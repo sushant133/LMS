@@ -1,0 +1,131 @@
+import type { Request, Response } from "express";
+import { Attendance } from "../models/Attendance";
+import { FeeCollection } from "../models/FeeCollection";
+import { Notice } from "../models/Notice";
+import { SchoolClass } from "../models/SchoolClass";
+import { Student } from "../models/Student";
+import { Subject } from "../models/Subject";
+import { Teacher } from "../models/Teacher";
+import { asyncHandler } from "../utils/asyncHandler";
+import { getStudentProfile } from "../utils/studentScope";
+import { getTeacherScope } from "../utils/teacherScope";
+import { sendSuccess } from "../utils/response";
+import { tenantObjectId, withTenantScope } from "../utils/tenant";
+
+export const getDashboard = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const noticeFilter =
+    req.user?.role === "SCHOOL_ADMIN" || req.user?.role === "SUPER_ADMIN"
+      ? { schoolId }
+      : { schoolId, visibleTo: req.user?.role };
+
+  const studentProfile = await getStudentProfile(req);
+  const teacherScope = req.user?.role === "TEACHER" ? await getTeacherScope(req) : null;
+  const attendanceFilter: Record<string, unknown> = { schoolId };
+  const feeFilter: Record<string, unknown> = { schoolId };
+
+  if (teacherScope) {
+    attendanceFilter.classId = { $in: teacherScope.classIds };
+    attendanceFilter.sectionId = { $in: teacherScope.sectionIds };
+    attendanceFilter.subjectId = { $in: teacherScope.subjectIds };
+  }
+
+  if (studentProfile) {
+    const enrolledSubjectIds = await Subject.find({ schoolId, classIds: studentProfile.classId }).distinct("_id");
+    attendanceFilter.classId = studentProfile.classId;
+    attendanceFilter.sectionId = studentProfile.sectionId;
+    attendanceFilter.subjectId = { $in: enrolledSubjectIds };
+    attendanceFilter["entries.studentId"] = studentProfile.studentId;
+    feeFilter.studentId = studentProfile.studentId;
+  }
+
+  const includeFees = req.user?.role === "SCHOOL_ADMIN" || req.user?.role === "SUPER_ADMIN";
+
+  const [studentCount, teacherCount, classCount, noticeCount, recentAttendance, recentCollections, notices, enrolledSubjects] =
+    await Promise.all([
+      Student.countDocuments({ schoolId }),
+      Teacher.countDocuments({ schoolId }),
+      SchoolClass.countDocuments({ schoolId }),
+      Notice.countDocuments(noticeFilter),
+      Attendance.find(attendanceFilter).sort({ dateBs: -1 }).limit(7),
+      includeFees ? FeeCollection.find(feeFilter).sort({ paidDateBs: -1 }).limit(12) : Promise.resolve([]),
+      Notice.find(noticeFilter).sort({ publishDateBs: -1 }).limit(5),
+      studentProfile
+        ? Subject.countDocuments({ schoolId, classIds: studentProfile.classId })
+        : Promise.resolve(0)
+    ]);
+
+  const attendanceChart = recentAttendance
+    .slice()
+    .reverse()
+    .map((item) => {
+      const entries = studentProfile
+        ? item.entries.filter((entry) => entry.studentId.toString() === studentProfile.studentId)
+        : item.entries;
+      const present = entries.filter((entry) => entry.status === "PRESENT").length;
+      const absent = entries.filter((entry) => entry.status !== "PRESENT").length;
+
+      return {
+        label: item.dateBs,
+        present,
+        absent
+      };
+    });
+
+  const feeChart = Object.values(
+    recentCollections.reduce<Record<string, { label: string; amount: number }>>((acc, item) => {
+      const key = item.paidDateBs.slice(0, 7);
+      acc[key] ??= { label: key, amount: 0 };
+      acc[key].amount += item.amountPaidNpr;
+      return acc;
+    }, {})
+  );
+
+  const adminLike = req.user?.role === "SCHOOL_ADMIN" || req.user?.role === "SUPER_ADMIN";
+  const stats = adminLike
+    ? [
+        { label: "Students", value: studentCount },
+        { label: "Teachers", value: teacherCount },
+        { label: "Classes", value: classCount },
+        { label: "Notices", value: noticeCount }
+      ]
+    : studentProfile
+      ? [
+          { label: "Enrolled Subjects", value: enrolledSubjects },
+          { label: "Visible Notices", value: noticeCount },
+          { label: "Attendance Days", value: attendanceChart.length },
+          { label: "Fee Entries", value: recentCollections.length }
+        ]
+      : teacherScope
+        ? [
+            { label: "Assigned Classes", value: teacherScope.classIds.length },
+            { label: "Assigned Subjects", value: teacherScope.subjectIds.length },
+            { label: "Visible Notices", value: noticeCount },
+            { label: "Attendance Days", value: attendanceChart.length }
+          ]
+        : [
+            { label: "Visible Notices", value: noticeCount },
+            { label: "Attendance Days", value: attendanceChart.length },
+            { label: "Classes", value: classCount }
+          ];
+
+  return sendSuccess(res, "Dashboard data fetched", {
+    stats,
+    attendanceChart,
+    feeChart: includeFees ? feeChart : [],
+    counts: adminLike
+      ? [
+          { name: "Students", value: studentCount },
+          { name: "Teachers", value: teacherCount },
+          { name: "Classes", value: classCount }
+        ]
+      : teacherScope
+        ? [
+            { name: "Classes", value: teacherScope.classIds.length },
+            { name: "Subjects", value: teacherScope.subjectIds.length },
+            { name: "Sections", value: teacherScope.sectionIds.length }
+          ]
+        : [],
+    notices
+  });
+});

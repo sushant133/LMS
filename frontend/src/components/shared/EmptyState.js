@@ -1,0 +1,2 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+export const EmptyState = ({ title, description }) => (_jsxs("div", { className: "rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center", children: [_jsx("h3", { className: "text-lg font-semibold text-slate-800", children: title }), _jsx("p", { className: "mt-2 text-sm text-slate-500", children: description })] }));

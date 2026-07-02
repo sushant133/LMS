@@ -1,0 +1,163 @@
+import type { Request, Response } from "express";
+import { Assignment, AssignmentSubmission } from "../models/Assignment";
+import { Attendance } from "../models/Attendance";
+import { FeeCollection } from "../models/FeeCollection";
+import { Notice } from "../models/Notice";
+import { Result } from "../models/Result";
+import { SchoolClass } from "../models/SchoolClass";
+import { Section } from "../models/Section";
+import { Student } from "../models/Student";
+import { asyncHandler } from "../utils/asyncHandler";
+import { ApiError } from "../utils/apiError";
+import { getTodayBs } from "../utils/nepaliDate";
+import { sendSuccess } from "../utils/response";
+import { assertStudentSubjectAccess, getEnrolledSubjects, requireStudentProfile } from "../utils/studentScope";
+import { tenantObjectId } from "../utils/tenant";
+
+export const listStudentSubjects = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user?.role !== "STUDENT") {
+    throw new ApiError(403, "Only students can access enrolled subjects");
+  }
+
+  const subjects = await getEnrolledSubjects(req);
+  return sendSuccess(res, "Enrolled subjects fetched", subjects);
+});
+
+export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user?.role !== "STUDENT") {
+    throw new ApiError(403, "Only students can access subject details");
+  }
+
+  const { profile, subject } = await assertStudentSubjectAccess(req, String(req.params.subjectId));
+  const schoolId = tenantObjectId(req);
+
+  const [attendance, assignments, submissions, notices, results] = await Promise.all([
+    Attendance.find({
+      schoolId,
+      classId: profile.classId,
+      sectionId: profile.sectionId,
+      subjectId: subject._id,
+      "entries.studentId": profile.studentId
+    })
+      .sort({ dateBs: -1 })
+      .lean(),
+    Assignment.find({
+      schoolId,
+      classId: profile.classId,
+      sectionId: profile.sectionId,
+      subjectId: subject._id,
+      visibleTo: "STUDENT"
+    })
+      .sort({ createdAt: -1 })
+      .lean(),
+    AssignmentSubmission.find({
+      schoolId,
+      studentId: profile.studentId,
+      assignmentId: {
+        $in: (
+          await Assignment.find({
+            schoolId,
+            classId: profile.classId,
+            sectionId: profile.sectionId,
+            subjectId: subject._id
+          }).distinct("_id")
+        )
+      }
+    }).lean(),
+    Notice.find({
+      schoolId,
+      visibleTo: "STUDENT",
+      publishDateBs: { $lte: getTodayBs() },
+      $or: [{ expiresAtBs: { $exists: false } }, { expiresAtBs: null }, { expiresAtBs: "" }, { expiresAtBs: { $gte: getTodayBs() } }],
+      $and: [
+        {
+          $or: [
+            { subjectId: subject._id, classId: profile.classId, $or: [{ sectionId: { $exists: false } }, { sectionId: null }, { sectionId: profile.sectionId }] },
+            {
+              $and: [
+                { $or: [{ subjectId: { $exists: false } }, { subjectId: null }] },
+                { $or: [{ classId: { $exists: false } }, { classId: null }, { classId: profile.classId }] }
+              ]
+            }
+          ]
+        }
+      ]
+    })
+      .sort({ publishDateBs: -1, createdAt: -1 })
+      .lean(),
+    Result.find({
+      schoolId,
+      studentId: profile.studentId,
+      classId: profile.classId,
+      sectionId: profile.sectionId,
+      "marks.subjectId": subject._id.toString()
+    })
+      .sort({ updatedAt: -1 })
+      .lean()
+  ]);
+
+  const attendanceHistory = attendance.map((record) => {
+    const entry = record.entries.find((item) => item.studentId.toString() === profile.studentId);
+    return {
+      dateBs: record.dateBs,
+      status: entry?.status ?? "ABSENT"
+    };
+  });
+
+  const marks = results.flatMap((result) =>
+    result.marks
+      .filter((mark) => mark.subjectId.toString() === subject._id.toString())
+      .map((mark) => ({
+        examId: result.examId.toString(),
+        obtainedMarks: mark.obtainedMarks,
+        percentage: result.percentage,
+        grade: result.grade,
+        gpa: result.gpa,
+        publishedAtBs: result.publishedAtBs
+      }))
+  );
+
+  const notes = assignments.filter((item) => item.type === "NOTE");
+  const homework = assignments.filter((item) => item.type === "HOMEWORK" || item.type === "CAS");
+
+  return sendSuccess(res, "Subject detail fetched", {
+    subject,
+    attendance: attendanceHistory,
+    marks,
+    assignments: homework,
+    notes,
+    submissions,
+    notices
+  });
+});
+
+export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Response) => {
+  const profile = await requireStudentProfile(req);
+  const schoolId = tenantObjectId(req);
+
+  const student = await Student.findOne({ _id: profile.studentId, schoolId }).populate("user", "-password").lean();
+  if (!student) throw new ApiError(404, "Student not found");
+
+  const [classDoc, sectionDoc, collections] = await Promise.all([
+    SchoolClass.findById(student.classId).lean(),
+    Section.findById(student.sectionId).lean(),
+    FeeCollection.find({ schoolId, studentId: student._id }).sort({ paidDateBs: -1 }).lean()
+  ]);
+
+  const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
+  const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
+  const totalScholarship = collections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
+
+  return sendSuccess(res, "Financial history fetched", {
+    student,
+    className: classDoc?.name ?? "",
+    sectionName: sectionDoc?.name ?? "",
+    outstandingDueNpr: student.feesDueNpr ?? 0,
+    totalPaidNpr: totalPaid,
+    totalDiscountNpr: totalDiscount,
+    totalScholarshipNpr: totalScholarship,
+    totalRefundsNpr: 0,
+    collections,
+    refunds: []
+  });
+});
