@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { Menu, School, LogOut } from "lucide-react";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
 import { useTranslation } from "react-i18next";
@@ -44,6 +44,20 @@ export const AppLayout = () => {
     const navigate = useNavigate();
     const { user, logout, availableSchools, activeSchoolId, setActiveSchool } = useAuth();
     const { t } = useTranslation();
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+        const isMobile = window.matchMedia("(max-width: 767px)").matches;
+        if (!isMobile) {
+            return;
+        }
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => {
+            document.body.style.overflow = previousOverflow;
+        };
+    }, [open]);
     const handleLogout = async () => {
         setOpen(false);
         resetAppShell();
@@ -83,11 +97,11 @@ export const AppLayout = () => {
         ...item,
         path: item.path === "/dashboard" ? `/dashboard/${user.role.toLowerCase()}` : item.path
     }));
-    return (_jsxs("div", { className: "min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.16),_transparent_28%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_100%)]", children: [open ? (_jsx("button", { type: "button", "aria-label": "Close menu", "aria-hidden": "true", className: "fixed inset-0 z-40 bg-slate-950/50 sm:hidden", onClick: () => setOpen(false) })) : null, _jsxs("div", { className: "flex min-h-screen w-full", children: [_jsx("aside", { className: cn("z-30 flex h-screen w-[var(--app-sidebar-width)] shrink-0 flex-col border-r border-white/60 bg-slate-950/95 px-5 py-6 text-white", "max-md:fixed max-md:left-0 max-md:top-0 max-md:transition-transform max-md:duration-200", open ? "max-md:translate-x-0" : "max-md:-translate-x-full", "md:sticky md:top-0 md:translate-x-0"), children: _jsxs("div", { className: "app-sidebar-inner", children: [_jsx("div", { className: "shrink-0", children: _jsxs("div", { className: "flex items-center gap-3", children: [_jsx("div", { className: "rounded-2xl bg-emerald-500/20 p-3", children: _jsx(School, { className: "h-6 w-6 text-emerald-300" }) }), _jsx("div", { className: "min-w-0", children: _jsx("h2", { className: "truncate text-lg font-semibold leading-tight", children: t("appName") }) })] }) }), _jsx("nav", { className: "app-sidebar-nav mt-8 space-y-2 pr-1", children: visibleItems.map((item) => (_jsx(NavLink, { to: item.path, onClick: () => setOpen(false), className: ({ isActive }) => cn("block rounded-2xl px-4 py-3 text-sm font-medium transition", isActive ? "bg-emerald-500 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"), children: t(item.labelKey) }, item.path))) }), _jsx("div", { className: "mt-4 shrink-0 pt-4", children: _jsxs("div", { className: "rounded-2xl border border-white/10 bg-white/5 p-4", children: [_jsx("p", { className: "text-xs uppercase tracking-[0.2em] text-slate-400", children: roleLabelMap[user.role] }), _jsx("p", { className: "mt-2 truncate font-semibold", children: user.fullName }), _jsx("p", { className: "truncate text-sm text-slate-300", children: user.email }), _jsx("p", { className: "mt-2 truncate text-xs text-slate-400", children: user.role === "SUPER_ADMIN"
-                                                    ? activeSchoolId
-                                                        ? "School context selected"
-                                                        : "Select a school to manage tenant data"
-                                                    : schoolName })] }) })] }) }), _jsxs("div", { className: "flex min-h-screen min-w-0 flex-1 flex-col", children: [_jsx("header", { className: "sticky top-0 z-20 shrink-0 border-b border-white/70 bg-white/90 backdrop-blur", children: _jsx("div", { className: "mx-auto w-full max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8 lg:py-4", children: _jsxs("div", { className: "flex flex-wrap items-center justify-between gap-3", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-3", children: [_jsx(Button, { variant: "ghost", size: "sm", className: "shrink-0 md:hidden", onClick: () => setOpen((current) => !current), children: _jsx(Menu, { className: "h-4 w-4" }) }), _jsxs("div", { className: "min-w-0", children: [_jsx("p", { className: "text-xs uppercase tracking-[0.2em] text-emerald-600", children: t("welcome") }), _jsx("h1", { className: "truncate text-lg font-semibold text-slate-900", children: user.fullName })] })] }), _jsxs("div", { className: "flex min-w-0 flex-wrap items-center gap-2", children: [user.role === "SUPER_ADMIN" ? (_jsx("div", { className: "min-w-0 w-full sm:w-auto sm:min-w-[220px]", children: _jsxs(Select, { value: activeSchoolId ?? "", onChange: (event) => {
+    return (_jsxs("div", { className: "min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.16),_transparent_28%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_100%)]", children: [open ? (_jsx("button", { type: "button", "aria-label": "Close menu", "aria-hidden": "true", className: "fixed inset-0 z-40 bg-slate-950/50 md:hidden", onClick: () => setOpen(false) })) : null, _jsxs("div", { className: "flex min-h-screen w-full", children: [_jsxs("aside", { className: cn("flex w-[var(--app-sidebar-width)] shrink-0 flex-col overflow-hidden border-r border-white/60 bg-slate-950/95 px-5 py-6 text-white", "h-[100dvh] md:h-screen", "max-md:fixed max-md:left-0 max-md:top-0 max-md:z-50 max-md:transition-transform max-md:duration-200", open ? "max-md:translate-x-0" : "max-md:-translate-x-full", "md:sticky md:top-0 md:z-30 md:translate-x-0"), children: [_jsx("div", { className: "shrink-0", children: _jsxs("div", { className: "flex items-center gap-3", children: [_jsx("div", { className: "rounded-2xl bg-emerald-500/20 p-3", children: _jsx(School, { className: "h-6 w-6 text-emerald-300" }) }), _jsx("div", { className: "min-w-0", children: _jsx("h2", { className: "truncate text-lg font-semibold leading-tight", children: t("appName") }) })] }) }), _jsxs("div", { className: "app-sidebar-scroll mt-8 min-h-0 flex-1", children: [_jsx("nav", { className: "space-y-2 pr-1", children: visibleItems.map((item) => (_jsx(NavLink, { to: item.path, onClick: () => setOpen(false), className: ({ isActive }) => cn("block rounded-2xl px-4 py-3 text-sm font-medium transition", isActive ? "bg-emerald-500 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"), children: t(item.labelKey) }, item.path))) }), _jsx("div", { className: "mt-4 pt-4", children: _jsxs("div", { className: "rounded-2xl border border-white/10 bg-white/5 p-4", children: [_jsx("p", { className: "text-xs uppercase tracking-[0.2em] text-slate-400", children: roleLabelMap[user.role] }), _jsx("p", { className: "mt-2 truncate font-semibold", children: user.fullName }), _jsx("p", { className: "truncate text-sm text-slate-300", children: user.email }), _jsx("p", { className: "mt-2 truncate text-xs text-slate-400", children: user.role === "SUPER_ADMIN"
+                                                        ? activeSchoolId
+                                                            ? "School context selected"
+                                                            : "Select a school to manage tenant data"
+                                                        : schoolName })] }) })] })] }), _jsxs("div", { className: "flex min-h-screen min-w-0 flex-1 flex-col", children: [_jsx("header", { className: "sticky top-0 z-20 shrink-0 border-b border-white/70 bg-white/90 backdrop-blur", children: _jsx("div", { className: "mx-auto w-full max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8 lg:py-4", children: _jsxs("div", { className: "flex flex-wrap items-center justify-between gap-3", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-3", children: [_jsx(Button, { variant: "ghost", size: "sm", className: "shrink-0 md:hidden", onClick: () => setOpen((current) => !current), children: _jsx(Menu, { className: "h-4 w-4" }) }), _jsxs("div", { className: "min-w-0", children: [_jsx("p", { className: "text-xs uppercase tracking-[0.2em] text-emerald-600", children: t("welcome") }), _jsx("h1", { className: "truncate text-lg font-semibold text-slate-900", children: user.fullName })] })] }), _jsxs("div", { className: "flex min-w-0 flex-wrap items-center gap-2", children: [user.role === "SUPER_ADMIN" ? (_jsx("div", { className: "min-w-0 w-full sm:w-auto sm:min-w-[220px]", children: _jsxs(Select, { value: activeSchoolId ?? "", onChange: (event) => {
                                                                 if (event.target.value) {
                                                                     void setActiveSchool(event.target.value);
                                                                 }

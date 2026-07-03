@@ -32,17 +32,10 @@ a {
   text-decoration: none;
 }
 
-.app-sidebar-inner {
-  display: flex;
-  height: 100%;
-  min-height: 0;
-  flex-direction: column;
-  overflow: visible;
-}
-
-
-.app-sidebar-nav {
-  flex: 1 1 auto;
-  min-height: 0;
+.app-sidebar-scroll {
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }

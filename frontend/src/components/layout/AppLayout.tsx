@@ -1,5 +1,5 @@
 import { Menu, School, LogOut } from "lucide-react";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
 import { useTranslation } from "react-i18next";
@@ -46,6 +46,24 @@ export const AppLayout = () => {
   const navigate = useNavigate();
   const { user, logout, availableSchools, activeSchoolId, setActiveSchool } = useAuth();
   const { t } = useTranslation();
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+    if (!isMobile) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
 
   const handleLogout = async () => {
     setOpen(false);
@@ -97,7 +115,7 @@ export const AppLayout = () => {
           type="button"
           aria-label="Close menu"
           aria-hidden="true"
-          className="fixed inset-0 z-40 bg-slate-950/50 sm:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/50 md:hidden"
           onClick={() => setOpen(false)}
         />
       ) : null}
@@ -106,26 +124,26 @@ export const AppLayout = () => {
       <div key={user._id} className="flex min-h-screen w-full">
         <aside
           className={cn(
-            "z-30 flex h-screen w-[var(--app-sidebar-width)] shrink-0 flex-col border-r border-white/60 bg-slate-950/95 px-5 py-6 text-white",
-            "max-md:fixed max-md:left-0 max-md:top-0 max-md:transition-transform max-md:duration-200",
+            "flex w-[var(--app-sidebar-width)] shrink-0 flex-col overflow-hidden border-r border-white/60 bg-slate-950/95 px-5 py-6 text-white",
+            "h-[100dvh] md:h-screen",
+            "max-md:fixed max-md:left-0 max-md:top-0 max-md:z-50 max-md:transition-transform max-md:duration-200",
             open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
-            "md:sticky md:top-0 md:translate-x-0"
+            "md:sticky md:top-0 md:z-30 md:translate-x-0"
           )}
         >
-
-          <div className="app-sidebar-inner">
-            <div className="shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="rounded-2xl bg-emerald-500/20 p-3">
-                  <School className="h-6 w-6 text-emerald-300" />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="truncate text-lg font-semibold leading-tight">{t("appName")}</h2>
-                </div>
+          <div className="shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="rounded-2xl bg-emerald-500/20 p-3">
+                <School className="h-6 w-6 text-emerald-300" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold leading-tight">{t("appName")}</h2>
               </div>
             </div>
+          </div>
 
-            <nav className="app-sidebar-nav mt-8 space-y-2 pr-1">
+          <div className="app-sidebar-scroll mt-8 min-h-0 flex-1">
+            <nav className="space-y-2 pr-1">
               {visibleItems.map((item) => (
                 <NavLink
                   key={item.path}
@@ -143,7 +161,7 @@ export const AppLayout = () => {
               ))}
             </nav>
 
-            <div className="mt-4 shrink-0 pt-4">
+            <div className="mt-4 pt-4">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{roleLabelMap[user.role]}</p>
                 <p className="mt-2 truncate font-semibold">{user.fullName}</p>

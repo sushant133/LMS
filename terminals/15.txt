@@ -3,7 +3,7 @@ pid: 3896
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "npm run dev:client --prefix \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\""
 started_at: 2026-07-03T08:18:42.199Z
-running_for_ms: 474995   
+running_for_ms: 1370004  
 ---
 
 > @nepal-school-erp/frontend@1.0.0 dev:client
@@ -35,3 +35,8 @@ found 0 vulnerabilities
 2:10:10 pm [vite] (client) hmr update /src/components/layout/AppLayout.tsx, /src/index.css
 2:10:24 pm [vite] (client) hmr update /src/App.tsx, /src/index.css
 2:10:24 pm [vite] (client) hmr update /src/pages/LoginPage.tsx, /src/index.css
+2:22:12 pm [vite] (client) hmr update /src/index.css
+2:22:12 pm [vite] (client) hmr update /src/components/layout/AppLayout.tsx, /src/index.css
+2:23:28 pm [vite] (client) hmr update /src/components/layout/AppLayout.tsx, /src/index.css
+2:23:28 pm [vite] (client) hmr update /src/index.css
+2:24:10 pm [vite] (client) hmr update /src/index.css
