@@ -1,0 +1,19 @@
+---
+pid: 23572
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "Remove-Item -Recurse -Force \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\" -ErrorAction SilentlyContinue; $env:NODE_ENV='production'; Set-Location \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm install --include=dev"
+started_at: 2026-07-03T06:32:38.428Z
+running_for_ms: 650008   
+---
+
+added 267 packages, and audited 269 packages in 16s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+4 high severity vulnerabilities
+
+To address all issues, run:
+  npm audit fix --force
+
+Run `npm audit` for details.
