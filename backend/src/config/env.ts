@@ -1,11 +1,16 @@
+import { existsSync } from "node:fs";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const envPath = path.join(backendRoot, ".env");
 
-dotenv.config({ path: path.join(backendRoot, ".env") });
+// Local dev uses backend/.env. On Render, set vars in the dashboard (or paste via "Add from .env").
+if (existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+}
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(5000),

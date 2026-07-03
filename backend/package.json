@@ -11,6 +11,7 @@
     "build:shared": "npm run build --prefix ./shared",
     "dev": "npm run build:shared && tsx watch src/server.ts",
     "build": "npm run build:shared && tsc -p tsconfig.json",
+    "postinstall": "npm run build",
     "start": "node dist/server.js",
     "seed:superadmin": "npm run build:shared && tsx src/scripts/seedSuperAdmin.ts",
     "seed:demo": "npm run build:shared && tsx src/scripts/seedDemoSchool.ts",
