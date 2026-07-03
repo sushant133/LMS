@@ -1,0 +1,101 @@
+---
+pid: 25284
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "Remove-Item -Recurse -Force \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\",\"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\\shared\\node_modules\" -ErrorAction SilentlyContinue; $env:NODE_ENV='production'; Set-Location \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm install --include=dev --prefix ../backend/shared; npm install --include=dev; npm run build"
+started_at: 2026-07-03T06:45:53.683Z
+running_for_ms: 69996    
+---
+
+added 2 packages, and audited 3 packages in 2s
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+added 267 packages, and audited 269 packages in 15s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+4 high severity vulnerabilities
+
+To address all issues, run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> @nepal-school-erp/frontend@1.0.0 build
+> npm run build:shared && tsc -b && vite build
+
+
+> @nepal-school-erp/frontend@1.0.0 build:shared
+> npm install --include=dev --prefix ../backend/shared && npm run build --prefix ../backend/shared
+
+
+up to date, audited 3 packages in 847ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 2535 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                0.47 kB │ gzip:   0.31 kB
+dist/assets/NepaliDateField-RnjHd2W5.css      17.61 kB │ gzip:   4.09 kB
+dist/assets/index-niokT3rf.css                39.19 kB │ gzip:   7.65 kB
+dist/assets/teacherScopeUtils-CSalEzEm.js      0.15 kB │ gzip:   0.13 kB
+dist/assets/PageContent-B0rQ0Lk3.js            0.16 kB │ gzip:   0.15 kB
+dist/assets/useTeacherScope-C-cpK5Bs.js        0.18 kB │ gzip:   0.17 kB
+dist/assets/download-B4nFdPuN.js               0.23 kB │ gzip:   0.19 kB
+dist/assets/badge-BR2oLFSE.js                  0.24 kB │ gzip:   0.20 kB
+dist/assets/book-open-BXjlevDd.js              0.28 kB │ gzip:   0.21 kB
+dist/assets/receipt-DAd_S0DA.js                0.29 kB │ gzip:   0.22 kB
+dist/assets/EmptyState-MAi6S6mk.js             0.35 kB │ gzip:   0.25 kB
+dist/assets/textarea-BQ7z3GXZ.js               0.36 kB │ gzip:   0.28 kB
+dist/assets/input-C53bIRZ1.js                  0.36 kB │ gzip:   0.28 kB
+dist/assets/PageHeader-D2E8W6XQ.js             0.48 kB │ gzip:   0.29 kB
+dist/assets/card-DuRzSXot.js                   0.49 kB │ gzip:   0.25 kB
+dist/assets/table-MwfTX91H.js                  0.57 kB │ gzip:   0.26 kB
+dist/assets/NotFoundPage-IOt6_yzW.js           0.61 kB │ gzip:   0.39 kB
+dist/assets/users-DMxLOXws.js                  0.61 kB │ gzip:   0.33 kB
+dist/assets/StockStatusBadge-CBHkNkx-.js       0.69 kB │ gzip:   0.43 kB
+dist/assets/NotificationsPage-CgeKjwVJ.js      1.76 kB │ gzip:   0.83 kB
+dist/assets/RegisterPage-C0mpirQy.js           2.47 kB │ gzip:   1.09 kB
+dist/assets/ParentLinksPage-DNz-JjL4.js        2.59 kB │ gzip:   1.02 kB
+dist/assets/ParentPortalPage-sNCZRGbt.js       2.59 kB │ gzip:   0.89 kB
+dist/assets/AttachmentViewer-D5cD7wfR.js       3.11 kB │ gzip:   1.35 kB
+dist/assets/StudentFeesPage-Db7hFigd.js        3.23 kB │ gzip:   1.14 kB
+dist/assets/TransportPage-BmT8r73N.js          4.47 kB │ gzip:   1.31 kB
+dist/assets/MyLibraryPage-ej0TtzEE.js          5.00 kB │ gzip:   1.27 kB
+dist/assets/HrPage-CbOMNzJ-.js                 5.19 kB │ gzip:   1.52 kB
+dist/assets/ReportsPage-Cs06FiRe.js            5.40 kB │ gzip:   1.86 kB
+dist/assets/TimetablePage-D3wXw6k1.js          5.76 kB │ gzip:   1.91 kB
+dist/assets/SchoolsPage-BPLX2Vfo.js            5.89 kB │ gzip:   1.90 kB
+dist/assets/LoginPage-wC_ild5_.js              5.94 kB │ gzip:   1.99 kB
+dist/assets/StudentSubjectsPage-BFd1tRXJ.js    6.02 kB │ gzip:   1.84 kB
+dist/assets/TeachersPage-kip_T9Cb.js           6.57 kB │ gzip:   2.19 kB
+dist/assets/AttendancePage-cf0uC8uM.js         6.66 kB │ gzip:   2.46 kB
+dist/assets/FeesPage-BWz6TEbT.js               6.81 kB │ gzip:   2.04 kB
+dist/assets/SettingsPage-DiM4gwtk.js           7.47 kB │ gzip:   2.32 kB
+dist/assets/NoticesPage-Cnm79_Xw.js            8.49 kB │ gzip:   2.84 kB
+dist/assets/StudentsPage-HQF38Lnm.js           8.63 kB │ gzip:   2.73 kB
+dist/assets/AcademicsPage-DiKUUhed.js          8.63 kB │ gzip:   2.27 kB
+dist/assets/LibraryPage-PY68EELO.js           11.33 kB │ gzip:   3.13 kB
+dist/assets/LaboratoryPage-DUAxaMg-.js        14.59 kB │ gzip:   3.57 kB
+dist/assets/ExamsPage-BiNYYegy.js             20.99 kB │ gzip:   5.27 kB
+dist/assets/HomeworkPage-CRR_exKD.js          27.21 kB │ gzip:   7.85 kB
+dist/assets/AccountingPage-87Uqj-WL.js        34.97 kB │ gzip:   7.72 kB
+dist/assets/NepaliDateField-DcRfgYYO.js       43.98 kB │ gzip:  13.73 kB
+dist/assets/FormField-1SelLz2O.js             63.85 kB │ gzip:  17.73 kB
+dist/assets/AddressFields-uRDqaarU.js         87.59 kB │ gzip:  10.15 kB
+dist/assets/index-DuA8mKzh.js                373.25 kB │ gzip: 121.39 kB
+dist/assets/DashboardPage-DwSJEr4Q.js        383.96 kB │ gzip: 111.33 kB
+✓ built in 4.44s

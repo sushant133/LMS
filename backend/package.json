@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build:shared": "npm run build --prefix ./shared",
+    "build:shared": "npm install --include=dev --prefix ./shared && npm run build --prefix ./shared",
     "dev": "npm run build:shared && tsx watch src/server.ts",
     "build": "npm run build:shared && tsc -p tsconfig.json",
     "postinstall": "npm run build",

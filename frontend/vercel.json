@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm install --include=dev",
+  "installCommand": "npm install --include=dev --prefix ../backend/shared && npm install --include=dev",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [

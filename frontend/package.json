@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build:shared": "npm run build --prefix ../backend/shared",
+    "build:shared": "npm install --include=dev --prefix ../backend/shared && npm run build --prefix ../backend/shared",
     "dev": "npm run build:shared && node scripts/dev.mjs",
     "dev:client": "npm run build:shared && vite",
     "build": "npm run build:shared && tsc -b && vite build",
