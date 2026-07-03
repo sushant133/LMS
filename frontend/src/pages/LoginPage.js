@@ -24,6 +24,9 @@ export const LoginPage = () => {
     const { login, user, loading, authEpoch } = useAuth();
     useLayoutEffect(() => {
         resetAppShell();
+    }, []);
+    useLayoutEffect(() => {
+        resetAppShell();
     }, [authEpoch]);
     useEffect(() => {
         if (!loading && user) {

@@ -1,0 +1,37 @@
+---
+pid: 3896
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "npm run dev:client --prefix \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\""
+started_at: 2026-07-03T08:18:42.199Z
+running_for_ms: 474995   
+---
+
+> @nepal-school-erp/frontend@1.0.0 dev:client
+> npm run build:shared && vite
+
+
+> @nepal-school-erp/frontend@1.0.0 build:shared
+> npm install --include=dev --prefix ../backend/shared && npm run build --prefix ../backend/shared
+
+
+up to date, audited 3 packages in 909ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+
+  VITE v7.3.6  ready in 351 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+2:09:49 pm [vite] (client) hmr update /src/features/auth/ProtectedRoute.tsx, /src/index.css
+2:09:49 pm [vite] (client) hmr update /src/index.css, /src/components/layout/AppLayout.tsx, /src/pages/LoginPage.tsx
+2:10:10 pm [vite] (client) hmr update /src/features/auth/AuthProvider.tsx, /src/index.css
+2:10:10 pm [vite] (client) hmr update /src/components/layout/AppLayout.tsx, /src/index.css
+2:10:24 pm [vite] (client) hmr update /src/App.tsx, /src/index.css
+2:10:24 pm [vite] (client) hmr update /src/pages/LoginPage.tsx, /src/index.css

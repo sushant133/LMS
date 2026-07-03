@@ -1,5 +1,6 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useContext, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
@@ -55,8 +56,11 @@ export const AuthProvider = ({ children }) => {
             await api.post("/auth/logout");
         },
         onMutate: async () => {
-            setLoggingOut(true);
-            queryClient.setQueryData(["auth", "me"], null);
+            flushSync(() => {
+                setLoggingOut(true);
+                queryClient.setQueryData(["auth", "me"], null);
+                setAuthEpoch((current) => current + 1);
+            });
             await queryClient.cancelQueries({
                 predicate: (query) => !keepAuthMeQuery(query.queryKey)
             });
@@ -67,7 +71,6 @@ export const AuthProvider = ({ children }) => {
                 predicate: (query) => !keepAuthMeQuery(query.queryKey)
             });
             setLoggingOut(false);
-            setAuthEpoch((current) => current + 1);
         }
     });
     const isBootstrapping = meQuery.isPending && meQuery.data === undefined;

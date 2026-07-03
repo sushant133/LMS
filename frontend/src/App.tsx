@@ -1,12 +1,11 @@
 import { Suspense, lazy, type ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "components/layout/AppLayout";
 import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
 import { useAuth } from "features/auth/AuthProvider";
 import { roleRedirectMap } from "lib/auth";
-
-const LoginPage = lazy(() => import("pages/LoginPage").then((module) => ({ default: module.LoginPage })));
+import { LoginPage } from "pages/LoginPage";
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const StudentsPage = lazy(() => import("pages/StudentsPage").then((module) => ({ default: module.StudentsPage })));
@@ -50,12 +49,9 @@ const LazyRoute = ({ children }: { children: ReactNode }) => (
 
 const LoginRoute = () => {
   const { authEpoch } = useAuth();
+  const location = useLocation();
 
-  return (
-    <LazyRoute>
-      <LoginPage key={`login-page-${authEpoch}`} />
-    </LazyRoute>
-  );
+  return <LoginPage key={`login-page-${authEpoch}-${location.key}`} />;
 };
 
 export default function App() {

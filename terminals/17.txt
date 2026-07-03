@@ -1,0 +1,117 @@
+---
+pid: 18984
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "$env:BASE_URL=\"http://localhost:5173\"; node \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\scripts\\test-logout-layout.mjs\""
+started_at: 2026-07-03T08:22:50.743Z
+running_for_ms: 215009   
+---
+{
+  "fresh": {
+    "tag": "fresh-login",
+    "url": "http://localhost:5173/login",
+    "viewport": {
+      "width": 1400,
+      "height": 900
+    },
+    "rootWidth": "1400px",
+    "bodyStyles": {
+      "overflow": "",
+      "position": "",
+      "top": "",
+      "width": ""
+    },
+    "hasAppLayoutAside": false,
+    "grid": {
+      "display": "grid",
+      "visibility": "visible",
+      "width": "1400px",
+      "className": "grid min-h-screen w-full bg-[linear-gradient(135deg,_#0f172a_0%,_#064e3b_45%,_#dcfce7_100%)] lg:grid-cols-[1.2fr_0.8fr]"
+    },
+    "mobileHero": {
+      "display": "none",
+      "visibility": "visible",
+      "width": "auto",
+      "className": "flex flex-col items-center gap-3 px-6 pt-8 text-center text-white lg:hidden"
+    },
+    "desktopHero": {
+      "display": "flex",
+      "visibility": "visible",
+      "width": "840px",
+      "className": "hidden p-12 text-white lg:flex lg:flex-col lg:justify-between"
+    },
+    "h2Count": 1,
+    "h2Text": "BS calendar, streamlined workflows, and school operations in"
+  },
+  "afterLogout": {
+    "tag": "after-logout",
+    "url": "http://localhost:5173/login",
+    "viewport": {
+      "width": 1400,
+      "height": 900
+    },
+    "rootWidth": "1400px",
+    "bodyStyles": {
+      "overflow": "",
+      "position": "",
+      "top": "",
+      "width": ""
+    },
+    "hasAppLayoutAside": false,
+    "grid": {
+      "display": "grid",
+      "visibility": "visible",
+      "width": "1400px",
+      "className": "grid min-h-screen w-full bg-[linear-gradient(135deg,_#0f172a_0%,_#064e3b_45%,_#dcfce7_100%)] lg:grid-cols-[1.2fr_0.8fr]"
+    },
+    "mobileHero": {
+      "display": "none",
+      "visibility": "visible",
+      "width": "auto",
+      "className": "flex flex-col items-center gap-3 px-6 pt-8 text-center text-white lg:hidden"
+    },
+    "desktopHero": {
+      "display": "flex",
+      "visibility": "visible",
+      "width": "840px",
+      "className": "hidden p-12 text-white lg:flex lg:flex-col lg:justify-between"
+    },
+    "h2Count": 1,
+    "h2Text": "BS calendar, streamlined workflows, and school operations in"
+  },
+  "afterReload": {
+    "tag": "after-reload",
+    "url": "http://localhost:5173/login",
+    "viewport": {
+      "width": 1400,
+      "height": 900
+    },
+    "rootWidth": "1400px",
+    "bodyStyles": {
+      "overflow": "",
+      "position": "",
+      "top": "",
+      "width": ""
+    },
+    "hasAppLayoutAside": false,
+    "grid": {
+      "display": "grid",
+      "visibility": "visible",
+      "width": "1400px",
+      "className": "grid min-h-screen w-full bg-[linear-gradient(135deg,_#0f172a_0%,_#064e3b_45%,_#dcfce7_100%)] lg:grid-cols-[1.2fr_0.8fr]"
+    },
+    "mobileHero": {
+      "display": "none",
+      "visibility": "visible",
+      "width": "auto",
+      "className": "flex flex-col items-center gap-3 px-6 pt-8 text-center text-white lg:hidden"
+    },
+    "desktopHero": {
+      "display": "flex",
+      "visibility": "visible",
+      "width": "840px",
+      "className": "hidden p-12 text-white lg:flex lg:flex-col lg:justify-between"
+    },
+    "h2Count": 1,
+    "h2Text": "BS calendar, streamlined workflows, and school operations in"
+  }
+}

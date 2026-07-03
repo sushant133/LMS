@@ -1,5 +1,6 @@
 import type { PropsWithChildren } from "react";
 import { createContext, useContext, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { AuthResponse, LoginInput, RegisterInput, SchoolRecord, UserProfile } from "@nepal-school-erp/shared";
 import { api, unwrap } from "lib/api";
@@ -79,8 +80,11 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       await api.post("/auth/logout");
     },
     onMutate: async () => {
-      setLoggingOut(true);
-      queryClient.setQueryData<MeResponse | null>(["auth", "me"], null);
+      flushSync(() => {
+        setLoggingOut(true);
+        queryClient.setQueryData<MeResponse | null>(["auth", "me"], null);
+        setAuthEpoch((current) => current + 1);
+      });
       await queryClient.cancelQueries({
         predicate: (query) => !keepAuthMeQuery(query.queryKey)
       });
@@ -91,7 +95,6 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
         predicate: (query) => !keepAuthMeQuery(query.queryKey)
       });
       setLoggingOut(false);
-      setAuthEpoch((current) => current + 1);
     }
   });
 

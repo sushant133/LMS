@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { Menu, School, LogOut } from "lucide-react";
 import { Suspense, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
 import { useTranslation } from "react-i18next";
 import { Button } from "components/ui/button";
@@ -41,6 +41,7 @@ const navItems = [
 ];
 export const AppLayout = () => {
     const [open, setOpen] = useState(false);
+    const navigate = useNavigate();
     const { user, logout, availableSchools, activeSchoolId, setActiveSchool } = useAuth();
     const { t } = useTranslation();
     const handleLogout = async () => {
@@ -51,6 +52,7 @@ export const AppLayout = () => {
         }
         finally {
             resetAppShell();
+            navigate("/login", { replace: true });
         }
     };
     if (!user) {

@@ -4,10 +4,10 @@ import { PageLoadingState } from "components/shared/LoadingState";
 import { roleRedirectMap } from "lib/auth";
 import { useAuth } from "./AuthProvider";
 export const ProtectedRoute = ({ roles }) => {
-    const { user, loading, loggingOut } = useAuth();
+    const { user, loading } = useAuth();
     const location = useLocation();
     if (!user) {
-        if (loading || loggingOut) {
+        if (loading) {
             return _jsx(PageLoadingState, {});
         }
         return _jsx(Navigate, { to: "/login", replace: true, state: { from: location.pathname } });

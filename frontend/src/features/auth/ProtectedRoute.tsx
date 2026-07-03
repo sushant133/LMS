@@ -9,11 +9,11 @@ interface ProtectedRouteProps {
 }
 
 export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
-  const { user, loading, loggingOut } = useAuth();
+  const { user, loading } = useAuth();
   const location = useLocation();
 
   if (!user) {
-    if (loading || loggingOut) {
+    if (loading) {
       return <PageLoadingState />;
     }
 
@@ -26,4 +26,3 @@ export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
 
   return <Outlet />;
 };
-

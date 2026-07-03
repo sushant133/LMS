@@ -1,6 +1,6 @@
 import { Menu, School, LogOut } from "lucide-react";
 import { Suspense, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
 import { useTranslation } from "react-i18next";
 import type { UserRole } from "@nepal-school-erp/shared";
@@ -43,6 +43,7 @@ const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
 
 export const AppLayout = () => {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const { user, logout, availableSchools, activeSchoolId, setActiveSchool } = useAuth();
   const { t } = useTranslation();
 
@@ -53,6 +54,7 @@ export const AppLayout = () => {
       await logout();
     } finally {
       resetAppShell();
+      navigate("/login", { replace: true });
     }
   };
 

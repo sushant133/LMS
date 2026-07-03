@@ -8,6 +8,9 @@ export const resetAppShell = () => {
     body.style.right = "";
     body.style.width = "";
     body.style.height = "";
+    body.style.transform = "";
     documentElement.style.overflow = "";
+    documentElement.style.height = "";
+    documentElement.style.position = "";
     window.scrollTo({ top: 0, left: 0 });
 };

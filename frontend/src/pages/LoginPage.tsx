@@ -60,6 +60,10 @@ export const LoginPage = () => {
 
   useLayoutEffect(() => {
     resetAppShell();
+  }, []);
+
+  useLayoutEffect(() => {
+    resetAppShell();
   }, [authEpoch]);
 
   useEffect(() => {
