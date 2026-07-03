@@ -1,18 +1,27 @@
 import axios from "axios";
 
-export const getApiBaseUrl = (): string => import.meta.env.VITE_API_BASE_URL ?? "/api";
+const DEFAULT_API_BASE = "/api";
 
-/** Resolve an API or upload path for fetch/axios (supports cross-origin Render backend). */
+/** API base URL including the /api prefix (e.g. https://host.onrender.com/api or /api for local proxy). */
+export const getApiBaseUrl = (): string => {
+  const configured = import.meta.env.VITE_API_URL?.trim();
+  if (!configured) {
+    return DEFAULT_API_BASE;
+  }
+
+  return configured.replace(/\/$/, "");
+};
+
+/**
+ * Resolve a path relative to the API base for fetch() calls.
+ * Pass paths without a leading /api prefix (e.g. /auth/login, /uploads/classroom).
+ */
 export const resolveApiUrl = (path: string): string => {
   const normalized = path.startsWith("/") ? path : `/${path}`;
   const base = getApiBaseUrl();
+  const relativePath = normalized.startsWith("/api/") ? normalized.slice(4) : normalized;
 
-  if (base.startsWith("http")) {
-    const origin = base.replace(/\/api\/?$/, "");
-    return `${origin}${normalized}`;
-  }
-
-  return normalized;
+  return `${base}${relativePath}`;
 };
 
 export const api = axios.create({
@@ -27,4 +36,3 @@ export const unwrap = async <T>(promise: Promise<{ data: { data: T } }>): Promis
   const response = await promise;
   return response.data.data;
 };
-

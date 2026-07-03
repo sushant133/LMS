@@ -24,7 +24,7 @@ export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }: C
     Array.from(files).forEach((file) => formData.append("files", file));
 
     try {
-      const response = await fetch(resolveApiUrl("/api/uploads/classroom"), {
+      const response = await fetch(resolveApiUrl("/uploads/classroom"), {
         method: "POST",
         body: formData,
         credentials: "include"

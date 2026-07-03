@@ -15,7 +15,7 @@ interface FileUploadProps {
   multiple?: boolean;
   maxFiles?: number;
   onUploadComplete: (files: UploadedFile[]) => void;
-  uploadUrl: string; // e.g. /api/uploads/students/xxx/photo
+  uploadUrl: string; // e.g. /uploads/students/xxx/photo (relative to API base)
   headers?: Record<string, string>;
   disabled?: boolean;
 }

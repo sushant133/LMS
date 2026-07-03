@@ -1,12 +1,15 @@
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+import { getApiBaseUrl } from "./api";
+/** Resolve static upload URLs (/uploads/...) for cross-origin production backends. */
 export const resolveAttachmentUrl = (url) => {
     if (!url)
         return "";
     if (/^https?:\/\//i.test(url))
         return url;
     if (url.startsWith("/")) {
-        if (apiBase && !apiBase.startsWith("/")) {
-            return `${apiBase.replace(/\/api\/?$/, "")}${url}`;
+        const apiBase = getApiBaseUrl();
+        if (apiBase.startsWith("http")) {
+            const origin = apiBase.replace(/\/api\/?$/, "");
+            return `${origin}${url}`;
         }
         return url;
     }
