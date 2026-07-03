@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import { connectDatabase } from "../config/db";
-import { Student } from "../models/Student";
-import { User } from "../models/User";
+import { connectDatabase } from "../config/db.js";
+import { Student } from "../models/Student.js";
+import { User } from "../models/User.js";
 
 const email = process.argv[2] ?? "student01@demoerp.nepal-school.com";
 const password = process.argv[3] ?? "Demo@123456";

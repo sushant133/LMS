@@ -1,17 +1,17 @@
 import type { Request, Response } from "express";
 import { timetableSlotSchema } from "@nepal-school-erp/shared";
-import { TimetableSlot } from "../models/TimetableSlot";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { getStudentProfile } from "../utils/studentScope";
+import { TimetableSlot } from "../models/TimetableSlot.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { getStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherQueryScope,
   assertTeacherSubjectClassSection,
   getTeacherScope,
   requireTeacherScope
-} from "../utils/teacherScope";
-import { sendSuccess } from "../utils/response";
-import { withTenantScope } from "../utils/tenant";
+} from "../utils/teacherScope.js";
+import { sendSuccess } from "../utils/response.js";
+import { withTenantScope } from "../utils/tenant.js";
 
 export const listTimetable = asyncHandler(async (req: Request, res: Response) => {
   const filter: Record<string, unknown> = withTenantScope(req);

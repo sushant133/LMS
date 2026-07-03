@@ -1,8 +1,8 @@
 import type { Request } from "express";
-import { ParentChildLink } from "../models/ParentChildLink";
-import { Student } from "../models/Student";
-import { ApiError } from "./apiError";
-import { tenantObjectId, withTenantScope } from "./tenant";
+import { ParentChildLink } from "../models/ParentChildLink.js";
+import { Student } from "../models/Student.js";
+import { ApiError } from "./apiError.js";
+import { tenantObjectId, withTenantScope } from "./tenant.js";
 
 export const getLinkedStudentIds = async (req: Request): Promise<string[]> => {
   if (!req.user?.userId) {

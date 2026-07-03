@@ -1,16 +1,16 @@
 import type { Request, Response } from "express";
 import { feeCollectionSchema, feeStructureSchema } from "@nepal-school-erp/shared";
-import { FeeCollection } from "../models/FeeCollection";
-import { FeeStructure } from "../models/FeeStructure";
-import { Student } from "../models/Student";
-import { User } from "../models/User";
-import { calculateFeeTotals } from "../utils/accountingCalculations";
-import { recordAudit } from "../utils/audit";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { ensureValidBsDate } from "../utils/nepaliDate";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+import { FeeCollection } from "../models/FeeCollection.js";
+import { FeeStructure } from "../models/FeeStructure.js";
+import { Student } from "../models/Student.js";
+import { User } from "../models/User.js";
+import { calculateFeeTotals } from "../utils/accountingCalculations.js";
+import { recordAudit } from "../utils/audit.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const listFeeStructures = asyncHandler(async (req: Request, res: Response) => {
   const structures = await FeeStructure.find(withTenantScope(req)).sort({ createdAt: -1 });

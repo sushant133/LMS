@@ -1,5 +1,5 @@
-import { nepalAddressData } from "./data/nepal-addresses";
-import type { NepalAddressDistrict, NepalAddressMunicipality, NepalAddressProvince } from "./types";
+import { nepalAddressData } from "./data/nepal-addresses.js";
+import type { NepalAddressDistrict, NepalAddressMunicipality, NepalAddressProvince } from "./types.js";
 
 export const getAllProvinces = (): NepalAddressProvince[] => [...nepalAddressData];
 

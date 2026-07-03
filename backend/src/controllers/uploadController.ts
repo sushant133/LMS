@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
 import path from "path";
-import { asyncHandler } from "../utils/asyncHandler";
-import { sendSuccess } from "../utils/response";
-import { ApiError } from "../utils/apiError";
-import { getFilePublicPath, getUploadPublicUrl, inferAttachmentKind } from "../utils/upload";
-import { recordAudit } from "../utils/audit";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { sendSuccess } from "../utils/response.js";
+import { ApiError } from "../utils/apiError.js";
+import { getFilePublicPath, getUploadPublicUrl, inferAttachmentKind } from "../utils/upload.js";
+import { recordAudit } from "../utils/audit.js";
 
 export const uploadStudentPhotoHandler = asyncHandler(async (req: Request, res: Response) => {
   const file = (req as any).file as Express.Multer.File | undefined;

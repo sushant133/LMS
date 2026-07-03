@@ -1,11 +1,11 @@
-import { Student } from "../models/Student";
-import { Teacher } from "../models/Teacher";
-import { Setting } from "../models/Setting";
-import { Exam } from "../models/Exam";
-import { Result } from "../models/Result";
-import { Attendance } from "../models/Attendance";
+import { Student } from "../models/Student.js";
+import { Teacher } from "../models/Teacher.js";
+import { Setting } from "../models/Setting.js";
+import { Exam } from "../models/Exam.js";
+import { Result } from "../models/Result.js";
+import { Attendance } from "../models/Attendance.js";
 import type { Request } from "express";
-import { tenantObjectId } from "./tenant";
+import { tenantObjectId } from "./tenant.js";
 
 /**
  * IEMIS Export Service - Expanded Version

@@ -1,0 +1,13 @@
+---
+pid: 28128
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm start 2>&1"
+started_at: 2026-07-03T05:50:58.634Z
+running_for_ms: 870006   
+---
+
+> @nepal-school-erp/backend@1.0.0 start
+> node dist/server.js
+
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Backend server listening on http://localhost:5000

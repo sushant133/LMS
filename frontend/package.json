@@ -8,8 +8,11 @@
   },
   "scripts": {
     "build:shared": "npm run build --prefix ../backend/shared",
-    "dev": "npm run build:shared && vite",
+    "dev": "npm run build:shared && node scripts/dev.mjs",
+    "dev:client": "npm run build:shared && vite",
     "build": "npm run build:shared && tsc -b && vite build",
+    "start": "vite preview --host",
+    "prestart": "npm run build",
     "preview": "vite preview",
     "typecheck": "npm run build:shared && tsc --noEmit",
     "lint": "npm run build:shared && tsc --noEmit"
@@ -38,6 +41,8 @@
     "zod": "4.1.5"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
+    "wait-on": "^8.0.3",
     "@tailwindcss/vite": "^4.1.12",
     "@types/node": "^22.15.21",
     "@types/react": "^18.3.23",

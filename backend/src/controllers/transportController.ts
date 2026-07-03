@@ -1,11 +1,11 @@
 import type { Request, Response } from "express";
 import { transportAssignmentSchema, transportRouteSchema } from "@nepal-school-erp/shared";
-import { TransportAssignment, TransportRoute } from "../models/TransportRoute";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { notifyParentsOfStudent } from "../utils/notificationService";
-import { sendSuccess } from "../utils/response";
-import { withTenantScope } from "../utils/tenant";
+import { TransportAssignment, TransportRoute } from "../models/TransportRoute.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { notifyParentsOfStudent } from "../utils/notificationService.js";
+import { sendSuccess } from "../utils/response.js";
+import { withTenantScope } from "../utils/tenant.js";
 
 export const listRoutes = asyncHandler(async (req: Request, res: Response) => {
   const routes = await TransportRoute.find(withTenantScope(req)).sort({ name: 1 });

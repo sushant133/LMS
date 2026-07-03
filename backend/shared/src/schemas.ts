@@ -6,7 +6,7 @@ import {
   ETHNICITY_CATEGORIES,
   PUBLIC_REGISTER_ROLES,
   USER_ROLES
-} from "./constants";
+} from "./constants.js";
 
 export const objectIdSchema = z.string().trim().regex(/^[a-f\d]{24}$/i, "Invalid identifier");
 

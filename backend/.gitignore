@@ -3,7 +3,6 @@ dist
 coverage
 .env
 .env.local
-package-lock.json
 *.tsbuildinfo
 uploads
 logs

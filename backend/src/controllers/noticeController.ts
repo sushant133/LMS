@@ -1,23 +1,23 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
 import { noticeSchema } from "@nepal-school-erp/shared";
-import { Notice } from "../models/Notice";
-import { Subject } from "../models/Subject";
-import { Teacher } from "../models/Teacher";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { compareBsDates, ensureValidBsDate, getTodayBs } from "../utils/nepaliDate";
-import { getLinkedStudentIds } from "../utils/parentScope";
-import { getStudentProfile } from "../utils/studentScope";
+import { Notice } from "../models/Notice.js";
+import { Subject } from "../models/Subject.js";
+import { Teacher } from "../models/Teacher.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { compareBsDates, ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
+import { getLinkedStudentIds } from "../utils/parentScope.js";
+import { getStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherClassSection,
   assertTeacherSubject,
   getTeacherScope,
   requireTeacherScope
-} from "../utils/teacherScope";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+} from "../utils/teacherScope.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 type NoticeLean = {
   _id: Types.ObjectId;
@@ -140,7 +140,7 @@ export const listNotices = asyncHandler(async (req: Request, res: Response) => {
 
   if (req.user?.role === "PARENT") {
     const studentIds = await getLinkedStudentIds(req);
-    const { Student } = await import("../models/Student");
+    const { Student } = await import("../models/Student.js");
     const students = await Student.find({ _id: { $in: studentIds } }).lean();
     const classIds = [...new Set(students.map((student) => student.classId.toString()))];
     const sectionIds = [...new Set(students.map((student) => student.sectionId.toString()))];

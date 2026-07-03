@@ -1,0 +1,85 @@
+---
+pid: 24460
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm start"
+started_at: 2026-07-03T05:45:06.682Z
+running_for_ms: 200001   
+---
+
+> @nepal-school-erp/frontend@1.0.0 prestart
+> npm run build
+
+
+> @nepal-school-erp/frontend@1.0.0 build
+> npm run build:shared && tsc -b && vite build
+
+
+> @nepal-school-erp/frontend@1.0.0 build:shared
+> npm run build --prefix ../backend/shared
+
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 2534 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                0.47 kB │ gzip:   0.30 kB
+dist/assets/NepaliDateField-RnjHd2W5.css      17.61 kB │ gzip:   4.09 kB
+dist/assets/index-niokT3rf.css                39.19 kB │ gzip:   7.65 kB
+dist/assets/teacherScopeUtils-CSalEzEm.js      0.15 kB │ gzip:   0.13 kB
+dist/assets/PageContent-D9QZySif.js            0.16 kB │ gzip:   0.15 kB
+dist/assets/useTeacherScope-oKMk9jNv.js        0.18 kB │ gzip:   0.17 kB
+dist/assets/download-GCWkKocC.js               0.23 kB │ gzip:   0.19 kB
+dist/assets/badge-C2tHSTJR.js                  0.24 kB │ gzip:   0.20 kB
+dist/assets/book-open-BeHtcvxF.js              0.28 kB │ gzip:   0.21 kB
+dist/assets/receipt-BL5rRjRj.js                0.29 kB │ gzip:   0.21 kB
+dist/assets/EmptyState-CaLo6apb.js             0.35 kB │ gzip:   0.25 kB
+dist/assets/textarea-MLC1Y3zf.js               0.36 kB │ gzip:   0.28 kB
+dist/assets/input-BvWp-FG4.js                  0.36 kB │ gzip:   0.28 kB
+dist/assets/PageHeader-pz4oVDO0.js             0.48 kB │ gzip:   0.29 kB
+dist/assets/card-CspKS3-5.js                   0.49 kB │ gzip:   0.25 kB
+dist/assets/table-P6knuCiK.js                  0.57 kB │ gzip:   0.27 kB
+dist/assets/NotFoundPage-XZOmqm_H.js           0.61 kB │ gzip:   0.39 kB
+dist/assets/users-Ctp0_Zz7.js                  0.61 kB │ gzip:   0.33 kB
+dist/assets/StockStatusBadge-CftfZjER.js       0.69 kB │ gzip:   0.43 kB
+dist/assets/NotificationsPage-BfjVJ-8h.js      1.76 kB │ gzip:   0.83 kB
+dist/assets/RegisterPage-BEfqzWVM.js           2.47 kB │ gzip:   1.09 kB
+dist/assets/ParentLinksPage-EC5WgRCF.js        2.59 kB │ gzip:   1.01 kB
+dist/assets/ParentPortalPage-xDcGLWDc.js       2.59 kB │ gzip:   0.88 kB
+dist/assets/LoginPage-ko5Kakbk.js              3.09 kB │ gzip:   1.31 kB
+dist/assets/AttachmentViewer-C7If53LR.js       3.11 kB │ gzip:   1.35 kB
+dist/assets/StudentFeesPage-Cc_cOzu5.js        3.23 kB │ gzip:   1.14 kB
+dist/assets/TransportPage-BW8cXcvb.js          4.47 kB │ gzip:   1.31 kB
+dist/assets/MyLibraryPage-D1PlNl6F.js          5.00 kB │ gzip:   1.27 kB
+dist/assets/HrPage-udfA6HL1.js                 5.19 kB │ gzip:   1.52 kB
+dist/assets/ReportsPage-Di2IhByj.js            5.40 kB │ gzip:   1.86 kB
+dist/assets/TimetablePage-DwsPG02g.js          5.76 kB │ gzip:   1.91 kB
+dist/assets/SchoolsPage-ByNhAi3i.js            5.89 kB │ gzip:   1.90 kB
+dist/assets/StudentSubjectsPage-Ch3gy4LQ.js    6.02 kB │ gzip:   1.84 kB
+dist/assets/TeachersPage-De1CMyE0.js           6.57 kB │ gzip:   2.18 kB
+dist/assets/AttendancePage-D-nLSRjF.js         6.66 kB │ gzip:   2.46 kB
+dist/assets/FeesPage-BzMVt97Q.js               6.81 kB │ gzip:   2.04 kB
+dist/assets/SettingsPage-CKN3NGlL.js           7.47 kB │ gzip:   2.32 kB
+dist/assets/NoticesPage-CQmjBYoQ.js            8.49 kB │ gzip:   2.83 kB
+dist/assets/StudentsPage-BrsRCPNW.js           8.63 kB │ gzip:   2.73 kB
+dist/assets/AcademicsPage-BVOZE11w.js          8.63 kB │ gzip:   2.27 kB
+dist/assets/LibraryPage-8Q_RtQRT.js           11.33 kB │ gzip:   3.13 kB
+dist/assets/LaboratoryPage-5jz3GSUO.js        14.59 kB │ gzip:   3.56 kB
+dist/assets/ExamsPage-CAuhQlGx.js             20.99 kB │ gzip:   5.27 kB
+dist/assets/HomeworkPage-DyRBsS1C.js          27.21 kB │ gzip:   7.85 kB
+dist/assets/AccountingPage-9wavXCd7.js        34.97 kB │ gzip:   7.72 kB
+dist/assets/NepaliDateField-D-JbNAc1.js       43.98 kB │ gzip:  13.73 kB
+dist/assets/FormField-bQF_JKJn.js             63.85 kB │ gzip:  17.73 kB
+dist/assets/AddressFields-BLy-4Ttm.js         87.59 kB │ gzip:  10.15 kB
+dist/assets/index-CxPs8JEo.js                373.25 kB │ gzip: 121.39 kB
+dist/assets/DashboardPage-Bq0NEkIN.js        383.96 kB │ gzip: 111.33 kB
+✓ built in 4.99s
+
+> @nepal-school-erp/frontend@1.0.0 start
+> vite preview --host
+
+  ➜  Local:   http://localhost:4173/
+  ➜  Network: http://192.168.1.5:4173/

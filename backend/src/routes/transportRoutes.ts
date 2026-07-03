@@ -7,9 +7,9 @@ import {
   listRoutes,
   removeAssignment,
   updateRoute
-} from "../controllers/transportController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+} from "../controllers/transportController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

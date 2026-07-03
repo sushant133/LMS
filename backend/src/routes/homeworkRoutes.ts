@@ -13,9 +13,9 @@ import {
   submitAssignment,
   togglePin,
   updateAssignment
-} from "../controllers/homeworkController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+} from "../controllers/homeworkController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

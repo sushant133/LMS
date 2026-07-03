@@ -1,12 +1,12 @@
 import type { Request, Response } from "express";
 import { settingsSchema } from "@nepal-school-erp/shared";
-import { School } from "../models/School";
-import { Setting } from "../models/Setting";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ensureValidBsDate } from "../utils/nepaliDate";
-import { sendSuccess } from "../utils/response";
-import { buildDefaultSchoolPayload, buildSchoolSettingsPayload } from "../utils/schoolDefaults";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+import { School } from "../models/School.js";
+import { Setting } from "../models/Setting.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import { sendSuccess } from "../utils/response.js";
+import { buildDefaultSchoolPayload, buildSchoolSettingsPayload } from "../utils/schoolDefaults.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const getSettings = asyncHandler(async (req: Request, res: Response) => {
   let settings = await Setting.findOne(withTenantScope(req));

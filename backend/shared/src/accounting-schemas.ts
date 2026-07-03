@@ -6,8 +6,8 @@ import {
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
   PURCHASE_CATEGORIES
-} from "./constants";
-import { addressSchema, academicYearSchema, bsDateSchema, moneySchema, objectIdSchema } from "./schemas";
+} from "./constants.js";
+import { addressSchema, academicYearSchema, bsDateSchema, moneySchema, objectIdSchema } from "./schemas.js";
 
 export const feeBreakdownItemSchema = z.object({
   feeType: z.enum(FEE_TYPES),

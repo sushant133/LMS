@@ -1,4 +1,4 @@
-import type { UserRole } from "./types";
+import type { UserRole } from "./types.js";
 
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 

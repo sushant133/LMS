@@ -8,22 +8,22 @@ import {
   laboratorySchema,
   moduleStaffSchema
 } from "@nepal-school-erp/shared";
-import { env } from "../config/env";
+import { env } from "../config/env.js";
 import {
   Laboratory,
   LaboratoryCategory,
   LaboratoryEquipment,
   LaboratoryIssue
-} from "../models/Laboratory";
-import { Teacher } from "../models/Teacher";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { enrichEquipmentInventory } from "../utils/inventory";
-import { compareBsDates, getTodayBs } from "../utils/nepaliDate";
-import { sendNotification } from "../utils/notificationService";
-import { sendSuccess } from "../utils/response";
-import { withTenantScope } from "../utils/tenant";
+} from "../models/Laboratory.js";
+import { Teacher } from "../models/Teacher.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { enrichEquipmentInventory } from "../utils/inventory.js";
+import { compareBsDates, getTodayBs } from "../utils/nepaliDate.js";
+import { sendNotification } from "../utils/notificationService.js";
+import { sendSuccess } from "../utils/response.js";
+import { withTenantScope } from "../utils/tenant.js";
 
 const LAB_TYPE_LABELS: Record<string, string> = {
   COMPUTER: "Computer Lab",

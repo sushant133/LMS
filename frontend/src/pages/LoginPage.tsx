@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { School } from "lucide-react";
-import { loginSchema } from "@nepal-school-erp/shared";
+import { getDemoLoginEntries, loginSchema } from "@nepal-school-erp/shared";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -112,31 +112,14 @@ export const LoginPage = () => {
               </Button>
             </form>
 
-            {import.meta.env.DEV ? (
-              <div className="mt-4 space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900">
-                <p>
-                  Demo admin: <span className="font-medium">admin@demoerp.nepal-school.com</span> / <span className="font-medium">Demo@123456</span>
+            <div className="mt-4 space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900">
+              <p className="font-semibold text-emerald-950">Demo login credentials</p>
+              {getDemoLoginEntries().map((entry) => (
+                <p key={entry.email}>
+                  {entry.label}: <span className="font-medium">{entry.email}</span> / <span className="font-medium">{entry.password}</span>
                 </p>
-                <p>
-                  Demo teacher: <span className="font-medium">ram.sharma@demoerp.nepal-school.com</span> / <span className="font-medium">Demo@123456</span>
-                </p>
-                <p>
-                  Demo student: <span className="font-medium">student01@demoerp.nepal-school.com</span> / <span className="font-medium">Demo@123456</span>
-                </p>
-                <p>
-                  Demo parent: <span className="font-medium">parent.sharma@demoerp.nepal-school.com</span> / <span className="font-medium">Demo@123456</span>
-                </p>
-                <p>
-                  Library staff: <span className="font-medium">maya.poudel@demoerp.nepal-school.com</span> / <span className="font-medium">Demo@123456</span>
-                </p>
-                <p>
-                  Laboratory staff: <span className="font-medium">binod.shrestha@demoerp.nepal-school.com</span> / <span className="font-medium">Demo@123456</span>
-                </p>
-                <p>
-                  Demo accountant: <span className="font-medium">accountant@demo.school</span> / <span className="font-medium">12345678</span>
-                </p>
-              </div>
-            ) : null}
+              ))}
+            </div>
             <p className="mt-4 text-sm text-slate-600">
               No account?{" "}
               <Link className="font-semibold text-emerald-700" to="/register">

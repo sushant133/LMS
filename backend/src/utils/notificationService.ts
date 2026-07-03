@@ -1,7 +1,7 @@
-import { Notification } from "../models/Notification";
-import { User } from "../models/User";
+import { Notification } from "../models/Notification.js";
+import { User } from "../models/User.js";
 import type { NotificationChannel, NotificationType } from "@nepal-school-erp/shared";
-import { tenantObjectId } from "./tenant";
+import { tenantObjectId } from "./tenant.js";
 import type { Request } from "express";
 
 interface SendNotificationInput {
@@ -54,7 +54,7 @@ export const notifyParentsOfStudent = async (
   type: NotificationType,
   channel: NotificationChannel = "BOTH"
 ) => {
-  const { ParentChildLink } = await import("../models/ParentChildLink");
+  const { ParentChildLink } = await import("../models/ParentChildLink.js");
   const links = await ParentChildLink.find({ schoolId, studentId }).lean();
 
   await Promise.all(

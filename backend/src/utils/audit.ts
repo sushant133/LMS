@@ -1,6 +1,6 @@
 import type { Request } from "express";
-import { AuditLog } from "../models/AuditLog";
-import { tenantObjectId } from "./tenant";
+import { AuditLog } from "../models/AuditLog.js";
+import { tenantObjectId } from "./tenant.js";
 
 interface AuditParams {
   action: string;

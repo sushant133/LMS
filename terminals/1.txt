@@ -1,0 +1,20 @@
+---
+pid: 21112
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run typecheck"
+started_at: 2026-07-03T05:42:14.022Z
+running_for_ms: 375010   
+---
+
+> @nepal-school-erp/backend@1.0.0 typecheck
+> npm run build:shared && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit
+
+
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm run build --prefix ./shared
+
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+src/scripts/seedDemoSchool.ts(603,48): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../models/AssignmentComment.js'?

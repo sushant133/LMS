@@ -2,9 +2,9 @@ import multer, { type StorageEngine } from "multer";
 import path from "path";
 import fs from "fs-extra";
 import type { Request } from "express";
-import { env } from "../config/env";
-import { ApiError } from "./apiError";
-import { tenantObjectId } from "./tenant";
+import { env } from "../config/env.js";
+import { ApiError } from "./apiError.js";
+import { tenantObjectId } from "./tenant.js";
 
 const UPLOAD_ROOT = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
 

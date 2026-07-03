@@ -1,6 +1,6 @@
 import type { Request } from "express";
 import mongoose from "mongoose";
-import { ApiError } from "./apiError";
+import { ApiError } from "./apiError.js";
 
 export const getTenantSchoolId = (req: Request): string => {
   if (!req.tenantSchoolId) {

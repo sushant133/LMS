@@ -1,7 +1,11 @@
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import { z } from "zod";
 
-dotenv.config();
+const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+dotenv.config({ path: path.join(backendRoot, ".env") });
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(5000),
@@ -21,10 +25,16 @@ const envSchema = z.object({
     .default(false),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   UPLOAD_DIR: z.string().optional(),
+  SEED_DEMO: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false")
+    .pipe(z.boolean())
+    .default(true),
   DEFAULT_USER_PASSWORD: z.string().min(6).default("ChangeMe123!"),
   SUPER_ADMIN_NAME: z.string().min(2).default("System Super Admin"),
-  SUPER_ADMIN_EMAIL: z.email().default("superadmin@example.com"),
-  SUPER_ADMIN_PASSWORD: z.string().min(6).default("ChangeMe123!")
+  SUPER_ADMIN_EMAIL: z.email().default("superadmin@nepal-school.com"),
+  SUPER_ADMIN_PASSWORD: z.string().min(6).default("Admin@123456")
 });
 
 export const env = envSchema.parse(process.env);

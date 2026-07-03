@@ -1,24 +1,24 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
 import { teacherSchema } from "@nepal-school-erp/shared";
-import { env } from "../config/env";
-import { SchoolClass } from "../models/SchoolClass";
-import { Section } from "../models/Section";
-import { Subject } from "../models/Subject";
-import { Teacher } from "../models/Teacher";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { ensureValidBsDate } from "../utils/nepaliDate";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+import { env } from "../config/env.js";
+import { SchoolClass } from "../models/SchoolClass.js";
+import { Section } from "../models/Section.js";
+import { Subject } from "../models/Subject.js";
+import { Teacher } from "../models/Teacher.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import {
   createSession,
   commitTransaction,
   abortTransaction,
   endSession,
   getSessionOption
-} from "../utils/transaction";
+} from "../utils/transaction.js";
 
 const validateTeacherAssignments = async (
   schoolId: mongoose.Types.ObjectId,

@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import type { UserRole } from "@nepal-school-erp/shared";
-import { env } from "../config/env";
-import { ApiError } from "../utils/apiError";
+import { env } from "../config/env.js";
+import { ApiError } from "../utils/apiError.js";
 
 interface JwtPayload {
   userId: string;

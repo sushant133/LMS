@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
-import { env } from "../config/env";
-import { School } from "../models/School";
-import { ApiError } from "../utils/apiError";
+import { env } from "../config/env.js";
+import { School } from "../models/School.js";
+import { ApiError } from "../utils/apiError.js";
 
 export const tenantGuard = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   if (!req.user) {

@@ -21,9 +21,9 @@ import {
   updateLaboratory,
   updateLaboratoryCategory,
   updateLaboratoryStaff
-} from "../controllers/laboratoryController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+} from "../controllers/laboratoryController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

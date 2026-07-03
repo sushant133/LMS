@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { getDashboard } from "../controllers/dashboardController";
-import { protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { getDashboard } from "../controllers/dashboardController.js";
+import { protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

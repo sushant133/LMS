@@ -4,9 +4,9 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   sendManualNotification
-} from "../controllers/notificationController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+} from "../controllers/notificationController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

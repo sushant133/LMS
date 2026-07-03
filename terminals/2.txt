@@ -1,0 +1,9 @@
+---
+pid: 28208
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; node dist/server.js"
+started_at: 2026-07-03T05:42:32.113Z
+running_for_ms: 360002   
+---
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Backend server listening on http://localhost:5000

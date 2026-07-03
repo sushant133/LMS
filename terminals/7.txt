@@ -1,0 +1,16 @@
+---
+pid: 4272
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm start 2>&1"
+started_at: 2026-07-03T05:56:50.442Z
+running_for_ms: 515014   
+---
+
+> @nepal-school-erp/backend@1.0.0 start
+> node dist/server.js
+
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo school (DEMOERP) already present.
+Backend server listening on http://localhost:5000
+POST /api/auth/login 200 370.110 ms - 1621
+POST /api/auth/login 200 425.891 ms - 1596

@@ -1,13 +1,13 @@
 import type { Request, Response } from "express";
-import { Subject } from "../models/Subject";
-import { SchoolClass } from "../models/SchoolClass";
-import { Section } from "../models/Section";
-import { Student } from "../models/Student";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { sendSuccess } from "../utils/response";
-import { requireTeacherScope } from "../utils/teacherScope";
-import { tenantObjectId } from "../utils/tenant";
+import { Subject } from "../models/Subject.js";
+import { SchoolClass } from "../models/SchoolClass.js";
+import { Section } from "../models/Section.js";
+import { Student } from "../models/Student.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { sendSuccess } from "../utils/response.js";
+import { requireTeacherScope } from "../utils/teacherScope.js";
+import { tenantObjectId } from "../utils/tenant.js";
 
 export const getTeacherAssignments = asyncHandler(async (req: Request, res: Response) => {
   if (req.user?.role !== "TEACHER") {

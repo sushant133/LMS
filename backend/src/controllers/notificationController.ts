@@ -1,11 +1,11 @@
 import type { Request, Response } from "express";
 import { sendNotificationSchema } from "@nepal-school-erp/shared";
-import { Notification } from "../models/Notification";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { sendNotification } from "../utils/notificationService";
-import { sendSuccess } from "../utils/response";
-import { withTenantScope } from "../utils/tenant";
+import { Notification } from "../models/Notification.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { sendNotification } from "../utils/notificationService.js";
+import { sendSuccess } from "../utils/response.js";
+import { withTenantScope } from "../utils/tenant.js";
 
 export const listNotifications = asyncHandler(async (req: Request, res: Response) => {
   const filter = withTenantScope(req);

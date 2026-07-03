@@ -1,4 +1,4 @@
-import type { GradeSymbol, UserRole } from "./types";
+import type { GradeSymbol, UserRole } from "./types.js";
 
 export const USER_ROLES: UserRole[] = [
   "SUPER_ADMIN",

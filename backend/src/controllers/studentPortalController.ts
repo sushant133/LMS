@@ -1,18 +1,18 @@
 import type { Request, Response } from "express";
-import { Assignment, AssignmentSubmission } from "../models/Assignment";
-import { Attendance } from "../models/Attendance";
-import { FeeCollection } from "../models/FeeCollection";
-import { Notice } from "../models/Notice";
-import { Result } from "../models/Result";
-import { SchoolClass } from "../models/SchoolClass";
-import { Section } from "../models/Section";
-import { Student } from "../models/Student";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { getTodayBs } from "../utils/nepaliDate";
-import { sendSuccess } from "../utils/response";
-import { assertStudentSubjectAccess, getEnrolledSubjects, requireStudentProfile } from "../utils/studentScope";
-import { tenantObjectId } from "../utils/tenant";
+import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
+import { Attendance } from "../models/Attendance.js";
+import { FeeCollection } from "../models/FeeCollection.js";
+import { Notice } from "../models/Notice.js";
+import { Result } from "../models/Result.js";
+import { SchoolClass } from "../models/SchoolClass.js";
+import { Section } from "../models/Section.js";
+import { Student } from "../models/Student.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { getTodayBs } from "../utils/nepaliDate.js";
+import { sendSuccess } from "../utils/response.js";
+import { assertStudentSubjectAccess, getEnrolledSubjects, requireStudentProfile } from "../utils/studentScope.js";
+import { tenantObjectId } from "../utils/tenant.js";
 
 export const listStudentSubjects = asyncHandler(async (req: Request, res: Response) => {
   if (req.user?.role !== "STUDENT") {

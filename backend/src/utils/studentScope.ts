@@ -1,8 +1,8 @@
 import type { Request } from "express";
-import { Student } from "../models/Student";
-import { Subject } from "../models/Subject";
-import { ApiError } from "./apiError";
-import { tenantObjectId } from "./tenant";
+import { Student } from "../models/Student.js";
+import { Subject } from "../models/Subject.js";
+import { ApiError } from "./apiError.js";
+import { tenantObjectId } from "./tenant.js";
 
 export interface StudentProfile {
   studentId: string;

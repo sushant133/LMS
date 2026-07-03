@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { createSchool, deleteSchool, listAccessibleSchools, listPublicSchools, listSchools, updateSchool } from "../controllers/schoolController";
-import { authorize, protect } from "../middleware/auth";
+import { createSchool, deleteSchool, listAccessibleSchools, listPublicSchools, listSchools, updateSchool } from "../controllers/schoolController.js";
+import { authorize, protect } from "../middleware/auth.js";
 
 const router = Router();
 

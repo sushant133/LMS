@@ -2,10 +2,12 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import morgan from "morgan";
-import { connectDatabase } from "./config/db";
-import { env } from "./config/env";
-import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
-import routes from "./routes";
+import path from "path";
+import { connectDatabase } from "./config/db.js";
+import { env } from "./config/env.js";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import routes from "./routes/index.js";
+import { ensureDemoData } from "./seed/index.js";
 
 const app = express();
 
@@ -25,10 +27,8 @@ app.use(
 app.use(cookieParser(env.COOKIE_SECRET));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(morgan("dev"));
+app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
 
-// Serve uploaded files (tenant-isolated under /uploads)
-import path from "path";
 const uploadsDir = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
 app.use("/uploads", express.static(uploadsDir));
 
@@ -56,6 +56,7 @@ app.use(errorHandler);
 
 const startServer = async (): Promise<void> => {
   await connectDatabase();
+  await ensureDemoData();
 
   app.listen(env.PORT, () => {
     console.log(`Backend server listening on http://localhost:${env.PORT}`);

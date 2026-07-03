@@ -1,0 +1,38 @@
+---
+pid: 11788
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run dev 2>&1"
+started_at: 2026-07-03T06:02:16.359Z
+running_for_ms: 190006   
+---
+
+> @nepal-school-erp/frontend@1.0.0 dev
+> npm run build:shared && vite
+
+
+> @nepal-school-erp/frontend@1.0.0 build:shared
+> npm run build --prefix ../backend/shared
+
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+[backend-dev] Starting API server on http://127.0.0.1:5000 ...
+(node:26000) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+[backend-dev] API server is ready.
+11:47:23 am [vite] (client) Re-optimizing dependencies because vite config has changed
+Port 5173 is in use, trying another one...
+Port 5174 is in use, trying another one...
+
+  VITE v7.3.6  ready in 4091 ms
+
+  ➜  Local:   http://localhost:5175/
+  ➜  Network: use --host to expose
+Demo school (DEMOERP) already present.
+Backend server listening on http://localhost:5000
+11:47:37 am [vite] plugins/backendDev.ts changed, restarting server...
+[backend-dev] Starting API server on http://127.0.0.1:5000 ...
+[backend-dev] API server is ready.
+11:47:38 am [vite] server restarted.

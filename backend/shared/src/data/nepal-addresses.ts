@@ -1,4 +1,4 @@
-import type { NepalAddressProvince } from "../types";
+import type { NepalAddressProvince } from "../types.js";
 
 export const nepalAddressData: NepalAddressProvince[] = [
   {

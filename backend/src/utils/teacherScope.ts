@@ -1,10 +1,10 @@
 import type { Request } from "express";
 import mongoose from "mongoose";
-import { Section } from "../models/Section";
-import { Subject } from "../models/Subject";
-import { Teacher } from "../models/Teacher";
-import { ApiError } from "./apiError";
-import { tenantObjectId } from "./tenant";
+import { Section } from "../models/Section.js";
+import { Subject } from "../models/Subject.js";
+import { Teacher } from "../models/Teacher.js";
+import { ApiError } from "./apiError.js";
+import { tenantObjectId } from "./tenant.js";
 
 export interface TeacherScope {
   teacherId: string;

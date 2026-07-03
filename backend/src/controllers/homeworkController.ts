@@ -7,27 +7,27 @@ import {
   assignmentSubmissionSchema,
   gradeSubmissionSchema
 } from "@nepal-school-erp/shared";
-import { Assignment, AssignmentSubmission } from "../models/Assignment";
-import { AssignmentComment } from "../models/AssignmentComment";
-import { SchoolClass } from "../models/SchoolClass";
-import { Section } from "../models/Section";
-import { Subject } from "../models/Subject";
-import { Teacher } from "../models/Teacher";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { compareBsDates, getDeadlineStatus, getTodayBs } from "../utils/nepaliDate";
-import { notifyParentsOfStudent } from "../utils/notificationService";
-import { assertParentAccessToStudent, getLinkedStudentIds } from "../utils/parentScope";
-import { assertStudentOwnRecord, getStudentProfile, requireStudentProfile } from "../utils/studentScope";
+import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
+import { AssignmentComment } from "../models/AssignmentComment.js";
+import { SchoolClass } from "../models/SchoolClass.js";
+import { Section } from "../models/Section.js";
+import { Subject } from "../models/Subject.js";
+import { Teacher } from "../models/Teacher.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { compareBsDates, getDeadlineStatus, getTodayBs } from "../utils/nepaliDate.js";
+import { notifyParentsOfStudent } from "../utils/notificationService.js";
+import { assertParentAccessToStudent, getLinkedStudentIds } from "../utils/parentScope.js";
+import { assertStudentOwnRecord, getStudentProfile, requireStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherQueryScope,
   assertTeacherSubjectClassSection,
   getTeacherScope,
   requireTeacherScope
-} from "../utils/teacherScope";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+} from "../utils/teacherScope.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 type AssignmentLean = {
   _id: { toString(): string };
@@ -127,7 +127,7 @@ const buildAssignmentFilter = async (req: Request): Promise<Record<string, unkno
 
   if (req.user?.role === "PARENT") {
     const studentIds = await getLinkedStudentIds(req);
-    const { Student } = await import("../models/Student");
+    const { Student } = await import("../models/Student.js");
     const students = await Student.find({ _id: { $in: studentIds } }).lean();
     const classIds = [...new Set(students.map((s) => s.classId.toString()))];
     const sectionIds = [...new Set(students.map((s) => s.sectionId.toString()))];
@@ -381,7 +381,7 @@ export const createAssignment = asyncHandler(async (req: Request, res: Response)
   });
 
   if (payload.type === "HOMEWORK" || payload.type === "CAS") {
-    const { Student } = await import("../models/Student");
+    const { Student } = await import("../models/Student.js");
     const students = await Student.find({
       schoolId: tenantObjectId(req),
       classId: payload.classId,

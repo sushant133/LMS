@@ -18,14 +18,26 @@ export default defineConfig({
     },
     server: {
         port: 5173,
+        strictPort: true,
         proxy: {
             "/api": {
-                target: "http://localhost:5000",
+                target: "http://127.0.0.1:5000",
                 changeOrigin: true,
-                secure: false
+                secure: false,
+                configure: (proxy) => {
+                    proxy.on("error", (_error, _request, response) => {
+                        if (response && "writeHead" in response && typeof response.writeHead === "function" && !response.headersSent) {
+                            response.writeHead(503, { "Content-Type": "application/json" });
+                            response.end(JSON.stringify({
+                                success: false,
+                                message: "Backend API is not running. Start it with: npm run dev --prefix ../backend"
+                            }));
+                        }
+                    });
+                }
             },
             "/uploads": {
-                target: "http://localhost:5000",
+                target: "http://127.0.0.1:5000",
                 changeOrigin: true,
                 secure: false
             }

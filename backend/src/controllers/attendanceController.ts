@@ -1,16 +1,16 @@
 import type { Request, Response } from "express";
 import { attendanceSchema } from "@nepal-school-erp/shared";
-import { Attendance } from "../models/Attendance";
-import { Student } from "../models/Student";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { ensureValidBsDate } from "../utils/nepaliDate";
-import { notifyParentsOfStudent } from "../utils/notificationService";
-import { getStudentProfile } from "../utils/studentScope";
-import { assertTeacherQueryScope, assertTeacherSubjectClassSection, getTeacherScope } from "../utils/teacherScope";
-import { Subject } from "../models/Subject";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId } from "../utils/tenant";
+import { Attendance } from "../models/Attendance.js";
+import { Student } from "../models/Student.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import { notifyParentsOfStudent } from "../utils/notificationService.js";
+import { getStudentProfile } from "../utils/studentScope.js";
+import { assertTeacherQueryScope, assertTeacherSubjectClassSection, getTeacherScope } from "../utils/teacherScope.js";
+import { Subject } from "../models/Subject.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId } from "../utils/tenant.js";
 
 export const listAttendance = asyncHandler(async (req: Request, res: Response) => {
   const query: Record<string, unknown> = { schoolId: tenantObjectId(req) };

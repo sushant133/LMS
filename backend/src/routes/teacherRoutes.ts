@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { createTeacher, deleteTeacher, getTeacherById, listTeachers, updateTeacher } from "../controllers/teacherController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { createTeacher, deleteTeacher, getTeacherById, listTeachers, updateTeacher } from "../controllers/teacherController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

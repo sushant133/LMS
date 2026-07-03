@@ -1,13 +1,13 @@
 import type { HydratedDocument } from "mongoose";
 import type { LibraryIssueStatus } from "@nepal-school-erp/shared";
-import { LibraryIssue, type LibraryIssueDocument } from "../models/LibraryBook";
+import { LibraryIssue, type LibraryIssueDocument } from "../models/LibraryBook.js";
 
 type LibraryIssueEntity = HydratedDocument<LibraryIssueDocument>;
-import { Notification } from "../models/Notification";
-import { Student } from "../models/Student";
-import { Teacher } from "../models/Teacher";
-import { compareBsDates, getOffsetBsDate, getTodayBs } from "./nepaliDate";
-import { notifyParentsOfStudent, sendNotification } from "./notificationService";
+import { Notification } from "../models/Notification.js";
+import { Student } from "../models/Student.js";
+import { Teacher } from "../models/Teacher.js";
+import { compareBsDates, getOffsetBsDate, getTodayBs } from "./nepaliDate.js";
+import { notifyParentsOfStudent, sendNotification } from "./notificationService.js";
 
 type ReminderType = "BEFORE_DUE" | "DUE_TODAY" | "OVERDUE";
 

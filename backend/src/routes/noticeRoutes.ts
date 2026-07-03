@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { createNotice, deleteNotice, listNotices, updateNotice } from "../controllers/noticeController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { createNotice, deleteNotice, listNotices, updateNotice } from "../controllers/noticeController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

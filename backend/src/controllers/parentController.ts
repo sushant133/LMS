@@ -1,19 +1,19 @@
 import type { Request, Response } from "express";
 import { parentChildLinkSchema } from "@nepal-school-erp/shared";
-import { Assignment } from "../models/Assignment";
-import { AssignmentSubmission } from "../models/Assignment";
-import { Notification } from "../models/Notification";
-import { ParentChildLink } from "../models/ParentChildLink";
-import { SchoolClass } from "../models/SchoolClass";
-import { Section } from "../models/Section";
-import { Student } from "../models/Student";
-import { Attendance } from "../models/Attendance";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { getLinkedStudentIds } from "../utils/parentScope";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+import { Assignment } from "../models/Assignment.js";
+import { AssignmentSubmission } from "../models/Assignment.js";
+import { Notification } from "../models/Notification.js";
+import { ParentChildLink } from "../models/ParentChildLink.js";
+import { SchoolClass } from "../models/SchoolClass.js";
+import { Section } from "../models/Section.js";
+import { Student } from "../models/Student.js";
+import { Attendance } from "../models/Attendance.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { getLinkedStudentIds } from "../utils/parentScope.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const listParentUsers = asyncHandler(async (req: Request, res: Response) => {
   const parents = await User.find({ schoolId: tenantObjectId(req), role: "PARENT", isActive: true })

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
-import { connectDatabase } from "../config/db";
-import { env } from "../config/env";
-import { User } from "../models/User";
+import { connectDatabase } from "../config/db.js";
+import { env } from "../config/env.js";
+import { User } from "../models/User.js";
 
 const run = async (): Promise<void> => {
   await connectDatabase();

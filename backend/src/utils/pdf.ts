@@ -2,7 +2,7 @@ import PDFDocument from "pdfkit";
 import type { Response } from "express";
 import fs from "fs";
 import path from "path";
-import { formatCurrencyNpr } from "./currency";
+import { formatCurrencyNpr } from "./currency.js";
 
 const FONTS_DIR = path.join(process.cwd(), "assets", "fonts");
 

@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { createParentLink, deleteParentLink, getParentPortal, listParentLinks, listParentUsers } from "../controllers/parentController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { createParentLink, deleteParentLink, getParentPortal, listParentLinks, listParentUsers } from "../controllers/parentController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

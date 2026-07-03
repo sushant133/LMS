@@ -56,46 +56,18 @@ export const demoCredentials = {
   }
 } as const;
 
-export const printDemoCredentials = (): void => {
-  console.log("\n========== DEMO LOGIN CREDENTIALS ==========\n");
-  console.log("Super Admin");
-  console.log(`  Email:    ${demoCredentials.superAdmin.email}`);
-  console.log(`  Password: ${demoCredentials.superAdmin.password}\n`);
-
-  console.log("School Admin (Public Himal Institute of Technology)");
-  console.log(`  Email:    ${demoCredentials.schoolAdmin.email}`);
-  console.log(`  Password: ${demoCredentials.schoolAdmin.password}\n`);
-
-  console.log("Teachers");
-  demoCredentials.teachers.forEach((teacher) => {
-    console.log(`  ${teacher.name} — ${teacher.subjects}`);
-    console.log(`    Email: ${teacher.email}  Password: ${teacher.password}`);
-  });
-
-  console.log("\nStudents");
-  demoCredentials.students.forEach((student) => {
-    console.log(`  ${student.name} (${student.class} ${student.section}, Roll ${student.roll})`);
-    console.log(`    Email: ${student.email}  Password: ${student.password}`);
-  });
-
-  console.log("\nParent");
-  console.log(`  Email:    ${demoCredentials.parent.email}`);
-  console.log(`  Password: ${demoCredentials.parent.password}`);
-  console.log(`  Linked:   ${demoCredentials.parent.linkedStudent}`);
-
-  console.log("\nLibrary Staff");
-  console.log(`  ${demoCredentials.libraryStaff.name}`);
-  console.log(`  Email:    ${demoCredentials.libraryStaff.email}`);
-  console.log(`  Password: ${demoCredentials.libraryStaff.password}`);
-
-  console.log("\nLaboratory Staff");
-  console.log(`  ${demoCredentials.laboratoryStaff.name}`);
-  console.log(`  Email:    ${demoCredentials.laboratoryStaff.email}`);
-  console.log(`  Password: ${demoCredentials.laboratoryStaff.password}`);
-
-  console.log("\nAccountant");
-  console.log(`  ${demoCredentials.accountant.name} (${demoCredentials.accountant.employeeId})`);
-  console.log(`  Email:    ${demoCredentials.accountant.email}`);
-  console.log(`  Password: ${demoCredentials.accountant.password}`);
-  console.log("\n==============================================\n");
+export type DemoLoginEntry = {
+  label: string;
+  email: string;
+  password: string;
 };
+
+export const getDemoLoginEntries = (): DemoLoginEntry[] => [
+  { label: "Demo admin", email: demoCredentials.schoolAdmin.email, password: demoCredentials.schoolAdmin.password },
+  { label: "Demo teacher", email: demoCredentials.teachers[0]!.email, password: demoCredentials.teachers[0]!.password },
+  { label: "Demo student", email: demoCredentials.students[0]!.email, password: demoCredentials.students[0]!.password },
+  { label: "Demo parent", email: demoCredentials.parent.email, password: demoCredentials.parent.password },
+  { label: "Library staff", email: demoCredentials.libraryStaff.email, password: demoCredentials.libraryStaff.password },
+  { label: "Laboratory staff", email: demoCredentials.laboratoryStaff.email, password: demoCredentials.laboratoryStaff.password },
+  { label: "Demo accountant", email: demoCredentials.accountant.email, password: demoCredentials.accountant.password }
+];

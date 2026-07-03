@@ -7,9 +7,9 @@ import {
   listFeeCollections,
   listFeeStructures,
   updateFeeStructure
-} from "../controllers/feeController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+} from "../controllers/feeController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

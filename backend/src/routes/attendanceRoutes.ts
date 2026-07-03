@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { listAttendance, upsertAttendance } from "../controllers/attendanceController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { listAttendance, upsertAttendance } from "../controllers/attendanceController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

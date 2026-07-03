@@ -1,13 +1,13 @@
 import { Router } from "express";
-import { protect, authorize } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { protect, authorize } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 import {
   exportStudentMasterCsv,
   exportTeacherMasterCsv,
   exportInfrastructure,
   exportFlashII,
   exportEnrollmentSummary
-} from "../controllers/exportController";
+} from "../controllers/exportController.js";
 
 const router = Router();
 

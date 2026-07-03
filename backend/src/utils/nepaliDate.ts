@@ -1,7 +1,7 @@
 import NepaliDateImport from "nepali-date-converter";
 import type { AssignmentDeadlineStatus } from "@nepal-school-erp/shared";
 import { getNepalGrade } from "@nepal-school-erp/shared";
-import { ApiError } from "./apiError";
+import { ApiError } from "./apiError.js";
 
 type NepaliDateInstance = {
   getYear(): number;

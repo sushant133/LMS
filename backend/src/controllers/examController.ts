@@ -1,23 +1,23 @@
 import type { Request, Response } from "express";
 import { examSchema, resultSchema } from "@nepal-school-erp/shared";
-import { Exam } from "../models/Exam";
-import { Result } from "../models/Result";
-import { Section } from "../models/Section";
-import { Student } from "../models/Student";
-import { Subject } from "../models/Subject";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { calculateResultGrade, compareBsDates, ensureValidBsDate, getTodayBs } from "../utils/nepaliDate";
-import { assertParentAccessToStudent, getLinkedStudentIds } from "../utils/parentScope";
-import { assertStudentOwnRecord, getStudentProfile } from "../utils/studentScope";
+import { Exam } from "../models/Exam.js";
+import { Result } from "../models/Result.js";
+import { Section } from "../models/Section.js";
+import { Student } from "../models/Student.js";
+import { Subject } from "../models/Subject.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { calculateResultGrade, compareBsDates, ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
+import { assertParentAccessToStudent, getLinkedStudentIds } from "../utils/parentScope.js";
+import { assertStudentOwnRecord, getStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherClassSection,
   assertTeacherSubjectClassSection,
   getTeacherScope,
   requireTeacherScope
-} from "../utils/teacherScope";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+} from "../utils/teacherScope.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const listExams = asyncHandler(async (req: Request, res: Response) => {
   const filter: Record<string, unknown> = withTenantScope(req);

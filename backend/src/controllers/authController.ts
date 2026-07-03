@@ -7,13 +7,13 @@ import {
   type SchoolRecord,
   type UserRole
 } from "@nepal-school-erp/shared";
-import { env } from "../config/env";
-import { School } from "../models/School";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { clearActiveSchoolCookie, clearAuthCookie, setActiveSchoolCookie, setAuthCookie, signJwt } from "../utils/jwt";
-import { sendSuccess } from "../utils/response";
+import { env } from "../config/env.js";
+import { School } from "../models/School.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { clearActiveSchoolCookie, clearAuthCookie, setActiveSchoolCookie, setAuthCookie, signJwt } from "../utils/jwt.js";
+import { sendSuccess } from "../utils/response.js";
 
 const getRedirectPath = (role: UserRole): string => {
   switch (role) {

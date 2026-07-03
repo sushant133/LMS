@@ -1,16 +1,16 @@
 import type { Request, Response } from "express";
-import { Attendance } from "../models/Attendance";
-import { FeeCollection } from "../models/FeeCollection";
-import { Notice } from "../models/Notice";
-import { SchoolClass } from "../models/SchoolClass";
-import { Student } from "../models/Student";
-import { Subject } from "../models/Subject";
-import { Teacher } from "../models/Teacher";
-import { asyncHandler } from "../utils/asyncHandler";
-import { getStudentProfile } from "../utils/studentScope";
-import { getTeacherScope } from "../utils/teacherScope";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+import { Attendance } from "../models/Attendance.js";
+import { FeeCollection } from "../models/FeeCollection.js";
+import { Notice } from "../models/Notice.js";
+import { SchoolClass } from "../models/SchoolClass.js";
+import { Student } from "../models/Student.js";
+import { Subject } from "../models/Subject.js";
+import { Teacher } from "../models/Teacher.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { getStudentProfile } from "../utils/studentScope.js";
+import { getTeacherScope } from "../utils/teacherScope.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const getDashboard = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);

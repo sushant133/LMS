@@ -1,4 +1,4 @@
-import type { AddressSelection, FeeType, StudentRecord, TeacherRecord, UserProfile } from "./types";
+import type { AddressSelection, FeeType, StudentRecord, TeacherRecord, UserProfile } from "./types.js";
 
 export type PaymentMethod = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "ONLINE" | "OTHER";
 

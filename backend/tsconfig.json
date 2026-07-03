@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
+    "module": "NodeNext",
     "lib": ["ES2022"],
-    "moduleResolution": "Bundler",
+    "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
@@ -18,5 +18,5 @@
     "baseUrl": "./src"
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts"],
-  "exclude": ["src/server.ts", "src/scripts/testProxyLogin.ts", "src/scripts/testStudentFlow.ts"]
+  "exclude": ["src/scripts/**"]
 }

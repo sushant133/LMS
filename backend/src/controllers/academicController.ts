@@ -1,15 +1,15 @@
 import type { Request, Response } from "express";
 import { classSchema, sectionSchema, subjectSchema } from "@nepal-school-erp/shared";
-import { SchoolClass } from "../models/SchoolClass";
-import { Section } from "../models/Section";
-import { Subject } from "../models/Subject";
-import { Teacher } from "../models/Teacher";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { getStudentProfile } from "../utils/studentScope";
-import { getTeacherScope } from "../utils/teacherScope";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+import { SchoolClass } from "../models/SchoolClass.js";
+import { Section } from "../models/Section.js";
+import { Subject } from "../models/Subject.js";
+import { Teacher } from "../models/Teacher.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { getStudentProfile } from "../utils/studentScope.js";
+import { getTeacherScope } from "../utils/teacherScope.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const listClasses = asyncHandler(async (req: Request, res: Response) => {
   const filter = withTenantScope(req);

@@ -1,14 +1,14 @@
 import type { Request, Response } from "express";
-import { asyncHandler } from "../utils/asyncHandler";
-import { sendSuccess } from "../utils/response";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { sendSuccess } from "../utils/response.js";
 import {
   generateStudentMasterExport,
   generateTeacherMasterExport,
   generateInfrastructureExport,
   generateFlashIIPerformance,
   toCsv
-} from "../utils/iemisExport";
-import { recordAudit } from "../utils/audit";
+} from "../utils/iemisExport.js";
+import { recordAudit } from "../utils/audit.js";
 
 /**
  * Expanded IEMIS Export Controller
@@ -98,7 +98,7 @@ export const exportFlashII = asyncHandler(async (req: Request, res: Response) =>
 
 export const exportEnrollmentSummary = asyncHandler(async (req: Request, res: Response) => {
   // Keep the original enrollment summary for backward compatibility
-  const { generateEnrollmentSummary } = await import("../utils/iemisExport");
+  const { generateEnrollmentSummary } = await import("../utils/iemisExport.js");
   const summary = await generateEnrollmentSummary(req);
 
   await recordAudit(req, {

@@ -1,12 +1,12 @@
 import type { Request, Response } from "express";
 import { leaveRequestSchema, leaveStatusSchema, payrollSchema } from "@nepal-school-erp/shared";
-import { LeaveRequest, Payroll } from "../models/LeaveRequest";
-import { Teacher } from "../models/Teacher";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { sendNotification } from "../utils/notificationService";
-import { sendSuccess } from "../utils/response";
-import { tenantObjectId, withTenantScope } from "../utils/tenant";
+import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
+import { Teacher } from "../models/Teacher.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { sendNotification } from "../utils/notificationService.js";
+import { sendSuccess } from "../utils/response.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const listLeaveRequests = asyncHandler(async (req: Request, res: Response) => {
   const filter = withTenantScope(req);

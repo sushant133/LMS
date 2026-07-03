@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { createLeaveRequest, createPayroll, listLeaveRequests, listPayroll, updateLeaveStatus, updatePayroll } from "../controllers/hrController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { createLeaveRequest, createPayroll, listLeaveRequests, listPayroll, updateLeaveStatus, updatePayroll } from "../controllers/hrController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

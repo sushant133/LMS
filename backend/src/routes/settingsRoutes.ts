@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { getSettings, updateSettings } from "../controllers/settingsController";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
+import { getSettings, updateSettings } from "../controllers/settingsController.js";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 

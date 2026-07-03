@@ -1,0 +1,41 @@
+---
+pid: 28788
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run dev 2>&1"
+started_at: 2026-07-03T06:00:50.383Z
+running_for_ms: 275009   
+---
+
+> @nepal-school-erp/frontend@1.0.0 dev
+> npm run build:shared && concurrently -k -n backend,frontend -c blue,green "npm run dev --prefix ../backend" "wait-on -t 30000 http-get://localhost:5000/api/health && vite"
+
+
+> @nepal-school-erp/frontend@1.0.0 build:shared
+> npm run build --prefix ../backend/shared
+
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+[backend] 
+[backend] > @nepal-school-erp/backend@1.0.0 dev
+[backend] > npm run build:shared && tsx watch src/server.ts
+[backend] 
+[backend] 
+[backend] > @nepal-school-erp/backend@1.0.0 build:shared
+[backend] > npm run build --prefix ./shared
+[backend] 
+[backend] 
+[backend] > @nepal-school-erp/shared@1.0.0 build
+[backend] > tsc -p tsconfig.json
+[backend] 
+[backend] MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+[backend] Demo school (DEMOERP) already present.
+[backend] Backend server listening on http://localhost:5000
+[frontend] 11:46:00 am [vite] (client) Re-optimizing dependencies because lockfile has changed
+[frontend] Port 5173 is in use, trying another one...
+[frontend] 
+[frontend]   VITE v7.3.6  ready in 434 ms
+[frontend] 
+[frontend]   ➜  Local:   http://localhost:5174/
+[frontend]   ➜  Network: use --host to expose

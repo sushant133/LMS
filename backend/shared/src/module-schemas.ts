@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { LABORATORY_TYPES, USER_ROLES } from "./constants";
-import { academicYearSchema, bsDateSchema, moneySchema, objectIdSchema } from "./schemas";
+import { LABORATORY_TYPES, USER_ROLES } from "./constants.js";
+import { academicYearSchema, bsDateSchema, moneySchema, objectIdSchema } from "./schemas.js";
 
 export const dayOfWeekSchema = z.coerce.number().int().min(0).max(6);
 

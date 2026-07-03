@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { authorize, protect } from "../middleware/auth";
-import { tenantGuard } from "../middleware/tenant";
-import { uploadClassroomAttachmentsHandler, uploadDocumentsHandler, uploadStudentPhotoHandler } from "../controllers/uploadController";
-import { uploadClassroomAttachments, uploadStudentDocuments, uploadStudentPhoto } from "../utils/upload";
+import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
+import { uploadClassroomAttachmentsHandler, uploadDocumentsHandler, uploadStudentPhotoHandler } from "../controllers/uploadController.js";
+import { uploadClassroomAttachments, uploadStudentDocuments, uploadStudentPhoto } from "../utils/upload.js";
 
 const router = Router();
 

@@ -1,0 +1,38 @@
+---
+pid: 12304
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; Remove-Item -Recurse -Force shared\\dist -ErrorAction SilentlyContinue; npm install 2>&1; if (Test-Path shared\\dist\\index.js) { Write-Output \"shared/dist built on install: YES\" } else { Write-Output \"shared/dist built on install: NO\" }; npm run build 2>&1; npm start 2>&1"
+started_at: 2026-07-03T05:51:55.298Z
+running_for_ms: 810015   
+---
+
+up to date, audited 192 packages in 2s
+
+35 packages are looking for funding
+  run `npm fund` for details
+
+4 vulnerabilities (2 low, 2 high)
+
+To address all issues, run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+shared/dist built on install: YES
+
+> @nepal-school-erp/backend@1.0.0 build
+> npm run build:shared && tsc -p tsconfig.json
+
+
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm run build --prefix ./shared
+
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+
+> @nepal-school-erp/backend@1.0.0 start
+> node dist/server.js
+
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Backend server listening on http://localhost:5000

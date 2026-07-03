@@ -5,20 +5,20 @@ import {
   libraryReturnSchema,
   moduleStaffSchema
 } from "@nepal-school-erp/shared";
-import { env } from "../config/env";
-import { LibraryBook, LibraryIssue } from "../models/LibraryBook";
-import { Student } from "../models/Student";
-import { Teacher } from "../models/Teacher";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { enrichBookInventory } from "../utils/inventory";
-import { processLibraryIssueReminders, syncSchoolLibraryOverdueStatuses } from "../utils/libraryNotifications";
-import { getTodayBs } from "../utils/nepaliDate";
-import { notifyParentsOfStudent, sendNotification } from "../utils/notificationService";
-import { sendSuccess } from "../utils/response";
-import { getStudentProfile } from "../utils/studentScope";
-import { withTenantScope } from "../utils/tenant";
+import { env } from "../config/env.js";
+import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
+import { Student } from "../models/Student.js";
+import { Teacher } from "../models/Teacher.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { enrichBookInventory } from "../utils/inventory.js";
+import { processLibraryIssueReminders, syncSchoolLibraryOverdueStatuses } from "../utils/libraryNotifications.js";
+import { getTodayBs } from "../utils/nepaliDate.js";
+import { notifyParentsOfStudent, sendNotification } from "../utils/notificationService.js";
+import { sendSuccess } from "../utils/response.js";
+import { getStudentProfile } from "../utils/studentScope.js";
+import { withTenantScope } from "../utils/tenant.js";
 
 const formatIssue = (issue: Record<string, unknown>) => {
   const book = issue.bookId as { title?: string } | null | undefined;

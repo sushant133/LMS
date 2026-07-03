@@ -1,0 +1,32 @@
+---
+pid: 18456
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run dev 2>&1"
+started_at: 2026-07-03T06:03:56.624Z
+running_for_ms: 90003    
+---
+
+> @nepal-school-erp/frontend@1.0.0 dev
+> npm run build:shared && node scripts/dev.mjs
+
+
+> @nepal-school-erp/frontend@1.0.0 build:shared
+> npm run build --prefix ../backend/shared
+
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+[dev] Stopping stale process 21588 on port 5173
+[dev] Starting backend API on http://127.0.0.1:5000 ...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+[dev] Backend is ready.
+[dev] Starting Vite on http://localhost:5173 ...
+11:49:04 am [vite] (client) Re-optimizing dependencies because vite config has changed
+
+  VITE v7.3.6  ready in 397 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+Demo school (DEMOERP) already present.
+Backend server listening on http://localhost:5000

@@ -1,14 +1,14 @@
 import type { Request, Response } from "express";
 import { createSchoolSchema, updateSchoolSchema } from "@nepal-school-erp/shared";
-import { env } from "../config/env";
-import { School } from "../models/School";
-import { Setting } from "../models/Setting";
-import { User } from "../models/User";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
-import { deleteSchoolCascade } from "../utils/deleteSchoolCascade";
-import { buildSchoolSettingsPayload } from "../utils/schoolDefaults";
-import { sendSuccess } from "../utils/response";
+import { env } from "../config/env.js";
+import { School } from "../models/School.js";
+import { Setting } from "../models/Setting.js";
+import { User } from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/apiError.js";
+import { deleteSchoolCascade } from "../utils/deleteSchoolCascade.js";
+import { buildSchoolSettingsPayload } from "../utils/schoolDefaults.js";
+import { sendSuccess } from "../utils/response.js";
 import {
   createSession,
   commitTransaction,
@@ -16,7 +16,7 @@ import {
   endSession,
   getSessionOption,
   withTransaction
-} from "../utils/transaction";
+} from "../utils/transaction.js";
 
 export const listPublicSchools = asyncHandler(async (_req: Request, res: Response) => {
   const schools = await School.find({ isActive: true }).sort({ name: 1 }).lean();
