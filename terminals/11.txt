@@ -3,7 +3,7 @@ pid: 23684
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "Remove-Item -Recurse -Force \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\" -ErrorAction SilentlyContinue; $env:NODE_ENV='production'; Set-Location \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm install 2>&1"
 started_at: 2026-07-03T06:31:11.998Z
-running_for_ms: 735011   
+running_for_ms: 2810013  
 ---
 npm warn cleanup Failed to remove some directories [
 npm warn cleanup   [

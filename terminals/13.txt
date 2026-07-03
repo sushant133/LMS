@@ -3,7 +3,7 @@ pid: 25284
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "Remove-Item -Recurse -Force \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\",\"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\\shared\\node_modules\" -ErrorAction SilentlyContinue; $env:NODE_ENV='production'; Set-Location \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm install --include=dev --prefix ../backend/shared; npm install --include=dev; npm run build"
 started_at: 2026-07-03T06:45:53.683Z
-running_for_ms: 69996    
+running_for_ms: 1924992  
 ---
 
 added 2 packages, and audited 3 packages in 2s
