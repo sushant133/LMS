@@ -2,8 +2,19 @@ import axios from "axios";
 
 const DEFAULT_API_BASE = "/api";
 
-/** API base URL including the /api prefix (e.g. https://host.onrender.com/api or /api for local proxy). */
+const isLocalDevHost = (hostname: string): boolean =>
+  hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+
+/**
+ * API base URL including the /api prefix.
+ * Production must use same-origin `/api` so Vercel can proxy to Render and auth cookies work.
+ * A cross-origin Render URL breaks cookie auth because production cookies use SameSite=Lax.
+ */
 export const getApiBaseUrl = (): string => {
+  if (typeof window !== "undefined" && !isLocalDevHost(window.location.hostname)) {
+    return DEFAULT_API_BASE;
+  }
+
   const configured = import.meta.env.VITE_API_URL?.trim();
   if (!configured) {
     return DEFAULT_API_BASE;

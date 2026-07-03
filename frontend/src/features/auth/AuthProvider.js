@@ -26,14 +26,20 @@ export const AuthProvider = ({ children }) => {
     });
     const loginMutation = useMutation({
         mutationFn: async (payload) => unwrap(api.post("/auth/login", payload)),
-        onSuccess: (data) => {
+        onSuccess: async (data) => {
             queryClient.setQueryData(["auth", "me"], data);
+            await queryClient.invalidateQueries({
+                predicate: (query) => !keepAuthMeQuery(query.queryKey)
+            });
         }
     });
     const registerMutation = useMutation({
         mutationFn: async (payload) => unwrap(api.post("/auth/register", payload)),
-        onSuccess: (data) => {
+        onSuccess: async (data) => {
             queryClient.setQueryData(["auth", "me"], data);
+            await queryClient.invalidateQueries({
+                predicate: (query) => !keepAuthMeQuery(query.queryKey)
+            });
         }
     });
     const switchSchoolMutation = useMutation({
