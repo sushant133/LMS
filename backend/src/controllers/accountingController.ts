@@ -25,8 +25,10 @@ import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeStructure } from "../models/FeeStructure.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
 import { School } from "../models/School.js";
+import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
+import { Year } from "../models/Year.js";
 import { Setting } from "../models/Setting.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
@@ -37,6 +39,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
+import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -169,15 +172,18 @@ export const deleteAccountingStructure = asyncHandler(async (req: Request, res: 
 
 export const listStudentAccounts = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
-  const [students, classes, sections, collections] = await Promise.all([
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+
+  const [students, primaryGroups, secondaryGroups, collections] = await Promise.all([
     Student.find({ schoolId }).populate("user", "-password").sort({ rollNumber: 1 }).lean(),
-    SchoolClass.find({ schoolId }).lean(),
-    Section.find({ schoolId }).lean(),
+    college ? Batch.find({ schoolId }).lean() : SchoolClass.find({ schoolId }).lean(),
+    college ? Year.find({ schoolId }).lean() : Section.find({ schoolId }).lean(),
     FeeCollection.find({ schoolId }).lean()
   ]);
 
-  const classMap = new Map(classes.map((item) => [item._id.toString(), item.name]));
-  const sectionMap = new Map(sections.map((item) => [item._id.toString(), item.name]));
+  const primaryMap = new Map(primaryGroups.map((item) => [item._id.toString(), item.name]));
+  const secondaryMap = new Map(secondaryGroups.map((item) => [item._id.toString(), item.name]));
 
   const accounts = students.map((student) => {
     const studentCollections = collections.filter((item) => item.studentId.toString() === student._id.toString());
@@ -186,10 +192,13 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
     const totalScholarship = studentCollections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
     const lastPayment = studentCollections.sort((a, b) => b.paidDateBs.localeCompare(a.paidDateBs))[0];
 
+    const primaryId = college ? student.batchId?.toString() : student.classId?.toString();
+    const secondaryId = college ? student.yearId?.toString() : student.sectionId?.toString();
+
     return {
       student,
-      className: classMap.get(student.classId.toString()) ?? "",
-      sectionName: sectionMap.get(student.sectionId.toString()) ?? "",
+      className: primaryId ? (primaryMap.get(primaryId) ?? "") : "",
+      sectionName: secondaryId ? (secondaryMap.get(secondaryId) ?? "") : "",
       previousDueNpr: student.feesDueNpr ?? 0,
       totalPaidNpr: totalPaid,
       totalDiscountNpr: totalDiscount,
@@ -214,9 +223,12 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     }
   }
 
-  const [classDoc, sectionDoc, collections] = await Promise.all([
-    SchoolClass.findById(student.classId).lean(),
-    Section.findById(student.sectionId).lean(),
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+
+  const [primaryDoc, secondaryDoc, collections] = await Promise.all([
+    college ? Batch.findById(student.batchId).lean() : SchoolClass.findById(student.classId).lean(),
+    college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean(),
     FeeCollection.find({ schoolId, studentId: student._id }).sort({ paidDateBs: -1 }).lean()
   ]);
 
@@ -226,8 +238,8 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
 
   return sendSuccess(res, "Student financial history fetched", {
     student,
-    className: classDoc?.name ?? "",
-    sectionName: sectionDoc?.name ?? "",
+    className: primaryDoc?.name ?? "",
+    sectionName: secondaryDoc?.name ?? "",
     outstandingDueNpr: student.feesDueNpr ?? 0,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
@@ -401,7 +413,7 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
 
   if (!student || !school) throw new ApiError(404, "Receipt data incomplete");
 
-  const feeTitle = collection.feeBreakdown?.map((item) => item.title).join(", ") || "School Fee";
+  const feeTitle = collection.feeBreakdown?.map((item) => item.title).join(", ") || "College Fee";
 
   await generateFeeReceiptPDF(
     {

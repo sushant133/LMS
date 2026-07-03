@@ -6,6 +6,7 @@ const subjectSchema = new Schema(
     name: { type: String, required: true, trim: true },
     code: { type: String, required: true, trim: true },
     classIds: [{ type: Schema.Types.ObjectId, ref: "SchoolClass" }],
+    yearIds: [{ type: Schema.Types.ObjectId, ref: "Year" }],
     teacherIds: [{ type: Schema.Types.ObjectId, ref: "Teacher" }],
     fullMarks: { type: Number, required: true },
     passMarks: { type: Number, required: true }

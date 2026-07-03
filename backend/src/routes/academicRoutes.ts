@@ -1,14 +1,19 @@
 import { Router } from "express";
 import {
+  createBatch,
   createClass,
   createSection,
   createSubject,
+  deleteBatch,
   deleteClass,
   deleteSection,
   deleteSubject,
+  listBatches,
   listClasses,
   listSections,
   listSubjects,
+  listYears,
+  updateBatch,
   updateClass,
   updateSection,
   updateSubject
@@ -21,18 +26,25 @@ const router = Router();
 router.use(protect, tenantGuard);
 
 router.get("/classes", listClasses);
-router.post("/classes", authorize("SCHOOL_ADMIN"), createClass);
-router.put("/classes/:id", authorize("SCHOOL_ADMIN"), updateClass);
-router.delete("/classes/:id", authorize("SCHOOL_ADMIN"), deleteClass);
+router.post("/classes", authorize("COLLEGE_ADMIN"), createClass);
+router.put("/classes/:id", authorize("COLLEGE_ADMIN"), updateClass);
+router.delete("/classes/:id", authorize("COLLEGE_ADMIN"), deleteClass);
 
 router.get("/sections", listSections);
-router.post("/sections", authorize("SCHOOL_ADMIN"), createSection);
-router.put("/sections/:id", authorize("SCHOOL_ADMIN"), updateSection);
-router.delete("/sections/:id", authorize("SCHOOL_ADMIN"), deleteSection);
+router.post("/sections", authorize("COLLEGE_ADMIN"), createSection);
+router.put("/sections/:id", authorize("COLLEGE_ADMIN"), updateSection);
+router.delete("/sections/:id", authorize("COLLEGE_ADMIN"), deleteSection);
 
 router.get("/subjects", listSubjects);
-router.post("/subjects", authorize("SCHOOL_ADMIN"), createSubject);
-router.put("/subjects/:id", authorize("SCHOOL_ADMIN"), updateSubject);
-router.delete("/subjects/:id", authorize("SCHOOL_ADMIN"), deleteSubject);
+router.post("/subjects", authorize("COLLEGE_ADMIN"), createSubject);
+router.put("/subjects/:id", authorize("COLLEGE_ADMIN"), updateSubject);
+router.delete("/subjects/:id", authorize("COLLEGE_ADMIN"), deleteSubject);
+
+router.get("/batches", listBatches);
+router.post("/batches", authorize("COLLEGE_ADMIN"), createBatch);
+router.put("/batches/:id", authorize("COLLEGE_ADMIN"), updateBatch);
+router.delete("/batches/:id", authorize("COLLEGE_ADMIN"), deleteBatch);
+
+router.get("/years", listYears);
 
 export default router;

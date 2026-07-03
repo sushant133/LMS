@@ -7,8 +7,8 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/", listNotices);
-router.post("/", authorize("SCHOOL_ADMIN", "TEACHER"), createNotice);
-router.put("/:id", authorize("SCHOOL_ADMIN", "TEACHER"), updateNotice);
-router.delete("/:id", authorize("SCHOOL_ADMIN", "TEACHER"), deleteNotice);
+router.post("/", authorize("COLLEGE_ADMIN", "TEACHER"), createNotice);
+router.put("/:id", authorize("COLLEGE_ADMIN", "TEACHER"), updateNotice);
+router.delete("/:id", authorize("COLLEGE_ADMIN", "TEACHER"), deleteNotice);
 
 export default router;

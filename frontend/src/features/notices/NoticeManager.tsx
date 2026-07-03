@@ -27,7 +27,7 @@ import { parseErrorMessage } from "lib/utils";
 const adminDefaultNoticeValue: NoticeInput = {
   title: "",
   content: "",
-  visibleTo: ["SCHOOL_ADMIN", "TEACHER", "STUDENT", "PARENT"],
+  visibleTo: ["COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"],
   publishDateBs: "",
   expiresAtBs: ""
 };
@@ -46,7 +46,7 @@ export const NoticeManager = () => {
   const teacherScopeQuery = useTeacherScope(isTeacher);
   const [form, setForm] = useState<NoticeInput>(adminDefaultNoticeValue);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const canManageNotices = user?.role === "SUPER_ADMIN" || user?.role === "SCHOOL_ADMIN" || isTeacher;
+  const canManageNotices = user?.role === "SUPER_ADMIN" || user?.role === "COLLEGE_ADMIN" || isTeacher;
   const isReadOnlyViewer = user?.role === "STUDENT" || user?.role === "PARENT";
 
   useEffect(() => {
@@ -156,7 +156,7 @@ export const NoticeManager = () => {
         title="Notice Board"
         description={
           isReadOnlyViewer
-            ? "Announcements for your class, subjects, and school."
+            ? "Announcements for your class, subjects, and college."
             : isTeacher
               ? "Publish notices visible to your students in assigned classes and sections."
               : "Publish notices and control visibility by role."
@@ -292,7 +292,7 @@ export const NoticeManager = () => {
                                 }
                                 disabled={!form.classId}
                               >
-                                <option value="">School-wide notice</option>
+                                <option value="">College-wide notice</option>
                                 {scopedSubjects.map((subject) => (
                                   <option key={subject._id} value={subject._id}>
                                     {subject.name}

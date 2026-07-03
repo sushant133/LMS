@@ -70,7 +70,7 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminO
 
 export const LibraryManager = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === "SCHOOL_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isAdmin = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
   const [tab, setTab] = useState<Tab>("dashboard");
   const [bookForm, setBookForm] = useState<LibraryBookInput>(defaultBook);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);

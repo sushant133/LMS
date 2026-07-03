@@ -1,0 +1,370 @@
+---
+pid: 31572
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npx tsx src/server.ts"
+started_at: 2026-07-03T15:43:01.008Z
+running_for_ms: 1055010  
+---
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+POST /api/auth/login 200 402.624 ms - 1680
+POST /api/auth/login 200 441.153 ms - 1657
+POST /api/auth/login 200 436.151 ms - 1652
+GET /api/exams 200 110.204 ms - 1308
+GET /api/academics/batches 200 53.447 ms - 501
+GET /api/academics/years 200 52.948 ms - 1491
+GET /api/academics/subjects 200 51.325 ms - 2613
+POST /api/exams 201 69.180 ms - 547
+POST /api/exams/6a47d89782c18a2d33bf798b/routines 201 206.592 ms - 469
+POST /api/exams/6a47d89782c18a2d33bf798b/routines 409 104.573 ms - 84
+POST /api/exams/6a47d89782c18a2d33bf798b/routines/publish 200 364.615 ms - 547
+GET /api/exams/routines?examId=6a47d89782c18a2d33bf798b 200 262.365 ms - 518
+GET /api/exams/routines?examId=6a47d89782c18a2d33bf798b 200 263.139 ms - 518
+GET /api/teacher/scope 200 333.889 ms - 6393
+GET /api/students 200 203.066 ms - 4985
+POST /api/exams/results 200 728.685 ms - 698
+GET /api/exams/6a47d89782c18a2d33bf798b/analytics 200 164.369 ms - 562
+[SMS] To: 9804000000 | Results for "Smoke Test Exam 1783093399535" are now available for your child.
+POST /api/exams/6a47d89782c18a2d33bf798b/results/publish 200 439.007 ms - 556
+GET /api/exams/results/all 200 194.861 ms - 54
+GET /api/exams/results/6a47d89782c18a2d33bf798b/6a47c83d5f333eee49ab159c/marksheet/pdf 403 105.870 ms - 66
+POST /api/exams/6a47d89782c18a2d33bf798b/results/lock 200 104.187 ms - 552
+POST /api/exams/results 403 246.343 ms - 69
+POST /api/exams/6a47d89782c18a2d33bf798b/results/unlock 200 100.160 ms - 555
+DELETE /api/exams/6a47d89782c18a2d33bf798b 200 105.476 ms - 54
+GET /api/exams 200 150.065 ms - 1308
+POST /api/auth/login 200 392.499 ms - 1680
+POST /api/auth/login 200 370.391 ms - 1657
+POST /api/auth/login 200 333.904 ms - 1652
+GET /api/exams 200 97.372 ms - 1308
+GET /api/academics/batches 200 48.438 ms - 501
+GET /api/academics/years 200 49.841 ms - 1491
+GET /api/academics/subjects 200 50.669 ms - 2613
+POST /api/exams 201 59.959 ms - 547
+POST /api/exams/6a47d8b482c18a2d33bf7a16/routines 201 201.398 ms - 469
+POST /api/exams/6a47d8b482c18a2d33bf7a16/routines 409 99.209 ms - 84
+POST /api/exams/6a47d8b482c18a2d33bf7a16/routines/publish 200 368.667 ms - 547
+GET /api/exams/routines?examId=6a47d8b482c18a2d33bf7a16 200 272.579 ms - 518
+GET /api/exams/routines?examId=6a47d8b482c18a2d33bf7a16 200 283.495 ms - 518
+GET /api/teacher/scope 200 284.262 ms - 6393
+GET /api/auth/me 200 145.606 ms - 1656
+GET /api/exams 200 149.695 ms - 1797
+POST /api/auth/login 200 419.474 ms - 1680
+POST /api/auth/login 200 388.953 ms - 1657
+POST /api/auth/login 200 426.742 ms - 1652
+GET /api/exams 200 98.834 ms - 1797
+GET /api/academics/batches 200 49.509 ms - 501
+GET /api/academics/years 200 49.513 ms - 1491
+GET /api/academics/subjects 200 51.755 ms - 2613
+POST /api/exams 201 56.731 ms - 547
+POST /api/exams/6a47d8c682c18a2d33bf7a5f/routines 201 201.396 ms - 469
+POST /api/exams/6a47d8c682c18a2d33bf7a5f/routines 409 99.566 ms - 84
+POST /api/exams/6a47d8c682c18a2d33bf7a5f/routines/publish 200 373.144 ms - 547
+GET /api/exams/routines?examId=6a47d8c682c18a2d33bf7a5f 200 267.268 ms - 518
+GET /api/exams/routines?examId=6a47d8c682c18a2d33bf7a5f 200 267.512 ms - 518
+GET /api/teacher/scope 200 307.749 ms - 6393
+GET /api/students 200 109.389 ms - 8934
+POST /api/exams/results 200 734.611 ms - 698
+GET /api/exams/6a47d8c682c18a2d33bf7a5f/analytics 200 166.436 ms - 558
+[SMS] To: 9804000000 | Results for "Smoke Test Exam 1783093446436" are now available for your child.
+POST /api/exams/6a47d8c682c18a2d33bf7a5f/results/publish 200 409.240 ms - 556
+GET /api/exams/results/all 200 190.094 ms - 719
+GET /api/exams/results/6a47d8c682c18a2d33bf7a5f/6a47c83c5f333eee49ab158c/marksheet/pdf 200 554.735 ms - -
+POST /api/exams/6a47d8c682c18a2d33bf7a5f/results/lock 200 110.996 ms - 552
+POST /api/exams/results 403 278.671 ms - 69
+POST /api/exams/6a47d8c682c18a2d33bf7a5f/results/unlock 200 109.492 ms - 555
+DELETE /api/exams/6a47d8c682c18a2d33bf7a5f 200 119.377 ms - 54
+GET /api/exams 200 161.119 ms - 1797
+GET /api/auth/me 401 0.828 ms - 53
+POST /api/auth/login 200 401.304 ms - 1680
+GET /api/auth/me 200 166.239 ms - 1684
+GET /api/dashboard 200 117.743 ms - 1559
+POST /api/auth/logout 200 0.296 ms - 52
+GET /api/auth/me 401 0.230 ms - 53
+POST /api/auth/login 200 413.764 ms - 1652
+GET /api/student/subjects 200 255.187 ms - 3882
+GET /api/auth/me 304 201.303 ms - -
+GET /api/dashboard 304 132.998 ms - -
+POST /api/auth/logout 200 0.256 ms - 52
+POST /api/auth/login 200 398.804 ms - 1680
+GET /api/dashboard 304 124.347 ms - -
+GET /api/academics/batches 304 55.107 ms - -
+GET /api/academics/years 304 55.817 ms - -
+GET /api/students 304 122.758 ms - -
+GET /api/academics/subjects 200 48.712 ms - 2613
+GET /api/academics/batches 304 56.656 ms - -
+GET /api/academics/years 304 56.567 ms - -
+GET /api/students 304 99.144 ms - -
+GET /api/exams 200 119.009 ms - 1797
+GET /api/auth/me 401 0.376 ms - 53
+POST /api/auth/login 200 417.489 ms - 1680
+GET /api/auth/me 200 175.630 ms - 1684
+GET /api/academics/batches 200 46.930 ms - 501
+GET /api/academics/years 200 56.825 ms - 1491
+GET /api/academics/subjects 200 60.018 ms - 2613
+GET /api/students 200 102.683 ms - 8934
+GET /api/exams 200 123.704 ms - 1797
+POST /api/auth/logout 200 0.217 ms - 52
+GET /api/auth/me 401 0.173 ms - 53
+POST /api/auth/login 200 446.806 ms - 1652
+GET /api/auth/me 200 175.816 ms - 1656
+GET /api/exams 304 174.974 ms - -
+GET /api/exams/results/all 200 193.082 ms - 54
+GET /api/exams/routines?examId=6a47d7ac3ef1f1bf80ddabc3 200 193.132 ms - 60
+GET /api/student/subjects 200 188.983 ms - 3882
+GET /api/exams/routines?examId=6a47c8405f333eee49ab1607 200 211.850 ms - 60
+GET /api/exams/routines?examId=6a47d8b482c18a2d33bf7a16 200 267.417 ms - 518
+GET /api/exams/routines?examId=6a47d86c21ca6468aaabb94d 200 289.141 ms - 518
+POST /api/auth/logout 200 0.534 ms - 52
+GET /api/auth/me 401 0.505 ms - 53
+POST /api/auth/login 200 452.589 ms - 1657
+GET /api/auth/me 200 173.531 ms - 1661
+GET /api/academics/years 200 94.111 ms - 291
+GET /api/academics/batches 200 105.981 ms - 277
+GET /api/exams/results/all 200 147.743 ms - 1185
+GET /api/exams 304 157.809 ms - -
+GET /api/teacher/scope 200 304.312 ms - 6393
+POST /api/exams/6a47d86c21ca6468aaabb94d/results/lock 200 110.934 ms - 543
+GET /api/exams 200 106.367 ms - 1796
+POST /api/exams/6a47d86c21ca6468aaabb94d/results/unlock 200 107.562 ms - 546
+GET /api/exams 200 106.347 ms - 1797
+GET /api/health 200 0.441 ms - 70
+GET /api/health 200 0.108 ms - 70
+GET /api/auth/me 401 0.288 ms - 53
+POST /api/auth/login 200 327.993 ms - 1680
+GET /api/auth/me 200 155.790 ms - 1684
+GET /api/academics/subjects 200 50.706 ms - 2613
+GET /api/academics/years 200 54.141 ms - 1491
+GET /api/academics/batches 200 58.167 ms - 501
+GET /api/students 200 98.079 ms - 8934
+GET /api/exams 200 107.560 ms - 1797
+POST /api/auth/logout 200 0.429 ms - 52
+GET /api/auth/me 401 0.309 ms - 53
+POST /api/auth/login 200 327.174 ms - 1652
+GET /api/auth/me 200 167.587 ms - 1656
+GET /api/exams 304 155.326 ms - -
+GET /api/exams/results/all 200 192.974 ms - 54
+GET /api/exams/routines?examId=6a47d7ac3ef1f1bf80ddabc3 200 190.913 ms - 60
+GET /api/student/subjects 200 189.213 ms - 3882
+GET /api/exams/routines?examId=6a47c8405f333eee49ab1607 200 202.645 ms - 60
+GET /api/exams/routines?examId=6a47d86c21ca6468aaabb94d 200 259.501 ms - 518
+GET /api/exams/routines?examId=6a47d8b482c18a2d33bf7a16 200 302.825 ms - 518
+POST /api/auth/logout 200 0.215 ms - 52
+GET /api/auth/me 401 0.283 ms - 53
+POST /api/auth/login 200 371.079 ms - 1657
+GET /api/auth/me 200 173.221 ms - 1661
+GET /api/academics/years 200 94.194 ms - 291
+GET /api/academics/batches 200 100.961 ms - 277
+GET /api/exams/results/all 200 139.474 ms - 1185
+GET /api/exams 304 155.325 ms - -
+GET /api/teacher/scope 200 349.360 ms - 6393
+GET /api/exams/results/all?examId=6a47d7ac3ef1f1bf80ddabc3&batchId=6a47c83a5f333eee49ab1557&yearId=6a47c83a5f333eee49ab155b 200 110.019 ms - 54
+GET /api/exams/results/all?examId=6a47d7ac3ef1f1bf80ddabc3&batchId=6a47c83a5f333eee49ab1557&yearId=6a47c83a5f333eee49ab155b&studentId=6a47c83d5f333eee49ab159c 200 106.883 ms - 54
+GET /api/auth/me 304 170.948 ms - -
+GET /api/dashboard 304 115.515 ms - -
+POST /api/auth/logout 200 0.346 ms - 52
+POST /api/auth/login 200 494.999 ms - 1657
+GET /api/dashboard 200 180.187 ms - 1464
+GET /api/academics/batches 200 104.803 ms - 277
+GET /api/academics/years 200 108.001 ms - 291
+GET /api/exams/results/all 304 145.745 ms - -
+GET /api/exams 304 174.292 ms - -
+GET /api/teacher/scope 200 306.615 ms - 6393
+GET /api/laboratory/my-equipment 304 247.225 ms - -
+[SMS] To: 9804000000 | "Nepal History and Culture" is overdue (was due 2081-09-20). Please return it immediately.
+GET /api/library/my-books 304 542.681 ms - -
+GET /api/dashboard 304 175.256 ms - -
+POST /api/auth/logout 200 0.752 ms - 52
+POST /api/auth/login 200 457.040 ms - 1680
+GET /api/dashboard 200 123.271 ms - 1559
+GET /api/academics/batches 200 51.900 ms - 501
+GET /api/academics/years 200 51.718 ms - 1491
+GET /api/students 304 122.268 ms - -
+GET /api/academics/subjects 200 51.705 ms - 2613
+GET /api/academics/batches 304 55.328 ms - -
+GET /api/academics/years 304 56.706 ms - -
+GET /api/teachers 304 126.171 ms - -
+GET /api/academics/years 304 59.439 ms - -
+GET /api/academics/batches 304 63.508 ms - -
+GET /api/academics/subjects 304 65.334 ms - -
+GET /api/academics/batches 304 54.033 ms - -
+GET /api/academics/subjects 304 64.054 ms - -
+GET /api/teachers 304 113.057 ms - -
+GET /api/academics/subjects 304 59.614 ms - -
+GET /api/academics/batches 304 63.840 ms - -
+GET /api/academics/years 304 64.960 ms - -
+GET /api/students 304 107.296 ms - -
+GET /api/academics/years 304 59.784 ms - -
+GET /api/academics/subjects 304 61.362 ms - -
+GET /api/academics/batches 304 66.434 ms - -
+GET /api/exams 304 112.041 ms - -
+GET /api/students 304 108.794 ms - -
+GET /api/fees/collections 200 51.780 ms - 1426
+GET /api/fees/structures 200 55.278 ms - 370
+GET /api/academics/classes 200 54.893 ms - 54
+GET /api/students 304 130.837 ms - -
+GET /api/academics/classes 304 49.996 ms - -
+GET /api/accounting/structures 200 57.187 ms - 370
+GET /api/accounting/dashboard 200 82.563 ms - 2596
+GET /api/students 304 108.503 ms - -
+GET /api/accounting/student-accounts 200 122.322 ms - 10333
+GET /api/accounting/receipts 200 163.120 ms - 3342
+GET /api/accounting/student-accounts 304 106.074 ms - -
+GET /api/accounting/student-accounts/6a47c83c5f333eee49ab158c/financial-history 200 168.502 ms - 1945
+GET /api/accounting/student-accounts/6a47c83d5f333eee49ab15a8/financial-history 200 179.357 ms - 1235
+GET /api/accounting/salary-employees 200 122.023 ms - 3842
+GET /api/accounting/salaries 200 210.962 ms - 1487
+GET /api/accounting/purchases 200 71.386 ms - 518
+GET /api/accounting/expenses 200 59.280 ms - 775
+GET /api/accounting/income 200 66.594 ms - 418
+GET /api/accounting/cash-book 200 59.683 ms - 966
+GET /api/accounting/bank-accounts 200 60.365 ms - 434
+GET /api/accounting/reports/daily-fee-collection?dateBs=2081-09-01 200 59.236 ms - 761
+GET /api/accounting/settings 200 65.171 ms - 342
+GET /api/accounting/accountants 200 127.905 ms - 783
+POST /api/auth/logout 200 0.231 ms - 52
+GET /api/auth/me 401 0.307 ms - 53
+POST /api/auth/login 200 455.352 ms - 1657
+GET /api/dashboard 200 177.147 ms - 1464
+POST /api/auth/logout 200 0.348 ms - 52
+POST /api/auth/login 200 460.375 ms - 1652
+GET /api/student/subjects 200 293.458 ms - 3882
+GET /api/student/subjects 304 234.149 ms - -
+GET /api/homework/feed 500 281.637 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed 500 310.472 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/exams 304 172.004 ms - -
+GET /api/exams/results/all 200 242.737 ms - 54
+GET /api/exams/routines?examId=6a47c8405f333eee49ab1607 200 214.268 ms - 60
+GET /api/exams/routines?examId=6a47d7ac3ef1f1bf80ddabc3 200 238.282 ms - 60
+GET /api/exams/routines?examId=6a47d8b482c18a2d33bf7a16 200 266.456 ms - 518
+GET /api/exams/routines?examId=6a47d86c21ca6468aaabb94d 200 268.896 ms - 518
+GET /api/student/financial-history 304 269.077 ms - -
+GET /api/accounting/collections/6a47c8425f333eee49ab1651/receipt 200 491.988 ms - -
+[SMS] To: 9804000000 | "Nepal History and Culture" is overdue (was due 2081-09-20). Please return it immediately.
+[SMS] To: 9804000000 | "Nepal History and Culture" is overdue (was due 2081-09-20). Please return it immediately.
+GET /api/library/my-books 200 952.905 ms - 751
+GET /api/student/financial-history 304 299.602 ms - -
+GET /api/exams 304 154.057 ms - -
+GET /api/exams/routines?examId=6a47c8405f333eee49ab1607 304 214.410 ms - -
+GET /api/exams/results/all 304 214.032 ms - -
+GET /api/exams/routines?examId=6a47d7ac3ef1f1bf80ddabc3 304 237.204 ms - -
+GET /api/exams/routines?examId=6a47d8b482c18a2d33bf7a16 304 243.527 ms - -
+GET /api/exams/routines?examId=6a47d86c21ca6468aaabb94d 304 259.125 ms - -
+GET /api/student/subjects 304 224.348 ms - -
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed 500 235.767 ms - 51
+GET /api/homework/feed 500 238.756 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562 500 235.477 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562 500 234.640 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/dashboard 200 203.473 ms - 1466
+POST /api/auth/logout 200 0.258 ms - 52
+POST /api/auth/login 200 424.424 ms - 1657
+GET /api/dashboard 200 180.790 ms - 1464
+GET /api/homework/feed 500 175.849 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/teacher/scope 200 310.644 ms - 6393
+GET /api/homework/feed 500 159.991 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562 500 168.148 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562 500 160.437 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562&type=HOMEWORK 500 156.271 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562&type=HOMEWORK 500 155.904 ms - 51
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562&type=HOMEWORK&status=GRADED 500 158.635 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed?subjectId=6a47c83a5f333eee49ab1562&type=HOMEWORK&status=GRADED 500 158.778 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/dashboard 304 167.620 ms - -
+GET /api/homework/feed 500 174.558 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+GET /api/homework/feed 500 178.048 ms - 51
+TypeError: Cannot read properties of undefined (reading 'toString')
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:65)
+    at Array.map (<anonymous>)
+    at enrichAssignments (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:171:44)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\controllers\homeworkController.ts:319:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

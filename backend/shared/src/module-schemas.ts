@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { LABORATORY_TYPES, USER_ROLES } from "./constants.js";
-import { academicYearSchema, bsDateSchema, moneySchema, objectIdSchema } from "./schemas.js";
+import { academicYearSchema, bsDateSchema, moneySchema, objectIdSchema, optionalObjectIdSchema } from "./schemas.js";
 
 export const dayOfWeekSchema = z.coerce.number().int().min(0).max(6);
 
 export const timetableSlotSchema = z.object({
-  classId: objectIdSchema,
-  sectionId: objectIdSchema,
+  classId: objectIdSchema.optional(),
+  sectionId: objectIdSchema.optional(),
+  batchId: objectIdSchema.optional(),
+  yearId: objectIdSchema.optional(),
   dayOfWeek: dayOfWeekSchema,
   periodNumber: z.coerce.number().int().min(1).max(12),
   subjectId: objectIdSchema,
@@ -33,8 +35,10 @@ export const assignmentSchema = z.object({
   type: z.enum(["HOMEWORK", "CAS", "NOTE"]),
   title: z.string().min(2),
   description: z.string().min(1),
-  classId: objectIdSchema,
-  sectionId: objectIdSchema,
+  classId: optionalObjectIdSchema,
+  sectionId: optionalObjectIdSchema,
+  batchId: optionalObjectIdSchema,
+  yearId: optionalObjectIdSchema,
   subjectId: objectIdSchema,
   topic: z.string().optional().or(z.literal("")),
   dueDateBs: bsDateSchema.optional().or(z.literal("")),

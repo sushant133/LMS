@@ -13,6 +13,7 @@ export const resetAppShell = (): void => {
   documentElement.style.overflow = "";
   documentElement.style.height = "";
   documentElement.style.position = "";
+  documentElement.style.width = "";
 
   window.scrollTo({ top: 0, left: 0 });
 };

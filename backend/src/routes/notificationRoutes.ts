@@ -12,7 +12,7 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/", listNotifications);
-router.post("/send", authorize("SCHOOL_ADMIN", "TEACHER"), sendManualNotification);
+router.post("/send", authorize("COLLEGE_ADMIN", "TEACHER"), sendManualNotification);
 router.put("/:id/read", markNotificationRead);
 router.put("/read-all", markAllNotificationsRead);
 

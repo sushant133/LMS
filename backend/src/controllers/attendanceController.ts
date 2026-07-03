@@ -2,51 +2,73 @@ import type { Request, Response } from "express";
 import { attendanceSchema } from "@nepal-school-erp/shared";
 import { Attendance } from "../models/Attendance.js";
 import { Student } from "../models/Student.js";
+import { Subject } from "../models/Subject.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { validateAttendanceScope } from "../utils/academicValidation.js";
+import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { notifyParentsOfStudent } from "../utils/notificationService.js";
 import { getStudentProfile } from "../utils/studentScope.js";
-import { assertTeacherQueryScope, assertTeacherSubjectClassSection, getTeacherScope } from "../utils/teacherScope.js";
-import { Subject } from "../models/Subject.js";
+import {
+  assertTeacherQueryScope,
+  assertTeacherSubjectAcademicScope,
+  getTeacherScope
+} from "../utils/teacherScope.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
 export const listAttendance = asyncHandler(async (req: Request, res: Response) => {
   const query: Record<string, unknown> = { schoolId: tenantObjectId(req) };
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
 
   if (typeof req.query.classId === "string") query.classId = req.query.classId;
   if (typeof req.query.sectionId === "string") query.sectionId = req.query.sectionId;
+  if (typeof req.query.batchId === "string") query.batchId = req.query.batchId;
+  if (typeof req.query.yearId === "string") query.yearId = req.query.yearId;
   if (typeof req.query.subjectId === "string") query.subjectId = req.query.subjectId;
   if (typeof req.query.dateBs === "string") query.dateBs = req.query.dateBs;
 
   const teacherScope = await getTeacherScope(req);
   if (teacherScope) {
-    assertTeacherQueryScope(
-      teacherScope,
-      typeof req.query.classId === "string" ? req.query.classId : undefined,
-      typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
-      typeof req.query.subjectId === "string" ? req.query.subjectId : undefined
-    );
+    assertTeacherQueryScope(teacherScope, {
+      classId: typeof req.query.classId === "string" ? req.query.classId : undefined,
+      sectionId: typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
+      batchId: typeof req.query.batchId === "string" ? req.query.batchId : undefined,
+      yearId: typeof req.query.yearId === "string" ? req.query.yearId : undefined,
+      subjectId: typeof req.query.subjectId === "string" ? req.query.subjectId : undefined,
+      isCollege: college
+    });
     query.teacherId = teacherScope.teacherId;
-    query.classId = typeof req.query.classId === "string" ? req.query.classId : { $in: teacherScope.classIds };
-    query.sectionId = typeof req.query.sectionId === "string" ? req.query.sectionId : { $in: teacherScope.sectionIds };
+
+    if (college) {
+      query.batchId = typeof req.query.batchId === "string" ? req.query.batchId : { $in: teacherScope.batchIds };
+      query.yearId = typeof req.query.yearId === "string" ? req.query.yearId : { $in: teacherScope.yearIds };
+    } else {
+      query.classId = typeof req.query.classId === "string" ? req.query.classId : { $in: teacherScope.classIds };
+      query.sectionId = typeof req.query.sectionId === "string" ? req.query.sectionId : { $in: teacherScope.sectionIds };
+    }
+
     query.subjectId = typeof req.query.subjectId === "string" ? req.query.subjectId : { $in: teacherScope.subjectIds };
   }
 
   const studentProfile = await getStudentProfile(req);
   if (studentProfile) {
-    const enrolledSubjectIds = await Subject.find({
-      schoolId: tenantObjectId(req),
-      classIds: studentProfile.classId
-    }).distinct("_id");
+    const subjectFilter: Record<string, unknown> = { schoolId: tenantObjectId(req) };
+    if (college && studentProfile.yearId) {
+      subjectFilter.yearIds = studentProfile.yearId;
+      query.batchId = studentProfile.batchId;
+      query.yearId = studentProfile.yearId;
+    } else if (studentProfile.classId) {
+      subjectFilter.classIds = studentProfile.classId;
+      query.classId = studentProfile.classId;
+      query.sectionId = studentProfile.sectionId;
+    }
 
-    query.classId = studentProfile.classId;
-    query.sectionId = studentProfile.sectionId;
+    const enrolledSubjectIds = await Subject.find(subjectFilter).distinct("_id");
     query.subjectId =
-      typeof req.query.subjectId === "string"
-        ? req.query.subjectId
-        : { $in: enrolledSubjectIds };
+      typeof req.query.subjectId === "string" ? req.query.subjectId : { $in: enrolledSubjectIds };
     query["entries.studentId"] = studentProfile.studentId;
   }
 
@@ -70,29 +92,47 @@ export const upsertAttendance = asyncHandler(async (req: Request, res: Response)
 
   const payload = attendanceSchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
+  const institutionType = await getInstitutionType(req);
+  validateAttendanceScope(institutionType, payload);
 
   const schoolId = tenantObjectId(req);
-  const teacherScope = await assertTeacherSubjectClassSection(req, payload.subjectId, payload.classId, payload.sectionId);
+  const teacherScope = await assertTeacherSubjectAcademicScope(req, payload.subjectId, payload);
 
-  const studentsCount = await Student.countDocuments({
+  const studentFilter: Record<string, unknown> = {
     _id: { $in: payload.entries.map((entry) => entry.studentId) },
-    classId: payload.classId,
-    sectionId: payload.sectionId,
     schoolId
-  });
+  };
+
+  if (isCollege(institutionType)) {
+    studentFilter.batchId = payload.batchId;
+    studentFilter.yearId = payload.yearId;
+  } else {
+    studentFilter.classId = payload.classId;
+    studentFilter.sectionId = payload.sectionId;
+  }
+
+  const studentsCount = await Student.countDocuments(studentFilter);
 
   if (studentsCount !== payload.entries.length) {
-    throw new ApiError(400, "Attendance includes students outside the selected class/section");
+    throw new ApiError(400, "Attendance includes students outside the selected academic group");
+  }
+
+  const lookupFilter: Record<string, unknown> = {
+    schoolId,
+    subjectId: payload.subjectId,
+    dateBs: payload.dateBs
+  };
+
+  if (isCollege(institutionType)) {
+    lookupFilter.batchId = payload.batchId;
+    lookupFilter.yearId = payload.yearId;
+  } else {
+    lookupFilter.classId = payload.classId;
+    lookupFilter.sectionId = payload.sectionId;
   }
 
   const attendance = await Attendance.findOneAndUpdate(
-    {
-      schoolId,
-      classId: payload.classId,
-      sectionId: payload.sectionId,
-      subjectId: payload.subjectId,
-      dateBs: payload.dateBs
-    },
+    lookupFilter,
     {
       ...payload,
       schoolId,

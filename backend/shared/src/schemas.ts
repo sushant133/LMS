@@ -4,11 +4,20 @@ import {
   CLASS_LEVELS,
   DISABILITY_CATEGORIES,
   ETHNICITY_CATEGORIES,
+  EXAM_ATTENDANCE_STATUSES,
+  EXAM_STATUSES,
+  INSTITUTION_TYPES,
   PUBLIC_REGISTER_ROLES,
   USER_ROLES
 } from "./constants.js";
 
 export const objectIdSchema = z.string().trim().regex(/^[a-f\d]{24}$/i, "Invalid identifier");
+
+/** Accepts empty form values and normalizes them to undefined for optional MongoDB refs. */
+export const optionalObjectIdSchema = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  objectIdSchema.optional()
+);
 
 export const bsDateSchema = z
   .string()
@@ -30,9 +39,39 @@ export const addressSchema = z.object({
   streetAddress: z.string().min(1)
 });
 
+const isValidPortalLoginId = (value: string): boolean => {
+  if (z.email().safeParse(value).success) {
+    return true;
+  }
+
+  return /^[a-z0-9][a-z0-9._-]{2,63}$/.test(value);
+};
+
+/** Email or simple username used as the portal login ID (stored on the user account). */
+export const portalLoginIdSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
+  z
+    .string()
+    .min(3, "Login ID must be at least 3 characters")
+    .max(100, "Login ID is too long")
+    .refine(isValidPortalLoginId, {
+      message: "Enter a valid email (e.g. name@college.com) or username (e.g. teacher01)"
+    })
+);
+
+export const portalPasswordSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim() : value),
+  z.string().min(6, "Password must be at least 6 characters")
+);
+
+export const optionalPortalPasswordSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : typeof value === "string" ? value.trim() : value),
+  z.string().min(6, "Password must be at least 6 characters").optional()
+);
+
 export const loginSchema = z.object({
-  email: z.email(),
-  password: z.string().min(6)
+  email: portalLoginIdSchema,
+  password: portalPasswordSchema
 });
 
 export const registerSchema = z.object({
@@ -56,6 +95,7 @@ export const schoolSchema = z.object({
   phone: z.string().min(7),
   principalName: z.string().min(2),
   academicYearBs: academicYearSchema,
+  institutionType: z.enum(INSTITUTION_TYPES).default("SCHOOL"),
   address: addressSchema,
   isActive: z.boolean().default(true)
 });
@@ -70,12 +110,15 @@ export const updateSchoolSchema = schoolSchema;
 
 export const studentSchema = z.object({
   fullName: z.string().min(2),
-  email: z.email(),
+  email: portalLoginIdSchema,
   phone: z.string().optional().or(z.literal("")),
+  password: optionalPortalPasswordSchema,
   admissionNumber: z.string().min(1),
   rollNumber: z.coerce.number().min(1),
-  classId: objectIdSchema,
-  sectionId: objectIdSchema,
+  classId: optionalObjectIdSchema,
+  sectionId: optionalObjectIdSchema,
+  batchId: optionalObjectIdSchema,
+  yearId: optionalObjectIdSchema,
   admissionDateBs: bsDateSchema,
   dateOfBirthBs: bsDateSchema,
   gender: z.string().min(1),
@@ -102,8 +145,9 @@ export const studentSchema = z.object({
 
 export const teacherSchema = z.object({
   fullName: z.string().min(2),
-  email: z.email(),
+  email: portalLoginIdSchema,
   phone: z.string().optional().or(z.literal("")),
+  password: optionalPortalPasswordSchema,
   teacherCode: z.string().min(1),
   qualification: z.string().min(2),
   joinedDateBs: bsDateSchema,
@@ -111,6 +155,8 @@ export const teacherSchema = z.object({
   subjects: z.array(objectIdSchema).default([]),
   assignedClassIds: z.array(objectIdSchema).default([]),
   assignedSectionIds: z.array(objectIdSchema).default([]),
+  assignedBatchIds: z.array(objectIdSchema).default([]),
+  assignedYearIds: z.array(objectIdSchema).default([]),
   basicSalaryNpr: moneySchema
 });
 
@@ -130,18 +176,37 @@ export const sectionSchema = z.object({
   classTeacherId: objectIdSchema.optional().or(z.literal(""))
 });
 
-export const subjectSchema = z.object({
+export const batchSchema = z.object({
+  name: z.string().min(1),
+  academicYearBs: academicYearSchema,
+  isActive: z.boolean().default(true)
+});
+
+export const yearSchema = z.object({
+  batchId: objectIdSchema,
+  name: z.string().min(1),
+  level: z.coerce.number().min(1).max(3),
+  isActive: z.boolean().default(true)
+});
+
+export const academicSubjectSchema = z.object({
   name: z.string().min(1),
   code: z.string().min(1),
   classIds: z.array(objectIdSchema).default([]),
+  yearIds: z.array(objectIdSchema).default([])
+});
+
+export const subjectSchema = academicSubjectSchema.extend({
   teacherIds: z.array(objectIdSchema).default([]),
-  fullMarks: z.coerce.number().min(1),
-  passMarks: z.coerce.number().min(0)
+  fullMarks: z.coerce.number().min(1).default(100),
+  passMarks: z.coerce.number().min(0).default(35)
 });
 
 export const attendanceSchema = z.object({
-  classId: objectIdSchema,
-  sectionId: objectIdSchema,
+  classId: objectIdSchema.optional(),
+  sectionId: objectIdSchema.optional(),
+  batchId: objectIdSchema.optional(),
+  yearId: objectIdSchema.optional(),
   subjectId: objectIdSchema,
   dateBs: bsDateSchema,
   entries: z.array(
@@ -157,21 +222,44 @@ export const examSchema = z.object({
   academicYearBs: academicYearSchema,
   startDateBs: bsDateSchema,
   endDateBs: bsDateSchema,
-  classIds: z.array(objectIdSchema).default([])
+  resultPublishDateBs: bsDateSchema.optional().or(z.literal("")),
+  status: z.enum(EXAM_STATUSES).default("DRAFT"),
+  classIds: z.array(objectIdSchema).default([]),
+  batchIds: z.array(objectIdSchema).default([]),
+  yearIds: z.array(objectIdSchema).default([])
+});
+
+export const examRoutineSchema = z.object({
+  subjectId: objectIdSchema,
+  examDateBs: bsDateSchema,
+  day: z.string().min(1),
+  startTime: z.string().min(1),
+  endTime: z.string().min(1),
+  durationMinutes: z.coerce.number().min(1),
+  examHall: z.string().optional().or(z.literal("")),
+  invigilator: z.string().optional().or(z.literal("")),
+  remarks: z.string().optional().or(z.literal(""))
+});
+
+export const resultMarkSchema = z.object({
+  subjectId: objectIdSchema,
+  fullMarks: z.coerce.number().min(1),
+  passMarks: z.coerce.number().min(0),
+  theoryMarks: z.coerce.number().min(0).optional(),
+  practicalMarks: z.coerce.number().min(0).optional(),
+  internalMarks: z.coerce.number().min(0).optional(),
+  attendanceStatus: z.enum(EXAM_ATTENDANCE_STATUSES).default("PRESENT"),
+  teacherRemarks: z.string().optional().or(z.literal(""))
 });
 
 export const resultSchema = z.object({
   examId: objectIdSchema,
   studentId: objectIdSchema,
-  classId: objectIdSchema,
-  sectionId: objectIdSchema,
-  marks: z.array(
-    z.object({
-      subjectId: objectIdSchema,
-      obtainedMarks: z.coerce.number().min(0)
-    })
-  ),
-  publishedAtBs: bsDateSchema.optional().or(z.literal(""))
+  classId: objectIdSchema.optional(),
+  sectionId: objectIdSchema.optional(),
+  batchId: objectIdSchema.optional(),
+  yearId: objectIdSchema.optional(),
+  marks: z.array(resultMarkSchema)
 });
 
 export const feeStructureSchema = z.object({
@@ -266,9 +354,14 @@ export type StudentInput = z.infer<typeof studentSchema>;
 export type TeacherInput = z.infer<typeof teacherSchema>;
 export type ClassInput = z.infer<typeof classSchema>;
 export type SectionInput = z.infer<typeof sectionSchema>;
+export type BatchInput = z.infer<typeof batchSchema>;
+export type YearInput = z.infer<typeof yearSchema>;
+export type AcademicSubjectInput = z.infer<typeof academicSubjectSchema>;
 export type SubjectInput = z.infer<typeof subjectSchema>;
 export type AttendanceInput = z.infer<typeof attendanceSchema>;
 export type ExamInput = z.infer<typeof examSchema>;
+export type ExamRoutineInput = z.infer<typeof examRoutineSchema>;
+export type ResultMarkInput = z.infer<typeof resultMarkSchema>;
 export type ResultInput = z.infer<typeof resultSchema>;
 export type FeeStructureInput = z.infer<typeof feeStructureSchema>;
 export type FeeCollectionInput = z.infer<typeof feeCollectionSchema>;

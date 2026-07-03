@@ -1,14 +1,25 @@
-import { teacherSchema, type ClassRecord, type SectionRecord, type SubjectRecord, type TeacherInput } from "@nepal-school-erp/shared";
+import {
+  teacherSchema,
+  type BatchRecord,
+  type ClassRecord,
+  type SectionRecord,
+  type SubjectRecord,
+  type TeacherInput,
+  type YearRecord
+} from "@nepal-school-erp/shared";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
+import { PortalLoginFields, validatePortalPassword } from "components/shared/PortalLoginFields";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
+import { useIsCollege } from "hooks/useInstitutionType";
+import { filterSectionsByClass, filterYearsByBatch, getAcademicLabels } from "lib/academicStructureUtils";
 
-const createDefaultTeacherValue = (): TeacherInput => ({
+const createDefaultTeacherValue = (isCollege: boolean): TeacherInput => ({
   fullName: "",
   email: "",
   phone: "",
@@ -25,30 +36,69 @@ const createDefaultTeacherValue = (): TeacherInput => ({
   subjects: [],
   assignedClassIds: [],
   assignedSectionIds: [],
+  assignedBatchIds: isCollege ? [] : [],
+  assignedYearIds: isCollege ? [] : [],
   basicSalaryNpr: 0
 });
 
 interface TeacherFormProps {
   initialValue?: TeacherInput;
-  classes: ClassRecord[];
-  sections: SectionRecord[];
+  isEditing?: boolean;
+  classes?: ClassRecord[];
+  sections?: SectionRecord[];
+  batches?: BatchRecord[];
+  years?: YearRecord[];
   subjects: SubjectRecord[];
   submitting?: boolean;
   onSubmit: (value: TeacherInput) => Promise<void>;
   onCancel?: () => void;
 }
 
-export const TeacherForm = ({ initialValue, classes, sections, subjects, submitting, onSubmit, onCancel }: TeacherFormProps) => {
-  const [form, setForm] = useState<TeacherInput>(initialValue ?? createDefaultTeacherValue());
+export const TeacherForm = ({
+  initialValue,
+  isEditing = false,
+  classes = [],
+  sections = [],
+  batches = [],
+  years = [],
+  subjects,
+  submitting,
+  onSubmit,
+  onCancel
+}: TeacherFormProps) => {
+  const isCollege = useIsCollege();
+  const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
+  const [form, setForm] = useState<TeacherInput>(initialValue ?? createDefaultTeacherValue(isCollege));
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const filteredSections = useMemo(
     () => sections.filter((section) => form.assignedClassIds.length === 0 || form.assignedClassIds.includes(section.classId)),
     [form.assignedClassIds, sections]
   );
 
+  const filteredYears = useMemo(
+    () =>
+      years.filter(
+        (year) => form.assignedBatchIds.length === 0 || form.assignedBatchIds.includes(year.batchId)
+      ),
+    [form.assignedBatchIds, years]
+  );
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const parsed = teacherSchema.safeParse(form);
+
+    const passwordError = validatePortalPassword(password, confirmPassword);
+    if (passwordError) {
+      toast.error(passwordError);
+      return;
+    }
+
+    const parsed = teacherSchema.safeParse({
+      ...form,
+      email: form.email.trim(),
+      password: password.trim() || undefined
+    });
 
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
@@ -56,7 +106,9 @@ export const TeacherForm = ({ initialValue, classes, sections, subjects, submitt
     }
 
     await onSubmit(parsed.data);
-    setForm(createDefaultTeacherValue());
+    setForm(createDefaultTeacherValue(isCollege));
+    setPassword("");
+    setConfirmPassword("");
   };
 
   const readMultiSelect = (selectedOptions: HTMLCollectionOf<HTMLOptionElement>): string[] =>
@@ -70,8 +122,13 @@ export const TeacherForm = ({ initialValue, classes, sections, subjects, submitt
         <FormField label="Full Name">
           <Input value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
         </FormField>
-        <FormField label="Email">
-          <Input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+        <FormField label="Login ID">
+          <Input
+            placeholder="e.g. teacher01 or name@college.com"
+            type="text"
+            value={form.email}
+            onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+          />
         </FormField>
         <FormField label="Phone">
           <Input value={form.phone ?? ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
@@ -108,36 +165,93 @@ export const TeacherForm = ({ initialValue, classes, sections, subjects, submitt
           </Select>
         </FormField>
 
-        <FormField label="Assigned Classes">
-          <Select
-            multiple
-            className="h-36"
-            value={form.assignedClassIds}
-            onChange={(event) => setForm((current) => ({ ...current, assignedClassIds: readMultiSelect(event.target.selectedOptions), assignedSectionIds: [] }))}
-          >
-            {classes.map((item) => (
-              <option key={item._id} value={item._id}>
-                {item.name}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+        {isCollege ? (
+          <>
+            <FormField label={`Assigned ${labels.primaryPlural}`}>
+              <Select
+                multiple
+                className="h-36"
+                value={form.assignedBatchIds}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    assignedBatchIds: readMultiSelect(event.target.selectedOptions),
+                    assignedYearIds: []
+                  }))
+                }
+              >
+                {batches.map((item) => (
+                  <option key={item._id} value={item._id}>
+                    {item.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
 
-        <FormField label="Assigned Sections">
-          <Select
-            multiple
-            className="h-36"
-            value={form.assignedSectionIds}
-            onChange={(event) => setForm((current) => ({ ...current, assignedSectionIds: readMultiSelect(event.target.selectedOptions) }))}
-          >
-            {filteredSections.map((section) => (
-              <option key={section._id} value={section._id}>
-                {section.name}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+            <FormField label={`Assigned ${labels.secondaryPlural}`}>
+              <Select
+                multiple
+                className="h-36"
+                value={form.assignedYearIds}
+                onChange={(event) => setForm((current) => ({ ...current, assignedYearIds: readMultiSelect(event.target.selectedOptions) }))}
+              >
+                {filteredYears.map((year) => (
+                  <option key={year._id} value={year._id}>
+                    {batches.find((batch) => batch._id === year.batchId)?.name ?? "Batch"} — {year.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </>
+        ) : (
+          <>
+            <FormField label="Assigned Classes">
+              <Select
+                multiple
+                className="h-36"
+                value={form.assignedClassIds}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    assignedClassIds: readMultiSelect(event.target.selectedOptions),
+                    assignedSectionIds: []
+                  }))
+                }
+              >
+                {classes.map((item) => (
+                  <option key={item._id} value={item._id}>
+                    {item.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+
+            <FormField label="Assigned Sections">
+              <Select
+                multiple
+                className="h-36"
+                value={form.assignedSectionIds}
+                onChange={(event) => setForm((current) => ({ ...current, assignedSectionIds: readMultiSelect(event.target.selectedOptions) }))}
+              >
+                {filteredSections.map((section) => (
+                  <option key={section._id} value={section._id}>
+                    {section.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </>
+        )}
       </div>
+
+      <PortalLoginFields
+        email={form.email}
+        password={password}
+        confirmPassword={confirmPassword}
+        onPasswordChange={setPassword}
+        onConfirmPasswordChange={setConfirmPassword}
+        showReset={!isEditing}
+      />
 
       <div className="flex items-center justify-end gap-2">
         {onCancel ? (
@@ -152,4 +266,3 @@ export const TeacherForm = ({ initialValue, classes, sections, subjects, submitt
     </form>
   );
 };
-

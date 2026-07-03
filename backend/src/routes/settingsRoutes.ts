@@ -7,6 +7,6 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/", getSettings);
-router.put("/", authorize("SCHOOL_ADMIN"), updateSettings);
+router.put("/", authorize("COLLEGE_ADMIN"), updateSettings);
 
 export default router;

@@ -3,7 +3,7 @@ pid: 17288
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "Set-Location \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npx playwright install chromium"
 started_at: 2026-07-03T08:20:57.323Z
-running_for_ms: 325007   
+running_for_ms: 19625009 
 ---
 Removing unused browser at C:\Users\Sushant\AppData\Local\ms-playwright\chromium-1155
 Downloading Chrome for Testing 149.0.7827.55 (playwright chromium v1228) from https://cdn.playwright.dev/builds/cft/149.0.7827.55/win64/chrome-win64.zip

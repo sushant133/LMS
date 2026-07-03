@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import {
   activeSchoolSchema,
   loginSchema,
+  normalizeUserRole,
   registerSchema,
   type AuthResponse,
   type SchoolRecord,
@@ -15,12 +16,12 @@ import { ApiError } from "../utils/apiError.js";
 import { clearActiveSchoolCookie, clearAuthCookie, setActiveSchoolCookie, setAuthCookie, signJwt } from "../utils/jwt.js";
 import { sendSuccess } from "../utils/response.js";
 
-const getRedirectPath = (role: UserRole): string => {
-  switch (role) {
+const getRedirectPath = (role: UserRole | string): string => {
+  switch (normalizeUserRole(role)) {
     case "SUPER_ADMIN":
       return "/dashboard/super_admin";
-    case "SCHOOL_ADMIN":
-      return "/dashboard/school_admin";
+    case "COLLEGE_ADMIN":
+      return "/dashboard/college_admin";
     case "TEACHER":
       return "/dashboard/teacher";
     case "STUDENT":
@@ -68,7 +69,7 @@ const getSafeUser = async (userId: string) => {
     school: populatedSchool,
     fullName: user.fullName,
     email: user.email,
-    role: user.role,
+    role: normalizeUserRole(user.role as string),
     phone: user.phone,
     isActive: user.isActive,
     mustChangePassword: user.mustChangePassword
@@ -98,7 +99,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (!school || !school.isActive) {
-    throw new ApiError(404, "Selected school is not available for registration");
+    throw new ApiError(404, "Selected college is not available for registration");
   }
 
   const user = await User.create({
@@ -129,17 +130,24 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const user = await User.findOne({ email });
 
   if (!user || !(await user.comparePassword(payload.password))) {
-    throw new ApiError(401, "Invalid email or password");
+    throw new ApiError(401, "Invalid login ID or password");
   }
 
   if (!user.isActive) {
     throw new ApiError(403, "This account is disabled");
   }
 
-  if (user.role !== "SUPER_ADMIN") {
+  if ((user.role as string) === "SCHOOL_ADMIN") {
+    user.role = "COLLEGE_ADMIN";
+    await user.save();
+  }
+
+  const normalizedRole = normalizeUserRole(user.role as string);
+
+  if (normalizedRole !== "SUPER_ADMIN") {
     const school = await School.findById(user.schoolId);
     if (!school || !school.isActive) {
-      throw new ApiError(403, "This school is inactive");
+      throw new ApiError(403, "This college is inactive");
     }
     setActiveSchoolCookie(res, school._id.toString());
   } else {
@@ -148,7 +156,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   const token = signJwt({
     userId: user._id.toString(),
-    role: user.role,
+    role: normalizedRole,
     email: user.email,
     schoolId: user.schoolId ? user.schoolId.toString() : null
   });
@@ -158,7 +166,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(
     res,
     "Login successful",
-    await buildAuthResponse(user._id.toString(), user.role === "SUPER_ADMIN" ? null : user.schoolId?.toString() ?? null)
+    await buildAuthResponse(user._id.toString(), normalizedRole === "SUPER_ADMIN" ? null : user.schoolId?.toString() ?? null)
   );
 });
 
@@ -169,12 +177,12 @@ export const switchActiveSchool = asyncHandler(async (req: Request, res: Respons
 
   if (req.user.role !== "SUPER_ADMIN") {
     if (!req.user.schoolId) {
-      throw new ApiError(400, "No school assigned to this account");
+      throw new ApiError(400, "No college assigned to this account");
     }
 
     setActiveSchoolCookie(res, req.user.schoolId);
     const school = await School.findById(req.user.schoolId).lean();
-    return sendSuccess(res, "Active school set", {
+    return sendSuccess(res, "Active college set", {
       activeSchoolId: req.user.schoolId,
       school
     });
@@ -184,12 +192,12 @@ export const switchActiveSchool = asyncHandler(async (req: Request, res: Respons
   const school = await School.findById(payload.schoolId).lean();
 
   if (!school || !school.isActive) {
-    throw new ApiError(404, "Selected school was not found");
+    throw new ApiError(404, "Selected college was not found");
   }
 
   setActiveSchoolCookie(res, school._id.toString());
 
-  return sendSuccess(res, "Active school set", {
+  return sendSuccess(res, "Active college set", {
     activeSchoolId: school._id.toString(),
     school
   });

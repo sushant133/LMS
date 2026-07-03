@@ -1,8 +1,16 @@
 import type { GradeSymbol, UserRole } from "./types.js";
 
+/** @deprecated Legacy role stored on older accounts — normalized to COLLEGE_ADMIN */
+export const LEGACY_USER_ROLE_ALIASES: Record<string, UserRole> = {
+  SCHOOL_ADMIN: "COLLEGE_ADMIN"
+};
+
+export const normalizeUserRole = (role: string): UserRole =>
+  (LEGACY_USER_ROLE_ALIASES[role] ?? role) as UserRole;
+
 export const USER_ROLES: UserRole[] = [
   "SUPER_ADMIN",
-  "SCHOOL_ADMIN",
+  "COLLEGE_ADMIN",
   "TEACHER",
   "STUDENT",
   "PARENT",
@@ -14,7 +22,7 @@ export const USER_ROLES: UserRole[] = [
 export const PUBLIC_REGISTER_ROLES: UserRole[] = ["PARENT"];
 
 export const TENANT_STAFF_ROLES: UserRole[] = [
-  "SCHOOL_ADMIN",
+  "COLLEGE_ADMIN",
   "TEACHER",
   "STUDENT",
   "PARENT",
@@ -23,11 +31,11 @@ export const TENANT_STAFF_ROLES: UserRole[] = [
   "ACCOUNTANT"
 ];
 
-export const LIBRARY_MANAGER_ROLES: UserRole[] = ["SCHOOL_ADMIN", "LIBRARY_STAFF"];
+export const LIBRARY_MANAGER_ROLES: UserRole[] = ["COLLEGE_ADMIN", "LIBRARY_STAFF"];
 
-export const LABORATORY_MANAGER_ROLES: UserRole[] = ["SCHOOL_ADMIN", "LABORATORY_STAFF"];
+export const LABORATORY_MANAGER_ROLES: UserRole[] = ["COLLEGE_ADMIN", "LABORATORY_STAFF"];
 
-export const ACCOUNTING_MANAGER_ROLES: UserRole[] = ["SCHOOL_ADMIN", "ACCOUNTANT"];
+export const ACCOUNTING_MANAGER_ROLES: UserRole[] = ["COLLEGE_ADMIN", "ACCOUNTANT"];
 
 export const FEE_TYPES = [
   "ADMISSION",
@@ -126,7 +134,17 @@ export const DEFAULT_LAB_CATEGORIES: Record<(typeof LABORATORY_TYPES)[number], s
 
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
 
+export const INSTITUTION_TYPES = ["SCHOOL", "COLLEGE"] as const;
+
 export const CLASS_LEVELS = ["ECD", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12"] as const;
+
+export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year"] as const;
+
+export const EXAM_STATUSES = ["DRAFT", "SCHEDULED", "ONGOING", "COMPLETED", "PUBLISHED"] as const;
+
+export const EXAM_ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "EXEMPT"] as const;
+
+export const EXAM_PASS_FAIL_STATUSES = ["PASS", "FAIL"] as const;
 
 export const GRADE_SCALE: Array<{
   symbol: GradeSymbol;

@@ -96,14 +96,14 @@ const enrichNotices = async (notices: NoticeLean[]) => {
       sectionId: notice.sectionId?.toString(),
       teacherId: notice.teacherId?.toString(),
       createdBy: notice.createdBy.toString(),
-      authorName: teacherName ?? creator?.fullName ?? "School Administration",
+      authorName: teacherName ?? creator?.fullName ?? "College Administration",
       subjectName: subject?.name
     };
   });
 };
 
 export const listNotices = asyncHandler(async (req: Request, res: Response) => {
-  const adminLike = req.user?.role === "SCHOOL_ADMIN" || req.user?.role === "SUPER_ADMIN";
+  const adminLike = req.user?.role === "COLLEGE_ADMIN" || req.user?.role === "SUPER_ADMIN";
   const schoolId = tenantObjectId(req);
 
   if (adminLike) {
@@ -126,12 +126,27 @@ export const listNotices = asyncHandler(async (req: Request, res: Response) => {
 
   const studentProfile = await getStudentProfile(req);
   if (studentProfile) {
-    const enrolledSubjectIds = await Subject.find({ schoolId, classIds: studentProfile.classId }).distinct("_id");
+    const subjectFilter: Record<string, unknown> = { schoolId };
+    if (studentProfile.yearId) {
+      subjectFilter.yearIds = studentProfile.yearId;
+    } else if (studentProfile.classId) {
+      subjectFilter.classIds = studentProfile.classId;
+    }
+    const enrolledSubjectIds = await Subject.find(subjectFilter).distinct("_id");
     const notices = await Notice.find({
       schoolId,
       visibleTo: "STUDENT",
       ...activeNoticeFilter,
-      ...buildStudentNoticeScope(studentProfile.classId, studentProfile.sectionId, enrolledSubjectIds)
+      ...(studentProfile.classId && studentProfile.sectionId
+        ? buildStudentNoticeScope(studentProfile.classId, studentProfile.sectionId, enrolledSubjectIds)
+        : {
+            $or: [
+              { batchId: studentProfile.batchId, yearId: studentProfile.yearId },
+              { batchId: studentProfile.batchId, $or: [{ yearId: { $exists: false } }, { yearId: null }] },
+              { subjectId: { $in: enrolledSubjectIds } },
+              { $and: [{ subjectId: { $exists: false } }, { batchId: { $exists: false } }] }
+            ]
+          })
     })
       .sort({ publishDateBs: -1, createdAt: -1 })
       .lean();
@@ -142,8 +157,8 @@ export const listNotices = asyncHandler(async (req: Request, res: Response) => {
     const studentIds = await getLinkedStudentIds(req);
     const { Student } = await import("../models/Student.js");
     const students = await Student.find({ _id: { $in: studentIds } }).lean();
-    const classIds = [...new Set(students.map((student) => student.classId.toString()))];
-    const sectionIds = [...new Set(students.map((student) => student.sectionId.toString()))];
+    const classIds = [...new Set(students.map((student) => student.classId?.toString()).filter(Boolean))];
+    const sectionIds = [...new Set(students.map((student) => student.sectionId?.toString()).filter(Boolean))];
     const enrolledSubjectIds = await Subject.find({ schoolId, classIds: { $in: classIds } }).distinct("_id");
 
     const notices = await Notice.find({

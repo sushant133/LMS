@@ -1,4 +1,11 @@
-import { DEFAULT_ACADEMIC_YEAR_BS, DEFAULT_LAB_CATEGORIES, DEMO_PASSWORD, DEMO_SCHOOL_CODE, demoCredentials } from "@nepal-school-erp/shared";
+import {
+  COLLEGE_YEAR_NAMES,
+  DEFAULT_ACADEMIC_YEAR_BS,
+  DEFAULT_LAB_CATEGORIES,
+  DEMO_PASSWORD,
+  DEMO_SCHOOL_CODE,
+  demoCredentials
+} from "@nepal-school-erp/shared";
 import mongoose from "mongoose";
 import { env } from "../config/env.js";
 import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
@@ -21,9 +28,9 @@ import { Notice } from "../models/Notice.js";
 import { Notification } from "../models/Notification.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
 import { Result } from "../models/Result.js";
+import { Batch } from "../models/Batch.js";
 import { School } from "../models/School.js";
-import { SchoolClass } from "../models/SchoolClass.js";
-import { Section } from "../models/Section.js";
+import { Year } from "../models/Year.js";
 import { Setting } from "../models/Setting.js";
 import { Student } from "../models/Student.js";
 import { Subject } from "../models/Subject.js";
@@ -87,8 +94,8 @@ const syncSeedIndexes = async (): Promise<void> => {
     ParentChildLink.syncIndexes(),
     Result.syncIndexes(),
     School.syncIndexes(),
-    SchoolClass.syncIndexes(),
-    Section.syncIndexes(),
+    Batch.syncIndexes(),
+    Year.syncIndexes(),
     Setting.syncIndexes(),
     Student.syncIndexes(),
     Subject.syncIndexes(),
@@ -113,11 +120,11 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
     const existingSchool = await School.findOne({ code: DEMO_SCHOOL_CODE }).session(session);
     if (existingSchool) {
       if (!force) {
-        console.log(`Demo school (${DEMO_SCHOOL_CODE}) already exists — skipping seed.`);
+        console.log(`Demo college (${DEMO_SCHOOL_CODE}) already exists — skipping seed.`);
         return;
       }
 
-      console.log(`Removing existing demo school (${DEMO_SCHOOL_CODE})...`);
+      console.log(`Removing existing demo college (${DEMO_SCHOOL_CODE})...`);
       await deleteSchoolCascade(existingSchool._id, session);
     }
 
@@ -131,6 +138,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           phone: "0144123456",
           principalName: "Dr. Kamal Prasad Bhatta",
           academicYearBs: DEFAULT_ACADEMIC_YEAR_BS,
+          institutionType: "COLLEGE",
           address,
           isActive: true
         }
@@ -144,11 +152,11 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       [
         {
           schoolId,
-          fullName: "Demo School Administrator",
+          fullName: "Demo College Administrator",
           email: demoCredentials.schoolAdmin.email,
           phone: "9801111000",
           password: DEMO_PASSWORD,
-          role: "SCHOOL_ADMIN",
+          role: "COLLEGE_ADMIN",
           mustChangePassword: false
         }
       ],
@@ -173,33 +181,47 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    const [class9, class10] = await SchoolClass.create(
+    const [batch2082, batch2083] = await Batch.create(
       [
-        { schoolId, name: "Class 9", level: "Class 9", academicYearBs: DEFAULT_ACADEMIC_YEAR_BS, isActive: true },
-        { schoolId, name: "Class 10", level: "Class 10", academicYearBs: DEFAULT_ACADEMIC_YEAR_BS, isActive: true }
+        { schoolId, name: "Batch 2082", academicYearBs: "2082/2083", isActive: true },
+        { schoolId, name: "Batch 2083", academicYearBs: "2083/2084", isActive: true }
       ],
       options
     );
 
-    const [section9A, section10A] = await Section.create(
-      [
-        { schoolId, classId: class9!._id, name: "A", capacity: 40 },
-        { schoolId, classId: class10!._id, name: "A", capacity: 35 }
-      ],
+    const years = await Year.insertMany(
+      [batch2082!, batch2083!].flatMap((batch) =>
+        COLLEGE_YEAR_NAMES.map((name, index) => ({
+          schoolId,
+          batchId: batch._id,
+          name,
+          level: index + 1,
+          isActive: true
+        }))
+      ),
       options
     );
+
+    const yearByBatchAndName = new Map<string, (typeof years)[number]>();
+    for (const year of years) {
+      const batch = [batch2082!, batch2083!].find((item) => item._id.equals(year.batchId));
+      if (batch) {
+        yearByBatchAndName.set(`${batch.name}::${year.name}`, year);
+      }
+    }
+
+    const year1 = yearByBatchAndName.get("Batch 2082::1st Year")!;
+    const year2 = yearByBatchAndName.get("Batch 2082::2nd Year")!;
 
     const subjectDefs = [
-      { name: "Mathematics", code: "MATH9", classId: class9!._id, fullMarks: 100, passMarks: 35 },
-      { name: "English", code: "ENG9", classId: class9!._id, fullMarks: 100, passMarks: 35 },
-      { name: "Science", code: "SCI9", classId: class9!._id, fullMarks: 100, passMarks: 35 },
-      { name: "Social Studies", code: "SOC9", classId: class9!._id, fullMarks: 100, passMarks: 35 },
-      { name: "Nepali", code: "NEP9", classId: class9!._id, fullMarks: 100, passMarks: 35 },
-      { name: "Mathematics", code: "MATH10", classId: class10!._id, fullMarks: 100, passMarks: 35 },
-      { name: "English", code: "ENG10", classId: class10!._id, fullMarks: 100, passMarks: 35 },
-      { name: "Science", code: "SCI10", classId: class10!._id, fullMarks: 100, passMarks: 35 },
-      { name: "Social Studies", code: "SOC10", classId: class10!._id, fullMarks: 100, passMarks: 35 },
-      { name: "Nepali", code: "NEP10", classId: class10!._id, fullMarks: 100, passMarks: 35 }
+      { name: "Anatomy", code: "ANAT1", yearId: year1._id, fullMarks: 100, passMarks: 35 },
+      { name: "Physiology", code: "PHYS1", yearId: year1._id, fullMarks: 100, passMarks: 35 },
+      { name: "English", code: "ENG1", yearId: year1._id, fullMarks: 100, passMarks: 35 },
+      { name: "Community Health", code: "CH1", yearId: year1._id, fullMarks: 100, passMarks: 35 },
+      { name: "Pharmacology", code: "PHAR2", yearId: year2._id, fullMarks: 100, passMarks: 35 },
+      { name: "Medical Surgery", code: "MS2", yearId: year2._id, fullMarks: 100, passMarks: 35 },
+      { name: "Microbiology", code: "MIC2", yearId: year2._id, fullMarks: 100, passMarks: 35 },
+      { name: "English", code: "ENG2", yearId: year2._id, fullMarks: 100, passMarks: 35 }
     ];
 
     const subjects = await Subject.create(
@@ -207,7 +229,8 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
         schoolId,
         name: item.name,
         code: item.code,
-        classIds: [item.classId],
+        classIds: [],
+        yearIds: [item.yearId],
         teacherIds: [],
         fullMarks: item.fullMarks,
         passMarks: item.passMarks
@@ -216,49 +239,47 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
     );
 
     const subjectByCode = {
-      MATH9: subjects[0]!,
-      ENG9: subjects[1]!,
-      SCI9: subjects[2]!,
-      SOC9: subjects[3]!,
-      NEP9: subjects[4]!,
-      MATH10: subjects[5]!,
-      ENG10: subjects[6]!,
-      SCI10: subjects[7]!,
-      SOC10: subjects[8]!,
-      NEP10: subjects[9]!
+      ANAT1: subjects[0]!,
+      PHYS1: subjects[1]!,
+      ENG1: subjects[2]!,
+      CH1: subjects[3]!,
+      PHAR2: subjects[4]!,
+      MS2: subjects[5]!,
+      MIC2: subjects[6]!,
+      ENG2: subjects[7]!
     };
 
     const teacherDefs = [
       {
         cred: demoCredentials.teachers[0],
         code: "TCH001",
-        subjects: [subjectByCode.MATH9, subjectByCode.SCI9],
-        classIds: [class9!._id],
-        sectionIds: [section9A!._id],
+        subjects: [subjectByCode.ANAT1, subjectByCode.PHYS1],
+        batchIds: [batch2082!._id],
+        yearIds: [year1._id],
         salary: 45000
       },
       {
         cred: demoCredentials.teachers[1],
         code: "TCH002",
-        subjects: [subjectByCode.ENG9, subjectByCode.ENG10],
-        classIds: [class9!._id, class10!._id],
-        sectionIds: [section9A!._id, section10A!._id],
+        subjects: [subjectByCode.ENG1, subjectByCode.ENG2],
+        batchIds: [batch2082!._id],
+        yearIds: [year1._id, year2._id],
         salary: 42000
       },
       {
         cred: demoCredentials.teachers[2],
         code: "TCH003",
-        subjects: [subjectByCode.MATH10, subjectByCode.SCI10, subjectByCode.NEP10],
-        classIds: [class10!._id],
-        sectionIds: [section10A!._id],
+        subjects: [subjectByCode.PHAR2, subjectByCode.MS2],
+        batchIds: [batch2082!._id],
+        yearIds: [year2._id],
         salary: 44000
       },
       {
         cred: demoCredentials.teachers[3],
         code: "TCH004",
-        subjects: [subjectByCode.NEP9, subjectByCode.SOC9, subjectByCode.SOC10],
-        classIds: [class9!._id, class10!._id],
-        sectionIds: [section9A!._id, section10A!._id],
+        subjects: [subjectByCode.CH1, subjectByCode.MIC2],
+        batchIds: [batch2082!._id],
+        yearIds: [year1._id, year2._id],
         salary: 41000
       }
     ];
@@ -287,12 +308,12 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
             schoolId,
             user: user!._id,
             teacherCode: def.code,
-            qualification: "M.Ed.",
+            qualification: "B.N.",
             joinedDateBs: "2078-04-01",
             address,
             subjects: def.subjects.map((s) => s._id),
-            assignedClassIds: def.classIds,
-            assignedSectionIds: def.sectionIds,
+            assignedBatchIds: def.batchIds,
+            assignedYearIds: def.yearIds,
             basicSalaryNpr: def.salary
           }
         ],
@@ -316,16 +337,16 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
     const studentDefs = [
       ...demoCredentials.students.slice(0, 5).map((cred, index) => ({
         cred,
-        classId: class9!._id,
-        sectionId: section9A!._id,
-        admissionNumber: `ADM9-${String(index + 1).padStart(3, "0")}`,
+        batchId: batch2082!._id,
+        yearId: year1._id,
+        admissionNumber: `HA2082-${String(index + 1).padStart(3, "0")}`,
         roll: index + 1
       })),
       ...demoCredentials.students.slice(5).map((cred, index) => ({
         cred,
-        classId: class10!._id,
-        sectionId: section10A!._id,
-        admissionNumber: `ADM10-${String(index + 1).padStart(3, "0")}`,
+        batchId: batch2082!._id,
+        yearId: year2._id,
+        admissionNumber: `HA2082-${String(100 + index + 1).padStart(3, "0")}`,
         roll: index + 1
       }))
     ];
@@ -355,8 +376,8 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
             user: user!._id,
             admissionNumber: def.admissionNumber,
             rollNumber: def.roll,
-            classId: def.classId,
-            sectionId: def.sectionId,
+            batchId: def.batchId,
+            yearId: def.yearId,
             admissionDateBs: "2081-04-15",
             dateOfBirthBs: "2066-08-10",
             gender: def.roll % 2 === 0 ? "Female" : "Male",
@@ -452,16 +473,16 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    const class9Students = students.slice(0, 5).map((s) => s.profile);
-    const class10Students = students.slice(5).map((s) => s.profile);
+    const year1Students = students.slice(0, 5).map((s) => s.profile);
+    const year2Students = students.slice(5).map((s) => s.profile);
 
     for (const dateBs of attendanceDates) {
       const attendanceRows = [
-        { teacher: teacherByCode.ram, subject: subjectByCode.MATH9, classId: class9!._id, sectionId: section9A!._id, roster: class9Students },
-        { teacher: teacherByCode.sita, subject: subjectByCode.ENG9, classId: class9!._id, sectionId: section9A!._id, roster: class9Students },
-        { teacher: teacherByCode.gita, subject: subjectByCode.NEP9, classId: class9!._id, sectionId: section9A!._id, roster: class9Students },
-        { teacher: teacherByCode.hari, subject: subjectByCode.MATH10, classId: class10!._id, sectionId: section10A!._id, roster: class10Students },
-        { teacher: teacherByCode.sita, subject: subjectByCode.ENG10, classId: class10!._id, sectionId: section10A!._id, roster: class10Students }
+        { teacher: teacherByCode.ram, subject: subjectByCode.ANAT1, batchId: batch2082!._id, yearId: year1._id, roster: year1Students },
+        { teacher: teacherByCode.sita, subject: subjectByCode.ENG1, batchId: batch2082!._id, yearId: year1._id, roster: year1Students },
+        { teacher: teacherByCode.gita, subject: subjectByCode.CH1, batchId: batch2082!._id, yearId: year1._id, roster: year1Students },
+        { teacher: teacherByCode.hari, subject: subjectByCode.PHAR2, batchId: batch2082!._id, yearId: year2._id, roster: year2Students },
+        { teacher: teacherByCode.sita, subject: subjectByCode.ENG2, batchId: batch2082!._id, yearId: year2._id, roster: year2Students }
       ];
 
       for (const row of attendanceRows) {
@@ -469,8 +490,8 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           [
             {
               schoolId,
-              classId: row.classId,
-              sectionId: row.sectionId,
+              batchId: row.batchId,
+              yearId: row.yearId,
               subjectId: row.subject._id,
               teacherId: row.teacher.profile._id,
               dateBs,
@@ -493,95 +514,95 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
     const assignmentRows = [
       {
         teacher: teacherByCode.ram,
-        subject: subjectByCode.MATH9,
-        classId: class9!._id,
-        sectionId: section9A!._id,
+        subject: subjectByCode.ANAT1,
+        batchId: batch2082!._id,
+        yearId: year1._id,
         type: "HOMEWORK",
-        title: "Algebra Practice Set 3",
-        description: "Complete exercises 1-15 from chapter 4. Show all working steps.",
-        topic: "Algebra — Unit 4",
+        title: "Anatomy Diagram Practice",
+        description: "Label the major organs of the human body and submit your diagram.",
+        topic: "Human Anatomy — Unit 4",
         dueDateBs: dueUpcomingBs,
         isPinned: true,
-        links: [{ title: "Khan Academy: Linear Equations", url: "https://www.khanacademy.org/math/algebra" }]
+        links: [{ title: "WHO Health Education", url: "https://www.who.int/health-topics/health-education" }]
       },
       {
         teacher: teacherByCode.ram,
-        subject: subjectByCode.SCI9,
-        classId: class9!._id,
-        sectionId: section9A!._id,
+        subject: subjectByCode.PHYS1,
+        batchId: batch2082!._id,
+        yearId: year1._id,
         type: "CAS",
-        title: "Lab Report: Acid-Base Reaction",
-        description: "Submit your lab observation report with hypothesis and conclusion.",
-        topic: "Chemistry Lab",
+        title: "Lab Report: Vital Signs Measurement",
+        description: "Submit your lab observation report with pulse, BP, and temperature readings.",
+        topic: "Physiology Lab",
         dueDateBs: dueTodayBs,
         maxMarks: 20
       },
       {
         teacher: teacherByCode.sita,
-        subject: subjectByCode.ENG9,
-        classId: class9!._id,
-        sectionId: section9A!._id,
+        subject: subjectByCode.ENG1,
+        batchId: batch2082!._id,
+        yearId: year1._id,
         type: "NOTE",
-        title: "Essay Writing Tips",
-        description: "Key points for descriptive essay structure: introduction, body paragraphs, and conclusion.",
-        topic: "Writing Skills",
+        title: "Medical Terminology Tips",
+        description: "Key prefixes and suffixes used in health sciences vocabulary.",
+        topic: "English for Health Assistants",
         allowSubmission: false
       },
       {
         teacher: teacherByCode.gita,
-        subject: subjectByCode.SOC9,
-        classId: class9!._id,
-        sectionId: section9A!._id,
+        subject: subjectByCode.CH1,
+        batchId: batch2082!._id,
+        yearId: year1._id,
         type: "HOMEWORK",
-        title: "Civic Responsibility Essay",
-        description: "Write 300 words on civic duties of students in Nepal.",
-        topic: "Civics",
+        title: "Community Health Survey",
+        description: "Write 300 words on primary health care services in your municipality.",
+        topic: "Community Health",
         dueDateBs: dueOverdueBs
       },
       {
         teacher: teacherByCode.sita,
-        subject: subjectByCode.ENG9,
-        classId: class9!._id,
-        sectionId: section9A!._id,
+        subject: subjectByCode.ENG1,
+        batchId: batch2082!._id,
+        yearId: year1._id,
         type: "HOMEWORK",
         title: "Reading Comprehension — Unit 2",
-        description: "Read the passage on page 42 and answer questions 1-8.",
+        description: "Read the health education passage and answer questions 1-8.",
         topic: "Reading Skills",
         dueDateBs: dueTodayBs
       },
       {
         teacher: teacherByCode.hari,
-        subject: subjectByCode.MATH10,
-        classId: class10!._id,
-        sectionId: section10A!._id,
+        subject: subjectByCode.PHAR2,
+        batchId: batch2082!._id,
+        yearId: year2._id,
         type: "HOMEWORK",
-        title: "Trigonometry Worksheet",
-        description: "Solve problems 1-20 from the trigonometry chapter.",
-        topic: "Trigonometry",
+        title: "Drug Classification Worksheet",
+        description: "Classify common medicines by therapeutic group and dosage form.",
+        topic: "Pharmacology",
         dueDateBs: dueUpcomingBs,
         isPinned: true
       },
       {
         teacher: teacherByCode.hari,
-        subject: subjectByCode.SCI10,
-        classId: class10!._id,
-        sectionId: section10A!._id,
+        subject: subjectByCode.MS2,
+        batchId: batch2082!._id,
+        yearId: year2._id,
         type: "CAS",
-        title: "Physics Practical: Ohm's Law",
-        description: "Record observations and calculate resistance from your circuit experiment.",
-        topic: "Physics Lab",
+        title: "Clinical Skills: Wound Dressing",
+        description: "Record observations from your wound dressing practical session.",
+        topic: "Medical Surgery Lab",
         dueDateBs: dueTodayBs,
         maxMarks: 25
       },
       {
         teacher: teacherByCode.sita,
-        subject: subjectByCode.ENG10,
-        classId: class10!._id,
-        sectionId: section10A!._id,
+        subject: subjectByCode.ENG2,
+        batchId: batch2082!._id,
+        yearId: year2._id,
         type: "NOTE",
-        title: "Poetry Analysis Framework",
-        description: "Use the TPCASTT method when analyzing poems for your upcoming unit test.",
-        topic: "Literature",
+        title: "Patient Communication Framework",
+        description: "Use the SPIKES protocol when communicating with patients and families.",
+        topic: "Clinical Communication",
         allowSubmission: false
       }
     ];
@@ -592,8 +613,8 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
         type: row.type,
         title: row.title,
         description: row.description,
-        classId: row.classId,
-        sectionId: row.sectionId,
+        batchId: row.batchId,
+        yearId: row.yearId,
         subjectId: row.subject._id,
         teacherId: row.teacher.profile._id,
         topic: row.topic,
@@ -645,7 +666,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           schoolId,
           assignmentId: createdAssignments[0]!._id,
           studentId: students[0]!.profile._id,
-          content: "Completed all algebra exercises.",
+          content: "Completed all anatomy diagram exercises.",
           status: "GRADED",
           marks: 18,
           feedback: "Good work. Show steps more clearly.",
@@ -671,17 +692,18 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           academicYearBs: DEFAULT_ACADEMIC_YEAR_BS,
           startDateBs: "2081-08-01",
           endDateBs: "2081-08-15",
-          classIds: [class9!._id, class10!._id]
+          batchIds: [batch2082!._id],
+          yearIds: [year1._id, year2._id]
         }
       ],
       options
     );
 
     const resultPlans = [
-      { student: students[0]!, classId: class9!._id, sectionId: section9A!._id, marks: [{ subject: subjectByCode.MATH9, obtained: 82 }, { subject: subjectByCode.ENG9, obtained: 76 }, { subject: subjectByCode.SCI9, obtained: 88 }] },
-      { student: students[1]!, classId: class9!._id, sectionId: section9A!._id, marks: [{ subject: subjectByCode.MATH9, obtained: 71 }, { subject: subjectByCode.ENG9, obtained: 79 }, { subject: subjectByCode.SCI9, obtained: 74 }] },
-      { student: students[5]!, classId: class10!._id, sectionId: section10A!._id, marks: [{ subject: subjectByCode.MATH10, obtained: 85 }, { subject: subjectByCode.ENG10, obtained: 72 }, { subject: subjectByCode.SCI10, obtained: 80 }] },
-      { student: students[6]!, classId: class10!._id, sectionId: section10A!._id, marks: [{ subject: subjectByCode.MATH10, obtained: 68 }, { subject: subjectByCode.ENG10, obtained: 70 }, { subject: subjectByCode.SCI10, obtained: 65 }] }
+      { student: students[0]!, batchId: batch2082!._id, yearId: year1._id, marks: [{ subject: subjectByCode.ANAT1, obtained: 82 }, { subject: subjectByCode.ENG1, obtained: 76 }, { subject: subjectByCode.PHYS1, obtained: 88 }] },
+      { student: students[1]!, batchId: batch2082!._id, yearId: year1._id, marks: [{ subject: subjectByCode.ANAT1, obtained: 71 }, { subject: subjectByCode.ENG1, obtained: 79 }, { subject: subjectByCode.PHYS1, obtained: 74 }] },
+      { student: students[5]!, batchId: batch2082!._id, yearId: year2._id, marks: [{ subject: subjectByCode.PHAR2, obtained: 85 }, { subject: subjectByCode.ENG2, obtained: 72 }, { subject: subjectByCode.MS2, obtained: 80 }] },
+      { student: students[6]!, batchId: batch2082!._id, yearId: year2._id, marks: [{ subject: subjectByCode.PHAR2, obtained: 68 }, { subject: subjectByCode.ENG2, obtained: 70 }, { subject: subjectByCode.MS2, obtained: 65 }] }
     ];
 
     for (const plan of resultPlans) {
@@ -695,8 +717,8 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
             schoolId,
             examId: exam!._id,
             studentId: plan.student.profile._id,
-            classId: plan.classId,
-            sectionId: plan.sectionId,
+            batchId: plan.batchId,
+            yearId: plan.yearId,
             marks: plan.marks.map((mark) => ({ subjectId: mark.subject._id, obtainedMarks: mark.obtained })),
             percentage,
             gpa,
@@ -714,19 +736,17 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           schoolId,
           title: "Welcome to New Academic Session",
           content: "Classes resume from 2081-09-01. Please check the timetable.",
-          visibleTo: ["SCHOOL_ADMIN", "TEACHER", "STUDENT", "PARENT"],
+          visibleTo: ["COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"],
           publishDateBs: "2081-08-25",
           createdBy: adminUser!._id
         },
         {
           schoolId,
-          title: "Math Unit Test Reminder",
-          content: "Class 9 Mathematics unit test is scheduled for next week.",
+          title: "Anatomy Unit Test Reminder",
+          content: "Batch 2082 — 1st Year Anatomy unit test is scheduled for next week.",
           visibleTo: ["STUDENT", "PARENT", "TEACHER"],
           publishDateBs: "2081-09-10",
-          subjectId: subjectByCode.MATH9._id,
-          classId: class9!._id,
-          sectionId: section9A!._id,
+          subjectId: subjectByCode.ANAT1._id,
           teacherId: teacherByCode.ram.profile._id,
           createdBy: teacherByCode.ram.userId
         }
@@ -735,18 +755,18 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
     );
 
     const timetableRows = [
-      { classId: class9!._id, sectionId: section9A!._id, day: 1, period: 1, subject: subjectByCode.MATH9, teacher: teacherByCode.ram, start: "10:00", end: "10:45" },
-      { classId: class9!._id, sectionId: section9A!._id, day: 1, period: 2, subject: subjectByCode.ENG9, teacher: teacherByCode.sita, start: "10:45", end: "11:30" },
-      { classId: class9!._id, sectionId: section9A!._id, day: 2, period: 1, subject: subjectByCode.SCI9, teacher: teacherByCode.ram, start: "10:00", end: "10:45" },
-      { classId: class10!._id, sectionId: section10A!._id, day: 1, period: 1, subject: subjectByCode.MATH10, teacher: teacherByCode.hari, start: "10:00", end: "10:45" },
-      { classId: class10!._id, sectionId: section10A!._id, day: 1, period: 2, subject: subjectByCode.ENG10, teacher: teacherByCode.sita, start: "10:45", end: "11:30" }
+      { batchId: batch2082!._id, yearId: year1._id, day: 1, period: 1, subject: subjectByCode.ANAT1, teacher: teacherByCode.ram, start: "10:00", end: "10:45" },
+      { batchId: batch2082!._id, yearId: year1._id, day: 1, period: 2, subject: subjectByCode.ENG1, teacher: teacherByCode.sita, start: "10:45", end: "11:30" },
+      { batchId: batch2082!._id, yearId: year1._id, day: 2, period: 1, subject: subjectByCode.PHYS1, teacher: teacherByCode.ram, start: "10:00", end: "10:45" },
+      { batchId: batch2082!._id, yearId: year2._id, day: 1, period: 1, subject: subjectByCode.PHAR2, teacher: teacherByCode.hari, start: "10:00", end: "10:45" },
+      { batchId: batch2082!._id, yearId: year2._id, day: 1, period: 2, subject: subjectByCode.ENG2, teacher: teacherByCode.sita, start: "10:45", end: "11:30" }
     ];
 
     await TimetableSlot.create(
       timetableRows.map((row) => ({
         schoolId,
-        classId: row.classId,
-        sectionId: row.sectionId,
+        batchId: row.batchId,
+        yearId: row.yearId,
         dayOfWeek: row.day,
         periodNumber: row.period,
         subjectId: row.subject._id,
@@ -883,7 +903,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           stops: [
             { name: "Koteshwor", pickupTime: "06:30" },
             { name: "Gausala", pickupTime: "06:45" },
-            { name: "School Gate", pickupTime: "07:15" }
+            { name: "College Gate", pickupTime: "07:15" }
           ],
           monthlyFeeNpr: 3500,
           isActive: true
@@ -899,7 +919,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           routeId: route!._id,
           studentId: students[2]!.profile._id,
           pickupStop: "Koteshwor",
-          dropStop: "School Gate",
+          dropStop: "College Gate",
           isActive: true
         }
       ],
@@ -944,7 +964,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
         {
           schoolId,
           title: "Monthly Tuition Fee",
-          classIds: [class9!._id, class10!._id],
+          classIds: [],
           feeType: "MONTHLY",
           frequency: "MONTHLY",
           academicYearBs: DEFAULT_ACADEMIC_YEAR_BS,
@@ -1059,7 +1079,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           totalAmountNpr: 42000,
           paymentStatus: "PAID",
           paymentMethod: "BANK_TRANSFER",
-          description: "Class 9 & 10 textbooks",
+          description: "HA program textbooks",
           createdBy: accountantUser!._id
         }
       ],
@@ -1157,7 +1177,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           schoolId,
           recipientUserId: students[0]!.userId,
           title: "New Homework",
-          message: "Algebra Practice Set 3 has been published.",
+          message: "Anatomy Diagram Practice has been published.",
           channel: "IN_APP",
           type: "HOMEWORK",
           read: false,
@@ -1167,7 +1187,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    console.log(`Demo school created: ${school!.name} (${school!.code})`);
+    console.log(`Demo college created: ${school!.name} (${school!.code})`);
   });
 };
 

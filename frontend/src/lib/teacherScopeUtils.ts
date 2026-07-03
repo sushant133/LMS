@@ -1,15 +1,9 @@
-export interface ScopeOption {
-  _id: string;
-  name: string;
-  code?: string;
-  classId?: string;
-  classIds?: string[];
-}
+export {
+  filterSectionsByClass,
+  filterYearsByBatch,
+  filterSubjectsByClass,
+  filterSubjectsByYear,
+  type AcademicScopeOption as ScopeOption
+} from "./academicStructureUtils";
 
-export const filterSectionsByClass = (sections: ScopeOption[], classId: string): ScopeOption[] =>
-  classId ? sections.filter((section) => section.classId === classId) : [];
-
-export const filterSubjectsByClass = (subjects: ScopeOption[], classId: string): ScopeOption[] =>
-  classId ? subjects.filter((subject) => (subject.classIds ?? []).includes(classId)) : [];
-
-export const hasSingleOption = (items: ScopeOption[]): boolean => items.length === 1;
+export const hasSingleOption = <T extends { _id: string }>(items: T[]): boolean => items.length === 1;

@@ -200,7 +200,7 @@ export const StudentSubjects = () => {
       />
 
       {subjects.length === 0 ? (
-        <EmptyState title="No subjects enrolled" description="Subjects are assigned based on your class. Contact your school admin if this looks wrong." />
+        <EmptyState title="No subjects enrolled" description="Subjects are assigned based on your year. Contact your college admin if this looks wrong." />
       ) : (
         <div className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {subjects.map((subject) => (

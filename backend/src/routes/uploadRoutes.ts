@@ -9,10 +9,10 @@ const router = Router();
 router.use(protect);
 router.use(tenantGuard);
 
-// Student photo upload (SCHOOL_ADMIN, TEACHER)
+// Student photo upload (COLLEGE_ADMIN, TEACHER)
 router.post(
   "/students/:studentId/photo",
-  authorize("SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
   uploadStudentPhoto,
   uploadStudentPhotoHandler
 );
@@ -20,14 +20,14 @@ router.post(
 // Student document uploads
 router.post(
   "/students/:studentId/documents",
-  authorize("SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
   uploadStudentDocuments,
   uploadDocumentsHandler
 );
 
 router.post(
   "/classroom",
-  authorize("SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "STUDENT"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT"),
   uploadClassroomAttachments,
   uploadClassroomAttachmentsHandler
 );

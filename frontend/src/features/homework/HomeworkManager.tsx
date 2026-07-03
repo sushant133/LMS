@@ -65,6 +65,8 @@ export const HomeworkManager = () => {
 
   const classes = isTeacher ? (teacherScopeQuery.data?.classes ?? []) : [];
   const sections = isTeacher ? (teacherScopeQuery.data?.sections ?? []) : [];
+  const batches = isTeacher ? (teacherScopeQuery.data?.batches ?? []) : [];
+  const years = isTeacher ? (teacherScopeQuery.data?.years ?? []) : [];
   const subjects = isTeacher
     ? (teacherScopeQuery.data?.subjects ?? [])
     : isStudent
@@ -286,6 +288,8 @@ export const HomeworkManager = () => {
         editingPost={editingPost}
         classes={classes}
         sections={sections}
+        batches={batches}
+        years={years}
         subjects={subjects}
         topicSuggestions={topicSuggestions}
         scopedOnly={isTeacher}

@@ -1,49 +1,49 @@
-import { Menu, School, LogOut } from "lucide-react";
+import { Building2, LogOut, Menu } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
 import { useTranslation } from "react-i18next";
-import type { UserRole } from "@nepal-school-erp/shared";
+import { normalizeUserRole, type UserRole } from "@nepal-school-erp/shared";
 import { Button } from "components/ui/button";
 import { Select } from "components/ui/select";
 import { cn } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
-import { getSchoolDisplayName, roleLabelMap } from "lib/auth";
+import { getCollegeDisplayName, roleLabelMap } from "lib/auth";
+import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
 
 const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
-  { labelKey: "dashboard", path: "/dashboard", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
+  { labelKey: "dashboard", path: "/dashboard", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
   { labelKey: "mySubjects", path: "/my-subjects", roles: ["STUDENT"] },
   { labelKey: "parentPortal", path: "/parent-portal", roles: ["PARENT"] },
-  { labelKey: "schools", path: "/schools", roles: ["SUPER_ADMIN"] },
-  { labelKey: "students", path: "/students", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER"] },
-  { labelKey: "teachers", path: "/teachers", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "academics", path: "/academics", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "timetable", path: "/timetable", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER"] },
+  { labelKey: "colleges", path: "/colleges", roles: ["SUPER_ADMIN"] },
+  { labelKey: "students", path: "/students", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"] },
+  { labelKey: "teachers", path: "/teachers", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "academics", path: "/academics", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "timetable", path: "/timetable", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"] },
   { labelKey: "homework", path: "/homework", roles: ["TEACHER"] },
   { labelKey: "homework", path: "/homework-view", roles: ["STUDENT", "PARENT"] },
   { labelKey: "attendance", path: "/attendance", roles: ["TEACHER"] },
-  { labelKey: "attendance", path: "/attendance-view", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
+  { labelKey: "attendance", path: "/attendance-view", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
   { labelKey: "exams", path: "/exams", roles: ["TEACHER", "STUDENT", "PARENT"] },
-  { labelKey: "exams", path: "/exams-view", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "fees", path: "/fees", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "accounting", path: "/accounting", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "ACCOUNTANT"] },
+  { labelKey: "exams", path: "/exams-view", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "fees", path: "/fees", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "accounting", path: "/accounting", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT"] },
   { labelKey: "myFees", path: "/my-fees", roles: ["STUDENT"] },
-  { labelKey: "library", path: "/library", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "LIBRARY_STAFF"] },
+  { labelKey: "library", path: "/library", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "LIBRARY_STAFF"] },
   { labelKey: "myLibrary", path: "/my-library", roles: ["STUDENT", "TEACHER"] },
-  { labelKey: "laboratory", path: "/laboratory", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "LABORATORY_STAFF"] },
-  { labelKey: "transport", path: "/transport", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "hr", path: "/hr", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "parentLinks", path: "/parent-links", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "notifications", path: "/notifications", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
-  { labelKey: "notices", path: "/notices", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
-  { labelKey: "settings", path: "/settings", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] },
-  { labelKey: "reports", path: "/reports", roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"] }
+  { labelKey: "laboratory", path: "/laboratory", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "LABORATORY_STAFF"] },
+  { labelKey: "transport", path: "/transport", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "hr", path: "/hr", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "parentLinks", path: "/parent-links", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "notifications", path: "/notifications", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
+  { labelKey: "notices", path: "/notices", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
+  { labelKey: "settings", path: "/settings", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "reports", path: "/reports", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] }
 ];
 
 export const AppLayout = () => {
   const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
   const { user, logout, availableSchools, activeSchoolId, setActiveSchool } = useAuth();
   const { t } = useTranslation();
 
@@ -71,8 +71,7 @@ export const AppLayout = () => {
     try {
       await logout();
     } finally {
-      resetAppShell();
-      navigate("/login", { replace: true });
+      redirectToLogin();
     }
   };
 
@@ -80,16 +79,17 @@ export const AppLayout = () => {
     return null;
   }
 
-  const superAdminNeedsSchoolSelection = user.role === "SUPER_ADMIN" && !activeSchoolId;
+  const normalizedRole = normalizeUserRole(user.role);
+  const superAdminNeedsCollegeSelection = normalizedRole === "SUPER_ADMIN" && !activeSchoolId;
   const moduleOnlyRoles: UserRole[] = ["LIBRARY_STAFF", "LABORATORY_STAFF", "ACCOUNTANT"];
-  const isModuleOnlyUser = moduleOnlyRoles.includes(user.role);
-  const schoolName = getSchoolDisplayName(availableSchools, user);
+  const isModuleOnlyUser = moduleOnlyRoles.includes(normalizedRole);
+  const collegeName = getCollegeDisplayName(availableSchools, user);
 
   const visibleItems = navItems
-    .filter((item) => item.roles.includes(user.role))
+    .filter((item) => item.roles.includes(normalizedRole))
     .filter((item) => {
       if (isModuleOnlyUser) {
-        if (user.role === "ACCOUNTANT") {
+        if (normalizedRole === "ACCOUNTANT") {
           return item.path === "/accounting" || item.path === "/notifications";
         }
         return item.path === "/library" || item.path === "/laboratory" || item.path === "/notifications";
@@ -97,15 +97,15 @@ export const AppLayout = () => {
       return true;
     })
     .filter((item) => {
-      if (!superAdminNeedsSchoolSelection) {
+      if (!superAdminNeedsCollegeSelection) {
         return true;
       }
 
-      return item.path === "/dashboard" || item.path === "/schools";
+      return item.path === "/dashboard" || item.path === "/colleges";
     })
     .map((item) => ({
       ...item,
-      path: item.path === "/dashboard" ? `/dashboard/${user.role.toLowerCase()}` : item.path
+      path: item.path === "/dashboard" ? `/dashboard/${normalizedRole.toLowerCase()}` : item.path
     }));
 
   return (
@@ -134,7 +134,7 @@ export const AppLayout = () => {
           <div className="shrink-0">
             <div className="flex items-center gap-3">
               <div className="rounded-2xl bg-emerald-500/20 p-3">
-                <School className="h-6 w-6 text-emerald-300" />
+                <Building2 className="h-6 w-6 text-emerald-300" />
               </div>
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-semibold leading-tight">{t("appName")}</h2>
@@ -163,15 +163,15 @@ export const AppLayout = () => {
 
             <div className="mt-4 pt-4">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{roleLabelMap[user.role]}</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{roleLabelMap[normalizedRole]}</p>
                 <p className="mt-2 truncate font-semibold">{user.fullName}</p>
                 <p className="truncate text-sm text-slate-300">{user.email}</p>
                 <p className="mt-2 truncate text-xs text-slate-400">
-                  {user.role === "SUPER_ADMIN"
+                  {normalizedRole === "SUPER_ADMIN"
                     ? activeSchoolId
-                      ? "School context selected"
-                      : "Select a school to manage tenant data"
-                    : schoolName}
+                      ? "College context selected"
+                      : "Select a college to manage tenant data"
+                    : collegeName}
                 </p>
               </div>
             </div>
@@ -193,7 +193,7 @@ export const AppLayout = () => {
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  {user.role === "SUPER_ADMIN" ? (
+                  {normalizedRole === "SUPER_ADMIN" ? (
                     <div className="min-w-0 w-full sm:w-auto sm:min-w-[220px]">
                       <Select
                         value={activeSchoolId ?? ""}
@@ -203,7 +203,7 @@ export const AppLayout = () => {
                           }
                         }}
                       >
-                        <option value="">{availableSchools.length === 0 ? "No schools available" : "Select school context"}</option>
+                        <option value="">{availableSchools.length === 0 ? "No colleges available" : "Select college context"}</option>
                         {availableSchools.map((school) => (
                           <option key={school._id} value={school._id}>
                             {school.name}
@@ -213,13 +213,13 @@ export const AppLayout = () => {
                     </div>
                   ) : (
                     <div className="flex min-w-0 max-w-full items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
-                      <School className="h-4 w-4 shrink-0 text-emerald-700" />
+                      <Building2 className="h-4 w-4 shrink-0 text-emerald-700" />
                       <div className="min-w-0">
-                        <div className="truncate font-semibold leading-tight text-emerald-950" title={schoolName}>
-                          {schoolName}
+                        <div className="truncate font-semibold leading-tight text-emerald-950" title={collegeName}>
+                          {collegeName}
                         </div>
                         <div className="text-[10px] font-medium uppercase tracking-widest text-emerald-700/80">
-                          {roleLabelMap[user.role]}
+                          {roleLabelMap[normalizedRole]}
                         </div>
                       </div>
                     </div>
@@ -235,20 +235,20 @@ export const AppLayout = () => {
 
           <main className="min-w-0 flex-1 overflow-x-clip px-4 py-6 sm:px-6 lg:px-8">
             <div className="mx-auto min-w-0 w-full max-w-[1600px]">
-              {user.role === "SCHOOL_ADMIN" ? (
+              {normalizedRole === "COLLEGE_ADMIN" ? (
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white px-4 py-3 shadow-sm">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="rounded-xl bg-emerald-100 p-2">
-                      <School className="h-5 w-5 text-emerald-700" />
+                      <Building2 className="h-5 w-5 text-emerald-700" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs uppercase tracking-widest text-emerald-600">Managing School</p>
-                      <p className="truncate text-lg font-semibold leading-tight text-emerald-950" title={schoolName}>
-                        {schoolName}
+                      <p className="text-xs uppercase tracking-widest text-emerald-600">Managing College</p>
+                      <p className="truncate text-lg font-semibold leading-tight text-emerald-950" title={collegeName}>
+                        {collegeName}
                       </p>
                     </div>
                   </div>
-                  <div className="text-xs text-emerald-600">All data shown is for this school only</div>
+                  <div className="text-xs text-emerald-600">All data shown is for this college only</div>
                 </div>
               ) : null}
 

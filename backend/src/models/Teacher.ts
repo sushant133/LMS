@@ -22,6 +22,8 @@ const teacherSchema = new Schema(
     subjects: [{ type: Schema.Types.ObjectId, ref: "Subject" }],
     assignedClassIds: [{ type: Schema.Types.ObjectId, ref: "SchoolClass" }],
     assignedSectionIds: [{ type: Schema.Types.ObjectId, ref: "Section" }],
+    assignedBatchIds: [{ type: Schema.Types.ObjectId, ref: "Batch" }],
+    assignedYearIds: [{ type: Schema.Types.ObjectId, ref: "Year" }],
     basicSalaryNpr: { type: Number, default: 0 }
   },
   { timestamps: true }

@@ -8,8 +8,8 @@ const router = Router();
 router.use(protect, tenantGuard);
 router.get("/", listTeachers);
 router.get("/:id", getTeacherById);
-router.post("/", authorize("SCHOOL_ADMIN"), createTeacher);
-router.put("/:id", authorize("SCHOOL_ADMIN"), updateTeacher);
-router.delete("/:id", authorize("SCHOOL_ADMIN"), deleteTeacher);
+router.post("/", authorize("COLLEGE_ADMIN"), createTeacher);
+router.put("/:id", authorize("COLLEGE_ADMIN"), updateTeacher);
+router.delete("/:id", authorize("COLLEGE_ADMIN"), deleteTeacher);
 
 export default router;

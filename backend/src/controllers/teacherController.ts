@@ -10,7 +10,11 @@ import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import { validateCollegeTeacherScope } from "../utils/academicValidation.js";
+import { getInstitutionType, isCollege } from "../utils/institution.js";
+import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { sendSuccess } from "../utils/response.js";
+import { updatePortalUser } from "../utils/userPassword.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import {
   createSession,
@@ -33,15 +37,15 @@ const validateTeacherAssignments = async (
   ]);
 
   if (subjectsCount !== subjectIds.length) {
-    throw new ApiError(400, "One or more selected subjects are invalid for this school");
+    throw new ApiError(400, "One or more selected subjects are invalid for this college");
   }
 
   if (classesCount !== classIds.length) {
-    throw new ApiError(400, "One or more selected classes are invalid for this school");
+    throw new ApiError(400, "One or more selected classes are invalid for this college");
   }
 
   if (sections.length !== sectionIds.length) {
-    throw new ApiError(400, "One or more selected sections are invalid for this school");
+    throw new ApiError(400, "One or more selected sections are invalid for this college");
   }
 
   const classIdSet = new Set(classIds);
@@ -84,6 +88,72 @@ const removeTeacherFromSubjects = async (
   await Subject.updateMany(filter, { $pull: { teacherIds: teacherId } }, getSessionOption(session));
 };
 
+const validateTeacherScope = async (
+  req: Request,
+  schoolId: mongoose.Types.ObjectId,
+  payload: {
+    subjects: string[];
+    assignedClassIds: string[];
+    assignedSectionIds: string[];
+    assignedBatchIds: string[];
+    assignedYearIds: string[];
+  }
+): Promise<void> => {
+  const institutionType = await getInstitutionType(req);
+
+  if (isCollege(institutionType)) {
+    if (payload.assignedClassIds.length > 0 || payload.assignedSectionIds.length > 0) {
+      throw new ApiError(400, "Class and section assignments are not used for college institutions");
+    }
+
+    await validateTeacherAssignments(schoolId, payload.subjects, [], []);
+    await validateCollegeTeacherScope(schoolId, payload.assignedBatchIds, payload.assignedYearIds);
+    return;
+  }
+
+  if (payload.assignedBatchIds.length > 0 || payload.assignedYearIds.length > 0) {
+    throw new ApiError(400, "Batch and year assignments are not used for class & section programs");
+  }
+
+  await validateTeacherAssignments(schoolId, payload.subjects, payload.assignedClassIds, payload.assignedSectionIds);
+};
+
+const buildTeacherAssignmentFields = (
+  institutionType: Awaited<ReturnType<typeof getInstitutionType>>,
+  payload: {
+    subjects: string[];
+    assignedClassIds: string[];
+    assignedSectionIds: string[];
+    assignedBatchIds: string[];
+    assignedYearIds: string[];
+    teacherCode: string;
+    qualification: string;
+    joinedDateBs: string;
+    address: (typeof teacherSchema)["_output"]["address"];
+    basicSalaryNpr: number;
+  }
+) => ({
+  teacherCode: payload.teacherCode,
+  qualification: payload.qualification,
+  joinedDateBs: payload.joinedDateBs,
+  address: payload.address,
+  subjects: payload.subjects,
+  basicSalaryNpr: payload.basicSalaryNpr,
+  ...(isCollege(institutionType)
+    ? {
+        assignedBatchIds: payload.assignedBatchIds,
+        assignedYearIds: payload.assignedYearIds,
+        assignedClassIds: [],
+        assignedSectionIds: []
+      }
+    : {
+        assignedClassIds: payload.assignedClassIds,
+        assignedSectionIds: payload.assignedSectionIds,
+        assignedBatchIds: [],
+        assignedYearIds: []
+      })
+});
+
 export const listTeachers = asyncHandler(async (req: Request, res: Response) => {
   const teachers = await Teacher.find(withTenantScope(req)).populate("user", "-password").sort({ createdAt: -1 });
   return sendSuccess(res, "Teachers fetched", teachers);
@@ -104,14 +174,17 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
   ensureValidBsDate(payload.joinedDateBs);
 
   const schoolId = tenantObjectId(req);
-  await validateTeacherAssignments(schoolId, payload.subjects, payload.assignedClassIds, payload.assignedSectionIds);
+  const institutionType = await getInstitutionType(req);
+  await validateTeacherScope(req, schoolId, payload);
 
-  const existingUser = await User.findOne({ email: payload.email });
+  const loginEmail = payload.email;
+  const existingUser = await User.findOne({ email: loginEmail });
   if (existingUser) {
     throw new ApiError(409, "A user with this email already exists");
   }
 
   const session = await createSession();
+  const portalPassword = payload.password?.trim() || env.DEFAULT_USER_PASSWORD;
 
   try {
     const createdUsers = await User.create(
@@ -119,11 +192,11 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
         {
           schoolId,
           fullName: payload.fullName,
-          email: payload.email,
+          email: loginEmail,
           phone: payload.phone,
-          password: env.DEFAULT_USER_PASSWORD,
+          password: portalPassword,
           role: "TEACHER",
-          mustChangePassword: true
+          mustChangePassword: !payload.password?.trim()
         }
       ],
       getSessionOption(session)
@@ -135,14 +208,7 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
         {
           schoolId,
           user: user._id,
-          teacherCode: payload.teacherCode,
-          qualification: payload.qualification,
-          joinedDateBs: payload.joinedDateBs,
-          address: payload.address,
-          subjects: payload.subjects,
-          assignedClassIds: payload.assignedClassIds,
-          assignedSectionIds: payload.assignedSectionIds,
-          basicSalaryNpr: payload.basicSalaryNpr
+          ...buildTeacherAssignmentFields(institutionType, payload)
         }
       ],
       getSessionOption(session)
@@ -159,12 +225,14 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
       "Teacher created successfully",
       {
         teacher,
-        defaultPassword: env.DEFAULT_USER_PASSWORD
+        loginEmail,
+        defaultPassword: portalPassword
       },
       201
     );
   } catch (error) {
     await abortTransaction(session);
+    throwIfDuplicateKey(error);
     throw error;
   } finally {
     await endSession(session);
@@ -176,28 +244,37 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
   ensureValidBsDate(payload.joinedDateBs);
 
   const schoolId = tenantObjectId(req);
-  await validateTeacherAssignments(schoolId, payload.subjects, payload.assignedClassIds, payload.assignedSectionIds);
+  const institutionType = await getInstitutionType(req);
+  await validateTeacherScope(req, schoolId, payload);
 
   const teacher = await Teacher.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!teacher) {
     throw new ApiError(404, "Teacher not found");
   }
 
-  await User.findOneAndUpdate(
-    { _id: teacher.user, schoolId },
-    {
-      fullName: payload.fullName,
-      email: payload.email,
-      phone: payload.phone
+  const loginEmail = payload.email;
+  const currentUser = await User.findById(teacher.user).select("email").lean();
+
+  if (loginEmail !== currentUser?.email) {
+    const duplicate = await User.findOne({ email: loginEmail, _id: { $ne: teacher.user } });
+    if (duplicate) {
+      throw new ApiError(409, "A user with this login ID already exists");
     }
-  );
+  }
+
+  await updatePortalUser(teacher.user, {
+    fullName: payload.fullName,
+    email: loginEmail,
+    phone: payload.phone,
+    password: payload.password
+  });
 
   const previousSubjectIds = (teacher.subjects ?? []).map((id) => id.toString());
   const nextSubjectIds = payload.subjects;
   const addedSubjectIds = nextSubjectIds.filter((id) => !previousSubjectIds.includes(id));
   const removedSubjectIds = previousSubjectIds.filter((id) => !nextSubjectIds.includes(id));
 
-  Object.assign(teacher, payload);
+  Object.assign(teacher, buildTeacherAssignmentFields(institutionType, payload));
   await teacher.save();
 
   await Promise.all([

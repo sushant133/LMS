@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { ClassRecord, SectionRecord, SubjectRecord, TeacherInput, TeacherRecord } from "@nepal-school-erp/shared";
+import type { BatchRecord, ClassRecord, SectionRecord, SubjectRecord, TeacherInput, TeacherRecord, YearRecord } from "@nepal-school-erp/shared";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
@@ -8,6 +8,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
+import { useIsCollege } from "hooks/useInstitutionType";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
@@ -24,10 +25,13 @@ const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   subjects: teacher.subjects,
   assignedClassIds: teacher.assignedClassIds,
   assignedSectionIds: teacher.assignedSectionIds,
+  assignedBatchIds: teacher.assignedBatchIds ?? [],
+  assignedYearIds: teacher.assignedYearIds ?? [],
   basicSalaryNpr: teacher.basicSalaryNpr
 });
 
 export const TeachersManager = () => {
+  const isCollege = useIsCollege();
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
@@ -35,11 +39,23 @@ export const TeachersManager = () => {
   });
   const classesQuery = useQuery({
     queryKey: ["classes"],
-    queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes"))
+    queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes")),
+    enabled: !isCollege
   });
   const sectionsQuery = useQuery({
     queryKey: ["sections"],
-    queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections"))
+    queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections")),
+    enabled: !isCollege
+  });
+  const batchesQuery = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
+    enabled: isCollege
+  });
+  const yearsQuery = useQuery({
+    queryKey: ["years"],
+    queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
+    enabled: isCollege
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
@@ -48,9 +64,17 @@ export const TeachersManager = () => {
 
   const teacherMutation = useMutation({
     mutationFn: async (payload: TeacherInput) =>
-      editing ? unwrap<TeacherRecord>(api.put(`/teachers/${editing._id}`, payload)) : unwrap<TeacherRecord>(api.post("/teachers", payload)),
-    onSuccess: async () => {
-      toast.success(editing ? "Teacher updated" : "Teacher created");
+      editing
+        ? unwrap<TeacherRecord>(api.put(`/teachers/${editing._id}`, payload))
+        : unwrap<{ teacher: TeacherRecord; loginEmail: string; defaultPassword: string }>(api.post("/teachers", payload)),
+    onSuccess: async (data) => {
+      if ("loginEmail" in data) {
+        toast.success("Teacher created with portal login", {
+          description: `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
+        });
+      } else {
+        toast.success("Teacher updated");
+      }
       setEditing(null);
       await queryClient.invalidateQueries({ queryKey: ["teachers"] });
     },
@@ -71,7 +95,11 @@ export const TeachersManager = () => {
   const classMap = useMemo(() => new Map((classesQuery.data ?? []).map((item) => [item._id, item.name])), [classesQuery.data]);
   const subjectMap = useMemo(() => new Map((subjectsQuery.data ?? []).map((item) => [item._id, item.name])), [subjectsQuery.data]);
 
-  if (teachersQuery.isLoading || classesQuery.isLoading || sectionsQuery.isLoading || subjectsQuery.isLoading) {
+  if (
+    teachersQuery.isLoading ||
+    subjectsQuery.isLoading ||
+    (isCollege ? batchesQuery.isLoading || yearsQuery.isLoading : classesQuery.isLoading || sectionsQuery.isLoading)
+  ) {
     return <LoadingState />;
   }
 
@@ -88,9 +116,12 @@ export const TeachersManager = () => {
         <CardContent>
           <TeacherForm
             key={editing?._id ?? "new-teacher"}
+            isEditing={Boolean(editing)}
             initialValue={editing ? mapTeacherToInput(editing) : undefined}
             classes={classesQuery.data ?? []}
             sections={sectionsQuery.data ?? []}
+            batches={batchesQuery.data ?? []}
+            years={yearsQuery.data ?? []}
             subjects={subjectsQuery.data ?? []}
             submitting={teacherMutation.isPending}
             onCancel={editing ? () => setEditing(null) : undefined}

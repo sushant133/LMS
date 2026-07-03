@@ -26,7 +26,7 @@ export const StudentNoticeBoard = ({ notices }: StudentNoticeBoardProps) => {
               <div className="min-w-0 flex-1">
                 <CardTitle className="text-lg text-slate-900">{notice.title}</CardTitle>
                 <p className="mt-1 text-sm text-slate-500">
-                  Posted by {notice.authorName ?? "School"} · {notice.publishDateBs}
+                  Posted by {notice.authorName ?? "College"} · {notice.publishDateBs}
                   {notice.subjectName ? ` · ${notice.subjectName}` : ""}
                 </p>
               </div>

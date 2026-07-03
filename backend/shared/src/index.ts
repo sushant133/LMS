@@ -1,4 +1,5 @@
 export * from "./demo-credentials.js";
+export * from "./examCalculation.js";
 export * from "./accounting-schemas.js";
 export * from "./accounting-types.js";
 export * from "./address-utils.js";

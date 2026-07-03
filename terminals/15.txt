@@ -3,7 +3,7 @@ pid: 3896
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "npm run dev:client --prefix \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\""
 started_at: 2026-07-03T08:18:42.199Z
-running_for_ms: 1370004  
+running_for_ms: 19774999 
 ---
 
 > @nepal-school-erp/frontend@1.0.0 dev:client

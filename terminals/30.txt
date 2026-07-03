@@ -1,0 +1,49 @@
+---
+pid: 33452
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npx tsx src/server.ts"
+started_at: 2026-07-03T15:42:20.012Z
+running_for_ms: 1095000  
+---
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+POST /api/auth/login 200 483.480 ms - 1680
+POST /api/auth/login 200 454.614 ms - 1657
+POST /api/auth/login 200 452.068 ms - 1652
+GET /api/exams 200 104.976 ms - 819
+GET /api/academics/batches 200 52.714 ms - 501
+GET /api/academics/years 200 53.879 ms - 1491
+GET /api/academics/subjects 200 55.522 ms - 2613
+POST /api/exams 201 84.872 ms - 547
+POST /api/exams/6a47d86c21ca6468aaabb94d/routines 201 207.047 ms - 469
+POST /api/exams/6a47d86c21ca6468aaabb94d/routines 409 103.054 ms - 84
+POST /api/exams/6a47d86c21ca6468aaabb94d/routines/publish 500 333.857 ms - 51
+Error: Notification validation failed: type: `EXAM` is not a valid enum value for path `type`.
+    at ValidationError.inspect (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\error\validation.js:52:26)
+    at formatValue (node:internal/util/inspect:897:19)
+    at inspect (node:internal/util/inspect:409:10)
+    at formatWithOptionsInternal (node:internal/util/inspect:2645:40)
+    at formatWithOptions (node:internal/util/inspect:2507:10)
+    at console.value (node:internal/console/constructor:377:14)
+    at console.error (node:internal/console/constructor:444:61)
+    at errorHandler (C:\Users\Sushant\Documents\New LMS Project\backend\src\middleware\errorHandler.ts:25:11)
+    at Layer.handleError (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\router\lib\layer.js:116:17)
+    at trimPrefix (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\router\index.js:340:13) {
+  errors: {
+    type: ValidatorError: `EXAM` is not a valid enum value for path `type`.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'enum',
+      path: 'type',
+      value: 'EXAM',
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    }
+  },
+  _message: 'Notification validation failed'
+}
+GET /api/exams 200 167.413 ms - 1308

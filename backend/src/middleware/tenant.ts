@@ -16,12 +16,12 @@ export const tenantGuard = async (req: Request, _res: Response, next: NextFuncti
       (typeof req.body?.schoolId === "string" ? req.body.schoolId : undefined);
 
     if (!activeSchoolId) {
-      return next(new ApiError(400, "Select a school context to continue"));
+      return next(new ApiError(400, "Select a college context to continue"));
     }
 
     const school = await School.findById(activeSchoolId).select("_id isActive");
     if (!school || !school.isActive) {
-      return next(new ApiError(404, "Selected school context is invalid"));
+      return next(new ApiError(404, "Selected college context is invalid"));
     }
 
     req.tenantSchoolId = school._id.toString();
@@ -29,7 +29,7 @@ export const tenantGuard = async (req: Request, _res: Response, next: NextFuncti
   }
 
   if (!req.user.schoolId) {
-    return next(new ApiError(400, "No school is assigned to this user"));
+    return next(new ApiError(400, "No college is assigned to this user"));
   }
 
   req.tenantSchoolId = req.user.schoolId;

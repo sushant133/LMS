@@ -7,7 +7,18 @@ const examSchema = new Schema(
     academicYearBs: { type: String, required: true },
     startDateBs: { type: String, required: true },
     endDateBs: { type: String, required: true },
-    classIds: [{ type: Schema.Types.ObjectId, ref: "SchoolClass" }]
+    resultPublishDateBs: { type: String },
+    status: {
+      type: String,
+      enum: ["DRAFT", "SCHEDULED", "ONGOING", "COMPLETED", "PUBLISHED"],
+      default: "DRAFT"
+    },
+    routinePublished: { type: Boolean, default: false },
+    resultsPublished: { type: Boolean, default: false },
+    resultsLocked: { type: Boolean, default: false },
+    classIds: [{ type: Schema.Types.ObjectId, ref: "SchoolClass" }],
+    batchIds: [{ type: Schema.Types.ObjectId, ref: "Batch" }],
+    yearIds: [{ type: Schema.Types.ObjectId, ref: "Year" }]
   },
   { timestamps: true }
 );

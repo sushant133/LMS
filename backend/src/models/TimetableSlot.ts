@@ -3,8 +3,10 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 const timetableSlotSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
-    classId: { type: Schema.Types.ObjectId, ref: "SchoolClass", required: true },
-    sectionId: { type: Schema.Types.ObjectId, ref: "Section", required: true },
+    classId: { type: Schema.Types.ObjectId, ref: "SchoolClass" },
+    sectionId: { type: Schema.Types.ObjectId, ref: "Section" },
+    batchId: { type: Schema.Types.ObjectId, ref: "Batch" },
+    yearId: { type: Schema.Types.ObjectId, ref: "Year" },
     dayOfWeek: { type: Number, required: true, min: 0, max: 6 },
     periodNumber: { type: Number, required: true, min: 1 },
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject", required: true },
@@ -17,7 +19,14 @@ const timetableSlotSchema = new Schema(
   { timestamps: true }
 );
 
-timetableSlotSchema.index({ schoolId: 1, classId: 1, sectionId: 1, dayOfWeek: 1, periodNumber: 1, academicYearBs: 1 }, { unique: true });
+timetableSlotSchema.index(
+  { schoolId: 1, classId: 1, sectionId: 1, dayOfWeek: 1, periodNumber: 1, academicYearBs: 1 },
+  { unique: true, partialFilterExpression: { classId: { $exists: true }, sectionId: { $exists: true } } }
+);
+timetableSlotSchema.index(
+  { schoolId: 1, batchId: 1, yearId: 1, dayOfWeek: 1, periodNumber: 1, academicYearBs: 1 },
+  { unique: true, partialFilterExpression: { batchId: { $exists: true }, yearId: { $exists: true } } }
+);
 
 export type TimetableSlotDocument = InferSchemaType<typeof timetableSlotSchema>;
 export const TimetableSlot = mongoose.model("TimetableSlot", timetableSlotSchema);

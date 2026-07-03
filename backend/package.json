@@ -3,21 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "dist/server.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build:shared": "npm install --include=dev --prefix ./shared && npm run build --prefix ./shared",
+    "build:shared": "npm run build --prefix ./shared",
     "dev": "npm run build:shared && tsx watch src/server.ts",
     "build": "npm run build:shared && tsc -p tsconfig.json",
-    "postinstall": "npm run build",
     "start": "node dist/server.js",
     "seed:superadmin": "npm run build:shared && tsx src/scripts/seedSuperAdmin.ts",
     "seed:demo": "npm run build:shared && tsx src/scripts/seedDemoSchool.ts",
-    "typecheck": "npm run build:shared && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
-    "lint": "npm run build:shared && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
-    "clean": "node -e \"import('node:fs').then(fs=>fs.rmSync('dist',{recursive:true,force:true}))\""
+    "typecheck": "npm run build:shared && tsc -p tsconfig.json --noEmit",
+    "lint": "npm run build:shared && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@nepal-school-erp/shared": "file:./shared",
@@ -36,7 +33,6 @@
     "zod": "4.1.5"
   },
   "devDependencies": {
-    "axios": "1.12.2",
     "@types/bcryptjs": "2.4.6",
     "@types/cookie-parser": "1.4.9",
     "@types/cors": "2.8.19",

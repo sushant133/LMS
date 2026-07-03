@@ -20,6 +20,7 @@ const schoolSchema = new Schema(
     phone: { type: String, required: true, trim: true },
     principalName: { type: String, required: true, trim: true },
     academicYearBs: { type: String, required: true, trim: true },
+    institutionType: { type: String, enum: ["SCHOOL", "COLLEGE"], default: "SCHOOL" },
     address: { type: addressSchema, required: true },
     isActive: { type: Boolean, default: true }
   },

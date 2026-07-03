@@ -79,12 +79,6 @@ export const uploadStudentDocuments = multer({
   fileFilter
 }).array("documents", 6); // max 6 documents at once
 
-export const uploadGeneral = multer({
-  storage: createTenantStorage("general"),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter
-}).single("file");
-
 export const uploadClassroomAttachments = multer({
   storage: createTenantStorage("classroom"),
   limits: { fileSize: 25 * 1024 * 1024 },

@@ -63,11 +63,11 @@ export const collectFee = asyncHandler(async (req: Request, res: Response) => {
   ]);
 
   if (!student) {
-    throw new ApiError(404, "Student not found in this school");
+    throw new ApiError(404, "Student not found in this college");
   }
 
   if (!structure) {
-    throw new ApiError(404, "Fee structure not found in this school");
+    throw new ApiError(404, "Fee structure not found in this college");
   }
 
   const previousDueNpr = student.feesDueNpr ?? 0;

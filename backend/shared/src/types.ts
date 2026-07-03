@@ -1,6 +1,6 @@
 export type UserRole =
   | "SUPER_ADMIN"
-  | "SCHOOL_ADMIN"
+  | "COLLEGE_ADMIN"
   | "TEACHER"
   | "STUDENT"
   | "PARENT"
@@ -67,6 +67,8 @@ export type DocumentType =
 
 export type GradeSymbol = "A+" | "A" | "B+" | "B" | "C+" | "C" | "D" | "E";
 
+export type InstitutionType = "SCHOOL" | "COLLEGE";
+
 export type LocalLevelType = "Metropolitan City" | "Sub Metropolitan City" | "Municipality" | "Rural Municipality";
 
 export interface NepalAddressMunicipality {
@@ -104,6 +106,7 @@ export interface SchoolRecord {
   phone: string;
   principalName: string;
   academicYearBs: string;
+  institutionType: InstitutionType;
   address: AddressSelection;
   isActive: boolean;
   createdAt?: string;
@@ -130,8 +133,10 @@ export interface StudentRecord {
   user: UserProfile;
   admissionNumber: string;
   rollNumber: number;
-  classId: string;
-  sectionId: string;
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
   admissionDateBs: string;
   dateOfBirthBs: string;
   gender: string;
@@ -172,6 +177,8 @@ export interface TeacherRecord {
   subjects: string[];
   assignedClassIds: string[];
   assignedSectionIds: string[];
+  assignedBatchIds: string[];
+  assignedYearIds: string[];
   basicSalaryNpr: number;
   createdAt?: string;
   updatedAt?: string;
@@ -201,12 +208,34 @@ export interface SectionRecord {
   updatedAt?: string;
 }
 
+export interface BatchRecord {
+  _id: string;
+  schoolId: string;
+  name: string;
+  academicYearBs: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface YearRecord {
+  _id: string;
+  schoolId: string;
+  batchId: string;
+  name: string;
+  level: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface SubjectRecord {
   _id: string;
   schoolId: string;
   name: string;
   code: string;
   classIds: string[];
+  yearIds: string[];
   teacherIds: string[];
   fullMarks: number;
   passMarks: number;
@@ -222,8 +251,10 @@ export interface AttendanceEntry {
 export interface AttendanceRecord {
   _id: string;
   schoolId: string;
-  classId: string;
-  sectionId: string;
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
   subjectId: string;
   teacherId: string;
   dateBs: string;
@@ -233,6 +264,12 @@ export interface AttendanceRecord {
   updatedAt?: string;
 }
 
+export type ExamStatus = "DRAFT" | "SCHEDULED" | "ONGOING" | "COMPLETED" | "PUBLISHED";
+
+export type ExamAttendanceStatus = "PRESENT" | "ABSENT" | "EXEMPT";
+
+export type ExamPassFailStatus = "PASS" | "FAIL";
+
 export interface ExamRecord {
   _id: string;
   schoolId: string;
@@ -240,30 +277,87 @@ export interface ExamRecord {
   academicYearBs: string;
   startDateBs: string;
   endDateBs: string;
+  resultPublishDateBs?: string;
+  status: ExamStatus;
+  routinePublished: boolean;
+  resultsPublished: boolean;
+  resultsLocked: boolean;
   classIds: string[];
+  batchIds: string[];
+  yearIds: string[];
   createdAt?: string;
   updatedAt?: string;
 }
 
-export interface ResultSubjectMark {
+export interface ExamRoutineRecord {
+  _id: string;
+  schoolId: string;
+  examId: string;
   subjectId: string;
-  obtainedMarks: number;
+  examDateBs: string;
+  day: string;
+  startTime: string;
+  endTime: string;
+  durationMinutes: number;
+  examHall?: string;
+  invigilator?: string;
+  remarks?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
+
+export interface ResultSubjectMarkInput {
+  subjectId: string;
+  fullMarks: number;
+  passMarks: number;
+  theoryMarks?: number;
+  practicalMarks?: number;
+  internalMarks?: number;
+  obtainedMarks: number;
+  attendanceStatus?: ExamAttendanceStatus;
+  teacherRemarks?: string;
+  percentage?: number;
+  grade?: GradeSymbol;
+  passFail?: ExamPassFailStatus;
+}
+
+export interface ResultSubjectMark extends ResultSubjectMarkInput {}
 
 export interface ResultRecord {
   _id: string;
   schoolId: string;
   examId: string;
   studentId: string;
-  classId: string;
-  sectionId: string;
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
   marks: ResultSubjectMark[];
   percentage: number;
   gpa: number;
   grade: GradeSymbol;
+  passFailStatus: ExamPassFailStatus;
   publishedAtBs?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ExamAnalyticsSummary {
+  examId: string;
+  totalStudents: number;
+  resultsEntered: number;
+  passCount: number;
+  failCount: number;
+  averagePercentage: number;
+  topPerformers: Array<{ studentId: string; studentName: string; percentage: number; grade: GradeSymbol }>;
+  lowestPerformers: Array<{ studentId: string; studentName: string; percentage: number; grade: GradeSymbol }>;
+  subjectPerformance: Array<{
+    subjectId: string;
+    subjectName: string;
+    averagePercentage: number;
+    passCount: number;
+    failCount: number;
+  }>;
 }
 
 export interface FeeStructureRecord {

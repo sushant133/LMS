@@ -10,24 +10,24 @@ export const demoCredentials = {
   schoolAdmin: {
     email: "admin@demoerp.nepal-school.com",
     password: DEMO_PASSWORD,
-    role: "SCHOOL_ADMIN"
+    role: "COLLEGE_ADMIN"
   },
   teachers: [
-    { email: "ram.sharma@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Ram Sharma", subjects: "Math & Science (Class 9-A)" },
-    { email: "sita.gurung@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Sita Gurung", subjects: "English (Class 9-A & 10-A)" },
-    { email: "hari.thapa@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Hari Thapa", subjects: "Math, Science & Nepali (Class 10-A)" },
-    { email: "gita.rai@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Gita Rai", subjects: "Nepali & Social (Class 9-A & 10-A)" }
+    { email: "ram.sharma@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Ram Sharma", subjects: "Anatomy & Physiology (Batch 2082, 1st Year)" },
+    { email: "sita.gurung@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Sita Gurung", subjects: "English (Batch 2082, 1st & 2nd Year)" },
+    { email: "hari.thapa@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Hari Thapa", subjects: "Pharmacology & Medical Surgery (Batch 2082, 2nd Year)" },
+    { email: "gita.rai@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Gita Rai", subjects: "Community Health & Microbiology (Batch 2082)" }
   ],
   students: [
-    { email: "student01@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Aarav Sharma", class: "Class 9", section: "A", roll: 1 },
-    { email: "student02@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Priya Karki", class: "Class 9", section: "A", roll: 2 },
-    { email: "student03@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Rohan Thapa", class: "Class 9", section: "A", roll: 3 },
-    { email: "student04@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Sneha Gurung", class: "Class 9", section: "A", roll: 4 },
-    { email: "student05@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Niraj Adhikari", class: "Class 9", section: "A", roll: 5 },
-    { email: "student06@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Kritika Rai", class: "Class 10", section: "A", roll: 1 },
-    { email: "student07@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Bikash Tamang", class: "Class 10", section: "A", roll: 2 },
-    { email: "student08@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Anjali Shrestha", class: "Class 10", section: "A", roll: 3 },
-    { email: "student09@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Suman Magar", class: "Class 10", section: "A", roll: 4 }
+    { email: "student01@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Aarav Sharma", batch: "Batch 2082", year: "1st Year", roll: 1 },
+    { email: "student02@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Priya Karki", batch: "Batch 2082", year: "1st Year", roll: 2 },
+    { email: "student03@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Rohan Thapa", batch: "Batch 2082", year: "1st Year", roll: 3 },
+    { email: "student04@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Sneha Gurung", batch: "Batch 2082", year: "1st Year", roll: 4 },
+    { email: "student05@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Niraj Adhikari", batch: "Batch 2082", year: "1st Year", roll: 5 },
+    { email: "student06@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Kritika Rai", batch: "Batch 2082", year: "2nd Year", roll: 1 },
+    { email: "student07@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Bikash Tamang", batch: "Batch 2082", year: "2nd Year", roll: 2 },
+    { email: "student08@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Anjali Shrestha", batch: "Batch 2082", year: "2nd Year", roll: 3 },
+    { email: "student09@demoerp.nepal-school.com", password: DEMO_PASSWORD, name: "Suman Magar", batch: "Batch 2082", year: "2nd Year", roll: 4 }
   ],
   parent: {
     email: "parent.sharma@demoerp.nepal-school.com",

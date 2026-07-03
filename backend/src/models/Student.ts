@@ -18,8 +18,10 @@ const studentSchema = new Schema(
     user: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
     admissionNumber: { type: String, required: true, trim: true },
     rollNumber: { type: Number, required: true },
-    classId: { type: Schema.Types.ObjectId, ref: "SchoolClass", required: true },
-    sectionId: { type: Schema.Types.ObjectId, ref: "Section", required: true },
+    classId: { type: Schema.Types.ObjectId, ref: "SchoolClass" },
+    sectionId: { type: Schema.Types.ObjectId, ref: "Section" },
+    batchId: { type: Schema.Types.ObjectId, ref: "Batch" },
+    yearId: { type: Schema.Types.ObjectId, ref: "Year" },
     admissionDateBs: { type: String, required: true },
     dateOfBirthBs: { type: String, required: true },
     gender: { type: String, required: true },
@@ -41,7 +43,14 @@ const studentSchema = new Schema(
 );
 
 studentSchema.index({ schoolId: 1, admissionNumber: 1 }, { unique: true });
-studentSchema.index({ schoolId: 1, rollNumber: 1, classId: 1, sectionId: 1 }, { unique: true });
+studentSchema.index(
+  { schoolId: 1, rollNumber: 1, classId: 1, sectionId: 1 },
+  { unique: true, partialFilterExpression: { classId: { $exists: true }, sectionId: { $exists: true } } }
+);
+studentSchema.index(
+  { schoolId: 1, rollNumber: 1, batchId: 1, yearId: 1 },
+  { unique: true, partialFilterExpression: { batchId: { $exists: true }, yearId: { $exists: true } } }
+);
 
 export type StudentDocument = InferSchemaType<typeof studentSchema>;
 export const Student = mongoose.model("Student", studentSchema);

@@ -1,0 +1,95 @@
+---
+pid: 30388
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run seed:reset"
+started_at: 2026-07-03T14:33:22.125Z
+running_for_ms: 5220003  
+---
+
+> @nepal-school-erp/backend@1.0.0 seed:reset
+> npm run build:shared && tsx src/scripts/resetAndSeed.ts
+
+
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
+
+
+up to date, audited 3 packages in 898ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Dropping entire database...
+Database cleared.
+
+Super admin created: superadmin@nepal-school.com
+Demo college created: Public Himal Institute of Technology (DEMOERP)
+
+========== FRESH DEMO CREDENTIALS ==========
+
+Super Admin
+  Email:    superadmin@nepal-school.com
+  Password: Admin@123456
+
+College Admin — Public Himal Institute of Technology (DEMOERP)
+  Email:    admin@demoerp.nepal-school.com
+  Password: Demo@123456
+
+Teachers
+  Ram Sharma — Anatomy & Physiology (Batch 2082, 1st Year)
+    Email: ram.sharma@demoerp.nepal-school.com  Password: Demo@123456
+  Sita Gurung — English (Batch 2082, 1st & 2nd Year)
+    Email: sita.gurung@demoerp.nepal-school.com  Password: Demo@123456
+  Hari Thapa — Pharmacology & Medical Surgery (Batch 2082, 2nd Year)
+    Email: hari.thapa@demoerp.nepal-school.com  Password: Demo@123456
+  Gita Rai — Community Health & Microbiology (Batch 2082)
+    Email: gita.rai@demoerp.nepal-school.com  Password: Demo@123456
+
+Students
+  Aarav Sharma (Batch 2082, 1st Year, Roll 1)
+    Email: student01@demoerp.nepal-school.com  Password: Demo@123456
+  Priya Karki (Batch 2082, 1st Year, Roll 2)
+    Email: student02@demoerp.nepal-school.com  Password: Demo@123456
+  Rohan Thapa (Batch 2082, 1st Year, Roll 3)
+    Email: student03@demoerp.nepal-school.com  Password: Demo@123456
+  Sneha Gurung (Batch 2082, 1st Year, Roll 4)
+    Email: student04@demoerp.nepal-school.com  Password: Demo@123456
+  Niraj Adhikari (Batch 2082, 1st Year, Roll 5)
+    Email: student05@demoerp.nepal-school.com  Password: Demo@123456
+  Kritika Rai (Batch 2082, 2nd Year, Roll 1)
+    Email: student06@demoerp.nepal-school.com  Password: Demo@123456
+  Bikash Tamang (Batch 2082, 2nd Year, Roll 2)
+    Email: student07@demoerp.nepal-school.com  Password: Demo@123456
+  Anjali Shrestha (Batch 2082, 2nd Year, Roll 3)
+    Email: student08@demoerp.nepal-school.com  Password: Demo@123456
+  Suman Magar (Batch 2082, 2nd Year, Roll 4)
+    Email: student09@demoerp.nepal-school.com  Password: Demo@123456
+
+Parent
+  Email:    parent.sharma@demoerp.nepal-school.com
+  Password: Demo@123456
+  Linked:   Aarav Sharma (student01)
+
+Library Staff
+  Maya Poudel
+  Email:    maya.poudel@demoerp.nepal-school.com
+  Password: Demo@123456
+
+Laboratory Staff
+  Binod Shrestha
+  Email:    binod.shrestha@demoerp.nepal-school.com
+  Password: Demo@123456
+
+Accountant
+  Demo Accountant (ACC001)
+  Email:    accountant@demo.school
+  Password: 12345678
+
+==============================================
+

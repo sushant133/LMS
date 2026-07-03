@@ -15,7 +15,7 @@ export default defineConfig({
       lib: path.resolve(__dirname, "./src/lib"),
       pages: path.resolve(__dirname, "./src/pages")
     },
-    extensions: [".ts", ".tsx", ".js", ".jsx", ".json"]
+    extensions: [".tsx", ".ts", ".jsx", ".js", ".json"]
   },
   server: {
     port: 5173,

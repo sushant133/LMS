@@ -12,11 +12,11 @@ export const ReportsPage = () => {
   const { user, activeSchoolId } = useAuth();
   const [loading, setLoading] = useState<string | null>(null);
 
-  const canExport = user?.role === "SUPER_ADMIN" || user?.role === "SCHOOL_ADMIN";
+  const canExport = user?.role === "SUPER_ADMIN" || user?.role === "COLLEGE_ADMIN";
 
   const downloadExport = async (endpoint: string, label: string) => {
     if (!activeSchoolId && user?.role !== "SUPER_ADMIN") {
-      toast.error("Please select a school context first");
+      toast.error("Please select a college context first");
       return;
     }
 
@@ -57,7 +57,7 @@ export const ReportsPage = () => {
         <PageHeader title={t("reports") || "Reports & IEMIS Compliance"} />
         <Card>
           <CardContent className="py-10 text-center text-slate-600">
-            This section is only available to School Administrators and Super Admins.
+            This section is only available to College Administrators and Super Admins.
           </CardContent>
         </Card>
       </div>
@@ -69,8 +69,8 @@ export const ReportsPage = () => {
       <PageHeader
         title={t("reports") || "Reports & IEMIS Compliance"}
         description={
-          user?.role === "SCHOOL_ADMIN"
-            ? "Official IEMIS & Flash Report exports for your school. Use these for mandatory government submissions."
+          user?.role === "COLLEGE_ADMIN"
+            ? "Official IEMIS & Flash Report exports for your college. Use these for mandatory government submissions."
             : "Generate official exports for Nepal's Integrated Education Management Information System (IEMIS / CEHRD Flash Reports)."
         }
       />

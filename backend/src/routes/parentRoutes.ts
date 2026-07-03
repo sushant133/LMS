@@ -7,9 +7,9 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/portal", getParentPortal);
-router.get("/users", authorize("SCHOOL_ADMIN", "SUPER_ADMIN"), listParentUsers);
-router.get("/links", authorize("SCHOOL_ADMIN", "SUPER_ADMIN"), listParentLinks);
-router.post("/links", authorize("SCHOOL_ADMIN"), createParentLink);
-router.delete("/links/:id", authorize("SCHOOL_ADMIN"), deleteParentLink);
+router.get("/users", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listParentUsers);
+router.get("/links", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listParentLinks);
+router.post("/links", authorize("COLLEGE_ADMIN"), createParentLink);
+router.delete("/links/:id", authorize("COLLEGE_ADMIN"), deleteParentLink);
 
 export default router;

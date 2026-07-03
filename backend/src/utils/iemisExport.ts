@@ -80,6 +80,8 @@ export async function generateStudentMasterExport(req: Request): Promise<Student
   const students = await Student.find({ schoolId })
     .populate("classId", "name")
     .populate("sectionId", "name")
+    .populate("batchId", "name")
+    .populate("yearId", "name")
     .populate("user", "fullName")
     .lean();
 
@@ -88,8 +90,8 @@ export async function generateStudentMasterExport(req: Request): Promise<Student
     fullName: s.user?.fullName || "",
     gender: s.gender,
     dateOfBirthBs: s.dateOfBirthBs,
-    className: s.classId?.name || "",
-    sectionName: s.sectionId?.name || "",
+    className: s.batchId?.name || s.classId?.name || "",
+    sectionName: s.yearId?.name || s.sectionId?.name || "",
     rollNumber: s.rollNumber,
     disabilityCategory: s.disabilityCategory || "None",
     ethnicityCategory: s.ethnicityCategory || "Other",

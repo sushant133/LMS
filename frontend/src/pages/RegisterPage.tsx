@@ -58,9 +58,9 @@ export const RegisterPage = () => {
         <CardContent>
           <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
             <div className="md:col-span-2">
-              <FormField label="School">
+              <FormField label="College">
                 <Select value={form.schoolId} onChange={(event) => setForm((current) => ({ ...current, schoolId: event.target.value }))}>
-                  <option value="">Select school</option>
+                  <option value="">Select college</option>
                   {(schoolsQuery.data ?? []).map((school) => (
                     <option key={school._id} value={school._id}>
                       {school.name}
@@ -86,7 +86,7 @@ export const RegisterPage = () => {
               </FormField>
             </div>
             <div className="md:col-span-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              Public self-registration is enabled for parents only. School admins, teachers, and students are created by school administration.
+              Public self-registration is enabled for parents only. College admins, teachers, and students are created by college administration.
             </div>
             <div className="md:col-span-2 flex items-center justify-between">
               <Link className="text-sm font-medium text-emerald-700" to="/login">

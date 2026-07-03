@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import type { UserRole } from "@nepal-school-erp/shared";
+import { normalizeUserRole, type UserRole } from "@nepal-school-erp/shared";
 import { env } from "../config/env.js";
 import { ApiError } from "../utils/apiError.js";
 
@@ -20,7 +20,7 @@ export const protect = (req: Request, _res: Response, next: NextFunction): void 
 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    req.user = decoded;
+    req.user = { ...decoded, role: normalizeUserRole(decoded.role) };
     next();
   } catch {
     next(new ApiError(401, "Invalid or expired session"));

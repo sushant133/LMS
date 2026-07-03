@@ -7,8 +7,8 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/", listTimetable);
-router.post("/", authorize("SCHOOL_ADMIN", "TEACHER"), createTimetableSlot);
-router.put("/:id", authorize("SCHOOL_ADMIN", "TEACHER"), updateTimetableSlot);
-router.delete("/:id", authorize("SCHOOL_ADMIN"), deleteTimetableSlot);
+router.post("/", authorize("COLLEGE_ADMIN", "TEACHER"), createTimetableSlot);
+router.put("/:id", authorize("COLLEGE_ADMIN", "TEACHER"), updateTimetableSlot);
+router.delete("/:id", authorize("COLLEGE_ADMIN"), deleteTimetableSlot);
 
 export default router;

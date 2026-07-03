@@ -1,7 +1,9 @@
-import type { UserRole } from "@nepal-school-erp/shared";
+import { useEffect } from "react";
+import { normalizeUserRole, type UserRole } from "@nepal-school-erp/shared";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { PageLoadingState } from "components/shared/LoadingState";
-import { roleRedirectMap } from "lib/auth";
+import { getRoleRedirectPath } from "lib/auth";
+import { redirectToLogin } from "lib/redirectToLogin";
 import { useAuth } from "./AuthProvider";
 
 interface ProtectedRouteProps {
@@ -9,19 +11,31 @@ interface ProtectedRouteProps {
 }
 
 export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
-  const { user, loading } = useAuth();
+  const { user, loading, loggingOut } = useAuth();
   const location = useLocation();
 
-  if (!user) {
-    if (loading) {
-      return <PageLoadingState />;
+  const shouldRedirectToLogin = !loading && !loggingOut && !user;
+
+  useEffect(() => {
+    if (!shouldRedirectToLogin || location.pathname === "/login") {
+      return;
     }
 
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    redirectToLogin();
+  }, [location.pathname, shouldRedirectToLogin]);
+
+  if (!user) {
+    return loading || loggingOut ? <PageLoadingState /> : null;
   }
 
-  if (roles && !roles.includes(user.role)) {
-    return <Navigate to={roleRedirectMap[user.role]} replace />;
+  const normalizedRole = normalizeUserRole(user.role);
+
+  if (roles && !roles.includes(normalizedRole)) {
+    const fallback = getRoleRedirectPath(user.role);
+    if (!fallback || fallback === location.pathname) {
+      return <PageLoadingState />;
+    }
+    return <Navigate to={fallback} replace />;
   }
 
   return <Outlet />;

@@ -94,7 +94,9 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       queryClient.removeQueries({
         predicate: (query) => !keepAuthMeQuery(query.queryKey)
       });
-      setLoggingOut(false);
+      flushSync(() => {
+        setLoggingOut(false);
+      });
     }
   });
 

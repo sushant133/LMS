@@ -1,0 +1,15 @@
+---
+pid: 13436
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "node \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\\dist\\server.js\""
+started_at: 2026-07-03T16:18:50.962Z
+running_for_ms: 100001   
+---
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+POST /api/auth/login 200 358.548 ms - 1657
+GET /api/homework/feed 200 286.324 ms - 1853
+GET /api/teacher/scope 200 291.227 ms - 6393
+POST /api/homework 201 427.044 ms - 584
+GET /api/homework/feed 200 261.974 ms - 2569

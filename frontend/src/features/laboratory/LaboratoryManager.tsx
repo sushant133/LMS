@@ -71,7 +71,7 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminO
 
 export const LaboratoryManager = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === "SCHOOL_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isAdmin = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
   const [tab, setTab] = useState<Tab>("dashboard");
   const [labForm, setLabForm] = useState<LaboratoryInput>(defaultLab);
   const [equipmentForm, setEquipmentForm] = useState<LaboratoryEquipmentInput>(defaultEquipment);

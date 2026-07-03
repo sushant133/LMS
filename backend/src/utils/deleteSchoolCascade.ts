@@ -3,10 +3,12 @@ import mongoose from "mongoose";
 import path from "path";
 import fs from "fs-extra";
 import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
+import { Batch } from "../models/Batch.js";
 import { AssignmentComment } from "../models/AssignmentComment.js";
 import { Attendance } from "../models/Attendance.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { Exam } from "../models/Exam.js";
+import { ExamRoutine } from "../models/ExamRoutine.js";
 import { Accountant } from "../models/Accountant.js";
 import { AccountingExpense } from "../models/AccountingExpense.js";
 import { AccountingIncome } from "../models/AccountingIncome.js";
@@ -34,6 +36,7 @@ import { Teacher } from "../models/Teacher.js";
 import { TimetableSlot } from "../models/TimetableSlot.js";
 import { TransportAssignment, TransportRoute } from "../models/TransportRoute.js";
 import { User } from "../models/User.js";
+import { Year } from "../models/Year.js";
 import { env } from "../config/env.js";
 import { getSessionOption } from "./transaction.js";
 
@@ -53,6 +56,7 @@ export const deleteSchoolCascade = async (
     Assignment.deleteMany(filter, options),
     Attendance.deleteMany(filter, options),
     Result.deleteMany(filter, options),
+    ExamRoutine.deleteMany(filter, options),
     Exam.deleteMany(filter, options),
     Notice.deleteMany(filter, options),
     TimetableSlot.deleteMany(filter, options),
@@ -84,6 +88,8 @@ export const deleteSchoolCascade = async (
   await Student.deleteMany(filter, options);
   await Teacher.deleteMany(filter, options);
   await Subject.deleteMany(filter, options);
+  await Year.deleteMany(filter, options);
+  await Batch.deleteMany(filter, options);
   await Section.deleteMany(filter, options);
   await SchoolClass.deleteMany(filter, options);
   await Setting.deleteMany(filter, options);

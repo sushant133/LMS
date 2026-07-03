@@ -48,8 +48,8 @@ import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
-const managers = authorize("SUPER_ADMIN", "SCHOOL_ADMIN", "ACCOUNTANT");
-const admins = authorize("SUPER_ADMIN", "SCHOOL_ADMIN");
+const managers = authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT");
+const admins = authorize("SUPER_ADMIN", "COLLEGE_ADMIN");
 
 router.use(protect, tenantGuard);
 
@@ -63,7 +63,7 @@ router.delete("/structures/:id", admins, deleteAccountingStructure);
 router.get("/student-accounts", managers, listStudentAccounts);
 router.get(
   "/student-accounts/:studentId/financial-history",
-  authorize("SUPER_ADMIN", "SCHOOL_ADMIN", "ACCOUNTANT", "STUDENT"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "STUDENT"),
   getStudentFinancialHistory
 );
 
@@ -72,7 +72,7 @@ router.post("/collections", managers, collectAccountingFee);
 router.put("/collections/:id", managers, updateAccountingFeeCollection);
 router.get(
   "/collections/:id/receipt",
-  authorize("SUPER_ADMIN", "SCHOOL_ADMIN", "ACCOUNTANT", "STUDENT"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "STUDENT"),
   downloadFeeReceipt
 );
 router.get("/receipts", managers, listFeeReceipts);

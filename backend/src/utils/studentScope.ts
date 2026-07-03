@@ -2,12 +2,15 @@ import type { Request } from "express";
 import { Student } from "../models/Student.js";
 import { Subject } from "../models/Subject.js";
 import { ApiError } from "./apiError.js";
+import { getInstitutionType, isCollege } from "./institution.js";
 import { tenantObjectId } from "./tenant.js";
 
 export interface StudentProfile {
   studentId: string;
-  classId: string;
-  sectionId: string;
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
 }
 
 export const getStudentProfile = async (req: Request): Promise<StudentProfile | null> => {
@@ -26,8 +29,10 @@ export const getStudentProfile = async (req: Request): Promise<StudentProfile | 
 
   return {
     studentId: student._id.toString(),
-    classId: student.classId.toString(),
-    sectionId: student.sectionId.toString()
+    classId: student.classId?.toString(),
+    sectionId: student.sectionId?.toString(),
+    batchId: student.batchId?.toString(),
+    yearId: student.yearId?.toString()
   };
 };
 
@@ -41,22 +46,49 @@ export const requireStudentProfile = async (req: Request): Promise<StudentProfil
 
 export const getEnrolledSubjects = async (req: Request) => {
   const profile = await requireStudentProfile(req);
-  return Subject.find({
-    schoolId: tenantObjectId(req),
-    classIds: profile.classId
-  })
-    .populate("teacherIds")
-    .sort({ name: 1 })
-    .lean();
+  const institutionType = await getInstitutionType(req);
+
+  const filter: Record<string, unknown> = {
+    schoolId: tenantObjectId(req)
+  };
+
+  if (isCollege(institutionType)) {
+    if (!profile.yearId) {
+      throw new ApiError(400, "Student year is not configured");
+    }
+    filter.yearIds = profile.yearId;
+  } else {
+    if (!profile.classId) {
+      throw new ApiError(400, "Student class is not configured");
+    }
+    filter.classIds = profile.classId;
+  }
+
+  return Subject.find(filter).populate("teacherIds").sort({ name: 1 }).lean();
 };
 
 export const assertStudentSubjectAccess = async (req: Request, subjectId: string) => {
   const profile = await requireStudentProfile(req);
-  const subject = await Subject.findOne({
+  const institutionType = await getInstitutionType(req);
+
+  const filter: Record<string, unknown> = {
     _id: subjectId,
-    schoolId: tenantObjectId(req),
-    classIds: profile.classId
-  }).lean();
+    schoolId: tenantObjectId(req)
+  };
+
+  if (isCollege(institutionType)) {
+    if (!profile.yearId) {
+      throw new ApiError(400, "Student year is not configured");
+    }
+    filter.yearIds = profile.yearId;
+  } else {
+    if (!profile.classId) {
+      throw new ApiError(400, "Student class is not configured");
+    }
+    filter.classIds = profile.classId;
+  }
+
+  const subject = await Subject.findOne(filter).lean();
 
   if (!subject) {
     throw new ApiError(403, "You are not enrolled in this subject");

@@ -2,8 +2,6 @@ import type { Request, Response } from "express";
 import type mongoose from "mongoose";
 import { studentSchema } from "@nepal-school-erp/shared";
 import { env } from "../config/env.js";
-import { SchoolClass } from "../models/SchoolClass.js";
-import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -11,7 +9,11 @@ import { ApiError } from "../utils/apiError.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getStudentScopeFilter } from "../utils/parentScope.js";
 import { getTeacherStudentFilter, getTeacherScope } from "../utils/teacherScope.js";
+import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { sendSuccess } from "../utils/response.js";
+import { updatePortalUser } from "../utils/userPassword.js";
+import { validateStudentAdmissionScope } from "../utils/academicValidation.js";
+import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import {
   createSession,
@@ -20,21 +22,6 @@ import {
   endSession,
   getSessionOption
 } from "../utils/transaction.js";
-
-const validateStudentScope = async (schoolId: mongoose.Types.ObjectId, classId: string, sectionId: string): Promise<void> => {
-  const [schoolClass, section] = await Promise.all([
-    SchoolClass.findOne({ _id: classId, schoolId }),
-    Section.findOne({ _id: sectionId, classId, schoolId })
-  ]);
-
-  if (!schoolClass) {
-    throw new ApiError(404, "Selected class was not found in this school");
-  }
-
-  if (!section) {
-    throw new ApiError(404, "Selected section was not found in this school");
-  }
-};
 
 const getReadableStudentFilter = async (req: Request): Promise<Record<string, unknown>> => {
   if (req.user?.role === "TEACHER") {
@@ -66,9 +53,11 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
   ensureValidBsDate(payload.dateOfBirthBs);
 
   const schoolId = tenantObjectId(req);
-  await validateStudentScope(schoolId, payload.classId, payload.sectionId);
+  const institutionType = await getInstitutionType(req);
+  await validateStudentAdmissionScope(institutionType, schoolId, payload);
 
-  const existingUser = await User.findOne({ email: payload.email });
+  const loginEmail = payload.email;
+  const existingUser = await User.findOne({ email: loginEmail });
   if (existingUser) {
     throw new ApiError(409, "A user with this email already exists");
   }
@@ -76,16 +65,18 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
   const session = await createSession();
 
   try {
+    const portalPassword = payload.password?.trim() || env.DEFAULT_USER_PASSWORD;
+
     const createdUsers = await User.create(
       [
         {
           schoolId,
           fullName: payload.fullName,
-          email: payload.email,
+          email: loginEmail,
           phone: payload.phone,
-          password: env.DEFAULT_USER_PASSWORD,
+          password: portalPassword,
           role: "STUDENT",
-          mustChangePassword: true
+          mustChangePassword: !payload.password?.trim()
         }
       ],
       getSessionOption(session)
@@ -99,12 +90,15 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           user: user._id,
           admissionNumber: payload.admissionNumber,
           rollNumber: payload.rollNumber,
-          classId: payload.classId,
-          sectionId: payload.sectionId,
+          ...(isCollege(institutionType)
+            ? { batchId: payload.batchId, yearId: payload.yearId }
+            : { classId: payload.classId, sectionId: payload.sectionId }),
           admissionDateBs: payload.admissionDateBs,
           dateOfBirthBs: payload.dateOfBirthBs,
           gender: payload.gender,
           bloodGroup: payload.bloodGroup,
+          disabilityCategory: payload.disabilityCategory,
+          ethnicityCategory: payload.ethnicityCategory,
           address: payload.address,
           fatherName: payload.fatherName,
           motherName: payload.motherName,
@@ -126,12 +120,14 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
       "Student created successfully",
       {
         student,
-        defaultPassword: env.DEFAULT_USER_PASSWORD
+        loginEmail,
+        defaultPassword: portalPassword
       },
       201
     );
   } catch (error) {
     await abortTransaction(session);
+    throwIfDuplicateKey(error);
     throw error;
   } finally {
     await endSession(session);
@@ -144,31 +140,43 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   ensureValidBsDate(payload.dateOfBirthBs);
 
   const schoolId = tenantObjectId(req);
-  await validateStudentScope(schoolId, payload.classId, payload.sectionId);
+  const institutionType = await getInstitutionType(req);
+  await validateStudentAdmissionScope(institutionType, schoolId, payload);
 
   const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!student) {
     throw new ApiError(404, "Student not found");
   }
 
-  await User.findOneAndUpdate(
-    { _id: student.user, schoolId },
-    {
-      fullName: payload.fullName,
-      email: payload.email,
-      phone: payload.phone
+  const loginEmail = payload.email;
+  const currentUser = await User.findById(student.user).select("email").lean();
+
+  if (loginEmail !== currentUser?.email) {
+    const duplicate = await User.findOne({ email: loginEmail, _id: { $ne: student.user } });
+    if (duplicate) {
+      throw new ApiError(409, "A user with this login ID already exists");
     }
-  );
+  }
+
+  await updatePortalUser(student.user, {
+    fullName: payload.fullName,
+    email: loginEmail,
+    phone: payload.phone,
+    password: payload.password
+  });
 
   Object.assign(student, {
     admissionNumber: payload.admissionNumber,
     rollNumber: payload.rollNumber,
-    classId: payload.classId,
-    sectionId: payload.sectionId,
+    ...(isCollege(institutionType)
+      ? { batchId: payload.batchId, yearId: payload.yearId, classId: undefined, sectionId: undefined }
+      : { classId: payload.classId, sectionId: payload.sectionId, batchId: undefined, yearId: undefined }),
     admissionDateBs: payload.admissionDateBs,
     dateOfBirthBs: payload.dateOfBirthBs,
     gender: payload.gender,
     bloodGroup: payload.bloodGroup,
+    disabilityCategory: payload.disabilityCategory,
+    ethnicityCategory: payload.ethnicityCategory,
     address: payload.address,
     fatherName: payload.fatherName,
     motherName: payload.motherName,

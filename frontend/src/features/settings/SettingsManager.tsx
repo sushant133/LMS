@@ -85,10 +85,10 @@ export const SettingsManager = () => {
   return (
     <div className="space-y-8">
       <PageHeader 
-        title="School Settings" 
-        description="Manage your school's profile, contact details, holidays, and infrastructure data required for IEMIS reporting." 
+        title="College Settings" 
+        description="Manage your college's profile, contact details, holidays, and infrastructure data required for IEMIS reporting." 
       />
-      {user?.role === "SCHOOL_ADMIN" && availableSchools?.[0] && (
+      {user?.role === "COLLEGE_ADMIN" && availableSchools?.[0] && (
         <div className="-mt-4 text-sm text-emerald-700">
           Updating details for <span className="font-medium">{availableSchools[0].name}</span>
         </div>
@@ -105,17 +105,17 @@ export const SettingsManager = () => {
           void settingsMutation.mutateAsync(parsed.data);
         }}
       >
-        {/* School Profile */}
+        {/* College Profile */}
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>School Profile</CardTitle>
+            <CardTitle>College Profile</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2">
-              <FormField label="School Name (English)">
+              <FormField label="College Name (English)">
                 <Input value={form.schoolName} onChange={(event) => setForm((current) => ({ ...current, schoolName: event.target.value }))} />
               </FormField>
-              <FormField label="School Name (Nepali)">
+              <FormField label="College Name (Nepali)">
                 <Input value={form.schoolNameNp} onChange={(event) => setForm((current) => ({ ...current, schoolNameNp: event.target.value }))} />
               </FormField>
               <FormField label="Academic Year (BS)">

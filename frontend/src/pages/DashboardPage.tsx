@@ -11,7 +11,7 @@ import { PageContent } from "components/layout/PageContent";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
 import { api, unwrap } from "lib/api";
-import { getSchoolDisplayName } from "lib/auth";
+import { getCollegeDisplayName } from "lib/auth";
 import { formatCurrencyNpr } from "lib/utils";
 
 export const DashboardPage = () => {
@@ -27,13 +27,13 @@ export const DashboardPage = () => {
   if (user?.role === "SUPER_ADMIN" && !activeSchoolId) {
     return (
       <div className="space-y-6">
-        <PageHeader title={`${t("dashboard")} / ${role ?? "overview"}`} description="Select a school context to view isolated tenant metrics, or open the school directory to create a new tenant." />
+        <PageHeader title={`${t("dashboard")} / ${role ?? "overview"}`} description="Select a college context to view isolated tenant metrics, or open the college directory to create a new tenant." />
         <Card>
           <CardContent className="py-10 text-center">
-            <h2 className="text-2xl font-semibold text-slate-900">Choose a school to continue</h2>
-            <p className="mt-3 text-sm text-slate-600">Use the selector in the top bar to enter a school context. Super admin school creation is available from the school directory.</p>
+            <h2 className="text-2xl font-semibold text-slate-900">Choose a college to continue</h2>
+            <p className="mt-3 text-sm text-slate-600">Use the selector in the top bar to enter a college context. Super admin college creation is available from the college directory.</p>
             <Button className="mt-5" asChild>
-              <Link to="/schools">Open School Directory</Link>
+              <Link to="/colleges">Open College Directory</Link>
             </Button>
           </CardContent>
         </Card>
@@ -64,7 +64,7 @@ export const DashboardPage = () => {
   }
 
   if (user?.role === "STUDENT") {
-    const schoolName = getSchoolDisplayName(availableSchools, user);
+    const collegeName = getCollegeDisplayName(availableSchools, user);
 
     return (
       <PageContent className="space-y-6">
@@ -74,7 +74,7 @@ export const DashboardPage = () => {
             <div className="min-w-0">
               <p className="text-sm text-slate-500">Welcome back</p>
               <p className="text-2xl font-semibold text-slate-900">{user.fullName}</p>
-              <p className="mt-1 text-sm font-medium text-emerald-700">{schoolName}</p>
+              <p className="mt-1 text-sm font-medium text-emerald-700">{collegeName}</p>
               <p className="mt-1 text-sm text-slate-600">{data.stats.map((stat) => `${stat.label}: ${stat.value}`).join(" · ")}</p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -94,8 +94,8 @@ export const DashboardPage = () => {
     );
   }
 
-  const isSchoolAdmin = user?.role === "SCHOOL_ADMIN";
-  const isAdminLike = user?.role === "SCHOOL_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isCollegeAdmin = user?.role === "COLLEGE_ADMIN";
+  const isAdminLike = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
   const isTeacher = user?.role === "TEACHER";
 
   return (
@@ -103,21 +103,21 @@ export const DashboardPage = () => {
       <PageHeader 
         title={`${t("dashboard")} / ${role ?? "overview"}`} 
         description={
-          isSchoolAdmin
-            ? "Welcome back! Here's a quick overview of your school."
+          isCollegeAdmin
+            ? "Welcome back! Here's a quick overview of your college."
             : isTeacher
-              ? "Your teaching overview: assigned classes, attendance trends, and school notices."
+              ? "Your teaching overview: assigned classes, attendance trends, and college notices."
               : "Role-based overview of attendance, student volume, and recent notices."
         } 
       />
 
-      {isSchoolAdmin && (
+      {isCollegeAdmin && (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm text-emerald-700">Currently managing</p>
               <p className="text-lg font-semibold text-emerald-950">
-                {getSchoolDisplayName(availableSchools, user)}
+                {getCollegeDisplayName(availableSchools, user)}
               </p>
             </div>
             <div className="text-xs text-emerald-600">
@@ -138,7 +138,7 @@ export const DashboardPage = () => {
         ))}
       </div>
 
-      {isSchoolAdmin && (
+      {isCollegeAdmin && (
         <div className="flex flex-wrap gap-3">
           <Button asChild variant="outline" size="sm">
             <Link to="/attendance-view">View Attendance</Link>

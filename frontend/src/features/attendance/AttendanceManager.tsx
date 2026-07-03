@@ -13,10 +13,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { useIsCollege } from "hooks/useInstitutionType";
 import { useTeacherScope } from "hooks/useTeacherScope";
+import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
-import { filterSectionsByClass, filterSubjectsByClass, hasSingleOption } from "lib/teacherScopeUtils";
+import {
+  filterSectionsByClass,
+  filterSubjectsByClass,
+  filterSubjectsByYear,
+  filterYearsByBatch,
+  hasSingleOption
+} from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
 
 const statuses: AttendanceStatus[] = ["PRESENT", "ABSENT", "LEAVE", "LATE"];
@@ -38,12 +46,16 @@ const StatusBadge = ({ status }: { status: AttendanceStatus | "NOT_MARKED" }) =>
 export const AttendanceManager = () => {
   const { user } = useAuth();
   const isTeacher = user?.role === "TEACHER";
-  const isAdminViewer = user?.role === "SCHOOL_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isAdminViewer = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
   const canMark = isTeacher;
+  const isCollege = useIsCollege();
+  const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
+  const [batchId, setBatchId] = useState("");
+  const [yearId, setYearId] = useState("");
   const [subjectId, setSubjectId] = useState("");
   const [dateBs, setDateBs] = useState("");
   const [statusMap, setStatusMap] = useState<Record<string, AttendanceStatus>>({});
@@ -51,16 +63,29 @@ export const AttendanceManager = () => {
   const classesQuery = useQuery({
     queryKey: ["classes"],
     queryFn: () => unwrap<Array<{ _id: string; name: string }>>(api.get("/academics/classes")),
-    enabled: isAdminViewer
+    enabled: isAdminViewer && !isCollege
   });
   const sectionsQuery = useQuery({
     queryKey: ["sections"],
     queryFn: () => unwrap<Array<{ _id: string; name: string; classId: string }>>(api.get("/academics/sections")),
-    enabled: isAdminViewer
+    enabled: isAdminViewer && !isCollege
+  });
+  const batchesQuery = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => unwrap<Array<{ _id: string; name: string }>>(api.get("/academics/batches")),
+    enabled: isAdminViewer && isCollege
+  });
+  const yearsQuery = useQuery({
+    queryKey: ["years"],
+    queryFn: () => unwrap<Array<{ _id: string; name: string; batchId: string }>>(api.get("/academics/years")),
+    enabled: isAdminViewer && isCollege
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string; code: string; classIds?: string[] }>>(api.get("/academics/subjects")),
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string; code: string; classIds?: string[]; yearIds?: string[] }>>(
+        api.get("/academics/subjects")
+      ),
     enabled: isAdminViewer
   });
   const studentsQuery = useQuery({
@@ -71,17 +96,21 @@ export const AttendanceManager = () => {
 
   const classes = isTeacher ? (teacherScopeQuery.data?.classes ?? []) : (classesQuery.data ?? []);
   const sections = isTeacher ? (teacherScopeQuery.data?.sections ?? []) : (sectionsQuery.data ?? []);
+  const batches = isTeacher ? (teacherScopeQuery.data?.batches ?? []) : (batchesQuery.data ?? []);
+  const years = isTeacher ? (teacherScopeQuery.data?.years ?? []) : (yearsQuery.data ?? []);
   const subjects = isTeacher ? (teacherScopeQuery.data?.subjects ?? []) : (subjectsQuery.data ?? []);
   const students = isTeacher ? (teacherScopeQuery.data?.students ?? []) : (studentsQuery.data ?? []);
 
-  const filtersComplete = Boolean(classId && sectionId && subjectId && dateBs);
+  const primaryId = isCollege ? batchId : classId;
+  const secondaryId = isCollege ? yearId : sectionId;
+  const filtersComplete = Boolean(primaryId && secondaryId && subjectId && dateBs);
 
   const attendanceQuery = useQuery({
-    queryKey: ["attendance", classId, sectionId, subjectId, dateBs],
+    queryKey: ["attendance", classId, sectionId, batchId, yearId, subjectId, dateBs],
     queryFn: () =>
       unwrap<AttendanceRecord[]>(
         api.get("/attendance", {
-          params: { classId, sectionId, subjectId, dateBs }
+          params: isCollege ? { batchId, yearId, subjectId, dateBs } : { classId, sectionId, subjectId, dateBs }
         })
       ),
     enabled: filtersComplete
@@ -97,10 +126,23 @@ export const AttendanceManager = () => {
   });
 
   const filteredSections = useMemo(() => filterSectionsByClass(sections, classId), [classId, sections]);
-  const filteredSubjects = useMemo(() => filterSubjectsByClass(subjects, classId), [classId, subjects]);
+  const filteredYears = useMemo(() => filterYearsByBatch(years, batchId), [batchId, years]);
+  const filteredSubjects = useMemo(
+    () => (isCollege ? filterSubjectsByYear(subjects, yearId) : filterSubjectsByClass(subjects, classId)),
+    [classId, isCollege, subjects, yearId]
+  );
 
   useEffect(() => {
     if (!isTeacher) {
+      return;
+    }
+
+    if (isCollege) {
+      if (hasSingleOption(batches) && batchId !== batches[0]!._id) {
+        setBatchId(batches[0]!._id);
+        setYearId("");
+        setSubjectId("");
+      }
       return;
     }
 
@@ -109,32 +151,47 @@ export const AttendanceManager = () => {
       setSectionId("");
       setSubjectId("");
     }
-  }, [classId, classes, isTeacher]);
+  }, [batchId, batches, classId, classes, isCollege, isTeacher]);
 
   useEffect(() => {
-    if (!isTeacher || !classId) {
+    if (!isTeacher) {
       return;
     }
 
+    if (isCollege) {
+      if (!batchId) return;
+      if (hasSingleOption(filteredYears) && yearId !== filteredYears[0]!._id) {
+        setYearId(filteredYears[0]!._id);
+        setSubjectId("");
+      }
+      return;
+    }
+
+    if (!classId) return;
     if (hasSingleOption(filteredSections) && sectionId !== filteredSections[0]!._id) {
       setSectionId(filteredSections[0]!._id);
       setSubjectId("");
     }
-  }, [classId, filteredSections, isTeacher, sectionId]);
+  }, [batchId, classId, filteredSections, filteredYears, isCollege, isTeacher, sectionId, yearId]);
 
   useEffect(() => {
-    if (!isTeacher || !classId) {
-      return;
-    }
+    if (!isTeacher) return;
+    const scopeReady = isCollege ? Boolean(batchId && yearId) : Boolean(classId);
+    if (!scopeReady) return;
 
     if (hasSingleOption(filteredSubjects) && subjectId !== filteredSubjects[0]!._id) {
       setSubjectId(filteredSubjects[0]!._id);
     }
-  }, [classId, filteredSubjects, isTeacher, subjectId]);
+  }, [batchId, classId, filteredSubjects, isCollege, isTeacher, subjectId, yearId]);
 
   const filteredStudents = useMemo(
-    () => students.filter((student) => student.classId === classId && student.sectionId === sectionId),
-    [classId, sectionId, students]
+    () =>
+      students.filter((student) =>
+        isCollege
+          ? student.batchId === batchId && student.yearId === yearId
+          : student.classId === classId && student.sectionId === sectionId
+      ),
+    [batchId, classId, isCollege, sectionId, students, yearId]
   );
 
   useEffect(() => {
@@ -169,7 +226,9 @@ export const AttendanceManager = () => {
 
   const isLoading = isTeacher
     ? teacherScopeQuery.isLoading
-    : classesQuery.isLoading || sectionsQuery.isLoading || studentsQuery.isLoading || subjectsQuery.isLoading;
+    : studentsQuery.isLoading ||
+      subjectsQuery.isLoading ||
+      (isCollege ? batchesQuery.isLoading || yearsQuery.isLoading : classesQuery.isLoading || sectionsQuery.isLoading);
 
   if (isLoading) {
     return <LoadingState />;
@@ -182,7 +241,7 @@ export const AttendanceManager = () => {
         description={
           canMark
             ? "Mark subject-wise attendance for your assigned classes. Each record is stored per subject and teacher."
-            : "View attendance results by class, section, subject, and date. Teachers mark attendance from their section."
+            : `View attendance results by ${labels.primary.toLowerCase()}, ${labels.secondary.toLowerCase()}, subject, and date.`
         }
       />
 
@@ -192,20 +251,25 @@ export const AttendanceManager = () => {
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-4">
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Class</label>
-            {isTeacher && hasSingleOption(classes) ? (
-              <Input value={classes[0]!.name} readOnly disabled />
+            <label className="mb-2 block text-sm font-medium text-slate-700">{labels.primary}</label>
+            {isTeacher && hasSingleOption(isCollege ? batches : classes) ? (
+              <Input value={(isCollege ? batches : classes)[0]!.name} readOnly disabled />
             ) : (
               <Select
-                value={classId}
+                value={isCollege ? batchId : classId}
                 onChange={(event) => {
-                  setClassId(event.target.value);
-                  setSectionId("");
+                  if (isCollege) {
+                    setBatchId(event.target.value);
+                    setYearId("");
+                  } else {
+                    setClassId(event.target.value);
+                    setSectionId("");
+                  }
                   setSubjectId("");
                 }}
               >
-                <option value="">Select class</option>
-                {classes.map((item) => (
+                <option value="">Select {labels.primary.toLowerCase()}</option>
+                {(isCollege ? batches : classes).map((item) => (
                   <option key={item._id} value={item._id}>
                     {item.name}
                   </option>
@@ -214,20 +278,24 @@ export const AttendanceManager = () => {
             )}
           </div>
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Section</label>
-            {isTeacher && hasSingleOption(filteredSections) ? (
-              <Input value={filteredSections[0]!.name} readOnly disabled />
+            <label className="mb-2 block text-sm font-medium text-slate-700">{labels.secondary}</label>
+            {isTeacher && hasSingleOption(isCollege ? filteredYears : filteredSections) ? (
+              <Input value={(isCollege ? filteredYears : filteredSections)[0]!.name} readOnly disabled />
             ) : (
               <Select
-                value={sectionId}
+                value={isCollege ? yearId : sectionId}
                 onChange={(event) => {
-                  setSectionId(event.target.value);
+                  if (isCollege) {
+                    setYearId(event.target.value);
+                  } else {
+                    setSectionId(event.target.value);
+                  }
                   setSubjectId("");
                 }}
-                disabled={!classId}
+                disabled={!primaryId}
               >
-                <option value="">Select section</option>
-                {filteredSections.map((item) => (
+                <option value="">Select {labels.secondary.toLowerCase()}</option>
+                {(isCollege ? filteredYears : filteredSections).map((item) => (
                   <option key={item._id} value={item._id}>
                     {item.name}
                   </option>
@@ -248,7 +316,7 @@ export const AttendanceManager = () => {
                 disabled
               />
             ) : (
-              <Select value={subjectId} onChange={(event) => setSubjectId(event.target.value)} disabled={!classId}>
+              <Select value={subjectId} onChange={(event) => setSubjectId(event.target.value)} disabled={!primaryId}>
                 <option value="">Select subject</option>
                 {filteredSubjects.map((item) => (
                   <option key={item._id} value={item._id}>
@@ -294,7 +362,10 @@ export const AttendanceManager = () => {
               {attendanceQuery.isLoading ? (
                 <LoadingState />
               ) : filteredStudents.length === 0 ? (
-                <EmptyState title="No students found" description="Assign students to the selected class and section first." />
+                <EmptyState
+                  title="No students found"
+                  description={`Assign students to the selected ${labels.primary.toLowerCase()} and ${labels.secondary.toLowerCase()} first.`}
+                />
               ) : (
                 <>
                   <div className="overflow-x-auto">
@@ -347,8 +418,7 @@ export const AttendanceManager = () => {
                         disabled={saveAttendance.isPending}
                         onClick={() =>
                           void saveAttendance.mutateAsync({
-                            classId,
-                            sectionId,
+                            ...(isCollege ? { batchId, yearId } : { classId, sectionId }),
                             subjectId,
                             dateBs,
                             entries: filteredStudents.map((student) => ({
@@ -363,7 +433,7 @@ export const AttendanceManager = () => {
                     </div>
                   ) : attendanceQuery.data?.length === 0 ? (
                     <p className="mt-4 text-sm text-slate-500">
-                      No attendance has been recorded for this class, section, subject, and date yet.
+                      {`No attendance has been recorded for this ${labels.primary.toLowerCase()}, ${labels.secondary.toLowerCase()}, subject, and date yet.`}
                     </p>
                   ) : null}
                 </>

@@ -13,6 +13,7 @@
     "noUncheckedIndexedAccess": true,
     "useDefineForClassFields": true,
     "jsx": "react-jsx",
+    "noEmit": true,
     "baseUrl": "./src",
     "types": ["vite/client"]
   },

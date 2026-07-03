@@ -3,7 +3,7 @@ pid: 18984
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "$env:BASE_URL=\"http://localhost:5173\"; node \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\scripts\\test-logout-layout.mjs\""
 started_at: 2026-07-03T08:22:50.743Z
-running_for_ms: 215009   
+running_for_ms: 19510011 
 ---
 {
   "fresh": {

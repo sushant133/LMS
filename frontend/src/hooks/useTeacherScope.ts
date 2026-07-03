@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ClassRecord, SectionRecord, StudentRecord, SubjectRecord } from "@nepal-school-erp/shared";
+import type { BatchRecord, ClassRecord, SectionRecord, StudentRecord, SubjectRecord, YearRecord } from "@nepal-school-erp/shared";
 import { api, unwrap } from "lib/api";
 
 export interface TeacherScopeData {
@@ -8,10 +8,14 @@ export interface TeacherScopeData {
     subjectIds: string[];
     classIds: string[];
     sectionIds: string[];
+    batchIds: string[];
+    yearIds: string[];
   };
   subjects: SubjectRecord[];
   classes: ClassRecord[];
   sections: SectionRecord[];
+  batches: BatchRecord[];
+  years: YearRecord[];
   students: StudentRecord[];
 }
 

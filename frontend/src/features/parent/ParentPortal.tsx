@@ -20,7 +20,7 @@ export const ParentPortal = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Parent Portal" description="View your children's attendance, fees, assignments, and school alerts." />
+      <PageHeader title="Parent Portal" description="View your children's attendance, fees, assignments, and college alerts." />
 
       <div className="grid gap-4 md:grid-cols-2">
         {(data?.children ?? []).map((child) => (

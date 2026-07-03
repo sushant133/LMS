@@ -20,12 +20,12 @@ import {
 
 export const listPublicSchools = asyncHandler(async (_req: Request, res: Response) => {
   const schools = await School.find({ isActive: true }).sort({ name: 1 }).lean();
-  return sendSuccess(res, "Public schools fetched", schools);
+  return sendSuccess(res, "Public colleges fetched", schools);
 });
 
 export const listSchools = asyncHandler(async (_req: Request, res: Response) => {
   const schools = await School.find().sort({ createdAt: -1 }).lean();
-  return sendSuccess(res, "Schools fetched", schools);
+  return sendSuccess(res, "Colleges fetched", schools);
 });
 
 export const listAccessibleSchools = asyncHandler(async (req: Request, res: Response) => {
@@ -38,7 +38,7 @@ export const listAccessibleSchools = asyncHandler(async (req: Request, res: Resp
       ? await School.find().sort({ name: 1 }).lean()
       : await School.find({ _id: req.user.schoolId }).sort({ name: 1 }).lean();
 
-  return sendSuccess(res, "Accessible schools fetched", schools);
+  return sendSuccess(res, "Accessible colleges fetched", schools);
 });
 
 export const createSchool = asyncHandler(async (req: Request, res: Response) => {
@@ -50,11 +50,11 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
   ]);
 
   if (existingSchoolCode) {
-    throw new ApiError(409, "A school with this code already exists");
+    throw new ApiError(409, "A college with this code already exists");
   }
 
   if (existingAdminEmail) {
-    throw new ApiError(409, "A user with the school admin email already exists");
+    throw new ApiError(409, "A user with the college admin email already exists");
   }
 
   const session = await createSession();
@@ -70,6 +70,7 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
           phone: payload.phone,
           principalName: payload.principalName,
           academicYearBs: payload.academicYearBs,
+          institutionType: payload.institutionType,
           address: payload.address,
           isActive: payload.isActive
         }
@@ -86,7 +87,7 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
           email: payload.adminEmail,
           phone: payload.adminPhone,
           password: env.DEFAULT_USER_PASSWORD,
-          role: "SCHOOL_ADMIN",
+          role: "COLLEGE_ADMIN",
           mustChangePassword: true
         }
       ],
@@ -116,7 +117,7 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
 
     return sendSuccess(
       res,
-      "School created successfully",
+      "College created successfully",
       {
         school,
         schoolAdmin: {
@@ -144,14 +145,14 @@ export const updateSchool = asyncHandler(async (req: Request, res: Response) => 
 
   const school = await School.findById(schoolId);
   if (!school) {
-    throw new ApiError(404, "School not found");
+    throw new ApiError(404, "College not found");
   }
 
   const nextCode = payload.code.toUpperCase();
   if (nextCode !== school.code) {
     const existingSchoolCode = await School.findOne({ code: nextCode });
     if (existingSchoolCode) {
-      throw new ApiError(409, "A school with this code already exists");
+      throw new ApiError(409, "A college with this code already exists");
     }
   }
 
@@ -163,6 +164,7 @@ export const updateSchool = asyncHandler(async (req: Request, res: Response) => 
     phone: payload.phone,
     principalName: payload.principalName,
     academicYearBs: payload.academicYearBs,
+    institutionType: payload.institutionType,
     address: payload.address,
     isActive: payload.isActive
   });
@@ -183,7 +185,7 @@ export const updateSchool = asyncHandler(async (req: Request, res: Response) => 
     }
   );
 
-  return sendSuccess(res, "School updated successfully", school);
+  return sendSuccess(res, "College updated successfully", school);
 });
 
 export const deleteSchool = asyncHandler(async (req: Request, res: Response) => {
@@ -191,12 +193,12 @@ export const deleteSchool = asyncHandler(async (req: Request, res: Response) => 
   const school = await School.findById(schoolId);
 
   if (!school) {
-    throw new ApiError(404, "School not found");
+    throw new ApiError(404, "College not found");
   }
 
   await withTransaction(async (session) => {
     await deleteSchoolCascade(school._id, session);
   });
 
-  return sendSuccess(res, "School and all associated data deleted permanently");
+  return sendSuccess(res, "College and all associated data deleted permanently");
 });

@@ -48,12 +48,19 @@ interface MarksheetData {
     subject: string;
     fullMarks: number;
     obtained: number;
+    theory?: number;
+    practical?: number;
+    internal?: number;
+    grade?: string;
+    passFail?: string;
+    remarks?: string;
   }>;
   totalObtained: number;
   totalFull: number;
   percentage: number;
   gpa: number;
   grade: string;
+  passFailStatus?: string;
   publishDateBs?: string;
 }
 
@@ -261,24 +268,39 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
   doc.text(`Class: ${data.className} | Section: ${data.sectionName} | Roll: ${data.rollNumber}`);
   doc.moveDown();
 
-  doc.font(fonts.bold);
-  doc.text("Subject", 50, doc.y, { continued: true });
-  doc.text("Full Marks", 250, doc.y, { continued: true });
-  doc.text("Obtained", 350, doc.y);
-  doc.moveDown(0.2);
+  doc.font(fonts.bold).fontSize(10);
+  doc.text("Subject", 40, doc.y, { width: 120 });
+  doc.text("Th", 165, doc.y, { width: 30 });
+  doc.text("Pr", 195, doc.y, { width: 30 });
+  doc.text("In", 225, doc.y, { width: 30 });
+  doc.text("Total", 255, doc.y, { width: 40 });
+  doc.text("Full", 300, doc.y, { width: 40 });
+  doc.text("Grade", 345, doc.y, { width: 40 });
+  doc.text("Status", 390, doc.y, { width: 50 });
+  doc.moveDown(0.3);
 
   doc.font(fonts.regular);
-  data.marks.forEach((m) => {
-    doc.text(m.subject, 50, doc.y, { continued: true });
-    doc.text(String(m.fullMarks), 250, doc.y, { continued: true });
-    doc.text(String(m.obtained), 350, doc.y);
+  data.marks.forEach((mark) => {
+    const y = doc.y;
+    doc.text(mark.subject, 40, y, { width: 120 });
+    doc.text(String(mark.theory ?? "-"), 165, y, { width: 30 });
+    doc.text(String(mark.practical ?? "-"), 195, y, { width: 30 });
+    doc.text(String(mark.internal ?? "-"), 225, y, { width: 30 });
+    doc.text(String(mark.obtained), 255, y, { width: 40 });
+    doc.text(String(mark.fullMarks), 300, y, { width: 40 });
+    doc.text(mark.grade ?? "-", 345, y, { width: 40 });
+    doc.text(mark.passFail ?? "-", 390, y, { width: 50 });
+    doc.moveDown(0.2);
   });
 
   doc.moveDown(0.5);
-  doc.font(fonts.bold);
+  doc.font(fonts.bold).fontSize(11);
   doc.text(`Total: ${data.totalObtained} / ${data.totalFull}`);
   doc.text(`Percentage: ${data.percentage.toFixed(2)}%`);
   doc.text(`GPA: ${data.gpa.toFixed(2)}   Grade: ${data.grade}`);
+  if (data.passFailStatus) {
+    doc.text(`Result Status: ${data.passFailStatus}`);
+  }
 
   if (data.publishDateBs) {
     doc.moveDown();

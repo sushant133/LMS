@@ -17,6 +17,7 @@ export type NotificationType =
   | "LIBRARY"
   | "LABORATORY"
   | "PAYROLL"
+  | "EXAM"
   | "GENERAL";
 
 export type InventoryStockStatus = "AVAILABLE" | "LOW_STOCK" | "OUT_OF_STOCK";
@@ -40,8 +41,10 @@ export type ParentRelationship = "FATHER" | "MOTHER" | "GUARDIAN" | "OTHER";
 export interface TimetableSlotRecord {
   _id: string;
   schoolId: string;
-  classId: string;
-  sectionId: string;
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
   dayOfWeek: DayOfWeek;
   periodNumber: number;
   subjectId: string;
@@ -76,8 +79,10 @@ export interface AssignmentRecord {
   type: AssignmentType;
   title: string;
   description: string;
-  classId: string;
-  sectionId: string;
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
   subjectId?: string;
   teacherId: string;
   topic?: string;

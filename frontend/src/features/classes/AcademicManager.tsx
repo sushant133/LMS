@@ -1,15 +1,17 @@
 import { useState } from "react";
+import { useIsCollege } from "hooks/useInstitutionType";
+import { CollegeAcademicManager } from "./CollegeAcademicManager";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CLASS_LEVELS,
+  academicSubjectSchema,
   classSchema,
   sectionSchema,
-  subjectSchema,
+  type AcademicSubjectInput,
   type ClassInput,
   type ClassRecord,
   type SectionInput,
   type SectionRecord,
-  type SubjectInput,
   type SubjectRecord,
   type TeacherRecord
 } from "@nepal-school-erp/shared";
@@ -42,19 +44,17 @@ const defaultSectionValue: SectionInput = {
   classTeacherId: ""
 };
 
-const defaultSubjectValue: SubjectInput = {
+const defaultSubjectValue: AcademicSubjectInput = {
   name: "",
   code: "",
   classIds: [],
-  teacherIds: [],
-  fullMarks: 100,
-  passMarks: 35
+  yearIds: []
 };
 
-export const AcademicManager = () => {
+const SchoolAcademicManager = () => {
   const [classForm, setClassForm] = useState<ClassInput>(defaultClassValue);
   const [sectionForm, setSectionForm] = useState<SectionInput>(defaultSectionValue);
-  const [subjectForm, setSubjectForm] = useState<SubjectInput>(defaultSubjectValue);
+  const [subjectForm, setSubjectForm] = useState<AcademicSubjectInput>(defaultSubjectValue);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
@@ -109,7 +109,7 @@ export const AcademicManager = () => {
   });
 
   const subjectMutation = useMutation({
-    mutationFn: async (payload: SubjectInput) =>
+    mutationFn: async (payload: AcademicSubjectInput) =>
       editingSubjectId ? unwrap<SubjectRecord>(api.put(`/academics/subjects/${editingSubjectId}`, payload)) : unwrap<SubjectRecord>(api.post("/academics/subjects", payload)),
     onSuccess: async () => {
       toast.success(editingSubjectId ? "Subject updated" : "Subject created");
@@ -325,7 +325,7 @@ export const AcademicManager = () => {
               className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
-                const parsed = subjectSchema.safeParse(subjectForm);
+                const parsed = academicSubjectSchema.safeParse(subjectForm);
                 if (!parsed.success) {
                   toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
                   return;
@@ -339,39 +339,22 @@ export const AcademicManager = () => {
               <FormField label="Code">
                 <Input value={subjectForm.code} onChange={(event) => setSubjectForm((current) => ({ ...current, code: event.target.value }))} />
               </FormField>
-              <FormField label="Full Marks">
-                <Input type="number" value={subjectForm.fullMarks} onChange={(event) => setSubjectForm((current) => ({ ...current, fullMarks: Number(event.target.value) }))} />
-              </FormField>
-              <FormField label="Pass Marks">
-                <Input type="number" value={subjectForm.passMarks} onChange={(event) => setSubjectForm((current) => ({ ...current, passMarks: Number(event.target.value) }))} />
-              </FormField>
-              <FormField label="Class IDs (comma separated)">
-                <Input
-                  value={subjectForm.classIds.join(", ")}
-                  onChange={(event) =>
-                    setSubjectForm((current) => ({
-                      ...current,
-                      classIds: event.target.value
-                        .split(",")
-                        .map((item) => item.trim())
-                        .filter(Boolean)
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField label="Teacher IDs (comma separated)">
-                <Input
-                  value={subjectForm.teacherIds.join(", ")}
-                  onChange={(event) =>
-                    setSubjectForm((current) => ({
-                      ...current,
-                      teacherIds: event.target.value
-                        .split(",")
-                        .map((item) => item.trim())
-                        .filter(Boolean)
-                    }))
-                  }
-                />
+              <FormField label="Class">
+                <Select
+                  multiple
+                  className="h-28"
+                  value={subjectForm.classIds}
+                  onChange={(event) => {
+                    const selected = Array.from(event.target.selectedOptions).map((option) => option.value);
+                    setSubjectForm((current) => ({ ...current, classIds: selected }));
+                  }}
+                >
+                  {classes.map((item) => (
+                    <option key={item._id} value={item._id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </Select>
               </FormField>
               <Button className="w-full" type="submit">
                 {editingSubjectId ? "Update Subject" : "Create Subject"}
@@ -383,7 +366,7 @@ export const AcademicManager = () => {
                 <TableHead>
                   <tr>
                     <Th>Subject</Th>
-                    <Th>Marks</Th>
+                    <Th>Class</Th>
                     <Th />
                   </tr>
                 </TableHead>
@@ -395,7 +378,9 @@ export const AcademicManager = () => {
                         <div className="text-xs text-slate-500">{subject.code}</div>
                       </Td>
                       <Td>
-                        {subject.passMarks}/{subject.fullMarks}
+                        {subject.classIds
+                          .map((classId) => classes.find((item) => item._id === classId)?.name ?? classId)
+                          .join(", ")}
                       </Td>
                       <Td className="text-right">
                         <div className="flex justify-end gap-2">
@@ -408,9 +393,7 @@ export const AcademicManager = () => {
                                 name: subject.name,
                                 code: subject.code,
                                 classIds: subject.classIds,
-                                teacherIds: subject.teacherIds,
-                                fullMarks: subject.fullMarks,
-                                passMarks: subject.passMarks
+                                yearIds: subject.yearIds ?? []
                               });
                             }}
                           >
@@ -431,5 +414,10 @@ export const AcademicManager = () => {
       </div>
     </div>
   );
+};
+
+export const AcademicManager = () => {
+  const isCollege = useIsCollege();
+  return isCollege ? <CollegeAcademicManager /> : <SchoolAcademicManager />;
 };
 

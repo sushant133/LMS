@@ -4,11 +4,15 @@ import { Attendance } from "../models/Attendance.js";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { Notice } from "../models/Notice.js";
 import { Result } from "../models/Result.js";
+import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
+import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { buildStudentAcademicFilter } from "../utils/academicScope.js";
+import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getTodayBs } from "../utils/nepaliDate.js";
 import { sendSuccess } from "../utils/response.js";
 import { assertStudentSubjectAccess, getEnrolledSubjects, requireStudentProfile } from "../utils/studentScope.js";
@@ -30,12 +34,14 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
 
   const { profile, subject } = await assertStudentSubjectAccess(req, String(req.params.subjectId));
   const schoolId = tenantObjectId(req);
+  const institutionType = await getInstitutionType(req);
+  const academicFilter = buildStudentAcademicFilter(profile, institutionType);
+  const college = isCollege(institutionType);
 
   const [attendance, assignments, submissions, notices, results] = await Promise.all([
     Attendance.find({
       schoolId,
-      classId: profile.classId,
-      sectionId: profile.sectionId,
+      ...academicFilter,
       subjectId: subject._id,
       "entries.studentId": profile.studentId
     })
@@ -43,8 +49,7 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
       .lean(),
     Assignment.find({
       schoolId,
-      classId: profile.classId,
-      sectionId: profile.sectionId,
+      ...academicFilter,
       subjectId: subject._id,
       visibleTo: "STUDENT"
     })
@@ -57,8 +62,7 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
         $in: (
           await Assignment.find({
             schoolId,
-            classId: profile.classId,
-            sectionId: profile.sectionId,
+            ...academicFilter,
             subjectId: subject._id
           }).distinct("_id")
         )
@@ -72,11 +76,23 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
       $and: [
         {
           $or: [
-            { subjectId: subject._id, classId: profile.classId, $or: [{ sectionId: { $exists: false } }, { sectionId: null }, { sectionId: profile.sectionId }] },
+            college
+              ? {
+                  subjectId: subject._id,
+                  batchId: profile.batchId,
+                  $or: [{ yearId: { $exists: false } }, { yearId: null }, { yearId: profile.yearId }]
+                }
+              : {
+                  subjectId: subject._id,
+                  classId: profile.classId,
+                  $or: [{ sectionId: { $exists: false } }, { sectionId: null }, { sectionId: profile.sectionId }]
+                },
             {
               $and: [
                 { $or: [{ subjectId: { $exists: false } }, { subjectId: null }] },
-                { $or: [{ classId: { $exists: false } }, { classId: null }, { classId: profile.classId }] }
+                college
+                  ? { $or: [{ batchId: { $exists: false } }, { batchId: null }, { batchId: profile.batchId }] }
+                  : { $or: [{ classId: { $exists: false } }, { classId: null }, { classId: profile.classId }] }
               ]
             }
           ]
@@ -88,8 +104,7 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
     Result.find({
       schoolId,
       studentId: profile.studentId,
-      classId: profile.classId,
-      sectionId: profile.sectionId,
+      ...academicFilter,
       "marks.subjectId": subject._id.toString()
     })
       .sort({ updatedAt: -1 })
@@ -138,9 +153,14 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
   const student = await Student.findOne({ _id: profile.studentId, schoolId }).populate("user", "-password").lean();
   if (!student) throw new ApiError(404, "Student not found");
 
-  const [classDoc, sectionDoc, collections] = await Promise.all([
-    SchoolClass.findById(student.classId).lean(),
-    Section.findById(student.sectionId).lean(),
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+
+  const [classDoc, sectionDoc, batchDoc, yearDoc, collections] = await Promise.all([
+    college ? null : SchoolClass.findById(student.classId).lean(),
+    college ? null : Section.findById(student.sectionId).lean(),
+    college ? Batch.findById(student.batchId).lean() : null,
+    college ? Year.findById(student.yearId).lean() : null,
     FeeCollection.find({ schoolId, studentId: student._id }).sort({ paidDateBs: -1 }).lean()
   ]);
 
@@ -150,8 +170,8 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
 
   return sendSuccess(res, "Financial history fetched", {
     student,
-    className: classDoc?.name ?? "",
-    sectionName: sectionDoc?.name ?? "",
+    className: college ? (batchDoc?.name ?? "") : (classDoc?.name ?? ""),
+    sectionName: college ? (yearDoc?.name ?? "") : (sectionDoc?.name ?? ""),
     outstandingDueNpr: student.feesDueNpr ?? 0,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,

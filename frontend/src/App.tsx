@@ -1,10 +1,11 @@
 import { Suspense, lazy, type ReactNode } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "components/layout/AppLayout";
+import { AuthLayout } from "components/layout/AuthLayout";
 import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
 import { useAuth } from "features/auth/AuthProvider";
-import { roleRedirectMap } from "lib/auth";
+import { getRoleRedirectPath } from "lib/auth";
 import { LoginPage } from "pages/LoginPage";
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
@@ -40,31 +41,29 @@ const RootRedirect = () => {
     return <PageLoadingState />;
   }
 
-  return <Navigate to={user ? roleRedirectMap[user.role] : "/login"} replace />;
+  const redirectTarget = user ? getRoleRedirectPath(user.role) : null;
+  return <Navigate to={redirectTarget ?? "/login"} replace />;
 };
 
 const LazyRoute = ({ children }: { children: ReactNode }) => (
   <Suspense fallback={<PageLoadingState />}>{children}</Suspense>
 );
 
-const LoginRoute = () => {
-  const { authEpoch } = useAuth();
-  const location = useLocation();
-
-  return <LoginPage key={`login-page-${authEpoch}-${location.key}`} />;
-};
-
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<RootRedirect />} />
-      <Route path="/login" element={<LoginRoute />} />
-      <Route path="/register" element={<LazyRoute><RegisterPage /></LazyRoute>} />
+
+      <Route element={<AuthLayout />}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<LazyRoute><RegisterPage /></LazyRoute>} />
+      </Route>
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             {/* Shared portal layout: dashboard + all student/parent pages render in the same AppLayout shell */}
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "STUDENT", "PARENT"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"]} />}>
+              <Route path="/dashboard/school_admin" element={<Navigate to="/dashboard/college_admin" replace />} />
               <Route path="/dashboard/:role" element={<DashboardPage />} />
               <Route path="/homework-view" element={<HomeworkPage />} />
               <Route path="/exams" element={<ExamsPage />} />
@@ -81,7 +80,7 @@ export default function App() {
               <Route path="/my-library" element={<MyLibraryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"]} />}>
               <Route path="/students" element={<StudentsPage />} />
             </Route>
 
@@ -89,23 +88,23 @@ export default function App() {
               <Route path="/attendance" element={<AttendancePage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
               <Route path="/attendance-view" element={<AttendancePage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN", "LIBRARY_STAFF"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "LIBRARY_STAFF"]} />}>
               <Route path="/library" element={<LibraryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN", "LABORATORY_STAFF"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "LABORATORY_STAFF"]} />}>
               <Route path="/laboratory" element={<LaboratoryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN", "ACCOUNTANT"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT"]} />}>
               <Route path="/accounting" element={<AccountingPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
               <Route path="/teachers" element={<TeachersPage />} />
               <Route path="/academics" element={<AcademicsPage />} />
               <Route path="/fees" element={<FeesPage />} />
@@ -118,7 +117,7 @@ export default function App() {
 
 
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"]} />}>
               <Route path="/timetable" element={<TimetablePage />} />
             </Route>
 
@@ -128,7 +127,7 @@ export default function App() {
 
 
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "SCHOOL_ADMIN"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
               <Route path="/exams-view" element={<ExamsPage />} />
             </Route>
 
@@ -139,7 +138,8 @@ export default function App() {
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN"]} />}>
-              <Route path="/schools" element={<SchoolsPage />} />
+              <Route path="/colleges" element={<SchoolsPage />} />
+              <Route path="/schools" element={<Navigate to="/colleges" replace />} />
             </Route>
           </Route>
         </Route>

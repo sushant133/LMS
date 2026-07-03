@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useIsCollege } from "hooks/useInstitutionType";
+import { getAcademicLabels } from "lib/academicStructureUtils";
 import {
   filterSectionsByClass,
   filterSubjectsByClass,
+  filterSubjectsByYear,
+  filterYearsByBatch,
   hasSingleOption,
   type ScopeOption
 } from "lib/teacherScopeUtils";
@@ -29,6 +33,8 @@ const defaultForm: AssignmentInput = {
   description: "",
   classId: "",
   sectionId: "",
+  batchId: "",
+  yearId: "",
   subjectId: "",
   topic: "",
   dueDateBs: "",
@@ -46,6 +52,8 @@ interface ComposePostModalProps {
   editingPost?: ClassroomPost | null;
   classes: ScopeOption[];
   sections: ScopeOption[];
+  batches?: ScopeOption[];
+  years?: ScopeOption[];
   subjects: ScopeOption[];
   topicSuggestions: string[];
   scopedOnly?: boolean;
@@ -59,6 +67,8 @@ export const ComposePostModal = ({
   editingPost,
   classes,
   sections,
+  batches = [],
+  years = [],
   subjects,
   topicSuggestions,
   scopedOnly = false,
@@ -66,6 +76,8 @@ export const ComposePostModal = ({
   onSave,
   saving
 }: ComposePostModalProps) => {
+  const isCollege = useIsCollege();
+  const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const [form, setForm] = useState<AssignmentInput>(defaultForm);
   const [linkDraft, setLinkDraft] = useState<AssignmentLink>({ title: "", url: "" });
 
@@ -78,6 +90,8 @@ export const ComposePostModal = ({
         description: editingPost.description,
         classId: editingPost.classId,
         sectionId: editingPost.sectionId,
+        batchId: editingPost.batchId,
+        yearId: editingPost.yearId,
         subjectId: editingPost.subjectId ?? "",
         topic: editingPost.topic ?? "",
         dueDateBs: editingPost.dueDateBs ?? "",
@@ -95,38 +109,46 @@ export const ComposePostModal = ({
     setLinkDraft({ title: "", url: "" });
   }, [open, editingPost]);
 
-  const filteredSections = useMemo(() => filterSectionsByClass(sections, form.classId), [sections, form.classId]);
-  const filteredSubjects = useMemo(() => filterSubjectsByClass(subjects, form.classId), [subjects, form.classId]);
+  const filteredSections = useMemo(() => filterSectionsByClass(sections, form.classId ?? ""), [sections, form.classId]);
+  const filteredYears = useMemo(() => filterYearsByBatch(years, form.batchId ?? ""), [years, form.batchId]);
+  const filteredSubjects = useMemo(
+    () => (isCollege ? filterSubjectsByYear(subjects, form.yearId ?? "") : filterSubjectsByClass(subjects, form.classId ?? "")),
+    [form.classId, form.yearId, isCollege, subjects]
+  );
+
+  const primaryOptions = isCollege ? batches : classes;
+  const scopedSecondary = isCollege ? filteredYears : filteredSections;
+  const primaryFormId = isCollege ? form.batchId : form.classId;
+  const secondaryFormId = isCollege ? form.yearId : form.sectionId;
 
   useEffect(() => {
-    if (!open || editingPost || !scopedOnly) {
-      return;
+    if (!open || editingPost || !scopedOnly) return;
+    if (hasSingleOption(primaryOptions) && primaryFormId !== primaryOptions[0]!._id) {
+      setForm((current) =>
+        isCollege
+          ? { ...current, batchId: primaryOptions[0]!._id, yearId: "", subjectId: "" }
+          : { ...current, classId: primaryOptions[0]!._id, sectionId: "", subjectId: "" }
+      );
     }
-
-    if (hasSingleOption(classes) && form.classId !== classes[0]!._id) {
-      setForm((current) => ({ ...current, classId: classes[0]!._id, sectionId: "", subjectId: "" }));
-    }
-  }, [classes, editingPost, form.classId, open, scopedOnly]);
-
-  useEffect(() => {
-    if (!open || editingPost || !scopedOnly || !form.classId) {
-      return;
-    }
-
-    if (hasSingleOption(filteredSections) && form.sectionId !== filteredSections[0]!._id) {
-      setForm((current) => ({ ...current, sectionId: filteredSections[0]!._id, subjectId: "" }));
-    }
-  }, [editingPost, filteredSections, form.classId, form.sectionId, open, scopedOnly]);
+  }, [editingPost, isCollege, open, primaryFormId, primaryOptions, scopedOnly]);
 
   useEffect(() => {
-    if (!open || editingPost || !scopedOnly || !form.classId) {
-      return;
+    if (!open || editingPost || !scopedOnly || !primaryFormId) return;
+    if (hasSingleOption(scopedSecondary) && secondaryFormId !== scopedSecondary[0]!._id) {
+      setForm((current) =>
+        isCollege
+          ? { ...current, yearId: scopedSecondary[0]!._id, subjectId: "" }
+          : { ...current, sectionId: scopedSecondary[0]!._id, subjectId: "" }
+      );
     }
+  }, [editingPost, isCollege, open, primaryFormId, scopedOnly, scopedSecondary, secondaryFormId]);
 
+  useEffect(() => {
+    if (!open || editingPost || !scopedOnly || !primaryFormId) return;
     if (hasSingleOption(filteredSubjects) && form.subjectId !== filteredSubjects[0]!._id) {
       setForm((current) => ({ ...current, subjectId: filteredSubjects[0]!._id }));
     }
-  }, [editingPost, filteredSubjects, form.classId, form.subjectId, open, scopedOnly]);
+  }, [editingPost, filteredSubjects, form.subjectId, open, primaryFormId, scopedOnly]);
 
   if (!open) return null;
 
@@ -195,20 +217,24 @@ export const ComposePostModal = ({
           </FormField>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            {scopedOnly && hasSingleOption(classes) ? (
-              <FormField label="Class">
-                <Input value={classes[0]!.name} readOnly disabled />
+            {scopedOnly && hasSingleOption(primaryOptions) ? (
+              <FormField label={labels.primary}>
+                <Input value={primaryOptions[0]!.name} readOnly disabled />
               </FormField>
             ) : (
-              <FormField label="Class">
+              <FormField label={labels.primary}>
                 <Select
-                  value={form.classId}
+                  value={primaryFormId}
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, classId: event.target.value, sectionId: "", subjectId: "" }))
+                    setForm((current) =>
+                      isCollege
+                        ? { ...current, batchId: event.target.value, yearId: "", subjectId: "" }
+                        : { ...current, classId: event.target.value, sectionId: "", subjectId: "" }
+                    )
                   }
                 >
-                  <option value="">Select class</option>
-                  {classes.map((item) => (
+                  <option value="">Select {labels.primary.toLowerCase()}</option>
+                  {primaryOptions.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
                     </option>
@@ -216,19 +242,25 @@ export const ComposePostModal = ({
                 </Select>
               </FormField>
             )}
-            {scopedOnly && hasSingleOption(filteredSections) ? (
-              <FormField label="Section">
-                <Input value={filteredSections[0]!.name} readOnly disabled />
+            {scopedOnly && hasSingleOption(scopedSecondary) ? (
+              <FormField label={labels.secondary}>
+                <Input value={scopedSecondary[0]!.name} readOnly disabled />
               </FormField>
             ) : (
-              <FormField label="Section">
+              <FormField label={labels.secondary}>
                 <Select
-                  value={form.sectionId}
-                  onChange={(event) => setForm((current) => ({ ...current, sectionId: event.target.value, subjectId: "" }))}
-                  disabled={!form.classId}
+                  value={secondaryFormId}
+                  onChange={(event) =>
+                    setForm((current) =>
+                      isCollege
+                        ? { ...current, yearId: event.target.value, subjectId: "" }
+                        : { ...current, sectionId: event.target.value, subjectId: "" }
+                    )
+                  }
+                  disabled={!primaryFormId}
                 >
-                  <option value="">Select section</option>
-                  {filteredSections.map((item) => (
+                  <option value="">Select {labels.secondary.toLowerCase()}</option>
+                  {scopedSecondary.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
                     </option>
@@ -253,7 +285,7 @@ export const ComposePostModal = ({
                 <Select
                   value={form.subjectId}
                   onChange={(event) => setForm((current) => ({ ...current, subjectId: event.target.value }))}
-                  disabled={!form.classId}
+                  disabled={!primaryFormId}
                 >
                   <option value="">Select subject</option>
                   {filteredSubjects.map((item) => (

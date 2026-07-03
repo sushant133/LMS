@@ -9,7 +9,7 @@ import { withTenantScope } from "../utils/tenant.js";
 
 export const listNotifications = asyncHandler(async (req: Request, res: Response) => {
   const filter = withTenantScope(req);
-  if (req.user?.role !== "SUPER_ADMIN" && req.user?.role !== "SCHOOL_ADMIN") {
+  if (req.user?.role !== "SUPER_ADMIN" && req.user?.role !== "COLLEGE_ADMIN") {
     Object.assign(filter, { recipientUserId: req.user?.userId });
   }
 

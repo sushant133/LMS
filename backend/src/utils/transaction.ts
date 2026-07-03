@@ -97,12 +97,14 @@ async function checkIfReplicaSet(): Promise<boolean> {
  */
 export async function createSession(): Promise<ClientSession | null> {
   const isReplicaSet = await checkIfReplicaSet();
-  
+
   if (!isReplicaSet) {
     return null;
   }
 
-  return await mongoose.startSession();
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  return session;
 }
 
 /**

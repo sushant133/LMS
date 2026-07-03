@@ -9,7 +9,7 @@ const printDemoCredentials = (): void => {
   console.log(`  Email:    ${demoCredentials.superAdmin.email}`);
   console.log(`  Password: ${demoCredentials.superAdmin.password}\n`);
 
-  console.log("School Admin (Public Himal Institute of Technology)");
+  console.log("College Admin (Public Himal Institute of Technology — HA/Diploma)");
   console.log(`  Email:    ${demoCredentials.schoolAdmin.email}`);
   console.log(`  Password: ${demoCredentials.schoolAdmin.password}\n`);
 
@@ -21,7 +21,7 @@ const printDemoCredentials = (): void => {
 
   console.log("\nStudents");
   demoCredentials.students.forEach((student) => {
-    console.log(`  ${student.name} (${student.class} ${student.section}, Roll ${student.roll})`);
+    console.log(`  ${student.name} (${student.batch}, ${student.year}, Roll ${student.roll})`);
     console.log(`    Email: ${student.email}  Password: ${student.password}`);
   });
 
@@ -56,7 +56,7 @@ const run = async (): Promise<void> => {
 };
 
 run().catch(async (error) => {
-  console.error("Failed to seed demo school", error);
+  console.error("Failed to seed demo college", error);
   await mongoose.connection.close();
   process.exit(1);
 });

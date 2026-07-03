@@ -10,7 +10,7 @@ const notificationSchema = new Schema(
     channel: { type: String, enum: ["IN_APP", "SMS", "BOTH"], default: "IN_APP" },
     type: {
       type: String,
-      enum: ["ATTENDANCE", "HOMEWORK", "FEE", "NOTICE", "TRANSPORT", "LIBRARY", "LABORATORY", "PAYROLL", "GENERAL"],
+      enum: ["ATTENDANCE", "HOMEWORK", "FEE", "NOTICE", "TRANSPORT", "LIBRARY", "LABORATORY", "PAYROLL", "EXAM", "GENERAL"],
       default: "GENERAL"
     },
     read: { type: Boolean, default: false },
