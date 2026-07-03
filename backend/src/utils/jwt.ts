@@ -15,9 +15,11 @@ export const signJwt = (payload: SignPayload): string =>
     expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"]
   });
 
+const cookieSecure = env.COOKIE_SAME_SITE === "none" || env.NODE_ENV === "production" || env.COOKIE_SECURE;
+
 const cookieOptions = {
   httpOnly: true,
-  secure: env.NODE_ENV === "production" || env.COOKIE_SECURE,
+  secure: cookieSecure,
   sameSite: env.COOKIE_SAME_SITE,
   path: "/",
   maxAge: 7 * 24 * 60 * 60 * 1000
@@ -35,7 +37,7 @@ export const clearAuthCookie = (res: Response): void => {
   res.clearCookie(env.COOKIE_NAME, {
     httpOnly: true,
     sameSite: env.COOKIE_SAME_SITE,
-    secure: env.NODE_ENV === "production" || env.COOKIE_SECURE
+    secure: cookieSecure
   });
 };
 
@@ -43,6 +45,6 @@ export const clearActiveSchoolCookie = (res: Response): void => {
   res.clearCookie(env.ACTIVE_SCHOOL_COOKIE_NAME, {
     httpOnly: true,
     sameSite: env.COOKIE_SAME_SITE,
-    secure: env.NODE_ENV === "production" || env.COOKIE_SECURE
+    secure: cookieSecure
   });
 };

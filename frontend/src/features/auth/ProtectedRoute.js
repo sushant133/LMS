@@ -7,7 +7,7 @@ export const ProtectedRoute = ({ roles }) => {
     const { user, loading, loggingOut } = useAuth();
     const location = useLocation();
     if (!user) {
-        if (loading && !loggingOut) {
+        if (loading || loggingOut) {
             return _jsx(PageLoadingState, {});
         }
         return _jsx(Navigate, { to: "/login", replace: true, state: { from: location.pathname } });

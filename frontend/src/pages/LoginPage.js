@@ -21,10 +21,10 @@ export const LoginPage = () => {
     const [form, setForm] = useState({ email: "", password: "" });
     const navigate = useNavigate();
     const { t } = useTranslation();
-    const { login, user, loading } = useAuth();
+    const { login, user, loading, authEpoch } = useAuth();
     useLayoutEffect(() => {
         resetAppShell();
-    }, []);
+    }, [authEpoch]);
     useEffect(() => {
         if (!loading && user) {
             navigate(roleRedirectMap[user.role], { replace: true });

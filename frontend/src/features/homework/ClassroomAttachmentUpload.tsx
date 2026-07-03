@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FileText, Image as ImageIcon, Upload, X } from "lucide-react";
 import type { AssignmentAttachment } from "@nepal-school-erp/shared";
 import { Button } from "components/ui/button";
+import { resolveApiUrl } from "lib/api";
 
 interface ClassroomAttachmentUploadProps {
   attachments: AssignmentAttachment[];
@@ -23,7 +24,7 @@ export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }: C
     Array.from(files).forEach((file) => formData.append("files", file));
 
     try {
-      const response = await fetch("/api/uploads/classroom", {
+      const response = await fetch(resolveApiUrl("/api/uploads/classroom"), {
         method: "POST",
         body: formData,
         credentials: "include"

@@ -2,10 +2,11 @@ import multer, { type StorageEngine } from "multer";
 import path from "path";
 import fs from "fs-extra";
 import type { Request } from "express";
+import { env } from "../config/env";
 import { ApiError } from "./apiError";
 import { tenantObjectId } from "./tenant";
 
-const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
+const UPLOAD_ROOT = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
 
 // Ensure base upload directory exists
 fs.ensureDirSync(UPLOAD_ROOT);

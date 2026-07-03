@@ -17,5 +17,6 @@
     "types": ["node"],
     "baseUrl": "./src"
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
+  "exclude": ["src/server.ts", "src/scripts/testProxyLogin.ts", "src/scripts/testStudentFlow.ts"]
 }

@@ -34,9 +34,10 @@ import { Teacher } from "../models/Teacher";
 import { TimetableSlot } from "../models/TimetableSlot";
 import { TransportAssignment, TransportRoute } from "../models/TransportRoute";
 import { User } from "../models/User";
+import { env } from "../config/env";
 import { getSessionOption } from "./transaction";
 
-const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
+const UPLOAD_ROOT = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
 
 export const deleteSchoolCascade = async (
   schoolId: mongoose.Types.ObjectId | string,

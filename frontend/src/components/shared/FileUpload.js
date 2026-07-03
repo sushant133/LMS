@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from "react";
 import { Upload, X, FileText, Image as ImageIcon } from "lucide-react";
 import { Button } from "components/ui/button";
+import { resolveApiUrl } from "lib/api";
 export function FileUpload({ label = "Upload File", accept = "image/*,.pdf,.doc,.docx", multiple = false, maxFiles = 6, onUploadComplete, uploadUrl, headers = {}, disabled = false }) {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -17,7 +18,7 @@ export function FileUpload({ label = "Upload File", accept = "image/*,.pdf,.doc,
             formData.append(multiple ? "documents" : "photo", file);
         });
         try {
-            const res = await fetch(uploadUrl, {
+            const res = await fetch(resolveApiUrl(uploadUrl), {
                 method: "POST",
                 body: formData,
                 credentials: "include",

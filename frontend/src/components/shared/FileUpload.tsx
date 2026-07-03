@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Upload, X, FileText, Image as ImageIcon } from "lucide-react";
 import { Button } from "components/ui/button";
+import { resolveApiUrl } from "lib/api";
 
 interface UploadedFile {
   url: string;
@@ -46,7 +47,7 @@ export function FileUpload({
     });
 
     try {
-      const res = await fetch(uploadUrl, {
+      const res = await fetch(resolveApiUrl(uploadUrl), {
         method: "POST",
         body: formData,
         credentials: "include",

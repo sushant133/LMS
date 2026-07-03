@@ -20,6 +20,7 @@ const envSchema = z.object({
     .pipe(z.boolean())
     .default(false),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  UPLOAD_DIR: z.string().optional(),
   DEFAULT_USER_PASSWORD: z.string().min(6).default("ChangeMe123!"),
   SUPER_ADMIN_NAME: z.string().min(2).default("System Super Admin"),
   SUPER_ADMIN_EMAIL: z.email().default("superadmin@example.com"),

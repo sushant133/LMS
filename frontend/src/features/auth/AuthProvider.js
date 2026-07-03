@@ -50,7 +50,6 @@ export const AuthProvider = ({ children }) => {
         },
         onMutate: async () => {
             setLoggingOut(true);
-            setAuthEpoch((current) => current + 1);
             queryClient.setQueryData(["auth", "me"], null);
             await queryClient.cancelQueries({
                 predicate: (query) => !keepAuthMeQuery(query.queryKey)
@@ -62,6 +61,7 @@ export const AuthProvider = ({ children }) => {
                 predicate: (query) => !keepAuthMeQuery(query.queryKey)
             });
             setLoggingOut(false);
+            setAuthEpoch((current) => current + 1);
         }
     });
     const isBootstrapping = meQuery.isPending && meQuery.data === undefined;

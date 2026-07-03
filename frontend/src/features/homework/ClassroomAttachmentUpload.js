@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from "react";
 import { FileText, Image as ImageIcon, Upload, X } from "lucide-react";
 import { Button } from "components/ui/button";
+import { resolveApiUrl } from "lib/api";
 export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }) => {
     const [isUploading, setIsUploading] = useState(false);
     const [error, setError] = useState(null);
@@ -14,7 +15,7 @@ export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }) =
         const formData = new FormData();
         Array.from(files).forEach((file) => formData.append("files", file));
         try {
-            const response = await fetch("/api/uploads/classroom", {
+            const response = await fetch(resolveApiUrl("/api/uploads/classroom"), {
                 method: "POST",
                 body: formData,
                 credentials: "include"
