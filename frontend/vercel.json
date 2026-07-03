@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://lms-s7tz.onrender.com/api/:path*"
+    },
+    {
       "source": "/uploads/:path*",
       "destination": "https://lms-s7tz.onrender.com/uploads/:path*"
     },
