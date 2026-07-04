@@ -29,6 +29,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
@@ -204,6 +205,8 @@ export const LaboratoryManager = () => {
         title="Laboratory"
         description="Create laboratories, manage equipment inventory, and issue items to teachers."
       />
+
+      <DashboardBannerStrip />
 
       <div className="flex flex-wrap gap-2">
         {visibleTabs.map((item) => {
@@ -438,7 +441,7 @@ export const LaboratoryManager = () => {
                   <Input
                     type="number"
                     value={equipmentForm.quantity}
-                    onChange={(e) => setEquipmentForm((c) => ({ ...c, quantity: Number(e.target.value) }))}
+                    onChange={(e) => setEquipmentForm((c) => ({ ...c, quantity: e.target.valueAsNumber }))}
                   />
                 </FormField>
                 <FormField label="Description (optional)">
@@ -527,7 +530,7 @@ export const LaboratoryManager = () => {
                 </Select>
               </FormField>
               <FormField label="Quantity">
-                <Input type="number" value={issueForm.quantity} onChange={(e) => setIssueForm((c) => ({ ...c, quantity: Number(e.target.value) }))} />
+                <Input type="number" value={issueForm.quantity} onChange={(e) => setIssueForm((c) => ({ ...c, quantity: e.target.valueAsNumber }))} />
               </FormField>
               <FormField label="Issued (BS)">
                 <NepaliDateField value={issueForm.issuedDateBs} onChange={(v) => setIssueForm((c) => ({ ...c, issuedDateBs: v }))} />

@@ -54,19 +54,30 @@ const run = async (): Promise<void> => {
     const exams = unwrap<Array<{ _id: string; name: string; batchIds: string[]; yearIds: string[] }>>(await admin.get("/exams"));
     pass("Admin lists exams", `${exams.length} exam(s)`);
 
-    const batches = unwrap<Array<{ _id: string; name: string }>>(await admin.get("/academics/batches"));
-    const years = unwrap<Array<{ _id: string; name: string; batchId: string }>>(await admin.get("/academics/years"));
-    const subjects = unwrap<Array<{ _id: string; name: string; yearIds?: string[]; fullMarks: number; passMarks: number }>>(
-      await admin.get("/academics/subjects")
-    );
+    const teacherScope = unwrap<{
+      scope: { subjectIds: string[]; batchIds: string[]; yearIds: string[] };
+      subjects: Array<{ _id: string; name: string; yearIds?: string[]; fullMarks: number; passMarks: number }>;
+      years: Array<{ _id: string; name: string; batchId: string }>;
+      batches: Array<{ _id: string; name: string }>;
+      students: Array<{ _id: string; batchId?: string; yearId?: string; user: { email: string } }>;
+    }>(await teacher.get("/teacher/scope"));
 
-    if (batches.length === 0 || years.length === 0) {
-      throw new Error("No batches/years in demo data");
+    if (teacherScope.subjects.length === 0 || teacherScope.years.length === 0) {
+      throw new Error("Teacher has no assigned subjects/years in demo data");
     }
 
-    const batchId = batches[0]!._id;
-    const yearId = years.find((year) => year.batchId === batchId)?._id ?? years[0]!._id;
-    const yearSubject = subjects.find((subject) => (subject.yearIds ?? []).includes(yearId));
+    const yearSubject = teacherScope.subjects[0]!;
+    const yearId = (yearSubject.yearIds ?? []).find((linkedYearId) => teacherScope.scope.yearIds.includes(linkedYearId));
+    if (!yearId) {
+      throw new Error("No matching year for teacher subject");
+    }
+
+    const yearWithSubject = teacherScope.years.find((year) => year._id === yearId);
+    if (!yearWithSubject) {
+      throw new Error("Year record not found for teacher subject");
+    }
+
+    const batchId = yearWithSubject.batchId;
 
     // Create smoke exam
     const examName = `Smoke Test Exam ${Date.now()}`;
@@ -138,7 +149,6 @@ const run = async (): Promise<void> => {
 
     // Teacher sees routine for assigned subject only
     const teacherRoutines = unwrap<Array<{ subjectId: string }>>(await teacher.get("/exams/routines", { params: { examId: createdExam._id } }));
-    const teacherScope = unwrap<{ scope: { subjectIds: string[] } }>(await teacher.get("/teacher/scope"));
     const allAssigned = teacherRoutines.every((routine) => teacherScope.scope.subjectIds.includes(routine.subjectId));
     if (allAssigned) {
       pass("Teacher sees scoped routines", `${teacherRoutines.length} entry(ies)`);
@@ -147,36 +157,105 @@ const run = async (): Promise<void> => {
     }
 
     // Teacher enters marks for the logged-in student portal user
-    const allStudents = unwrap<Array<{ _id: string; batchId?: string; yearId?: string; user: { email: string } }>>(await admin.get("/students"));
-    const scopedStudent = allStudents.find((item) => item.user.email === studentEmail && item.batchId === batchId && item.yearId === yearId);
+    const scopedStudents = teacherScope.students.filter((item) => item.batchId === batchId && item.yearId === yearId);
+    const scopedStudent = scopedStudents.find((item) => item.user.email === studentEmail) ?? scopedStudents[0];
     if (!scopedStudent) {
-      throw new Error("Logged-in student is not in teacher scope for marks entry");
+      throw new Error("No students in teacher scope for marks entry");
+    }
+    if (scopedStudents.length === 0) {
+      throw new Error("No students in selected batch/year");
     }
 
-    const savedResult = unwrap<{ _id: string; percentage: number; grade: string; passFailStatus: string; marks: Array<{ obtainedMarks: number }> }>(
-      await teacher.post("/exams/results", {
+    let savedResult: { _id: string; percentage: number; grade: string; passFailStatus: string; marks: Array<{ obtainedMarks: number }> } | null = null;
+    for (const targetStudent of scopedStudents) {
+      savedResult = unwrap(
+        await teacher.post("/exams/results", {
+          examId: createdExam._id,
+          studentId: targetStudent._id,
+          batchId,
+          yearId,
+          marks: [
+            {
+              subjectId: yearSubject._id,
+              fullMarks: yearSubject.fullMarks,
+              passMarks: yearSubject.passMarks,
+              theoryMarks: 40,
+              practicalMarks: 30,
+              internalMarks: 10,
+              attendanceStatus: "PRESENT",
+              teacherRemarks: "Smoke test marks"
+            }
+          ]
+        })
+      );
+    }
+    if (savedResult && savedResult.marks[0]!.obtainedMarks === 80) {
+      pass("Teacher enters marks with auto-calculation", `${scopedStudents.length} student(s) · ${savedResult.percentage}% · ${savedResult.grade}`);
+    } else {
+      fail("Teacher enters marks with auto-calculation", `Expected obtained 80, got ${savedResult?.marks[0]?.obtainedMarks}`);
+    }
+
+    // Teacher cannot publish results
+    const teacherPublishAttempt = await teacher.post(`/exams/${createdExam._id}/results/publish`);
+    if (teacherPublishAttempt.status === 403) {
+      pass("Teacher blocked from publishing results", "403 Forbidden");
+    } else {
+      fail("Teacher blocked from publishing results", `Expected 403, got ${teacherPublishAttempt.status}`);
+    }
+
+    // Submit for review
+    const submitted = unwrap<{ _id: string; status: string }>(
+      await teacher.post("/exams/result-submissions/submit", {
         examId: createdExam._id,
-        studentId: scopedStudent._id,
+        subjectId: yearSubject._id,
         batchId,
-        yearId,
-        marks: [
-          {
-            subjectId: yearSubject._id,
-            fullMarks: yearSubject.fullMarks,
-            passMarks: yearSubject.passMarks,
-            theoryMarks: 40,
-            practicalMarks: 30,
-            internalMarks: 10,
-            attendanceStatus: "PRESENT",
-            teacherRemarks: "Smoke test marks"
-          }
-        ]
+        yearId
       })
     );
-    if (savedResult.marks[0]!.obtainedMarks === 80) {
-      pass("Teacher enters marks with auto-calculation", `${savedResult.percentage}% · ${savedResult.grade} · ${savedResult.passFailStatus}`);
+    if (submitted.status === "PENDING_ADMIN_REVIEW") {
+      pass("Teacher submits results for review", `submission=${submitted._id}`);
     } else {
-      fail("Teacher enters marks with auto-calculation", `Expected obtained 80, got ${savedResult.marks[0]!.obtainedMarks}`);
+      fail("Teacher submits results for review", `Expected PENDING_ADMIN_REVIEW, got ${submitted.status}`);
+    }
+
+    // Teacher cannot edit after submit
+    const editAfterSubmit = await teacher.post("/exams/results", {
+      examId: createdExam._id,
+      studentId: scopedStudent._id,
+      batchId,
+      yearId,
+      marks: [
+        {
+          subjectId: yearSubject._id,
+          fullMarks: yearSubject.fullMarks,
+          passMarks: yearSubject.passMarks,
+          theoryMarks: 30,
+          practicalMarks: 20,
+          internalMarks: 10,
+          attendanceStatus: "PRESENT"
+        }
+      ]
+    });
+    if (editAfterSubmit.status === 403) {
+      pass("Submitted results block teacher edits", "403 Forbidden");
+    } else {
+      fail("Submitted results block teacher edits", `Expected 403, got ${editAfterSubmit.status}`);
+    }
+
+    // Publish without approval should fail
+    const prematurePublish = await admin.post(`/exams/${createdExam._id}/results/publish`);
+    if (prematurePublish.status === 400) {
+      pass("Publish blocked until submissions approved", "400 Bad Request");
+    } else {
+      fail("Publish blocked until submissions approved", `Expected 400, got ${prematurePublish.status}`);
+    }
+
+    // Admin approves submission
+    const approved = unwrap<{ status: string }>(await admin.post(`/exams/result-submissions/${submitted._id}/approve`, { comments: "Looks good" }));
+    if (approved.status === "APPROVED") {
+      pass("Admin approves result submission", approved.status);
+    } else {
+      fail("Admin approves result submission", `Expected APPROVED, got ${approved.status}`);
     }
 
     // Admin analytics
@@ -189,12 +268,24 @@ const run = async (): Promise<void> => {
       fail("Admin fetches exam analytics", "No results in analytics");
     }
 
-    // Publish results
-    const publishedResultsExam = unwrap<{ resultsPublished: boolean; status: string }>(await admin.post(`/exams/${createdExam._id}/results/publish`));
-    if (publishedResultsExam.resultsPublished) {
-      pass("Admin publishes results", `status=${publishedResultsExam.status}`);
+    // Audit log available
+    const auditLog = unwrap<unknown[]>(
+      await admin.get("/exams/result-submissions/audit-log", { params: { examId: createdExam._id } })
+    );
+    if (auditLog.length > 0) {
+      pass("Admin views result audit log", `${auditLog.length} entry(ies)`);
     } else {
-      fail("Admin publishes results", "resultsPublished is false");
+      fail("Admin views result audit log", "No audit entries");
+    }
+
+    // Publish results after approval
+    const publishedResultsExam = unwrap<{ resultsPublished: boolean; resultsLocked: boolean; status: string }>(
+      await admin.post(`/exams/${createdExam._id}/results/publish`)
+    );
+    if (publishedResultsExam.resultsPublished && publishedResultsExam.resultsLocked) {
+      pass("Admin publishes results", `status=${publishedResultsExam.status}, locked=true`);
+    } else {
+      fail("Admin publishes results", "resultsPublished or resultsLocked is false");
     }
 
     // Student sees published results

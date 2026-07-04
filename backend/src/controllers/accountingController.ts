@@ -31,6 +31,7 @@ import { Section } from "../models/Section.js";
 import { Year } from "../models/Year.js";
 import { Setting } from "../models/Setting.js";
 import { Student } from "../models/Student.js";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
 import { calculateFeeTotals, calculateNetSalary, generateReceiptNumber } from "../utils/accountingCalculations.js";
@@ -593,8 +594,43 @@ export const deleteIncome = asyncHandler(async (req: Request, res: Response) => 
 export const listSalaries = asyncHandler(async (req: Request, res: Response) => {
   const salaries = await SalaryPayment.find(withTenantScope(req))
     .populate({ path: "teacherId", populate: { path: "user", select: "-password" } })
-    .sort({ monthBs: -1 });
-  return sendSuccess(res, "Salary payments fetched", salaries);
+    .populate("staffId")
+    .sort({ monthBs: -1 })
+    .lean();
+
+  const normalized = salaries.map((salary) => {
+    const staffRef = salary.staffId as { _id?: { toString(): string }; fullName?: string } | string | null | undefined;
+    const teacherRef = salary.teacherId as { _id?: { toString(): string } } | string | null | undefined;
+    const collegeStaff =
+      staffRef && typeof staffRef === "object" && "fullName" in staffRef
+        ? {
+            _id: staffRef._id?.toString() ?? "",
+            fullName: staffRef.fullName ?? ""
+          }
+        : undefined;
+
+    return {
+      ...salary,
+      _id: salary._id.toString(),
+      schoolId: salary.schoolId.toString(),
+      teacherId:
+        typeof teacherRef === "object" && teacherRef?._id
+          ? teacherRef._id.toString()
+          : typeof teacherRef === "string"
+            ? teacherRef
+            : undefined,
+      staffId:
+        typeof staffRef === "object" && staffRef?._id
+          ? staffRef._id.toString()
+          : typeof staffRef === "string"
+            ? staffRef
+            : undefined,
+      collegeStaff,
+      createdBy: salary.createdBy.toString()
+    };
+  });
+
+  return sendSuccess(res, "Salary payments fetched", normalized);
 });
 
 export const createSalary = asyncHandler(async (req: Request, res: Response) => {
@@ -912,8 +948,9 @@ export const resetAccountantPassword = asyncHandler(async (req: Request, res: Re
 });
 
 export const listSalaryEmployees = asyncHandler(async (req: Request, res: Response) => {
-  const teachers = await Teacher.find(withTenantScope(req))
-    .populate("user", "-password")
-    .sort({ createdAt: -1 });
-  return sendSuccess(res, "Salary employees fetched", teachers);
+  const [teachers, collegeStaff] = await Promise.all([
+    Teacher.find(withTenantScope(req)).populate("user", "-password").sort({ createdAt: -1 }),
+    CollegeStaff.find(withTenantScope(req, { isDeleted: false, status: "ACTIVE" })).sort({ fullName: 1 })
+  ]);
+  return sendSuccess(res, "Salary employees fetched", { teachers, collegeStaff });
 });

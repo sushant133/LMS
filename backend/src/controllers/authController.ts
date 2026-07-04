@@ -32,6 +32,8 @@ const getRedirectPath = (role: UserRole | string): string => {
       return "/laboratory";
     case "ACCOUNTANT":
       return "/accounting";
+    case "COLLEGE_STAFF":
+      return "/dashboard/college_staff";
     case "PARENT":
     default:
       return "/dashboard/parent";

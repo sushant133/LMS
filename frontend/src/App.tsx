@@ -11,6 +11,7 @@ const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const StudentsPage = lazy(() => import("pages/StudentsPage").then((module) => ({ default: module.StudentsPage })));
 const TeachersPage = lazy(() => import("pages/TeachersPage").then((module) => ({ default: module.TeachersPage })));
+const CollegeStaffPage = lazy(() => import("pages/CollegeStaffPage").then((module) => ({ default: module.CollegeStaffPage })));
 const AcademicsPage = lazy(() => import("pages/AcademicsPage").then((module) => ({ default: module.AcademicsPage })));
 const AttendancePage = lazy(() => import("pages/AttendancePage").then((module) => ({ default: module.AttendancePage })));
 const ExamsPage = lazy(() => import("pages/ExamsPage").then((module) => ({ default: module.ExamsPage })));
@@ -62,7 +63,7 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             {/* Shared portal layout: dashboard + all student/parent pages render in the same AppLayout shell */}
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT", "COLLEGE_STAFF"]} />}>
               <Route path="/dashboard/school_admin" element={<Navigate to="/dashboard/college_admin" replace />} />
               <Route path="/dashboard/:role" element={<DashboardPage />} />
               <Route path="/homework-view" element={<HomeworkPage />} />
@@ -105,6 +106,7 @@ export default function App() {
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
+              <Route path="/college-staff" element={<CollegeStaffPage />} />
               <Route path="/teachers" element={<TeachersPage />} />
               <Route path="/academics" element={<AcademicsPage />} />
               <Route path="/fees" element={<FeesPage />} />

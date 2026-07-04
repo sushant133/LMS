@@ -1,70 +1,45 @@
 ---
-pid: 31512
+pid: 34612
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run seed:reset"
-started_at: 2026-07-03T14:21:08.140Z
-running_for_ms: 5955013  
+command: "Stop-Process -Id 31556 -Force -ErrorAction SilentlyContinue; cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm start"
+started_at: 2026-07-04T19:07:26.483Z
+running_for_ms: 2229995  
 ---
 
-> @nepal-school-erp/backend@1.0.0 seed:reset
-> npm run build:shared && tsx src/scripts/resetAndSeed.ts
+> @nepal-school-erp/backend@1.0.0 start
+> node dist/server.js
 
-
-> @nepal-school-erp/backend@1.0.0 build:shared
-> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
-
-
-up to date, audited 3 packages in 857ms
-
-1 package is looking for funding
-  run `npm fund` for details
-
-found 0 vulnerabilities
-
-> @nepal-school-erp/shared@1.0.0 build
-> tsc -p tsconfig.json
-
-MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
-Dropping entire database...
-Database cleared.
-
-Super admin created: superadmin@nepal-school.com
-Demo school created: Public Himal Institute of Technology (DEMOERP)
-Failed to reset and seed database Error: Attendance validation failed: createdBy: Path `createdBy` is required., teacherId: Path `teacherId` is required.
-    at ValidationError.inspect (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\error\validation.js:52:26)
-    at formatValue (node:internal/util/inspect:897:19)
-    at inspect (node:internal/util/inspect:409:10)
-    at formatWithOptionsInternal (node:internal/util/inspect:2645:40)
-    at formatWithOptions (node:internal/util/inspect:2507:10)
-    at console.value (node:internal/console/constructor:377:14)
-    at console.error (node:internal/console/constructor:444:61)
-    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\scripts\resetAndSeed.ts:53:11)
-    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
-  errors: {
-    createdBy: ValidatorError: Path `createdBy` is required.
-        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
-        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
-        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
-        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
-      properties: [Object],
-      kind: 'required',
-      path: 'createdBy',
-      value: undefined,
-      reason: undefined,
-      Symbol(mongoose#validatorError): true
+Failed to start backend MongoServerError: Index build failed: f344fa64-cc45-4940-bff3-e2872038af72: Collection schoolDB.subjects ( b9b5e46e-777a-4d47-a43c-913b58c2d189 ) :: caused by :: dropIndexes command
+    at Connection.sendCommand (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\cmap\connection.js:305:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async Connection.command (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\cmap\connection.js:333:26)
+    at async Server.command (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\sdam\server.js:171:29)
+    at async CreateIndexesOperation.executeCommand (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\operations\command.js:76:16)
+    at async CreateIndexesOperation.execute (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\operations\indexes.js:122:9)
+    at async tryOperation (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\operations\execute_operation.js:207:20)
+    at async executeOperation (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\operations\execute_operation.js:75:16)
+    at async Collection.createIndex (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\collection.js:329:25) {
+  errorLabelSet: Set(0) {},
+  errorResponse: {
+    ok: 0,
+    errmsg: 'Index build failed: f344fa64-cc45-4940-bff3-e2872038af72: Collection schoolDB.subjects ( b9b5e46e-777a-4d47-a43c-913b58c2d189 ) :: caused by :: dropIndexes command',
+    code: 276,
+    codeName: 'IndexBuildAborted',
+    '$clusterTime': {
+      clusterTime: new Timestamp({ t: 1783192159, i: 3 }),
+      signature: [Object]
     },
-    teacherId: ValidatorError: Path `teacherId` is required.
-        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
-        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
-        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
-        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
-      properties: [Object],
-      kind: 'required',
-      path: 'teacherId',
-      value: undefined,
-      reason: undefined,
-      Symbol(mongoose#validatorError): true
+    operationTime: new Timestamp({ t: 1783192159, i: 3 })
+  },
+  ok: 0,
+  code: 276,
+  codeName: 'IndexBuildAborted',
+  '$clusterTime': {
+    clusterTime: new Timestamp({ t: 1783192159, i: 3 }),
+    signature: {
+      hash: Binary.createFromBase64('wK1g+IyvSNcOg/k4+p+pgpmh5sE=', 0),
+      keyId: new Long('7613864864091471874')
     }
   },
-  _message: 'Attendance validation failed'
+  operationTime: new Timestamp({ t: 1783192159, i: 3 })
 }

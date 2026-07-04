@@ -30,7 +30,11 @@ const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   basicSalaryNpr: teacher.basicSalaryNpr
 });
 
-export const TeachersManager = () => {
+interface TeachersManagerProps {
+  embedded?: boolean;
+}
+
+export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const isCollege = useIsCollege();
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
@@ -105,9 +109,11 @@ export const TeachersManager = () => {
 
   const teachers = teachersQuery.data ?? [];
 
-  return (
-    <div className="space-y-6">
-      <PageHeader title="Teacher Management" description="Manage teacher accounts, qualifications, BS joining dates, classes, and subject assignments." />
+  const content = (
+    <>
+      {!embedded ? (
+        <PageHeader title="Teacher Management" description="Manage teacher accounts, qualifications, BS joining dates, classes, and subject assignments." />
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -185,6 +191,8 @@ export const TeachersManager = () => {
           )}
         </CardContent>
       </Card>
-    </div>
+    </>
   );
+
+  return <div className="space-y-6">{content}</div>;
 };

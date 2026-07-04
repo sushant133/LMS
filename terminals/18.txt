@@ -1,13 +1,26 @@
 ---
-pid: 10184
+pid: 24620
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "npm run build --prefix \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\" 2>&1 | Select-Object -Last 6"
-started_at: 2026-07-03T08:25:31.417Z
-running_for_ms: 19350012 
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run build"
+started_at: 2026-07-04T18:11:45.989Z
+running_for_ms: 5555000  
 ---
-dist/assets/AccountingPage-DBgmTssO.js        34.88 kB │ gzip:   7.69 kB
-dist/assets/NepaliDateField-B1sTCF3b.js       43.98 kB │ gzip:  13.73 kB
-dist/assets/AddressFields-CMygd6H7.js         87.52 kB │ gzip:  10.11 kB
-dist/assets/DashboardPage-BdR_O2pJ.js        383.93 kB │ gzip: 111.31 kB
-dist/assets/index-C6u4p3I9.js                444.22 kB │ gzip: 140.84 kB
-✓ built in 6.90s
+
+> @nepal-school-erp/backend@1.0.0 build
+> npm run build:shared && tsc -p tsconfig.json
+
+
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
+
+
+up to date, audited 3 packages in 937ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+

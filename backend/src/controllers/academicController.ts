@@ -9,6 +9,10 @@ import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { getInstitutionType, isCollege, requireCollegeInstitution, requireSchoolInstitution } from "../utils/institution.js";
+import {
+  deleteSubjectsForBatchYears,
+  provisionSubjectsForBatch
+} from "../utils/masterSubjectProvisioning.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { getTeacherScope } from "../utils/teacherScope.js";
 import { sendSuccess } from "../utils/response.js";
@@ -165,6 +169,7 @@ export const listSubjects = asyncHandler(async (req: Request, res: Response) => 
     const institutionType = await getInstitutionType(req);
     if (isCollege(institutionType) && studentProfile.yearId) {
       filter.yearIds = studentProfile.yearId;
+      filter.isActive = { $ne: false };
     } else if (studentProfile.classId) {
       filter.classIds = studentProfile.classId;
     }
@@ -172,6 +177,10 @@ export const listSubjects = asyncHandler(async (req: Request, res: Response) => 
 
   if (typeof req.query.yearId === "string") {
     filter.yearIds = req.query.yearId;
+  }
+
+  if (req.query.activeOnly === "true") {
+    filter.isActive = { $ne: false };
   }
 
   const subjects = await Subject.find(filter).sort({ name: 1 });
@@ -192,12 +201,10 @@ export const createSubject = asyncHandler(async (req: Request, res: Response) =>
   const institutionType = await getInstitutionType(req);
 
   if (isCollege(institutionType)) {
-    if (!payload.yearIds?.length) {
-      throw new ApiError(400, "At least one year must be selected for college subjects");
-    }
-    if (payload.classIds?.length) {
-      throw new ApiError(400, "Class assignment is not used for college institutions");
-    }
+    throw new ApiError(
+      400,
+      "College subjects are managed through the Master Subject List and assigned automatically to batches"
+    );
   } else if (!payload.classIds?.length) {
     throw new ApiError(400, "At least one class must be selected for class & section subjects");
   }
@@ -206,8 +213,8 @@ export const createSubject = asyncHandler(async (req: Request, res: Response) =>
     name: payload.name,
     code: payload.code,
     schoolId,
-    classIds: isCollege(institutionType) ? [] : payload.classIds,
-    yearIds: isCollege(institutionType) ? payload.yearIds : [],
+    classIds: payload.classIds,
+    yearIds: [],
     teacherIds: [],
     fullMarks: 100,
     passMarks: 35
@@ -221,9 +228,7 @@ export const updateSubject = asyncHandler(async (req: Request, res: Response) =>
   const institutionType = await getInstitutionType(req);
 
   if (isCollege(institutionType)) {
-    if (!payload.yearIds?.length) {
-      throw new ApiError(400, "At least one year must be selected for college subjects");
-    }
+    throw new ApiError(400, "College subjects must be edited in the Master Subject List");
   } else if (!payload.classIds?.length) {
     throw new ApiError(400, "At least one class must be selected for class & section subjects");
   }
@@ -233,8 +238,8 @@ export const updateSubject = asyncHandler(async (req: Request, res: Response) =>
     {
       name: payload.name,
       code: payload.code,
-      classIds: isCollege(institutionType) ? [] : payload.classIds,
-      yearIds: isCollege(institutionType) ? payload.yearIds : []
+      classIds: payload.classIds,
+      yearIds: []
     },
     { new: true }
   );
@@ -248,12 +253,18 @@ export const updateSubject = asyncHandler(async (req: Request, res: Response) =>
 
 export const deleteSubject = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
-  const subject = await Subject.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
+  const institutionType = await getInstitutionType(req);
+  const subject = await Subject.findOne(withTenantScope(req, { _id: req.params.id }));
 
   if (!subject) {
     throw new ApiError(404, "Subject not found");
   }
 
+  if (isCollege(institutionType) && subject.masterSubjectId) {
+    throw new ApiError(400, "College subjects must be deleted from the Master Subject List");
+  }
+
+  await Subject.findOneAndDelete({ _id: subject._id, schoolId });
   await removeSubjectFromTeachers(schoolId, subject._id.toString());
 
   return sendSuccess(res, "Subject deleted successfully");
@@ -296,7 +307,9 @@ export const createBatch = asyncHandler(async (req: Request, res: Response) => {
     }))
   );
 
-  return sendSuccess(res, "Batch created successfully", batch, 201);
+  await provisionSubjectsForBatch(schoolId, batch._id);
+
+  return sendSuccess(res, "Batch created successfully with curriculum subjects", batch, 201);
 });
 
 export const updateBatch = asyncHandler(async (req: Request, res: Response) => {
@@ -320,6 +333,7 @@ export const deleteBatch = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(404, "Batch not found");
   }
 
+  await deleteSubjectsForBatchYears(schoolId, batch._id);
   await Year.deleteMany({ batchId: batch._id, schoolId });
 
   return sendSuccess(res, "Batch deleted successfully");

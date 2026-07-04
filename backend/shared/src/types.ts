@@ -6,7 +6,34 @@ export type UserRole =
   | "PARENT"
   | "LIBRARY_STAFF"
   | "LABORATORY_STAFF"
-  | "ACCOUNTANT";
+  | "ACCOUNTANT"
+  | "COLLEGE_STAFF";
+
+export type CollegeStaffCategory =
+  | "SECURITY_GUARD"
+  | "HOUSEKEEPING"
+  | "RECEPTIONIST"
+  | "OFFICE_ASSISTANT"
+  | "TRANSPORT"
+  | "IT_STAFF"
+  | "OTHER";
+
+export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN";
+
+export type BannerTargetRole =
+  | "STUDENT"
+  | "TEACHER"
+  | "PARENT"
+  | "ACCOUNTANT"
+  | "LIBRARY_STAFF"
+  | "LABORATORY_STAFF"
+  | "TRANSPORT_STAFF"
+  | "HR_PAYROLL"
+  | "COLLEGE_ADMIN";
+
+export type BannerPriority = "HIGH" | "MEDIUM" | "LOW";
+
+export type BannerDisplayStatus = "ACTIVE" | "SCHEDULED" | "EXPIRED" | "INACTIVE";
 
 export type BloodGroup =
   | "A+"
@@ -145,7 +172,9 @@ export interface StudentRecord {
   ethnicityCategory?: EthnicityCategory;
   address: AddressSelection;
   fatherName: string;
+  fatherPhone?: string;
   motherName: string;
+  motherPhone?: string;
   guardianName: string;
   guardianPhone: string;
   feesDueNpr: number;
@@ -182,6 +211,34 @@ export interface TeacherRecord {
   basicSalaryNpr: number;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface CollegeStaffRecord {
+  _id: string;
+  schoolId: string;
+  user?: UserProfile;
+  staffId: string;
+  fullName: string;
+  photoUrl?: string;
+  gender: string;
+  dateOfBirthBs?: string;
+  phone: string;
+  email?: string;
+  address: AddressSelection;
+  joinedDateBs: string;
+  designation: string;
+  category: CollegeStaffCategory;
+  employmentType: EmploymentType;
+  basicSalaryNpr: number;
+  status: "ACTIVE" | "INACTIVE";
+  enableLogin: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SalaryEmployeesResponse {
+  teachers: TeacherRecord[];
+  collegeStaff: CollegeStaffRecord[];
 }
 
 export interface ClassRecord {
@@ -229,16 +286,39 @@ export interface YearRecord {
   updatedAt?: string;
 }
 
+export interface MasterSubjectRecord {
+  _id: string;
+  schoolId: string;
+  name: string;
+  code: string;
+  yearLevel: number;
+  creditHours?: number;
+  theoryMarks: number;
+  practicalMarks?: number;
+  internalMarks?: number;
+  passMarks: number;
+  fullMarks: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface SubjectRecord {
   _id: string;
   schoolId: string;
+  masterSubjectId?: string;
   name: string;
   code: string;
   classIds: string[];
   yearIds: string[];
   teacherIds: string[];
+  creditHours?: number;
+  theoryMarks?: number;
+  practicalMarks?: number;
+  internalMarks?: number;
   fullMarks: number;
   passMarks: number;
+  isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -269,6 +349,48 @@ export type ExamStatus = "DRAFT" | "SCHEDULED" | "ONGOING" | "COMPLETED" | "PUBL
 export type ExamAttendanceStatus = "PRESENT" | "ABSENT" | "EXEMPT";
 
 export type ExamPassFailStatus = "PASS" | "FAIL";
+
+export type ResultSubmissionStatus =
+  | "DRAFT"
+  | "SUBMITTED_FOR_REVIEW"
+  | "PENDING_ADMIN_REVIEW"
+  | "RETURNED_FOR_CORRECTION"
+  | "APPROVED"
+  | "PUBLISHED";
+
+export interface ResultSubmissionRecord {
+  _id: string;
+  schoolId: string;
+  examId: string;
+  subjectId: string;
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
+  status: ResultSubmissionStatus;
+  enteredByUserId?: string;
+  submittedByUserId?: string;
+  submittedAt?: string;
+  reviewedByUserId?: string;
+  reviewedAt?: string;
+  reviewComments?: string;
+  approvedByUserId?: string;
+  approvedAt?: string;
+  publishedByUserId?: string;
+  publishedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ResultSubmissionReviewSummary {
+  submission: ResultSubmissionRecord;
+  examName: string;
+  subjectName: string;
+  scopeLabel: string;
+  studentsTotal: number;
+  marksEntered: number;
+  missingStudents: Array<{ studentId: string; studentName: string }>;
+}
 
 export interface ExamRecord {
   _id: string;
@@ -360,6 +482,68 @@ export interface ExamAnalyticsSummary {
   }>;
 }
 
+export interface PrintResultsSubjectColumn {
+  subjectId: string;
+  subjectName: string;
+  subjectCode?: string;
+}
+
+export interface PrintResultsGridRow {
+  sn: number;
+  resultId: string;
+  examId: string;
+  studentId: string;
+  studentName: string;
+  rollNumber: number;
+  registrationNumber: string;
+  batchName?: string;
+  yearName?: string;
+  className?: string;
+  sectionName?: string;
+  subjectMarks: Record<string, number | null>;
+  totalMarks: number;
+  totalFullMarks: number;
+  percentage: number;
+  grade: GradeSymbol;
+  gpa: number;
+  passFailStatus: ExamPassFailStatus;
+  remarks?: string;
+}
+
+export interface PrintResultsGridResponse {
+  exam?: Pick<ExamRecord, "_id" | "name" | "academicYearBs" | "resultsPublished" | "resultPublishDateBs">;
+  subjects: PrintResultsSubjectColumn[];
+  rows: PrintResultsGridRow[];
+  academicYearBs?: string;
+  batchName?: string;
+  yearName?: string;
+  className?: string;
+  sectionName?: string;
+  collegeName?: string;
+  collegeNameNp?: string;
+}
+
+export interface MarksheetViewResponse {
+  result: ResultRecord;
+  exam: ExamRecord;
+  student: StudentRecord;
+  section?: SectionRecord;
+  batch?: { _id: string; name: string };
+  year?: { _id: string; name: string };
+  schoolClass?: ClassRecord;
+  subjects: SubjectRecord[];
+  collegeName: string;
+  collegeNameNp?: string;
+  collegeAddress?: string;
+  collegeLogoUrl?: string;
+  principalName?: string;
+  controllerOfExamination?: string;
+  verificationNumber?: string;
+  printedDateBs?: string;
+  totalObtained: number;
+  totalFullMarks: number;
+}
+
 export interface FeeStructureRecord {
   _id: string;
   schoolId: string;
@@ -408,6 +592,30 @@ export interface NoticeRecord {
   updatedAt?: string;
 }
 
+export interface BannerRecord {
+  _id: string;
+  schoolId: string;
+  title: string;
+  description: string;
+  imageUrl?: string;
+  buttonText?: string;
+  buttonUrl?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  priority: BannerPriority;
+  startAt: string;
+  endAt: string;
+  isActive: boolean;
+  showOnce: boolean;
+  dismissible: boolean;
+  targetRoles: BannerTargetRole[];
+  createdBy: string;
+  createdByName?: string;
+  displayStatus?: BannerDisplayStatus;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface HolidayRecord {
   title: string;
   dateBs: string;
@@ -452,6 +660,7 @@ export interface DashboardResponse {
   feeChart: Array<{ label: string; amount: number }>;
   counts: Array<{ name: string; value: number }>;
   notices: NoticeRecord[];
+  banners: BannerRecord[];
 }
 
 // Foundation type for future IEMIS infrastructure tracking (Phase 2)

@@ -57,6 +57,7 @@ export const getEnrolledSubjects = async (req: Request) => {
       throw new ApiError(400, "Student year is not configured");
     }
     filter.yearIds = profile.yearId;
+    filter.isActive = { $ne: false };
   } else {
     if (!profile.classId) {
       throw new ApiError(400, "Student class is not configured");
@@ -81,6 +82,7 @@ export const assertStudentSubjectAccess = async (req: Request, subjectId: string
       throw new ApiError(400, "Student year is not configured");
     }
     filter.yearIds = profile.yearId;
+    filter.isActive = { $ne: false };
   } else {
     if (!profile.classId) {
       throw new ApiError(400, "Student class is not configured");

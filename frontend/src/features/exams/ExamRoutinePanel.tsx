@@ -264,7 +264,7 @@ export const ExamRoutinePanel = ({ exam, subjects, isAdmin, readOnly = false }: 
                   type="number"
                   min={1}
                   value={routineForm.durationMinutes}
-                  onChange={(event) => setRoutineForm((current) => ({ ...current, durationMinutes: Number(event.target.value) }))}
+                  onChange={(event) => setRoutineForm((current) => ({ ...current, durationMinutes: event.target.valueAsNumber }))}
                 />
               </FormField>
               <FormField label="Start Time">

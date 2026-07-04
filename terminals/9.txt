@@ -1,38 +1,129 @@
 ---
-pid: 11788
+pid: 3632
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run dev 2>&1"
-started_at: 2026-07-03T06:02:16.359Z
-running_for_ms: 190006   
+command: "Stop-Process -Id 24496 -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run dev 2>&1"
+started_at: 2026-07-04T16:20:44.927Z
+running_for_ms: 2430003  
 ---
 
-> @nepal-school-erp/frontend@1.0.0 dev
-> npm run build:shared && vite
+> @nepal-school-erp/backend@1.0.0 dev
+> npm run build:shared && tsx watch src/server.ts
 
 
-> @nepal-school-erp/frontend@1.0.0 build:shared
-> npm run build --prefix ../backend/shared
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
 
+
+up to date, audited 3 packages in 956ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
 
 > @nepal-school-erp/shared@1.0.0 build
 > tsc -p tsconfig.json
 
-[backend-dev] Starting API server on http://127.0.0.1:5000 ...
-(node:26000) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
-(Use `node --trace-deprecation ...` to show where the warning was created)
 MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
-[backend-dev] API server is ready.
-11:47:23 am [vite] (client) Re-optimizing dependencies because vite config has changed
-Port 5173 is in use, trying another one...
-Port 5174 is in use, trying another one...
-
-  VITE v7.3.6  ready in 4091 ms
-
-  ➜  Local:   http://localhost:5175/
-  ➜  Network: use --host to expose
-Demo school (DEMOERP) already present.
+Demo institution (DEMOERP) is complete.
 Backend server listening on http://localhost:5000
-11:47:37 am [vite] plugins/backendDev.ts changed, restarting server...
-[backend-dev] Starting API server on http://127.0.0.1:5000 ...
-[backend-dev] API server is ready.
-11:47:38 am [vite] server restarted.
+10:14:45 pm [tsx] change in ./src\controllers\resultSubmissionController.ts Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:15:34 pm [tsx] change in ./shared\dist\index.js Restarting...
+10:15:34 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:15:51 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:16:03 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:20:09 pm [tsx] change in ./src\controllers\resultSubmissionController.ts Restarting...
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: Transform failed with 1 error:
+C:\Users\Sushant\Documents\New LMS Project\backend\src\utils\resultSubmission.ts:118:8: ERROR: The symbol "studentIds" has already been declared
+    at failureErrorWithLog (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1748:15)
+    at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1017:50
+    at responseCallbacks.<computed> (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:884:9)
+    at handleIncomingPacket (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:939:12)
+    at Socket.readFromStdout (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:862:7)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23) {
+  name: 'TransformError'
+}
+
+Node.js v24.16.0
+10:20:15 pm [tsx] change in ./src\controllers\resultSubmissionController.ts Rerunning...
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: Transform failed with 1 error:
+C:\Users\Sushant\Documents\New LMS Project\backend\src\utils\resultSubmission.ts:118:8: ERROR: The symbol "studentIds" has already been declared
+    at failureErrorWithLog (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1748:15)
+    at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1017:50
+    at responseCallbacks.<computed> (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:884:9)
+    at handleIncomingPacket (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:939:12)
+    at Socket.readFromStdout (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:862:7)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23) {
+  name: 'TransformError'
+}
+
+Node.js v24.16.0
+10:20:20 pm [tsx] change in ./shared\dist\index.js Rerunning...
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: Transform failed with 1 error:
+C:\Users\Sushant\Documents\New LMS Project\backend\src\utils\resultSubmission.ts:118:8: ERROR: The symbol "studentIds" has already been declared
+    at failureErrorWithLog (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1748:15)
+    at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1017:50
+    at responseCallbacks.<computed> (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:884:9)
+    at handleIncomingPacket (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:939:12)
+    at Socket.readFromStdout (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:862:7)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23) {
+  name: 'TransformError'
+}
+
+Node.js v24.16.0
+10:20:34 pm [tsx] change in ./src\utils\resultSubmission.ts Rerunning...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:25:48 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:33:45 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:35:12 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:43:09 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000

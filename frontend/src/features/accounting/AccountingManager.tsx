@@ -42,6 +42,7 @@ import {
   type SalaryPaymentRecord,
   type StudentAccountSummary,
   type StudentRecord,
+  type SalaryEmployeesResponse,
   type TeacherRecord,
   type YearRecord
 } from "@nepal-school-erp/shared";
@@ -85,6 +86,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
+import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
@@ -191,6 +193,8 @@ const defaultIncome: AccountingIncomeInput = {
 const defaultSalary: SalaryPaymentInput = {
   employeeType: "TEACHER",
   teacherId: "",
+  staffId: "",
+  staffName: "",
   monthBs: "2082-01",
   basicSalaryNpr: 0,
   allowancesNpr: 0,
@@ -341,7 +345,7 @@ export const AccountingManager = () => {
 
   const salaryEmployeesQuery = useQuery({
     queryKey: ["accounting-salary-employees"],
-    queryFn: () => unwrap<TeacherRecord[]>(api.get("/accounting/salary-employees")),
+    queryFn: () => unwrap<SalaryEmployeesResponse>(api.get("/accounting/salary-employees")),
     enabled: tab === "salaries"
   });
 
@@ -627,6 +631,8 @@ export const AccountingManager = () => {
         description="Fee collection, salaries, expenses, purchases, income, cash book, bank accounts, and financial reports."
       />
 
+      <DashboardBannerStrip />
+
       <div className="flex flex-wrap gap-2">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
@@ -785,7 +791,7 @@ export const AccountingManager = () => {
                     </Select>
                   </FormField>
                   <FormField label="Amount (NPR)">
-                    <Input type="number" value={structureForm.amountNpr} onChange={(e) => setStructureForm((c) => ({ ...c, amountNpr: Number(e.target.value) }))} />
+                    <Input type="number" value={structureForm.amountNpr} onChange={(e) => setStructureForm((c) => ({ ...c, amountNpr: e.target.valueAsNumber }))} />
                   </FormField>
                   <FormField label="Academic Year (BS)">
                     <Input value={structureForm.academicYearBs} onChange={(e) => setStructureForm((c) => ({ ...c, academicYearBs: e.target.value }))} placeholder="2083/2084" />
@@ -931,19 +937,19 @@ export const AccountingManager = () => {
                   </Select>
                 </FormField>
                 <FormField label="Current Charges">
-                  <Input type="number" value={collectionForm.currentChargesNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, currentChargesNpr: Number(e.target.value) }))} />
+                  <Input type="number" value={collectionForm.currentChargesNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, currentChargesNpr: e.target.valueAsNumber }))} />
                 </FormField>
                 <FormField label="Amount Paid">
-                  <Input type="number" value={collectionForm.amountPaidNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, amountPaidNpr: Number(e.target.value) }))} />
+                  <Input type="number" value={collectionForm.amountPaidNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, amountPaidNpr: e.target.valueAsNumber }))} />
                 </FormField>
                 <FormField label="Discount">
-                  <Input type="number" value={collectionForm.discountNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, discountNpr: Number(e.target.value) }))} />
+                  <Input type="number" value={collectionForm.discountNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, discountNpr: e.target.valueAsNumber }))} />
                 </FormField>
                 <FormField label="Scholarship">
-                  <Input type="number" value={collectionForm.scholarshipNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, scholarshipNpr: Number(e.target.value) }))} />
+                  <Input type="number" value={collectionForm.scholarshipNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, scholarshipNpr: e.target.valueAsNumber }))} />
                 </FormField>
                 <FormField label="Late Fine">
-                  <Input type="number" value={collectionForm.lateFeeNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, lateFeeNpr: Number(e.target.value) }))} />
+                  <Input type="number" value={collectionForm.lateFeeNpr} onChange={(e) => setCollectionForm((c) => ({ ...c, lateFeeNpr: e.target.valueAsNumber }))} />
                 </FormField>
                 <FormField label="Installment">
                   <Select value={collectionForm.isInstallment ? "yes" : "no"} onChange={(e) => setCollectionForm((c) => ({ ...c, isInstallment: e.target.value === "yes" }))}>
@@ -1074,24 +1080,73 @@ export const AccountingManager = () => {
           <Card>
             <CardHeader><CardTitle>Pay Salary</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <FormField label="Teacher">
+              <FormField label="Employee Type">
                 <Select
-                  value={salaryForm.teacherId ?? ""}
-                  onChange={(e) => {
-                    const teacher = (salaryEmployeesQuery.data ?? []).find((t) => t._id === e.target.value);
-                    setSalaryForm((c) => ({ ...c, teacherId: e.target.value, basicSalaryNpr: teacher?.basicSalaryNpr ?? c.basicSalaryNpr }));
-                  }}
+                  value={salaryForm.employeeType}
+                  onChange={(e) =>
+                    setSalaryForm((current) => ({
+                      ...current,
+                      employeeType: e.target.value as SalaryPaymentInput["employeeType"],
+                      teacherId: "",
+                      staffId: "",
+                      staffName: ""
+                    }))
+                  }
                 >
-                  <option value="">Select teacher</option>
-                  {(salaryEmployeesQuery.data ?? []).map((t) => <option key={t._id} value={t._id}>{t.user.fullName}</option>)}
+                  <option value="TEACHER">Teacher</option>
+                  <option value="STAFF">College Staff</option>
                 </Select>
               </FormField>
+              {salaryForm.employeeType === "TEACHER" ? (
+                <FormField label="Teacher">
+                  <Select
+                    value={salaryForm.teacherId ?? ""}
+                    onChange={(e) => {
+                      const teacher = (salaryEmployeesQuery.data?.teachers ?? []).find((item) => item._id === e.target.value);
+                      setSalaryForm((current) => ({
+                        ...current,
+                        teacherId: e.target.value,
+                        basicSalaryNpr: teacher?.basicSalaryNpr ?? current.basicSalaryNpr
+                      }));
+                    }}
+                  >
+                    <option value="">Select teacher</option>
+                    {(salaryEmployeesQuery.data?.teachers ?? []).map((teacher) => (
+                      <option key={teacher._id} value={teacher._id}>
+                        {teacher.user.fullName}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              ) : (
+                <FormField label="College Staff">
+                  <Select
+                    value={salaryForm.staffId ?? ""}
+                    onChange={(e) => {
+                      const staff = (salaryEmployeesQuery.data?.collegeStaff ?? []).find((item) => item._id === e.target.value);
+                      setSalaryForm((current) => ({
+                        ...current,
+                        staffId: e.target.value,
+                        staffName: staff?.fullName ?? "",
+                        basicSalaryNpr: staff?.basicSalaryNpr ?? current.basicSalaryNpr
+                      }));
+                    }}
+                  >
+                    <option value="">Select staff member</option>
+                    {(salaryEmployeesQuery.data?.collegeStaff ?? []).map((staff) => (
+                      <option key={staff._id} value={staff._id}>
+                        {staff.fullName} ({staff.staffId})
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              )}
               <FormField label="Month"><Input value={salaryForm.monthBs} onChange={(e) => setSalaryForm((c) => ({ ...c, monthBs: e.target.value }))} /></FormField>
-              <FormField label="Basic Salary"><Input type="number" value={salaryForm.basicSalaryNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, basicSalaryNpr: Number(e.target.value) }))} /></FormField>
-              <FormField label="Allowances"><Input type="number" value={salaryForm.allowancesNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, allowancesNpr: Number(e.target.value) }))} /></FormField>
-              <FormField label="Bonus"><Input type="number" value={salaryForm.bonusNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, bonusNpr: Number(e.target.value) }))} /></FormField>
-              <FormField label="Loan Deduction"><Input type="number" value={salaryForm.loanDeductionNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, loanDeductionNpr: Number(e.target.value) }))} /></FormField>
-              <FormField label="Tax"><Input type="number" value={salaryForm.taxNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, taxNpr: Number(e.target.value) }))} /></FormField>
+              <FormField label="Basic Salary"><Input type="number" value={salaryForm.basicSalaryNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, basicSalaryNpr: e.target.valueAsNumber }))} /></FormField>
+              <FormField label="Allowances"><Input type="number" value={salaryForm.allowancesNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, allowancesNpr: e.target.valueAsNumber }))} /></FormField>
+              <FormField label="Bonus"><Input type="number" value={salaryForm.bonusNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, bonusNpr: e.target.valueAsNumber }))} /></FormField>
+              <FormField label="Loan Deduction"><Input type="number" value={salaryForm.loanDeductionNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, loanDeductionNpr: e.target.valueAsNumber }))} /></FormField>
+              <FormField label="Tax"><Input type="number" value={salaryForm.taxNpr} onChange={(e) => setSalaryForm((c) => ({ ...c, taxNpr: e.target.valueAsNumber }))} /></FormField>
               <FormField label="Status">
                 <Select value={salaryForm.status} onChange={(e) => setSalaryForm((c) => ({ ...c, status: e.target.value as SalaryPaymentInput["status"] }))}>
                   <option value="DRAFT">Draft</option>
@@ -1123,7 +1178,7 @@ export const AccountingManager = () => {
                   {(salariesQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
                       <Td>{row.monthBs}</Td>
-                      <Td>{row.teacher?.user.fullName ?? row.staffName ?? "—"}</Td>
+                      <Td>{row.teacher?.user.fullName ?? row.collegeStaff?.fullName ?? row.staffName ?? "—"}</Td>
                       <Td>{formatCurrencyNpr(row.netSalaryNpr)}</Td>
                       <Td><Badge>{row.status}</Badge></Td>
                     </tr>
@@ -1147,7 +1202,7 @@ export const AccountingManager = () => {
               </FormField>
               <FormField label="Vendor"><Input value={expenseForm.vendor} onChange={(e) => setExpenseForm((c) => ({ ...c, vendor: e.target.value }))} /></FormField>
               <FormField label="Date"><NepaliDateField value={expenseForm.dateBs} onChange={(v) => setExpenseForm((c) => ({ ...c, dateBs: v }))} /></FormField>
-              <FormField label="Amount"><Input type="number" value={expenseForm.amountNpr} onChange={(e) => setExpenseForm((c) => ({ ...c, amountNpr: Number(e.target.value) }))} /></FormField>
+              <FormField label="Amount"><Input type="number" value={expenseForm.amountNpr} onChange={(e) => setExpenseForm((c) => ({ ...c, amountNpr: e.target.valueAsNumber }))} /></FormField>
               <FormField label="Payment Method">
                 <Select value={expenseForm.paymentMethod} onChange={(e) => setExpenseForm((c) => ({ ...c, paymentMethod: e.target.value as AccountingExpenseInput["paymentMethod"] }))}>
                   {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replace(/_/g, " ")}</option>)}
@@ -1200,8 +1255,8 @@ export const AccountingManager = () => {
               <FormField label="Vendor"><Input value={purchaseForm.vendor} onChange={(e) => setPurchaseForm((c) => ({ ...c, vendor: e.target.value }))} /></FormField>
               <FormField label="Invoice"><Input value={purchaseForm.invoiceNumber} onChange={(e) => setPurchaseForm((c) => ({ ...c, invoiceNumber: e.target.value }))} /></FormField>
               <FormField label="Date"><NepaliDateField value={purchaseForm.purchaseDateBs} onChange={(v) => setPurchaseForm((c) => ({ ...c, purchaseDateBs: v }))} /></FormField>
-              <FormField label="Quantity"><Input type="number" value={purchaseForm.quantity} onChange={(e) => setPurchaseForm((c) => ({ ...c, quantity: Number(e.target.value) }))} /></FormField>
-              <FormField label="Unit Price"><Input type="number" value={purchaseForm.unitPriceNpr} onChange={(e) => setPurchaseForm((c) => ({ ...c, unitPriceNpr: Number(e.target.value) }))} /></FormField>
+              <FormField label="Quantity"><Input type="number" value={purchaseForm.quantity} onChange={(e) => setPurchaseForm((c) => ({ ...c, quantity: e.target.valueAsNumber }))} /></FormField>
+              <FormField label="Unit Price"><Input type="number" value={purchaseForm.unitPriceNpr} onChange={(e) => setPurchaseForm((c) => ({ ...c, unitPriceNpr: e.target.valueAsNumber }))} /></FormField>
               <FormField label="Payment Status">
                 <Select value={purchaseForm.paymentStatus} onChange={(e) => setPurchaseForm((c) => ({ ...c, paymentStatus: e.target.value as AccountingPurchaseInput["paymentStatus"] }))}>
                   {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1253,7 +1308,7 @@ export const AccountingManager = () => {
               </FormField>
               <FormField label="Source"><Input value={incomeForm.source} onChange={(e) => setIncomeForm((c) => ({ ...c, source: e.target.value }))} /></FormField>
               <FormField label="Date"><NepaliDateField value={incomeForm.dateBs} onChange={(v) => setIncomeForm((c) => ({ ...c, dateBs: v }))} /></FormField>
-              <FormField label="Amount"><Input type="number" value={incomeForm.amountNpr} onChange={(e) => setIncomeForm((c) => ({ ...c, amountNpr: Number(e.target.value) }))} /></FormField>
+              <FormField label="Amount"><Input type="number" value={incomeForm.amountNpr} onChange={(e) => setIncomeForm((c) => ({ ...c, amountNpr: e.target.valueAsNumber }))} /></FormField>
               <Button onClick={() => {
                 const parsed = accountingIncomeSchema.safeParse(incomeForm);
                 if (!parsed.success) return toast.error("Invalid income");
@@ -1301,7 +1356,7 @@ export const AccountingManager = () => {
               </FormField>
               <FormField label="Category"><Input value={cashForm.category} onChange={(e) => setCashForm((c) => ({ ...c, category: e.target.value }))} /></FormField>
               <FormField label="Description"><Textarea value={cashForm.description} onChange={(e) => setCashForm((c) => ({ ...c, description: e.target.value }))} /></FormField>
-              <FormField label="Amount"><Input type="number" value={cashForm.amountNpr} onChange={(e) => setCashForm((c) => ({ ...c, amountNpr: Number(e.target.value) }))} /></FormField>
+              <FormField label="Amount"><Input type="number" value={cashForm.amountNpr} onChange={(e) => setCashForm((c) => ({ ...c, amountNpr: e.target.valueAsNumber }))} /></FormField>
               <Button onClick={() => {
                 const parsed = cashBookEntrySchema.safeParse(cashForm);
                 if (!parsed.success) return toast.error("Invalid entry");
@@ -1342,7 +1397,7 @@ export const AccountingManager = () => {
                 <FormField label="Bank Name"><Input value={bankForm.bankName} onChange={(e) => setBankForm((c) => ({ ...c, bankName: e.target.value }))} /></FormField>
                 <FormField label="Account Name"><Input value={bankForm.accountName} onChange={(e) => setBankForm((c) => ({ ...c, accountName: e.target.value }))} /></FormField>
                 <FormField label="Account Number"><Input value={bankForm.accountNumber} onChange={(e) => setBankForm((c) => ({ ...c, accountNumber: e.target.value }))} /></FormField>
-                <FormField label="Opening Balance"><Input type="number" value={bankForm.openingBalanceNpr} onChange={(e) => setBankForm((c) => ({ ...c, openingBalanceNpr: Number(e.target.value) }))} /></FormField>
+                <FormField label="Opening Balance"><Input type="number" value={bankForm.openingBalanceNpr} onChange={(e) => setBankForm((c) => ({ ...c, openingBalanceNpr: e.target.valueAsNumber }))} /></FormField>
                 <Button onClick={() => {
                   const parsed = bankAccountSchema.safeParse(bankForm);
                   if (!parsed.success) return toast.error("Invalid bank account");
@@ -1432,10 +1487,10 @@ export const AccountingManager = () => {
             ) : settingsQuery.data ? (
               <>
                 <FormField label="Late Fine %">
-                  <Input type="number" value={settingsForm.lateFinePercent} onChange={(e) => setSettingsForm((c) => ({ ...c, lateFinePercent: Number(e.target.value) }))} />
+                  <Input type="number" value={settingsForm.lateFinePercent} onChange={(e) => setSettingsForm((c) => ({ ...c, lateFinePercent: e.target.valueAsNumber }))} />
                 </FormField>
                 <FormField label="Grace Days">
-                  <Input type="number" value={settingsForm.lateFineGraceDays} onChange={(e) => setSettingsForm((c) => ({ ...c, lateFineGraceDays: Number(e.target.value) }))} />
+                  <Input type="number" value={settingsForm.lateFineGraceDays} onChange={(e) => setSettingsForm((c) => ({ ...c, lateFineGraceDays: e.target.valueAsNumber }))} />
                 </FormField>
                 <FormField label="Receipt Prefix">
                   <Input value={settingsForm.receiptPrefix} onChange={(e) => setSettingsForm((c) => ({ ...c, receiptPrefix: e.target.value }))} />

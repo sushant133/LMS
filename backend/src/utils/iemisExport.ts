@@ -25,6 +25,8 @@ export interface StudentMasterRow {
   rollNumber: number;
   disabilityCategory: string;
   ethnicityCategory: string;
+  fatherPhone: string;
+  motherPhone: string;
   guardianName: string;
   guardianPhone: string;
   address: string;
@@ -95,6 +97,8 @@ export async function generateStudentMasterExport(req: Request): Promise<Student
     rollNumber: s.rollNumber,
     disabilityCategory: s.disabilityCategory || "None",
     ethnicityCategory: s.ethnicityCategory || "Other",
+    fatherPhone: s.fatherPhone || "",
+    motherPhone: s.motherPhone || "",
     guardianName: s.guardianName,
     guardianPhone: s.guardianPhone,
     address: `${s.address?.municipality || ""}, Ward ${s.address?.ward || ""}`,

@@ -125,7 +125,7 @@ export const FeeManager = () => {
                 <Input value={structureForm.academicYearBs} onChange={(event) => setStructureForm((current) => ({ ...current, academicYearBs: event.target.value }))} />
               </FormField>
               <FormField label="Amount (NPR)">
-                <Input type="number" value={structureForm.amountNpr} onChange={(event) => setStructureForm((current) => ({ ...current, amountNpr: Number(event.target.value) }))} />
+                <Input type="number" value={structureForm.amountNpr} onChange={(event) => setStructureForm((current) => ({ ...current, amountNpr: event.target.valueAsNumber }))} />
               </FormField>
               <div className="md:col-span-2">
                 <FormField label="Class IDs (comma separated)">
@@ -206,16 +206,16 @@ export const FeeManager = () => {
                 <NepaliDateField value={collectionForm.paidDateBs} onChange={(value) => setCollectionForm((current) => ({ ...current, paidDateBs: value }))} />
               </FormField>
               <FormField label="Amount Paid">
-                <Input type="number" value={collectionForm.amountPaidNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, amountPaidNpr: Number(event.target.value) }))} />
+                <Input type="number" value={collectionForm.amountPaidNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, amountPaidNpr: event.target.valueAsNumber }))} />
               </FormField>
               <FormField label="Discount">
-                <Input type="number" value={collectionForm.discountNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, discountNpr: Number(event.target.value) }))} />
+                <Input type="number" value={collectionForm.discountNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, discountNpr: event.target.valueAsNumber }))} />
               </FormField>
               <FormField label="Scholarship">
-                <Input type="number" value={collectionForm.scholarshipNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, scholarshipNpr: Number(event.target.value) }))} />
+                <Input type="number" value={collectionForm.scholarshipNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, scholarshipNpr: event.target.valueAsNumber }))} />
               </FormField>
               <FormField label="Late Fee">
-                <Input type="number" value={collectionForm.lateFeeNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, lateFeeNpr: Number(event.target.value) }))} />
+                <Input type="number" value={collectionForm.lateFeeNpr} onChange={(event) => setCollectionForm((current) => ({ ...current, lateFeeNpr: event.target.valueAsNumber }))} />
               </FormField>
               <div className="md:col-span-2">
                 <FormField label="Notes">

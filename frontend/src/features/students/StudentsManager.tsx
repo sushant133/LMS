@@ -36,7 +36,9 @@ const mapStudentToInput = (student: StudentRecord): StudentInput => ({
   bloodGroup: student.bloodGroup,
   address: student.address,
   fatherName: student.fatherName,
+  fatherPhone: student.fatherPhone ?? "",
   motherName: student.motherName,
+  motherPhone: student.motherPhone ?? "",
   guardianName: student.guardianName,
   guardianPhone: student.guardianPhone,
   feesDueNpr: student.feesDueNpr,
@@ -168,12 +170,16 @@ export const StudentsManager = () => {
       const email = student.user.email.toLowerCase();
       const phone = (student.user.phone ?? "").toLowerCase();
       const guardianPhone = student.guardianPhone.toLowerCase();
+      const fatherPhone = (student.fatherPhone ?? "").toLowerCase();
+      const motherPhone = (student.motherPhone ?? "").toLowerCase();
 
       return (
         name.includes(query) ||
         email.includes(query) ||
         phone.includes(query) ||
-        guardianPhone.includes(query)
+        guardianPhone.includes(query) ||
+        fatherPhone.includes(query) ||
+        motherPhone.includes(query)
       );
     });
   }, [batchFilter, classFilter, isCollege, searchQuery, sectionFilter, students, yearFilter]);

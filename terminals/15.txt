@@ -1,20 +1,20 @@
 ---
-pid: 3896
+pid: 31556
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "npm run dev:client --prefix \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\""
-started_at: 2026-07-03T08:18:42.199Z
-running_for_ms: 19774999 
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run build; npm start"
+started_at: 2026-07-04T17:12:14.027Z
+running_for_ms: 9130001  
 ---
 
-> @nepal-school-erp/frontend@1.0.0 dev:client
-> npm run build:shared && vite
+> @nepal-school-erp/backend@1.0.0 build
+> npm run build:shared && tsc -p tsconfig.json
 
 
-> @nepal-school-erp/frontend@1.0.0 build:shared
-> npm install --include=dev --prefix ../backend/shared && npm run build --prefix ../backend/shared
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
 
 
-up to date, audited 3 packages in 909ms
+up to date, audited 3 packages in 1s
 
 1 package is looking for funding
   run `npm fund` for details
@@ -25,18 +25,378 @@ found 0 vulnerabilities
 > tsc -p tsconfig.json
 
 
-  VITE v7.3.6  ready in 351 ms
+> @nepal-school-erp/backend@1.0.0 start
+> node dist/server.js
 
-  ➜  Local:   http://localhost:5173/
-  ➜  Network: use --host to expose
-2:09:49 pm [vite] (client) hmr update /src/features/auth/ProtectedRoute.tsx, /src/index.css
-2:09:49 pm [vite] (client) hmr update /src/index.css, /src/components/layout/AppLayout.tsx, /src/pages/LoginPage.tsx
-2:10:10 pm [vite] (client) hmr update /src/features/auth/AuthProvider.tsx, /src/index.css
-2:10:10 pm [vite] (client) hmr update /src/components/layout/AppLayout.tsx, /src/index.css
-2:10:24 pm [vite] (client) hmr update /src/App.tsx, /src/index.css
-2:10:24 pm [vite] (client) hmr update /src/pages/LoginPage.tsx, /src/index.css
-2:22:12 pm [vite] (client) hmr update /src/index.css
-2:22:12 pm [vite] (client) hmr update /src/components/layout/AppLayout.tsx, /src/index.css
-2:23:28 pm [vite] (client) hmr update /src/components/layout/AppLayout.tsx, /src/index.css
-2:23:28 pm [vite] (client) hmr update /src/index.css
-2:24:10 pm [vite] (client) hmr update /src/index.css
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+POST /api/auth/login 200 669.536 ms - 1680
+GET /api/dashboard 304 158.316 ms - -
+GET /api/academics/batches 304 62.456 ms - -
+GET /api/academics/years 304 63.303 ms - -
+GET /api/academics/subjects 200 70.094 ms - 2764
+GET /api/academics/master-subjects 200 115.585 ms - 62
+GET /api/academics/batches 304 57.942 ms - -
+GET /api/academics/years 304 65.086 ms - -
+GET /api/academics/subjects 304 68.854 ms - -
+GET /api/exams 304 141.849 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 200 122.205 ms - 65
+GET /api/students 304 183.180 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 108.806 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 107.920 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 104.419 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 400.543 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 107.485 ms - -
+GET /api/auth/me 200 154.663 ms - 1684
+GET /api/academics/subjects 304 100.542 ms - -
+GET /api/exams 304 253.753 ms - -
+GET /api/students 304 302.133 ms - -
+GET /api/academics/batches 304 336.577 ms - -
+GET /api/academics/years 304 366.622 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 650.271 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 108.426 ms - -
+GET /api/academics/years 304 50.043 ms - -
+GET /api/academics/subjects 304 51.851 ms - -
+GET /api/academics/batches 304 55.702 ms - -
+GET /api/academics/master-subjects 304 104.956 ms - -
+POST /api/academics/master-subjects/reconcile 200 2242.273 ms - 144
+GET /api/academics/subjects 200 71.720 ms - 5818
+GET /api/academics/master-subjects 200 108.734 ms - 1974
+GET /api/auth/me 304 161.942 ms - -
+GET /api/academics/years 304 54.248 ms - -
+GET /api/academics/subjects 304 59.826 ms - -
+GET /api/academics/batches 304 64.328 ms - -
+GET /api/academics/master-subjects 304 109.014 ms - -
+DELETE /api/academics/master-subjects/6a49421977e08050298ae579 400 768.198 ms - 101
+DELETE /api/academics/master-subjects/6a49421977e08050298ae579 400 508.913 ms - 101
+PUT /api/academics/master-subjects/6a49421977e08050298ae579 200 231.813 ms - 355
+GET /api/academics/subjects 200 66.468 ms - 5820
+GET /api/academics/master-subjects 200 104.890 ms - 1975
+PUT /api/academics/master-subjects/6a49421977e08050298ae579 200 331.591 ms - 354
+GET /api/academics/subjects 200 62.082 ms - 5818
+GET /api/academics/master-subjects 200 103.009 ms - 1974
+GET /api/academics/years 304 56.209 ms - -
+GET /api/academics/batches 304 60.360 ms - -
+GET /api/students 304 113.627 ms - -
+GET /api/auth/me 304 153.717 ms - -
+GET /api/academics/years 304 56.668 ms - -
+GET /api/academics/batches 304 60.165 ms - -
+GET /api/students 304 113.087 ms - -
+GET /api/auth/me 304 152.179 ms - -
+GET /api/academics/years 304 54.125 ms - -
+GET /api/academics/batches 304 57.726 ms - -
+GET /api/students 304 104.640 ms - -
+GET /api/dashboard 304 115.034 ms - -
+GET /api/notices 200 54.696 ms - 920
+GET /api/dashboard 304 117.168 ms - -
+GET /api/academics/batches 304 53.374 ms - -
+GET /api/academics/years 304 55.637 ms - -
+GET /api/students 304 108.845 ms - -
+GET /api/auth/me 304 177.307 ms - -
+GET /api/academics/years 304 57.732 ms - -
+GET /api/academics/batches 304 60.168 ms - -
+GET /api/students 304 113.057 ms - -
+GET /api/academics/batches 304 50.906 ms - -
+GET /api/academics/subjects 304 56.805 ms - -
+GET /api/academics/years 304 63.706 ms - -
+GET /api/teachers 304 106.131 ms - -
+GET /api/academics/years 304 51.027 ms - -
+GET /api/academics/batches 304 54.953 ms - -
+GET /api/academics/subjects 304 54.840 ms - -
+GET /api/academics/master-subjects 304 101.013 ms - -
+GET /api/academics/batches 304 50.222 ms - -
+GET /api/academics/subjects 304 52.690 ms - -
+GET /api/teachers 304 110.594 ms - -
+GET /api/academics/years 304 51.570 ms - -
+GET /api/academics/subjects 304 53.354 ms - -
+GET /api/academics/batches 304 58.191 ms - -
+GET /api/students 304 109.459 ms - -
+GET /api/academics/years 304 50.774 ms - -
+GET /api/academics/batches 304 53.805 ms - -
+GET /api/academics/subjects 304 95.488 ms - -
+GET /api/exams 304 102.603 ms - -
+GET /api/students 304 143.682 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 143.628 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 101.373 ms - -
+GET /api/fees/structures 200 53.664 ms - 370
+GET /api/fees/collections 200 58.298 ms - 1426
+GET /api/academics/classes 304 60.444 ms - -
+GET /api/students 304 118.009 ms - -
+GET /api/academics/batches 304 51.042 ms - -
+GET /api/academics/years 304 50.918 ms - -
+GET /api/academics/subjects 304 61.569 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 101.827 ms - -
+GET /api/exams 304 108.903 ms - -
+GET /api/students 304 109.683 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 101.446 ms - -
+GET /api/academics/batches 304 50.122 ms - -
+GET /api/academics/subjects 304 55.276 ms - -
+GET /api/teachers 304 100.660 ms - -
+GET /api/academics/years 304 50.678 ms - -
+GET /api/academics/batches 304 54.230 ms - -
+GET /api/academics/subjects 304 54.130 ms - -
+GET /api/academics/master-subjects 304 101.615 ms - -
+GET /api/academics/batches 304 53.136 ms - -
+GET /api/academics/years 304 53.813 ms - -
+GET /api/students 304 102.864 ms - -
+GET /api/academics/subjects 304 54.302 ms - -
+GET /api/academics/batches 304 59.393 ms - -
+GET /api/academics/years 304 59.653 ms - -
+GET /api/teachers 304 101.600 ms - -
+GET /api/auth/me 304 153.930 ms - -
+GET /api/academics/batches 304 54.536 ms - -
+GET /api/academics/years 304 54.753 ms - -
+GET /api/academics/subjects 304 55.834 ms - -
+GET /api/teachers 304 106.136 ms - -
+GET /api/auth/me 304 152.117 ms - -
+GET /api/academics/batches 304 54.211 ms - -
+GET /api/academics/years 304 55.714 ms - -
+GET /api/academics/subjects 304 57.548 ms - -
+GET /api/teachers 304 105.827 ms - -
+GET /api/academics/subjects 304 66.584 ms - -
+GET /api/academics/years 304 70.800 ms - -
+GET /api/academics/batches 304 73.631 ms - -
+GET /api/academics/master-subjects 304 123.254 ms - -
+GET /api/academics/subjects 304 61.847 ms - -
+GET /api/academics/batches 304 64.280 ms - -
+GET /api/teachers 304 118.712 ms - -
+GET /api/academics/years 304 50.445 ms - -
+GET /api/academics/batches 304 55.877 ms - -
+GET /api/academics/subjects 304 57.010 ms - -
+GET /api/students 304 111.553 ms - -
+GET /api/academics/subjects 304 54.291 ms - -
+GET /api/academics/batches 304 59.380 ms - -
+GET /api/academics/years 304 60.082 ms - -
+GET /api/teachers 304 102.123 ms - -
+GET /api/academics/batches 304 54.533 ms - -
+GET /api/academics/years 304 55.769 ms - -
+GET /api/students 304 108.941 ms - -
+GET /api/academics/batches 304 50.892 ms - -
+GET /api/academics/years 304 54.461 ms - -
+GET /api/academics/subjects 304 58.191 ms - -
+GET /api/students 304 106.150 ms - -
+GET /api/academics/subjects 304 66.819 ms - -
+GET /api/academics/batches 304 76.127 ms - -
+GET /api/academics/years 304 76.827 ms - -
+GET /api/exams 304 120.092 ms - -
+GET /api/students 304 122.754 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 136.189 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 102.335 ms - -
+GET /api/fees/collections 304 59.492 ms - -
+GET /api/fees/structures 304 65.490 ms - -
+GET /api/academics/classes 304 59.229 ms - -
+GET /api/students 304 110.023 ms - -
+GET /api/academics/batches 304 98.664 ms - -
+GET /api/students 304 111.073 ms - -
+GET /api/academics/years 304 104.145 ms - -
+GET /api/accounting/structures 200 633.727 ms - 370
+GET /api/accounting/dashboard 200 649.751 ms - 2596
+GET /api/accounting/reports/daily-fee-collection?dateBs=2081-09-01 200 53.755 ms - 761
+GET /api/accounting/purchases 200 54.355 ms - 518
+GET /api/accounting/expenses 200 51.533 ms - 775
+GET /api/accounting/income 200 54.034 ms - 418
+GET /api/accounting/cash-book 200 55.604 ms - 966
+GET /api/library/books 200 53.033 ms - 432
+GET /api/students 304 112.096 ms - -
+GET /api/teachers 304 112.291 ms - -
+[SMS] To: 9802000000 | "Nepal History and Culture" is overdue (was due 2081-09-20). Please return it immediately.
+[SMS] To: 9802000000 | "Nepal History and Culture" is overdue (was due 2081-09-20). Please return it immediately.
+[SMS] To: 9804000000 | "Nepal History and Culture" is overdue (was due 2081-09-20). Please return it immediately.
+[SMS] To: 9804000000 | "Nepal History and Culture" is overdue (was due 2081-09-20). Please return it immediately.
+GET /api/library/dashboard 200 710.118 ms - 1516
+GET /api/library/issues 200 753.539 ms - 1491
+GET /api/notices 304 53.870 ms - -
+GET /api/academics/years 304 52.894 ms - -
+GET /api/academics/subjects 304 58.024 ms - -
+GET /api/academics/batches 304 61.447 ms - -
+GET /api/teachers 304 108.678 ms - -
+GET /api/accounting/dashboard 304 66.291 ms - -
+GET /api/accounting/structures 304 65.464 ms - -
+GET /api/students 304 108.889 ms - -
+GET /api/academics/years 304 572.640 ms - -
+GET /api/academics/batches 304 604.761 ms - -
+GET /api/accounting/salary-employees 200 121.726 ms - 3842
+GET /api/accounting/salaries 200 168.665 ms - 1487
+GET /api/teachers 304 110.986 ms - -
+GET /api/hr/leaves 200 157.115 ms - 1347
+GET /api/hr/payroll 200 156.041 ms - 1312
+GET /api/auth/me 304 153.867 ms - -
+GET /api/teachers 304 102.768 ms - -
+GET /api/hr/leaves 304 154.777 ms - -
+GET /api/hr/payroll 304 166.236 ms - -
+GET /api/notices 304 56.915 ms - -
+GET /api/auth/me 304 166.442 ms - -
+GET /api/dashboard 304 118.606 ms - -
+GET /api/banners/active 404 0.632 ms - 66
+GET /api/banners/active 404 0.390 ms - 66
+GET /api/notices 304 54.898 ms - -
+GET /api/banners 404 0.266 ms - 59
+GET /api/banners 404 0.343 ms - 59
+GET /api/notices 304 55.424 ms - -
+POST /api/auth/logout 200 1.197 ms - 52
+GET /api/auth/me 401 0.558 ms - 53
+GET /api/auth/me 401 0.575 ms - 53
+GET /api/auth/me 401 0.508 ms - 53
+POST /api/auth/login 200 398.197 ms - 1680
+GET /api/dashboard 304 115.373 ms - -
+GET /api/banners/active 404 0.291 ms - 66
+GET /api/banners/active 404 0.367 ms - 66
+GET /api/academics/batches 304 54.339 ms - -
+GET /api/academics/subjects 304 56.155 ms - -
+GET /api/academics/years 304 60.522 ms - -
+GET /api/teachers 304 106.189 ms - -
+GET /api/accounting/accountants 200 105.104 ms - 783
+GET /api/academics/years 304 50.203 ms - -
+GET /api/academics/subjects 304 52.504 ms - -
+GET /api/academics/batches 304 56.548 ms - -
+GET /api/teachers 304 101.032 ms - -
+GET /api/accounting/accountants 304 113.022 ms - -
+GET /api/library/staff 200 52.384 ms - 377
+GET /api/laboratory/staff 200 51.477 ms - 389
+GET /api/college-staff?category=SECURITY_GUARD 404 0.157 ms - 89
+GET /api/college-staff?category=SECURITY_GUARD 404 0.151 ms - 89
+GET /api/college-staff?category=HOUSEKEEPING 404 0.234 ms - 87
+GET /api/college-staff?category=HOUSEKEEPING 404 0.303 ms - 87
+GET /api/college-staff?category=RECEPTIONIST 404 0.185 ms - 87
+GET /api/college-staff?category=RECEPTIONIST 404 0.448 ms - 87
+GET /api/college-staff?category=OTHER 404 0.353 ms - 80
+GET /api/college-staff?category=OTHER 404 0.212 ms - 80
+GET /api/academics/years 304 55.798 ms - -
+GET /api/academics/batches 304 57.933 ms - -
+GET /api/accounting/dashboard 304 63.438 ms - -
+GET /api/accounting/structures 304 63.017 ms - -
+GET /api/students 304 107.025 ms - -
+GET /api/banners/active 404 0.172 ms - 66
+GET /api/banners/active 404 0.215 ms - 66
+GET /api/accounting/salary-employees 304 101.314 ms - -
+GET /api/accounting/salaries 304 158.502 ms - -
+GET /api/banners/active 404 0.481 ms - 66
+GET /api/dashboard 304 111.639 ms - -
+GET /api/banners/active 404 0.289 ms - 66
+GET /api/academics/years 304 51.572 ms - -
+GET /api/academics/batches 304 54.714 ms - -
+GET /api/students 304 114.784 ms - -
+GET /api/academics/batches 304 54.097 ms - -
+GET /api/academics/years 304 54.869 ms - -
+GET /api/academics/subjects 304 56.480 ms - -
+GET /api/teachers 304 115.008 ms - -
+POST /api/auth/logout 200 0.177 ms - 52
+GET /api/auth/me 401 0.258 ms - 53
+POST /api/auth/login 200 433.588 ms - 1657
+GET /api/dashboard 200 170.393 ms - 1465
+GET /api/banners/active 404 0.320 ms - 66
+GET /api/banners/active 404 0.333 ms - 66
+GET /api/auth/me 200 165.305 ms - 1661
+GET /api/dashboard 304 176.406 ms - -
+GET /api/banners/active 404 0.204 ms - 66
+POST /api/auth/logout 200 0.379 ms - 52
+GET /api/auth/me 401 0.391 ms - 53
+POST /api/auth/login 401 58.624 ms - 58
+POST /api/auth/login 401 57.728 ms - 58
+POST /api/auth/login 401 226.543 ms - 58
+POST /api/auth/login 200 439.330 ms - 1645
+GET /api/academics/batches 304 51.478 ms - -
+GET /api/academics/years 304 52.854 ms - -
+GET /api/accounting/structures 304 57.192 ms - -
+GET /api/accounting/dashboard 304 62.576 ms - -
+GET /api/students 304 103.987 ms - -
+GET /api/banners/active 404 0.498 ms - 66
+GET /api/banners/active 404 0.147 ms - 66
+POST /api/auth/logout 200 0.248 ms - 52
+GET /api/auth/me 401 0.298 ms - 53
+POST /api/auth/login 200 389.768 ms - 1680
+GET /api/dashboard 200 112.512 ms - 1560
+GET /api/banners/active 404 0.200 ms - 66
+GET /api/banners/active 404 0.189 ms - 66
+GET /api/accounting/dashboard 304 57.029 ms - -
+GET /api/accounting/structures 304 55.776 ms - -
+GET /api/academics/batches 304 55.607 ms - -
+GET /api/academics/years 304 55.993 ms - -
+GET /api/students 304 112.724 ms - -
+GET /api/banners/active 404 0.182 ms - 66
+GET /api/banners/active 404 0.317 ms - 66
+GET /api/accounting/accountants 304 106.728 ms - -
+GET /api/academics/batches 304 55.461 ms - -
+GET /api/academics/years 304 61.272 ms - -
+GET /api/academics/subjects 304 63.425 ms - -
+GET /api/teachers 304 112.032 ms - -
+GET /api/accounting/accountants 304 112.205 ms - -
+GET /api/library/staff 304 51.680 ms - -
+GET /api/laboratory/staff 304 58.773 ms - -
+GET /api/college-staff?category=SECURITY_GUARD 404 0.193 ms - 89
+GET /api/college-staff?category=SECURITY_GUARD 404 0.337 ms - 89
+GET /api/academics/batches 304 53.163 ms - -
+GET /api/academics/years 304 54.252 ms - -
+GET /api/students 304 104.589 ms - -
+GET /api/academics/batches 304 53.415 ms - -
+GET /api/academics/subjects 304 54.149 ms - -
+GET /api/academics/years 304 56.314 ms - -
+GET /api/teachers 304 105.287 ms - -
+GET /api/academics/years 304 50.073 ms - -
+GET /api/academics/batches 304 52.363 ms - -
+GET /api/academics/subjects 304 53.650 ms - -
+GET /api/academics/master-subjects 304 116.305 ms - -
+GET /api/academics/batches 304 50.802 ms - -
+GET /api/academics/subjects 304 55.864 ms - -
+GET /api/teachers 304 109.037 ms - -
+GET /api/academics/batches 304 52.293 ms - -
+GET /api/academics/years 304 51.795 ms - -
+GET /api/academics/subjects 304 57.379 ms - -
+GET /api/students 304 105.373 ms - -
+GET /api/academics/batches 304 51.140 ms - -
+GET /api/academics/years 304 52.685 ms - -
+GET /api/academics/subjects 304 54.136 ms - -
+GET /api/exams 304 103.630 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 105.553 ms - -
+GET /api/students 304 113.667 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 106.139 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 104.702 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 105.190 ms - -
+GET /api/notices 304 53.558 ms - -
+GET /api/notifications 200 111.644 ms - 19423
+GET /api/academics/batches 304 50.248 ms - -
+GET /api/academics/subjects 304 51.066 ms - -
+GET /api/academics/years 304 52.510 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 105.812 ms - -
+GET /api/exams 304 109.105 ms - -
+GET /api/students 304 104.925 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 106.145 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 109.649 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 107.221 ms - -
+GET /api/auth/me 200 166.153 ms - 1684
+GET /api/dashboard 304 113.338 ms - -
+GET /api/banners/active 404 0.270 ms - 66
+GET /api/banners/active 404 0.214 ms - 66
+GET /api/academics/batches 304 54.434 ms - -
+GET /api/academics/years 304 54.555 ms - -
+GET /api/academics/subjects 304 59.232 ms - -
+GET /api/exams 304 109.689 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 105.557 ms - -
+GET /api/students 304 117.207 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 116.882 ms - -
+GET /api/exams/results/published/exams 404 0.938 ms - 81
+GET /api/exams/results/published/exams 404 1.878 ms - 81
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 120.614 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 114.865 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 111.379 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 110.506 ms - -
+POST /api/exams/6a4932c99fe1b0547e855b9d/results/publish 400 168.343 ms - 121
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 113.068 ms - -
+[SMS] To: 9804000000 | Results for "First Terminal Examination" are now available for your child.
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 100.952 ms - -
+POST /api/exams/6a4932be7d5c20c352fb483e/results/publish 200 1172.320 ms - 580
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 107.460 ms - -
+GET /api/exams 200 113.764 ms - 1062
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 113.785 ms - -
+GET /api/exams/results/published/exams 404 0.442 ms - 81
+GET /api/exams/results/published/exams 404 0.760 ms - 81
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 113.543 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 118.296 ms - -
+GET /api/exams/results/published/exams 404 0.888 ms - 81
+GET /api/exams/results/published/exams 404 0.912 ms - 81
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 114.087 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 113.111 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 113.842 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 114.495 ms - -
+GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 113.093 ms - -

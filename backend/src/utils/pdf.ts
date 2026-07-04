@@ -39,10 +39,18 @@ interface ReceiptData {
 
 interface MarksheetData {
   schoolName: string;
+  schoolNameNp?: string;
+  schoolAddress?: string;
+  principalName?: string;
+  controllerOfExamination?: string;
   examName: string;
+  academicYearBs?: string;
   studentName: string;
+  registrationNumber?: string;
   className: string;
   sectionName: string;
+  batchName?: string;
+  yearName?: string;
   rollNumber: number;
   marks: Array<{
     subject: string;
@@ -62,6 +70,8 @@ interface MarksheetData {
   grade: string;
   passFailStatus?: string;
   publishDateBs?: string;
+  printedDateBs?: string;
+  verificationNumber?: string;
 }
 
 const registerPdfFonts = (doc: PDFKit.PDFDocument): { regular: string; bold: string; devanagari: string } => {
@@ -247,65 +257,217 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   doc.end();
 }
 
+const drawMarksheetInfoRow = (
+  doc: PDFKit.PDFDocument,
+  label: string,
+  value: string,
+  fonts: { regular: string; bold: string },
+  x: number,
+  y: number,
+  labelWidth: number,
+  valueWidth: number
+): number => {
+  doc.font(fonts.bold).fontSize(9).fillColor("#000000").text(`${label}:`, x, y, { width: labelWidth });
+  doc.font(fonts.regular).fontSize(9).text(value, x + labelWidth, y, { width: valueWidth });
+  return y + 14;
+};
+
 /**
- * Generates a basic marksheet PDF.
+ * Generates an official A4 marksheet PDF matching the HTML preview layout.
  */
 export async function generateMarksheetPDF(data: MarksheetData, res: Response): Promise<void> {
-  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const margin = 42;
+  const doc = new PDFDocument({ size: "A4", margin });
   const fonts = registerPdfFonts(doc);
+  const pageWidth = doc.page.width;
+  const contentWidth = pageWidth - margin * 2;
+  const leftX = margin;
+  const rightX = margin + contentWidth / 2 + 8;
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="marksheet-${data.studentName.replace(/\s+/g, "-")}.pdf"`);
 
   doc.pipe(res);
 
-  doc.font(fonts.bold).fontSize(16).fillColor("#0f172a").text(data.schoolName, { align: "center" });
-  doc.font(fonts.regular).fontSize(12).text(`Marksheet - ${data.examName}`, { align: "center" });
-  doc.moveDown();
+  let y = margin;
 
-  doc.fontSize(11);
-  doc.text(`Student: ${data.studentName}`);
-  doc.text(`Class: ${data.className} | Section: ${data.sectionName} | Roll: ${data.rollNumber}`);
-  doc.moveDown();
+  doc.rect(leftX + contentWidth / 2 - 28, y, 56, 56).lineWidth(1).strokeColor("#000000").stroke();
+  doc
+    .font(fonts.bold)
+    .fontSize(18)
+    .fillColor("#000000")
+    .text(data.schoolName.slice(0, 1).toUpperCase(), leftX + contentWidth / 2 - 28, y + 16, {
+      width: 56,
+      align: "center"
+    });
 
-  doc.font(fonts.bold).fontSize(10);
-  doc.text("Subject", 40, doc.y, { width: 120 });
-  doc.text("Th", 165, doc.y, { width: 30 });
-  doc.text("Pr", 195, doc.y, { width: 30 });
-  doc.text("In", 225, doc.y, { width: 30 });
-  doc.text("Total", 255, doc.y, { width: 40 });
-  doc.text("Full", 300, doc.y, { width: 40 });
-  doc.text("Grade", 345, doc.y, { width: 40 });
-  doc.text("Status", 390, doc.y, { width: 50 });
-  doc.moveDown(0.3);
+  y += 64;
+  doc.font(fonts.bold).fontSize(16).text(data.schoolName, leftX, y, { align: "center", width: contentWidth });
+  y += 20;
 
-  doc.font(fonts.regular);
-  data.marks.forEach((mark) => {
-    const y = doc.y;
-    doc.text(mark.subject, 40, y, { width: 120 });
-    doc.text(String(mark.theory ?? "-"), 165, y, { width: 30 });
-    doc.text(String(mark.practical ?? "-"), 195, y, { width: 30 });
-    doc.text(String(mark.internal ?? "-"), 225, y, { width: 30 });
-    doc.text(String(mark.obtained), 255, y, { width: 40 });
-    doc.text(String(mark.fullMarks), 300, y, { width: 40 });
-    doc.text(mark.grade ?? "-", 345, y, { width: 40 });
-    doc.text(mark.passFail ?? "-", 390, y, { width: 50 });
-    doc.moveDown(0.2);
+  if (data.schoolNameNp && fonts.devanagari !== fonts.regular && hasDevanagari(data.schoolNameNp)) {
+    doc.font(fonts.devanagari).fontSize(11).text(data.schoolNameNp, leftX, y, { align: "center", width: contentWidth });
+    y += 14;
+  }
+
+  if (data.schoolAddress) {
+    doc.font(fonts.regular).fontSize(9).text(data.schoolAddress, leftX, y, { align: "center", width: contentWidth });
+    y += 14;
+  }
+
+  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(1).strokeColor("#000000").stroke();
+  y += 10;
+
+  doc.font(fonts.bold).fontSize(12).text("OFFICIAL MARKSHEET", leftX, y, { align: "center", width: contentWidth });
+  y += 16;
+  doc.font(fonts.bold).fontSize(10).text(data.examName, leftX, y, { align: "center", width: contentWidth });
+  y += 14;
+  if (data.academicYearBs) {
+    doc.font(fonts.regular).fontSize(9).text(`Academic Session: ${data.academicYearBs}`, leftX, y, {
+      align: "center",
+      width: contentWidth
+    });
+    y += 16;
+  }
+
+  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(0.5).strokeColor("#000000").stroke();
+  y += 12;
+
+  const columnWidth = contentWidth / 2 - 12;
+  let leftY = y;
+  let rightY = y;
+
+  leftY = drawMarksheetInfoRow(doc, "Student Name", data.studentName, fonts, leftX, leftY, 88, columnWidth - 88);
+  if (data.registrationNumber) {
+    leftY = drawMarksheetInfoRow(doc, "Registration No.", data.registrationNumber, fonts, leftX, leftY, 88, columnWidth - 88);
+  }
+  leftY = drawMarksheetInfoRow(doc, "Roll No.", String(data.rollNumber), fonts, leftX, leftY, 88, columnWidth - 88);
+  if (data.batchName) {
+    leftY = drawMarksheetInfoRow(doc, "Batch", data.batchName, fonts, leftX, leftY, 88, columnWidth - 88);
+  }
+  if (data.yearName) {
+    leftY = drawMarksheetInfoRow(doc, "Year", data.yearName, fonts, leftX, leftY, 88, columnWidth - 88);
+  }
+
+  rightY = drawMarksheetInfoRow(doc, "Examination", data.examName, fonts, rightX, rightY, 88, columnWidth - 88);
+  if (data.publishDateBs) {
+    rightY = drawMarksheetInfoRow(doc, "Published Date", data.publishDateBs, fonts, rightX, rightY, 88, columnWidth - 88);
+  }
+  if (data.passFailStatus) {
+    rightY = drawMarksheetInfoRow(doc, "Result Status", data.passFailStatus, fonts, rightX, rightY, 88, columnWidth - 88);
+  }
+  rightY = drawMarksheetInfoRow(doc, "GPA", data.gpa.toFixed(2), fonts, rightX, rightY, 88, columnWidth - 88);
+  rightY = drawMarksheetInfoRow(doc, "Percentage", `${data.percentage.toFixed(2)}%`, fonts, rightX, rightY, 88, columnWidth - 88);
+
+  y = Math.max(leftY, rightY) + 8;
+
+  const columns = [
+    { label: "SN", x: leftX, width: 18, align: "center" as const },
+    { label: "Subject", x: leftX + 18, width: 88, align: "left" as const },
+    { label: "Th", x: leftX + 106, width: 24, align: "center" as const },
+    { label: "Pr", x: leftX + 130, width: 24, align: "center" as const },
+    { label: "In", x: leftX + 154, width: 24, align: "center" as const },
+    { label: "Total", x: leftX + 178, width: 30, align: "center" as const },
+    { label: "Full", x: leftX + 208, width: 30, align: "center" as const },
+    { label: "Grade", x: leftX + 238, width: 34, align: "center" as const },
+    { label: "Status", x: leftX + 272, width: 38, align: "center" as const },
+    { label: "Remarks", x: leftX + 310, width: contentWidth - 310, align: "left" as const }
+  ];
+
+  const headerHeight = 18;
+  const tableTop = y;
+  doc.rect(leftX, tableTop, contentWidth, headerHeight).fillAndStroke("#ffffff", "#000000");
+  doc.fillColor("#000000").font(fonts.bold).fontSize(7.5);
+  columns.forEach((column) => {
+    doc.text(column.label, column.x + 2, tableTop + 5, {
+      width: column.width - 4,
+      align: column.align
+    });
   });
 
-  doc.moveDown(0.5);
-  doc.font(fonts.bold).fontSize(11);
-  doc.text(`Total: ${data.totalObtained} / ${data.totalFull}`);
-  doc.text(`Percentage: ${data.percentage.toFixed(2)}%`);
-  doc.text(`GPA: ${data.gpa.toFixed(2)}   Grade: ${data.grade}`);
-  if (data.passFailStatus) {
-    doc.text(`Result Status: ${data.passFailStatus}`);
+  y = tableTop + headerHeight;
+  doc.font(fonts.regular).fontSize(7.5);
+  data.marks.forEach((mark, index) => {
+    const rowHeight = 16;
+    doc.rect(leftX, y, contentWidth, rowHeight).strokeColor("#000000").lineWidth(0.5).stroke();
+    const values = [
+      String(index + 1),
+      mark.subject,
+      String(mark.theory ?? 0),
+      String(mark.practical ?? 0),
+      String(mark.internal ?? 0),
+      String(mark.obtained),
+      String(mark.fullMarks),
+      mark.grade ?? "-",
+      mark.passFail ?? "-",
+      mark.remarks ?? "-"
+    ];
+    columns.forEach((column, columnIndex) => {
+      doc.text(values[columnIndex] ?? "-", column.x + 2, y + 4, {
+        width: column.width - 4,
+        align: column.align,
+        lineBreak: false
+      });
+    });
+    y += rowHeight;
+  });
+
+  y += 10;
+  doc.font(fonts.bold).fontSize(9).text("Result Summary", leftX, y);
+  y += 14;
+
+  const summaryRows: Array<[string, string]> = [
+    ["Total Obtained Marks", String(data.totalObtained)],
+    ["Total Full Marks", String(data.totalFull)],
+    ["Percentage", `${data.percentage.toFixed(2)}%`],
+    ["GPA", data.gpa.toFixed(2)],
+    ["Final Grade", data.grade],
+    ["Result", data.passFailStatus ?? "-"]
+  ];
+
+  summaryRows.forEach(([label, value]) => {
+    doc.font(fonts.bold).fontSize(9).text(label, leftX, y, { width: 150 });
+    doc.font(fonts.regular).fontSize(9).text(value, leftX + 155, y, { width: 120 });
+    y += 13;
+  });
+
+  y += 18;
+  const footerTop = y;
+  const third = contentWidth / 3;
+
+  doc.moveTo(leftX, footerTop + 40).lineTo(leftX + third - 20, footerTop + 40).strokeColor("#000000").stroke();
+  doc.font(fonts.regular).fontSize(8).text("Principal Signature", leftX, footerTop + 44, { width: third - 20, align: "center" });
+  if (data.principalName) {
+    doc.font(fonts.regular).fontSize(8).text(data.principalName, leftX, footerTop + 24, { width: third - 20, align: "center" });
   }
 
-  if (data.publishDateBs) {
-    doc.moveDown();
-    doc.font(fonts.regular).text(`Published: ${data.publishDateBs}`);
+  const controller = data.controllerOfExamination ?? "Controller of Examination";
+  doc
+    .moveTo(leftX + third + 10, footerTop + 40)
+    .lineTo(leftX + third * 2 - 10, footerTop + 40)
+    .stroke();
+  doc.text(controller, leftX + third, footerTop + 44, { width: third, align: "center" });
+
+  const sealX = leftX + third * 2 + 20;
+  doc.rect(sealX, footerTop, 70, 70).lineWidth(1).dash(2, { space: 2 }).strokeColor("#000000").stroke();
+  doc.undash();
+  doc.text("College Seal", sealX, footerTop + 28, { width: 70, align: "center" });
+
+  y = footerTop + 82;
+  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(0.5).strokeColor("#000000").stroke();
+  y += 8;
+
+  doc.font(fonts.regular).fontSize(8).fillColor("#000000");
+  if (data.printedDateBs) {
+    doc.text(`Printed Date: ${data.printedDateBs}`, leftX, y);
   }
+  if (data.verificationNumber) {
+    doc.text(`Verification No.: ${data.verificationNumber}`, leftX + 180, y);
+  }
+
+  const qrX = leftX + contentWidth - 52;
+  doc.rect(qrX, y - 4, 48, 48).lineWidth(0.5).strokeColor("#000000").stroke();
+  doc.fontSize(7).text("QR Code", qrX, y + 16, { width: 48, align: "center" });
 
   doc.end();
 }

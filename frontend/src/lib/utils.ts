@@ -10,6 +10,14 @@ export const formatCurrencyNpr = (amount: number): string =>
     maximumFractionDigits: 2
   }).format(amount);
 
+/** Display value for controlled number inputs — empty field when cleared (NaN sentinel). */
+export const formatNumberInputValue = (value: number | undefined | null): number | "" => {
+  if (value === undefined || value === null || Number.isNaN(value)) {
+    return "";
+  }
+  return value;
+};
+
 export const parseErrorMessage = (error: unknown): string => {
   if (typeof error === "object" && error && "response" in error) {
     const response = (error as { response?: { data?: { message?: string } } }).response;

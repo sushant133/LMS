@@ -2,9 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   COLLEGE_YEAR_NAMES,
-  academicSubjectSchema,
   batchSchema,
-  type AcademicSubjectInput,
   type BatchInput,
   type BatchRecord,
   type SubjectRecord,
@@ -14,6 +12,7 @@ import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { PageHeader } from "components/shared/PageHeader";
+import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
@@ -23,6 +22,7 @@ import { api, unwrap } from "lib/api";
 import { filterYearsByBatch } from "lib/academicStructureUtils";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
+import { MasterSubjectManager } from "./MasterSubjectManager";
 
 const defaultBatchValue: BatchInput = {
   name: "",
@@ -30,19 +30,11 @@ const defaultBatchValue: BatchInput = {
   isActive: true
 };
 
-const defaultSubjectValue: AcademicSubjectInput = {
-  name: "",
-  code: "",
-  classIds: [],
-  yearIds: []
-};
-
 export const CollegeAcademicManager = () => {
   const [batchForm, setBatchForm] = useState<BatchInput>(defaultBatchValue);
-  const [subjectForm, setSubjectForm] = useState<AcademicSubjectInput>(defaultSubjectValue);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
-  const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
+  const [pendingMasterEditId, setPendingMasterEditId] = useState<string | null>(null);
 
   const batchesQuery = useQuery({
     queryKey: ["batches"],
@@ -60,7 +52,8 @@ export const CollegeAcademicManager = () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["batches"] }),
       queryClient.invalidateQueries({ queryKey: ["years"] }),
-      queryClient.invalidateQueries({ queryKey: ["subjects"] })
+      queryClient.invalidateQueries({ queryKey: ["subjects"] }),
+      queryClient.invalidateQueries({ queryKey: ["master-subjects"] })
     ]);
   };
 
@@ -70,7 +63,9 @@ export const CollegeAcademicManager = () => {
         ? unwrap<BatchRecord>(api.put(`/academics/batches/${editingBatchId}`, payload))
         : unwrap<BatchRecord>(api.post("/academics/batches", payload)),
     onSuccess: async () => {
-      toast.success(editingBatchId ? "Batch updated" : "Batch created with 1st–3rd Year");
+      toast.success(
+        editingBatchId ? "Batch updated" : "Batch created with years and curriculum subjects"
+      );
       setBatchForm(defaultBatchValue);
       setEditingBatchId(null);
       await refreshAcademicQueries();
@@ -78,25 +73,31 @@ export const CollegeAcademicManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error))
   });
 
-  const subjectMutation = useMutation({
-    mutationFn: async (payload: AcademicSubjectInput) =>
-      editingSubjectId
-        ? unwrap<SubjectRecord>(api.put(`/academics/subjects/${editingSubjectId}`, payload))
-        : unwrap<SubjectRecord>(api.post("/academics/subjects", payload)),
-    onSuccess: async () => {
-      toast.success(editingSubjectId ? "Subject updated" : "Subject created");
-      setSubjectForm(defaultSubjectValue);
-      setEditingSubjectId(null);
+  const removeMasterSubject = async (masterSubjectId: string, subjectName: string) => {
+    const confirmed = window.confirm(
+      `Remove "${subjectName}" from the master curriculum?\n\nThis removes the subject from all batches if it is not in use.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await api.delete(`/academics/master-subjects/${masterSubjectId}`);
+      toast.success("Subject removed from master curriculum");
       await refreshAcademicQueries();
-    },
-    onError: (error) => toast.error(parseErrorMessage(error))
-  });
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    }
+  };
 
   const deleteEntity = async (path: string, queryKey: string) => {
     try {
       await api.delete(path);
       toast.success("Deleted successfully");
       await queryClient.invalidateQueries({ queryKey: [queryKey] });
+      if (queryKey === "batches") {
+        await queryClient.invalidateQueries({ queryKey: ["subjects"] });
+      }
     } catch (error) {
       toast.error(parseErrorMessage(error));
     }
@@ -118,16 +119,32 @@ export const CollegeAcademicManager = () => {
     return map;
   }, [batches, years]);
 
-  const yearNameById = useMemo(() => new Map(years.map((year) => [year._id, year.name])), [years]);
+  const batchSubjectsByYear = useMemo(() => {
+    const map = new Map<string, SubjectRecord[]>();
+    for (const year of yearsForSelectedBatch) {
+      map.set(
+        year._id,
+        subjects.filter(
+          (subject) => (subject.yearIds ?? []).includes(year._id) && subject.isActive !== false
+        )
+      );
+    }
+    return map;
+  }, [yearsForSelectedBatch, subjects]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Academic Setup"
-        description="Configure batches, years, and year-wise subjects for Diploma/Health Assistant programs."
+        description="Manage the fixed HA curriculum once, then create batches that automatically inherit year-wise subjects."
       />
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <MasterSubjectManager
+        pendingEditId={pendingMasterEditId}
+        onPendingEditHandled={() => setPendingMasterEditId(null)}
+      />
+
+      <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Batches</CardTitle>
@@ -147,7 +164,7 @@ export const CollegeAcademicManager = () => {
             >
               <FormField label="Batch Name">
                 <Input
-                  placeholder="e.g. Batch 2082, Batch A"
+                  placeholder="e.g. Batch 2083"
                   value={batchForm.name}
                   onChange={(event) => setBatchForm((current) => ({ ...current, name: event.target.value }))}
                 />
@@ -166,7 +183,7 @@ export const CollegeAcademicManager = () => {
             {batches.length === 0 ? (
               <EmptyState
                 title="No batches"
-                description="Create a batch to automatically provision 1st, 2nd, and 3rd Year groups."
+                description="Create a batch to automatically provision 1st, 2nd, and 3rd Year groups with master subjects."
               />
             ) : (
               <div className="space-y-3">
@@ -215,7 +232,10 @@ export const CollegeAcademicManager = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle>Years</CardTitle>
+            <CardTitle>Batch Subjects</CardTitle>
+            <p className="text-sm text-slate-500">
+              Auto-assigned from the Master Subject List. Use Edit or Remove to manage subjects in the master curriculum.
+            </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <FormField label="Select Batch">
@@ -230,112 +250,90 @@ export const CollegeAcademicManager = () => {
             </FormField>
 
             {selectedBatchId ? (
-              <div className="space-y-3">
-                {(yearsForSelectedBatch.length > 0 ? yearsForSelectedBatch : COLLEGE_YEAR_NAMES.map((name, index) => ({ name, level: index + 1 }))).map(
-                  (year) => (
-                    <div key={"_id" in year ? year._id : year.name} className="rounded-2xl border border-slate-200 p-4">
+              <div className="space-y-4">
+                {(yearsForSelectedBatch.length > 0 ? yearsForSelectedBatch : []).map((year) => {
+                  const yearSubjects = batchSubjectsByYear.get(year._id) ?? [];
+
+                  return (
+                    <div key={year._id} className="rounded-2xl border border-slate-200 p-4">
                       <h3 className="font-semibold text-slate-900">{year.name}</h3>
-                      <p className="text-sm text-slate-500">Auto-created with each batch</p>
+                      {yearSubjects.length === 0 ? (
+                        <p className="mt-2 text-sm text-slate-500">No subjects assigned yet. Add subjects to the Master Subject List.</p>
+                      ) : (
+                        <div className="mt-3 overflow-x-auto">
+                          <Table>
+                            <TableHead>
+                              <tr>
+                                <Th>Subject</Th>
+                                <Th>Marks</Th>
+                                <Th>Status</Th>
+                                <Th className="text-right">Actions</Th>
+                              </tr>
+                            </TableHead>
+                            <TableBody>
+                              {yearSubjects.map((subject) => (
+                                <tr key={subject._id}>
+                                  <Td>
+                                    <div className="font-medium">{subject.name}</div>
+                                    <div className="text-xs text-slate-500">{subject.code}</div>
+                                  </Td>
+                                  <Td className="text-sm text-slate-600">
+                                    Pass {subject.passMarks} / Full {subject.fullMarks}
+                                  </Td>
+                                  <Td>
+                                    <Badge
+                                      className={
+                                        subject.isActive === false ? "bg-slate-100 text-slate-600" : undefined
+                                      }
+                                    >
+                                      {subject.isActive === false ? "Inactive" : "Active"}
+                                    </Badge>
+                                  </Td>
+                                  <Td className="text-right">
+                                    {subject.masterSubjectId ? (
+                                      <div className="flex justify-end gap-2">
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => setPendingMasterEditId(subject.masterSubjectId!)}
+                                        >
+                                          Edit
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="destructive"
+                                          onClick={() =>
+                                            void removeMasterSubject(subject.masterSubjectId!, subject.name)
+                                          }
+                                        >
+                                          Remove
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-slate-500">Legacy subject</span>
+                                    )}
+                                  </Td>
+                                </tr>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
                     </div>
-                  )
-                )}
+                  );
+                })}
+                {yearsForSelectedBatch.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    Years are auto-created with each batch ({COLLEGE_YEAR_NAMES.join(", ")}).
+                  </p>
+                ) : null}
               </div>
             ) : (
-              <EmptyState title="Select a batch" description="Years are automatically created when you add a batch." />
+              <EmptyState
+                title="Select a batch"
+                description="View the subjects automatically assigned to each year from the master curriculum."
+              />
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Subjects</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <form
-              className="space-y-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const parsed = academicSubjectSchema.safeParse(subjectForm);
-                if (!parsed.success) {
-                  toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
-                  return;
-                }
-                void subjectMutation.mutateAsync(parsed.data);
-              }}
-            >
-              <FormField label="Subject Name">
-                <Input value={subjectForm.name} onChange={(event) => setSubjectForm((current) => ({ ...current, name: event.target.value }))} />
-              </FormField>
-              <FormField label="Code">
-                <Input value={subjectForm.code} onChange={(event) => setSubjectForm((current) => ({ ...current, code: event.target.value }))} />
-              </FormField>
-              <FormField label="Year">
-                <Select
-                  value={subjectForm.yearIds[0] ?? ""}
-                  onChange={(event) =>
-                    setSubjectForm((current) => ({
-                      ...current,
-                      yearIds: event.target.value ? [event.target.value] : []
-                    }))
-                  }
-                >
-                  <option value="">Select year</option>
-                  {years.map((year) => (
-                    <option key={year._id} value={year._id}>
-                      {batches.find((batch) => batch._id === year.batchId)?.name ?? "Batch"} — {year.name}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-              <Button className="w-full" type="submit">
-                {editingSubjectId ? "Update Subject" : "Create Subject"}
-              </Button>
-            </form>
-
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>Subject</Th>
-                    <Th>Year</Th>
-                    <Th />
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {subjects.map((subject) => (
-                    <tr key={subject._id}>
-                      <Td>
-                        <div className="font-medium">{subject.name}</div>
-                        <div className="text-xs text-slate-500">{subject.code}</div>
-                      </Td>
-                      <Td>{subject.yearIds.map((yearId) => yearNameById.get(yearId) ?? yearId).join(", ")}</Td>
-                      <Td className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingSubjectId(subject._id);
-                              setSubjectForm({
-                                name: subject.name,
-                                code: subject.code,
-                                classIds: [],
-                                yearIds: subject.yearIds ?? []
-                              });
-                            }}
-                          >
-                            Edit
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => void deleteEntity(`/academics/subjects/${subject._id}`, "subjects")}>
-                            Delete
-                          </Button>
-                        </div>
-                      </Td>
-                    </tr>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
           </CardContent>
         </Card>
       </div>

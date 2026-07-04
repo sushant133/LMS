@@ -45,7 +45,9 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
     streetAddress: ""
   },
   fatherName: "",
+  fatherPhone: "",
   motherName: "",
+  motherPhone: "",
   guardianName: "",
   guardianPhone: "",
   feesDueNpr: 0,
@@ -145,7 +147,7 @@ export const StudentForm = ({
           <Input value={form.admissionNumber} onChange={(event) => setForm((current) => ({ ...current, admissionNumber: event.target.value }))} />
         </FormField>
         <FormField label="Roll No.">
-          <Input type="number" value={form.rollNumber} onChange={(event) => setForm((current) => ({ ...current, rollNumber: Number(event.target.value) }))} />
+          <Input type="number" value={form.rollNumber} onChange={(event) => setForm((current) => ({ ...current, rollNumber: event.target.valueAsNumber }))} />
         </FormField>
 
         {isCollege ? (
@@ -255,7 +257,7 @@ export const StudentForm = ({
           </Select>
         </FormField>
         <FormField label="Fees Due (NPR)">
-          <Input type="number" value={form.feesDueNpr} onChange={(event) => setForm((current) => ({ ...current, feesDueNpr: Number(event.target.value) }))} />
+          <Input type="number" value={form.feesDueNpr} onChange={(event) => setForm((current) => ({ ...current, feesDueNpr: event.target.valueAsNumber }))} />
         </FormField>
       </div>
 
@@ -265,8 +267,22 @@ export const StudentForm = ({
         <FormField label="Father Name">
           <Input value={form.fatherName} onChange={(event) => setForm((current) => ({ ...current, fatherName: event.target.value }))} />
         </FormField>
+        <FormField label="Father Phone">
+          <Input
+            placeholder="e.g. 9801234567"
+            value={form.fatherPhone ?? ""}
+            onChange={(event) => setForm((current) => ({ ...current, fatherPhone: event.target.value }))}
+          />
+        </FormField>
         <FormField label="Mother Name">
           <Input value={form.motherName} onChange={(event) => setForm((current) => ({ ...current, motherName: event.target.value }))} />
+        </FormField>
+        <FormField label="Mother Phone">
+          <Input
+            placeholder="e.g. 9801234567"
+            value={form.motherPhone ?? ""}
+            onChange={(event) => setForm((current) => ({ ...current, motherPhone: event.target.value }))}
+          />
         </FormField>
         <FormField label="Guardian Name">
           <Input value={form.guardianName} onChange={(event) => setForm((current) => ({ ...current, guardianName: event.target.value }))} />

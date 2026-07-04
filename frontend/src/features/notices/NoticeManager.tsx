@@ -40,7 +40,11 @@ const teacherDefaultNoticeValue: NoticeInput = {
   expiresAtBs: ""
 };
 
-export const NoticeManager = () => {
+interface NoticeManagerProps {
+  embedded?: boolean;
+}
+
+export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
   const { user } = useAuth();
   const isTeacher = user?.role === "TEACHER";
   const teacherScopeQuery = useTeacherScope(isTeacher);
@@ -150,18 +154,20 @@ export const NoticeManager = () => {
     return <EmptyState title="Loading notices" description="Please wait." />;
   }
 
-  return (
-    <PageContent className="space-y-6">
-      <PageHeader
-        title="Notice Board"
-        description={
-          isReadOnlyViewer
-            ? "Announcements for your class, subjects, and college."
-            : isTeacher
-              ? "Publish notices visible to your students in assigned classes and sections."
-              : "Publish notices and control visibility by role."
-        }
-      />
+  const content = (
+    <>
+      {!embedded ? (
+        <PageHeader
+          title="Notice Board"
+          description={
+            isReadOnlyViewer
+              ? "Announcements for your class, subjects, and college."
+              : isTeacher
+                ? "Publish notices visible to your students in assigned classes and sections."
+                : "Publish notices and control visibility by role."
+          }
+        />
+      ) : null}
 
       {canManageNotices ? (
         <Card>
@@ -409,6 +415,12 @@ export const NoticeManager = () => {
           )}
         </CardContent>
       </Card>
-    </PageContent>
+    </>
   );
+
+  if (embedded) {
+    return <div className="space-y-6">{content}</div>;
+  }
+
+  return <PageContent className="space-y-6">{content}</PageContent>;
 };

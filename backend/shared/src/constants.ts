@@ -16,8 +16,31 @@ export const USER_ROLES: UserRole[] = [
   "PARENT",
   "LIBRARY_STAFF",
   "LABORATORY_STAFF",
-  "ACCOUNTANT"
+  "ACCOUNTANT",
+  "COLLEGE_STAFF"
 ];
+
+export const COLLEGE_STAFF_CATEGORIES = [
+  "SECURITY_GUARD",
+  "HOUSEKEEPING",
+  "RECEPTIONIST",
+  "OFFICE_ASSISTANT",
+  "TRANSPORT",
+  "IT_STAFF",
+  "OTHER"
+] as const;
+
+export const COLLEGE_STAFF_CATEGORY_LABELS: Record<(typeof COLLEGE_STAFF_CATEGORIES)[number], string> = {
+  SECURITY_GUARD: "Security Guards",
+  HOUSEKEEPING: "Sweepers / Housekeeping",
+  RECEPTIONIST: "Receptionists",
+  OFFICE_ASSISTANT: "Office Assistants",
+  TRANSPORT: "Drivers / Transport Staff",
+  IT_STAFF: "IT Staff",
+  OTHER: "Other Staff"
+};
+
+export const EMPLOYMENT_TYPES = ["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN"] as const;
 
 export const PUBLIC_REGISTER_ROLES: UserRole[] = ["PARENT"];
 
@@ -28,7 +51,8 @@ export const TENANT_STAFF_ROLES: UserRole[] = [
   "PARENT",
   "LIBRARY_STAFF",
   "LABORATORY_STAFF",
-  "ACCOUNTANT"
+  "ACCOUNTANT",
+  "COLLEGE_STAFF"
 ];
 
 export const LIBRARY_MANAGER_ROLES: UserRole[] = ["COLLEGE_ADMIN", "LIBRARY_STAFF"];
@@ -36,6 +60,38 @@ export const LIBRARY_MANAGER_ROLES: UserRole[] = ["COLLEGE_ADMIN", "LIBRARY_STAF
 export const LABORATORY_MANAGER_ROLES: UserRole[] = ["COLLEGE_ADMIN", "LABORATORY_STAFF"];
 
 export const ACCOUNTING_MANAGER_ROLES: UserRole[] = ["COLLEGE_ADMIN", "ACCOUNTANT"];
+
+export const BANNER_TARGET_ROLES = [
+  "STUDENT",
+  "TEACHER",
+  "PARENT",
+  "ACCOUNTANT",
+  "LIBRARY_STAFF",
+  "LABORATORY_STAFF",
+  "TRANSPORT_STAFF",
+  "HR_PAYROLL",
+  "COLLEGE_ADMIN"
+] as const;
+
+export const BANNER_TARGET_ROLE_LABELS: Record<(typeof BANNER_TARGET_ROLES)[number], string> = {
+  STUDENT: "Students",
+  TEACHER: "Teachers",
+  PARENT: "Parents",
+  ACCOUNTANT: "Accounting",
+  LIBRARY_STAFF: "Library Staff",
+  LABORATORY_STAFF: "Laboratory Staff",
+  TRANSPORT_STAFF: "Transport Staff",
+  HR_PAYROLL: "HR & Payroll",
+  COLLEGE_ADMIN: "College Admin"
+};
+
+export const BANNER_PRIORITIES = ["HIGH", "MEDIUM", "LOW"] as const;
+
+export const BANNER_PRIORITY_ORDER: Record<(typeof BANNER_PRIORITIES)[number], number> = {
+  HIGH: 0,
+  MEDIUM: 1,
+  LOW: 2
+};
 
 export const FEE_TYPES = [
   "ADMISSION",
@@ -141,6 +197,15 @@ export const CLASS_LEVELS = ["ECD", "Class 1", "Class 2", "Class 3", "Class 4", 
 export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year"] as const;
 
 export const EXAM_STATUSES = ["DRAFT", "SCHEDULED", "ONGOING", "COMPLETED", "PUBLISHED"] as const;
+
+export const RESULT_SUBMISSION_STATUSES = [
+  "DRAFT",
+  "SUBMITTED_FOR_REVIEW",
+  "PENDING_ADMIN_REVIEW",
+  "RETURNED_FOR_CORRECTION",
+  "APPROVED",
+  "PUBLISHED"
+] as const;
 
 export const EXAM_ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "EXEMPT"] as const;
 

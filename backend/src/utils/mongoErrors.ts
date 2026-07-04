@@ -17,6 +17,10 @@ const duplicateKeyMessage = (keyValue: Record<string, unknown> | undefined): str
     return "A teacher with this code already exists";
   }
 
+  if (keyValue.staffId !== undefined) {
+    return "A staff member with this ID already exists";
+  }
+
   if (keyValue.email !== undefined) {
     return "A user with this login ID already exists";
   }

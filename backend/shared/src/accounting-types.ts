@@ -1,4 +1,4 @@
-import type { AddressSelection, FeeType, StudentRecord, TeacherRecord, UserProfile } from "./types.js";
+import type { AddressSelection, CollegeStaffRecord, FeeType, StudentRecord, TeacherRecord, UserProfile } from "./types.js";
 
 export type PaymentMethod = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "ONLINE" | "OTHER";
 
@@ -129,6 +129,7 @@ export interface SalaryPaymentRecord {
   schoolId: string;
   employeeType: "TEACHER" | "STAFF";
   teacherId?: string;
+  staffId?: string;
   staffName?: string;
   monthBs: string;
   basicSalaryNpr: number;
@@ -144,6 +145,7 @@ export interface SalaryPaymentRecord {
   paymentMethod: PaymentMethod;
   createdBy: string;
   teacher?: TeacherRecord;
+  collegeStaff?: Pick<CollegeStaffRecord, "_id" | "fullName">;
   createdAt?: string;
   updatedAt?: string;
 }

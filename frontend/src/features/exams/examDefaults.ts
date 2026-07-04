@@ -41,3 +41,21 @@ export const EXAM_STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
   PUBLISHED: "Published"
 };
+
+export const RESULT_SUBMISSION_STATUS_LABELS: Record<string, string> = {
+  DRAFT: "Draft",
+  SUBMITTED_FOR_REVIEW: "Submitted for Review",
+  PENDING_ADMIN_REVIEW: "Pending Admin Review",
+  RETURNED_FOR_CORRECTION: "Returned for Correction",
+  APPROVED: "Approved",
+  PUBLISHED: "Published"
+};
+
+export const RESULT_SUBMISSION_STATUS_COLORS: Record<string, string> = {
+  DRAFT: "bg-slate-100 text-slate-700",
+  SUBMITTED_FOR_REVIEW: "bg-blue-100 text-blue-700",
+  PENDING_ADMIN_REVIEW: "bg-amber-100 text-amber-800",
+  RETURNED_FOR_CORRECTION: "bg-orange-100 text-orange-800",
+  APPROVED: "bg-emerald-100 text-emerald-700",
+  PUBLISHED: "bg-violet-100 text-violet-700"
+};

@@ -17,7 +17,7 @@ import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { filterSectionsByClass, filterYearsByBatch, getAcademicLabels } from "lib/academicStructureUtils";
+import { filterSectionsByClass, filterSubjectsByYear, filterYearsByBatch, getAcademicLabels } from "lib/academicStructureUtils";
 
 const createDefaultTeacherValue = (isCollege: boolean): TeacherInput => ({
   fullName: "",
@@ -85,6 +85,47 @@ export const TeacherForm = ({
     [form.assignedBatchIds, years]
   );
 
+  const filteredSubjects = useMemo(() => {
+    if (!isCollege) {
+      return subjects;
+    }
+
+    if (form.assignedYearIds.length === 0) {
+      return subjects.filter((subject) => subject.isActive !== false);
+    }
+
+    const scopedSubjects = form.assignedYearIds.flatMap((yearId) => filterSubjectsByYear(subjects, yearId));
+    const uniqueSubjects = new Map(scopedSubjects.map((subject) => [subject._id, subject]));
+    return Array.from(uniqueSubjects.values()).sort((left, right) => left.name.localeCompare(right.name));
+  }, [form.assignedYearIds, isCollege, subjects]);
+
+  const subjectLabelById = useMemo(() => {
+    const batchNameById = new Map(batches.map((batch) => [batch._id, batch.name]));
+    const yearById = new Map(years.map((year) => [year._id, year]));
+
+    return new Map(
+      subjects.map((subject) => {
+        if (!isCollege) {
+          return [subject._id, subject.name] as const;
+        }
+
+        const yearLabels = (subject.yearIds ?? [])
+          .map((yearId) => {
+            const year = yearById.get(yearId);
+            if (!year) {
+              return null;
+            }
+            const batchName = batchNameById.get(year.batchId) ?? "Batch";
+            return `${batchName} — ${year.name}`;
+          })
+          .filter(Boolean);
+
+        const scopeLabel = yearLabels.length ? ` (${yearLabels.join(", ")})` : "";
+        return [subject._id, `${subject.name} · ${subject.code}${scopeLabel}`] as const;
+      })
+    );
+  }, [batches, isCollege, subjects, years]);
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -143,26 +184,31 @@ export const TeacherForm = ({
           <NepaliDateField value={form.joinedDateBs} onChange={(value) => setForm((current) => ({ ...current, joinedDateBs: value }))} />
         </FormField>
         <FormField label="Basic Salary (NPR)">
-          <Input type="number" value={form.basicSalaryNpr} onChange={(event) => setForm((current) => ({ ...current, basicSalaryNpr: Number(event.target.value) }))} />
+          <Input type="number" value={form.basicSalaryNpr} onChange={(event) => setForm((current) => ({ ...current, basicSalaryNpr: event.target.valueAsNumber }))} />
         </FormField>
       </div>
 
       <AddressFields value={form.address} onChange={(address) => setForm((current) => ({ ...current, address }))} />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <FormField label="Subjects">
+        <FormField label={isCollege ? "Subjects (from Master List)" : "Subjects"}>
           <Select
             multiple
             className="h-36"
             value={form.subjects}
             onChange={(event) => setForm((current) => ({ ...current, subjects: readMultiSelect(event.target.selectedOptions) }))}
           >
-            {subjects.map((subject) => (
+            {filteredSubjects.map((subject) => (
               <option key={subject._id} value={subject._id}>
-                {subject.name}
+                {subjectLabelById.get(subject._id) ?? subject.name}
               </option>
             ))}
           </Select>
+          {isCollege ? (
+            <p className="mt-1 text-xs text-slate-500">
+              Select assigned batches and years first to narrow subjects from the master curriculum.
+            </p>
+          ) : null}
         </FormField>
 
         {isCollege ? (

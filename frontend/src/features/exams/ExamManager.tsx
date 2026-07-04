@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ClassRecord,
@@ -23,11 +23,28 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
-import { ExamAnalyticsPanel } from "features/exams/ExamAnalyticsPanel";
-import { ExamMarksEntry } from "features/exams/ExamMarksEntry";
-import { ExamRoutinePanel, TeacherRoutineList } from "features/exams/ExamRoutinePanel";
-import { StudentExamPortal } from "features/exams/StudentExamPortal";
-import { EXAM_STATUS_LABELS, defaultExamValue } from "features/exams/examDefaults";
+const ExamAnalyticsPanel = lazy(() =>
+  import("features/exams/ExamAnalyticsPanel").then((module) => ({ default: module.ExamAnalyticsPanel }))
+);
+const ExamMarksEntry = lazy(() =>
+  import("features/exams/ExamMarksEntry").then((module) => ({ default: module.ExamMarksEntry }))
+);
+const ExamRoutinePanel = lazy(() =>
+  import("features/exams/ExamRoutinePanel").then((module) => ({ default: module.ExamRoutinePanel }))
+);
+const TeacherRoutineList = lazy(() =>
+  import("features/exams/ExamRoutinePanel").then((module) => ({ default: module.TeacherRoutineList }))
+);
+const PrintResultsPanel = lazy(() =>
+  import("features/exams/PrintResultsPanel").then((module) => ({ default: module.PrintResultsPanel }))
+);
+const ResultReviewPanel = lazy(() =>
+  import("features/exams/ResultReviewPanel").then((module) => ({ default: module.ResultReviewPanel }))
+);
+const StudentExamPortal = lazy(() =>
+  import("features/exams/StudentExamPortal").then((module) => ({ default: module.StudentExamPortal }))
+);
+import { EXAM_STATUS_LABELS, RESULT_SUBMISSION_STATUS_COLORS, RESULT_SUBMISSION_STATUS_LABELS, defaultExamValue } from "features/exams/examDefaults";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsTenantAdmin, useNormalizedRole } from "hooks/useNormalizedRole";
 import { useTeacherScope } from "hooks/useTeacherScope";
@@ -58,7 +75,8 @@ export const ExamManager = () => {
   const [editingExamId, setEditingExamId] = useState<string | null>(null);
   const [marksheetSelection, setMarksheetSelection] = useState<{ examId: string; studentId: string } | null>(null);
   const [selectedExamId, setSelectedExamId] = useState("");
-  const [adminTab, setAdminTab] = useState<"routine" | "analytics" | "results">("routine");
+  const [adminSection, setAdminSection] = useState<"manage" | "print-results">("manage");
+  const [adminTab, setAdminTab] = useState<"routine" | "analytics" | "review" | "results">("routine");
 
   const [viewExamId, setViewExamId] = useState("");
   const [viewClassId, setViewClassId] = useState("");
@@ -139,6 +157,24 @@ export const ExamManager = () => {
     enabled: isStudentOrParent
   });
 
+  const teacherSubmissionsQuery = useQuery({
+    queryKey: ["result-submissions", "teacher"],
+    queryFn: () => unwrap<Array<{ _id: string; examId: string; subjectId: string; status: string; scopeLabel: string }>>(api.get("/exams/result-submissions")),
+    enabled: isTeacher
+  });
+
+  const pendingReviewQuery = useQuery({
+    queryKey: ["result-submissions", "pending-review"],
+    queryFn: () =>
+      unwrap<Array<{ _id: string; examId: string; status: string }>>(
+        api.get("/exams/result-submissions", { params: { status: "PENDING_ADMIN_REVIEW" } })
+      ),
+    enabled: isAdmin,
+    refetchInterval: 15_000
+  });
+
+  const pendingReviewCount = pendingReviewQuery.data?.length ?? 0;
+
   const teacherResultsQuery = useQuery({
     queryKey: ["results", "teacher", teacherViewExamId, teacherViewClassId, teacherViewBatchId, teacherViewYearId],
     queryFn: () =>
@@ -197,7 +233,8 @@ export const ExamManager = () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["exams"] }),
         queryClient.invalidateQueries({ queryKey: ["results"] }),
-        queryClient.invalidateQueries({ queryKey: ["exam-routines"] })
+        queryClient.invalidateQueries({ queryKey: ["exam-routines"] }),
+        queryClient.invalidateQueries({ queryKey: ["print-results"] })
       ]);
     },
     onError: (error) => toast.error(parseErrorMessage(error))
@@ -245,7 +282,9 @@ export const ExamManager = () => {
       toast.success(labels[variables.action]);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["exams"] }),
-        queryClient.invalidateQueries({ queryKey: ["results"] })
+        queryClient.invalidateQueries({ queryKey: ["results"] }),
+        queryClient.invalidateQueries({ queryKey: ["result-submissions"] }),
+        queryClient.invalidateQueries({ queryKey: ["print-results"] })
       ]);
     },
     onError: (error) => toast.error(parseErrorMessage(error))
@@ -350,13 +389,28 @@ export const ExamManager = () => {
   const isLoading = isStudentOrParent
     ? examsQuery.isLoading || portalResultsQuery.isLoading
     : examsQuery.isLoading ||
-      (isTeacher && teacherScopeQuery.isLoading) ||
       (isAdmin &&
         (subjectsQuery.isLoading ||
           studentsQuery.isLoading ||
           (isCollege ? batchesQuery.isLoading || yearsQuery.isLoading : classesQuery.isLoading || sectionsQuery.isLoading)));
 
   if (isLoading) {
+    return <LoadingState />;
+  }
+
+  if (isTeacher && teacherScopeQuery.isError) {
+    return (
+      <PageContent>
+        <PageHeader title="Exams & Results" description="View exam routines and enter marks for your assigned subjects." />
+        <EmptyState
+          title="Could not load your teaching assignments"
+          description={parseErrorMessage(teacherScopeQuery.error)}
+        />
+      </PageContent>
+    );
+  }
+
+  if (isTeacher && teacherScopeQuery.isLoading) {
     return <LoadingState />;
   }
 
@@ -389,11 +443,47 @@ export const ExamManager = () => {
       />
 
       {isStudentOrParent ? (
-        <StudentExamPortal exams={examsQuery.data ?? []} results={portalResultsQuery.data ?? []} isLoading={portalResultsQuery.isLoading} />
+        <Suspense fallback={<LoadingState />}>
+          <StudentExamPortal exams={examsQuery.data ?? []} results={portalResultsQuery.data ?? []} isLoading={portalResultsQuery.isLoading} />
+        </Suspense>
       ) : null}
 
       {isAdmin ? (
         <>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={adminSection === "manage" ? "default" : "outline"}
+              onClick={() => setAdminSection("manage")}
+            >
+              Exam Sessions
+            </Button>
+            <Button
+              size="sm"
+              variant={adminSection === "print-results" ? "default" : "outline"}
+              onClick={() => setAdminSection("print-results")}
+            >
+              Print Results
+            </Button>
+          </div>
+
+          {adminSection === "print-results" ? (
+            <Suspense fallback={<LoadingState />}>
+              <PrintResultsPanel
+                isCollege={isCollege}
+                labels={labels}
+                batches={batchesQuery.data ?? []}
+                years={yearsQuery.data ?? []}
+                classes={classesQuery.data ?? []}
+                sections={sectionsQuery.data ?? []}
+                students={studentsQuery.data ?? []}
+                fallbackPublishedExams={(examsQuery.data ?? []).filter((exam) => exam.resultsPublished)}
+              />
+            </Suspense>
+          ) : null}
+
+          {adminSection === "manage" ? (
+          <>
           <Card>
             <CardHeader>
               <CardTitle>{editingExamId ? "Edit Exam" : "Create Exam"}</CardTitle>
@@ -587,7 +677,15 @@ export const ExamManager = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => void examActionMutation.mutateAsync({ examId: exam._id, action: "publish-results" })}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Publish results for "${exam.name}"? All subject submissions must be approved first. Results will be locked and students will be notified.`
+                              )
+                            ) {
+                              void examActionMutation.mutateAsync({ examId: exam._id, action: "publish-results" });
+                            }
+                          }}
                         >
                           Publish Results
                         </Button>
@@ -614,9 +712,9 @@ export const ExamManager = () => {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <CardTitle>{selectedExam.name}</CardTitle>
                   <div className="flex gap-2">
-                    {(["routine", "analytics", "results"] as const).map((tab) => (
+                    {(["routine", "analytics", "review", "results"] as const).map((tab) => (
                       <Button key={tab} size="sm" variant={adminTab === tab ? "default" : "outline"} onClick={() => setAdminTab(tab)}>
-                        {tab === "routine" ? "Routine" : tab === "analytics" ? "Analytics" : "Results"}
+                        {tab === "routine" ? "Routine" : tab === "analytics" ? "Analytics" : tab === "review" ? "Review" : "Results"}
                       </Button>
                     ))}
                   </div>
@@ -624,15 +722,54 @@ export const ExamManager = () => {
               </CardHeader>
               <CardContent>
                 {adminTab === "routine" ? (
-                  <ExamRoutinePanel exam={selectedExam} subjects={subjectsQuery.data ?? []} isAdmin />
+                  <Suspense fallback={<LoadingState />}>
+                    <ExamRoutinePanel exam={selectedExam} subjects={subjectsQuery.data ?? []} isAdmin />
+                  </Suspense>
                 ) : adminTab === "analytics" ? (
-                  <ExamAnalyticsPanel examId={selectedExam._id} />
+                  <Suspense fallback={<LoadingState />}>
+                    <ExamAnalyticsPanel examId={selectedExam._id} />
+                  </Suspense>
+                ) : adminTab === "review" ? (
+                  <Suspense fallback={<LoadingState />}>
+                    <ResultReviewPanel
+                      examId={selectedExam._id}
+                      students={studentsQuery.data ?? []}
+                      subjects={subjectsQuery.data ?? []}
+                      isCollege={isCollege}
+                      compact
+                    />
+                  </Suspense>
                 ) : (
                   <p className="text-sm text-slate-600">Use the results filters below to view entered marks for this exam.</p>
                 )}
               </CardContent>
             </Card>
           ) : null}
+
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center gap-3">
+                <CardTitle>Result Approval Workflow</CardTitle>
+                {pendingReviewCount > 0 ? (
+                  <Badge className="bg-amber-100 text-amber-800">
+                    {pendingReviewCount} pending review
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="text-sm text-slate-600">
+                Teachers submit subject results here. Approve each submission, then use Publish Results on the exam session above.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <Suspense fallback={<LoadingState />}>
+                <ResultReviewPanel
+                  students={studentsQuery.data ?? []}
+                  subjects={subjectsQuery.data ?? []}
+                  isCollege={isCollege}
+                />
+              </Suspense>
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
@@ -710,28 +847,37 @@ export const ExamManager = () => {
               </FormField>
             </CardContent>
           </Card>
+          </>
+          ) : null}
         </>
       ) : null}
 
       {isTeacher ? (
         <>
+          {subjects.length === 0 || students.length === 0 ? (
+            <EmptyState
+              title="No teaching assignments found"
+              description="Your account has no assigned subjects or students. Contact the college admin to assign subjects before entering exam marks."
+            />
+          ) : null}
           <Card>
             <CardHeader>
               <CardTitle>Enter Marks</CardTitle>
             </CardHeader>
             <CardContent>
-              <ExamMarksEntry
-                exams={examsQuery.data ?? []}
-                subjects={subjects}
-                students={students}
-                batches={batches}
-                years={years}
-                classes={classes}
-                sections={sections}
-                existingResults={teacherResultsQuery.data ?? []}
-                isCollege={isCollege}
-                resultsLockedExamIds={resultsLockedExamIds}
-              />
+              <Suspense fallback={<LoadingState />}>
+                <ExamMarksEntry
+                  exams={examsQuery.data ?? []}
+                  subjects={subjects}
+                  students={students}
+                  batches={batches}
+                  years={years}
+                  classes={classes}
+                  sections={sections}
+                  isCollege={isCollege}
+                  resultsLockedExamIds={resultsLockedExamIds}
+                />
+              </Suspense>
             </CardContent>
           </Card>
 
@@ -750,9 +896,36 @@ export const ExamManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <TeacherRoutineList examId={teacherViewExamId} />
+              <Suspense fallback={<LoadingState />}>
+                <TeacherRoutineList examId={teacherViewExamId} />
+              </Suspense>
             </CardContent>
           </Card>
+
+          {(teacherSubmissionsQuery.data ?? []).length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>My Submission Status</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {(teacherSubmissionsQuery.data ?? []).map((submission) => (
+                    <div key={submission._id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-4 py-3">
+                      <div>
+                        <p className="font-medium text-slate-900">{submission.scopeLabel}</p>
+                        <p className="text-xs text-slate-500">
+                          {(examsQuery.data ?? []).find((exam) => exam._id === submission.examId)?.name ?? submission.examId}
+                        </p>
+                      </div>
+                      <Badge className={RESULT_SUBMISSION_STATUS_COLORS[submission.status] ?? "bg-slate-100 text-slate-700"}>
+                        {RESULT_SUBMISSION_STATUS_LABELS[submission.status] ?? submission.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>
@@ -872,7 +1045,7 @@ export const ExamManager = () => {
         </>
       ) : null}
 
-      {(isAdmin || isTeacher) ? (
+      {(isTeacher || (isAdmin && adminSection === "manage")) ? (
         <Card>
           <CardHeader>
             <CardTitle>{isAdmin ? "Results" : "My Subject Results"}</CardTitle>
@@ -898,13 +1071,23 @@ export const ExamManager = () => {
                         <Th>Student</Th>
                         <Th>Subject</Th>
                         <Th>Marks</Th>
-                        <Th>Status</Th>
+                        <Th>Pass/Fail</Th>
+                        <Th>Workflow</Th>
                         <Th />
                       </tr>
                     </TableHead>
                     <TableBody>
                       {teacherDisplayedResults.map(({ result, mark }) => {
                         const computed = computeSubjectMark({ ...mark, obtainedMarks: 0 });
+                        const submission = (teacherSubmissionsQuery.data ?? []).find(
+                          (item) =>
+                            item.examId === result.examId &&
+                            item.subjectId === mark.subjectId
+                        );
+                        const workflowStatus = submission?.status ?? "DRAFT";
+                        const canDelete =
+                          !resultsLockedExamIds.has(result.examId) &&
+                          (workflowStatus === "DRAFT" || workflowStatus === "RETURNED_FOR_CORRECTION");
                         return (
                           <tr key={`${result._id}-${mark.subjectId}`}>
                             <Td>{(examsQuery.data ?? []).find((exam) => exam._id === result.examId)?.name ?? result.examId}</Td>
@@ -919,6 +1102,11 @@ export const ExamManager = () => {
                               </Badge>
                             </Td>
                             <Td>
+                              <Badge className={RESULT_SUBMISSION_STATUS_COLORS[workflowStatus] ?? "bg-slate-100 text-slate-700"}>
+                                {RESULT_SUBMISSION_STATUS_LABELS[workflowStatus] ?? workflowStatus}
+                              </Badge>
+                            </Td>
+                            <Td>
                               <div className="flex justify-end gap-2">
                                 <Button
                                   size="sm"
@@ -930,7 +1118,7 @@ export const ExamManager = () => {
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  disabled={deleteResultMarkMutation.isPending || resultsLockedExamIds.has(result.examId)}
+                                  disabled={deleteResultMarkMutation.isPending || !canDelete}
                                   onClick={() => {
                                     const subjectName = subjectNameById.get(mark.subjectId)?.name ?? "this subject";
                                     if (window.confirm(`Delete marks for ${subjectName}?`)) {

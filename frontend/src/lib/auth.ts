@@ -13,7 +13,8 @@ export const roleLabelMap: Record<UserRole, string> = {
   PARENT: "Parent",
   LIBRARY_STAFF: "Library Staff",
   LABORATORY_STAFF: "Laboratory Staff",
-  ACCOUNTANT: "Accountant"
+  ACCOUNTANT: "Accountant",
+  COLLEGE_STAFF: "College Staff"
 };
 
 export const roleRedirectMap: Record<UserRole, string> = {
@@ -24,7 +25,8 @@ export const roleRedirectMap: Record<UserRole, string> = {
   PARENT: "/dashboard/parent",
   LIBRARY_STAFF: "/library",
   LABORATORY_STAFF: "/laboratory",
-  ACCOUNTANT: "/accounting"
+  ACCOUNTANT: "/accounting",
+  COLLEGE_STAFF: "/dashboard/college_staff"
 };
 
 export const getRoleRedirectPath = (role: string | undefined | null): string | null => {

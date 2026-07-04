@@ -12,6 +12,7 @@ import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
 import { api, unwrap } from "lib/api";
 import { getCollegeDisplayName } from "lib/auth";
+import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
 import { formatCurrencyNpr } from "lib/utils";
 
 export const DashboardPage = () => {
@@ -63,11 +64,30 @@ export const DashboardPage = () => {
     return <LoadingState />;
   }
 
+  if (user?.role === "COLLEGE_STAFF") {
+    return (
+      <PageContent className="space-y-6">
+        <DashboardBannerStrip banners={data.banners} />
+        <PageHeader title="Staff Dashboard" description="View college announcements and updates relevant to your role." />
+        <Card>
+          <CardContent className="py-8">
+            <p className="text-sm text-slate-500">Welcome back</p>
+            <p className="text-2xl font-semibold text-slate-900">{user.fullName}</p>
+            <p className="mt-2 text-sm text-slate-600">
+              You are signed in as college staff. Attendance and additional staff workflows will appear here as they are enabled.
+            </p>
+          </CardContent>
+        </Card>
+      </PageContent>
+    );
+  }
+
   if (user?.role === "STUDENT") {
     const collegeName = getCollegeDisplayName(availableSchools, user);
 
     return (
       <PageContent className="space-y-6">
+        <DashboardBannerStrip banners={data.banners} />
         <PageHeader title="Student Dashboard" description="View your enrolled subjects, attendance, marks, and assignments." />
         <Card>
           <CardContent className="flex flex-col gap-4 py-8 sm:flex-row sm:items-center sm:justify-between">
@@ -100,6 +120,7 @@ export const DashboardPage = () => {
 
   return (
     <div className="space-y-6">
+      <DashboardBannerStrip banners={data.banners} />
       <PageHeader 
         title={`${t("dashboard")} / ${role ?? "overview"}`} 
         description={

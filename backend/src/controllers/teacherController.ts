@@ -24,6 +24,34 @@ import {
   getSessionOption
 } from "../utils/transaction.js";
 
+const validateCollegeTeacherSubjects = async (
+  schoolId: mongoose.Types.ObjectId,
+  subjectIds: string[],
+  yearIds: string[]
+): Promise<void> => {
+  if (!subjectIds.length) {
+    return;
+  }
+
+  const subjects = await Subject.find({ _id: { $in: subjectIds }, schoolId }).lean();
+  if (subjects.length !== subjectIds.length) {
+    throw new ApiError(400, "One or more selected subjects are invalid for this institution");
+  }
+
+  if (!yearIds.length) {
+    return;
+  }
+
+  const yearIdSet = new Set(yearIds);
+  const invalidSubject = subjects.find(
+    (subject) => !(subject.yearIds ?? []).some((yearId) => yearIdSet.has(yearId.toString()))
+  );
+
+  if (invalidSubject) {
+    throw new ApiError(400, "Selected subjects must belong to the assigned years");
+  }
+};
+
 const validateTeacherAssignments = async (
   schoolId: mongoose.Types.ObjectId,
   subjectIds: string[],
@@ -108,6 +136,7 @@ const validateTeacherScope = async (
 
     await validateTeacherAssignments(schoolId, payload.subjects, [], []);
     await validateCollegeTeacherScope(schoolId, payload.assignedBatchIds, payload.assignedYearIds);
+    await validateCollegeTeacherSubjects(schoolId, payload.subjects, payload.assignedYearIds);
     return;
   }
 

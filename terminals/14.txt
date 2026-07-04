@@ -1,9 +1,9 @@
 ---
-pid: 12348
+pid: 26120
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "npm run build --prefix \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\" 2>&1"
-started_at: 2026-07-03T08:00:53.042Z
-running_for_ms: 20830002 
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run build; npm start"
+started_at: 2026-07-04T17:11:26.598Z
+running_for_ms: 9175007  
 ---
 
 > @nepal-school-erp/backend@1.0.0 build
@@ -14,7 +14,7 @@ running_for_ms: 20830002
 > npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
 
 
-up to date, audited 3 packages in 2s
+up to date, audited 3 packages in 1s
 
 1 package is looking for funding
   run `npm fund` for details
@@ -24,3 +24,38 @@ found 0 vulnerabilities
 > @nepal-school-erp/shared@1.0.0 build
 > tsc -p tsconfig.json
 
+
+> @nepal-school-erp/backend@1.0.0 start
+> node dist/server.js
+
+Failed to start backend MongoServerError: E11000 duplicate key error collection: schoolDB.subjects index: schoolId_1_masterSubjectId_1_yearIds_1 dup key: { schoolId: ObjectId('6a4932b67d5c20c352fb4788'), masterSubjectId: null, yearIds: ObjectId('6a4932b77d5c20c352fb4792') }
+    at UpdateManyOperation.execute (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\operations\update.js:102:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async tryOperation (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\operations\execute_operation.js:207:20)
+    at async executeOperation (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\operations\execute_operation.js:75:16)
+    at async Collection.updateMany (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongodb\lib\collection.js:231:16)
+    at async model.Query.exec (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\query.js:4627:63)
+    at async resyncSubjectIndexes (file:///C:/Users/Sushant/Documents/New%20LMS%20Project/backend/dist/config/db.js:6:5)
+    at async connectDatabase (file:///C:/Users/Sushant/Documents/New%20LMS%20Project/backend/dist/config/db.js:21:5)
+    at async startServer (file:///C:/Users/Sushant/Documents/New%20LMS%20Project/backend/dist/server.js:45:5) {
+  errorLabelSet: Set(0) {},
+  errorResponse: {
+    index: 0,
+    code: 11000,
+    errmsg: "E11000 duplicate key error collection: schoolDB.subjects index: schoolId_1_masterSubjectId_1_yearIds_1 dup key: { schoolId: ObjectId('6a4932b67d5c20c352fb4788'), masterSubjectId: null, yearIds: ObjectId('6a4932b77d5c20c352fb4792') }",
+    keyPattern: { schoolId: 1, masterSubjectId: 1, yearIds: 1 },
+    keyValue: {
+      schoolId: new ObjectId('6a4932b67d5c20c352fb4788'),
+      masterSubjectId: null,
+      yearIds: new ObjectId('6a4932b77d5c20c352fb4792')
+    }
+  },
+  index: 0,
+  code: 11000,
+  keyPattern: { schoolId: 1, masterSubjectId: 1, yearIds: 1 },
+  keyValue: {
+    schoolId: new ObjectId('6a4932b67d5c20c352fb4788'),
+    masterSubjectId: null,
+    yearIds: new ObjectId('6a4932b77d5c20c352fb4792')
+  }
+}

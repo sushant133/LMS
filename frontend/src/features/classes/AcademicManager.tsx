@@ -261,7 +261,7 @@ const SchoolAcademicManager = () => {
                 <Input value={sectionForm.room ?? ""} onChange={(event) => setSectionForm((current) => ({ ...current, room: event.target.value }))} />
               </FormField>
               <FormField label="Capacity">
-                <Input type="number" value={sectionForm.capacity} onChange={(event) => setSectionForm((current) => ({ ...current, capacity: Number(event.target.value) }))} />
+                <Input type="number" value={sectionForm.capacity} onChange={(event) => setSectionForm((current) => ({ ...current, capacity: event.target.valueAsNumber }))} />
               </FormField>
               <FormField label="Class Teacher">
                 <Select value={sectionForm.classTeacherId ?? ""} onChange={(event) => setSectionForm((current) => ({ ...current, classTeacherId: event.target.value }))}>

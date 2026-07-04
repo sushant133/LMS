@@ -1,57 +1,112 @@
 ---
-pid: 23684
+pid: 30236
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "Remove-Item -Recurse -Force \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\" -ErrorAction SilentlyContinue; $env:NODE_ENV='production'; Set-Location \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm install 2>&1"
-started_at: 2026-07-03T06:31:11.998Z
-running_for_ms: 2810013  
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run dev 2>&1"
+started_at: 2026-07-04T16:30:59.639Z
+running_for_ms: 1815007  
 ---
-npm warn cleanup Failed to remove some directories [
-npm warn cleanup   [
-npm warn cleanup     'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\@tailwindcss\\.oxide-win32-x64-msvc-UbHygRM7',
-npm warn cleanup     [Error: EPERM: operation not permitted, unlink 'C:\Users\Sushant\Documents\New LMS Project\frontend\node_modules\@tailwindcss\.oxide-win32-x64-msvc-UbHygRM7\tailwindcss-oxide.win32-x64-msvc.node'] {
-npm warn cleanup       errno: -4048,
-npm warn cleanup       code: 'EPERM',
-npm warn cleanup       syscall: 'unlink',
-npm warn cleanup       path: 'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\@tailwindcss\\.oxide-win32-x64-msvc-UbHygRM7\\tailwindcss-oxide.win32-x64-msvc.node'
-npm warn cleanup     }
-npm warn cleanup   ],
-npm warn cleanup   [
-npm warn cleanup     'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\@rollup\\.rollup-win32-x64-msvc-frAWHee8',
-npm warn cleanup     [Error: EPERM: operation not permitted, unlink 'C:\Users\Sushant\Documents\New LMS Project\frontend\node_modules\@rollup\.rollup-win32-x64-msvc-frAWHee8\rollup.win32-x64-msvc.node'] {
-npm warn cleanup       errno: -4048,
-npm warn cleanup       code: 'EPERM',
-npm warn cleanup       syscall: 'unlink',
-npm warn cleanup       path: 'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\@rollup\\.rollup-win32-x64-msvc-frAWHee8\\rollup.win32-x64-msvc.node'
-npm warn cleanup     }
-npm warn cleanup   ],
-npm warn cleanup   [
-npm warn cleanup     'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\@esbuild\\.win32-x64-hxHJdMzw',
-npm warn cleanup     [Error: EPERM: operation not permitted, unlink 'C:\Users\Sushant\Documents\New LMS Project\frontend\node_modules\@esbuild\.win32-x64-hxHJdMzw\esbuild.exe'] {
-npm warn cleanup       errno: -4048,
-npm warn cleanup       code: 'EPERM',
-npm warn cleanup       syscall: 'unlink',
-npm warn cleanup       path: 'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\@esbuild\\.win32-x64-hxHJdMzw\\esbuild.exe'
-npm warn cleanup     }
-npm warn cleanup   ],
-npm warn cleanup   [
-npm warn cleanup     'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\.lightningcss-win32-x64-msvc-qe5frOhP',
-npm warn cleanup     [Error: EPERM: operation not permitted, unlink 'C:\Users\Sushant\Documents\New LMS Project\frontend\node_modules\.lightningcss-win32-x64-msvc-qe5frOhP\lightningcss.win32-x64-msvc.node'] {
-npm warn cleanup       errno: -4048,
-npm warn cleanup       code: 'EPERM',
-npm warn cleanup       syscall: 'unlink',
-npm warn cleanup       path: 'C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\\node_modules\\.lightningcss-win32-x64-msvc-qe5frOhP\\lightningcss.win32-x64-msvc.node'
-npm warn cleanup     }
-npm warn cleanup   ]
-npm warn cleanup ]
 
-added 187 packages, changed 4 packages, and audited 193 packages in 15s
+> @nepal-school-erp/backend@1.0.0 dev
+> npm run build:shared && tsx watch src/server.ts
 
-27 packages are looking for funding
+
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
+
+
+up to date, audited 3 packages in 1s
+
+1 package is looking for funding
   run `npm fund` for details
 
-4 high severity vulnerabilities
+found 0 vulnerabilities
 
-To address all issues, run:
-  npm audit fix --force
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
 
-Run `npm audit` for details.
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:20:09 pm [tsx] change in ./src\controllers\resultSubmissionController.ts Restarting...
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: Transform failed with 1 error:
+C:\Users\Sushant\Documents\New LMS Project\backend\src\utils\resultSubmission.ts:118:8: ERROR: The symbol "studentIds" has already been declared
+    at failureErrorWithLog (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1748:15)
+    at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1017:50
+    at responseCallbacks.<computed> (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:884:9)
+    at handleIncomingPacket (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:939:12)
+    at Socket.readFromStdout (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:862:7)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23) {
+  name: 'TransformError'
+}
+
+Node.js v24.16.0
+10:20:15 pm [tsx] change in ./src\controllers\resultSubmissionController.ts Rerunning...
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: Transform failed with 1 error:
+C:\Users\Sushant\Documents\New LMS Project\backend\src\utils\resultSubmission.ts:118:8: ERROR: The symbol "studentIds" has already been declared
+    at failureErrorWithLog (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1748:15)
+    at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1017:50
+    at responseCallbacks.<computed> (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:884:9)
+    at handleIncomingPacket (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:939:12)
+    at Socket.readFromStdout (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:862:7)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23) {
+  name: 'TransformError'
+}
+
+Node.js v24.16.0
+10:20:20 pm [tsx] change in ./shared\dist\index.js Rerunning...
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: Transform failed with 1 error:
+C:\Users\Sushant\Documents\New LMS Project\backend\src\utils\resultSubmission.ts:118:8: ERROR: The symbol "studentIds" has already been declared
+    at failureErrorWithLog (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1748:15)
+    at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:1017:50
+    at responseCallbacks.<computed> (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:884:9)
+    at handleIncomingPacket (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:939:12)
+    at Socket.readFromStdout (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\esbuild\lib\main.js:862:7)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23) {
+  name: 'TransformError'
+}
+
+Node.js v24.16.0
+10:20:34 pm [tsx] change in ./src\utils\resultSubmission.ts Rerunning...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:25:48 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:33:45 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:35:12 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000
+10:43:09 pm [tsx] change in ./shared\dist\index.js Restarting...
+MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
+Demo institution (DEMOERP) is complete.
+Backend server listening on http://localhost:5000

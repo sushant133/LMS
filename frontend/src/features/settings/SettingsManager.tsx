@@ -155,23 +155,23 @@ export const SettingsManager = () => {
           <CardContent>
             <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
               <FormField label="Total Classrooms">
-                <Input type="number" value={form.infrastructure.classrooms} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, classrooms: Number(e.target.value) } }))} />
+                <Input type="number" value={form.infrastructure.classrooms} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, classrooms: e.target.valueAsNumber } }))} />
               </FormField>
               <FormField label="Usable Classrooms">
-                <Input type="number" value={form.infrastructure.usableClassrooms} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, usableClassrooms: Number(e.target.value) } }))} />
+                <Input type="number" value={form.infrastructure.usableClassrooms} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, usableClassrooms: e.target.valueAsNumber } }))} />
               </FormField>
 
               <div className="md:col-span-2 mt-2">
                 <div className="text-sm font-medium text-slate-700 mb-2">Toilets</div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <FormField label="Male Toilets">
-                    <Input type="number" value={form.infrastructure.toiletsMale} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, toiletsMale: Number(e.target.value) } }))} />
+                    <Input type="number" value={form.infrastructure.toiletsMale} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, toiletsMale: e.target.valueAsNumber } }))} />
                   </FormField>
                   <FormField label="Female Toilets">
-                    <Input type="number" value={form.infrastructure.toiletsFemale} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, toiletsFemale: Number(e.target.value) } }))} />
+                    <Input type="number" value={form.infrastructure.toiletsFemale} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, toiletsFemale: e.target.valueAsNumber } }))} />
                   </FormField>
                   <FormField label="Disabled Toilets">
-                    <Input type="number" value={form.infrastructure.toiletsDisabled} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, toiletsDisabled: Number(e.target.value) } }))} />
+                    <Input type="number" value={form.infrastructure.toiletsDisabled} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, toiletsDisabled: e.target.valueAsNumber } }))} />
                   </FormField>
                 </div>
               </div>
@@ -207,7 +207,7 @@ export const SettingsManager = () => {
 
               <div className="md:col-span-2">
                 <FormField label="Library Books Count">
-                  <Input type="number" value={form.infrastructure.libraryBooks} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, libraryBooks: Number(e.target.value) } }))} />
+                  <Input type="number" value={form.infrastructure.libraryBooks} onChange={(e) => setForm(c => ({ ...c, infrastructure: { ...c.infrastructure, libraryBooks: e.target.valueAsNumber } }))} />
                 </FormField>
               </div>
             </div>

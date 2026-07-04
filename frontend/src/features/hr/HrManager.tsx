@@ -92,9 +92,9 @@ export const HrManager = () => {
               </Select>
             </FormField>
             <FormField label="Month (YYYY-MM)"><Input value={payrollForm.monthBs} onChange={(e) => setPayrollForm((c) => ({ ...c, monthBs: e.target.value }))} /></FormField>
-            <FormField label="Basic salary"><Input type="number" value={payrollForm.basicSalaryNpr} onChange={(e) => setPayrollForm((c) => ({ ...c, basicSalaryNpr: Number(e.target.value) }))} /></FormField>
-            <FormField label="Allowances"><Input type="number" value={payrollForm.allowancesNpr} onChange={(e) => setPayrollForm((c) => ({ ...c, allowancesNpr: Number(e.target.value) }))} /></FormField>
-            <FormField label="Deductions"><Input type="number" value={payrollForm.deductionsNpr} onChange={(e) => setPayrollForm((c) => ({ ...c, deductionsNpr: Number(e.target.value) }))} /></FormField>
+            <FormField label="Basic salary"><Input type="number" value={payrollForm.basicSalaryNpr} onChange={(e) => setPayrollForm((c) => ({ ...c, basicSalaryNpr: e.target.valueAsNumber }))} /></FormField>
+            <FormField label="Allowances"><Input type="number" value={payrollForm.allowancesNpr} onChange={(e) => setPayrollForm((c) => ({ ...c, allowancesNpr: e.target.valueAsNumber }))} /></FormField>
+            <FormField label="Deductions"><Input type="number" value={payrollForm.deductionsNpr} onChange={(e) => setPayrollForm((c) => ({ ...c, deductionsNpr: e.target.valueAsNumber }))} /></FormField>
             <Button onClick={() => { const p = payrollSchema.safeParse(payrollForm); if (!p.success) return toast.error("Invalid payroll"); createPayroll.mutate(p.data); }}>Create payroll</Button>
           </CardContent>
         </Card>

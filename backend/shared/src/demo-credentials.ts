@@ -53,6 +53,64 @@ export const demoCredentials = {
     name: "Demo Accountant",
     employeeId: "ACC001",
     role: "ACCOUNTANT"
+  },
+  collegeStaff: {
+    security: {
+      email: "security@demoerp.nepal-school.com",
+      password: DEMO_PASSWORD,
+      name: "Ramesh Karki",
+      phone: "9804400001",
+      gender: "Male",
+      basicSalaryNpr: 22000
+    },
+    housekeeping: {
+      email: "housekeeping@demoerp.nepal-school.com",
+      password: DEMO_PASSWORD,
+      name: "Sunita Tamang",
+      phone: "9804400002",
+      gender: "Female",
+      basicSalaryNpr: 18000
+    },
+    receptionist: {
+      email: "reception@demoerp.nepal-school.com",
+      password: DEMO_PASSWORD,
+      name: "Anita Shrestha",
+      phone: "9804400003",
+      gender: "Female",
+      basicSalaryNpr: 25000
+    },
+    officeAssistant: {
+      email: "office@demoerp.nepal-school.com",
+      password: DEMO_PASSWORD,
+      name: "Bikash Maharjan",
+      phone: "9804400004",
+      gender: "Male",
+      basicSalaryNpr: 24000
+    },
+    transport: {
+      email: "driver@demoerp.nepal-school.com",
+      password: DEMO_PASSWORD,
+      name: "Dilip Gurung",
+      phone: "9804400005",
+      gender: "Male",
+      basicSalaryNpr: 26000
+    },
+    it: {
+      email: "it@demoerp.nepal-school.com",
+      password: DEMO_PASSWORD,
+      name: "Prakash Bhattarai",
+      phone: "9804400006",
+      gender: "Male",
+      basicSalaryNpr: 35000
+    },
+    other: {
+      email: "staff@demoerp.nepal-school.com",
+      password: DEMO_PASSWORD,
+      name: "Kamala Devi",
+      phone: "9804400007",
+      gender: "Female",
+      basicSalaryNpr: 20000
+    }
   }
 } as const;
 

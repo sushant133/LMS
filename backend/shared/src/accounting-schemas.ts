@@ -80,6 +80,7 @@ export const accountingIncomeSchema = z.object({
 export const salaryPaymentSchema = z.object({
   employeeType: z.enum(["TEACHER", "STAFF"]),
   teacherId: objectIdSchema.optional(),
+  staffId: objectIdSchema.optional(),
   staffName: z.string().optional().or(z.literal("")),
   monthBs: z.string().regex(/^\d{4}-\d{2}$/),
   basicSalaryNpr: moneySchema,
@@ -96,8 +97,12 @@ export const salaryPaymentSchema = z.object({
   if (value.employeeType === "TEACHER" && !value.teacherId) {
     ctx.addIssue({ code: "custom", message: "teacherId is required for teacher salaries", path: ["teacherId"] });
   }
-  if (value.employeeType === "STAFF" && !value.staffName?.trim()) {
-    ctx.addIssue({ code: "custom", message: "staffName is required for staff salaries", path: ["staffName"] });
+  if (value.employeeType === "STAFF" && !value.staffId && !value.staffName?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Select a college staff member or provide a staff name",
+      path: ["staffId"]
+    });
   }
 });
 

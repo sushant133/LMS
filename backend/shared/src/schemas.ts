@@ -1,11 +1,16 @@
 import { z } from "zod";
 import {
+  BANNER_PRIORITIES,
+  BANNER_TARGET_ROLES,
   BLOOD_GROUPS,
   CLASS_LEVELS,
+  COLLEGE_STAFF_CATEGORIES,
   DISABILITY_CATEGORIES,
+  EMPLOYMENT_TYPES,
   ETHNICITY_CATEGORIES,
   EXAM_ATTENDANCE_STATUSES,
   EXAM_STATUSES,
+  RESULT_SUBMISSION_STATUSES,
   INSTITUTION_TYPES,
   PUBLIC_REGISTER_ROLES,
   USER_ROLES
@@ -127,7 +132,9 @@ export const studentSchema = z.object({
   ethnicityCategory: z.enum(ETHNICITY_CATEGORIES).optional(),
   address: addressSchema,
   fatherName: z.string().min(2),
+  fatherPhone: z.string().min(7).optional().or(z.literal("")),
   motherName: z.string().min(2),
+  motherPhone: z.string().min(7).optional().or(z.literal("")),
   guardianName: z.string().min(2),
   guardianPhone: z.string().min(7),
   feesDueNpr: moneySchema,
@@ -159,6 +166,31 @@ export const teacherSchema = z.object({
   assignedYearIds: z.array(objectIdSchema).default([]),
   basicSalaryNpr: moneySchema
 });
+
+export const collegeStaffSchema = z
+  .object({
+    fullName: z.string().min(2),
+    email: z.string().optional().or(z.literal("")),
+    phone: z.string().min(7),
+    password: optionalPortalPasswordSchema,
+    enableLogin: z.boolean().default(false),
+    staffId: z.string().min(1),
+    photoUrl: z.string().optional().or(z.literal("")),
+    gender: z.string().min(1),
+    dateOfBirthBs: bsDateSchema.optional().or(z.literal("")),
+    address: addressSchema,
+    joinedDateBs: bsDateSchema,
+    designation: z.string().min(1),
+    category: z.enum(COLLEGE_STAFF_CATEGORIES),
+    employmentType: z.enum(EMPLOYMENT_TYPES).default("FULL_TIME"),
+    basicSalaryNpr: moneySchema.default(0),
+    status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE")
+  })
+  .superRefine((value, ctx) => {
+    if (value.enableLogin && !value.email?.trim()) {
+      ctx.addIssue({ code: "custom", message: "Email is required when login is enabled", path: ["email"] });
+    }
+  });
 
 export const classSchema = z.object({
   name: z.string().min(1),
@@ -196,10 +228,28 @@ export const academicSubjectSchema = z.object({
   yearIds: z.array(objectIdSchema).default([])
 });
 
+export const masterSubjectSchema = z.object({
+  name: z.string().min(1),
+  code: z.string().min(1),
+  yearLevel: z.coerce.number().min(1).max(3),
+  creditHours: z.coerce.number().min(0).optional(),
+  theoryMarks: z.coerce.number().min(0),
+  practicalMarks: z.coerce.number().min(0).optional(),
+  internalMarks: z.coerce.number().min(0).optional(),
+  passMarks: z.coerce.number().min(0),
+  fullMarks: z.coerce.number().min(1),
+  isActive: z.boolean().default(true)
+});
+
 export const subjectSchema = academicSubjectSchema.extend({
   teacherIds: z.array(objectIdSchema).default([]),
+  creditHours: z.coerce.number().min(0).optional(),
+  theoryMarks: z.coerce.number().min(0).optional(),
+  practicalMarks: z.coerce.number().min(0).optional(),
+  internalMarks: z.coerce.number().min(0).optional(),
   fullMarks: z.coerce.number().min(1).default(100),
-  passMarks: z.coerce.number().min(0).default(35)
+  passMarks: z.coerce.number().min(0).default(35),
+  isActive: z.boolean().default(true)
 });
 
 export const attendanceSchema = z.object({
@@ -255,11 +305,24 @@ export const resultMarkSchema = z.object({
 export const resultSchema = z.object({
   examId: objectIdSchema,
   studentId: objectIdSchema,
-  classId: objectIdSchema.optional(),
-  sectionId: objectIdSchema.optional(),
-  batchId: objectIdSchema.optional(),
-  yearId: objectIdSchema.optional(),
+  classId: optionalObjectIdSchema,
+  sectionId: optionalObjectIdSchema,
+  batchId: optionalObjectIdSchema,
+  yearId: optionalObjectIdSchema,
   marks: z.array(resultMarkSchema)
+});
+
+export const resultSubmissionScopeSchema = z.object({
+  examId: objectIdSchema,
+  subjectId: objectIdSchema,
+  classId: optionalObjectIdSchema,
+  sectionId: optionalObjectIdSchema,
+  batchId: optionalObjectIdSchema,
+  yearId: optionalObjectIdSchema
+});
+
+export const resultSubmissionReviewSchema = z.object({
+  comments: z.string().optional().or(z.literal(""))
 });
 
 export const feeStructureSchema = z.object({
@@ -293,6 +356,23 @@ export const noticeSchema = z.object({
   subjectId: objectIdSchema.optional(),
   classId: objectIdSchema.optional(),
   sectionId: objectIdSchema.optional()
+});
+
+export const bannerSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1),
+  imageUrl: z.string().optional().or(z.literal("")),
+  buttonText: z.string().optional().or(z.literal("")),
+  buttonUrl: z.union([z.url(), z.literal("")]).optional(),
+  backgroundColor: z.string().optional().or(z.literal("")),
+  textColor: z.string().optional().or(z.literal("")),
+  priority: z.enum(BANNER_PRIORITIES).default("MEDIUM"),
+  startAt: z.string().min(1),
+  endAt: z.string().min(1),
+  isActive: z.boolean().default(true),
+  showOnce: z.boolean().default(false),
+  dismissible: z.boolean().default(true),
+  targetRoles: z.array(z.enum(BANNER_TARGET_ROLES)).min(1)
 });
 
 export const infrastructureSchema = z.object({
@@ -352,19 +432,24 @@ export type CreateSchoolInput = z.infer<typeof createSchoolSchema>;
 export type UpdateSchoolInput = z.infer<typeof updateSchoolSchema>;
 export type StudentInput = z.infer<typeof studentSchema>;
 export type TeacherInput = z.infer<typeof teacherSchema>;
+export type CollegeStaffInput = z.infer<typeof collegeStaffSchema>;
 export type ClassInput = z.infer<typeof classSchema>;
 export type SectionInput = z.infer<typeof sectionSchema>;
 export type BatchInput = z.infer<typeof batchSchema>;
 export type YearInput = z.infer<typeof yearSchema>;
 export type AcademicSubjectInput = z.infer<typeof academicSubjectSchema>;
+export type MasterSubjectInput = z.infer<typeof masterSubjectSchema>;
 export type SubjectInput = z.infer<typeof subjectSchema>;
 export type AttendanceInput = z.infer<typeof attendanceSchema>;
 export type ExamInput = z.infer<typeof examSchema>;
 export type ExamRoutineInput = z.infer<typeof examRoutineSchema>;
 export type ResultMarkInput = z.infer<typeof resultMarkSchema>;
 export type ResultInput = z.infer<typeof resultSchema>;
+export type ResultSubmissionScopeInput = z.infer<typeof resultSubmissionScopeSchema>;
+export type ResultSubmissionReviewInput = z.infer<typeof resultSubmissionReviewSchema>;
 export type FeeStructureInput = z.infer<typeof feeStructureSchema>;
 export type FeeCollectionInput = z.infer<typeof feeCollectionSchema>;
 export type NoticeInput = z.infer<typeof noticeSchema>;
+export type BannerInput = z.infer<typeof bannerSchema>;
 export type InfrastructureInput = z.infer<typeof infrastructureSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;

@@ -312,7 +312,7 @@ export const ComposePostModal = ({
                   <Input
                     type="number"
                     value={form.maxMarks ?? ""}
-                    onChange={(event) => setForm((current) => ({ ...current, maxMarks: Number(event.target.value) }))}
+                    onChange={(event) => setForm((current) => ({ ...current, maxMarks: event.target.valueAsNumber }))}
                   />
                 </FormField>
               ) : null}

@@ -1,16 +1,126 @@
 ---
-pid: 4272
+pid: 15612
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm start 2>&1"
-started_at: 2026-07-03T05:56:50.442Z
-running_for_ms: 515014   
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run seed:demo 2>&1"
+started_at: 2026-07-04T16:19:18.810Z
+running_for_ms: 2500000  
 ---
 
-> @nepal-school-erp/backend@1.0.0 start
-> node dist/server.js
+> @nepal-school-erp/backend@1.0.0 seed:demo
+> npm run build:shared && tsx src/scripts/seedDemoSchool.ts
+
+
+> @nepal-school-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
+
+
+up to date, audited 3 packages in 1s
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @nepal-school-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
 
 MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
-Demo school (DEMOERP) already present.
-Backend server listening on http://localhost:5000
-POST /api/auth/login 200 370.110 ms - 1621
-POST /api/auth/login 200 425.891 ms - 1596
+Removing existing demo college (DEMOERP)...
+Failed to seed demo college Error: Result validation failed: passFailStatus: Path `passFailStatus` is required., marks.0.passMarks: Path `passMarks` is required., marks.0.fullMarks: Path `fullMarks` is required., marks.1.passMarks: Path `passMarks` is required., marks.1.fullMarks: Path `fullMarks` is required., marks.2.passMarks: Path `passMarks` is required., marks.2.fullMarks: Path `fullMarks` is required.
+    at ValidationError.inspect (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\error\validation.js:52:26)
+    at formatValue (node:internal/util/inspect:897:19)
+    at inspect (node:internal/util/inspect:409:10)
+    at formatWithOptionsInternal (node:internal/util/inspect:2645:40)
+    at formatWithOptions (node:internal/util/inspect:2507:10)
+    at console.value (node:internal/console/constructor:377:14)
+    at console.error (node:internal/console/constructor:444:61)
+    at <anonymous> (C:\Users\Sushant\Documents\New LMS Project\backend\src\scripts\seedDemoSchool.ts:59:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  errors: {
+    passFailStatus: ValidatorError: Path `passFailStatus` is required.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'required',
+      path: 'passFailStatus',
+      value: undefined,
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    },
+    'marks.0.passMarks': ValidatorError: Path `passMarks` is required.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'required',
+      path: 'passMarks',
+      value: undefined,
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    },
+    'marks.0.fullMarks': ValidatorError: Path `fullMarks` is required.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'required',
+      path: 'fullMarks',
+      value: undefined,
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    },
+    'marks.1.passMarks': ValidatorError: Path `passMarks` is required.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'required',
+      path: 'passMarks',
+      value: undefined,
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    },
+    'marks.1.fullMarks': ValidatorError: Path `fullMarks` is required.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'required',
+      path: 'fullMarks',
+      value: undefined,
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    },
+    'marks.2.passMarks': ValidatorError: Path `passMarks` is required.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'required',
+      path: 'passMarks',
+      value: undefined,
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    },
+    'marks.2.fullMarks': ValidatorError: Path `fullMarks` is required.
+        at validate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1413:13)
+        at SchemaType.doValidate (C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\schemaType.js:1397:7)
+        at C:\Users\Sushant\Documents\New LMS Project\backend\node_modules\mongoose\lib\document.js:3111:18
+        at process.processTicksAndRejections (node:internal/process/task_queues:85:11) {
+      properties: [Object],
+      kind: 'required',
+      path: 'fullMarks',
+      value: undefined,
+      reason: undefined,
+      Symbol(mongoose#validatorError): true
+    }
+  },
+  _message: 'Result validation failed'
+}

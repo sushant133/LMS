@@ -18,7 +18,7 @@ const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
   { labelKey: "parentPortal", path: "/parent-portal", roles: ["PARENT"] },
   { labelKey: "colleges", path: "/colleges", roles: ["SUPER_ADMIN"] },
   { labelKey: "students", path: "/students", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"] },
-  { labelKey: "teachers", path: "/teachers", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "collegeStaff", path: "/college-staff", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
   { labelKey: "academics", path: "/academics", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
   { labelKey: "timetable", path: "/timetable", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"] },
   { labelKey: "homework", path: "/homework", roles: ["TEACHER"] },

@@ -8,6 +8,7 @@ export interface AcademicScopeOption {
   batchId?: string;
   classIds?: string[];
   yearIds?: string[];
+  isActive?: boolean;
 }
 
 export const isCollegeInstitution = (institutionType: InstitutionType): boolean => institutionType === "COLLEGE";
@@ -22,7 +23,9 @@ export const filterSubjectsByClass = (subjects: AcademicScopeOption[], classId: 
   classId ? subjects.filter((subject) => (subject.classIds ?? []).includes(classId)) : [];
 
 export const filterSubjectsByYear = (subjects: AcademicScopeOption[], yearId: string): AcademicScopeOption[] =>
-  yearId ? subjects.filter((subject) => (subject.yearIds ?? []).includes(yearId)) : [];
+  yearId
+    ? subjects.filter((subject) => (subject.yearIds ?? []).includes(yearId) && subject.isActive !== false)
+    : [];
 
 export const getAcademicLabels = (institutionType: InstitutionType) =>
   isCollegeInstitution(institutionType)

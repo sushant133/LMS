@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/marksheet.css";
 
 @theme {
   --color-brand-50: #f0fdf4;
@@ -40,3 +41,43 @@ a {
   touch-action: pan-y;
 }
 
+/* Screen: hide dedicated print-only layouts */
+.print-results-bulk-table {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+    size: auto;
+  }
+
+  body.printing-bulk-results {
+    background: #fff !important;
+  }
+
+  body.printing-bulk-results * {
+    visibility: hidden !important;
+  }
+
+  body.printing-bulk-results .print-results-bulk-table,
+  body.printing-bulk-results .print-results-bulk-table * {
+    visibility: visible !important;
+  }
+
+  body.printing-bulk-results .print-results-bulk-table {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  body.printing-marksheet .no-print,
+  body.printing-bulk-results .no-print {
+    display: none !important;
+  }
+}

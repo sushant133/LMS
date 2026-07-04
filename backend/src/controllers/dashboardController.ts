@@ -3,6 +3,7 @@ import { Attendance } from "../models/Attendance.js";
 import { Batch } from "../models/Batch.js";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { Notice } from "../models/Notice.js";
+import { getActiveBannersForUser } from "./bannerController.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Student } from "../models/Student.js";
 import { Subject } from "../models/Subject.js";
@@ -64,7 +65,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   const includeFees = req.user?.role === "COLLEGE_ADMIN" || req.user?.role === "SUPER_ADMIN";
   const groupLabel = college ? "Batches" : "Classes";
 
-  const [studentCount, teacherCount, groupCount, noticeCount, recentAttendance, recentCollections, notices, enrolledSubjects] =
+  const [studentCount, teacherCount, groupCount, noticeCount, recentAttendance, recentCollections, notices, enrolledSubjects, banners] =
     await Promise.all([
       Student.countDocuments({ schoolId }),
       Teacher.countDocuments({ schoolId }),
@@ -79,7 +80,8 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
           : studentProfile.classId
             ? Subject.countDocuments({ schoolId, classIds: studentProfile.classId })
             : Promise.resolve(0)
-        : Promise.resolve(0)
+        : Promise.resolve(0),
+      getActiveBannersForUser(req)
     ]);
 
   const attendanceChart = recentAttendance
@@ -162,6 +164,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
               { name: "Sections", value: teacherScope.sectionIds.length }
             ]
         : [],
-    notices
+    notices,
+    banners
   });
 });

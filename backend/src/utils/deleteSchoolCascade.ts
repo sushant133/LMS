@@ -10,6 +10,7 @@ import { AuditLog } from "../models/AuditLog.js";
 import { Exam } from "../models/Exam.js";
 import { ExamRoutine } from "../models/ExamRoutine.js";
 import { Accountant } from "../models/Accountant.js";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import { AccountingExpense } from "../models/AccountingExpense.js";
 import { AccountingIncome } from "../models/AccountingIncome.js";
 import { AccountingPurchase } from "../models/AccountingPurchase.js";
@@ -22,15 +23,19 @@ import { SalaryPayment } from "../models/SalaryPayment.js";
 import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
 import { Laboratory, LaboratoryCategory, LaboratoryEquipment, LaboratoryIssue } from "../models/Laboratory.js";
 import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
+import { Banner } from "../models/Banner.js";
+import { BannerDismissal } from "../models/BannerDismissal.js";
 import { Notice } from "../models/Notice.js";
 import { Notification } from "../models/Notification.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
 import { Result } from "../models/Result.js";
+import { ResultSubmission } from "../models/ResultSubmission.js";
 import { School } from "../models/School.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Setting } from "../models/Setting.js";
 import { Student } from "../models/Student.js";
+import { MasterSubject } from "../models/MasterSubject.js";
 import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
 import { TimetableSlot } from "../models/TimetableSlot.js";
@@ -56,9 +61,12 @@ export const deleteSchoolCascade = async (
     Assignment.deleteMany(filter, options),
     Attendance.deleteMany(filter, options),
     Result.deleteMany(filter, options),
+    ResultSubmission.deleteMany(filter, options),
     ExamRoutine.deleteMany(filter, options),
     Exam.deleteMany(filter, options),
     Notice.deleteMany(filter, options),
+    BannerDismissal.deleteMany(filter, options),
+    Banner.deleteMany(filter, options),
     TimetableSlot.deleteMany(filter, options),
     LibraryIssue.deleteMany(filter, options),
     LibraryBook.deleteMany(filter, options),
@@ -80,6 +88,7 @@ export const deleteSchoolCascade = async (
     CashBookEntry.deleteMany(filter, options),
     AccountingSettings.deleteMany(filter, options),
     Accountant.deleteMany(filter, options),
+    CollegeStaff.deleteMany(filter, options),
     ParentChildLink.deleteMany(filter, options),
     Notification.deleteMany(filter, options),
     AuditLog.deleteMany(filter, options)
@@ -88,6 +97,7 @@ export const deleteSchoolCascade = async (
   await Student.deleteMany(filter, options);
   await Teacher.deleteMany(filter, options);
   await Subject.deleteMany(filter, options);
+  await MasterSubject.deleteMany(filter, options);
   await Year.deleteMany(filter, options);
   await Batch.deleteMany(filter, options);
   await Section.deleteMany(filter, options);

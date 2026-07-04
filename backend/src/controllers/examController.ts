@@ -1,18 +1,30 @@
 import type { Request, Response } from "express";
 import { computeSubjectMark, examSchema, resultSchema } from "@nepal-school-erp/shared";
+import type { z } from "zod";
+import { Batch } from "../models/Batch.js";
 import { Exam } from "../models/Exam.js";
 import { ExamRoutine } from "../models/ExamRoutine.js";
 import { Result } from "../models/Result.js";
+import { ResultSubmission } from "../models/ResultSubmission.js";
+import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
-import { Setting } from "../models/Setting.js";
 import { Student } from "../models/Student.js";
 import { Subject } from "../models/Subject.js";
+import { Year } from "../models/Year.js";
 
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { recordAudit } from "../utils/audit.js";
 import { buildResultTotals, canViewPublishedResults } from "../utils/examResults.js";
+import {
+  assertTeacherCanEditSubmission,
+  buildSubmissionFilter,
+  getOrCreateSubmission,
+  type SubmissionScope
+} from "../utils/resultSubmission.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { generateMarksheetPDF } from "../utils/pdf.js";
+import { resolveSchoolBranding } from "../utils/schoolBranding.js";
 import { assertParentAccessToStudent, getLinkedStudentIds } from "../utils/parentScope.js";
 import { sendNotification, getSchoolIdFromRequest, notifyParentsOfStudent } from "../utils/notificationService.js";
 import { assertStudentOwnRecord, getStudentProfile } from "../utils/studentScope.js";
@@ -39,6 +51,154 @@ const getExamOrThrow = async (req: Request, examId: string) => {
     throw new ApiError(404, "Exam not found");
   }
   return exam;
+};
+
+type ResultPayload = z.infer<typeof resultSchema>;
+
+const buildSubmissionScopeFromPayload = (payload: ResultPayload): SubmissionScope => ({
+  examId: payload.examId,
+  subjectId: payload.marks[0]?.subjectId ?? "",
+  classId: payload.classId,
+  sectionId: payload.sectionId,
+  batchId: payload.batchId,
+  yearId: payload.yearId
+});
+
+const persistResultMarks = async (
+  req: Request,
+  payload: ResultPayload,
+  options: { isAdmin: boolean; allowedSubjectIds?: string[] }
+) => {
+  const schoolId = tenantObjectId(req);
+  const institutionType = await getInstitutionType(req);
+
+  const exam = await Exam.findOne({ _id: payload.examId, schoolId });
+  if (!exam) {
+    throw new ApiError(404, "Exam was not found in this college context");
+  }
+
+  if (!options.isAdmin && exam.resultsLocked) {
+    throw new ApiError(403, "Results are locked by the college admin");
+  }
+
+  for (const mark of payload.marks) {
+    if (options.allowedSubjectIds && !options.allowedSubjectIds.includes(mark.subjectId)) {
+      throw new ApiError(403, "You can only enter marks for your assigned subjects");
+    }
+    if (!options.isAdmin) {
+      await assertTeacherSubjectAcademicScope(req, mark.subjectId, payload);
+    }
+  }
+
+  if (!options.isAdmin) {
+    const scope = buildSubmissionScopeFromPayload(payload);
+    const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user?.userId);
+    assertTeacherCanEditSubmission(submission, exam);
+  }
+
+  const studentLookup: Record<string, unknown> = { _id: payload.studentId, schoolId };
+  if (isCollege(institutionType)) {
+    studentLookup.batchId = payload.batchId;
+    studentLookup.yearId = payload.yearId;
+  } else {
+    studentLookup.classId = payload.classId;
+    studentLookup.sectionId = payload.sectionId;
+  }
+
+  const [student, existingResult] = await Promise.all([
+    Student.findOne(studentLookup),
+    Result.findOne({ schoolId, examId: payload.examId, studentId: payload.studentId }).lean()
+  ]);
+
+  if (!student) {
+    throw new ApiError(404, "Student was not found in this college context");
+  }
+
+  const subjects = await Subject.find({ _id: { $in: payload.marks.map((mark) => mark.subjectId) }, schoolId }).lean();
+  const subjectMap = new Map(subjects.map((subject) => [subject._id.toString(), subject]));
+
+  const editableSubjectIds = new Set(
+    options.isAdmin ? payload.marks.map((mark) => mark.subjectId) : (options.allowedSubjectIds ?? [])
+  );
+  const retainedMarks = (existingResult?.marks ?? []).filter((mark) => !editableSubjectIds.has(mark.subjectId.toString()));
+
+  const incomingMarks = payload.marks.map((mark) => {
+    const subject = subjectMap.get(mark.subjectId);
+    return computeSubjectMark({
+      ...mark,
+      fullMarks: mark.fullMarks ?? subject?.fullMarks ?? 100,
+      passMarks: mark.passMarks ?? subject?.passMarks ?? 35,
+      obtainedMarks: 0
+    });
+  });
+
+  const mergedMarksMap = new Map<string, ReturnType<typeof computeSubjectMark>>();
+  for (const mark of retainedMarks) {
+    mergedMarksMap.set(mark.subjectId.toString(), mark as ReturnType<typeof computeSubjectMark>);
+  }
+  for (const mark of incomingMarks) {
+    mergedMarksMap.set(mark.subjectId, mark);
+  }
+
+  const mergedMarks = Array.from(mergedMarksMap.values());
+  const totals = buildResultTotals(
+    mergedMarks.map((mark) => ({
+      obtainedMarks: mark.obtainedMarks,
+      fullMarks: mark.fullMarks,
+      passFail: mark.passFail
+    }))
+  );
+
+  const beforeMarks = existingResult?.marks.filter((mark) =>
+    payload.marks.some((incoming) => incoming.subjectId === mark.subjectId.toString())
+  );
+
+  const result = await Result.findOneAndUpdate(
+    { schoolId, examId: payload.examId, studentId: payload.studentId },
+    {
+      examId: payload.examId,
+      studentId: payload.studentId,
+      classId: payload.classId,
+      sectionId: payload.sectionId,
+      batchId: payload.batchId,
+      yearId: payload.yearId,
+      marks: mergedMarks,
+      schoolId,
+      percentage: totals.percentage,
+      gpa: totals.gpa,
+      grade: totals.grade,
+      passFailStatus: totals.passFailStatus,
+      publishedAtBs: existingResult?.publishedAtBs
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  const afterMarks = result.marks.filter((mark) =>
+    payload.marks.some((incoming) => incoming.subjectId === mark.subjectId.toString())
+  );
+
+  await recordAudit(req, {
+    action: options.isAdmin ? "result.admin_edit_marks" : "result.teacher_save_marks",
+    entity: "Result",
+    entityId: result._id.toString(),
+    before: beforeMarks?.length ? { studentId: payload.studentId, marks: beforeMarks } : null,
+    after: {
+      studentId: payload.studentId,
+      examId: payload.examId,
+      marks: afterMarks,
+      percentage: result.percentage,
+      gpa: result.gpa,
+      grade: result.grade,
+      passFailStatus: result.passFailStatus
+    }
+  });
+
+  if (!options.isAdmin) {
+    const scope = buildSubmissionScopeFromPayload(payload);
+    await getOrCreateSubmission(schoolId.toString(), scope, req.user?.userId);
+  }
+
+  return result;
 };
 
 export const listExams = asyncHandler(async (req: Request, res: Response) => {
@@ -132,6 +292,7 @@ export const deleteExam = asyncHandler(async (req: Request, res: Response) => {
 
   await Promise.all([
     Result.deleteMany({ examId: req.params.id, schoolId }),
+    ResultSubmission.deleteMany({ examId: req.params.id, schoolId }),
     ExamRoutine.deleteMany({ examId: req.params.id, schoolId })
   ]);
   return sendSuccess(res, "Exam deleted successfully");
@@ -184,7 +345,7 @@ export const listResults = asyncHandler(async (req: Request, res: Response) => {
     const examMap = new Map(exams.map((exam) => [exam._id.toString(), exam]));
     results = results.filter((result) => {
       const exam = examMap.get(result.examId.toString());
-      return exam ? canViewPublishedResults(exam) : false;
+      return exam ? canViewPublishedResults(exam) && Boolean(result.publishedAtBs) : false;
     });
   }
 
@@ -197,98 +358,18 @@ export const upsertResult = asyncHandler(async (req: Request, res: Response) => 
   }
 
   const payload = resultSchema.parse(req.body);
-  const schoolId = tenantObjectId(req);
-  const institutionType = await getInstitutionType(req);
   const scope = await assertTeacherAcademicScope(req, payload);
-
-  const exam = await Exam.findOne({ _id: payload.examId, schoolId });
-  if (!exam) {
-    throw new ApiError(404, "Exam was not found in this college context");
-  }
-
-  if (exam.resultsLocked) {
-    throw new ApiError(403, "Results are locked by the college admin");
-  }
-
-  for (const mark of payload.marks) {
-    if (!scope.subjectIds.includes(mark.subjectId)) {
-      throw new ApiError(403, "You can only enter marks for your assigned subjects");
-    }
-    await assertTeacherSubjectAcademicScope(req, mark.subjectId, payload);
-  }
-
-  const studentLookup: Record<string, unknown> = { _id: payload.studentId, schoolId };
-  if (isCollege(institutionType)) {
-    studentLookup.batchId = payload.batchId;
-    studentLookup.yearId = payload.yearId;
-  } else {
-    studentLookup.classId = payload.classId;
-    studentLookup.sectionId = payload.sectionId;
-  }
-
-  const [student, existingResult] = await Promise.all([
-    Student.findOne(studentLookup),
-    Result.findOne({ schoolId, examId: payload.examId, studentId: payload.studentId }).lean()
-  ]);
-
-  if (!student) {
-    throw new ApiError(404, "Student was not found in this college context");
-  }
-
-  const subjects = await Subject.find({ _id: { $in: payload.marks.map((mark) => mark.subjectId) }, schoolId }).lean();
-  const subjectMap = new Map(subjects.map((subject) => [subject._id.toString(), subject]));
-
-  const teacherSubjectIdSet = new Set(scope.subjectIds);
-  const retainedMarks = (existingResult?.marks ?? []).filter((mark) => !teacherSubjectIdSet.has(mark.subjectId.toString()));
-
-  const incomingMarks = payload.marks.map((mark) => {
-    const subject = subjectMap.get(mark.subjectId);
-    return computeSubjectMark({
-      ...mark,
-      fullMarks: mark.fullMarks ?? subject?.fullMarks ?? 100,
-      passMarks: mark.passMarks ?? subject?.passMarks ?? 35,
-      obtainedMarks: 0
-    });
-  });
-
-  const mergedMarksMap = new Map<string, ReturnType<typeof computeSubjectMark>>();
-  for (const mark of retainedMarks) {
-    mergedMarksMap.set(mark.subjectId.toString(), mark as ReturnType<typeof computeSubjectMark>);
-  }
-  for (const mark of incomingMarks) {
-    mergedMarksMap.set(mark.subjectId, mark);
-  }
-
-  const mergedMarks = Array.from(mergedMarksMap.values());
-  const totals = buildResultTotals(
-    mergedMarks.map((mark) => ({
-      obtainedMarks: mark.obtainedMarks,
-      fullMarks: mark.fullMarks,
-      passFail: mark.passFail
-    }))
-  );
-
-  const result = await Result.findOneAndUpdate(
-    { schoolId, examId: payload.examId, studentId: payload.studentId },
-    {
-      examId: payload.examId,
-      studentId: payload.studentId,
-      classId: payload.classId,
-      sectionId: payload.sectionId,
-      batchId: payload.batchId,
-      yearId: payload.yearId,
-      marks: mergedMarks,
-      schoolId,
-      percentage: totals.percentage,
-      gpa: totals.gpa,
-      grade: totals.grade,
-      passFailStatus: totals.passFailStatus,
-      publishedAtBs: existingResult?.publishedAtBs
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+  const result = await persistResultMarks(req, payload, { isAdmin: false, allowedSubjectIds: scope.subjectIds });
 
   return sendSuccess(res, "Result saved successfully", result);
+});
+
+export const adminUpsertResult = asyncHandler(async (req: Request, res: Response) => {
+  assertAdmin(req);
+  const payload = resultSchema.parse(req.body);
+  const result = await persistResultMarks(req, payload, { isAdmin: true });
+
+  return sendSuccess(res, "Result updated by administrator", result);
 });
 
 export const deleteResult = asyncHandler(async (req: Request, res: Response) => {
@@ -318,6 +399,26 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
 
   if (role === "TEACHER" && exam.resultsLocked) {
     throw new ApiError(403, "Results are locked by the college admin");
+  }
+
+  if (role === "TEACHER") {
+    const student = await Student.findOne({ _id: studentId, schoolId }).lean();
+    if (student) {
+      const institutionType = await getInstitutionType(req);
+      const scope: SubmissionScope = {
+        examId,
+        subjectId,
+        batchId: student.batchId?.toString(),
+        yearId: student.yearId?.toString(),
+        classId: student.classId?.toString(),
+        sectionId: student.sectionId?.toString()
+      };
+      const filter = buildSubmissionFilter(schoolId.toString(), scope);
+      const submission = await ResultSubmission.findOne(filter);
+      if (submission) {
+        assertTeacherCanEditSubmission(submission, exam);
+      }
+    }
   }
 
   const result = await Result.findOne({ schoolId, examId, studentId });
@@ -360,6 +461,8 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
     }))
   );
 
+  const deletedMark = result.marks.find((mark) => mark.subjectId.toString() === subjectId);
+
   const updated = await Result.findOneAndUpdate(
     { _id: result._id },
     {
@@ -372,6 +475,20 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
     { new: true }
   );
 
+  await recordAudit(req, {
+    action: role === "TEACHER" ? "result.teacher_delete_marks" : "result.admin_delete_marks",
+    entity: "Result",
+    entityId: result._id.toString(),
+    before: { studentId, subjectId, mark: deletedMark },
+    after: {
+      studentId,
+      percentage: totals.percentage,
+      gpa: totals.gpa,
+      grade: totals.grade,
+      passFailStatus: totals.passFailStatus
+    }
+  });
+
   return sendSuccess(res, "Subject marks deleted successfully", updated);
 });
 
@@ -379,9 +496,36 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
   assertAdmin(req);
   const examId = String(req.params.examId);
   const exam = await getExamOrThrow(req, examId);
+  const tenantSchoolId = tenantObjectId(req);
+  const schoolId = getSchoolIdFromRequest(req);
   const todayBs = getTodayBs();
 
+  const blockingSubmissions = await ResultSubmission.find({
+    schoolId: tenantSchoolId,
+    examId,
+    status: { $in: ["PENDING_ADMIN_REVIEW", "SUBMITTED_FOR_REVIEW", "RETURNED_FOR_CORRECTION"] }
+  }).lean();
+
+  if (blockingSubmissions.length > 0) {
+    throw new ApiError(
+      400,
+      `Cannot publish results. ${blockingSubmissions.length} subject submission(s) are awaiting review or correction. Approve or return them before publishing.`
+    );
+  }
+
+  const approvedCount = await ResultSubmission.countDocuments({
+    schoolId: tenantSchoolId,
+    examId,
+    status: "APPROVED"
+  });
+
+  if (approvedCount === 0) {
+    throw new ApiError(400, "Cannot publish results. At least one subject submission must be approved before publishing.");
+  }
+
+  const beforeExam = exam.toObject();
   exam.resultsPublished = true;
+  exam.resultsLocked = true;
   exam.status = "PUBLISHED";
   if (!exam.resultPublishDateBs) {
     exam.resultPublishDateBs = todayBs;
@@ -389,17 +533,35 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
   await exam.save();
 
   await Result.updateMany(
-    { schoolId: tenantObjectId(req), examId },
+    { schoolId: tenantSchoolId, examId },
     { $set: { publishedAtBs: exam.resultPublishDateBs ?? todayBs } }
   );
 
+  await ResultSubmission.updateMany(
+    { schoolId: tenantSchoolId, examId, status: "APPROVED" },
+    {
+      $set: {
+        status: "PUBLISHED",
+        publishedByUserId: req.user!.userId,
+        publishedAt: new Date()
+      }
+    }
+  );
+
+  await recordAudit(req, {
+    action: "result.publish",
+    entity: "Exam",
+    entityId: examId,
+    before: beforeExam,
+    after: exam.toObject()
+  });
+
   const students = await Student.find({
-    schoolId: tenantObjectId(req),
+    schoolId: tenantSchoolId,
     ...(exam.batchIds?.length ? { batchId: { $in: exam.batchIds } } : {}),
     ...(exam.yearIds?.length ? { yearId: { $in: exam.yearIds } } : {})
   }).lean();
 
-  const schoolId = getSchoolIdFromRequest(req);
   await Promise.all(
     students.map((student) =>
       Promise.all([
@@ -430,28 +592,64 @@ export const unpublishExamResults = asyncHandler(async (req: Request, res: Respo
   assertAdmin(req);
   const examId = String(req.params.examId);
   const exam = await getExamOrThrow(req, examId);
+  const schoolId = tenantObjectId(req);
+  const beforeExam = exam.toObject();
+
   exam.resultsPublished = false;
   if (exam.status === "PUBLISHED") {
     exam.status = "COMPLETED";
   }
   await exam.save();
-  await Result.updateMany({ schoolId: tenantObjectId(req), examId }, { $unset: { publishedAtBs: "" } });
+  await Result.updateMany({ schoolId, examId }, { $unset: { publishedAtBs: "" } });
+  await ResultSubmission.updateMany(
+    { schoolId, examId, status: "PUBLISHED" },
+    { $set: { status: "APPROVED" }, $unset: { publishedByUserId: "", publishedAt: "" } }
+  );
+
+  await recordAudit(req, {
+    action: "result.unpublish",
+    entity: "Exam",
+    entityId: examId,
+    before: beforeExam,
+    after: exam.toObject()
+  });
+
   return sendSuccess(res, "Exam results unpublished", exam);
 });
 
 export const lockExamResults = asyncHandler(async (req: Request, res: Response) => {
   assertAdmin(req);
   const exam = await getExamOrThrow(req, String(req.params.examId));
+  const beforeExam = exam.toObject();
   exam.resultsLocked = true;
   await exam.save();
+
+  await recordAudit(req, {
+    action: "result.lock",
+    entity: "Exam",
+    entityId: exam._id.toString(),
+    before: beforeExam,
+    after: exam.toObject()
+  });
+
   return sendSuccess(res, "Exam results locked", exam);
 });
 
 export const unlockExamResults = asyncHandler(async (req: Request, res: Response) => {
   assertAdmin(req);
   const exam = await getExamOrThrow(req, String(req.params.examId));
+  const beforeExam = exam.toObject();
   exam.resultsLocked = false;
   await exam.save();
+
+  await recordAudit(req, {
+    action: "result.unlock",
+    entity: "Exam",
+    entityId: exam._id.toString(),
+    before: beforeExam,
+    after: exam.toObject()
+  });
+
   return sendSuccess(res, "Exam results unlocked", exam);
 });
 
@@ -562,6 +760,18 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     throw new ApiError(404, "Result not found");
   }
 
+  if (req.user?.role === "STUDENT" || req.user?.role === "PARENT") {
+    if (!result.publishedAtBs) {
+      throw new ApiError(403, "Results are not published yet");
+    }
+  } else if (
+    (req.user?.role === "COLLEGE_ADMIN" || req.user?.role === "SUPER_ADMIN") &&
+    exam.resultsPublished &&
+    !result.publishedAtBs
+  ) {
+    throw new ApiError(404, "Published result not found");
+  }
+
   const teacherScope = await getTeacherScope(req);
   if (teacherScope) {
     const hasAssignedMarks = result.marks.some((mark) => teacherScope.subjectIds.includes(mark.subjectId.toString()));
@@ -570,11 +780,14 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     }
   }
 
-  const [student, section, subjects, settings] = await Promise.all([
+  const [student, section, subjects, branding, batch, year, schoolClass] = await Promise.all([
     Student.findOne(withTenantScope(req, { _id: result.studentId })).populate("user", "-password"),
-    Section.findOne(withTenantScope(req, { _id: result.sectionId })),
+    result.sectionId ? Section.findOne(withTenantScope(req, { _id: result.sectionId })) : null,
     Subject.find({ _id: { $in: result.marks.map((mark) => mark.subjectId) }, schoolId }),
-    Setting.findOne({ schoolId }).lean()
+    resolveSchoolBranding(schoolId),
+    result.batchId ? Batch.findById(result.batchId).lean() : null,
+    result.yearId ? Year.findById(result.yearId).lean() : null,
+    result.classId ? SchoolClass.findById(result.classId).lean() : null
   ]);
 
   const scopedMarks = teacherScope
@@ -584,13 +797,33 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     ? subjects.filter((subject) => teacherScope.subjectIds.includes(subject._id.toString()))
     : subjects;
 
+  const totals = buildResultTotals(
+    (teacherScope ? scopedMarks : result.marks).map((mark) => ({
+      obtainedMarks: mark.obtainedMarks,
+      fullMarks: mark.fullMarks,
+      passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
+    }))
+  );
+
   return sendSuccess(res, "Marksheet generated", {
     result: teacherScope ? { ...result.toObject(), marks: scopedMarks } : result,
     exam,
     student,
     section,
+    batch: batch ? { _id: batch._id.toString(), name: batch.name } : undefined,
+    year: year ? { _id: year._id.toString(), name: year.name } : undefined,
+    schoolClass: schoolClass ? { _id: schoolClass._id.toString(), name: schoolClass.name, schoolId: schoolClass.schoolId.toString(), level: schoolClass.level, academicYearBs: schoolClass.academicYearBs, isActive: schoolClass.isActive } : undefined,
     subjects: scopedSubjects,
-    collegeName: settings?.schoolName
+    collegeName: branding.collegeName,
+    collegeNameNp: branding.collegeNameNp,
+    collegeAddress: branding.collegeAddress,
+    collegeLogoUrl: branding.collegeLogoUrl,
+    principalName: branding.principalName,
+    controllerOfExamination: "Controller of Examination",
+    verificationNumber: `MS-${result._id.toString().slice(-8).toUpperCase()}`,
+    printedDateBs: getTodayBs(),
+    totalObtained: totals.totalObtained,
+    totalFullMarks: totals.totalFull
   });
 });
 
@@ -614,22 +847,40 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(403, "You do not have permission to download this marksheet");
   }
 
-  const [result, student, settings] = await Promise.all([
-    Result.findOne(withTenantScope(req, { examId, studentId })),
-    Student.findOne(withTenantScope(req, { _id: studentId })).populate("user", "-password"),
-    Setting.findOne({ schoolId }).lean()
-  ]);
+  const resultFilter = {
+    examId,
+    studentId,
+    schoolId,
+    ...(req.user?.role === "STUDENT" || req.user?.role === "PARENT"
+      ? { publishedAtBs: { $exists: true, $nin: [null, ""] } }
+      : exam.resultsPublished
+        ? { publishedAtBs: { $exists: true, $nin: [null, ""] } }
+        : {})
+  };
 
-  if (!result || !student) {
-    throw new ApiError(404, "Result not found");
+  const resultDoc = await Result.findOne(resultFilter);
+  if (!resultDoc) {
+    throw new ApiError(404, "Published result not found");
   }
 
-  const subjects = await Subject.find({ _id: { $in: result.marks.map((mark) => mark.subjectId) }, schoolId }).lean();
+  const [student, branding, batch, year, schoolClass, section, subjects] = await Promise.all([
+    Student.findOne(withTenantScope(req, { _id: studentId })).populate("user", "-password"),
+    resolveSchoolBranding(schoolId),
+    resultDoc.batchId ? Batch.findById(resultDoc.batchId).lean() : null,
+    resultDoc.yearId ? Year.findById(resultDoc.yearId).lean() : null,
+    resultDoc.classId ? SchoolClass.findById(resultDoc.classId).lean() : null,
+    resultDoc.sectionId ? Section.findById(resultDoc.sectionId).lean() : null,
+    Subject.find({ _id: { $in: resultDoc.marks.map((mark) => mark.subjectId) }, schoolId }).lean()
+  ]);
+
+  if (!student) {
+    throw new ApiError(404, "Student not found");
+  }
+
   const subjectMap = new Map(subjects.map((subject) => [subject._id.toString(), subject]));
   const user = student.user as { fullName?: string };
-
   const totals = buildResultTotals(
-    result.marks.map((mark) => ({
+    resultDoc.marks.map((mark) => ({
       obtainedMarks: mark.obtainedMarks,
       fullMarks: mark.fullMarks,
       passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
@@ -638,13 +889,21 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
 
   await generateMarksheetPDF(
     {
-      schoolName: settings?.schoolName ?? "College",
+      schoolName: branding.collegeName,
+      schoolNameNp: branding.collegeNameNp,
+      schoolAddress: branding.collegeAddress,
+      principalName: branding.principalName,
+      controllerOfExamination: "Controller of Examination",
       examName: exam.name,
+      academicYearBs: exam.academicYearBs,
       studentName: user?.fullName ?? "Student",
-      className: "",
-      sectionName: "",
+      registrationNumber: student.admissionNumber,
+      className: schoolClass?.name ?? "",
+      sectionName: section?.name ?? "",
+      batchName: batch?.name,
+      yearName: year?.name,
       rollNumber: student.rollNumber,
-      marks: result.marks.map((mark) => ({
+      marks: resultDoc.marks.map((mark) => ({
         subject: subjectMap.get(mark.subjectId.toString())?.name ?? "Subject",
         fullMarks: mark.fullMarks,
         obtained: mark.obtainedMarks,
@@ -660,8 +919,10 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
       percentage: totals.percentage,
       gpa: totals.gpa,
       grade: totals.grade,
-      passFailStatus: result.passFailStatus,
-      publishDateBs: result.publishedAtBs ?? undefined
+      passFailStatus: resultDoc.passFailStatus,
+      publishDateBs: resultDoc.publishedAtBs ?? undefined,
+      printedDateBs: getTodayBs(),
+      verificationNumber: `MS-${resultDoc._id.toString().slice(-8).toUpperCase()}`
     },
     res
   );

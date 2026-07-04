@@ -1,32 +1,34 @@
 ---
-pid: 18456
+pid: 29332
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run dev 2>&1"
-started_at: 2026-07-03T06:03:56.624Z
-running_for_ms: 90003    
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npx tsx src/scripts/testExamFlow.ts 2>&1"
+started_at: 2026-07-04T16:21:18.925Z
+running_for_ms: 2380005  
 ---
 
-> @nepal-school-erp/frontend@1.0.0 dev
-> npm run build:shared && node scripts/dev.mjs
+=== Exams & Results Smoke Test ===
 
+✓ Admin lists exams — 2 exam(s)
+✓ Admin creates exam — Smoke Test Exam 1783182082380
+✓ Admin creates exam routine — subject Anatomy
+✓ Duplicate subject routine blocked — 409 Conflict
+✓ Admin publishes exam routine — status=SCHEDULED
+✓ Student sees published routine — 1 entry(ies)
+✓ Teacher sees scoped routines — 1 entry(ies)
+✓ Teacher enters marks with auto-calculation — 5 student(s) · 80% · A
+✓ Teacher blocked from publishing results — 403 Forbidden
+✓ Teacher submits results for review — submission=6a493304d8fdc0f5c596aa57
+✓ Submitted results block teacher edits — 403 Forbidden
+✓ Publish blocked until submissions approved — 400 Bad Request
+✓ Admin approves result submission — APPROVED
+✓ Admin fetches exam analytics — 5 result(s), 1 subject(s)
+✓ Admin views result audit log — 5 entry(ies)
+✓ Admin publishes results — status=PUBLISHED, locked=true
+✓ Student sees published results — 1 total result card(s)
+✓ Student downloads marksheet PDF — 16935 bytes
+✓ Locked results block teacher edits — 403 Forbidden
+✓ Admin deletes smoke exam — cleanup complete
+✓ Student lists scoped exams — 2 exam(s)
 
-> @nepal-school-erp/frontend@1.0.0 build:shared
-> npm run build --prefix ../backend/shared
-
-
-> @nepal-school-erp/shared@1.0.0 build
-> tsc -p tsconfig.json
-
-[dev] Stopping stale process 21588 on port 5173
-[dev] Starting backend API on http://127.0.0.1:5000 ...
-MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
-[dev] Backend is ready.
-[dev] Starting Vite on http://localhost:5173 ...
-11:49:04 am [vite] (client) Re-optimizing dependencies because vite config has changed
-
-  VITE v7.3.6  ready in 397 ms
-
-  ➜  Local:   http://localhost:5173/
-  ➜  Network: use --host to expose
-Demo school (DEMOERP) already present.
-Backend server listening on http://localhost:5000
+=== Summary ===
+21/21 passed

@@ -18,6 +18,13 @@ import {
   updateSection,
   updateSubject
 } from "../controllers/academicController.js";
+import {
+  createMasterSubject,
+  deleteMasterSubject,
+  listMasterSubjects,
+  reconcileMasterSubjects,
+  updateMasterSubject
+} from "../controllers/masterSubjectController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
@@ -39,6 +46,12 @@ router.get("/subjects", listSubjects);
 router.post("/subjects", authorize("COLLEGE_ADMIN"), createSubject);
 router.put("/subjects/:id", authorize("COLLEGE_ADMIN"), updateSubject);
 router.delete("/subjects/:id", authorize("COLLEGE_ADMIN"), deleteSubject);
+
+router.get("/master-subjects", listMasterSubjects);
+router.post("/master-subjects/reconcile", authorize("COLLEGE_ADMIN"), reconcileMasterSubjects);
+router.post("/master-subjects", authorize("COLLEGE_ADMIN"), createMasterSubject);
+router.put("/master-subjects/:id", authorize("COLLEGE_ADMIN"), updateMasterSubject);
+router.delete("/master-subjects/:id", authorize("COLLEGE_ADMIN"), deleteMasterSubject);
 
 router.get("/batches", listBatches);
 router.post("/batches", authorize("COLLEGE_ADMIN"), createBatch);

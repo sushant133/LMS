@@ -80,3 +80,29 @@ export const uploadClassroomAttachmentsHandler = asyncHandler(async (req: Reques
 
   return sendSuccess(res, "Classroom attachments uploaded", { attachments });
 });
+
+export const uploadStaffPhotoHandler = asyncHandler(async (req: Request, res: Response) => {
+  const file = (req as { file?: Express.Multer.File }).file;
+  if (!file) {
+    throw new ApiError(400, "No staff photo uploaded");
+  }
+
+  return sendSuccess(res, "Staff photo uploaded successfully", {
+    url: getUploadPublicUrl(file.path),
+    originalName: file.originalname,
+    size: file.size
+  });
+});
+
+export const uploadBannerImageHandler = asyncHandler(async (req: Request, res: Response) => {
+  const file = (req as { file?: Express.Multer.File }).file;
+  if (!file) {
+    throw new ApiError(400, "No banner image uploaded");
+  }
+
+  return sendSuccess(res, "Banner image uploaded successfully", {
+    url: getUploadPublicUrl(file.path),
+    originalName: file.originalname,
+    size: file.size
+  });
+});

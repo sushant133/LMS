@@ -1,4 +1,3 @@
-import { TeachersManager } from "features/teachers/TeachersManager";
+import { Navigate } from "react-router-dom";
 
-export const TeachersPage = () => <TeachersManager />;
-
+export const TeachersPage = () => <Navigate to="/college-staff?tab=teachers" replace />;

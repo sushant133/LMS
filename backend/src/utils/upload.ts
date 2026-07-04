@@ -85,6 +85,21 @@ export const uploadClassroomAttachments = multer({
   fileFilter: classroomFileFilter
 }).array("files", 10);
 
+const bannerMimeTypes = ["image/jpeg", "image/png", "image/webp"];
+const bannerFileFilter = createFileFilter(bannerMimeTypes, "Invalid file type. Allowed: JPG, PNG, WEBP");
+
+export const uploadBannerImage = multer({
+  storage: createTenantStorage("banners"),
+  limits: { fileSize: 3 * 1024 * 1024 },
+  fileFilter: bannerFileFilter
+}).single("image");
+
+export const uploadStaffPhoto = multer({
+  storage: createTenantStorage("staff/photos"),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: bannerFileFilter
+}).single("photo");
+
 /**
  * Returns a public URL path for a stored file (relative).
  * In production you would return a signed S3/Cloudinary URL.

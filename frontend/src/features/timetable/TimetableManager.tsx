@@ -308,7 +308,7 @@ export const TimetableManager = () => {
               </Select>
             </FormField>
             <FormField label="Period">
-              <Input type="number" value={form.periodNumber} onChange={(e) => setForm((c) => ({ ...c, periodNumber: Number(e.target.value) }))} />
+              <Input type="number" value={form.periodNumber} onChange={(e) => setForm((c) => ({ ...c, periodNumber: e.target.valueAsNumber }))} />
             </FormField>
             <FormField label="Start Time">
               <Input value={form.startTime} onChange={(e) => setForm((c) => ({ ...c, startTime: e.target.value }))} />

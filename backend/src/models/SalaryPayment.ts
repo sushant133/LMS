@@ -5,6 +5,7 @@ const salaryPaymentSchema = new Schema(
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     employeeType: { type: String, enum: ["TEACHER", "STAFF"], required: true },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher" },
+    staffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff" },
     staffName: { type: String },
     monthBs: { type: String, required: true },
     basicSalaryNpr: { type: Number, required: true },
@@ -24,6 +25,7 @@ const salaryPaymentSchema = new Schema(
 );
 
 salaryPaymentSchema.index({ schoolId: 1, teacherId: 1, monthBs: 1 }, { unique: true, sparse: true });
+salaryPaymentSchema.index({ schoolId: 1, staffId: 1, monthBs: 1 }, { unique: true, sparse: true });
 
 export type SalaryPaymentDocument = InferSchemaType<typeof salaryPaymentSchema>;
 export const SalaryPayment = mongoose.model("SalaryPayment", salaryPaymentSchema);

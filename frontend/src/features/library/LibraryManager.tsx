@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
@@ -178,6 +179,8 @@ export const LibraryManager = () => {
         description="Manage catalog, inventory, issue and return books, and track borrowing activity."
       />
 
+      <DashboardBannerStrip />
+
       <div className="flex flex-wrap gap-2">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
@@ -272,7 +275,7 @@ export const LibraryManager = () => {
                 <Input
                   type="number"
                   value={bookForm.totalCopies}
-                  onChange={(e) => setBookForm((c) => ({ ...c, totalCopies: Number(e.target.value) }))}
+                  onChange={(e) => setBookForm((c) => ({ ...c, totalCopies: e.target.valueAsNumber }))}
                 />
               </FormField>
               <div className="flex gap-2">

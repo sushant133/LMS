@@ -61,7 +61,7 @@ export const TransportManager = () => {
             <FormField label="Vehicle"><Input value={routeForm.vehicleNumber} onChange={(e) => setRouteForm((c) => ({ ...c, vehicleNumber: e.target.value }))} /></FormField>
             <FormField label="Driver"><Input value={routeForm.driverName} onChange={(e) => setRouteForm((c) => ({ ...c, driverName: e.target.value }))} /></FormField>
             <FormField label="Driver phone"><Input value={routeForm.driverPhone} onChange={(e) => setRouteForm((c) => ({ ...c, driverPhone: e.target.value }))} /></FormField>
-            <FormField label="Monthly fee (NPR)"><Input type="number" value={routeForm.monthlyFeeNpr} onChange={(e) => setRouteForm((c) => ({ ...c, monthlyFeeNpr: Number(e.target.value) }))} /></FormField>
+            <FormField label="Monthly fee (NPR)"><Input type="number" value={routeForm.monthlyFeeNpr} onChange={(e) => setRouteForm((c) => ({ ...c, monthlyFeeNpr: e.target.valueAsNumber }))} /></FormField>
             <Button onClick={() => { const p = transportRouteSchema.safeParse(routeForm); if (!p.success) return toast.error("Invalid route"); createRoute.mutate(p.data); }}>Create route</Button>
           </CardContent>
         </Card>
