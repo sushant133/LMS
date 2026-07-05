@@ -19,7 +19,11 @@ const salaryPaymentSchema = new Schema(
     status: { type: String, enum: ["DRAFT", "PROCESSED", "PAID"], default: "DRAFT" },
     paidDateBs: { type: String },
     paymentMethod: { type: String, enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "OTHER"], default: "BANK_TRANSFER" },
-    createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true }
+    createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    voidReason: { type: String }
   },
   { timestamps: true }
 );

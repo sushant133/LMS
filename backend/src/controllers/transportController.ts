@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { transportAssignmentSchema, transportRouteSchema } from "@nepal-school-erp/shared";
+import { transportAssignmentSchema, transportRouteSchema } from "@phit-erp/shared";
 import { TransportAssignment, TransportRoute } from "../models/TransportRoute.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
@@ -35,7 +35,9 @@ export const deleteRoute = asyncHandler(async (req: Request, res: Response) => {
 export const listAssignments = asyncHandler(async (req: Request, res: Response) => {
   const filter = withTenantScope(req);
   if (typeof req.query.routeId === "string") filter.routeId = req.query.routeId;
-  const assignments = await TransportAssignment.find(filter).populate("routeId").populate("studentId");
+  const assignments = await TransportAssignment.find(filter)
+    .populate("routeId")
+    .populate({ path: "studentId", populate: { path: "user", select: "fullName email phone" } });
   return sendSuccess(res, "Transport assignments fetched", assignments);
 });
 

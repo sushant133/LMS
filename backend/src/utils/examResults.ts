@@ -1,4 +1,4 @@
-import { computeResultSummary } from "@nepal-school-erp/shared";
+import { computeResultSummary } from "@phit-erp/shared";
 import type { ExamDocument } from "../models/Exam.js";
 import { compareBsDates, getTodayBs } from "./nepaliDate.js";
 

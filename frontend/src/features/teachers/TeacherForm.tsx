@@ -6,7 +6,7 @@ import {
   type SubjectRecord,
   type TeacherInput,
   type YearRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";

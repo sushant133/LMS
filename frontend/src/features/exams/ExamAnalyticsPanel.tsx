@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ExamAnalyticsSummary } from "@nepal-school-erp/shared";
+import type { ExamAnalyticsSummary } from "@phit-erp/shared";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { Badge } from "components/ui/badge";

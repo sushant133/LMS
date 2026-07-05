@@ -1,4 +1,4 @@
-import type { NoticeRecord } from "@nepal-school-erp/shared";
+import type { NoticeRecord } from "@phit-erp/shared";
 import { EmptyState } from "components/shared/EmptyState";
 import { PageContent } from "components/layout/PageContent";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { LaboratoryIssueRecord } from "@nepal-school-erp/shared";
+import type { LaboratoryIssueRecord } from "@phit-erp/shared";
 import { PageHeader } from "components/shared/PageHeader";
 import { Badge } from "components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";

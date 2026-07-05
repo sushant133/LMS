@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { masterSubjectSchema } from "@nepal-school-erp/shared";
+import { masterSubjectSchema } from "@phit-erp/shared";
 import { MasterSubject } from "../models/MasterSubject.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";

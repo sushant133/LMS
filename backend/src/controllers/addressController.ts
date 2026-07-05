@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { nepalAddressData } from "@nepal-school-erp/shared";
+import { nepalAddressData } from "@phit-erp/shared";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/response.js";
 

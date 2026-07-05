@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { BANNER_PRIORITIES, BANNER_TARGET_ROLES } from "@nepal-school-erp/shared";
+import { BANNER_PRIORITIES, BANNER_TARGET_ROLES } from "@phit-erp/shared";
 
 const bannerSchema = new Schema(
   {

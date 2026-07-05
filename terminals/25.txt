@@ -3,7 +3,7 @@ pid: 24152
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run build 2>&1 | Select-String -Pattern \"ExamsPage|chunk|kB|built|error\""
 started_at: 2026-07-04T19:47:40.465Z
-running_for_ms: 195014   
+running_for_ms: 530010   
 ---
 
 rendering chunks...

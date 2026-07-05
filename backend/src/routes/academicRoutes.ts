@@ -25,7 +25,7 @@ import {
   reconcileMasterSubjects,
   updateMasterSubject
 } from "../controllers/masterSubjectController.js";
-import { authorize, protect } from "../middleware/auth.js";
+import { authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
@@ -33,30 +33,30 @@ const router = Router();
 router.use(protect, tenantGuard);
 
 router.get("/classes", listClasses);
-router.post("/classes", authorize("COLLEGE_ADMIN"), createClass);
-router.put("/classes/:id", authorize("COLLEGE_ADMIN"), updateClass);
-router.delete("/classes/:id", authorize("COLLEGE_ADMIN"), deleteClass);
+router.post("/classes", authorizeInstitutionAdmin, createClass);
+router.put("/classes/:id", authorizeInstitutionAdmin, updateClass);
+router.delete("/classes/:id", authorizeInstitutionAdmin, deleteClass);
 
 router.get("/sections", listSections);
-router.post("/sections", authorize("COLLEGE_ADMIN"), createSection);
-router.put("/sections/:id", authorize("COLLEGE_ADMIN"), updateSection);
-router.delete("/sections/:id", authorize("COLLEGE_ADMIN"), deleteSection);
+router.post("/sections", authorizeInstitutionAdmin, createSection);
+router.put("/sections/:id", authorizeInstitutionAdmin, updateSection);
+router.delete("/sections/:id", authorizeInstitutionAdmin, deleteSection);
 
 router.get("/subjects", listSubjects);
-router.post("/subjects", authorize("COLLEGE_ADMIN"), createSubject);
-router.put("/subjects/:id", authorize("COLLEGE_ADMIN"), updateSubject);
-router.delete("/subjects/:id", authorize("COLLEGE_ADMIN"), deleteSubject);
+router.post("/subjects", authorizeInstitutionAdmin, createSubject);
+router.put("/subjects/:id", authorizeInstitutionAdmin, updateSubject);
+router.delete("/subjects/:id", authorizeInstitutionAdmin, deleteSubject);
 
 router.get("/master-subjects", listMasterSubjects);
-router.post("/master-subjects/reconcile", authorize("COLLEGE_ADMIN"), reconcileMasterSubjects);
-router.post("/master-subjects", authorize("COLLEGE_ADMIN"), createMasterSubject);
-router.put("/master-subjects/:id", authorize("COLLEGE_ADMIN"), updateMasterSubject);
-router.delete("/master-subjects/:id", authorize("COLLEGE_ADMIN"), deleteMasterSubject);
+router.post("/master-subjects/reconcile", authorizeInstitutionAdmin, reconcileMasterSubjects);
+router.post("/master-subjects", authorizeInstitutionAdmin, createMasterSubject);
+router.put("/master-subjects/:id", authorizeInstitutionAdmin, updateMasterSubject);
+router.delete("/master-subjects/:id", authorizeInstitutionAdmin, deleteMasterSubject);
 
 router.get("/batches", listBatches);
-router.post("/batches", authorize("COLLEGE_ADMIN"), createBatch);
-router.put("/batches/:id", authorize("COLLEGE_ADMIN"), updateBatch);
-router.delete("/batches/:id", authorize("COLLEGE_ADMIN"), deleteBatch);
+router.post("/batches", authorizeInstitutionAdmin, createBatch);
+router.put("/batches/:id", authorizeInstitutionAdmin, updateBatch);
+router.delete("/batches/:id", authorizeInstitutionAdmin, deleteBatch);
 
 router.get("/years", listYears);
 

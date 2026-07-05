@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { BookOpen, Filter, Plus } from "lucide-react";
-import type { AssignmentInput, ClassroomFeedResponse, ClassroomPost } from "@nepal-school-erp/shared";
-import { ASSIGNMENT_TYPES } from "@nepal-school-erp/shared";
+import type { AssignmentInput, ClassroomFeedResponse, ClassroomPost } from "@phit-erp/shared";
+import { ASSIGNMENT_TYPES } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { PageContent } from "components/layout/PageContent";

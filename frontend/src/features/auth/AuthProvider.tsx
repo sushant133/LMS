@@ -2,7 +2,7 @@ import type { PropsWithChildren } from "react";
 import { createContext, useContext, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { AuthResponse, LoginInput, RegisterInput, SchoolRecord, UserProfile } from "@nepal-school-erp/shared";
+import type { AuthResponse, LoginInput, RegisterInput, SchoolRecord, UserProfile } from "@phit-erp/shared";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { computeSubjectMark, type MarksheetViewResponse } from "@nepal-school-erp/shared";
+import { computeSubjectMark, type MarksheetViewResponse } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Download, Printer } from "lucide-react";

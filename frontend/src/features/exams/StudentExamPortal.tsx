@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ExamRecord, ExamRoutineRecord, MarksheetViewResponse, ResultRecord, SubjectRecord } from "@nepal-school-erp/shared";
+import type { ExamRecord, ExamRoutineRecord, MarksheetViewResponse, ResultRecord, SubjectRecord } from "@phit-erp/shared";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";

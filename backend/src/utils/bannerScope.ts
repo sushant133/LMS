@@ -1,4 +1,4 @@
-import type { BannerTargetRole, UserRole } from "@nepal-school-erp/shared";
+import type { BannerTargetRole, UserRole } from "@phit-erp/shared";
 
 const BANNER_TARGET_USER_ROLES: Record<BannerTargetRole, UserRole[]> = {
   STUDENT: ["STUDENT"],

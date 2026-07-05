@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { LEAVE_TYPES } from "@nepal-school-erp/shared";
+import { LEAVE_TYPES } from "@phit-erp/shared";
 
 const leaveRequestSchema = new Schema(
   {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FileText, Image as ImageIcon, Upload, X } from "lucide-react";
-import type { AssignmentAttachment } from "@nepal-school-erp/shared";
+import type { AssignmentAttachment } from "@phit-erp/shared";
 import { Button } from "components/ui/button";
 import { resolveApiUrl } from "lib/api";
 

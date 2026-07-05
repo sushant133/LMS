@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { createSchoolSchema, updateSchoolSchema } from "@nepal-school-erp/shared";
+import { createSchoolSchema, updateSchoolSchema } from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { School } from "../models/School.js";
 import { Setting } from "../models/Setting.js";
@@ -8,6 +8,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { deleteSchoolCascade } from "../utils/deleteSchoolCascade.js";
 import { buildSchoolSettingsPayload } from "../utils/schoolDefaults.js";
+import { resolveInstitutionSchool } from "../utils/institutionSchool.js";
 import { sendSuccess } from "../utils/response.js";
 import {
   createSession,
@@ -19,8 +20,8 @@ import {
 } from "../utils/transaction.js";
 
 export const listPublicSchools = asyncHandler(async (_req: Request, res: Response) => {
-  const schools = await School.find({ isActive: true }).sort({ name: 1 }).lean();
-  return sendSuccess(res, "Public colleges fetched", schools);
+  const school = await resolveInstitutionSchool();
+  return sendSuccess(res, "Public colleges fetched", school ? [school] : []);
 });
 
 export const listSchools = asyncHandler(async (_req: Request, res: Response) => {
@@ -35,7 +36,7 @@ export const listAccessibleSchools = asyncHandler(async (req: Request, res: Resp
 
   const schools =
     req.user.role === "SUPER_ADMIN"
-      ? await School.find().sort({ name: 1 }).lean()
+      ? [await resolveInstitutionSchool()].filter(Boolean)
       : await School.find({ _id: req.user.schoolId }).sort({ name: 1 }).lean();
 
   return sendSuccess(res, "Accessible colleges fetched", schools);

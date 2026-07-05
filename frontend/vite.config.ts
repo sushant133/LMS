@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@nepal-school-erp/shared": path.resolve(__dirname, "../backend/shared/src"),
+      "@phit-erp/shared": path.resolve(__dirname, "../backend/shared/src"),
       components: path.resolve(__dirname, "./src/components"),
       features: path.resolve(__dirname, "./src/features"),
       hooks: path.resolve(__dirname, "./src/hooks"),

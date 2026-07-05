@@ -8,8 +8,8 @@ import type {
   ResultSubmissionRecord,
   StudentRecord,
   SubjectRecord
-} from "@nepal-school-erp/shared";
-import { EXAM_ATTENDANCE_STATUSES, computeSubjectMark, resultSchema } from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
+import { EXAM_ATTENDANCE_STATUSES, computeSubjectMark, resultSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
 import { Badge } from "components/ui/badge";

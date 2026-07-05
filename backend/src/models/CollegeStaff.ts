@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { COLLEGE_STAFF_CATEGORIES, EMPLOYMENT_TYPES } from "@nepal-school-erp/shared";
+import { COLLEGE_STAFF_CATEGORIES, EMPLOYMENT_TYPES } from "@phit-erp/shared";
 
 const addressSchema = new Schema(
   {

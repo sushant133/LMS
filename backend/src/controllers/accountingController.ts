@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import type { Request, Response } from "express";
 import {
   accountantSchema,
@@ -10,8 +11,13 @@ import {
   enhancedFeeCollectionSchema,
   extendedFeeStructureSchema,
   salaryPaymentSchema,
-  type AccountingReportType
-} from "@nepal-school-erp/shared";
+  buildFinancialSummaryRows,
+  buildFinancialSummaryCsv,
+  buildReportCsv,
+  sumAmount,
+  type AccountingReportType,
+  type FinancialSummaryReport
+} from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { Accountant } from "../models/Accountant.js";
 import { AccountingExpense } from "../models/AccountingExpense.js";
@@ -34,11 +40,39 @@ import { Student } from "../models/Student.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
-import { calculateFeeTotals, calculateNetSalary, generateReceiptNumber } from "../utils/accountingCalculations.js";
+import {
+  calculateFeeTotals,
+  calculateNetSalary,
+  calculateSuggestedLateFee,
+  computeBalanceAfterEntry,
+  generateReceiptNumber
+} from "../utils/accountingCalculations.js";
+import { getLatestCashBalance, recordCashEntry, reverseCashEntry } from "../utils/accountingCashBook.js";
+import { getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
+import { generateReceiptVerificationCode } from "../utils/receiptVerification.js";
+import {
+  postExpenseJournal,
+  postFeeCollectionJournal,
+  postIncomeJournal,
+  postPurchaseJournal,
+  postSalaryJournal,
+  reverseJournalEntry
+} from "../utils/journalPosting.js";
+import { FeeRefund } from "../models/FeeRefund.js";
 import { recordAudit } from "../utils/audit.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
-import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
+import { withFinancialTransaction } from "../utils/financialTransaction.js";
+import { voidFeeCollection, voidWithJournalReversal } from "../utils/accountingVoid.js";
+import { hasAccountingPermission } from "@phit-erp/shared";
+import { needsApprovalForAmount } from "./accountingApprovalController.js";
+import { FinancialApproval } from "../models/FinancialApproval.js";
+import { z } from "zod";
+
+const reverseReasonSchema = z.object({
+  reason: z.string().min(3, "Reason must be at least 3 characters")
+});
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { sendSuccess } from "../utils/response.js";
@@ -58,59 +92,31 @@ const getActorName = async (req: Request): Promise<string> => {
   return user?.fullName ?? "Accountant";
 };
 
-const recordCashEntry = async (
-  req: Request,
-  params: {
-    dateBs: string;
-    entryType: "DEBIT" | "CREDIT";
-    category: string;
-    description: string;
-    amountNpr: number;
-    paymentMethod: string;
-    referenceType?: string;
-    referenceId?: string;
-  }
-) => {
-  const schoolId = tenantObjectId(req);
-  const lastEntry = await CashBookEntry.findOne({ schoolId }).sort({ createdAt: -1 }).lean();
-  const previousBalance = lastEntry?.balanceAfterNpr ?? 0;
-  const balanceAfterNpr =
-    params.entryType === "CREDIT" ? previousBalance + params.amountNpr : previousBalance - params.amountNpr;
-
-  await CashBookEntry.create({
-    schoolId,
-    dateBs: params.dateBs,
-    entryType: params.entryType,
-    category: params.category,
-    description: params.description,
-    amountNpr: params.amountNpr,
-    paymentMethod: params.paymentMethod,
-    referenceType: params.referenceType,
-    referenceId: params.referenceId,
-    balanceAfterNpr,
-    createdBy: req.user!.userId
-  });
-};
-
 export const getAccountingDashboard = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayBs();
+  const currentMonth = today.slice(0, 7);
 
-  const [collections, expenses, students, recentCollections, recentExpenses, lastCashEntry, bankAccounts] =
+  const [collections, expenses, students, recentCollections, recentExpenses, cashEntries, bankAccounts] =
     await Promise.all([
-      FeeCollection.find({ schoolId }).lean(),
-      AccountingExpense.find({ schoolId }).lean(),
+      FeeCollection.find({ schoolId, isDeleted: false }).lean(),
+      AccountingExpense.find({ schoolId, isDeleted: false }).lean(),
       Student.find({ schoolId }).lean(),
-      FeeCollection.find({ schoolId }).sort({ createdAt: -1 }).limit(5).lean(),
-      AccountingExpense.find({ schoolId }).sort({ createdAt: -1 }).limit(5).lean(),
-      CashBookEntry.findOne({ schoolId }).sort({ createdAt: -1 }).lean(),
+      FeeCollection.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(5).lean(),
+      AccountingExpense.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(5).lean(),
+      CashBookEntry.find({ schoolId }).sort({ dateBs: -1, createdAt: -1 }).limit(10).lean(),
       BankAccount.find({ schoolId, isActive: true }).lean()
     ]);
 
-  const totalCollected = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
   const totalExpenses = expenses.reduce((sum, item) => sum + item.amountNpr, 0);
   const pendingFees = students.reduce((sum, item) => sum + (item.feesDueNpr ?? 0), 0);
   const bankBalance = bankAccounts.reduce((sum, item) => sum + item.currentBalanceNpr, 0);
+  const todayCollectionNpr = collections
+    .filter((item) => item.paidDateBs === today)
+    .reduce((sum, item) => sum + item.amountPaidNpr, 0);
+  const monthlyCollectionNpr = collections
+    .filter((item) => item.paidDateBs.startsWith(currentMonth))
+    .reduce((sum, item) => sum + item.amountPaidNpr, 0);
 
   const feeByMonth = collections.reduce<Record<string, number>>((acc, item) => {
     const month = item.paidDateBs.slice(0, 7);
@@ -123,20 +129,44 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     return acc;
   }, {});
 
+  const revenueByFeeType = collections.reduce<Record<string, number>>((acc, item) => {
+    for (const breakdown of item.feeBreakdown ?? []) {
+      acc[breakdown.feeType] = (acc[breakdown.feeType] ?? 0) + breakdown.amountNpr;
+    }
+    return acc;
+  }, {});
+
+  const cashBalanceNpr = await getLatestCashBalance(schoolId);
+
   return sendSuccess(res, "Accounting dashboard fetched", {
     stats: [
-      { label: "Total Collected", value: totalCollected },
-      { label: "Total Expenses", value: totalExpenses },
-      { label: "Pending Fees", value: pendingFees },
-      { label: "Students", value: students.length }
+      { label: "Today's Collection", value: todayCollectionNpr },
+      { label: "Monthly Collection", value: monthlyCollectionNpr },
+      { label: "Outstanding Fees", value: pendingFees },
+      { label: "Total Expenses", value: totalExpenses }
     ],
     feeChart: Object.entries(feeByMonth).map(([label, amount]) => ({ label, amount })),
     expenseChart: Object.entries(expenseByCategory).map(([label, amount]) => ({ label, amount })),
+    collectionTrend: Object.entries(feeByMonth)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6)
+      .map(([label, amount]) => ({ label, amount })),
+    revenueSources: Object.entries(revenueByFeeType).map(([label, amount]) => ({ label, amount })),
     recentCollections,
     recentExpenses,
+    recentTransactions: cashEntries.map((entry) => ({
+      dateBs: entry.dateBs,
+      type: entry.category,
+      description: entry.description,
+      amountNpr: entry.amountNpr,
+      entryType: entry.entryType
+    })),
     pendingFeesTotal: pendingFees,
-    cashBalanceNpr: lastCashEntry?.balanceAfterNpr ?? 0,
+    todayCollectionNpr,
+    monthlyCollectionNpr,
+    cashBalanceNpr,
     bankBalanceNpr: bankBalance,
+    pendingApprovals: 0,
     generatedAt: today
   });
 });
@@ -149,9 +179,42 @@ export const listAccountingStructures = asyncHandler(async (req: Request, res: R
 export const createAccountingStructure = asyncHandler(async (req: Request, res: Response) => {
   const payload = extendedFeeStructureSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
-  const structure = await FeeStructure.create({ ...payload, schoolId });
+  const versionGroupId = payload.versionGroupId || crypto.randomUUID();
+  const structure = await FeeStructure.create({
+    ...payload,
+    schoolId,
+    versionGroupId,
+    status: payload.status ?? "ACTIVE"
+  });
   await recordAudit(req, { action: "accounting.structure.create", entity: "FeeStructure", entityId: structure._id.toString(), after: structure });
   return sendSuccess(res, "Fee structure created", structure, 201);
+});
+
+export const createFeeStructureVersion = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const existing = await FeeStructure.findOne({ _id: req.params.id, schoolId });
+  if (!existing) throw new ApiError(404, "Fee structure not found");
+
+  existing.status = "ARCHIVED";
+  await existing.save();
+
+  const payload = extendedFeeStructureSchema.parse(req.body);
+  const newVersion = await FeeStructure.create({
+    ...payload,
+    schoolId,
+    versionGroupId: existing.versionGroupId ?? existing._id.toString(),
+    version: (existing.version ?? 1) + 1,
+    status: "ACTIVE"
+  });
+
+  await recordAudit(req, {
+    action: "accounting.structure.version",
+    entity: "FeeStructure",
+    entityId: newVersion._id.toString(),
+    before: existing,
+    after: newVersion
+  });
+  return sendSuccess(res, "New fee structure version created", newVersion, 201);
 });
 
 export const updateAccountingStructure = asyncHandler(async (req: Request, res: Response) => {
@@ -180,7 +243,7 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
     Student.find({ schoolId }).populate("user", "-password").sort({ rollNumber: 1 }).lean(),
     college ? Batch.find({ schoolId }).lean() : SchoolClass.find({ schoolId }).lean(),
     college ? Year.find({ schoolId }).lean() : Section.find({ schoolId }).lean(),
-    FeeCollection.find({ schoolId }).lean()
+    FeeCollection.find({ schoolId, isDeleted: false }).lean()
   ]);
 
   const primaryMap = new Map(primaryGroups.map((item) => [item._id.toString(), item.name]));
@@ -227,32 +290,59 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
 
-  const [primaryDoc, secondaryDoc, collections] = await Promise.all([
+  const [primaryDoc, secondaryDoc, collections, refunds] = await Promise.all([
     college ? Batch.findById(student.batchId).lean() : SchoolClass.findById(student.classId).lean(),
     college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean(),
-    FeeCollection.find({ schoolId, studentId: student._id }).sort({ paidDateBs: -1 }).lean()
+    FeeCollection.find({ schoolId, studentId: student._id, isDeleted: false }).sort({ paidDateBs: -1 }).lean(),
+    FeeRefund.find({ schoolId, studentId: student._id, isDeleted: false }).sort({ dateBs: -1 }).lean()
   ]);
 
   const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
   const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
   const totalScholarship = collections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
+  const totalFine = collections.reduce((sum, item) => sum + (item.lateFeeNpr ?? 0), 0);
+  const advanceBalance = collections.reduce((sum, item) => sum + (item.advancePaymentNpr ?? 0), 0);
+  const totalRefunds = refunds.reduce((sum, item) => sum + item.amountNpr, 0);
+
+  const dueInstallments = collections
+    .filter((c) => c.isInstallment && c.installmentNumber && c.totalInstallments)
+    .map((c) => ({
+      installmentNumber: c.installmentNumber!,
+      totalInstallments: c.totalInstallments!,
+      amountNpr: c.amountPaidNpr,
+      dueDateBs: c.paidDateBs
+    }));
 
   return sendSuccess(res, "Student financial history fetched", {
     student,
-    className: primaryDoc?.name ?? "",
-    sectionName: secondaryDoc?.name ?? "",
+    className: college ? "" : (primaryDoc?.name ?? ""),
+    sectionName: college ? "" : (secondaryDoc?.name ?? ""),
+    batchName: college ? (primaryDoc?.name ?? "") : undefined,
+    yearName: college ? (secondaryDoc?.name ?? "") : undefined,
+    guardianName: student.guardianName,
+    scholarshipStatus: totalScholarship > 0 ? "Scholarship Applied" : "None",
+    totalPayableNpr: totalPaid + (student.feesDueNpr ?? 0) + totalDiscount + totalScholarship,
     outstandingDueNpr: student.feesDueNpr ?? 0,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
     totalScholarshipNpr: totalScholarship,
-    totalRefundsNpr: 0,
+    totalFineNpr: totalFine,
+    advanceBalanceNpr: advanceBalance,
+    totalRefundsNpr: totalRefunds,
     collections,
-    refunds: []
+    refunds: refunds.map((r) => ({
+      _id: r._id.toString(),
+      refundNumber: r.refundNumber,
+      dateBs: r.dateBs,
+      amountNpr: r.amountNpr,
+      reason: r.reason
+    })),
+    dueInstallments
   });
 });
 
 export const listFeeReceipts = asyncHandler(async (req: Request, res: Response) => {
-  const collections = await FeeCollection.find(withTenantScope(req))
+  const collections = await FeeCollection.find(withTenantScope(req, { isDeleted: false }))
     .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
     .sort({ paidDateBs: -1 });
   return sendSuccess(res, "Fee receipts fetched", collections);
@@ -275,13 +365,17 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
 
   const previousDueNpr = student.feesDueNpr ?? 0;
   const currentChargesNpr = payload.currentChargesNpr || structure?.amountNpr || 0;
+  const lateFeeNpr =
+    payload.lateFeeNpr > 0
+      ? payload.lateFeeNpr
+      : calculateSuggestedLateFee(previousDueNpr, settings.lateFinePercent);
   const totals = calculateFeeTotals({
     previousDueNpr,
     currentChargesNpr,
     amountPaidNpr: payload.amountPaidNpr,
     discountNpr: payload.discountNpr,
     scholarshipNpr: payload.scholarshipNpr,
-    lateFeeNpr: payload.lateFeeNpr
+    lateFeeNpr
   });
 
   const receiptCount = await FeeCollection.countDocuments({ schoolId });
@@ -299,41 +393,83 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
         ? [{ feeType: structure.feeType, title: structure.title, amountNpr: currentChargesNpr }]
         : [];
 
-  const collection = await FeeCollection.create({
-    schoolId,
-    studentId: payload.studentId,
-    feeStructureId: payload.feeStructureId,
+  const fiscalYearBs = getFiscalYearFromBsDate(payload.paidDateBs, settings.currentFiscalYearBs);
+  const verificationCode = generateReceiptVerificationCode(
+    schoolId.toString(),
     receiptNumber,
-    paidDateBs: payload.paidDateBs,
-    previousDueNpr,
-    currentChargesNpr,
-    amountPaidNpr: payload.amountPaidNpr,
-    discountNpr: payload.discountNpr,
-    scholarshipNpr: payload.scholarshipNpr,
-    lateFeeNpr: payload.lateFeeNpr,
-    advancePaymentNpr: totals.advancePaymentNpr,
-    remainingDueNpr: totals.remainingDueNpr,
-    paymentMethod: payload.paymentMethod,
-    feeBreakdown,
-    isInstallment: payload.isInstallment,
-    installmentNumber: payload.installmentNumber,
-    notes: payload.notes,
-    accountantName,
-    createdBy: req.user!.userId
-  });
+    payload.amountPaidNpr,
+    payload.paidDateBs
+  );
 
-  student.feesDueNpr = totals.remainingDueNpr;
-  await student.save();
+  const collection = await withFinancialTransaction(async (session) => {
+    const [created] = await FeeCollection.create(
+      [
+        {
+          schoolId,
+          studentId: payload.studentId,
+          feeStructureId: payload.feeStructureId,
+          receiptNumber,
+          paidDateBs: payload.paidDateBs,
+          fiscalYearBs,
+          academicYearBs: payload.academicYearBs ?? structure?.academicYearBs,
+          semesterBs: payload.semesterBs ?? structure?.semesterBs,
+          previousDueNpr,
+          currentChargesNpr,
+          amountPaidNpr: payload.amountPaidNpr,
+          discountNpr: payload.discountNpr,
+          scholarshipNpr: payload.scholarshipNpr,
+          lateFeeNpr,
+          advancePaymentNpr: totals.advancePaymentNpr,
+          remainingDueNpr: totals.remainingDueNpr,
+          paymentMethod: payload.paymentMethod ?? settings.defaultPaymentMethod,
+          bankAccountId: payload.bankAccountId,
+          transactionNumber: payload.transactionNumber,
+          verificationCode,
+          feeBreakdown,
+          isInstallment: payload.isInstallment,
+          installmentNumber: payload.installmentNumber,
+          totalInstallments: payload.totalInstallments ?? structure?.installmentCount,
+          notes: payload.notes,
+          accountantName,
+          createdBy: req.user!.userId
+        }
+      ],
+      session ? { session } : undefined
+    );
+    if (!created) throw new ApiError(500, "Failed to create fee collection");
 
-  await recordCashEntry(req, {
-    dateBs: payload.paidDateBs,
-    entryType: "CREDIT",
-    category: "Fee Collection",
-    description: `Fee receipt ${receiptNumber}`,
-    amountNpr: payload.amountPaidNpr,
-    paymentMethod: payload.paymentMethod,
-    referenceType: "FeeCollection",
-    referenceId: collection._id.toString()
+    student.feesDueNpr = totals.remainingDueNpr;
+    await student.save(session ? { session } : undefined);
+
+    await recordCashEntry(req, {
+      dateBs: payload.paidDateBs,
+      entryType: "CREDIT",
+      category: "Fee Collection",
+      description: `Fee receipt ${receiptNumber}`,
+      amountNpr: payload.amountPaidNpr,
+      paymentMethod: payload.paymentMethod ?? settings.defaultPaymentMethod,
+      referenceType: "FeeCollection",
+      referenceId: created._id.toString(),
+      bankAccountId: payload.bankAccountId
+    });
+
+    await postFeeCollectionJournal({
+      schoolId,
+      userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+      collectionId: created._id,
+      studentId: payload.studentId,
+      dateBs: payload.paidDateBs,
+      amountPaidNpr: payload.amountPaidNpr,
+      discountNpr: payload.discountNpr,
+      scholarshipNpr: payload.scholarshipNpr,
+      lateFeeNpr,
+      paymentMethod: payload.paymentMethod ?? settings.defaultPaymentMethod,
+      bankAccountId: payload.bankAccountId,
+      receiptNumber,
+      feeBreakdown
+    });
+
+    return created;
   });
 
   await recordAudit(req, {
@@ -392,9 +528,71 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
   return sendSuccess(res, "Fee collection updated", existing);
 });
 
+export const reverseFeeCollection = asyncHandler(async (req: Request, res: Response) => {
+  const payload = reverseReasonSchema.parse(req.body);
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  const collection = await FeeCollection.findOne({ _id: req.params.id, schoolId, isDeleted: false });
+  if (!collection) throw new ApiError(404, "Fee collection not found");
+
+  const settings = await getOrCreateSettings(schoolId);
+  if (settings.auditLockDateBs && collection.paidDateBs <= settings.auditLockDateBs) {
+    throw new ApiError(403, "This fiscal period is audit-locked. Cannot reverse.");
+  }
+
+  const requiresApproval = await needsApprovalForAmount(schoolId, collection.amountPaidNpr, req.user!.role);
+  if (requiresApproval) {
+    const existing = await FinancialApproval.findOne({
+      schoolId,
+      entityType: "FeeCollection",
+      entityId: collection._id,
+      status: "PENDING",
+      isDeleted: false
+    });
+    if (existing) throw new ApiError(409, "An approval request is already pending");
+
+    const approval = await FinancialApproval.create({
+      schoolId,
+      entityType: "FeeCollection",
+      entityId: collection._id,
+      actionType: "REVERSE",
+      amountNpr: collection.amountPaidNpr,
+      reason: payload.reason,
+      requestedBy: req.user!.userId,
+      beforeSnapshot: collection.toObject()
+    });
+
+    await recordAudit(req, {
+      action: "accounting.approval.request",
+      entity: "FinancialApproval",
+      entityId: approval._id.toString(),
+      after: approval
+    });
+
+    return sendSuccess(res, "Reversal submitted for approval", approval, 202);
+  }
+
+  const before = collection.toObject();
+
+  await withFinancialTransaction(async (session) => {
+    await voidFeeCollection(req, collection, schoolId, userId, payload.reason, session);
+  });
+
+  await recordAudit(req, {
+    action: "accounting.fee.reverse",
+    entity: "FeeCollection",
+    entityId: collection._id.toString(),
+    before,
+    after: { isDeleted: true, voidReason: payload.reason }
+  });
+
+  return sendSuccess(res, "Fee collection reversed successfully");
+});
+
 export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
-  const collection = await FeeCollection.findOne({ _id: req.params.id, schoolId });
+  const collection = await FeeCollection.findOne({ _id: req.params.id, schoolId, isDeleted: false });
   if (!collection) throw new ApiError(404, "Receipt not found");
 
   if (req.user?.role === "STUDENT") {
@@ -402,19 +600,48 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
     if (!ownStudent || ownStudent._id.toString() !== collection.studentId.toString()) {
       throw new ApiError(403, "You can only download your own receipts");
     }
+  } else if (!hasAccountingPermission(req.user!.role, "print_receipt")) {
+    throw new ApiError(403, "You do not have permission to print receipts");
   }
 
-  const [school, student, classDoc, sectionDoc, settings] = await Promise.all([
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+
+  const [school, student, settings] = await Promise.all([
     School.findById(schoolId).lean(),
     Student.findById(collection.studentId).populate("user", "-password").lean(),
-    Student.findById(collection.studentId).then((s) => (s ? SchoolClass.findById(s.classId).lean() : null)),
-    Student.findById(collection.studentId).then((s) => (s ? Section.findById(s.sectionId).lean() : null)),
     Setting.findOne({ schoolId }).lean()
   ]);
 
   if (!student || !school) throw new ApiError(404, "Receipt data incomplete");
 
+  const [classDoc, sectionDoc] = await Promise.all([
+    college
+      ? Batch.findById(student.batchId).lean()
+      : SchoolClass.findById(student.classId).lean(),
+    college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean()
+  ]);
+
   const feeTitle = collection.feeBreakdown?.map((item) => item.title).join(", ") || "College Fee";
+  const isReprint = (collection.printCount ?? 0) > 0;
+  const printAction = isReprint ? "accounting.receipt.reprint" : "accounting.receipt.print";
+
+  collection.printCount = (collection.printCount ?? 0) + 1;
+  collection.lastPrintedAt = new Date();
+  collection.lastPrintedBy = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+  await collection.save();
+
+  await recordAudit(req, {
+    action: printAction,
+    entity: "FeeCollection",
+    entityId: collection._id.toString(),
+    before: { printCount: (collection.printCount ?? 1) - 1 },
+    after: {
+      printCount: collection.printCount,
+      receiptNumber: collection.receiptNumber,
+      isReprint
+    }
+  });
 
   await generateFeeReceiptPDF(
     {
@@ -436,14 +663,17 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
       paymentMethod: collection.paymentMethod ?? "CASH",
       accountantName: collection.accountantName ?? "",
       rollNumber: student.rollNumber,
-      feeBreakdown: collection.feeBreakdown ?? []
+      feeBreakdown: collection.feeBreakdown ?? [],
+      verificationCode: collection.verificationCode ?? undefined,
+      transactionNumber: collection.transactionNumber ?? undefined,
+      isDuplicate: isReprint
     },
     res
   );
 });
 
 export const listExpenses = asyncHandler(async (req: Request, res: Response) => {
-  const expenses = await AccountingExpense.find(withTenantScope(req)).sort({ dateBs: -1 });
+  const expenses = await AccountingExpense.find(withTenantScope(req, { isDeleted: false })).sort({ dateBs: -1 });
   return sendSuccess(res, "Expenses fetched", expenses);
 });
 
@@ -467,6 +697,17 @@ export const createExpense = asyncHandler(async (req: Request, res: Response) =>
     referenceId: expense._id.toString()
   });
 
+  await postExpenseJournal({
+    schoolId: tenantObjectId(req),
+    userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+    expenseId: expense._id,
+    dateBs: payload.dateBs,
+    amountNpr: payload.amountNpr,
+    category: payload.category,
+    paymentMethod: payload.paymentMethod,
+    description: payload.description
+  });
+
   await recordAudit(req, { action: "accounting.expense.create", entity: "AccountingExpense", entityId: expense._id.toString(), after: expense });
   return sendSuccess(res, "Expense recorded", expense, 201);
 });
@@ -482,14 +723,39 @@ export const updateExpense = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const deleteExpense = asyncHandler(async (req: Request, res: Response) => {
-  const expense = await AccountingExpense.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
+  const payload = reverseReasonSchema.parse(req.body ?? { reason: "Voided by administrator" });
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  const expense = await AccountingExpense.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!expense) throw new ApiError(404, "Expense not found");
-  await recordAudit(req, { action: "accounting.expense.delete", entity: "AccountingExpense", entityId: String(req.params.id), before: expense });
-  return sendSuccess(res, "Expense deleted");
+
+  const requiresApproval = await needsApprovalForAmount(schoolId, expense.amountNpr, req.user!.role);
+  if (requiresApproval) {
+    const approval = await FinancialApproval.create({
+      schoolId,
+      entityType: "AccountingExpense",
+      entityId: expense._id,
+      actionType: "VOID",
+      amountNpr: expense.amountNpr,
+      reason: payload.reason,
+      requestedBy: req.user!.userId,
+      beforeSnapshot: expense.toObject()
+    });
+    await recordAudit(req, { action: "accounting.approval.request", entity: "FinancialApproval", entityId: approval._id.toString(), after: approval });
+    return sendSuccess(res, "Void request submitted for approval", approval, 202);
+  }
+
+  const before = expense.toObject();
+  await withFinancialTransaction(async (session) => {
+    await voidWithJournalReversal(req, expense, schoolId, userId, "AccountingExpense", payload.reason, expense.dateBs, session);
+  });
+  await recordAudit(req, { action: "accounting.expense.void", entity: "AccountingExpense", entityId: String(req.params.id), before, after: { isDeleted: true } });
+  return sendSuccess(res, "Expense voided (record retained for audit)");
 });
 
 export const listPurchases = asyncHandler(async (req: Request, res: Response) => {
-  const purchases = await AccountingPurchase.find(withTenantScope(req)).sort({ purchaseDateBs: -1 });
+  const purchases = await AccountingPurchase.find(withTenantScope(req, { isDeleted: false })).sort({ purchaseDateBs: -1 });
   return sendSuccess(res, "Purchases fetched", purchases);
 });
 
@@ -517,6 +783,18 @@ export const createPurchase = asyncHandler(async (req: Request, res: Response) =
     });
   }
 
+  await postPurchaseJournal({
+    schoolId: tenantObjectId(req),
+    userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+    purchaseId: purchase._id,
+    dateBs: payload.purchaseDateBs,
+    amountNpr: totalAmountNpr,
+    category: payload.category,
+    paymentStatus: payload.paymentStatus,
+    paymentMethod: payload.paymentMethod,
+    vendor: payload.vendor
+  });
+
   await recordAudit(req, { action: "accounting.purchase.create", entity: "AccountingPurchase", entityId: purchase._id.toString(), after: purchase });
   return sendSuccess(res, "Purchase recorded", purchase, 201);
 });
@@ -534,19 +812,59 @@ export const updatePurchase = asyncHandler(async (req: Request, res: Response) =
     { new: true }
   );
 
+  const wasPaid = before.paymentStatus === "PAID";
+  const isPaid = (purchase?.paymentStatus ?? before.paymentStatus) === "PAID";
+  if (!wasPaid && isPaid && purchase) {
+    await recordCashEntry(req, {
+      dateBs: purchase.purchaseDateBs,
+      entryType: "DEBIT",
+      category: "Purchase",
+      description: `${purchase.category} - ${purchase.vendor}`,
+      amountNpr: purchase.totalAmountNpr,
+      paymentMethod: purchase.paymentMethod,
+      referenceType: "AccountingPurchase",
+      referenceId: purchase._id.toString()
+    });
+  }
+
   await recordAudit(req, { action: "accounting.purchase.update", entity: "AccountingPurchase", entityId: String(req.params.id), before, after: purchase });
   return sendSuccess(res, "Purchase updated", purchase);
 });
 
 export const deletePurchase = asyncHandler(async (req: Request, res: Response) => {
-  const purchase = await AccountingPurchase.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
+  const payload = reverseReasonSchema.parse(req.body ?? { reason: "Voided by administrator" });
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  const purchase = await AccountingPurchase.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!purchase) throw new ApiError(404, "Purchase not found");
-  await recordAudit(req, { action: "accounting.purchase.delete", entity: "AccountingPurchase", entityId: String(req.params.id), before: purchase });
-  return sendSuccess(res, "Purchase deleted");
+
+  const requiresApproval = await needsApprovalForAmount(schoolId, purchase.totalAmountNpr, req.user!.role);
+  if (requiresApproval) {
+    const approval = await FinancialApproval.create({
+      schoolId,
+      entityType: "AccountingPurchase",
+      entityId: purchase._id,
+      actionType: "VOID",
+      amountNpr: purchase.totalAmountNpr,
+      reason: payload.reason,
+      requestedBy: req.user!.userId,
+      beforeSnapshot: purchase.toObject()
+    });
+    await recordAudit(req, { action: "accounting.approval.request", entity: "FinancialApproval", entityId: approval._id.toString(), after: approval });
+    return sendSuccess(res, "Void request submitted for approval", approval, 202);
+  }
+
+  const before = purchase.toObject();
+  await withFinancialTransaction(async (session) => {
+    await voidWithJournalReversal(req, purchase, schoolId, userId, "AccountingPurchase", payload.reason, purchase.purchaseDateBs, session);
+  });
+  await recordAudit(req, { action: "accounting.purchase.void", entity: "AccountingPurchase", entityId: String(req.params.id), before, after: { isDeleted: true } });
+  return sendSuccess(res, "Purchase voided (record retained for audit)");
 });
 
 export const listIncome = asyncHandler(async (req: Request, res: Response) => {
-  const income = await AccountingIncome.find(withTenantScope(req)).sort({ dateBs: -1 });
+  const income = await AccountingIncome.find(withTenantScope(req, { isDeleted: false })).sort({ dateBs: -1 });
   return sendSuccess(res, "Income records fetched", income);
 });
 
@@ -570,6 +888,17 @@ export const createIncome = asyncHandler(async (req: Request, res: Response) => 
     referenceId: income._id.toString()
   });
 
+  await postIncomeJournal({
+    schoolId: tenantObjectId(req),
+    userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+    incomeId: income._id,
+    dateBs: payload.dateBs,
+    amountNpr: payload.amountNpr,
+    category: payload.category,
+    paymentMethod: payload.paymentMethod,
+    description: payload.description || payload.source
+  });
+
   await recordAudit(req, { action: "accounting.income.create", entity: "AccountingIncome", entityId: income._id.toString(), after: income });
   return sendSuccess(res, "Income recorded", income, 201);
 });
@@ -585,10 +914,35 @@ export const updateIncome = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const deleteIncome = asyncHandler(async (req: Request, res: Response) => {
-  const record = await AccountingIncome.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
+  const payload = reverseReasonSchema.parse(req.body ?? { reason: "Voided by administrator" });
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  const record = await AccountingIncome.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!record) throw new ApiError(404, "Income record not found");
-  await recordAudit(req, { action: "accounting.income.delete", entity: "AccountingIncome", entityId: String(req.params.id), before: record });
-  return sendSuccess(res, "Income deleted");
+
+  const requiresApproval = await needsApprovalForAmount(schoolId, record.amountNpr, req.user!.role);
+  if (requiresApproval) {
+    const approval = await FinancialApproval.create({
+      schoolId,
+      entityType: "AccountingIncome",
+      entityId: record._id,
+      actionType: "VOID",
+      amountNpr: record.amountNpr,
+      reason: payload.reason,
+      requestedBy: req.user!.userId,
+      beforeSnapshot: record.toObject()
+    });
+    await recordAudit(req, { action: "accounting.approval.request", entity: "FinancialApproval", entityId: approval._id.toString(), after: approval });
+    return sendSuccess(res, "Void request submitted for approval", approval, 202);
+  }
+
+  const before = record.toObject();
+  await withFinancialTransaction(async (session) => {
+    await voidWithJournalReversal(req, record, schoolId, userId, "AccountingIncome", payload.reason, record.dateBs, session);
+  });
+  await recordAudit(req, { action: "accounting.income.void", entity: "AccountingIncome", entityId: String(req.params.id), before, after: { isDeleted: true } });
+  return sendSuccess(res, "Income voided (record retained for audit)");
 });
 
 export const listSalaries = asyncHandler(async (req: Request, res: Response) => {
@@ -600,12 +954,23 @@ export const listSalaries = asyncHandler(async (req: Request, res: Response) => 
 
   const normalized = salaries.map((salary) => {
     const staffRef = salary.staffId as { _id?: { toString(): string }; fullName?: string } | string | null | undefined;
-    const teacherRef = salary.teacherId as { _id?: { toString(): string } } | string | null | undefined;
+    const teacherRef = salary.teacherId as
+      | { _id?: { toString(): string }; user?: { fullName?: string; email?: string } }
+      | string
+      | null
+      | undefined;
     const collegeStaff =
       staffRef && typeof staffRef === "object" && "fullName" in staffRef
         ? {
             _id: staffRef._id?.toString() ?? "",
             fullName: staffRef.fullName ?? ""
+          }
+        : undefined;
+    const teacher =
+      teacherRef && typeof teacherRef === "object" && teacherRef.user
+        ? {
+            _id: teacherRef._id?.toString() ?? "",
+            user: teacherRef.user
           }
         : undefined;
 
@@ -625,6 +990,7 @@ export const listSalaries = asyncHandler(async (req: Request, res: Response) => 
           : typeof staffRef === "string"
             ? staffRef
             : undefined,
+      teacher,
       collegeStaff,
       createdBy: salary.createdBy.toString()
     };
@@ -654,6 +1020,16 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
       referenceType: "SalaryPayment",
       referenceId: salary._id.toString()
     });
+
+    await postSalaryJournal({
+      schoolId: tenantObjectId(req),
+      userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+      salaryId: salary._id,
+      dateBs: payload.paidDateBs,
+      amountNpr: netSalaryNpr,
+      paymentMethod: payload.paymentMethod,
+      monthBs: payload.monthBs
+    });
   }
 
   await recordAudit(req, { action: "accounting.salary.create", entity: "SalaryPayment", entityId: salary._id.toString(), after: salary });
@@ -673,6 +1049,22 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
     { ...payload, netSalaryNpr },
     { new: true }
   );
+
+  const wasPaid = before.status === "PAID";
+  const isPaid = (salary?.status ?? before.status) === "PAID";
+  const paidDateBs = salary?.paidDateBs || payload.paidDateBs;
+  if (!wasPaid && isPaid && salary && paidDateBs) {
+    await recordCashEntry(req, {
+      dateBs: paidDateBs,
+      entryType: "DEBIT",
+      category: "Salary",
+      description: `Salary payment ${salary.monthBs}`,
+      amountNpr: netSalaryNpr,
+      paymentMethod: salary.paymentMethod,
+      referenceType: "SalaryPayment",
+      referenceId: salary._id.toString()
+    });
+  }
 
   await recordAudit(req, { action: "accounting.salary.update", entity: "SalaryPayment", entityId: String(req.params.id), before, after: salary });
   return sendSuccess(res, "Salary payment updated", salary);
@@ -724,10 +1116,8 @@ export const createCashBookEntry = asyncHandler(async (req: Request, res: Respon
   const payload = cashBookEntrySchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
   const schoolId = tenantObjectId(req);
-  const lastEntry = await CashBookEntry.findOne({ schoolId }).sort({ createdAt: -1 }).lean();
-  const previousBalance = lastEntry?.balanceAfterNpr ?? 0;
-  const balanceAfterNpr =
-    payload.entryType === "CREDIT" ? previousBalance + payload.amountNpr : previousBalance - payload.amountNpr;
+  const previousBalance = await getLatestCashBalance(schoolId);
+  const balanceAfterNpr = computeBalanceAfterEntry(previousBalance, payload.entryType, payload.amountNpr);
 
   const entry = await CashBookEntry.create({
     ...payload,
@@ -755,13 +1145,21 @@ export const updateAccountingSettings = asyncHandler(async (req: Request, res: R
 });
 
 export const listAuditLogs = asyncHandler(async (req: Request, res: Response) => {
-  const filter = withTenantScope(req);
-  if (typeof req.query.entity === "string") {
-    Object.assign(filter, { entity: req.query.entity });
-  }
-  const logs = await AuditLog.find(filter).sort({ createdAt: -1 }).limit(200).lean();
+  const filter: Record<string, unknown> = withTenantScope(req);
+  if (typeof req.query.entity === "string") filter.entity = req.query.entity;
+  if (typeof req.query.action === "string") filter.action = req.query.action;
+  if (typeof req.query.entityId === "string") filter.entityId = req.query.entityId;
+
+  const logs = await AuditLog.find(filter)
+    .populate("actorUserId", "fullName email")
+    .sort({ createdAt: -1 })
+    .limit(500)
+    .lean();
   return sendSuccess(res, "Audit logs fetched", logs);
 });
+
+const monthDateFilter = (monthBs?: string): Record<string, unknown> | undefined =>
+  monthBs ? { $regex: `^${monthBs}` } : undefined;
 
 export const generateAccountingReport = asyncHandler(async (req: Request, res: Response) => {
   const reportType = req.params.reportType as AccountingReportType;
@@ -770,18 +1168,26 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
   const dateBs = typeof req.query.dateBs === "string" ? req.query.dateBs : undefined;
 
   let data: unknown = [];
+  let summaryPayload: FinancialSummaryReport | null = null;
 
   switch (reportType) {
     case "daily-fee-collection": {
-      const filter: Record<string, unknown> = { schoolId };
+      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
       if (dateBs) filter.paidDateBs = dateBs;
-      data = await FeeCollection.find(filter).sort({ paidDateBs: -1 }).lean();
+      data = await FeeCollection.find(filter)
+        .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+        .sort({ paidDateBs: -1 })
+        .lean();
       break;
     }
     case "monthly-fee-collection": {
-      const filter: Record<string, unknown> = { schoolId };
-      if (monthBs) filter.paidDateBs = { $regex: `^${monthBs}` };
-      data = await FeeCollection.find(filter).sort({ paidDateBs: -1 }).lean();
+      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
+      const monthFilter = monthDateFilter(monthBs);
+      if (monthFilter) filter.paidDateBs = monthFilter;
+      data = await FeeCollection.find(filter)
+        .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+        .sort({ paidDateBs: -1 })
+        .lean();
       break;
     }
     case "pending-fees":
@@ -798,44 +1204,115 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       if (monthBs) filter.monthBs = monthBs;
       data = await SalaryPayment.find(filter)
         .populate({ path: "teacherId", populate: { path: "user", select: "-password" } })
+        .populate("staffId")
+        .sort({ monthBs: -1 })
         .lean();
       break;
     }
-    case "expenses":
-      data = await AccountingExpense.find({ schoolId }).sort({ dateBs: -1 }).lean();
+    case "expenses": {
+      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
+      const monthFilter = monthDateFilter(monthBs);
+      if (monthFilter) filter.dateBs = monthFilter;
+      data = await AccountingExpense.find(filter).sort({ dateBs: -1 }).lean();
       break;
-    case "purchases":
-      data = await AccountingPurchase.find({ schoolId }).sort({ purchaseDateBs: -1 }).lean();
+    }
+    case "purchases": {
+      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
+      const monthFilter = monthDateFilter(monthBs);
+      if (monthFilter) filter.purchaseDateBs = monthFilter;
+      data = await AccountingPurchase.find(filter).sort({ purchaseDateBs: -1 }).lean();
       break;
-    case "income":
-      data = await AccountingIncome.find({ schoolId }).sort({ dateBs: -1 }).lean();
+    }
+    case "income": {
+      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
+      const monthFilter = monthDateFilter(monthBs);
+      if (monthFilter) filter.dateBs = monthFilter;
+      data = await AccountingIncome.find(filter).sort({ dateBs: -1 }).lean();
       break;
-    case "cash-summary":
-      data = await CashBookEntry.find({ schoolId }).sort({ dateBs: -1 }).lean();
+    }
+    case "cash-summary": {
+      const filter: Record<string, unknown> = { schoolId };
+      const monthFilter = monthDateFilter(monthBs);
+      if (monthFilter) filter.dateBs = monthFilter;
+      data = await CashBookEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).lean();
       break;
+    }
+    case "financial-summary": {
+      if (!monthBs) {
+        throw new ApiError(400, "Month (BS) is required for the financial summary report");
+      }
+
+      const monthFilter = monthDateFilter(monthBs);
+      const [fees, income, expenses, purchases, salaries, pendingStudents] = await Promise.all([
+        FeeCollection.find({ schoolId, paidDateBs: monthFilter, isDeleted: false })
+          .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+          .sort({ paidDateBs: -1 })
+          .lean(),
+        AccountingIncome.find({ schoolId, dateBs: monthFilter, isDeleted: false }).sort({ dateBs: -1 }).lean(),
+        AccountingExpense.find({ schoolId, dateBs: monthFilter, isDeleted: false }).sort({ dateBs: -1 }).lean(),
+        AccountingPurchase.find({ schoolId, purchaseDateBs: monthFilter, isDeleted: false }).sort({ purchaseDateBs: -1 }).lean(),
+        SalaryPayment.find({ schoolId, monthBs })
+          .populate({ path: "teacherId", populate: { path: "user", select: "-password" } })
+          .populate("staffId")
+          .sort({ monthBs: -1 })
+          .lean(),
+        Student.find({ schoolId, feesDueNpr: { $gt: 0 } }).select("feesDueNpr").lean()
+      ]);
+
+      const feeCollectionNpr = sumAmount(fees, "amountPaidNpr");
+      const incomeNpr = sumAmount(income, "amountNpr");
+      const expenseNpr = sumAmount(expenses, "amountNpr");
+      const purchaseNpr = sumAmount(purchases, "totalAmountNpr");
+      const salaryNpr = sumAmount(salaries, "netSalaryNpr");
+      const pendingFeesNpr = sumAmount(pendingStudents, "feesDueNpr");
+      const inflowNpr = feeCollectionNpr + incomeNpr;
+      const outflowNpr = expenseNpr + purchaseNpr + salaryNpr;
+
+      const totals = {
+        feeCollectionNpr,
+        incomeNpr,
+        expenseNpr,
+        purchaseNpr,
+        salaryNpr,
+        pendingFeesNpr,
+        netSurplusNpr: inflowNpr - outflowNpr
+      };
+
+      summaryPayload = {
+        reportType: "financial-summary",
+        period: { monthBs, label: `BS ${monthBs}` },
+        totals,
+        sections: { fees, income, expenses, purchases, salaries },
+        data: buildFinancialSummaryRows(totals, {
+          fees: fees.length,
+          income: income.length,
+          expenses: expenses.length,
+          purchases: purchases.length,
+          salaries: salaries.length,
+          pendingStudents: pendingStudents.length
+        })
+      };
+      data = summaryPayload.data;
+      break;
+    }
     default:
       throw new ApiError(400, "Invalid report type");
   }
 
   if (req.query.format === "csv") {
-    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${reportType}.csv"`);
-    const rows = Array.isArray(data) ? data : [];
-    if (rows.length === 0) {
-      return res.send("No data");
+    if (summaryPayload) {
+      return res.send(buildFinancialSummaryCsv(summaryPayload));
     }
-    const headers = Object.keys(rows[0] as Record<string, unknown>).join(",");
-    const body = rows
-      .map((row) =>
-        Object.values(row as Record<string, unknown>)
-          .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
-          .join(",")
-      )
-      .join("\n");
-    return res.send(`${headers}\n${body}`);
+    return res.send(buildReportCsv(reportType, Array.isArray(data) ? data : []));
   }
 
-  return sendSuccess(res, "Report generated", { reportType, data });
+  if (summaryPayload) {
+    return sendSuccess(res, "Financial summary generated", summaryPayload);
+  }
+
+  return sendSuccess(res, "Report generated", { reportType, data, monthBs, dateBs });
 });
 
 export const listAccountants = asyncHandler(async (req: Request, res: Response) => {

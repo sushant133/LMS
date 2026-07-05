@@ -3,6 +3,7 @@ import { Image, Megaphone } from "lucide-react";
 import { PageContent } from "components/layout/PageContent";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
+import { isInstitutionAdmin } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
 import { BannerManager } from "features/notices/BannerManager";
 import { NoticeManager } from "features/notices/NoticeManager";
@@ -12,7 +13,7 @@ type NoticeTab = "board" | "banners";
 
 export const NoticesPage = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === "SUPER_ADMIN" || user?.role === "COLLEGE_ADMIN";
+  const isAdmin = isInstitutionAdmin(user?.role ?? "");
   const [tab, setTab] = useState<NoticeTab>("board");
 
   return (

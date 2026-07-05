@@ -44,7 +44,8 @@ export const uploadDocumentsHandler = asyncHandler(async (req: Request, res: Res
       url: getFilePublicPath(relativePath),
       originalName: file.originalname,
       size: file.size,
-      type: (Array.isArray(req.body.documentType) ? req.body.documentType[0] : req.body.documentType) || "Other"
+      mimeType: file.mimetype,
+      type: (Array.isArray(req.body.documentType) ? req.body.documentType[0] : req.body.documentType) || "OTHER"
     };
   });
 

@@ -1,3 +1,4 @@
+import { getTodayBs, parseBsDate } from "@munatech/nepali-datepicker";
 import { Suspense, lazy, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
@@ -8,10 +9,11 @@ import type {
   SectionRecord,
   StudentRecord,
   SubjectRecord
-} from "@nepal-school-erp/shared";
-import { EXAM_STATUSES, computeSubjectMark, examSchema } from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
+import { EXAM_STATUSES, computeSubjectMark, examSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
@@ -72,6 +74,9 @@ export const ExamManager = () => {
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
   const [examForm, setExamForm] = useState<ExamInput>(defaultExamValue);
+  const [examBatchId, setExamBatchId] = useState("");
+  const [examYearId, setExamYearId] = useState("");
+  const [examClassId, setExamClassId] = useState("");
   const [editingExamId, setEditingExamId] = useState<string | null>(null);
   const [marksheetSelection, setMarksheetSelection] = useState<{ examId: string; studentId: string } | null>(null);
   const [selectedExamId, setSelectedExamId] = useState("");
@@ -105,13 +110,26 @@ export const ExamManager = () => {
   });
   const batchesQuery = useQuery({
     queryKey: ["batches"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string }>>(api.get("/academics/batches")),
+    queryFn: () => unwrap<Array<{ _id: string; name: string; academicYearBs: string }>>(api.get("/academics/batches")),
     enabled: (isAdmin || isTeacher) && isCollege
   });
   const yearsQuery = useQuery({
     queryKey: ["years"],
     queryFn: () => unwrap<Array<{ _id: string; name: string; batchId: string }>>(api.get("/academics/years")),
     enabled: (isAdmin || isTeacher) && isCollege
+  });
+  const examYearsQuery = useQuery({
+    queryKey: ["years", "exam-form", examBatchId],
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string; batchId: string }>>(
+        api.get("/academics/years", { params: { batchId: examBatchId } })
+      ),
+    enabled: isAdmin && isCollege && Boolean(examBatchId)
+  });
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => unwrap<{ academicYearBs: string }>(api.get("/settings")),
+    enabled: isAdmin
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
@@ -210,6 +228,9 @@ export const ExamManager = () => {
     onSuccess: async () => {
       toast.success(editingExamId ? "Exam updated" : "Exam created");
       setExamForm(defaultExamValue);
+      setExamBatchId("");
+      setExamYearId("");
+      setExamClassId("");
       setEditingExamId(null);
       await queryClient.invalidateQueries({ queryKey: ["exams"] });
     },
@@ -386,6 +407,86 @@ export const ExamManager = () => {
   const resultStudents = isAdmin ? (studentsQuery.data ?? []) : students;
   const subjectNameById = new Map(subjects.map((subject) => [subject._id, subject]));
 
+  const examYearOptions = useMemo(
+    () => (examBatchId ? (examYearsQuery.data ?? []) : []),
+    [examBatchId, examYearsQuery.data]
+  );
+
+  const academicSessionOptions = useMemo(() => {
+    const sessions = new Set<string>();
+    if (settingsQuery.data?.academicYearBs) {
+      sessions.add(settingsQuery.data.academicYearBs);
+    }
+    (batchesQuery.data ?? []).forEach((batch) => {
+      if (batch.academicYearBs) {
+        sessions.add(batch.academicYearBs);
+      }
+    });
+    if (examForm.academicYearBs) {
+      sessions.add(examForm.academicYearBs);
+    }
+    return [...sessions].sort((left, right) => right.localeCompare(left));
+  }, [batchesQuery.data, examForm.academicYearBs, settingsQuery.data?.academicYearBs]);
+
+  const startDateValue = examForm.startDateBs ? parseBsDate(examForm.startDateBs) : undefined;
+  const endDateValue = examForm.endDateBs ? parseBsDate(examForm.endDateBs) : undefined;
+
+  const buildScopedExamForm = (
+    current: ExamInput,
+    scope: {
+      batchId?: string;
+      yearId?: string;
+      classId?: string;
+    }
+  ): ExamInput => {
+    if (isCollege) {
+      const batchId = scope.batchId ?? examBatchId;
+      const yearId = scope.yearId ?? examYearId;
+      const selectedBatch = (batchesQuery.data ?? []).find((batch) => batch._id === batchId);
+      return {
+        ...current,
+        academicYearBs: selectedBatch?.academicYearBs ?? current.academicYearBs,
+        batchIds: batchId ? [batchId] : [],
+        yearIds: yearId ? [yearId] : [],
+        classIds: []
+      };
+    }
+
+    const classId = scope.classId ?? examClassId;
+    return {
+      ...current,
+      classIds: classId ? [classId] : [],
+      batchIds: [],
+      yearIds: []
+    };
+  };
+
+  const resetExamForm = () => {
+    setExamForm(defaultExamValue);
+    setExamBatchId("");
+    setExamYearId("");
+    setExamClassId("");
+    setEditingExamId(null);
+  };
+
+  const loadExamForEdit = (exam: ExamRecord) => {
+    setEditingExamId(exam._id);
+    setExamBatchId(exam.batchIds?.[0] ?? "");
+    setExamYearId(exam.yearIds?.[0] ?? "");
+    setExamClassId(exam.classIds?.[0] ?? "");
+    setExamForm({
+      name: exam.name,
+      academicYearBs: exam.academicYearBs,
+      startDateBs: exam.startDateBs,
+      endDateBs: exam.endDateBs,
+      resultPublishDateBs: exam.resultPublishDateBs ?? "",
+      status: exam.status,
+      classIds: exam.classIds ?? [],
+      batchIds: exam.batchIds ?? [],
+      yearIds: exam.yearIds ?? []
+    });
+  };
+
   const isLoading = isStudentOrParent
     ? examsQuery.isLoading || portalResultsQuery.isLoading
     : examsQuery.isLoading ||
@@ -413,21 +514,6 @@ export const ExamManager = () => {
   if (isTeacher && teacherScopeQuery.isLoading) {
     return <LoadingState />;
   }
-
-  const loadExamForEdit = (exam: ExamRecord) => {
-    setEditingExamId(exam._id);
-    setExamForm({
-      name: exam.name,
-      academicYearBs: exam.academicYearBs,
-      startDateBs: exam.startDateBs,
-      endDateBs: exam.endDateBs,
-      resultPublishDateBs: exam.resultPublishDateBs ?? "",
-      status: exam.status,
-      classIds: exam.classIds ?? [],
-      batchIds: exam.batchIds ?? [],
-      yearIds: exam.yearIds ?? []
-    });
-  };
 
   return (
     <PageContent className="space-y-6">
@@ -487,13 +573,28 @@ export const ExamManager = () => {
           <Card>
             <CardHeader>
               <CardTitle>{editingExamId ? "Edit Exam" : "Create Exam"}</CardTitle>
+              <p className="text-sm text-slate-500">
+                Use the live Nepali calendar for exam dates and assign the exam to a {isCollege ? "batch and year" : "class"}.
+              </p>
             </CardHeader>
             <CardContent>
               <form
-                className="grid gap-4 md:grid-cols-2"
+                className="grid gap-6"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  const parsed = examSchema.safeParse(examForm);
+
+                  if (isCollege && (!examBatchId || !examYearId)) {
+                    toast.error(`Select both ${labels.primary.toLowerCase()} and ${labels.secondary.toLowerCase()}`);
+                    return;
+                  }
+
+                  if (!isCollege && !examClassId) {
+                    toast.error("Select a class for this exam");
+                    return;
+                  }
+
+                  const scopedForm = buildScopedExamForm(examForm, {});
+                  const parsed = examSchema.safeParse(scopedForm);
                   if (!parsed.success) {
                     toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
                     return;
@@ -501,102 +602,152 @@ export const ExamManager = () => {
                   void examMutation.mutateAsync(parsed.data);
                 }}
               >
-                <div className="md:col-span-2">
-                  <FormField label="Exam Name">
-                    <Input value={examForm.name} onChange={(event) => setExamForm((current) => ({ ...current, name: event.target.value }))} />
-                  </FormField>
-                </div>
-                <FormField label="Academic Session">
-                  <Input
-                    value={examForm.academicYearBs}
-                    onChange={(event) => setExamForm((current) => ({ ...current, academicYearBs: event.target.value }))}
-                  />
-                </FormField>
-                <FormField label="Status">
-                  <Select
-                    value={examForm.status}
-                    onChange={(event) => setExamForm((current) => ({ ...current, status: event.target.value as ExamInput["status"] }))}
-                  >
-                    {EXAM_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {EXAM_STATUS_LABELS[status] ?? status}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Start Date (BS)">
-                  <NepaliDateField value={examForm.startDateBs} onChange={(value) => setExamForm((current) => ({ ...current, startDateBs: value }))} />
-                </FormField>
-                <FormField label="End Date (BS)">
-                  <NepaliDateField value={examForm.endDateBs} onChange={(value) => setExamForm((current) => ({ ...current, endDateBs: value }))} />
-                </FormField>
-                <FormField label="Result Publish Date (optional)">
-                  <NepaliDateField
-                    value={examForm.resultPublishDateBs ?? ""}
-                    onChange={(value) => setExamForm((current) => ({ ...current, resultPublishDateBs: value }))}
-                  />
-                </FormField>
-                <div className="md:col-span-2">
-                  <FormField label={isCollege ? `${labels.primaryPlural} & ${labels.secondaryPlural}` : "Classes"}>
-                    <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 p-3">
-                      {isCollege
-                        ? (yearsQuery.data ?? []).map((item) => {
-                            const checked = examForm.yearIds.includes(item._id);
-                            const batchName = (batchesQuery.data ?? []).find((batch) => batch._id === item.batchId)?.name ?? "Batch";
-                            return (
-                              <label key={item._id} className="flex cursor-pointer items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() =>
-                                    setExamForm((current) => ({
-                                      ...current,
-                                      batchIds: checked
-                                        ? current.batchIds.filter((id) => id !== item.batchId)
-                                        : [...new Set([...current.batchIds, item.batchId])],
-                                      yearIds: checked
-                                        ? current.yearIds.filter((id) => id !== item._id)
-                                        : [...current.yearIds, item._id]
-                                    }))
-                                  }
-                                />
-                                {batchName} — {item.name}
-                              </label>
-                            );
-                          })
-                        : (classesQuery.data ?? []).map((item) => {
-                            const checked = examForm.classIds.includes(item._id);
-                            return (
-                              <label key={item._id} className="flex cursor-pointer items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() =>
-                                    setExamForm((current) => ({
-                                      ...current,
-                                      classIds: checked
-                                        ? current.classIds.filter((id) => id !== item._id)
-                                        : [...current.classIds, item._id]
-                                    }))
-                                  }
-                                />
-                                {item.name}
-                              </label>
-                            );
-                          })}
-                    </div>
-                  </FormField>
-                </div>
-                <div className="md:col-span-2 flex justify-end gap-2">
-                  {editingExamId ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setEditingExamId(null);
-                        setExamForm(defaultExamValue);
-                      }}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2">
+                    <FormField label="Exam Name">
+                      <Input value={examForm.name} onChange={(event) => setExamForm((current) => ({ ...current, name: event.target.value }))} />
+                    </FormField>
+                  </div>
+
+                  <FormField label="Academic Session">
+                    <Select
+                      value={examForm.academicYearBs}
+                      onChange={(event) => setExamForm((current) => ({ ...current, academicYearBs: event.target.value }))}
                     >
+                      {academicSessionOptions.length === 0 ? (
+                        <option value={examForm.academicYearBs}>{examForm.academicYearBs}</option>
+                      ) : (
+                        academicSessionOptions.map((session) => (
+                          <option key={session} value={session}>
+                            {session}
+                          </option>
+                        ))
+                      )}
+                    </Select>
+                  </FormField>
+
+                  <FormField label="Status">
+                    <Select
+                      value={examForm.status}
+                      onChange={(event) => setExamForm((current) => ({ ...current, status: event.target.value as ExamInput["status"] }))}
+                    >
+                      {EXAM_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {EXAM_STATUS_LABELS[status] ?? status}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                  <p className="text-sm font-semibold text-slate-900">Exam schedule (Nepali calendar)</p>
+                  <p className="mt-1 text-xs text-slate-500">Pick dates from the live BS calendar. End date cannot be before the start date.</p>
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <FormField label="Start Date (BS)">
+                      <NepaliDateField
+                        value={examForm.startDateBs}
+                        maxDate={endDateValue ?? undefined}
+                        onChange={(value) =>
+                          setExamForm((current) => {
+                            const nextEnd =
+                              current.endDateBs && value && current.endDateBs < value ? value : current.endDateBs;
+                            return { ...current, startDateBs: value, endDateBs: nextEnd };
+                          })
+                        }
+                      />
+                    </FormField>
+                    <FormField label="End Date (BS)">
+                      <NepaliDateField
+                        value={examForm.endDateBs}
+                        minDate={startDateValue ?? getTodayBs()}
+                        onChange={(value) => setExamForm((current) => ({ ...current, endDateBs: value }))}
+                      />
+                    </FormField>
+                    <FormField label="Result Publish Date (optional)">
+                      <NepaliDateField
+                        value={examForm.resultPublishDateBs ?? ""}
+                        minDate={endDateValue ?? startDateValue ?? getTodayBs()}
+                        onChange={(value) => setExamForm((current) => ({ ...current, resultPublishDateBs: value }))}
+                      />
+                    </FormField>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Exam scope</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {isCollege
+                      ? `Choose the ${labels.primary.toLowerCase()} first, then select the ${labels.secondary.toLowerCase()} for this exam session.`
+                      : "Choose which class this exam applies to."}
+                  </p>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    {isCollege ? (
+                      <>
+                        <FormField label={labels.primary}>
+                          <Select
+                            value={examBatchId}
+                            onChange={(event) => {
+                              const batchId = event.target.value;
+                              setExamBatchId(batchId);
+                              setExamYearId("");
+                              setExamForm((current) => buildScopedExamForm(current, { batchId, yearId: "", classId: "" }));
+                            }}
+                          >
+                            <option value="">Select {labels.primary.toLowerCase()}</option>
+                            {(batchesQuery.data ?? []).map((batch) => (
+                              <option key={batch._id} value={batch._id}>
+                                {batch.name} ({batch.academicYearBs})
+                              </option>
+                            ))}
+                          </Select>
+                        </FormField>
+                        <FormField label={labels.secondary}>
+                          <Select
+                            value={examYearId}
+                            disabled={!examBatchId || examYearsQuery.isLoading}
+                            onChange={(event) => {
+                              const yearId = event.target.value;
+                              setExamYearId(yearId);
+                              setExamForm((current) => buildScopedExamForm(current, { yearId }));
+                            }}
+                          >
+                            <option value="">
+                              {examBatchId ? `Select ${labels.secondary.toLowerCase()}` : `Select ${labels.primary.toLowerCase()} first`}
+                            </option>
+                            {examYearOptions.map((year) => (
+                              <option key={year._id} value={year._id}>
+                                {year.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </FormField>
+                      </>
+                    ) : (
+                      <FormField label="Class">
+                        <Select
+                          value={examClassId}
+                          onChange={(event) => {
+                            const classId = event.target.value;
+                            setExamClassId(classId);
+                            setExamForm((current) => buildScopedExamForm(current, { classId }));
+                          }}
+                        >
+                          <option value="">Select class</option>
+                          {(classesQuery.data ?? []).map((schoolClass) => (
+                            <option key={schoolClass._id} value={schoolClass._id}>
+                              {schoolClass.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormField>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  {editingExamId ? (
+                    <Button type="button" variant="outline" onClick={resetExamForm}>
                       Cancel
                     </Button>
                   ) : null}
@@ -1091,7 +1242,16 @@ export const ExamManager = () => {
                         return (
                           <tr key={`${result._id}-${mark.subjectId}`}>
                             <Td>{(examsQuery.data ?? []).find((exam) => exam._id === result.examId)?.name ?? result.examId}</Td>
-                            <Td>{students.find((student) => student._id === result.studentId)?.user.fullName ?? result.studentId}</Td>
+                            <Td>
+                              {(() => {
+                                const matched = students.find((student) => student._id === result.studentId);
+                                return matched ? (
+                                  <StudentNameLink studentId={matched._id} name={matched.user.fullName} />
+                                ) : (
+                                  result.studentId
+                                );
+                              })()}
+                            </Td>
                             <Td>{subjectNameById.get(mark.subjectId)?.name ?? mark.subjectId}</Td>
                             <Td>
                               {computed.obtainedMarks} / {computed.fullMarks}
@@ -1232,7 +1392,16 @@ export const ExamManager = () => {
                       {displayedResults.map((result) => (
                         <tr key={result._id}>
                           <Td>{(examsQuery.data ?? []).find((exam) => exam._id === result.examId)?.name ?? result.examId}</Td>
-                          <Td>{resultStudents.find((student) => student._id === result.studentId)?.user.fullName ?? result.studentId}</Td>
+                          <Td>
+                            {(() => {
+                              const matched = resultStudents.find((student) => student._id === result.studentId);
+                              return matched ? (
+                                <StudentNameLink studentId={matched._id} name={matched.user.fullName} />
+                              ) : (
+                                result.studentId
+                              );
+                            })()}
+                          </Td>
                           <Td>
                             <Badge>{result.grade}</Badge>
                           </Td>

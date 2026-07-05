@@ -1,0 +1,45 @@
+---
+pid: 21676
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run typecheck; cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run typecheck"
+started_at: 2026-07-05T20:27:14.065Z
+running_for_ms: 5770001  
+---
+
+> @phit-erp/backend@1.0.0 typecheck
+> npm run build:shared && tsc -p tsconfig.json --noEmit
+
+
+> @phit-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
+
+
+up to date, audited 3 packages in 901ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @phit-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+
+> @phit-erp/frontend@1.0.0 typecheck
+> npm run build:shared && tsc --noEmit
+
+
+> @phit-erp/frontend@1.0.0 build:shared
+> npm install --include=dev --prefix ../backend/shared && npm run build --prefix ../backend/shared
+
+
+up to date, audited 3 packages in 891ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @phit-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+

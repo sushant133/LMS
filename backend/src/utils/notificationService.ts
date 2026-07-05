@@ -1,6 +1,6 @@
 import { Notification } from "../models/Notification.js";
 import { User } from "../models/User.js";
-import type { NotificationChannel, NotificationType } from "@nepal-school-erp/shared";
+import type { NotificationChannel, NotificationType } from "@phit-erp/shared";
 import { tenantObjectId } from "./tenant.js";
 import type { Request } from "express";
 

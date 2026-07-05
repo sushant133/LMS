@@ -50,7 +50,7 @@ export const demoCredentials = {
   accountant: {
     email: "accountant@demo.school",
     password: "12345678",
-    name: "Demo Accountant",
+    name: "Accountant",
     employeeId: "ACC001",
     role: "ACCOUNTANT"
   },
@@ -121,11 +121,12 @@ export type DemoLoginEntry = {
 };
 
 export const getDemoLoginEntries = (): DemoLoginEntry[] => [
-  { label: "Demo admin", email: demoCredentials.schoolAdmin.email, password: demoCredentials.schoolAdmin.password },
-  { label: "Demo teacher", email: demoCredentials.teachers[0]!.email, password: demoCredentials.teachers[0]!.password },
-  { label: "Demo student", email: demoCredentials.students[0]!.email, password: demoCredentials.students[0]!.password },
-  { label: "Demo parent", email: demoCredentials.parent.email, password: demoCredentials.parent.password },
+  { label: "System Administrator", email: demoCredentials.superAdmin.email, password: demoCredentials.superAdmin.password },
+  { label: "College Administrator", email: demoCredentials.schoolAdmin.email, password: demoCredentials.schoolAdmin.password },
+  { label: "Teacher", email: demoCredentials.teachers[0]!.email, password: demoCredentials.teachers[0]!.password },
+  { label: "Student", email: demoCredentials.students[0]!.email, password: demoCredentials.students[0]!.password },
+  { label: "Parent", email: demoCredentials.parent.email, password: demoCredentials.parent.password },
   { label: "Library staff", email: demoCredentials.libraryStaff.email, password: demoCredentials.libraryStaff.password },
   { label: "Laboratory staff", email: demoCredentials.laboratoryStaff.email, password: demoCredentials.laboratoryStaff.password },
-  { label: "Demo accountant", email: demoCredentials.accountant.email, password: demoCredentials.accountant.password }
+  { label: "Accountant", email: demoCredentials.accountant.email, password: demoCredentials.accountant.password }
 ];

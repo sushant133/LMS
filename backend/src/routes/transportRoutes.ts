@@ -8,18 +8,18 @@ import {
   removeAssignment,
   updateRoute
 } from "../controllers/transportController.js";
-import { authorize, protect } from "../middleware/auth.js";
+import { authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/routes", listRoutes);
-router.post("/routes", authorize("COLLEGE_ADMIN"), createRoute);
-router.put("/routes/:id", authorize("COLLEGE_ADMIN"), updateRoute);
-router.delete("/routes/:id", authorize("COLLEGE_ADMIN"), deleteRoute);
+router.post("/routes", authorizeInstitutionAdmin, createRoute);
+router.put("/routes/:id", authorizeInstitutionAdmin, updateRoute);
+router.delete("/routes/:id", authorizeInstitutionAdmin, deleteRoute);
 router.get("/assignments", listAssignments);
-router.post("/assignments", authorize("COLLEGE_ADMIN"), assignStudent);
-router.delete("/assignments/:id", authorize("COLLEGE_ADMIN"), removeAssignment);
+router.post("/assignments", authorizeInstitutionAdmin, assignStudent);
+router.delete("/assignments/:id", authorizeInstitutionAdmin, removeAssignment);
 
 export default router;

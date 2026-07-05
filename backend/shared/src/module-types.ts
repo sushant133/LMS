@@ -38,6 +38,8 @@ export type PayrollStatus = "DRAFT" | "PROCESSED" | "PAID";
 
 export type ParentRelationship = "FATHER" | "MOTHER" | "GUARDIAN" | "OTHER";
 
+export type ParentFromStudentRelationship = "FATHER" | "MOTHER" | "GUARDIAN";
+
 export interface TimetableSlotRecord {
   _id: string;
   schoolId: string;
@@ -353,6 +355,26 @@ export interface ParentPortalResponse {
   children: ParentPortalChildSummary[];
   recentNotifications: NotificationRecord[];
   upcomingHomework: AssignmentRecord[];
+}
+
+export interface ParentCandidateFromStudent {
+  relationship: ParentFromStudentRelationship;
+  fullName: string;
+  phone: string;
+  suggestedLoginId: string;
+  isLinked: boolean;
+  existingLinkId?: string;
+  existingParentUserId?: string;
+  existingParentEmail?: string;
+}
+
+export interface StudentParentCandidatesResponse {
+  student: {
+    _id: string;
+    fullName: string;
+    admissionNumber: string;
+  };
+  candidates: ParentCandidateFromStudent[];
 }
 
 export interface StudentSubjectDetail {

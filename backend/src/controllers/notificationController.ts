@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { sendNotificationSchema } from "@nepal-school-erp/shared";
+import { sendNotificationSchema } from "@phit-erp/shared";
 import { Notification } from "../models/Notification.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";

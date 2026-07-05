@@ -21,18 +21,18 @@ const router = Router();
 router.use(protect);
 router.use(tenantGuard);
 
-// Student photo upload (COLLEGE_ADMIN, TEACHER)
+// Student photo upload (admin only)
 router.post(
   "/students/:studentId/photo",
-  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
   uploadStudentPhoto,
   uploadStudentPhotoHandler
 );
 
-// Student document uploads
+// Student document uploads (admin only)
 router.post(
   "/students/:studentId/documents",
-  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
   uploadStudentDocuments,
   uploadDocumentsHandler
 );

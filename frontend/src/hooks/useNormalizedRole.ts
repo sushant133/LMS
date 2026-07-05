@@ -1,4 +1,4 @@
-import { normalizeUserRole, type UserRole } from "@nepal-school-erp/shared";
+import { isInstitutionAdmin, isSystemAdministrator, normalizeUserRole, type UserRole } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
 
 export const useNormalizedRole = (): UserRole | null => {
@@ -11,5 +11,10 @@ export const useNormalizedRole = (): UserRole | null => {
 
 export const useIsTenantAdmin = (): boolean => {
   const role = useNormalizedRole();
-  return role === "COLLEGE_ADMIN" || role === "SUPER_ADMIN";
+  return role ? isInstitutionAdmin(role) : false;
+};
+
+export const useIsSystemAdministrator = (): boolean => {
+  const role = useNormalizedRole();
+  return role ? isSystemAdministrator(role) : false;
 };

@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { leaveRequestSchema, leaveStatusSchema, payrollSchema } from "@nepal-school-erp/shared";
+import { leaveRequestSchema, leaveStatusSchema, payrollSchema } from "@phit-erp/shared";
 import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
 import { Teacher } from "../models/Teacher.js";
 import { asyncHandler } from "../utils/asyncHandler.js";

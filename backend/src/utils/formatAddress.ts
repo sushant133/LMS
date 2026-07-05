@@ -1,4 +1,4 @@
-import type { AddressSelection } from "@nepal-school-erp/shared";
+import type { AddressSelection } from "@phit-erp/shared";
 
 export const formatAddressLine = (address?: AddressSelection | null): string | undefined => {
   if (!address) {

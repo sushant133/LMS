@@ -1,4 +1,4 @@
-import type { InstitutionType } from "@nepal-school-erp/shared";
+import type { InstitutionType } from "@phit-erp/shared";
 import type { Request } from "express";
 import { School } from "../models/School.js";
 import { ApiError } from "./apiError.js";

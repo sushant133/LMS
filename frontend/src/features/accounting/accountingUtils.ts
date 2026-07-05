@@ -1,11 +1,19 @@
-import type { AccountingReportType, StudentAccountSummary, StudentRecord } from "@nepal-school-erp/shared";
+import {
+  FINANCIAL_SUMMARY_SECTIONS,
+  REPORT_COLUMNS,
+  getReportRows as getSharedReportRows,
+  type AccountingReportType,
+  type FinancialSummaryReport,
+  type ReportColumn,
+  type StudentAccountSummary,
+  type StudentRecord
+} from "@phit-erp/shared";
+import { saveAs } from "file-saver";
 import { formatCurrencyNpr } from "lib/utils";
+import * as XLSX from "xlsx";
 
-export interface ReportColumn {
-  key: string;
-  label: string;
-  format?: "currency" | "text";
-}
+export { FINANCIAL_SUMMARY_SECTIONS, REPORT_COLUMNS };
+export type { ReportColumn };
 
 const getNestedValue = (row: Record<string, unknown>, key: string): unknown => {
   if (key.includes(".")) {
@@ -20,73 +28,8 @@ const getNestedValue = (row: Record<string, unknown>, key: string): unknown => {
   return row[key];
 };
 
-export const REPORT_COLUMNS: Record<AccountingReportType, ReportColumn[]> = {
-  "daily-fee-collection": [
-    { key: "receiptNumber", label: "Receipt" },
-    { key: "paidDateBs", label: "Date" },
-    { key: "studentId.user.fullName", label: "Student" },
-    { key: "amountPaidNpr", label: "Paid", format: "currency" },
-    { key: "remainingDueNpr", label: "Remaining", format: "currency" },
-    { key: "paymentMethod", label: "Method" }
-  ],
-  "monthly-fee-collection": [
-    { key: "receiptNumber", label: "Receipt" },
-    { key: "paidDateBs", label: "Date" },
-    { key: "studentId.user.fullName", label: "Student" },
-    { key: "amountPaidNpr", label: "Paid", format: "currency" },
-    { key: "paymentMethod", label: "Method" }
-  ],
-  "pending-fees": [
-    { key: "user.fullName", label: "Student" },
-    { key: "admissionNumber", label: "Admission No." },
-    { key: "rollNumber", label: "Roll" },
-    { key: "feesDueNpr", label: "Due", format: "currency" }
-  ],
-  "fee-defaulters": [
-    { key: "user.fullName", label: "Student" },
-    { key: "admissionNumber", label: "Admission No." },
-    { key: "rollNumber", label: "Roll" },
-    { key: "feesDueNpr", label: "Due", format: "currency" }
-  ],
-  "salary-payments": [
-    { key: "monthBs", label: "Month" },
-    { key: "teacherId.user.fullName", label: "Employee" },
-    { key: "staffName", label: "Staff" },
-    { key: "netSalaryNpr", label: "Net Salary", format: "currency" },
-    { key: "status", label: "Status" }
-  ],
-  expenses: [
-    { key: "dateBs", label: "Date" },
-    { key: "category", label: "Category" },
-    { key: "vendor", label: "Vendor" },
-    { key: "amountNpr", label: "Amount", format: "currency" },
-    { key: "paymentMethod", label: "Method" }
-  ],
-  purchases: [
-    { key: "purchaseDateBs", label: "Date" },
-    { key: "category", label: "Category" },
-    { key: "invoiceNumber", label: "Invoice" },
-    { key: "totalAmountNpr", label: "Total", format: "currency" },
-    { key: "paymentStatus", label: "Status" }
-  ],
-  income: [
-    { key: "dateBs", label: "Date" },
-    { key: "category", label: "Category" },
-    { key: "source", label: "Source" },
-    { key: "amountNpr", label: "Amount", format: "currency" },
-    { key: "paymentMethod", label: "Method" }
-  ],
-  "cash-summary": [
-    { key: "dateBs", label: "Date" },
-    { key: "entryType", label: "Type" },
-    { key: "description", label: "Description" },
-    { key: "amountNpr", label: "Amount", format: "currency" },
-    { key: "balanceAfterNpr", label: "Balance", format: "currency" }
-  ]
-};
-
 export const formatReportCell = (value: unknown, format?: ReportColumn["format"]): string => {
-  if (value === null || value === undefined) {
+  if (value === null || value === undefined || value === "") {
     return "—";
   }
 
@@ -102,10 +45,86 @@ export const formatReportCell = (value: unknown, format?: ReportColumn["format"]
 };
 
 export const getReportRows = (reportType: AccountingReportType, rows: unknown[]): Array<Record<string, unknown>> =>
-  rows.map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>) : {}));
+  getSharedReportRows(reportType, rows);
 
 export const getReportCellValue = (row: Record<string, unknown>, column: ReportColumn): string =>
   formatReportCell(getNestedValue(row, column.key), column.format);
+
+const buildSheetData = (reportType: AccountingReportType, rows: unknown[]): string[][] => {
+  const columns = REPORT_COLUMNS[reportType];
+  const enrichedRows = getReportRows(reportType, rows);
+  return [
+    columns.map((column) => column.label),
+    ...enrichedRows.map((row) => columns.map((column) => getReportCellValue(row, column)))
+  ];
+};
+
+export const downloadReportExcel = (
+  reportType: AccountingReportType,
+  reportLabel: string,
+  rows: unknown[]
+): void => {
+  const worksheet = XLSX.utils.aoa_to_sheet(buildSheetData(reportType, rows));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+  const safeLabel = reportLabel.replace(/[^\w-]+/g, "_").replace(/_+/g, "_");
+  saveAs(blob, `${safeLabel}_${reportType}.xlsx`);
+};
+
+export const downloadFinancialSummaryExcel = (report: FinancialSummaryReport): void => {
+  const workbook = XLSX.utils.book_new();
+
+  const summarySheet = XLSX.utils.aoa_to_sheet([
+    ["PHIT ERP — Financial Summary"],
+    ["Period", report.period.label],
+    [],
+    ["Category", "Transactions", "Total (NPR)"],
+    ...report.data.map((row) => [row.category, row.transactions, row.totalNpr]),
+    [],
+    ["Total Fee Collections", "", report.totals.feeCollectionNpr],
+    ["Total Income", "", report.totals.incomeNpr],
+    ["Total Expenses", "", report.totals.expenseNpr],
+    ["Total Purchases", "", report.totals.purchaseNpr],
+    ["Total Salaries", "", report.totals.salaryNpr],
+    ["Pending Student Fees", "", report.totals.pendingFeesNpr],
+    ["Net Surplus", "", report.totals.netSurplusNpr]
+  ]);
+  XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
+  for (const section of FINANCIAL_SUMMARY_SECTIONS) {
+    const rows = report.sections[section.key] ?? [];
+    const sheet = XLSX.utils.aoa_to_sheet(
+      rows.length > 0
+        ? buildSheetData(section.reportType, rows)
+        : [
+            REPORT_COLUMNS[section.reportType].map((column) => column.label),
+            ["No records for this period"]
+          ]
+    );
+    const safeName = section.label.slice(0, 31);
+    XLSX.utils.book_append_sheet(workbook, sheet, safeName);
+  }
+
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+  saveAs(blob, `Financial_Summary_${report.period.monthBs}.xlsx`);
+};
+
+export const reportUsesMonthFilter = (reportType: AccountingReportType): boolean =>
+  reportType.includes("monthly") ||
+  reportType === "salary-payments" ||
+  reportType === "expenses" ||
+  reportType === "purchases" ||
+  reportType === "income" ||
+  reportType === "cash-summary" ||
+  reportType === "financial-summary";
 
 export const matchesStudentSearch = (student: StudentRecord, query: string): boolean => {
   const normalized = query.trim().toLowerCase();

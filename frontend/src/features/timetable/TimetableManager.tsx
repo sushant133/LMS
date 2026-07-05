@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { DAYS_OF_WEEK, timetableSlotSchema, type TimetableSlotInput } from "@nepal-school-erp/shared";
+import { DAYS_OF_WEEK, isInstitutionAdmin, timetableSlotSchema, type TimetableSlotInput } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { FormField } from "components/shared/FormField";
@@ -43,7 +43,7 @@ const defaultSlot: TimetableSlotInput = {
 export const TimetableManager = () => {
   const { user } = useAuth();
   const isTeacher = user?.role === "TEACHER";
-  const isAdmin = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isAdmin = isInstitutionAdmin(user?.role ?? "");
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const teacherScopeQuery = useTeacherScope(isTeacher);

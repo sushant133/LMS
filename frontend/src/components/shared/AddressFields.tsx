@@ -1,4 +1,4 @@
-import { getAllProvinces, getDistrictsByProvince, getMunicipalitiesByDistrict, getWards, type AddressSelection } from "@nepal-school-erp/shared";
+import { getAllProvinces, getDistrictsByProvince, getMunicipalitiesByDistrict, getWards, type AddressSelection } from "@phit-erp/shared";
 import { useTranslation } from "react-i18next";
 import { FormField } from "./FormField";
 import { Input } from "components/ui/input";

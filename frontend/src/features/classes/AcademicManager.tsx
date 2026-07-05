@@ -14,7 +14,7 @@ import {
   type SectionRecord,
   type SubjectRecord,
   type TeacherRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { noticeSchema, USER_ROLES, type NoticeInput, type NoticeRecord } from "@nepal-school-erp/shared";
+import { isInstitutionAdmin, noticeSchema, USER_ROLES, type NoticeInput, type NoticeRecord } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherScope } from "hooks/useTeacherScope";
@@ -50,7 +50,7 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
   const teacherScopeQuery = useTeacherScope(isTeacher);
   const [form, setForm] = useState<NoticeInput>(adminDefaultNoticeValue);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const canManageNotices = user?.role === "SUPER_ADMIN" || user?.role === "COLLEGE_ADMIN" || isTeacher;
+  const canManageNotices = isInstitutionAdmin(user?.role ?? "") || isTeacher;
   const isReadOnlyViewer = user?.role === "STUDENT" || user?.role === "PARENT";
 
   useEffect(() => {

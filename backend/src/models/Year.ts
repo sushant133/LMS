@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { COLLEGE_YEAR_NAMES } from "@nepal-school-erp/shared";
+import { COLLEGE_YEAR_NAMES } from "@phit-erp/shared";
 
 const yearSchema = new Schema(
   {

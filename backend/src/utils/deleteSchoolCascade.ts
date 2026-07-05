@@ -17,8 +17,13 @@ import { AccountingPurchase } from "../models/AccountingPurchase.js";
 import { AccountingSettings } from "../models/AccountingSettings.js";
 import { BankAccount } from "../models/BankAccount.js";
 import { CashBookEntry } from "../models/CashBookEntry.js";
+import { ChartOfAccount } from "../models/ChartOfAccount.js";
 import { FeeCollection } from "../models/FeeCollection.js";
+import { FeeRefund } from "../models/FeeRefund.js";
 import { FeeStructure } from "../models/FeeStructure.js";
+import { FiscalYear } from "../models/FiscalYear.js";
+import { JournalEntry } from "../models/JournalEntry.js";
+import { Vendor } from "../models/Vendor.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
 import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
 import { Laboratory, LaboratoryCategory, LaboratoryEquipment, LaboratoryIssue } from "../models/Laboratory.js";
@@ -87,6 +92,11 @@ export const deleteSchoolCascade = async (
     BankAccount.deleteMany(filter, options),
     CashBookEntry.deleteMany(filter, options),
     AccountingSettings.deleteMany(filter, options),
+    ChartOfAccount.deleteMany(filter, options),
+    JournalEntry.deleteMany(filter, options),
+    Vendor.deleteMany(filter, options),
+    FeeRefund.deleteMany(filter, options),
+    FiscalYear.deleteMany(filter, options),
     Accountant.deleteMany(filter, options),
     CollegeStaff.deleteMany(filter, options),
     ParentChildLink.deleteMany(filter, options),

@@ -9,16 +9,17 @@ import { getRoleRedirectPath } from "lib/auth";
 import { LoginPage } from "pages/LoginPage";
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
-const StudentsPage = lazy(() => import("pages/StudentsPage").then((module) => ({ default: module.StudentsPage })));
+const StudentsLayout = lazy(() => import("pages/StudentsPage"));
+const CreateStudentPage = lazy(() => import("pages/CreateStudentPage").then((module) => ({ default: module.CreateStudentPage })));
+const StudentListPage = lazy(() => import("pages/StudentListPage").then((module) => ({ default: module.StudentListPage })));
 const TeachersPage = lazy(() => import("pages/TeachersPage").then((module) => ({ default: module.TeachersPage })));
 const CollegeStaffPage = lazy(() => import("pages/CollegeStaffPage").then((module) => ({ default: module.CollegeStaffPage })));
 const AcademicsPage = lazy(() => import("pages/AcademicsPage").then((module) => ({ default: module.AcademicsPage })));
 const AttendancePage = lazy(() => import("pages/AttendancePage").then((module) => ({ default: module.AttendancePage })));
 const ExamsPage = lazy(() => import("pages/ExamsPage").then((module) => ({ default: module.ExamsPage })));
-const FeesPage = lazy(() => import("pages/FeesPage").then((module) => ({ default: module.FeesPage })));
 const NoticesPage = lazy(() => import("pages/NoticesPage").then((module) => ({ default: module.NoticesPage })));
 const SettingsPage = lazy(() => import("pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
-const SchoolsPage = lazy(() => import("pages/SchoolsPage").then((module) => ({ default: module.SchoolsPage })));
+
 const NotFoundPage = lazy(() => import("pages/NotFoundPage").then((module) => ({ default: module.NotFoundPage })));
 const ReportsPage = lazy(() => import("pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
 const TimetablePage = lazy(() => import("pages/TimetablePage").then((module) => ({ default: module.TimetablePage })));
@@ -32,8 +33,10 @@ const MyLibraryPage = lazy(() => import("pages/MyLibraryPage").then((module) => 
 const TransportPage = lazy(() => import("pages/TransportPage").then((module) => ({ default: module.TransportPage })));
 const HrPage = lazy(() => import("pages/HrPage").then((module) => ({ default: module.HrPage })));
 const AccountingPage = lazy(() => import("pages/AccountingPage").then((module) => ({ default: module.AccountingPage })));
+const AdminManagementPage = lazy(() => import("pages/AdminManagementPage").then((module) => ({ default: module.AdminManagementPage })));
 const StudentFeesPage = lazy(() => import("pages/StudentFeesPage").then((module) => ({ default: module.StudentFeesPage })));
 const StudentSubjectsPage = lazy(() => import("pages/StudentSubjectsPage").then((module) => ({ default: module.StudentSubjectsPage })));
+const StudentProfilePage = lazy(() => import("pages/StudentProfilePage").then((module) => ({ default: module.StudentProfilePage })));
 
 const RootRedirect = () => {
   const { user, loading } = useAuth();
@@ -82,7 +85,19 @@ export default function App() {
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"]} />}>
-              <Route path="/students" element={<StudentsPage />} />
+              <Route path="/students" element={<LazyRoute><StudentsLayout /></LazyRoute>}>
+                <Route index element={<Navigate to="list" replace />} />
+                <Route path="list" element={<LazyRoute><StudentListPage /></LazyRoute>} />
+                <Route path="create" element={<LazyRoute><CreateStudentPage /></LazyRoute>} />
+              </Route>
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT", "ACCOUNTANT"]} />
+              }
+            >
+              <Route path="/students/:studentId/profile" element={<LazyRoute><StudentProfilePage /></LazyRoute>} />
             </Route>
 
             <Route element={<ProtectedRoute roles={["TEACHER"]} />}>
@@ -101,7 +116,7 @@ export default function App() {
               <Route path="/laboratory" element={<LaboratoryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"]} />}>
               <Route path="/accounting" element={<AccountingPage />} />
             </Route>
 
@@ -109,7 +124,7 @@ export default function App() {
               <Route path="/college-staff" element={<CollegeStaffPage />} />
               <Route path="/teachers" element={<TeachersPage />} />
               <Route path="/academics" element={<AcademicsPage />} />
-              <Route path="/fees" element={<FeesPage />} />
+              <Route path="/fees" element={<Navigate to="/accounting" replace />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/parent-links" element={<ParentLinksPage />} />
@@ -140,9 +155,11 @@ export default function App() {
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN"]} />}>
-              <Route path="/colleges" element={<SchoolsPage />} />
-              <Route path="/schools" element={<Navigate to="/colleges" replace />} />
+              <Route path="/admin-management" element={<LazyRoute><AdminManagementPage /></LazyRoute>} />
             </Route>
+
+            <Route path="/colleges" element={<Navigate to="/dashboard/super_admin" replace />} />
+            <Route path="/schools" element={<Navigate to="/dashboard/super_admin" replace />} />
           </Route>
         </Route>
 

@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { computeSubjectMark, examSchema, resultSchema } from "@nepal-school-erp/shared";
+import { computeSubjectMark, examSchema, resultSchema } from "@phit-erp/shared";
 import type { z } from "zod";
 import { Batch } from "../models/Batch.js";
 import { Exam } from "../models/Exam.js";
@@ -74,7 +74,7 @@ const persistResultMarks = async (
 
   const exam = await Exam.findOne({ _id: payload.examId, schoolId });
   if (!exam) {
-    throw new ApiError(404, "Exam was not found in this college context");
+    throw new ApiError(404, "Exam was not found");
   }
 
   if (!options.isAdmin && exam.resultsLocked) {
@@ -111,7 +111,7 @@ const persistResultMarks = async (
   ]);
 
   if (!student) {
-    throw new ApiError(404, "Student was not found in this college context");
+    throw new ApiError(404, "Student was not found");
   }
 
   const subjects = await Subject.find({ _id: { $in: payload.marks.map((mark) => mark.subjectId) }, schoolId }).lean();

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ParentPortalResponse } from "@nepal-school-erp/shared";
+import type { ParentPortalResponse } from "@phit-erp/shared";
 import { PageHeader } from "components/shared/PageHeader";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Badge } from "components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { api, unwrap } from "lib/api";
@@ -26,7 +27,9 @@ export const ParentPortal = () => {
         {(data?.children ?? []).map((child) => (
           <Card key={child.studentId}>
             <CardHeader>
-              <CardTitle>{child.fullName}</CardTitle>
+              <CardTitle>
+                <StudentNameLink studentId={child.studentId} name={child.fullName} />
+              </CardTitle>
               <p className="text-sm text-slate-500">{child.className} · Section {child.sectionName} · Roll {child.rollNumber}</p>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-3 text-sm">

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { ExamRecord, ExamRoutineInput, ExamRoutineRecord, SubjectRecord } from "@nepal-school-erp/shared";
-import { DAYS_OF_WEEK, examRoutineSchema } from "@nepal-school-erp/shared";
+import type { ExamRecord, ExamRoutineInput, ExamRoutineRecord, SubjectRecord } from "@phit-erp/shared";
+import { DAYS_OF_WEEK, examRoutineSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";

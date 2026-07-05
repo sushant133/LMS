@@ -1,4 +1,4 @@
-import type { UserRole } from "@nepal-school-erp/shared";
+import type { UserRole } from "@phit-erp/shared";
 
 declare global {
   namespace Express {

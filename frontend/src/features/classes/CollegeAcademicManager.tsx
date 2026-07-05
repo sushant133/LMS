@@ -7,7 +7,7 @@ import {
   type BatchRecord,
   type SubjectRecord,
   type YearRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";

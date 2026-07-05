@@ -1,7 +1,7 @@
 import type { Response } from "express";
 import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
 import { env } from "../config/env.js";
-import type { UserRole } from "@nepal-school-erp/shared";
+import type { UserRole } from "@phit-erp/shared";
 
 interface SignPayload {
   userId: string;

@@ -7,6 +7,7 @@ interface PortalLoginFieldsProps {
   confirmPassword: string;
   onPasswordChange: (password: string) => void;
   onConfirmPasswordChange: (confirmPassword: string) => void;
+  onEmailChange?: (email: string) => void;
   showReset?: boolean;
 }
 
@@ -16,18 +17,24 @@ export const PortalLoginFields = ({
   confirmPassword,
   onPasswordChange,
   onConfirmPasswordChange,
+  onEmailChange,
   showReset = true
 }: PortalLoginFieldsProps) => (
   <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
     <p className="text-sm font-semibold text-emerald-950">Portal login</p>
-    <p className="mt-1 text-xs text-emerald-800">
-      {showReset
-        ? "Use an email (name@college.com) or a simple username (e.g. teacher01). The teacher or student signs in with this login ID and password."
-        : "Leave password blank to keep the current login password."}
-    </p>
+    {!showReset ? (
+      <p className="mt-1 text-xs text-emerald-800">Leave password blank to keep the current login password.</p>
+    ) : null}
     <div className="mt-4 grid gap-4 md:grid-cols-2">
       <FormField label="Login ID">
-        <Input type="text" value={email} readOnly className="bg-white" />
+        <Input
+          type="text"
+          value={email}
+          readOnly={!onEmailChange}
+          placeholder="Login ID"
+          className={onEmailChange ? undefined : "bg-white"}
+          onChange={onEmailChange ? (event) => onEmailChange(event.target.value) : undefined}
+        />
       </FormField>
       <FormField label={showReset ? "Password" : "New password (optional)"}>
         <Input

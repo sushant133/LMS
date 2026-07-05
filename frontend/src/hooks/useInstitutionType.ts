@@ -1,4 +1,4 @@
-import type { InstitutionType } from "@nepal-school-erp/shared";
+import type { InstitutionType } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
 
 export const useInstitutionType = (): InstitutionType => {

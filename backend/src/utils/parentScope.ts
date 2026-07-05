@@ -10,7 +10,11 @@ export const getLinkedStudentIds = async (req: Request): Promise<string[]> => {
   }
 
   const schoolId = tenantObjectId(req);
-  const links = await ParentChildLink.find({ schoolId, parentUserId: req.user.userId }).lean();
+  const links = await ParentChildLink.find({
+    schoolId,
+    parentUserId: req.user.userId,
+    status: "APPROVED"
+  }).lean();
   return links.map((link) => link.studentId.toString());
 };
 

@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { USER_ROLES } from "@nepal-school-erp/shared";
+import { USER_ROLES } from "@phit-erp/shared";
 
 const noticeSchema = new Schema(
   {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { BannerRecord } from "@nepal-school-erp/shared";
+import type { BannerRecord } from "@phit-erp/shared";
 import { Button } from "components/ui/button";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";

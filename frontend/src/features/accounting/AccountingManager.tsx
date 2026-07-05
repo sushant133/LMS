@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  ACCOUNTING_ACCESS_ROLES,
+  ACCOUNTING_APPROVER_ROLES,
   ACCOUNTING_MANAGER_ROLES,
+  hasAccountingPermission,
+  isInstitutionAdmin,
+  normalizeUserRole,
   EXPENSE_CATEGORIES,
   FEE_TYPES,
   INCOME_CATEGORIES,
@@ -13,14 +18,15 @@ import {
   accountingIncomeSchema,
   accountingPurchaseSchema,
   accountingSettingsSchema,
-  bankAccountSchema,
   cashBookEntrySchema,
   enhancedFeeCollectionSchema,
   extendedFeeStructureSchema,
   salaryPaymentSchema,
   type AccountantInput,
   type AccountantRecord,
+  type AuditLogRecord,
   type AccountingDashboardResponse,
+  type FinancialSummaryReport,
   type AccountingExpenseInput,
   type AccountingExpenseRecord,
   type AccountingIncomeInput,
@@ -28,8 +34,6 @@ import {
   type AccountingPurchaseInput,
   type AccountingPurchaseRecord,
   type AccountingSettingsInput,
-  type BankAccountInput,
-  type BankAccountRecord,
   type BatchRecord,
   type CashBookEntryInput,
   type CashBookEntryRecord,
@@ -45,14 +49,17 @@ import {
   type SalaryEmployeesResponse,
   type TeacherRecord,
   type YearRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import {
   Banknote,
   BarChart3,
   BookOpen,
   Building2,
   ClipboardList,
+  FileText,
+  Landmark,
   LayoutDashboard,
+  RotateCcw,
   Receipt,
   Settings,
   ShoppingCart,
@@ -66,18 +73,29 @@ import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import {
+  FINANCIAL_SUMMARY_SECTIONS,
   REPORT_COLUMNS,
   getReportCellValue,
+  downloadFinancialSummaryExcel,
+  downloadReportExcel,
   getReportRows,
   matchesStudentAccountSearch,
-  matchesStudentSearch
+  matchesStudentSearch,
+  reportUsesMonthFilter
 } from "./accountingUtils";
+import { emptyIdsToUndefined, getSalaryEmployeeLabel } from "./accountingFormUtils";
+import { AccountingDashboardCharts } from "./AccountingDashboardCharts";
+import { ChartOfAccountsPanel } from "./ChartOfAccountsPanel";
+import { FeeRefundsPanel } from "./FeeRefundsPanel";
+import { JournalEntriesPanel } from "./JournalEntriesPanel";
+import { VendorsPanel } from "./VendorsPanel";
 import { useAuth } from "features/auth/AuthProvider";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -87,6 +105,7 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
+import { FinancialApprovalsPanel } from "features/accounting/FinancialApprovalsPanel";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
@@ -95,31 +114,41 @@ type Tab =
   | "dashboard"
   | "fee-collection"
   | "receipts"
+  | "refunds"
   | "student-accounts"
   | "salaries"
   | "purchases"
   | "expenses"
   | "income"
   | "cash-book"
-  | "bank-accounts"
+  | "chart-of-accounts"
+  | "journal-entries"
+  | "vendors"
   | "reports"
   | "settings"
-  | "accountants";
+  | "accountants"
+  | "audit-logs"
+  | "approvals";
 
 const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminOnly?: boolean }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "fee-collection", label: "Fee Collection", icon: Wallet },
   { id: "receipts", label: "Fee Receipts", icon: Receipt },
+  { id: "refunds", label: "Refunds", icon: RotateCcw },
   { id: "student-accounts", label: "Student Accounts", icon: Users },
   { id: "salaries", label: "Salary Management", icon: Banknote },
   { id: "purchases", label: "Purchases", icon: ShoppingCart },
   { id: "expenses", label: "Expenses", icon: TrendingDown },
   { id: "income", label: "Income", icon: TrendingUp },
   { id: "cash-book", label: "Cash Book", icon: BookOpen },
-  { id: "bank-accounts", label: "Bank Accounts", icon: Building2 },
+  { id: "chart-of-accounts", label: "Chart of Accounts", icon: Landmark },
+  { id: "journal-entries", label: "Journal Entries", icon: FileText },
+  { id: "vendors", label: "Vendors", icon: Building2 },
   { id: "reports", label: "Reports", icon: BarChart3 },
+  { id: "approvals", label: "Approvals", icon: ClipboardList },
   { id: "settings", label: "Settings", icon: Settings, adminOnly: true },
-  { id: "accountants", label: "Accountants", icon: UserCog, adminOnly: true }
+  { id: "accountants", label: "Accountants", icon: UserCog, adminOnly: true },
+  { id: "audit-logs", label: "Audit Trail", icon: ClipboardList }
 ];
 
 const reportTypes = [
@@ -131,17 +160,33 @@ const reportTypes = [
   { id: "expenses", label: "Expenses" },
   { id: "purchases", label: "Purchases" },
   { id: "income", label: "Income" },
-  { id: "cash-summary", label: "Cash Summary" }
+  { id: "cash-summary", label: "Cash Summary" },
+  { id: "financial-summary", label: "Financial Summary (All)" },
+  { id: "trial-balance", label: "Trial Balance", ledger: true },
+  { id: "balance-sheet", label: "Balance Sheet", ledger: true },
+  { id: "income-expenditure", label: "Income & Expenditure", ledger: true },
+  { id: "student-ledger", label: "Student Ledger", ledger: true },
+  { id: "student-due", label: "Student Due Report", ledger: true },
+  { id: "bank-book", label: "Bank Book", ledger: true },
+  { id: "day-book", label: "Day Book", ledger: true },
+  { id: "fee-collection-summary", label: "Fee Collection Summary", ledger: true },
+  { id: "scholarship-report", label: "Scholarship Report", ledger: true },
+  { id: "vendor-ledger", label: "Vendor Ledger", ledger: true },
+  { id: "cash-flow", label: "Cash Flow", ledger: true }
 ] as const;
 
 const defaultStructure: ExtendedFeeStructureInput = {
   title: "",
   classIds: [],
+  batchIds: [],
+  yearIds: [],
   feeType: "MONTHLY",
   frequency: "MONTHLY",
   academicYearBs: "2083/2084",
   amountNpr: 0,
-  isOptional: false
+  isOptional: false,
+  status: "ACTIVE",
+  version: 1
 };
 
 const defaultCollection: EnhancedFeeCollectionInput = {
@@ -208,15 +253,6 @@ const defaultSalary: SalaryPaymentInput = {
   paymentMethod: "BANK_TRANSFER"
 };
 
-const defaultBank: BankAccountInput = {
-  bankName: "",
-  accountName: "",
-  accountNumber: "",
-  branch: "",
-  openingBalanceNpr: 0,
-  isActive: true
-};
-
 const defaultCashEntry: CashBookEntryInput = {
   dateBs: "",
   entryType: "CREDIT",
@@ -231,7 +267,9 @@ const defaultSettings: AccountingSettingsInput = {
   lateFineGraceDays: 0,
   receiptPrefix: "RCPT",
   autoReceiptNumber: true,
-  defaultPaymentMethod: "CASH"
+  defaultPaymentMethod: "CASH",
+  voucherPrefix: "JV",
+  tdsEnabled: false
 };
 
 const defaultAccountant: AccountantInput = {
@@ -249,7 +287,15 @@ export const AccountingManager = () => {
   const { user } = useAuth();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
-  const isAdmin = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
+  const normalizedRole = normalizeUserRole(user?.role ?? "");
+  const isAdmin = isInstitutionAdmin(normalizedRole);
+  const isAuditor = normalizedRole === "AUDITOR";
+  const isPrincipal = normalizedRole === "PRINCIPAL";
+  const isCashier = normalizedRole === "CASHIER";
+  const canWrite = !isAuditor && !isPrincipal;
+  const canApprove = ACCOUNTING_APPROVER_ROLES.includes(normalizedRole);
+  const canViewAudit = hasAccountingPermission(normalizedRole, "view_audit");
+  const canReverse = hasAccountingPermission(normalizedRole, "reverse_transaction");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [studentSearch, setStudentSearch] = useState("");
   const [accountSearch, setAccountSearch] = useState("");
@@ -261,17 +307,26 @@ export const AccountingManager = () => {
   const [purchaseForm, setPurchaseForm] = useState(defaultPurchase);
   const [incomeForm, setIncomeForm] = useState(defaultIncome);
   const [salaryForm, setSalaryForm] = useState(defaultSalary);
-  const [bankForm, setBankForm] = useState(defaultBank);
   const [cashForm, setCashForm] = useState(defaultCashEntry);
   const [settingsForm, setSettingsForm] = useState(defaultSettings);
   const [accountantForm, setAccountantForm] = useState(defaultAccountant);
   const [editingAccountant, setEditingAccountant] = useState<AccountantRecord | null>(null);
+  const [editingExpense, setEditingExpense] = useState<AccountingExpenseRecord | null>(null);
+  const [editingPurchase, setEditingPurchase] = useState<AccountingPurchaseRecord | null>(null);
+  const [editingIncome, setEditingIncome] = useState<AccountingIncomeRecord | null>(null);
+  const [editingSalary, setEditingSalary] = useState<SalaryPaymentRecord | null>(null);
   const [selectedReport, setSelectedReport] = useState<(typeof reportTypes)[number]["id"]>("daily-fee-collection");
   const [reportMonth, setReportMonth] = useState("2081-09");
   const [reportDate, setReportDate] = useState("2081-09-01");
+  const [summarySection, setSummarySection] = useState<(typeof FINANCIAL_SUMMARY_SECTIONS)[number]["key"]>("fees");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
-  const visibleTabs = tabs.filter((item) => !item.adminOnly || isAdmin);
+  const cashierTabs: Tab[] = ["dashboard", "fee-collection", "receipts", "student-accounts", "refunds"];
+  const visibleTabs = tabs
+    .filter((item) => !item.adminOnly || isAdmin)
+    .filter((item) => item.id !== "audit-logs" || canViewAudit)
+    .filter((item) => !isCashier || cashierTabs.includes(item.id))
+    .filter((item) => !isPrincipal || ["dashboard", "reports", "approvals", "audit-logs", "student-accounts", "receipts"].includes(item.id));
 
   const dashboardQuery = useQuery({
     queryKey: ["accounting-dashboard"],
@@ -355,16 +410,11 @@ export const AccountingManager = () => {
     enabled: tab === "cash-book"
   });
 
-  const bankAccountsQuery = useQuery({
-    queryKey: ["accounting-bank-accounts"],
-    queryFn: () => unwrap<BankAccountRecord[]>(api.get("/accounting/bank-accounts")),
-    enabled: tab === "bank-accounts"
-  });
+
 
   const settingsQuery = useQuery({
     queryKey: ["accounting-settings"],
-    queryFn: () => unwrap<AccountingSettingsInput & { _id: string }>(api.get("/accounting/settings")),
-    enabled: isAdmin && tab === "settings"
+    queryFn: () => unwrap<AccountingSettingsInput & { _id: string }>(api.get("/accounting/settings"))
   });
 
   const accountantsQuery = useQuery({
@@ -373,19 +423,44 @@ export const AccountingManager = () => {
     enabled: isAdmin && tab === "accountants"
   });
 
+  const auditLogsQuery = useQuery({
+    queryKey: ["accounting-audit-logs"],
+    queryFn: () => unwrap<AuditLogRecord[]>(api.get("/accounting/audit-logs")),
+    enabled: canViewAudit && tab === "audit-logs"
+  });
+
+  const reverseCollection = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      unwrap<{ message?: string }>(api.post(`/accounting/collections/${id}/reverse`, { reason })),
+    onSuccess: (data) => {
+      toast.success(data?.message ?? "Reversal processed");
+      void invalidateAccounting();
+    },
+    onError: (error: Error) => toast.error(parseErrorMessage(error))
+  });
+
   const reportQuery = useQuery({
     queryKey: ["accounting-report", selectedReport, reportMonth, reportDate],
     queryFn: () =>
-      unwrap<{ data: unknown[] }>(
+      unwrap<FinancialSummaryReport | { data: unknown[] }>(
         api.get(`/accounting/reports/${selectedReport}`, {
           params: {
-            monthBs: selectedReport.includes("monthly") || selectedReport === "salary-payments" ? reportMonth : undefined,
+            monthBs: reportUsesMonthFilter(selectedReport) ? reportMonth : undefined,
             dateBs: selectedReport === "daily-fee-collection" ? reportDate : undefined
           }
         })
       ),
     enabled: tab === "reports"
   });
+
+  const financialSummary =
+    selectedReport === "financial-summary" && reportQuery.data && "sections" in reportQuery.data
+      ? reportQuery.data
+      : null;
+  const standardReportRows =
+    selectedReport !== "financial-summary" && reportQuery.data && "data" in reportQuery.data
+      ? (reportQuery.data.data ?? [])
+      : (financialSummary?.data ?? []);
 
   const studentHistoryQuery = useQuery({
     queryKey: ["student-financial-history", selectedStudentId],
@@ -404,7 +479,7 @@ export const AccountingManager = () => {
       queryClient.invalidateQueries({ queryKey: ["accounting-income"] }),
       queryClient.invalidateQueries({ queryKey: ["accounting-salaries"] }),
       queryClient.invalidateQueries({ queryKey: ["accounting-cash-book"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-bank-accounts"] }),
+
       queryClient.invalidateQueries({ queryKey: ["students"] })
     ]);
   };
@@ -477,16 +552,6 @@ export const AccountingManager = () => {
     onSuccess: async () => {
       toast.success("Salary payment recorded");
       setSalaryForm(defaultSalary);
-      await invalidateAccounting();
-    },
-    onError: (e) => toast.error(parseErrorMessage(e))
-  });
-
-  const createBank = useMutation({
-    mutationFn: (payload: BankAccountInput) => unwrap(api.post("/accounting/bank-accounts", payload)),
-    onSuccess: async () => {
-      toast.success("Bank account created");
-      setBankForm(defaultBank);
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e))
@@ -568,6 +633,54 @@ export const AccountingManager = () => {
     onError: (e) => toast.error(parseErrorMessage(e))
   });
 
+  const updateExpense = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: AccountingExpenseInput }) =>
+      unwrap(api.put(`/accounting/expenses/${id}`, payload)),
+    onSuccess: async () => {
+      toast.success("Expense updated");
+      setEditingExpense(null);
+      setExpenseForm(defaultExpense);
+      await invalidateAccounting();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e))
+  });
+
+  const updatePurchase = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<AccountingPurchaseInput> }) =>
+      unwrap(api.put(`/accounting/purchases/${id}`, payload)),
+    onSuccess: async () => {
+      toast.success("Purchase updated");
+      setEditingPurchase(null);
+      setPurchaseForm(defaultPurchase);
+      await invalidateAccounting();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e))
+  });
+
+  const updateIncome = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: AccountingIncomeInput }) =>
+      unwrap(api.put(`/accounting/income/${id}`, payload)),
+    onSuccess: async () => {
+      toast.success("Income updated");
+      setEditingIncome(null);
+      setIncomeForm(defaultIncome);
+      await invalidateAccounting();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e))
+  });
+
+  const updateSalary = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<SalaryPaymentInput> }) =>
+      unwrap(api.put(`/accounting/salaries/${id}`, payload)),
+    onSuccess: async () => {
+      toast.success("Salary payment updated");
+      setEditingSalary(null);
+      setSalaryForm(defaultSalary);
+      await invalidateAccounting();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e))
+  });
+
   useEffect(() => {
     if (settingsQuery.data) {
       setSettingsForm({
@@ -575,8 +688,19 @@ export const AccountingManager = () => {
         lateFineGraceDays: settingsQuery.data.lateFineGraceDays,
         receiptPrefix: settingsQuery.data.receiptPrefix,
         autoReceiptNumber: settingsQuery.data.autoReceiptNumber,
-        defaultPaymentMethod: settingsQuery.data.defaultPaymentMethod
+        defaultPaymentMethod: settingsQuery.data.defaultPaymentMethod,
+        voucherPrefix: settingsQuery.data.voucherPrefix ?? "JV",
+        currentFiscalYearBs: settingsQuery.data.currentFiscalYearBs,
+        auditLockDateBs: settingsQuery.data.auditLockDateBs ?? "",
+        panNumber: settingsQuery.data.panNumber ?? "",
+        vatNumber: settingsQuery.data.vatNumber ?? "",
+        tdsEnabled: settingsQuery.data.tdsEnabled ?? false,
+        institutionSignatureUrl: settingsQuery.data.institutionSignatureUrl ?? ""
       });
+      setCollectionForm((current) => ({
+        ...current,
+        paymentMethod: current.paymentMethod || settingsQuery.data.defaultPaymentMethod || "CASH"
+      }));
     }
   }, [settingsQuery.data]);
 
@@ -600,7 +724,7 @@ export const AccountingManager = () => {
     [structuresQuery.data, collectionForm.feeStructureId]
   );
 
-  if (!user || (!ACCOUNTING_MANAGER_ROLES.includes(user.role) && user.role !== "SUPER_ADMIN")) {
+  if (!user || !ACCOUNTING_ACCESS_ROLES.includes(user.role)) {
     return null;
   }
 
@@ -617,18 +741,39 @@ export const AccountingManager = () => {
     window.open(`${api.defaults.baseURL}/accounting/collections/${id}/receipt`, "_blank");
   };
 
-  const exportReport = (format: "csv") => {
+  const exportReport = (format: "csv" | "xlsx") => {
+    if (format === "xlsx") {
+      if (financialSummary) {
+        downloadFinancialSummaryExcel(financialSummary);
+        toast.success("Financial summary Excel downloaded");
+        return;
+      }
+
+      const reportLabel = reportTypes.find((item) => item.id === selectedReport)?.label ?? selectedReport;
+      if (standardReportRows.length === 0) {
+        toast.error("No report data to export. Adjust filters or wait for the report to load.");
+        return;
+      }
+      downloadReportExcel(selectedReport, reportLabel, standardReportRows);
+      toast.success("Excel report downloaded");
+      return;
+    }
+
     const params = new URLSearchParams({ format });
-    if (selectedReport.includes("monthly") || selectedReport === "salary-payments") params.set("monthBs", reportMonth);
+    if (reportUsesMonthFilter(selectedReport)) params.set("monthBs", reportMonth);
     if (selectedReport === "daily-fee-collection") params.set("dateBs", reportDate);
-    window.open(`${api.defaults.baseURL}/accounting/reports/${selectedReport}?${params.toString()}`, "_blank");
+    const reportMeta = reportTypes.find((item) => item.id === selectedReport);
+    const basePath = reportMeta && "ledger" in reportMeta && reportMeta.ledger
+      ? `/accounting/ledger-reports/${selectedReport}`
+      : `/accounting/reports/${selectedReport}`;
+    window.open(`${api.defaults.baseURL}${basePath}?${params.toString()}`, "_blank");
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Accounting & Finance"
-        description="Fee collection, salaries, expenses, purchases, income, cash book, bank accounts, and financial reports."
+        description="Fee collection, salaries, expenses, purchases, income, cash book, and financial reports."
       />
 
       <DashboardBannerStrip />
@@ -667,16 +812,10 @@ export const AccountingManager = () => {
                   </CardContent>
                 </Card>
               ))}
-              <Card className="md:col-span-2">
+              <Card>
                 <CardHeader><CardTitle>Cash Balance</CardTitle></CardHeader>
                 <CardContent className="text-2xl font-semibold text-emerald-700">
                   {formatCurrencyNpr(dashboardQuery.data?.cashBalanceNpr ?? 0)}
-                </CardContent>
-              </Card>
-              <Card className="md:col-span-2">
-                <CardHeader><CardTitle>Bank Balance</CardTitle></CardHeader>
-                <CardContent className="text-2xl font-semibold text-sky-700">
-                  {formatCurrencyNpr(dashboardQuery.data?.bankBalanceNpr ?? 0)}
                 </CardContent>
               </Card>
             </div>
@@ -719,6 +858,8 @@ export const AccountingManager = () => {
                 </CardContent>
               </Card>
             </div>
+
+            {dashboardQuery.data ? <AccountingDashboardCharts data={dashboardQuery.data} /> : null}
 
             <div className="grid gap-6 xl:grid-cols-2">
               <Card>
@@ -842,11 +983,19 @@ export const AccountingManager = () => {
                                 setStructureForm({
                                   title: structure.title,
                                   classIds: structure.classIds ?? [],
+                                  batchIds: structure.batchIds ?? [],
+                                  yearIds: structure.yearIds ?? [],
+                                  faculty: structure.faculty ?? "",
+                                  program: structure.program ?? "",
                                   feeType: structure.feeType,
                                   frequency: structure.frequency ?? "MONTHLY",
                                   academicYearBs: structure.academicYearBs ?? "2083/2084",
+                                  semesterBs: structure.semesterBs ?? "",
                                   amountNpr: structure.amountNpr,
-                                  isOptional: structure.isOptional ?? false
+                                  installmentCount: structure.installmentCount,
+                                  isOptional: structure.isOptional ?? false,
+                                  status: structure.status ?? "ACTIVE",
+                                  version: structure.version ?? 1
                                 });
                               }}>Edit</Button>
                               <Button size="sm" variant="destructive" onClick={() => void deleteStructure.mutateAsync(structure._id)}>Delete</Button>
@@ -868,10 +1017,15 @@ export const AccountingManager = () => {
                 className="grid gap-3 md:grid-cols-2"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const parsed = enhancedFeeCollectionSchema.safeParse({
-                    ...collectionForm,
-                    paymentMethod: collectionForm.paymentMethod || settingsForm.defaultPaymentMethod || "CASH"
-                  });
+                  const parsed = enhancedFeeCollectionSchema.safeParse(
+                    emptyIdsToUndefined(
+                      {
+                        ...collectionForm,
+                        paymentMethod: collectionForm.paymentMethod || settingsForm.defaultPaymentMethod || "CASH"
+                      },
+                      ["feeStructureId", "studentId"]
+                    )
+                  );
                   if (!parsed.success) return toast.error(parsed.error.issues[0]?.message ?? "Invalid collection");
                   void collectFee.mutateAsync(parsed.data);
                 }}
@@ -891,10 +1045,16 @@ export const AccountingManager = () => {
                     onChange={(e) => {
                       const studentId = e.target.value;
                       const structure = (structuresQuery.data ?? []).find((item) => item._id === collectionForm.feeStructureId);
+                      const account = (studentAccountsQuery.data ?? []).find((item) => item.student._id === studentId);
+                      const suggestedLateFine =
+                        account && account.remainingDueNpr > 0 && settingsForm.lateFinePercent > 0
+                          ? Math.round((account.remainingDueNpr * settingsForm.lateFinePercent) / 100)
+                          : 0;
                       setCollectionForm((c) => ({
                         ...c,
                         studentId,
-                        currentChargesNpr: structure?.amountNpr ?? c.currentChargesNpr
+                        currentChargesNpr: structure?.amountNpr ?? c.currentChargesNpr,
+                        lateFeeNpr: suggestedLateFine
                       }));
                     }}
                   >
@@ -957,6 +1117,15 @@ export const AccountingManager = () => {
                     <option value="yes">Installment</option>
                   </Select>
                 </FormField>
+                <div className="md:col-span-2">
+                  <FormField label="Notes (optional)">
+                    <Textarea
+                      value={collectionForm.notes ?? ""}
+                      onChange={(e) => setCollectionForm((c) => ({ ...c, notes: e.target.value }))}
+                      placeholder="Payment remarks, cheque number, scholarship reference, etc."
+                    />
+                  </FormField>
+                </div>
                 <div className="md:col-span-2 flex justify-end">
                   <Button type="submit" disabled={collectFee.isPending}>Collect Fee</Button>
                 </div>
@@ -992,7 +1161,27 @@ export const AccountingManager = () => {
                         <Td>{formatCurrencyNpr(row.remainingDueNpr ?? 0)}</Td>
                         <Td>{row.paymentMethod.replace(/_/g, " ")}</Td>
                         <Td>
-                          <Button size="sm" variant="outline" onClick={() => downloadReceipt(row._id)}>PDF</Button>
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="sm" variant="outline" onClick={() => downloadReceipt(row._id)}>
+                              {(row.printCount ?? 0) > 0 ? "Reprint" : "Print"}
+                            </Button>
+                            {canReverse ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-red-600"
+                                disabled={reverseCollection.isPending}
+                                onClick={() => {
+                                  const reason = window.prompt("Reason for reversing this collection (required):");
+                                  if (reason && reason.length >= 3) {
+                                    reverseCollection.mutate({ id: row._id, reason });
+                                  }
+                                }}
+                              >
+                                Reverse
+                              </Button>
+                            ) : null}
+                          </div>
                         </Td>
                       </tr>
                     );
@@ -1033,9 +1222,11 @@ export const AccountingManager = () => {
                       {filteredStudentAccounts.map((account) => (
                         <tr key={account.student._id}>
                           <Td>
-                            <div className="font-medium">{account.student.user.fullName}</div>
-                            <div className="text-xs text-slate-500">{account.student.admissionNumber}</div>
-                            <div className="text-xs text-slate-500">{account.student.user.email}</div>
+                            <StudentNameLink
+                              studentId={account.student._id}
+                              name={account.student.user.fullName}
+                              subtitle={`${account.student.admissionNumber} · ${account.student.user.email}`}
+                            />
                           </Td>
                           <Td>{account.className} {account.sectionName}</Td>
                           <Td>
@@ -1078,7 +1269,9 @@ export const AccountingManager = () => {
       {tab === "salaries" ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>Pay Salary</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>{editingSalary ? "Edit Salary Payment" : "Pay Salary"}</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-3">
               <FormField label="Employee Type">
                 <Select
@@ -1162,25 +1355,80 @@ export const AccountingManager = () => {
                   {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replace(/_/g, " ")}</option>)}
                 </Select>
               </FormField>
-              <Button onClick={() => {
-                const parsed = salaryPaymentSchema.safeParse(salaryForm);
-                if (!parsed.success) return toast.error("Invalid salary data");
-                void createSalary.mutateAsync(parsed.data);
-              }}>Record Salary</Button>
+              <div className="flex gap-2">
+                {editingSalary ? (
+                  <Button type="button" variant="outline" onClick={() => {
+                    setEditingSalary(null);
+                    setSalaryForm(defaultSalary);
+                  }}>Cancel</Button>
+                ) : null}
+                <Button onClick={() => {
+                  const parsed = salaryPaymentSchema.safeParse(
+                    emptyIdsToUndefined(salaryForm as Record<string, unknown>, ["teacherId", "staffId"])
+                  );
+                  if (!parsed.success) return toast.error(parsed.error.issues[0]?.message ?? "Invalid salary data");
+                  if (editingSalary) {
+                    void updateSalary.mutateAsync({ id: editingSalary._id, payload: parsed.data });
+                  } else {
+                    void createSalary.mutateAsync(parsed.data);
+                  }
+                }}>{editingSalary ? "Update Salary" : "Record Salary"}</Button>
+              </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle>Salary History</CardTitle></CardHeader>
             <CardContent className="overflow-x-auto">
               <Table>
-                <TableHead><tr><Th>Month</Th><Th>Employee</Th><Th>Net Salary</Th><Th>Status</Th></tr></TableHead>
+                <TableHead><tr><Th>Month</Th><Th>Employee</Th><Th>Net Salary</Th><Th>Status</Th><Th /></tr></TableHead>
                 <TableBody>
                   {(salariesQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
                       <Td>{row.monthBs}</Td>
-                      <Td>{row.teacher?.user.fullName ?? row.collegeStaff?.fullName ?? row.staffName ?? "—"}</Td>
+                      <Td>{getSalaryEmployeeLabel(row)}</Td>
                       <Td>{formatCurrencyNpr(row.netSalaryNpr)}</Td>
                       <Td><Badge>{row.status}</Badge></Td>
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" onClick={() => {
+                            setEditingSalary(row);
+                            setSalaryForm({
+                              employeeType: row.employeeType,
+                              teacherId: row.teacherId ?? "",
+                              staffId: row.staffId ?? "",
+                              staffName: row.staffName ?? "",
+                              monthBs: row.monthBs,
+                              basicSalaryNpr: row.basicSalaryNpr,
+                              allowancesNpr: row.allowancesNpr,
+                              bonusNpr: row.bonusNpr,
+                              advanceSalaryNpr: row.advanceSalaryNpr,
+                              loanDeductionNpr: row.loanDeductionNpr,
+                              taxNpr: row.taxNpr,
+                              otherDeductionsNpr: row.otherDeductionsNpr,
+                              status: row.status,
+                              paidDateBs: row.paidDateBs ?? "",
+                              paymentMethod: row.paymentMethod
+                            });
+                          }}>Edit</Button>
+                          {row.status !== "PAID" ? (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                if (!row.paidDateBs) {
+                                  toast.error("Set paid date (BS) using Edit before marking as paid");
+                                  return;
+                                }
+                                void updateSalary.mutateAsync({
+                                  id: row._id,
+                                  payload: { status: "PAID", paidDateBs: row.paidDateBs }
+                                });
+                              }}
+                            >
+                              Mark Paid
+                            </Button>
+                          ) : null}
+                        </div>
+                      </Td>
                     </tr>
                   ))}
                 </TableBody>
@@ -1193,7 +1441,7 @@ export const AccountingManager = () => {
       {tab === "expenses" ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>Record Expense</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{editingExpense ? "Edit Expense" : "Record Expense"}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <FormField label="Category">
                 <Select value={expenseForm.category} onChange={(e) => setExpenseForm((c) => ({ ...c, category: e.target.value as AccountingExpenseInput["category"] }))}>
@@ -1209,18 +1457,30 @@ export const AccountingManager = () => {
                 </Select>
               </FormField>
               <FormField label="Description"><Textarea value={expenseForm.description} onChange={(e) => setExpenseForm((c) => ({ ...c, description: e.target.value }))} /></FormField>
-              <Button onClick={() => {
-                const parsed = accountingExpenseSchema.safeParse(expenseForm);
-                if (!parsed.success) return toast.error("Invalid expense");
-                void createExpense.mutateAsync(parsed.data);
-              }}>Save Expense</Button>
+              <div className="flex gap-2">
+                {editingExpense ? (
+                  <Button type="button" variant="outline" onClick={() => {
+                    setEditingExpense(null);
+                    setExpenseForm(defaultExpense);
+                  }}>Cancel</Button>
+                ) : null}
+                <Button onClick={() => {
+                  const parsed = accountingExpenseSchema.safeParse(expenseForm);
+                  if (!parsed.success) return toast.error("Invalid expense");
+                  if (editingExpense) {
+                    void updateExpense.mutateAsync({ id: editingExpense._id, payload: parsed.data });
+                  } else {
+                    void createExpense.mutateAsync(parsed.data);
+                  }
+                }}>{editingExpense ? "Update Expense" : "Save Expense"}</Button>
+              </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle>Expense Records</CardTitle></CardHeader>
             <CardContent className="overflow-x-auto">
               <Table>
-                <TableHead><tr><Th>Date</Th><Th>Category</Th><Th>Vendor</Th><Th>Amount</Th>{isAdmin ? <Th /> : null}</tr></TableHead>
+                <TableHead><tr><Th>Date</Th><Th>Category</Th><Th>Vendor</Th><Th>Amount</Th><Th /></tr></TableHead>
                 <TableBody>
                   {(expensesQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
@@ -1228,11 +1488,25 @@ export const AccountingManager = () => {
                       <Td>{row.category}</Td>
                       <Td>{row.vendor}</Td>
                       <Td>{formatCurrencyNpr(row.amountNpr)}</Td>
-                      {isAdmin ? (
-                        <Td>
-                          <Button size="sm" variant="destructive" onClick={() => void deleteExpense.mutateAsync(row._id)}>Delete</Button>
-                        </Td>
-                      ) : null}
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" onClick={() => {
+                            setEditingExpense(row);
+                            setExpenseForm({
+                              category: row.category as AccountingExpenseInput["category"],
+                              vendor: row.vendor,
+                              dateBs: row.dateBs,
+                              amountNpr: row.amountNpr,
+                              paymentMethod: row.paymentMethod,
+                              description: row.description,
+                              attachmentUrl: row.attachmentUrl ?? ""
+                            });
+                          }}>Edit</Button>
+                          {isAdmin ? (
+                            <Button size="sm" variant="destructive" onClick={() => void deleteExpense.mutateAsync(row._id)}>Delete</Button>
+                          ) : null}
+                        </div>
+                      </Td>
                     </tr>
                   ))}
                 </TableBody>
@@ -1245,7 +1519,7 @@ export const AccountingManager = () => {
       {tab === "purchases" ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>Record Purchase</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{editingPurchase ? "Edit Purchase" : "Record Purchase"}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <FormField label="Category">
                 <Select value={purchaseForm.category} onChange={(e) => setPurchaseForm((c) => ({ ...c, category: e.target.value as AccountingPurchaseInput["category"] }))}>
@@ -1262,18 +1536,38 @@ export const AccountingManager = () => {
                   {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </Select>
               </FormField>
-              <Button onClick={() => {
-                const parsed = accountingPurchaseSchema.safeParse(purchaseForm);
-                if (!parsed.success) return toast.error("Invalid purchase");
-                void createPurchase.mutateAsync(parsed.data);
-              }}>Save Purchase</Button>
+              <FormField label="Payment Method">
+                <Select value={purchaseForm.paymentMethod} onChange={(e) => setPurchaseForm((c) => ({ ...c, paymentMethod: e.target.value as AccountingPurchaseInput["paymentMethod"] }))}>
+                  {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replace(/_/g, " ")}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Description">
+                <Textarea value={purchaseForm.description ?? ""} onChange={(e) => setPurchaseForm((c) => ({ ...c, description: e.target.value }))} />
+              </FormField>
+              <div className="flex gap-2">
+                {editingPurchase ? (
+                  <Button type="button" variant="outline" onClick={() => {
+                    setEditingPurchase(null);
+                    setPurchaseForm(defaultPurchase);
+                  }}>Cancel</Button>
+                ) : null}
+                <Button onClick={() => {
+                  const parsed = accountingPurchaseSchema.safeParse(purchaseForm);
+                  if (!parsed.success) return toast.error("Invalid purchase");
+                  if (editingPurchase) {
+                    void updatePurchase.mutateAsync({ id: editingPurchase._id, payload: parsed.data });
+                  } else {
+                    void createPurchase.mutateAsync(parsed.data);
+                  }
+                }}>{editingPurchase ? "Update Purchase" : "Save Purchase"}</Button>
+              </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle>Purchase Records</CardTitle></CardHeader>
             <CardContent className="overflow-x-auto">
               <Table>
-                <TableHead><tr><Th>Date</Th><Th>Category</Th><Th>Invoice</Th><Th>Total</Th><Th>Status</Th>{isAdmin ? <Th /> : null}</tr></TableHead>
+                <TableHead><tr><Th>Date</Th><Th>Category</Th><Th>Invoice</Th><Th>Total</Th><Th>Status</Th><Th /></tr></TableHead>
                 <TableBody>
                   {(purchasesQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
@@ -1282,11 +1576,40 @@ export const AccountingManager = () => {
                       <Td>{row.invoiceNumber}</Td>
                       <Td>{formatCurrencyNpr(row.totalAmountNpr)}</Td>
                       <Td><Badge>{row.paymentStatus}</Badge></Td>
-                      {isAdmin ? (
-                        <Td>
-                          <Button size="sm" variant="destructive" onClick={() => void deletePurchase.mutateAsync(row._id)}>Delete</Button>
-                        </Td>
-                      ) : null}
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" onClick={() => {
+                            setEditingPurchase(row);
+                            setPurchaseForm({
+                              category: row.category as AccountingPurchaseInput["category"],
+                              vendor: row.vendor,
+                              purchaseDateBs: row.purchaseDateBs,
+                              invoiceNumber: row.invoiceNumber,
+                              quantity: row.quantity,
+                              unitPriceNpr: row.unitPriceNpr,
+                              paymentStatus: row.paymentStatus,
+                              paymentMethod: row.paymentMethod,
+                              description: row.description ?? ""
+                            });
+                          }}>Edit</Button>
+                          {row.paymentStatus !== "PAID" ? (
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                void updatePurchase.mutateAsync({
+                                  id: row._id,
+                                  payload: { paymentStatus: "PAID" }
+                                })
+                              }
+                            >
+                              Mark Paid
+                            </Button>
+                          ) : null}
+                          {isAdmin ? (
+                            <Button size="sm" variant="destructive" onClick={() => void deletePurchase.mutateAsync(row._id)}>Delete</Button>
+                          ) : null}
+                        </div>
+                      </Td>
                     </tr>
                   ))}
                 </TableBody>
@@ -1299,7 +1622,7 @@ export const AccountingManager = () => {
       {tab === "income" ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>Record Income</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{editingIncome ? "Edit Income" : "Record Income"}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <FormField label="Category">
                 <Select value={incomeForm.category} onChange={(e) => setIncomeForm((c) => ({ ...c, category: e.target.value as AccountingIncomeInput["category"] }))}>
@@ -1309,18 +1632,35 @@ export const AccountingManager = () => {
               <FormField label="Source"><Input value={incomeForm.source} onChange={(e) => setIncomeForm((c) => ({ ...c, source: e.target.value }))} /></FormField>
               <FormField label="Date"><NepaliDateField value={incomeForm.dateBs} onChange={(v) => setIncomeForm((c) => ({ ...c, dateBs: v }))} /></FormField>
               <FormField label="Amount"><Input type="number" value={incomeForm.amountNpr} onChange={(e) => setIncomeForm((c) => ({ ...c, amountNpr: e.target.valueAsNumber }))} /></FormField>
-              <Button onClick={() => {
-                const parsed = accountingIncomeSchema.safeParse(incomeForm);
-                if (!parsed.success) return toast.error("Invalid income");
-                void createIncome.mutateAsync(parsed.data);
-              }}>Save Income</Button>
+              <FormField label="Payment Method">
+                <Select value={incomeForm.paymentMethod} onChange={(e) => setIncomeForm((c) => ({ ...c, paymentMethod: e.target.value as AccountingIncomeInput["paymentMethod"] }))}>
+                  {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replace(/_/g, " ")}</option>)}
+                </Select>
+              </FormField>
+              <div className="flex gap-2">
+                {editingIncome ? (
+                  <Button type="button" variant="outline" onClick={() => {
+                    setEditingIncome(null);
+                    setIncomeForm(defaultIncome);
+                  }}>Cancel</Button>
+                ) : null}
+                <Button onClick={() => {
+                  const parsed = accountingIncomeSchema.safeParse(incomeForm);
+                  if (!parsed.success) return toast.error("Invalid income");
+                  if (editingIncome) {
+                    void updateIncome.mutateAsync({ id: editingIncome._id, payload: parsed.data });
+                  } else {
+                    void createIncome.mutateAsync(parsed.data);
+                  }
+                }}>{editingIncome ? "Update Income" : "Save Income"}</Button>
+              </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle>Income Records</CardTitle></CardHeader>
             <CardContent className="overflow-x-auto">
               <Table>
-                <TableHead><tr><Th>Date</Th><Th>Category</Th><Th>Source</Th><Th>Amount</Th>{isAdmin ? <Th /> : null}</tr></TableHead>
+                <TableHead><tr><Th>Date</Th><Th>Category</Th><Th>Source</Th><Th>Amount</Th><Th /></tr></TableHead>
                 <TableBody>
                   {(incomeQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
@@ -1328,11 +1668,24 @@ export const AccountingManager = () => {
                       <Td>{row.category}</Td>
                       <Td>{row.source}</Td>
                       <Td>{formatCurrencyNpr(row.amountNpr)}</Td>
-                      {isAdmin ? (
-                        <Td>
-                          <Button size="sm" variant="destructive" onClick={() => void deleteIncome.mutateAsync(row._id)}>Delete</Button>
-                        </Td>
-                      ) : null}
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" onClick={() => {
+                            setEditingIncome(row);
+                            setIncomeForm({
+                              category: row.category as AccountingIncomeInput["category"],
+                              source: row.source,
+                              dateBs: row.dateBs,
+                              amountNpr: row.amountNpr,
+                              paymentMethod: row.paymentMethod,
+                              description: row.description ?? ""
+                            });
+                          }}>Edit</Button>
+                          {isAdmin ? (
+                            <Button size="sm" variant="destructive" onClick={() => void deleteIncome.mutateAsync(row._id)}>Delete</Button>
+                          ) : null}
+                        </div>
+                      </Td>
                     </tr>
                   ))}
                 </TableBody>
@@ -1388,49 +1741,16 @@ export const AccountingManager = () => {
         </div>
       ) : null}
 
-      {tab === "bank-accounts" ? (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {isAdmin ? (
-            <Card>
-              <CardHeader><CardTitle>Add Bank Account</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <FormField label="Bank Name"><Input value={bankForm.bankName} onChange={(e) => setBankForm((c) => ({ ...c, bankName: e.target.value }))} /></FormField>
-                <FormField label="Account Name"><Input value={bankForm.accountName} onChange={(e) => setBankForm((c) => ({ ...c, accountName: e.target.value }))} /></FormField>
-                <FormField label="Account Number"><Input value={bankForm.accountNumber} onChange={(e) => setBankForm((c) => ({ ...c, accountNumber: e.target.value }))} /></FormField>
-                <FormField label="Opening Balance"><Input type="number" value={bankForm.openingBalanceNpr} onChange={(e) => setBankForm((c) => ({ ...c, openingBalanceNpr: e.target.valueAsNumber }))} /></FormField>
-                <Button onClick={() => {
-                  const parsed = bankAccountSchema.safeParse(bankForm);
-                  if (!parsed.success) return toast.error("Invalid bank account");
-                  void createBank.mutateAsync(parsed.data);
-                }}>Save Account</Button>
-              </CardContent>
-            </Card>
-          ) : null}
-          <Card className={isAdmin ? "" : "lg:col-span-2"}>
-            <CardHeader><CardTitle>Bank Accounts</CardTitle></CardHeader>
-            <CardContent className="overflow-x-auto">
-              <Table>
-                <TableHead><tr><Th>Bank</Th><Th>Account</Th><Th>Number</Th><Th>Balance</Th><Th>Status</Th></tr></TableHead>
-                <TableBody>
-                  {(bankAccountsQuery.data ?? []).map((row) => (
-                    <tr key={row._id}>
-                      <Td>{row.bankName}</Td>
-                      <Td>{row.accountName}</Td>
-                      <Td>{row.accountNumber}</Td>
-                      <Td>{formatCurrencyNpr(row.currentBalanceNpr)}</Td>
-                      <Td><Badge>{row.isActive ? "Active" : "Inactive"}</Badge></Td>
-                    </tr>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </div>
-      ) : null}
+
 
       {tab === "reports" ? (
         <Card>
-          <CardHeader><CardTitle>Financial Reports</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Financial Reports</CardTitle>
+            <p className="text-sm text-slate-500">
+              Generate fee, income, expense, purchase, and salary reports. Use Financial Summary for a complete monthly overview.
+            </p>
+          </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-3">
               <Select value={selectedReport} onChange={(e) => setSelectedReport(e.target.value as typeof selectedReport)}>
@@ -1441,13 +1761,97 @@ export const AccountingManager = () => {
                   <NepaliDateField value={reportDate} onChange={setReportDate} />
                 </div>
               ) : null}
-              {selectedReport.includes("monthly") || selectedReport === "salary-payments" ? (
+              {reportUsesMonthFilter(selectedReport) ? (
                 <Input value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} placeholder="YYYY-MM" />
               ) : null}
               <Button variant="outline" onClick={() => exportReport("csv")}>Export CSV</Button>
+              <Button variant="outline" onClick={() => exportReport("xlsx")}>Export Excel</Button>
             </div>
             {reportQuery.isLoading ? (
               <LoadingState />
+            ) : financialSummary ? (
+              <div className="space-y-6">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                  {[
+                    { label: "Fee Collections", value: financialSummary.totals.feeCollectionNpr },
+                    { label: "Income", value: financialSummary.totals.incomeNpr },
+                    { label: "Expenses", value: financialSummary.totals.expenseNpr },
+                    { label: "Purchases", value: financialSummary.totals.purchaseNpr },
+                    { label: "Salaries", value: financialSummary.totals.salaryNpr },
+                    { label: "Net Surplus", value: financialSummary.totals.netSurplusNpr }
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{item.label}</p>
+                      <p className="mt-1 text-lg font-semibold text-slate-900">{formatCurrencyNpr(item.value)}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHead>
+                      <tr>
+                        {REPORT_COLUMNS["financial-summary"].map((column) => <Th key={column.key}>{column.label}</Th>)}
+                      </tr>
+                    </TableHead>
+                    <TableBody>
+                      {getReportRows("financial-summary", financialSummary.data).map((row, index) => (
+                        <tr key={index}>
+                          {REPORT_COLUMNS["financial-summary"].map((column) => (
+                            <Td key={column.key}>{getReportCellValue(row, column)}</Td>
+                          ))}
+                        </tr>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium text-slate-700">Detailed breakdown for {financialSummary.period.label}</p>
+                    <Select
+                      value={summarySection}
+                      onChange={(e) => setSummarySection(e.target.value as typeof summarySection)}
+                    >
+                      {FINANCIAL_SUMMARY_SECTIONS.map((section) => (
+                        <option key={section.key} value={section.key}>{section.label}</option>
+                      ))}
+                    </Select>
+                  </div>
+                  {(() => {
+                    const activeSection = FINANCIAL_SUMMARY_SECTIONS.find((section) => section.key === summarySection);
+                    const sectionRows = financialSummary.sections[summarySection] ?? [];
+                    const sectionReportType = activeSection?.reportType ?? "expenses";
+
+                    return (
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHead>
+                            <tr>
+                              {REPORT_COLUMNS[sectionReportType].map((column) => <Th key={column.key}>{column.label}</Th>)}
+                            </tr>
+                          </TableHead>
+                          <TableBody>
+                            {sectionRows.length === 0 ? (
+                              <tr>
+                                <Td colSpan={REPORT_COLUMNS[sectionReportType].length}>
+                                  No {activeSection?.label.toLowerCase() ?? "records"} for the selected month.
+                                </Td>
+                              </tr>
+                            ) : (
+                              getReportRows(sectionReportType, sectionRows).map((row, index) => (
+                                <tr key={index}>
+                                  {REPORT_COLUMNS[sectionReportType].map((column) => (
+                                    <Td key={column.key}>{getReportCellValue(row, column)}</Td>
+                                  ))}
+                                </tr>
+                              ))
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -1457,12 +1861,12 @@ export const AccountingManager = () => {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {getReportRows(selectedReport, reportQuery.data?.data ?? []).length === 0 ? (
+                    {standardReportRows.length === 0 ? (
                       <tr>
                         <Td colSpan={REPORT_COLUMNS[selectedReport].length}>No report data for the selected filters.</Td>
                       </tr>
                     ) : (
-                      getReportRows(selectedReport, reportQuery.data?.data ?? []).map((row, index) => (
+                      getReportRows(selectedReport, standardReportRows).map((row, index) => (
                         <tr key={index}>
                           {REPORT_COLUMNS[selectedReport].map((column) => (
                             <Td key={column.key}>{getReportCellValue(row, column)}</Td>
@@ -1477,6 +1881,11 @@ export const AccountingManager = () => {
           </CardContent>
         </Card>
       ) : null}
+
+      {tab === "refunds" ? <FeeRefundsPanel canWrite={canWrite && ACCOUNTING_MANAGER_ROLES.includes(user.role)} /> : null}
+      {tab === "chart-of-accounts" ? <ChartOfAccountsPanel isAdmin={isAdmin} /> : null}
+      {tab === "journal-entries" ? <JournalEntriesPanel canWrite={canWrite && !isCashier} /> : null}
+      {tab === "vendors" ? <VendorsPanel canWrite={canWrite && !isCashier} /> : null}
 
       {tab === "settings" && isAdmin ? (
         <Card>
@@ -1515,6 +1924,56 @@ export const AccountingManager = () => {
                 </div>
               </>
             ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {tab === "approvals" ? <FinancialApprovalsPanel canApprove={canApprove} /> : null}
+
+      {tab === "audit-logs" && canViewAudit ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Accounting Audit Trail</CardTitle>
+            <p className="text-sm text-slate-500">
+              Print, reprint, reverse, approval, and mutation events with user, timestamp, and device info.
+            </p>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            {auditLogsQuery.isLoading ? (
+              <LoadingState />
+            ) : (auditLogsQuery.data ?? []).length === 0 ? (
+              <EmptyState title="No audit entries yet" description="Financial actions will be logged here automatically." />
+            ) : (
+              <Table>
+                <TableHead>
+                  <tr>
+                    <Th>When</Th>
+                    <Th>User</Th>
+                    <Th>Action</Th>
+                    <Th>Entity</Th>
+                    <Th>IP</Th>
+                    <Th>Changes</Th>
+                  </tr>
+                </TableHead>
+                <TableBody>
+                  {(auditLogsQuery.data ?? []).map((log) => {
+                    const actor = log.actorUserId as { fullName?: string } | string | undefined;
+                    const actorName = typeof actor === "object" ? actor?.fullName ?? log.actorRole : log.actorRole;
+                    const hasChange = log.before != null || log.after != null;
+                    return (
+                      <tr key={log._id}>
+                        <Td>{log.createdAt ? new Date(log.createdAt).toLocaleString() : "—"}</Td>
+                        <Td>{actorName}</Td>
+                        <Td>{log.action.replace(/\./g, " · ")}</Td>
+                        <Td>{log.entity}</Td>
+                        <Td className="font-mono text-xs">{log.ipAddress ?? "—"}</Td>
+                        <Td className="text-xs text-slate-600">{hasChange ? "Before/after recorded" : "—"}</Td>
+                      </tr>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       ) : null}

@@ -7,7 +7,7 @@ import {
   type CollegeStaffCategory,
   type CollegeStaffInput,
   type CollegeStaffRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { LibraryIssueRecord } from "@nepal-school-erp/shared";
+import type { LibraryIssueRecord } from "@phit-erp/shared";
 import { BookOpen } from "lucide-react";
 import { PageContent } from "components/layout/PageContent";
 import { PageHeader } from "components/shared/PageHeader";

@@ -14,7 +14,7 @@ import {
   updateBook,
   updateLibraryStaff
 } from "../controllers/libraryController.js";
-import { authorize, protect } from "../middleware/auth.js";
+import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
@@ -33,9 +33,9 @@ router.get("/issues", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), listIssues);
 router.post("/issues", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), issueBook);
 router.put("/issues/:id/return", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), returnBook);
 
-router.get("/staff", authorize("COLLEGE_ADMIN"), listLibraryStaff);
-router.post("/staff", authorize("COLLEGE_ADMIN"), createLibraryStaff);
-router.put("/staff/:id", authorize("COLLEGE_ADMIN"), updateLibraryStaff);
-router.delete("/staff/:id", authorize("COLLEGE_ADMIN"), deleteLibraryStaff);
+router.get("/staff", authorizeInstitutionAdmin, listLibraryStaff);
+router.post("/staff", authorizeInstitutionAdmin, createLibraryStaff);
+router.put("/staff/:id", authorizeInstitutionAdmin, updateLibraryStaff);
+router.delete("/staff/:id", authorizeInstitutionAdmin, deleteLibraryStaff);
 
 export default router;

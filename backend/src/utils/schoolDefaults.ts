@@ -1,5 +1,5 @@
-import type { AddressSelection, SchoolInput } from "@nepal-school-erp/shared";
-import { DEFAULT_ACADEMIC_YEAR_BS } from "@nepal-school-erp/shared";
+import type { AddressSelection, SchoolInput } from "@phit-erp/shared";
+import { DEFAULT_ACADEMIC_YEAR_BS } from "@phit-erp/shared";
 
 export const defaultSchoolAddress: AddressSelection = {
   province: "Bagmati Province",

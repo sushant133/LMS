@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { feeCollectionSchema, feeStructureSchema } from "@nepal-school-erp/shared";
+import { feeCollectionSchema, feeStructureSchema } from "@phit-erp/shared";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeStructure } from "../models/FeeStructure.js";
 import { Student } from "../models/Student.js";

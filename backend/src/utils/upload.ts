@@ -44,6 +44,12 @@ const allowedMimeTypes = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ];
 
+const studentDocumentMimeTypes = ["image/jpeg", "image/jpg", "image/png", "application/pdf"];
+const studentDocumentFileFilter = createFileFilter(
+  studentDocumentMimeTypes,
+  "Invalid file type. Allowed: PDF, JPG, JPEG, PNG"
+);
+
 const classroomMimeTypes = [
   ...allowedMimeTypes,
   "video/mp4",
@@ -75,9 +81,9 @@ export const uploadStudentPhoto = multer({
 
 export const uploadStudentDocuments = multer({
   storage: createTenantStorage("students/documents"),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB per document
-  fileFilter
-}).array("documents", 6); // max 6 documents at once
+  limits: { fileSize: 500 * 1024 }, // 500KB per document
+  fileFilter: studentDocumentFileFilter
+}).array("documents", 10);
 
 export const uploadClassroomAttachments = multer({
   storage: createTenantStorage("classroom"),

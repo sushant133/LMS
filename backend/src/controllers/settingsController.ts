@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { settingsSchema } from "@nepal-school-erp/shared";
+import { settingsSchema } from "@phit-erp/shared";
 import { School } from "../models/School.js";
 import { Setting } from "../models/Setting.js";
 import { asyncHandler } from "../utils/asyncHandler.js";

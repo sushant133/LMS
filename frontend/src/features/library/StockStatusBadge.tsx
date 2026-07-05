@@ -1,4 +1,4 @@
-import type { InventoryStockStatus } from "@nepal-school-erp/shared";
+import type { InventoryStockStatus } from "@phit-erp/shared";
 import { Badge } from "components/ui/badge";
 
 const statusStyles: Record<InventoryStockStatus, string> = {

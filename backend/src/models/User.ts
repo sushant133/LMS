@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import mongoose, { Schema, type HydratedDocument, type Model } from "mongoose";
-import { USER_ROLES, type UserRole } from "@nepal-school-erp/shared";
+import { USER_ROLES, type UserRole } from "@phit-erp/shared";
 
 export interface UserDocument {
   schoolId?: mongoose.Types.ObjectId | null;

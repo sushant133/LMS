@@ -24,12 +24,14 @@ import laboratoryRoutes from "./laboratoryRoutes.js";
 import transportRoutes from "./transportRoutes.js";
 import hrRoutes from "./hrRoutes.js";
 import accountingRoutes from "./accountingRoutes.js";
+import adminRoutes from "./adminRoutes.js";
 import studentPortalRoutes from "./studentPortalRoutes.js";
 import teacherPortalRoutes from "./teacherPortalRoutes.js";
 
 const router = Router();
 
 router.use("/auth", authRoutes);
+router.use("/admins", adminRoutes);
 router.use("/schools", schoolRoutes);
 router.use("/students", studentRoutes);
 router.use("/teachers", teacherRoutes);

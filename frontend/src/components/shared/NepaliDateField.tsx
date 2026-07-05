@@ -5,7 +5,7 @@ interface NepaliDateFieldProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  /** Use dropdown year/month selectors inside the calendar (faster for birth dates). */
+  /** Calendar header: dropdown year/month selectors (default) or prev/next buttons. */
   captionLayout?: "buttons" | "dropdown";
   minDate?: NepaliDate;
   maxDate?: NepaliDate;
@@ -18,7 +18,7 @@ export const NepaliDateField = ({
   value,
   onChange,
   placeholder,
-  captionLayout = "buttons",
+  captionLayout = "dropdown",
   minDate,
   maxDate
 }: NepaliDateFieldProps) => (

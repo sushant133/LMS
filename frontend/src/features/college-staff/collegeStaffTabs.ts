@@ -1,4 +1,4 @@
-import type { CollegeStaffCategory } from "@nepal-school-erp/shared";
+import type { CollegeStaffCategory } from "@phit-erp/shared";
 
 export type CollegeStaffTabId =
   | "teachers"

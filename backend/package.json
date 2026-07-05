@@ -1,5 +1,5 @@
 {
-  "name": "@nepal-school-erp/backend",
+  "name": "@phit-erp/backend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "lint": "npm run build:shared && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@nepal-school-erp/shared": "file:./shared",
+    "@phit-erp/shared": "file:./shared",
     "bcryptjs": "3.0.2",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",

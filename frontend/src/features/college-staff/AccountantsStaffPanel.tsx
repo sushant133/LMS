@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { accountantSchema, type AccountantInput, type AccountantRecord } from "@nepal-school-erp/shared";
+import { accountantSchema, type AccountantInput, type AccountantRecord } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { EmptyState } from "components/shared/EmptyState";

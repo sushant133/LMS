@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { timetableSlotSchema } from "@nepal-school-erp/shared";
+import { timetableSlotSchema } from "@phit-erp/shared";
 import { TimetableSlot } from "../models/TimetableSlot.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";

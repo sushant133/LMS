@@ -7,7 +7,7 @@ import type {
   PrintResultsGridResponse,
   SectionRecord,
   StudentRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { Download, FileSpreadsheet, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";

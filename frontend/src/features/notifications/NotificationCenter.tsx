@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { NotificationRecord } from "@nepal-school-erp/shared";
+import type { NotificationRecord } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { PageContent } from "components/layout/PageContent";
 import { PageHeader } from "components/shared/PageHeader";

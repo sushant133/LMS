@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
-import { studentSchema } from "@nepal-school-erp/shared";
+import { studentSchema } from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
@@ -10,6 +10,7 @@ import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getStudentScopeFilter } from "../utils/parentScope.js";
 import { getTeacherStudentFilter, getTeacherScope } from "../utils/teacherScope.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
+import { recordAudit } from "../utils/audit.js";
 import { sendSuccess } from "../utils/response.js";
 import { updatePortalUser } from "../utils/userPassword.js";
 import { validateStudentAdmissionScope } from "../utils/academicValidation.js";
@@ -107,7 +108,9 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           guardianName: payload.guardianName,
           guardianPhone: payload.guardianPhone,
           feesDueNpr: payload.feesDueNpr,
-          remarks: payload.remarks
+          remarks: payload.remarks,
+          photoUrl: payload.photoUrl || undefined,
+          documents: payload.documents ?? []
         }
       ],
       getSessionOption(session)
@@ -116,6 +119,13 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
 
     await commitTransaction(session);
     await student.populate("user", "-password");
+
+    await recordAudit(req, {
+      action: "student.create",
+      entity: "Student",
+      entityId: student._id.toString(),
+      after: { admissionNumber: student.admissionNumber, fullName: payload.fullName }
+    });
 
     return sendSuccess(
       res,
@@ -187,11 +197,20 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     guardianName: payload.guardianName,
     guardianPhone: payload.guardianPhone,
     feesDueNpr: payload.feesDueNpr,
-    remarks: payload.remarks
+    remarks: payload.remarks,
+    photoUrl: payload.photoUrl || undefined,
+    documents: payload.documents ?? student.documents
   });
 
   await student.save();
   await student.populate("user", "-password");
+
+  await recordAudit(req, {
+    action: "student.update",
+    entity: "Student",
+    entityId: student._id.toString(),
+    after: { admissionNumber: student.admissionNumber, fullName: payload.fullName }
+  });
 
   return sendSuccess(res, "Student updated successfully", student);
 });

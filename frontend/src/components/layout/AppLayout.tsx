@@ -3,9 +3,8 @@ import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
 import { useTranslation } from "react-i18next";
-import { normalizeUserRole, type UserRole } from "@nepal-school-erp/shared";
+import { INSTITUTION_NAME, isInstitutionAdmin, normalizeUserRole, type UserRole } from "@phit-erp/shared";
 import { Button } from "components/ui/button";
-import { Select } from "components/ui/select";
 import { cn } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
 import { getCollegeDisplayName, roleLabelMap } from "lib/auth";
@@ -16,7 +15,6 @@ const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
   { labelKey: "dashboard", path: "/dashboard", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
   { labelKey: "mySubjects", path: "/my-subjects", roles: ["STUDENT"] },
   { labelKey: "parentPortal", path: "/parent-portal", roles: ["PARENT"] },
-  { labelKey: "colleges", path: "/colleges", roles: ["SUPER_ADMIN"] },
   { labelKey: "students", path: "/students", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"] },
   { labelKey: "collegeStaff", path: "/college-staff", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
   { labelKey: "academics", path: "/academics", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
@@ -27,8 +25,7 @@ const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
   { labelKey: "attendance", path: "/attendance-view", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
   { labelKey: "exams", path: "/exams", roles: ["TEACHER", "STUDENT", "PARENT"] },
   { labelKey: "exams", path: "/exams-view", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "fees", path: "/fees", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "accounting", path: "/accounting", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT"] },
+  { labelKey: "accounting", path: "/accounting", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"] },
   { labelKey: "myFees", path: "/my-fees", roles: ["STUDENT"] },
   { labelKey: "library", path: "/library", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "LIBRARY_STAFF"] },
   { labelKey: "myLibrary", path: "/my-library", roles: ["STUDENT", "TEACHER"] },
@@ -39,12 +36,13 @@ const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
   { labelKey: "notifications", path: "/notifications", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
   { labelKey: "notices", path: "/notices", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
   { labelKey: "settings", path: "/settings", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "reports", path: "/reports", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] }
+  { labelKey: "reports", path: "/reports", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "adminManagement", path: "/admin-management", roles: ["SUPER_ADMIN"] }
 ];
 
 export const AppLayout = () => {
   const [open, setOpen] = useState(false);
-  const { user, logout, availableSchools, activeSchoolId, setActiveSchool } = useAuth();
+  const { user, logout, availableSchools } = useAuth();
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -80,28 +78,22 @@ export const AppLayout = () => {
   }
 
   const normalizedRole = normalizeUserRole(user.role);
-  const superAdminNeedsCollegeSelection = normalizedRole === "SUPER_ADMIN" && !activeSchoolId;
-  const moduleOnlyRoles: UserRole[] = ["LIBRARY_STAFF", "LABORATORY_STAFF", "ACCOUNTANT"];
+  const institutionAdmin = isInstitutionAdmin(normalizedRole);
+  const moduleOnlyRoles: UserRole[] = ["LIBRARY_STAFF", "LABORATORY_STAFF", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"];
   const isModuleOnlyUser = moduleOnlyRoles.includes(normalizedRole);
   const collegeName = getCollegeDisplayName(availableSchools, user);
+  const showCollegeContext = !institutionAdmin;
 
   const visibleItems = navItems
     .filter((item) => item.roles.includes(normalizedRole))
     .filter((item) => {
       if (isModuleOnlyUser) {
-        if (normalizedRole === "ACCOUNTANT") {
+        if (normalizedRole === "ACCOUNTANT" || normalizedRole === "CASHIER" || normalizedRole === "AUDITOR" || normalizedRole === "PRINCIPAL") {
           return item.path === "/accounting" || item.path === "/notifications";
         }
         return item.path === "/library" || item.path === "/laboratory" || item.path === "/notifications";
       }
       return true;
-    })
-    .filter((item) => {
-      if (!superAdminNeedsCollegeSelection) {
-        return true;
-      }
-
-      return item.path === "/dashboard" || item.path === "/colleges";
     })
     .map((item) => ({
       ...item,
@@ -120,7 +112,6 @@ export const AppLayout = () => {
         />
       ) : null}
 
-      {/* Flex shell: sidebar + content — mounts with key so login always gets a fresh layout */}
       <div key={user._id} className="flex min-h-screen w-full">
         <aside
           className={cn(
@@ -138,6 +129,7 @@ export const AppLayout = () => {
               </div>
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-semibold leading-tight">{t("appName")}</h2>
+                {showCollegeContext ? <p className="truncate text-xs text-slate-400">{INSTITUTION_NAME}</p> : null}
               </div>
             </div>
           </div>
@@ -166,13 +158,7 @@ export const AppLayout = () => {
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{roleLabelMap[normalizedRole]}</p>
                 <p className="mt-2 truncate font-semibold">{user.fullName}</p>
                 <p className="truncate text-sm text-slate-300">{user.email}</p>
-                <p className="mt-2 truncate text-xs text-slate-400">
-                  {normalizedRole === "SUPER_ADMIN"
-                    ? activeSchoolId
-                      ? "College context selected"
-                      : "Select a college to manage tenant data"
-                    : collegeName}
-                </p>
+                {showCollegeContext ? <p className="mt-2 truncate text-xs text-slate-400">{collegeName}</p> : null}
               </div>
             </div>
           </div>
@@ -193,37 +179,17 @@ export const AppLayout = () => {
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  {normalizedRole === "SUPER_ADMIN" ? (
-                    <div className="min-w-0 w-full sm:w-auto sm:min-w-[220px]">
-                      <Select
-                        value={activeSchoolId ?? ""}
-                        onChange={(event) => {
-                          if (event.target.value) {
-                            void setActiveSchool(event.target.value);
-                          }
-                        }}
-                      >
-                        <option value="">{availableSchools.length === 0 ? "No colleges available" : "Select college context"}</option>
-                        {availableSchools.map((school) => (
-                          <option key={school._id} value={school._id}>
-                            {school.name}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                  ) : (
-                    <div className="flex min-w-0 max-w-full items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
-                      <Building2 className="h-4 w-4 shrink-0 text-emerald-700" />
-                      <div className="min-w-0">
-                        <div className="truncate font-semibold leading-tight text-emerald-950" title={collegeName}>
-                          {collegeName}
-                        </div>
-                        <div className="text-[10px] font-medium uppercase tracking-widest text-emerald-700/80">
-                          {roleLabelMap[normalizedRole]}
-                        </div>
+                  <div className="flex min-w-0 max-w-full items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
+                    <Building2 className="h-4 w-4 shrink-0 text-emerald-700" />
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold leading-tight text-emerald-950" title={collegeName}>
+                        {collegeName}
+                      </div>
+                      <div className="text-[10px] font-medium uppercase tracking-widest text-emerald-700/80">
+                        {roleLabelMap[normalizedRole]}
                       </div>
                     </div>
-                  )}
+                  </div>
                   <Button className="shrink-0" variant="outline" size="sm" onClick={() => void handleLogout()}>
                     <LogOut className="mr-2 h-4 w-4" />
                     {t("logout")}
@@ -235,23 +201,6 @@ export const AppLayout = () => {
 
           <main className="min-w-0 flex-1 overflow-x-clip px-4 py-6 sm:px-6 lg:px-8">
             <div className="mx-auto min-w-0 w-full max-w-[1600px]">
-              {normalizedRole === "COLLEGE_ADMIN" ? (
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white px-4 py-3 shadow-sm">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="rounded-xl bg-emerald-100 p-2">
-                      <Building2 className="h-5 w-5 text-emerald-700" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs uppercase tracking-widest text-emerald-600">Managing College</p>
-                      <p className="truncate text-lg font-semibold leading-tight text-emerald-950" title={collegeName}>
-                        {collegeName}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-emerald-600">All data shown is for this college only</div>
-                </div>
-              ) : null}
-
               <Suspense fallback={<LoadingState />}>
                 <Outlet />
               </Suspense>

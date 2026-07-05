@@ -1,4 +1,4 @@
-import type { InstitutionType, ResultSubmissionStatus } from "@nepal-school-erp/shared";
+import type { InstitutionType, ResultSubmissionStatus } from "@phit-erp/shared";
 import type { HydratedDocument } from "mongoose";
 import type { Request } from "express";
 import type { ExamDocument } from "../models/Exam.js";
@@ -154,7 +154,11 @@ export const notifySchoolAdmins = async (
   metadata?: Record<string, string>
 ): Promise<void> => {
   const schoolId = tenantObjectId(req).toString();
-  const admins = await User.find({ schoolId, role: "COLLEGE_ADMIN", isActive: true }).select("_id").lean();
+  const [collegeAdmins, superAdmins] = await Promise.all([
+    User.find({ schoolId, role: "COLLEGE_ADMIN", isActive: true }).select("_id").lean(),
+    User.find({ role: "SUPER_ADMIN", isActive: true }).select("_id").lean()
+  ]);
+  const admins = [...collegeAdmins, ...superAdmins];
 
   await Promise.all(
     admins.map((admin) =>

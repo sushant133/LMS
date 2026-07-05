@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { demoCredentials } from "@nepal-school-erp/shared";
+import { demoCredentials } from "@phit-erp/shared";
 import { connectDatabase } from "../config/db.js";
 import { ensureSuperAdmin, seedDemoSchool } from "../seed/demoSchool.js";
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { BatchRecord, ClassRecord, SectionRecord, SubjectRecord, TeacherInput, TeacherRecord, YearRecord } from "@nepal-school-erp/shared";
+import type { BatchRecord, ClassRecord, SectionRecord, SubjectRecord, TeacherInput, TeacherRecord, YearRecord } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";

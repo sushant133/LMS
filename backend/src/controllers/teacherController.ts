@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
-import { teacherSchema } from "@nepal-school-erp/shared";
+import { teacherSchema } from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";

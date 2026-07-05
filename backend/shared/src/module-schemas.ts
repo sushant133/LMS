@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { LABORATORY_TYPES, USER_ROLES } from "./constants.js";
-import { academicYearSchema, bsDateSchema, moneySchema, objectIdSchema, optionalObjectIdSchema } from "./schemas.js";
+import {
+  academicYearSchema,
+  bsDateSchema,
+  moneySchema,
+  objectIdSchema,
+  optionalObjectIdSchema,
+  optionalPortalPasswordSchema,
+  portalLoginIdSchema
+} from "./schemas.js";
 
 export const dayOfWeekSchema = z.coerce.number().int().min(0).max(6);
 
@@ -72,6 +80,16 @@ export const parentChildLinkSchema = z.object({
   studentId: objectIdSchema,
   relationship: z.enum(["FATHER", "MOTHER", "GUARDIAN", "OTHER"]),
   isPrimary: z.boolean().default(false)
+});
+
+export const parentFromStudentRelationshipSchema = z.enum(["FATHER", "MOTHER", "GUARDIAN"]);
+
+export const createParentFromStudentSchema = z.object({
+  studentId: objectIdSchema,
+  relationship: parentFromStudentRelationshipSchema,
+  email: portalLoginIdSchema.optional(),
+  password: optionalPortalPasswordSchema,
+  isPrimary: z.boolean().default(true)
 });
 
 export const sendNotificationSchema = z.object({
@@ -212,6 +230,7 @@ export type AssignmentInput = z.infer<typeof assignmentSchema>;
 export type AssignmentCommentInput = z.infer<typeof assignmentCommentSchema>;
 export type AssignmentSubmissionInput = z.infer<typeof assignmentSubmissionSchema>;
 export type ParentChildLinkInput = z.infer<typeof parentChildLinkSchema>;
+export type CreateParentFromStudentInput = z.infer<typeof createParentFromStudentSchema>;
 export type SendNotificationInput = z.infer<typeof sendNotificationSchema>;
 export type LibraryBookInput = z.infer<typeof libraryBookSchema>;
 export type LibraryIssueInput = z.infer<typeof libraryIssueSchema>;

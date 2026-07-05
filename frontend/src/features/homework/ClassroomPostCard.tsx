@@ -1,5 +1,5 @@
 import { MessageSquare, Paperclip, Pin } from "lucide-react";
-import type { ClassroomPost } from "@nepal-school-erp/shared";
+import type { ClassroomPost } from "@phit-erp/shared";
 import { Badge } from "components/ui/badge";
 import { cn } from "lib/utils";
 import {

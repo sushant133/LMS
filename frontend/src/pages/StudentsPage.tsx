@@ -1,4 +1,1 @@
-import { StudentsManager } from "features/students/StudentsManager";
-
-export const StudentsPage = () => <StudentsManager />;
-
+export { StudentsLayout as default, StudentsIndexRedirect } from "features/students/StudentsLayout";

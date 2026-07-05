@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
-import { collegeStaffSchema, type CollegeStaffCategory } from "@nepal-school-erp/shared";
+import { collegeStaffSchema, type CollegeStaffCategory } from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { User } from "../models/User.js";

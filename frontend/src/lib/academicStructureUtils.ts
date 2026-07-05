@@ -1,4 +1,4 @@
-import type { InstitutionType } from "@nepal-school-erp/shared";
+import type { InstitutionType } from "@phit-erp/shared";
 
 export interface AcademicScopeOption {
   _id: string;

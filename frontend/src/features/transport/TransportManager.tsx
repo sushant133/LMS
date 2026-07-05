@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { transportAssignmentSchema, transportRouteSchema, type TransportAssignmentInput, type TransportRouteInput } from "@nepal-school-erp/shared";
+import { transportAssignmentSchema, transportRouteSchema, type TransportAssignmentInput, type TransportRouteInput } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -29,7 +30,7 @@ export const TransportManager = () => {
   const assignmentsQuery = useQuery({
     queryKey: ["transport-assignments"],
     queryFn: () =>
-      unwrap<Array<{ _id: string; routeId?: { name: string }; studentId?: { user: { fullName: string } }; pickupStop: string; dropStop: string }>>(
+      unwrap<Array<{ _id: string; routeId?: { name: string }; studentId?: { _id: string; user: { fullName: string } }; pickupStop: string; dropStop: string }>>(
         api.get("/transport/assignments")
       )
   });
@@ -105,8 +106,19 @@ export const TransportManager = () => {
           <Table>
             <TableHead><tr><Th>Route</Th><Th>Student</Th><Th>Pickup</Th><Th>Drop</Th></tr></TableHead>
             <TableBody>
-              {(assignmentsQuery.data ?? []).map((a: { _id: string; routeId?: { name: string }; studentId?: { user: { fullName: string } }; pickupStop: string; dropStop: string }) => (
-                <tr key={a._id}><Td>{a.routeId?.name}</Td><Td>{a.studentId?.user?.fullName}</Td><Td>{a.pickupStop}</Td><Td>{a.dropStop}</Td></tr>
+              {(assignmentsQuery.data ?? []).map((a: { _id: string; routeId?: { name: string }; studentId?: { _id: string; user: { fullName: string } }; pickupStop: string; dropStop: string }) => (
+                <tr key={a._id}>
+                  <Td>{a.routeId?.name}</Td>
+                  <Td>
+                    {a.studentId?._id && a.studentId.user?.fullName ? (
+                      <StudentNameLink studentId={a.studentId._id} name={a.studentId.user.fullName} />
+                    ) : (
+                      "—"
+                    )}
+                  </Td>
+                  <Td>{a.pickupStop}</Td>
+                  <Td>{a.dropStop}</Td>
+                </tr>
               ))}
             </TableBody>
           </Table>

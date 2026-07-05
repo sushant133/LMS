@@ -1,4 +1,4 @@
-import type { InstitutionType } from "@nepal-school-erp/shared";
+import type { InstitutionType } from "@phit-erp/shared";
 import type mongoose from "mongoose";
 import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";

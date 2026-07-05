@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { settingsSchema, type SchoolSettingsRecord, type SettingsInput } from "@nepal-school-erp/shared";
+import { isInstitutionAdmin, settingsSchema, type SchoolSettingsRecord, type SettingsInput } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { FormField } from "components/shared/FormField";
@@ -85,10 +85,10 @@ export const SettingsManager = () => {
   return (
     <div className="space-y-8">
       <PageHeader 
-        title="College Settings" 
-        description="Manage your college's profile, contact details, holidays, and infrastructure data required for IEMIS reporting." 
+        title="Institution Settings" 
+        description="Manage Public Himal Institute of Technology profile, contact details, holidays, and infrastructure data required for IEMIS reporting." 
       />
-      {user?.role === "COLLEGE_ADMIN" && availableSchools?.[0] && (
+      {isInstitutionAdmin(user?.role ?? "") && availableSchools?.[0] && (
         <div className="-mt-4 text-sm text-emerald-700">
           Updating details for <span className="font-medium">{availableSchools[0].name}</span>
         </div>

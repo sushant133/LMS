@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { formatCurrencyNpr } from "lib/utils";
-import type { StudentFinancialHistory } from "@nepal-school-erp/shared";
+import type { StudentFinancialHistory } from "@phit-erp/shared";
 
 export const StudentFeesPage = () => {
   const historyQuery = useQuery({

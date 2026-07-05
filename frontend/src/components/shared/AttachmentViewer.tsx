@@ -1,5 +1,5 @@
 import { Download, ExternalLink, FileText, ImageIcon } from "lucide-react";
-import type { AssignmentAttachment } from "@nepal-school-erp/shared";
+import type { AssignmentAttachment } from "@phit-erp/shared";
 import { Button } from "components/ui/button";
 import { getAttachmentKind, resolveAttachmentUrl } from "lib/attachments";
 

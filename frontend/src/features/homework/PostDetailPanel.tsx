@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Pin, X } from "lucide-react";
-import type { AssignmentCommentRecord, AssignmentSubmissionRecord, ClassroomPost } from "@nepal-school-erp/shared";
+import type { AssignmentCommentRecord, AssignmentSubmissionRecord, ClassroomPost } from "@phit-erp/shared";
 import { toast } from "sonner";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
@@ -290,8 +291,17 @@ export const PostDetailPanel = ({
                         <div key={submission._id} className="rounded-xl border p-3 text-sm">
                           <div className="flex items-center justify-between gap-2">
                             <p className="font-medium text-slate-800">
-                              {studentName}
-                              {student.rollNumber ? ` (#${student.rollNumber})` : ""}
+                              {student._id && student.user?.fullName ? (
+                                <StudentNameLink
+                                  studentId={student._id}
+                                  name={`${studentName}${student.rollNumber ? ` (#${student.rollNumber})` : ""}`}
+                                />
+                              ) : (
+                                <>
+                                  {studentName}
+                                  {student.rollNumber ? ` (#${student.rollNumber})` : ""}
+                                </>
+                              )}
                             </p>
                             <Badge className={SUBMISSION_COLORS[submission.status]}>{SUBMISSION_LABELS[submission.status]}</Badge>
                           </div>

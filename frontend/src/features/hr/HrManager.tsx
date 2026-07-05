@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { LEAVE_TYPES, leaveRequestSchema, payrollSchema, type LeaveRequestInput, type PayrollInput } from "@nepal-school-erp/shared";
+import { LEAVE_TYPES, leaveRequestSchema, payrollSchema, type LeaveRequestInput, type PayrollInput } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";

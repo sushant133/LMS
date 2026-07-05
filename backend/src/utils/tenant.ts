@@ -4,7 +4,7 @@ import { ApiError } from "./apiError.js";
 
 export const getTenantSchoolId = (req: Request): string => {
   if (!req.tenantSchoolId) {
-    throw new ApiError(400, "Tenant college context is missing");
+    throw new ApiError(400, "Institution context is missing");
   }
 
   return req.tenantSchoolId;

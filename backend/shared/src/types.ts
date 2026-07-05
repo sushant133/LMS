@@ -7,6 +7,9 @@ export type UserRole =
   | "LIBRARY_STAFF"
   | "LABORATORY_STAFF"
   | "ACCOUNTANT"
+  | "CASHIER"
+  | "AUDITOR"
+  | "PRINCIPAL"
   | "COLLEGE_STAFF";
 
 export type CollegeStaffCategory =
@@ -49,13 +52,19 @@ export type FeeFrequency = "MONTHLY" | "ANNUAL" | "ONE_TIME";
 
 export type FeeType =
   | "ADMISSION"
+  | "REGISTRATION"
   | "TUITION"
   | "MONTHLY"
   | "EXAM"
+  | "PRACTICAL"
   | "LIBRARY"
   | "LAB"
   | "TRANSPORT"
   | "HOSTEL"
+  | "FINE"
+  | "SCHOLARSHIP"
+  | "MISC"
+  | "REFUND"
   | "OTHER"
   | "ANNUAL";
 
@@ -90,7 +99,25 @@ export type DocumentType =
   | "DisabilityCertificate"
   | "ScholarshipProof"
   | "GuardianID"
-  | "Other";
+  | "Other"
+  | "STUDENT_PHOTOGRAPH"
+  | "SEE_SLC_MARKSHEET"
+  | "SEE_SLC_CHARACTER"
+  | "CITIZENSHIP_NATIONAL_ID"
+  | "PLUS2_MARKSHEET"
+  | "PLUS2_CHARACTER"
+  | "MIGRATION_CERTIFICATE"
+  | "PROVISIONAL_CERTIFICATE"
+  | "BIRTH_CERTIFICATE"
+  | "MEDICAL_FITNESS"
+  | "ADMISSION_FORM"
+  | "CTEVT_REGISTRATION"
+  | "SCHOLARSHIP"
+  | "FEE_AGREEMENT";
+
+export type StudentDocumentStatus = "UPLOADED" | "VERIFIED" | "REJECTED" | "PENDING";
+
+export type StudentDocumentCategory = (typeof import("./constants.js").STUDENT_DOCUMENT_CATEGORIES)[number]["key"];
 
 export type GradeSymbol = "A+" | "A" | "B+" | "B" | "C+" | "C" | "D" | "E";
 
@@ -154,6 +181,23 @@ export interface UserProfile {
   updatedAt?: string;
 }
 
+export interface AdminAccountRecord extends UserProfile {
+  isDeleted?: boolean;
+  loginEmail?: string;
+}
+
+export interface AdminActivityLogEntry {
+  _id: string;
+  action: string;
+  entity: string;
+  entityId: string;
+  actorRole: string;
+  actorName?: string;
+  before?: unknown;
+  after?: unknown;
+  createdAt: string;
+}
+
 export interface StudentRecord {
   _id: string;
   schoolId: string;
@@ -187,12 +231,62 @@ export interface StudentRecord {
 }
 
 export interface StudentDocument {
-  type: DocumentType;
+  _id?: string;
+  type: DocumentType | string;
+  name: string;
   url: string;
   originalName: string;
+  mimeType?: string;
+  size: number;
+  status: StudentDocumentStatus;
   uploadedAt: string;
-  uploadedBy?: string;
+  uploadedBy: string;
+  uploadedByName?: string;
   notes?: string;
+}
+
+export interface StudentActivityLogEntry {
+  _id: string;
+  action: string;
+  entity: string;
+  entityId: string;
+  actorRole: string;
+  actorName?: string;
+  before?: unknown;
+  after?: unknown;
+  createdAt: string;
+}
+
+export interface StudentProfileData {
+  student: StudentRecord;
+  primaryLabel: string;
+  secondaryLabel: string;
+  primaryName: string;
+  secondaryName: string;
+  subjects: Array<{ _id: string; name: string; code?: string }>;
+  attendance: {
+    records: Array<{ dateBs: string; status: string; subjectName?: string }>;
+    monthlySummary: Array<{ month: string; present: number; absent: number; percentage: number }>;
+    yearlyPercentage: number;
+    totalPresent: number;
+    totalAbsent: number;
+    totalDays: number;
+  };
+  results: Array<Record<string, unknown>>;
+  exams: Array<Record<string, unknown>>;
+  financial: Record<string, unknown> | null;
+  library: {
+    issues: Array<Record<string, unknown>>;
+    pendingCount: number;
+    fineTotal: number;
+  };
+  transport: Record<string, unknown> | null;
+  activityLog: StudentActivityLogEntry[];
+  permissions: {
+    canManageDocuments: boolean;
+    canViewFinancial: boolean;
+    canViewActivity: boolean;
+  };
 }
 
 export interface TeacherRecord {
@@ -549,11 +643,21 @@ export interface FeeStructureRecord {
   schoolId: string;
   title: string;
   classIds: string[];
+  batchIds?: string[];
+  yearIds?: string[];
+  faculty?: string;
+  program?: string;
   feeType: FeeType;
-  frequency: FeeFrequency;
+  frequency: FeeFrequency | "SEMESTER";
   academicYearBs: string;
+  semesterBs?: string;
   amountNpr: number;
+  installmentCount?: number;
   isOptional: boolean;
+  status?: "ACTIVE" | "ARCHIVED";
+  version?: number;
+  versionGroupId?: string;
+  effectiveFromBs?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -654,6 +758,28 @@ export interface DashboardMetric {
   change?: string;
 }
 
+export interface DashboardNotificationItem {
+  _id: string;
+  title: string;
+  message: string;
+  type: string;
+  read: boolean;
+  createdAt?: string;
+}
+
+export interface DashboardHighlight {
+  label: string;
+  value: string;
+  href?: string;
+  tone?: "default" | "info" | "success" | "warning";
+}
+
+export interface DashboardChildSummary {
+  studentId: string;
+  fullName: string;
+  feesDueNpr: number;
+}
+
 export interface DashboardResponse {
   stats: DashboardMetric[];
   attendanceChart: Array<{ label: string; present: number; absent: number }>;
@@ -661,6 +787,12 @@ export interface DashboardResponse {
   counts: Array<{ name: string; value: number }>;
   notices: NoticeRecord[];
   banners: BannerRecord[];
+  notifications: DashboardNotificationItem[];
+  unreadNotificationCount: number;
+  highlights: DashboardHighlight[];
+  pendingFeesTotalNpr?: number;
+  studentsWithDueFees?: number;
+  children?: DashboardChildSummary[];
 }
 
 // Foundation type for future IEMIS infrastructure tracking (Phase 2)

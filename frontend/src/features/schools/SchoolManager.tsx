@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { INSTITUTION_TYPES, type CreateSchoolInput, type SchoolInput, type SchoolRecord } from "@nepal-school-erp/shared";
-import { createSchoolSchema, schoolSchema } from "@nepal-school-erp/shared";
+import { INSTITUTION_TYPES, type CreateSchoolInput, type SchoolInput, type SchoolRecord } from "@phit-erp/shared";
+import { createSchoolSchema, schoolSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { FormField } from "components/shared/FormField";

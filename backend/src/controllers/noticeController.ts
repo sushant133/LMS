@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
-import { noticeSchema } from "@nepal-school-erp/shared";
+import { noticeSchema } from "@phit-erp/shared";
 import { Notice } from "../models/Notice.js";
 import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";

@@ -3,16 +3,20 @@ import {
   activeSchoolSchema,
   loginSchema,
   normalizeUserRole,
-  registerSchema,
+  parentSelfRegisterSchema,
+  sanitizeUserDisplayName,
   type AuthResponse,
   type SchoolRecord,
   type UserRole
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { env } from "../config/env.js";
+import { ParentChildLink } from "../models/ParentChildLink.js";
 import { School } from "../models/School.js";
+import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { resolveInstitutionSchool, resolveInstitutionSchoolId } from "../utils/institutionSchool.js";
 import { clearActiveSchoolCookie, clearAuthCookie, setActiveSchoolCookie, setAuthCookie, signJwt } from "../utils/jwt.js";
 import { sendSuccess } from "../utils/response.js";
 
@@ -42,7 +46,8 @@ const getRedirectPath = (role: UserRole | string): string => {
 
 const getAccessibleSchools = async (user: { role: UserRole; schoolId?: unknown }): Promise<SchoolRecord[]> => {
   if (user.role === "SUPER_ADMIN") {
-    return (await School.find().sort({ name: 1 }).lean()) as unknown as SchoolRecord[];
+    const school = await resolveInstitutionSchool();
+    return school ? ([school] as unknown as SchoolRecord[]) : [];
   }
 
   if (!user.schoolId) {
@@ -69,7 +74,7 @@ const getSafeUser = async (userId: string) => {
     _id: user._id.toString(),
     schoolId: populatedSchool?._id?.toString() ?? (user.schoolId ? String(user.schoolId) : undefined),
     school: populatedSchool,
-    fullName: user.fullName,
+    fullName: sanitizeUserDisplayName(user.fullName),
     email: user.email,
     role: normalizeUserRole(user.role as string),
     phone: user.phone,
@@ -81,7 +86,10 @@ const getSafeUser = async (userId: string) => {
 const buildAuthResponse = async (userId: string, activeSchoolId?: string | null): Promise<AuthResponse> => {
   const safeUser = await getSafeUser(userId);
   const availableSchools = await getAccessibleSchools(safeUser);
-  const resolvedActiveSchoolId = activeSchoolId ?? (safeUser.schoolId ? String(safeUser.schoolId) : null);
+  const resolvedActiveSchoolId =
+    safeUser.role === "SUPER_ADMIN"
+      ? (activeSchoolId ?? (await resolveInstitutionSchoolId()))
+      : (activeSchoolId ?? (safeUser.schoolId ? String(safeUser.schoolId) : null));
 
   return {
     user: safeUser,
@@ -92,38 +100,110 @@ const buildAuthResponse = async (userId: string, activeSchoolId?: string | null)
 };
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
-  const payload = registerSchema.parse(req.body);
-  const email = payload.email.toLowerCase().trim();
-  const [existingUser, school] = await Promise.all([User.findOne({ email }), School.findById(payload.schoolId)]);
-
-  if (existingUser) {
-    throw new ApiError(409, "An account with this email already exists");
-  }
+  const payload = parentSelfRegisterSchema.parse(req.body);
+  const loginId = payload.email.toLowerCase().trim();
+  const [existingUser, school, student] = await Promise.all([
+    User.findOne({ email: loginId }),
+    School.findById(payload.schoolId),
+    Student.findOne({
+      schoolId: payload.schoolId,
+      admissionNumber: {
+        $regex: new RegExp(`^${payload.studentRegistrationNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+      }
+    })
+      .populate("user", "fullName")
+      .lean()
+  ]);
 
   if (!school || !school.isActive) {
     throw new ApiError(404, "Selected college is not available for registration");
   }
 
-  const user = await User.create({
+  if (!student) {
+    throw new ApiError(404, "No student found with this registration number. Please verify and try again.");
+  }
+
+  if (existingUser) {
+    if (existingUser.isActive) {
+      throw new ApiError(409, "An account with this login ID already exists. Please sign in or use a different login ID.");
+    }
+
+    const pendingLink = await ParentChildLink.findOne({
+      schoolId: school._id,
+      parentUserId: existingUser._id,
+      status: "PENDING"
+    }).lean();
+
+    if (pendingLink) {
+      throw new ApiError(409, "A registration with this login ID is already pending admin approval.");
+    }
+  }
+
+  const existingPendingForStudent = await ParentChildLink.findOne({
     schoolId: school._id,
-    fullName: payload.fullName,
-    email,
-    password: payload.password,
-    phone: payload.phone,
-    role: payload.role
+    studentId: student._id,
+    relationship: payload.relationship,
+    status: "PENDING"
+  }).lean();
+
+  if (existingPendingForStudent) {
+    throw new ApiError(409, "A parent registration for this student and relationship is already pending approval.");
+  }
+
+  const approvedDuplicate = await ParentChildLink.findOne({
+    schoolId: school._id,
+    studentId: student._id,
+    relationship: payload.relationship,
+    status: "APPROVED"
+  }).lean();
+
+  if (approvedDuplicate) {
+    throw new ApiError(409, "A parent is already linked for this student with the selected relationship.");
+  }
+
+  const user =
+    existingUser ??
+    (await User.create({
+      schoolId: school._id,
+      fullName: payload.fullName,
+      email: loginId,
+      password: payload.password,
+      phone: payload.phone,
+      role: "PARENT",
+      isActive: false
+    }));
+
+  if (existingUser) {
+    existingUser.fullName = payload.fullName;
+    existingUser.phone = payload.phone;
+    existingUser.password = payload.password;
+    existingUser.isActive = false;
+    await existingUser.save();
+  }
+
+  await ParentChildLink.create({
+    schoolId: school._id,
+    parentUserId: user._id,
+    studentId: student._id,
+    relationship: payload.relationship,
+    isPrimary: payload.relationship === "GUARDIAN",
+    status: "PENDING",
+    studentRegistrationNumber: payload.studentRegistrationNumber
   });
 
-  const token = signJwt({
-    userId: user._id.toString(),
-    role: user.role,
-    email: user.email,
-    schoolId: school._id.toString()
-  });
-
-  setAuthCookie(res, token);
-  setActiveSchoolCookie(res, school._id.toString());
-
-  return sendSuccess(res, "Registration successful", await buildAuthResponse(user._id.toString(), school._id.toString()), 201);
+  return sendSuccess(
+    res,
+    "Registration submitted for admin approval",
+    {
+      pending: true,
+      message:
+        "Your parent account has been created and is pending verification. You can sign in after the college administrator approves your registration in Parent Links.",
+      redirectTo: "/login",
+      studentRegistrationNumber: payload.studentRegistrationNumber,
+      studentName: (student.user as { fullName?: string } | undefined)?.fullName ?? ""
+    },
+    201
+  );
 });
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
@@ -136,6 +216,38 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (!user.isActive) {
+    if (normalizeUserRole(user.role as string) === "PARENT") {
+      const pendingLink = await ParentChildLink.findOne({
+        schoolId: user.schoolId,
+        parentUserId: user._id,
+        status: "PENDING"
+      }).lean();
+
+      if (pendingLink) {
+        throw new ApiError(
+          403,
+          "Your parent registration is pending admin approval. Please wait until the college administrator approves your account."
+        );
+      }
+
+      const rejectedLink = await ParentChildLink.findOne({
+        schoolId: user.schoolId,
+        parentUserId: user._id,
+        status: "REJECTED"
+      })
+        .sort({ reviewedAt: -1 })
+        .lean();
+
+      if (rejectedLink) {
+        throw new ApiError(
+          403,
+          rejectedLink.rejectionReason
+            ? `Your parent registration was not approved: ${rejectedLink.rejectionReason}`
+            : "Your parent registration was not approved. Please contact the college administration."
+        );
+      }
+    }
+
     throw new ApiError(403, "This account is disabled");
   }
 
@@ -153,7 +265,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     }
     setActiveSchoolCookie(res, school._id.toString());
   } else {
-    clearActiveSchoolCookie(res);
+    const institutionSchoolId = await resolveInstitutionSchoolId();
+    setActiveSchoolCookie(res, institutionSchoolId);
   }
 
   const token = signJwt({
@@ -168,7 +281,10 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(
     res,
     "Login successful",
-    await buildAuthResponse(user._id.toString(), normalizedRole === "SUPER_ADMIN" ? null : user.schoolId?.toString() ?? null)
+    await buildAuthResponse(
+      user._id.toString(),
+      normalizedRole === "SUPER_ADMIN" ? await resolveInstitutionSchoolId() : (user.schoolId?.toString() ?? null)
+    )
   );
 });
 
@@ -190,17 +306,18 @@ export const switchActiveSchool = asyncHandler(async (req: Request, res: Respons
     });
   }
 
-  const payload = activeSchoolSchema.parse(req.body);
-  const school = await School.findById(payload.schoolId).lean();
+  activeSchoolSchema.parse(req.body);
+  const institutionSchoolId = await resolveInstitutionSchoolId();
+  const school = await School.findById(institutionSchoolId).lean();
 
   if (!school || !school.isActive) {
-    throw new ApiError(404, "Selected college was not found");
+    throw new ApiError(404, "Institution was not found");
   }
 
-  setActiveSchoolCookie(res, school._id.toString());
+  setActiveSchoolCookie(res, institutionSchoolId);
 
   return sendSuccess(res, "Active college set", {
-    activeSchoolId: school._id.toString(),
+    activeSchoolId: institutionSchoolId,
     school
   });
 });
@@ -218,7 +335,8 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
 
   const activeSchoolId =
     req.user.role === "SUPER_ADMIN"
-      ? ((req.cookies?.[env.ACTIVE_SCHOOL_COOKIE_NAME] as string | undefined) ?? null)
+      ? ((req.cookies?.[env.ACTIVE_SCHOOL_COOKIE_NAME] as string | undefined) ??
+        (await resolveInstitutionSchoolId()))
       : (req.user.schoolId ?? null);
 
   return sendSuccess(res, "Current user fetched", await buildAuthResponse(req.user.userId, activeSchoolId));

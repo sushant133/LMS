@@ -3,7 +3,7 @@ import type {
   AssignmentSubmissionStatus,
   AssignmentType,
   ClassroomPost
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 
 export const TYPE_LABELS: Record<AssignmentType, string> = {
   HOMEWORK: "Assignments",

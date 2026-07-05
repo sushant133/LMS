@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { ASSIGNMENT_TYPES, USER_ROLES } from "@nepal-school-erp/shared";
+import { ASSIGNMENT_TYPES, USER_ROLES } from "@phit-erp/shared";
 
 const attachmentSchema = new Schema(
   {

@@ -1,4 +1,4 @@
-import type { InventoryStockStatus } from "@nepal-school-erp/shared";
+import type { InventoryStockStatus } from "@phit-erp/shared";
 
 export const getIssuedQuantity = (total: number, available: number): number => Math.max(0, total - available);
 

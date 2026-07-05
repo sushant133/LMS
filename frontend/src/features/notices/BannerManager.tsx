@@ -7,7 +7,7 @@ import {
   bannerSchema,
   type BannerInput,
   type BannerRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { Copy, Eye, ImageIcon, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";

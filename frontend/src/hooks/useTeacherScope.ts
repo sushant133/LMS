@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { BatchRecord, ClassRecord, SectionRecord, StudentRecord, SubjectRecord, YearRecord } from "@nepal-school-erp/shared";
+import type { BatchRecord, ClassRecord, SectionRecord, StudentRecord, SubjectRecord, YearRecord } from "@phit-erp/shared";
 import { api, unwrap } from "lib/api";
 
 export interface TeacherScopeData {

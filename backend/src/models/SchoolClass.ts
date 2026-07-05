@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { CLASS_LEVELS } from "@nepal-school-erp/shared";
+import { CLASS_LEVELS } from "@phit-erp/shared";
 
 const schoolClassSchema = new Schema(
   {

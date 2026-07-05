@@ -60,7 +60,7 @@ export const portalLoginIdSchema = z.preprocess(
     .min(3, "Login ID must be at least 3 characters")
     .max(100, "Login ID is too long")
     .refine(isValidPortalLoginId, {
-      message: "Enter a valid email (e.g. name@college.com) or username (e.g. teacher01)"
+      message: "Enter a valid login ID"
     })
 );
 
@@ -82,10 +82,24 @@ export const loginSchema = z.object({
 export const registerSchema = z.object({
   schoolId: objectIdSchema,
   fullName: z.string().min(2),
-  email: z.email(),
-  password: z.string().min(6),
+  email: portalLoginIdSchema,
+  password: portalPasswordSchema,
   phone: z.string().optional().or(z.literal("")),
   role: z.enum(PUBLIC_REGISTER_ROLES).default("PARENT")
+});
+
+/** Public parent self-registration — requires student admission number; admin must approve */
+export const parentSelfRegisterSchema = z.object({
+  schoolId: objectIdSchema,
+  fullName: z.string().min(2, "Full name is required"),
+  email: portalLoginIdSchema,
+  password: portalPasswordSchema,
+  phone: z.string().min(7, "Phone number is required"),
+  studentRegistrationNumber: z
+    .string()
+    .min(1, "Student registration number is required")
+    .transform((value) => value.trim().toUpperCase()),
+  relationship: z.enum(["FATHER", "MOTHER", "GUARDIAN", "OTHER"])
 });
 
 export const activeSchoolSchema = z.object({
@@ -140,14 +154,25 @@ export const studentSchema = z.object({
   feesDueNpr: moneySchema,
   remarks: z.string().optional(),
   // Phase 0 foundation fields (optional for backward compatibility)
-  photoUrl: z.string().url().optional().or(z.literal("")),
-  documents: z.array(z.object({
-    type: z.string(),
-    url: z.string(),
-    originalName: z.string(),
-    uploadedAt: z.string(),
-    notes: z.string().optional()
-  })).optional()
+  photoUrl: z.string().optional().or(z.literal("")),
+  documents: z
+    .array(
+      z.object({
+        _id: z.string().optional(),
+        type: z.string(),
+        name: z.string(),
+        url: z.string(),
+        originalName: z.string(),
+        mimeType: z.string().optional(),
+        size: z.number().min(0),
+        status: z.enum(["UPLOADED", "VERIFIED", "REJECTED", "PENDING"]).default("UPLOADED"),
+        uploadedAt: z.string(),
+        uploadedBy: z.string(),
+        uploadedByName: z.string().optional(),
+        notes: z.string().optional()
+      })
+    )
+    .optional()
 });
 
 export const teacherSchema = z.object({
@@ -407,6 +432,23 @@ export const infrastructureSchema = z.object({
   midDayMeal: false
 }));
 
+export const adminAccountSchema = z.object({
+  fullName: z.string().min(2),
+  email: portalLoginIdSchema,
+  phone: z.string().optional().or(z.literal("")),
+  password: optionalPortalPasswordSchema
+});
+
+export const adminAccountUpdateSchema = adminAccountSchema.partial().extend({
+  fullName: z.string().min(2).optional(),
+  email: portalLoginIdSchema.optional()
+});
+
+export const adminPasswordResetSchema = z.object({
+  password: portalPasswordSchema,
+  mustChangePassword: z.boolean().default(true)
+});
+
 export const settingsSchema = z.object({
   schoolName: z.string().min(2),
   schoolNameNp: z.string().min(2),
@@ -426,6 +468,7 @@ export const settingsSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type ParentSelfRegisterInput = z.infer<typeof parentSelfRegisterSchema>;
 export type ActiveSchoolInput = z.infer<typeof activeSchoolSchema>;
 export type SchoolInput = z.infer<typeof schoolSchema>;
 export type CreateSchoolInput = z.infer<typeof createSchoolSchema>;
@@ -453,3 +496,6 @@ export type NoticeInput = z.infer<typeof noticeSchema>;
 export type BannerInput = z.infer<typeof bannerSchema>;
 export type InfrastructureInput = z.infer<typeof infrastructureSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;
+export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
+export type AdminAccountUpdateInput = z.infer<typeof adminAccountUpdateSchema>;
+export type AdminPasswordResetInput = z.infer<typeof adminPasswordResetSchema>;

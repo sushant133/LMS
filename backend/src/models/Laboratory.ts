@@ -1,5 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { LABORATORY_TYPES } from "@nepal-school-erp/shared";
+import { LABORATORY_TYPES } from "@phit-erp/shared";
 
 const laboratorySchema = new Schema(
   {

@@ -1,4 +1,4 @@
-import { DEMO_SCHOOL_CODE } from "@nepal-school-erp/shared";
+import { DEMO_SCHOOL_CODE } from "@phit-erp/shared";
 import type { Types } from "mongoose";
 import { env } from "../config/env.js";
 import { Batch } from "../models/Batch.js";

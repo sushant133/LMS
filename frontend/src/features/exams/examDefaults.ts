@@ -1,10 +1,14 @@
-import type { ExamInput, ExamRoutineInput, ResultInput } from "@nepal-school-erp/shared";
+import { getTodayBs } from "@munatech/nepali-datepicker";
+import type { ExamInput, ExamRoutineInput, ResultInput } from "@phit-erp/shared";
+
+const todayBs = getTodayBs();
+const todayBsValue = `${todayBs.year}-${String(todayBs.month).padStart(2, "0")}-${String(todayBs.day).padStart(2, "0")}`;
 
 export const defaultExamValue: ExamInput = {
   name: "",
   academicYearBs: "2083/2084",
-  startDateBs: "",
-  endDateBs: "",
+  startDateBs: todayBsValue,
+  endDateBs: todayBsValue,
   resultPublishDateBs: "",
   status: "DRAFT",
   classIds: [],

@@ -5,7 +5,7 @@ import {
   masterSubjectSchema,
   type MasterSubjectInput,
   type MasterSubjectRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";

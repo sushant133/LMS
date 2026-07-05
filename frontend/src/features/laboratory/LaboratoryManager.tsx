@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  isInstitutionAdmin,
   laboratoryEquipmentSchema,
   laboratoryIssueSchema,
   laboratorySchema,
@@ -14,7 +15,7 @@ import {
   type LaboratoryRecord,
   type ModuleStaffInput,
   type UserProfile
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { Beaker, FlaskConical, LayoutDashboard, Package, Users } from "lucide-react";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
@@ -72,7 +73,7 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminO
 
 export const LaboratoryManager = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isAdmin = isInstitutionAdmin(user?.role ?? "");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [labForm, setLabForm] = useState<LaboratoryInput>(defaultLab);
   const [equipmentForm, setEquipmentForm] = useState<LaboratoryEquipmentInput>(defaultEquipment);

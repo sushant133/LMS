@@ -1,5 +1,24 @@
+import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { BLOOD_GROUPS, DISABILITY_CATEGORIES, ETHNICITY_CATEGORIES } from "@nepal-school-erp/shared";
+import { BLOOD_GROUPS, DISABILITY_CATEGORIES, ETHNICITY_CATEGORIES, STUDENT_DOCUMENT_STATUSES } from "@phit-erp/shared";
+
+const studentDocumentSchema = new Schema(
+  {
+    _id: { type: String, default: () => crypto.randomUUID() },
+    type: { type: String, required: true },
+    name: { type: String, required: true },
+    url: { type: String, required: true },
+    originalName: { type: String, required: true },
+    mimeType: { type: String },
+    size: { type: Number, required: true },
+    status: { type: String, enum: STUDENT_DOCUMENT_STATUSES, default: "UPLOADED" },
+    uploadedAt: { type: String, required: true },
+    uploadedBy: { type: String, required: true },
+    uploadedByName: { type: String },
+    notes: { type: String }
+  },
+  { _id: false }
+);
 
 const addressSchema = new Schema(
   {
@@ -39,7 +58,7 @@ const studentSchema = new Schema(
     remarks: { type: String },
     // Phase 0 - Foundation fields
     photoUrl: { type: String },
-    documents: { type: [Schema.Types.Mixed], default: [] }
+    documents: { type: [studentDocumentSchema], default: [] }
   },
   { timestamps: true }
 );

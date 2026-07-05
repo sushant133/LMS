@@ -7,7 +7,20 @@ const accountingSettingsSchema = new Schema(
     lateFineGraceDays: { type: Number, default: 0 },
     receiptPrefix: { type: String, default: "RCPT" },
     autoReceiptNumber: { type: Boolean, default: true },
-    defaultPaymentMethod: { type: String, enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "OTHER"], default: "CASH" }
+    defaultPaymentMethod: {
+      type: String,
+      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      default: "CASH"
+    },
+    voucherPrefix: { type: String, default: "JV" },
+    currentFiscalYearBs: { type: String, default: "2083/2084" },
+    auditLockDateBs: { type: String },
+    panNumber: { type: String },
+    vatNumber: { type: String },
+    tdsEnabled: { type: Boolean, default: false },
+    institutionSignatureUrl: { type: String },
+    /** Amount (NPR) above which reversals/voids require principal/admin approval */
+    approvalThresholdNpr: { type: Number, default: 25000 }
   },
   { timestamps: true }
 );

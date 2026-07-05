@@ -1,0 +1,217 @@
+import { z } from "zod";
+import { ACCOUNT_TYPES, FEE_TYPE_ACCOUNT_MAP, JOURNAL_REFERENCE_TYPES, VOUCHER_TYPES } from "./accounting-constants.js";
+import { bsDateSchema, moneySchema, objectIdSchema, optionalObjectIdSchema } from "./schemas.js";
+
+export const chartOfAccountSchema = z.object({
+  code: z.string().min(3).max(10),
+  name: z.string().min(2),
+  nameNp: z.string().optional().or(z.literal("")),
+  accountType: z.enum(ACCOUNT_TYPES),
+  parentCode: z.string().optional().or(z.literal("")),
+  description: z.string().optional().or(z.literal("")),
+  isActive: z.boolean().default(true)
+});
+
+export const journalLineSchema = z.object({
+  accountCode: z.string().min(3),
+  accountName: z.string().min(1),
+  debitNpr: moneySchema.default(0),
+  creditNpr: moneySchema.default(0),
+  description: z.string().optional().or(z.literal(""))
+});
+
+export const journalEntrySchema = z.object({
+  voucherType: z.enum(VOUCHER_TYPES).default("JOURNAL"),
+  dateBs: bsDateSchema,
+  fiscalYearBs: z.string().regex(/^\d{4}\/\d{4}$/),
+  narration: z.string().min(1),
+  lines: z.array(journalLineSchema).min(2),
+  referenceType: z.enum(JOURNAL_REFERENCE_TYPES).optional(),
+  referenceId: optionalObjectIdSchema,
+  studentId: optionalObjectIdSchema,
+  bankAccountId: optionalObjectIdSchema
+}).superRefine((value, ctx) => {
+  const totalDebit = value.lines.reduce((sum, line) => sum + line.debitNpr, 0);
+  const totalCredit = value.lines.reduce((sum, line) => sum + line.creditNpr, 0);
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    ctx.addIssue({ code: "custom", message: "Journal entry must balance (total debit = total credit)", path: ["lines"] });
+  }
+  if (totalDebit <= 0) {
+    ctx.addIssue({ code: "custom", message: "Journal entry must have a positive amount", path: ["lines"] });
+  }
+});
+
+export const vendorSchema = z.object({
+  name: z.string().min(2),
+  panNumber: z.string().optional().or(z.literal("")),
+  vatNumber: z.string().optional().or(z.literal("")),
+  contactPerson: z.string().optional().or(z.literal("")),
+  phone: z.string().optional().or(z.literal("")),
+  email: z.string().email().optional().or(z.literal("")),
+  address: z.string().optional().or(z.literal("")),
+  isActive: z.boolean().default(true)
+});
+
+export const feeRefundSchema = z.object({
+  studentId: objectIdSchema,
+  feeCollectionId: optionalObjectIdSchema,
+  amountNpr: moneySchema,
+  dateBs: bsDateSchema,
+  reason: z.string().min(1),
+  paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"]).default("CASH"),
+  bankAccountId: optionalObjectIdSchema,
+  transactionNumber: z.string().optional().or(z.literal("")),
+  notes: z.string().optional().or(z.literal(""))
+});
+
+export const fiscalYearSchema = z.object({
+  yearBs: z.string().regex(/^\d{4}\/\d{4}$/),
+  startDateBs: bsDateSchema,
+  endDateBs: bsDateSchema,
+  isCurrent: z.boolean().default(false),
+  isClosed: z.boolean().default(false)
+});
+
+export type ChartOfAccountInput = z.infer<typeof chartOfAccountSchema>;
+export type JournalEntryInput = z.infer<typeof journalEntrySchema>;
+export type JournalLineInput = z.infer<typeof journalLineSchema>;
+export type VendorInput = z.infer<typeof vendorSchema>;
+export type FeeRefundInput = z.infer<typeof feeRefundSchema>;
+export type FiscalYearInput = z.infer<typeof fiscalYearSchema>;
+
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export type VoucherType = (typeof VOUCHER_TYPES)[number];
+export type JournalReferenceType = (typeof JOURNAL_REFERENCE_TYPES)[number];
+
+export interface ChartOfAccountRecord {
+  _id: string;
+  schoolId: string;
+  code: string;
+  name: string;
+  nameNp?: string;
+  accountType: AccountType;
+  parentCode?: string;
+  description?: string;
+  isSystem: boolean;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface JournalLineRecord {
+  accountCode: string;
+  accountName: string;
+  debitNpr: number;
+  creditNpr: number;
+  description?: string;
+}
+
+export interface JournalEntryRecord {
+  _id: string;
+  schoolId: string;
+  voucherNumber: string;
+  voucherType: VoucherType;
+  dateBs: string;
+  fiscalYearBs: string;
+  narration: string;
+  lines: JournalLineRecord[];
+  totalDebitNpr: number;
+  totalCreditNpr: number;
+  referenceType?: JournalReferenceType;
+  referenceId?: string;
+  studentId?: string;
+  bankAccountId?: string;
+  isReversal: boolean;
+  reversedEntryId?: string;
+  isPosted: boolean;
+  createdBy: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VendorRecord {
+  _id: string;
+  schoolId: string;
+  name: string;
+  panNumber?: string;
+  vatNumber?: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FeeRefundRecord {
+  _id: string;
+  schoolId: string;
+  studentId: string;
+  feeCollectionId?: string;
+  refundNumber: string;
+  amountNpr: number;
+  dateBs: string;
+  reason: string;
+  paymentMethod: string;
+  bankAccountId?: string;
+  transactionNumber?: string;
+  notes?: string;
+  journalEntryId?: string;
+  createdBy: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FiscalYearRecord {
+  _id: string;
+  schoolId: string;
+  yearBs: string;
+  startDateBs: string;
+  endDateBs: string;
+  isCurrent: boolean;
+  isClosed: boolean;
+  closedAt?: string;
+  closedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TrialBalanceRow {
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  debitNpr: number;
+  creditNpr: number;
+}
+
+export interface LedgerAccountRow {
+  dateBs: string;
+  voucherNumber: string;
+  narration: string;
+  debitNpr: number;
+  creditNpr: number;
+  balanceNpr: number;
+}
+
+export interface StudentLedgerSummary {
+  studentId: string;
+  admissionNumber: string;
+  rollNumber: number;
+  fullName: string;
+  batchName: string;
+  yearName: string;
+  guardianName: string;
+  scholarshipStatus: string;
+  status: string;
+  totalPayableNpr: number;
+  totalPaidNpr: number;
+  outstandingBalanceNpr: number;
+  totalDiscountNpr: number;
+  totalScholarshipNpr: number;
+  totalFineNpr: number;
+  advanceBalanceNpr: number;
+  totalRefundsNpr: number;
+}
+
+export { FEE_TYPE_ACCOUNT_MAP };

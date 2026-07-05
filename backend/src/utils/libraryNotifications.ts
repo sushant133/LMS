@@ -1,5 +1,5 @@
 import type { HydratedDocument } from "mongoose";
-import type { LibraryIssueStatus } from "@nepal-school-erp/shared";
+import type { LibraryIssueStatus } from "@phit-erp/shared";
 import { LibraryIssue, type LibraryIssueDocument } from "../models/LibraryBook.js";
 
 type LibraryIssueEntity = HydratedDocument<LibraryIssueDocument>;

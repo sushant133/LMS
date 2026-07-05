@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { COLLEGE_YEAR_NAMES, academicSubjectSchema, batchSchema, classSchema, sectionSchema } from "@nepal-school-erp/shared";
+import { COLLEGE_YEAR_NAMES, academicSubjectSchema, batchSchema, classSchema, sectionSchema } from "@phit-erp/shared";
 import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";

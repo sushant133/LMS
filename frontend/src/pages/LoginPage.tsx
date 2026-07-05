@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Building2, Eye, EyeOff } from "lucide-react";
-import { getDemoLoginEntries, loginSchema } from "@nepal-school-erp/shared";
+import { getDemoLoginEntries, loginSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -13,9 +13,9 @@ import { useIsDesktopViewport } from "hooks/useIsDesktopViewport";
 import { getRoleRedirectPath } from "lib/auth";
 import { parseErrorMessage } from "lib/utils";
 
-const HERO_TAGLINE = "BS calendar, streamlined workflows, and college operations in one place.";
+const HERO_TAGLINE = "Official ERP for Public Himal Institute of Technology.";
 const HERO_SUPPORT =
-  "Built for diploma colleges, health assistant training institutes, and higher education programs across Nepal.";
+  "BS calendar, attendance, exams, fees, accounting, library, transport, and college operations in one place.";
 
 const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
   const { t } = useTranslation();
@@ -163,9 +163,9 @@ export const LoginPage = () => {
               ))}
             </div>
             <p className="mt-4 text-sm text-slate-600">
-              No account?{" "}
+              Parent without an account?{" "}
               <Link className="font-semibold text-emerald-700" to="/register">
-                {t("register")}
+                Register with student registration number
               </Link>
             </p>
           </CardContent>

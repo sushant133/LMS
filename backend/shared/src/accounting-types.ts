@@ -17,7 +17,19 @@ export type AccountingReportType =
   | "expenses"
   | "purchases"
   | "income"
-  | "cash-summary";
+  | "cash-summary"
+  | "financial-summary"
+  | "trial-balance"
+  | "balance-sheet"
+  | "income-expenditure"
+  | "cash-flow"
+  | "student-ledger"
+  | "student-due"
+  | "bank-book"
+  | "day-book"
+  | "fee-collection-summary"
+  | "scholarship-report"
+  | "vendor-ledger";
 
 export interface FeeBreakdownItem {
   feeType: FeeType;
@@ -46,6 +58,9 @@ export interface EnhancedFeeCollectionRecord {
   feeStructureId?: string;
   receiptNumber: string;
   paidDateBs: string;
+  fiscalYearBs?: string;
+  academicYearBs?: string;
+  semesterBs?: string;
   previousDueNpr: number;
   currentChargesNpr: number;
   amountPaidNpr: number;
@@ -55,12 +70,19 @@ export interface EnhancedFeeCollectionRecord {
   advancePaymentNpr: number;
   remainingDueNpr: number;
   paymentMethod: PaymentMethod;
+  bankAccountId?: string;
+  transactionNumber?: string;
+  verificationCode?: string;
   feeBreakdown: FeeBreakdownItem[];
   isInstallment: boolean;
   installmentNumber?: number;
+  totalInstallments?: number;
   notes?: string;
   accountantName: string;
   createdBy: string;
+  printCount?: number;
+  lastPrintedAt?: string;
+  isDeleted?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -189,6 +211,13 @@ export interface AccountingSettingsRecord {
   receiptPrefix: string;
   autoReceiptNumber: boolean;
   defaultPaymentMethod: PaymentMethod;
+  voucherPrefix: string;
+  currentFiscalYearBs: string;
+  auditLockDateBs?: string;
+  panNumber?: string;
+  vatNumber?: string;
+  tdsEnabled: boolean;
+  institutionSignatureUrl?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -197,35 +226,57 @@ export interface AccountingDashboardResponse {
   stats: Array<{ label: string; value: number; change?: string }>;
   feeChart: Array<{ label: string; amount: number }>;
   expenseChart: Array<{ label: string; amount: number }>;
+  collectionTrend: Array<{ label: string; amount: number }>;
+  revenueSources: Array<{ label: string; amount: number }>;
   recentCollections: EnhancedFeeCollectionRecord[];
   recentExpenses: AccountingExpenseRecord[];
+  recentTransactions: Array<{
+    dateBs: string;
+    type: string;
+    description: string;
+    amountNpr: number;
+    entryType: "DEBIT" | "CREDIT";
+  }>;
   pendingFeesTotal: number;
+  todayCollectionNpr: number;
+  monthlyCollectionNpr: number;
   cashBalanceNpr: number;
   bankBalanceNpr: number;
+  pendingApprovals: number;
 }
 
 export interface StudentFinancialHistory {
   student: StudentRecord;
   className: string;
   sectionName: string;
+  batchName?: string;
+  yearName?: string;
+  guardianName?: string;
+  scholarshipStatus?: string;
+  totalPayableNpr: number;
   outstandingDueNpr: number;
   totalPaidNpr: number;
   totalDiscountNpr: number;
   totalScholarshipNpr: number;
+  totalFineNpr: number;
+  advanceBalanceNpr: number;
   totalRefundsNpr: number;
   collections: EnhancedFeeCollectionRecord[];
-  refunds: Array<{ dateBs: string; amountNpr: number; reason: string }>;
+  refunds: Array<{ _id?: string; refundNumber?: string; dateBs: string; amountNpr: number; reason: string }>;
+  dueInstallments: Array<{ installmentNumber: number; totalInstallments: number; amountNpr: number; dueDateBs?: string }>;
 }
 
 export interface AuditLogRecord {
   _id: string;
   schoolId: string;
-  actorUserId: string;
+  actorUserId: string | { fullName?: string; email?: string };
   actorRole: string;
   action: string;
   entity: string;
   entityId: string;
   before?: unknown;
   after?: unknown;
+  ipAddress?: string;
+  userAgent?: string;
   createdAt?: string;
 }

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { AttendanceInput, AttendanceRecord, AttendanceStatus, StudentRecord } from "@nepal-school-erp/shared";
+import { isInstitutionAdmin, type AttendanceInput, type AttendanceRecord, type AttendanceStatus, type StudentRecord } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { EmptyState } from "components/shared/EmptyState";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
@@ -46,7 +47,7 @@ const StatusBadge = ({ status }: { status: AttendanceStatus | "NOT_MARKED" }) =>
 export const AttendanceManager = () => {
   const { user } = useAuth();
   const isTeacher = user?.role === "TEACHER";
-  const isAdminViewer = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isAdminViewer = isInstitutionAdmin(user?.role ?? "");
   const canMark = isTeacher;
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
@@ -382,7 +383,9 @@ export const AttendanceManager = () => {
                           const status = statusMap[student._id];
                           return (
                             <tr key={student._id}>
-                              <Td>{student.user.fullName}</Td>
+                              <Td>
+                                <StudentNameLink studentId={student._id} name={student.user.fullName} />
+                              </Td>
                               <Td>{student.rollNumber}</Td>
                               <Td>
                                 {canMark ? (

@@ -8,6 +8,7 @@ import { env } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import routes from "./routes/index.js";
 import { ensureDemoData } from "./seed/index.js";
+import { migrateLegacyDemoDisplayNames } from "./utils/migrateLegacyDemoDisplayNames.js";
 
 const app = express();
 
@@ -35,7 +36,7 @@ app.use("/uploads", express.static(uploadsDir));
 app.get("/", (_req, res) => {
   res.json({
     success: true,
-    message: "MantraSphere CampusPro backend API",
+    message: "PHIT ERP backend API",
     version: "1.0.0"
   });
 });
@@ -43,7 +44,7 @@ app.get("/", (_req, res) => {
 app.get("/api/health", (_req, res) => {
   res.json({
     success: true,
-    message: "MantraSphere CampusPro backend is running"
+    message: "PHIT ERP backend is running"
   });
 });
 
@@ -56,6 +57,7 @@ app.use(errorHandler);
 
 const startServer = async (): Promise<void> => {
   await connectDatabase();
+  await migrateLegacyDemoDisplayNames();
   await ensureDemoData();
 
   app.listen(env.PORT, () => {

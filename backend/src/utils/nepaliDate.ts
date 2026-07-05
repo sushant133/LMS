@@ -1,6 +1,6 @@
 import NepaliDateImport from "nepali-date-converter";
-import type { AssignmentDeadlineStatus } from "@nepal-school-erp/shared";
-import { getNepalGrade } from "@nepal-school-erp/shared";
+import type { AssignmentDeadlineStatus } from "@phit-erp/shared";
+import { getNepalGrade } from "@phit-erp/shared";
 import { ApiError } from "./apiError.js";
 
 type NepaliDateInstance = {

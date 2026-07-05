@@ -16,7 +16,7 @@ import {
   type AssignmentInput,
   type AssignmentLink,
   type ClassroomPost
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Button } from "components/ui/button";

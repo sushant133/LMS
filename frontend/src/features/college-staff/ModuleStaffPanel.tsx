@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { moduleStaffSchema, type ModuleStaffInput, type UserProfile } from "@nepal-school-erp/shared";
+import { moduleStaffSchema, type ModuleStaffInput, type UserProfile } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";

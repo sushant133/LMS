@@ -1,4 +1,4 @@
-import type { AssignmentAttachment } from "@nepal-school-erp/shared";
+import type { AssignmentAttachment } from "@phit-erp/shared";
 import { getApiBaseUrl } from "./api";
 
 /** Resolve static upload URLs (/uploads/...) for cross-origin production backends. */

@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
-import { bannerSchema, BANNER_PRIORITY_ORDER, type BannerTargetRole } from "@nepal-school-erp/shared";
+import { bannerSchema, BANNER_PRIORITY_ORDER, type BannerTargetRole } from "@phit-erp/shared";
 import { Banner } from "../models/Banner.js";
 import { BannerDismissal } from "../models/BannerDismissal.js";
 import { User } from "../models/User.js";

@@ -7,7 +7,7 @@ import {
   laboratoryReturnSchema,
   laboratorySchema,
   moduleStaffSchema
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import {
   Laboratory,

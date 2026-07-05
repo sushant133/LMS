@@ -4,7 +4,7 @@ import {
   libraryIssueSchema,
   libraryReturnSchema,
   moduleStaffSchema
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
 import { Student } from "../models/Student.js";
@@ -22,13 +22,27 @@ import { withTenantScope } from "../utils/tenant.js";
 
 const formatIssue = (issue: Record<string, unknown>) => {
   const book = issue.bookId as { title?: string } | null | undefined;
-  const student = issue.studentId as { user?: { fullName?: string } } | null | undefined;
+  const studentRef = issue.studentId as
+    | { _id?: { toString: () => string }; user?: { fullName?: string } }
+    | string
+    | null
+    | undefined;
   const teacher = issue.teacherId as { user?: { fullName?: string } } | null | undefined;
+
+  const studentId =
+    typeof studentRef === "string"
+      ? studentRef
+      : studentRef?._id?.toString();
+  const studentName =
+    typeof studentRef === "object" && studentRef && "user" in studentRef
+      ? studentRef.user?.fullName
+      : undefined;
 
   return {
     ...issue,
+    studentId,
     bookTitle: book?.title,
-    borrowerName: student?.user?.fullName ?? teacher?.user?.fullName
+    borrowerName: studentName ?? teacher?.user?.fullName
   };
 };
 

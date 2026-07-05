@@ -1,0 +1,61 @@
+---
+pid: 28704
+cwd: "C:\Users\Sushant\Documents\New LMS Project"
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\\shared\"; npm install; cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm install; cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm install"
+started_at: 2026-07-05T20:26:50.544Z
+running_for_ms: 5790005  
+---
+
+up to date, audited 3 packages in 864ms
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @phit-erp/backend@1.0.0 postinstall
+> npm run build
+
+
+> @phit-erp/backend@1.0.0 build
+> npm run build:shared && tsc -p tsconfig.json
+
+
+> @phit-erp/backend@1.0.0 build:shared
+> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
+
+
+added 2 packages, and audited 3 packages in 2s
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+> @phit-erp/shared@1.0.0 build
+> tsc -p tsconfig.json
+
+
+added 1 package, removed 14 packages, and audited 181 packages in 13s
+
+33 packages are looking for funding
+  run `npm fund` for details
+
+3 vulnerabilities (2 low, 1 high)
+
+To address all issues, run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+added 1 package, removed 1 package, and audited 291 packages in 2s
+
+40 packages are looking for funding
+  run `npm fund` for details
+
+4 high severity vulnerabilities
+
+To address all issues, run:
+  npm audit fix --force
+
+Run `npm audit` for details.

@@ -22,7 +22,7 @@ import {
   updateLaboratoryCategory,
   updateLaboratoryStaff
 } from "../controllers/laboratoryController.js";
-import { authorize, protect } from "../middleware/auth.js";
+import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
@@ -51,9 +51,9 @@ router.get("/issues", authorize("COLLEGE_ADMIN", "LABORATORY_STAFF"), listEquipm
 router.post("/issues", authorize("COLLEGE_ADMIN", "LABORATORY_STAFF"), issueEquipment);
 router.put("/issues/:id/return", authorize("COLLEGE_ADMIN", "LABORATORY_STAFF"), returnEquipment);
 
-router.get("/staff", authorize("COLLEGE_ADMIN"), listLaboratoryStaff);
-router.post("/staff", authorize("COLLEGE_ADMIN"), createLaboratoryStaff);
-router.put("/staff/:id", authorize("COLLEGE_ADMIN"), updateLaboratoryStaff);
-router.delete("/staff/:id", authorize("COLLEGE_ADMIN"), deleteLaboratoryStaff);
+router.get("/staff", authorizeInstitutionAdmin, listLaboratoryStaff);
+router.post("/staff", authorizeInstitutionAdmin, createLaboratoryStaff);
+router.put("/staff/:id", authorizeInstitutionAdmin, updateLaboratoryStaff);
+router.delete("/staff/:id", authorizeInstitutionAdmin, deleteLaboratoryStaff);
 
 export default router;

@@ -34,7 +34,10 @@ interface ReceiptData {
   remainingDueNpr?: number;
   paymentMethod?: string;
   accountantName?: string;
+  transactionNumber?: string;
+  verificationCode?: string;
   feeBreakdown?: Array<{ feeType: string; title: string; amountNpr: number }>;
+  isDuplicate?: boolean;
 }
 
 interface MarksheetData {
@@ -115,6 +118,14 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
 
   doc.pipe(res);
 
+  if (data.isDuplicate) {
+    doc.save();
+    doc.rotate(-35, { origin: [pageWidth / 2, 400] });
+    doc.fontSize(72).fillColor("#e2e8f0").text("DUPLICATE", 80, 320, { align: "center", width: pageWidth - 160 });
+    doc.restore();
+    doc.fillColor("#0f172a");
+  }
+
   // Header band
   const headerTop = 40;
   doc
@@ -155,6 +166,12 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   y = drawReceiptRow(doc, "Payment Date (BS)", data.paidDateBs, fonts, y);
   if (data.paymentMethod) {
     y = drawReceiptRow(doc, "Payment Method", data.paymentMethod.replace(/_/g, " "), fonts, y);
+  }
+  if (data.transactionNumber) {
+    y = drawReceiptRow(doc, "Transaction No.", data.transactionNumber, fonts, y);
+  }
+  if (data.verificationCode) {
+    y = drawReceiptRow(doc, "Verification Code", data.verificationCode, fonts, y);
   }
 
   y += 8;
@@ -233,7 +250,7 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   y += 48;
 
   if (data.accountantName) {
-    doc.font(fonts.regular).fontSize(10).fillColor("#334155").text(`Received by: ${data.accountantName}`, 50, y);
+    doc.font(fonts.regular).fontSize(10).fillColor("#334155").text(`Issued by: ${data.accountantName}`, 50, y);
     y += 24;
   }
 

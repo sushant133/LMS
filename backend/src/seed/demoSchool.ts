@@ -6,7 +6,7 @@ import {
   DEMO_SCHOOL_CODE,
   computeSubjectMark,
   demoCredentials
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import mongoose from "mongoose";
 import { env } from "../config/env.js";
 import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
@@ -159,7 +159,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       [
         {
           schoolId,
-          fullName: "Demo College Administrator",
+          fullName: "College Administrator",
           email: demoCredentials.schoolAdmin.email,
           phone: "9801111000",
           password: DEMO_PASSWORD,

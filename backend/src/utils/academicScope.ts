@@ -1,4 +1,4 @@
-import type { InstitutionType } from "@nepal-school-erp/shared";
+import type { InstitutionType } from "@phit-erp/shared";
 import type { StudentProfile } from "./studentScope.js";
 import type { TeacherScope } from "./teacherScope.js";
 import { isCollege } from "./institution.js";

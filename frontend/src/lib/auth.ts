@@ -1,21 +1,18 @@
-import { normalizeUserRole, type SchoolRecord, type UserProfile, type UserRole } from "@nepal-school-erp/shared";
+import {
+  INSTITUTION_NAME,
+  USER_ROLE_LABELS,
+  normalizeUserRole,
+  type SchoolRecord,
+  type UserProfile,
+  type UserRole
+} from "@phit-erp/shared";
 
 export const getCollegeDisplayName = (
   availableSchools: SchoolRecord[],
   user?: UserProfile | null
-): string => availableSchools[0]?.name ?? user?.school?.name ?? "Your College";
+): string => availableSchools[0]?.name ?? user?.school?.name ?? INSTITUTION_NAME;
 
-export const roleLabelMap: Record<UserRole, string> = {
-  SUPER_ADMIN: "Super Admin",
-  COLLEGE_ADMIN: "College Admin",
-  TEACHER: "Teacher",
-  STUDENT: "Student",
-  PARENT: "Parent",
-  LIBRARY_STAFF: "Library Staff",
-  LABORATORY_STAFF: "Laboratory Staff",
-  ACCOUNTANT: "Accountant",
-  COLLEGE_STAFF: "College Staff"
-};
+export const roleLabelMap: Record<UserRole, string> = USER_ROLE_LABELS;
 
 export const roleRedirectMap: Record<UserRole, string> = {
   SUPER_ADMIN: "/dashboard/super_admin",
@@ -26,6 +23,9 @@ export const roleRedirectMap: Record<UserRole, string> = {
   LIBRARY_STAFF: "/library",
   LABORATORY_STAFF: "/laboratory",
   ACCOUNTANT: "/accounting",
+  CASHIER: "/accounting",
+  AUDITOR: "/accounting",
+  PRINCIPAL: "/accounting",
   COLLEGE_STAFF: "/dashboard/college_staff"
 };
 

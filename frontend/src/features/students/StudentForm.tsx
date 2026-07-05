@@ -6,9 +6,10 @@ import {
   type BatchRecord,
   type ClassRecord,
   type SectionRecord,
+  type StudentDocument,
   type StudentInput,
   type YearRecord
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
@@ -20,6 +21,8 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { filterSectionsByClass, filterYearsByBatch } from "lib/academicStructureUtils";
+import { StudentDocumentsSection } from "./StudentDocumentsSection";
+import type { PendingStudentDocument } from "./studentDocumentUtils";
 
 const createDefaultValue = (isCollege: boolean): StudentInput => ({
   fullName: "",
@@ -56,29 +59,42 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
 
 interface StudentFormProps {
   initialValue?: StudentInput;
+  studentId?: string;
   isEditing?: boolean;
+  canManageDocuments?: boolean;
   classes?: ClassRecord[];
   sections?: SectionRecord[];
   batches?: BatchRecord[];
   years?: YearRecord[];
   submitting?: boolean;
+  uploadedBy?: string;
+  uploadedByName?: string;
   onSubmit: (value: StudentInput) => Promise<void>;
   onCancel?: () => void;
+  onPendingDocumentsChange?: (pending: PendingStudentDocument[]) => void;
+  pendingDocuments?: PendingStudentDocument[];
 }
 
 export const StudentForm = ({
   initialValue,
+  studentId,
   isEditing = false,
+  canManageDocuments = false,
   classes = [],
   sections = [],
   batches = [],
   years = [],
   submitting,
+  uploadedBy,
+  uploadedByName,
   onSubmit,
-  onCancel
+  onCancel,
+  onPendingDocumentsChange,
+  pendingDocuments = []
 }: StudentFormProps) => {
   const isCollege = useIsCollege();
   const [form, setForm] = useState<StudentInput>(initialValue ?? createDefaultValue(isCollege));
+  const [documents, setDocuments] = useState<StudentDocument[]>(initialValue?.documents ?? []);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const filteredSections = useMemo(
@@ -102,7 +118,9 @@ export const StudentForm = ({
     const parsed = studentSchema.safeParse({
       ...form,
       email: form.email.trim(),
-      password: password.trim() || undefined
+      password: password.trim() || undefined,
+      documents,
+      photoUrl: documents.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ?? form.photoUrl
     });
 
     if (!parsed.success) {
@@ -122,8 +140,18 @@ export const StudentForm = ({
 
     await onSubmit(parsed.data);
     setForm(createDefaultValue(isCollege));
+    setDocuments([]);
     setPassword("");
     setConfirmPassword("");
+  };
+
+  const handleDocumentsChange = (nextDocuments: StudentDocument[]) => {
+    setDocuments(nextDocuments);
+    setForm((current) => ({
+      ...current,
+      documents: nextDocuments,
+      photoUrl: nextDocuments.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ?? current.photoUrl
+    }));
   };
 
   return (
@@ -131,14 +159,6 @@ export const StudentForm = ({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <FormField label="Full Name">
           <Input value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
-        </FormField>
-        <FormField label="Login ID">
-          <Input
-            placeholder="e.g. student01 or name@college.com"
-            type="text"
-            value={form.email}
-            onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-          />
         </FormField>
         <FormField label="Phone">
           <Input value={form.phone ?? ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
@@ -211,7 +231,6 @@ export const StudentForm = ({
           <NepaliDateField
             value={form.dateOfBirthBs}
             onChange={(value) => setForm((current) => ({ ...current, dateOfBirthBs: value }))}
-            captionLayout="dropdown"
             minDate={studentBirthMinDate()}
             maxDate={studentBirthMaxDate()}
           />
@@ -296,10 +315,24 @@ export const StudentForm = ({
         <Input value={form.remarks ?? ""} onChange={(event) => setForm((current) => ({ ...current, remarks: event.target.value }))} />
       </FormField>
 
+      {canManageDocuments ? (
+        <StudentDocumentsSection
+          studentId={studentId}
+          documents={documents}
+          onChange={handleDocumentsChange}
+          canManage={canManageDocuments}
+          pendingDocuments={pendingDocuments}
+          onPendingChange={onPendingDocumentsChange}
+          uploadedBy={uploadedBy}
+          uploadedByName={uploadedByName}
+        />
+      ) : null}
+
       <PortalLoginFields
         email={form.email}
         password={password}
         confirmPassword={confirmPassword}
+        onEmailChange={(email) => setForm((current) => ({ ...current, email }))}
         onPasswordChange={setPassword}
         onConfirmPasswordChange={setConfirmPassword}
         showReset={!isEditing}

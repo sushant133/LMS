@@ -1,13 +1,14 @@
 import { z } from "zod";
 import {
   EXPENSE_CATEGORIES,
+  FEE_STRUCTURE_STATUSES,
   FEE_TYPES,
   INCOME_CATEGORIES,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
   PURCHASE_CATEGORIES
 } from "./constants.js";
-import { addressSchema, academicYearSchema, bsDateSchema, moneySchema, objectIdSchema } from "./schemas.js";
+import { addressSchema, academicYearSchema, bsDateSchema, moneySchema, objectIdSchema, optionalObjectIdSchema } from "./schemas.js";
 
 export const feeBreakdownItemSchema = z.object({
   feeType: z.enum(FEE_TYPES),
@@ -17,9 +18,11 @@ export const feeBreakdownItemSchema = z.object({
 
 export const enhancedFeeCollectionSchema = z.object({
   studentId: objectIdSchema,
-  feeStructureId: objectIdSchema.optional(),
+  feeStructureId: optionalObjectIdSchema,
   receiptNumber: z.string().optional(),
   paidDateBs: bsDateSchema,
+  academicYearBs: z.string().optional(),
+  semesterBs: z.string().optional(),
   currentChargesNpr: moneySchema.default(0),
   amountPaidNpr: moneySchema,
   discountNpr: moneySchema.default(0),
@@ -27,15 +30,18 @@ export const enhancedFeeCollectionSchema = z.object({
   lateFeeNpr: moneySchema.default(0),
   advancePaymentNpr: moneySchema.default(0),
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  bankAccountId: optionalObjectIdSchema,
+  transactionNumber: z.string().optional().or(z.literal("")),
   feeBreakdown: z.array(feeBreakdownItemSchema).default([]),
   isInstallment: z.boolean().default(false),
   installmentNumber: z.coerce.number().int().min(1).optional(),
+  totalInstallments: z.coerce.number().int().min(1).optional(),
   notes: z.string().optional()
 });
 
 export const accountantSchema = z.object({
   fullName: z.string().min(2),
-  email: z.email(),
+  email: z.string().trim().min(3, "Login ID must be at least 3 characters"),
   phone: z.string().optional().or(z.literal("")),
   password: z.string().min(6).optional(),
   employeeId: z.string().min(1),
@@ -79,8 +85,8 @@ export const accountingIncomeSchema = z.object({
 
 export const salaryPaymentSchema = z.object({
   employeeType: z.enum(["TEACHER", "STAFF"]),
-  teacherId: objectIdSchema.optional(),
-  staffId: objectIdSchema.optional(),
+  teacherId: optionalObjectIdSchema,
+  staffId: optionalObjectIdSchema,
   staffName: z.string().optional().or(z.literal("")),
   monthBs: z.string().regex(/^\d{4}-\d{2}$/),
   basicSalaryNpr: moneySchema,
@@ -123,7 +129,7 @@ export const cashBookEntrySchema = z.object({
   amountNpr: moneySchema,
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
   referenceType: z.string().optional(),
-  referenceId: objectIdSchema.optional()
+  referenceId: optionalObjectIdSchema
 });
 
 export const accountingSettingsSchema = z.object({
@@ -131,17 +137,34 @@ export const accountingSettingsSchema = z.object({
   lateFineGraceDays: z.coerce.number().int().min(0).default(0),
   receiptPrefix: z.string().default("RCPT"),
   autoReceiptNumber: z.boolean().default(true),
-  defaultPaymentMethod: z.enum(PAYMENT_METHODS).default("CASH")
+  defaultPaymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  voucherPrefix: z.string().default("JV"),
+  currentFiscalYearBs: academicYearSchema.optional(),
+  auditLockDateBs: z.string().optional().or(z.literal("")),
+  panNumber: z.string().optional().or(z.literal("")),
+  vatNumber: z.string().optional().or(z.literal("")),
+  tdsEnabled: z.boolean().default(false),
+  institutionSignatureUrl: z.string().optional().or(z.literal(""))
 });
 
 export const extendedFeeStructureSchema = z.object({
   title: z.string().min(1),
   classIds: z.array(objectIdSchema).default([]),
+  batchIds: z.array(objectIdSchema).default([]),
+  yearIds: z.array(objectIdSchema).default([]),
+  faculty: z.string().optional().or(z.literal("")),
+  program: z.string().optional().or(z.literal("")),
   feeType: z.enum(FEE_TYPES),
-  frequency: z.enum(["MONTHLY", "ANNUAL", "ONE_TIME"]),
+  frequency: z.enum(["MONTHLY", "ANNUAL", "ONE_TIME", "SEMESTER"]),
   academicYearBs: academicYearSchema,
+  semesterBs: z.string().optional().or(z.literal("")),
   amountNpr: moneySchema,
-  isOptional: z.boolean().default(false)
+  installmentCount: z.coerce.number().int().min(1).optional(),
+  isOptional: z.boolean().default(false),
+  status: z.enum(FEE_STRUCTURE_STATUSES).default("ACTIVE"),
+  version: z.coerce.number().int().min(1).default(1),
+  effectiveFromBs: bsDateSchema.optional().or(z.literal("")),
+  versionGroupId: z.string().optional()
 });
 
 export type AccountantInput = z.infer<typeof accountantSchema>;

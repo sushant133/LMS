@@ -1,12 +1,12 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
-import type { AssignmentAttachment, AssignmentDeadlineStatus, AssignmentSubmissionStatus } from "@nepal-school-erp/shared";
+import type { AssignmentAttachment, AssignmentDeadlineStatus, AssignmentSubmissionStatus } from "@phit-erp/shared";
 import {
   assignmentCommentSchema,
   assignmentSchema,
   assignmentSubmissionSchema,
   gradeSubmissionSchema
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
 import { AssignmentComment } from "../models/AssignmentComment.js";
 import { Batch } from "../models/Batch.js";

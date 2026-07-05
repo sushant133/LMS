@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { attendanceSchema } from "@nepal-school-erp/shared";
+import { attendanceSchema } from "@phit-erp/shared";
 import { Attendance } from "../models/Attendance.js";
 import { Student } from "../models/Student.js";
 import { Subject } from "../models/Subject.js";

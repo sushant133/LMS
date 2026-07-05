@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  isInstitutionAdmin,
   libraryBookSchema,
   libraryIssueSchema,
   moduleStaffSchema,
@@ -11,10 +12,11 @@ import {
   type LibraryIssueRecord,
   type ModuleStaffInput,
   type UserProfile
-} from "@nepal-school-erp/shared";
+} from "@phit-erp/shared";
 import { BookOpen, History, LayoutDashboard, Package, Users } from "lucide-react";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
@@ -27,6 +29,7 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
 import { api, unwrap } from "lib/api";
+import { resolveStudentId } from "lib/resolveStudentId";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
 
@@ -71,7 +74,7 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminO
 
 export const LibraryManager = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === "COLLEGE_ADMIN" || user?.role === "SUPER_ADMIN";
+  const isAdmin = isInstitutionAdmin(user?.role ?? "");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [bookForm, setBookForm] = useState<LibraryBookInput>(defaultBook);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
@@ -238,7 +241,13 @@ export const LibraryManager = () => {
                   {(dashboardQuery.data?.recentlyIssued ?? []).map((issue) => (
                     <tr key={issue._id}>
                       <Td>{issue.bookTitle ?? "—"}</Td>
-                      <Td>{issue.borrowerName ?? "—"}</Td>
+                      <Td>
+                        {issue.borrowerType === "STUDENT" && resolveStudentId(issue.studentId) && issue.borrowerName ? (
+                          <StudentNameLink studentId={resolveStudentId(issue.studentId)!} name={issue.borrowerName} />
+                        ) : (
+                          issue.borrowerName ?? "—"
+                        )}
+                      </Td>
                       <Td>{issue.dueDateBs}</Td>
                       <Td>
                         <Badge className={issueStatusStyles[issue.status] ?? ""}>{issue.status}</Badge>
@@ -465,7 +474,13 @@ export const LibraryManager = () => {
                   {(issuesQuery.data ?? []).map((issue) => (
                     <tr key={issue._id}>
                       <Td>{issue.bookTitle ?? "—"}</Td>
-                      <Td>{issue.borrowerName ?? "—"}</Td>
+                      <Td>
+                        {issue.borrowerType === "STUDENT" && resolveStudentId(issue.studentId) && issue.borrowerName ? (
+                          <StudentNameLink studentId={resolveStudentId(issue.studentId)!} name={issue.borrowerName} />
+                        ) : (
+                          issue.borrowerName ?? "—"
+                        )}
+                      </Td>
                       <Td>{issue.issuedDateBs}</Td>
                       <Td>{issue.dueDateBs}</Td>
                       <Td>{issue.returnedDateBs ?? "—"}</Td>

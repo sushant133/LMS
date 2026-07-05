@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { resultSubmissionReviewSchema, resultSubmissionScopeSchema } from "@nepal-school-erp/shared";
+import { resultSubmissionReviewSchema, resultSubmissionScopeSchema } from "@phit-erp/shared";
 import { Exam } from "../models/Exam.js";
 import { ResultSubmission } from "../models/ResultSubmission.js";
 import { AuditLog } from "../models/AuditLog.js";

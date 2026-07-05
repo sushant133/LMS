@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { StudentSubjectDetail } from "@nepal-school-erp/shared";
+import type { StudentSubjectDetail } from "@phit-erp/shared";
 import { BookOpen, ChevronLeft } from "lucide-react";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
@@ -10,7 +10,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { AttachmentViewer } from "components/shared/AttachmentViewer";
-import type { AssignmentAttachment } from "@nepal-school-erp/shared";
+import type { AssignmentAttachment } from "@phit-erp/shared";
 import { PageContent } from "components/layout/PageContent";
 import { api, unwrap } from "lib/api";
 

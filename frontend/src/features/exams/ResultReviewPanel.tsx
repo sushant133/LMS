@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { ResultRecord, ResultSubmissionRecord, StudentRecord, SubjectRecord } from "@nepal-school-erp/shared";
-import { computeSubjectMark, resultSchema } from "@nepal-school-erp/shared";
+import type { ResultRecord, ResultSubmissionRecord, StudentRecord, SubjectRecord } from "@phit-erp/shared";
+import { computeSubjectMark, resultSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
+import { StudentNameLink } from "components/shared/StudentNameLink";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { Badge } from "components/ui/badge";
@@ -336,7 +337,13 @@ export const ResultReviewPanel = ({ examId, students, subjects, isCollege, compa
 
                   return (
                     <tr key={`${result._id}-${mark.subjectId}`}>
-                      <Td>{student?.user.fullName ?? result.studentId}</Td>
+                      <Td>
+                        {student ? (
+                          <StudentNameLink studentId={student._id} name={student.user.fullName} />
+                        ) : (
+                          result.studentId
+                        )}
+                      </Td>
                       {isEditing && editingMark ? (
                         <>
                           <Td>
