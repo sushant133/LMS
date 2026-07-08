@@ -15,6 +15,12 @@ const StudentListPage = lazy(() => import("pages/StudentListPage").then((module)
 const TeachersPage = lazy(() => import("pages/TeachersPage").then((module) => ({ default: module.TeachersPage })));
 const CollegeStaffPage = lazy(() => import("pages/CollegeStaffPage").then((module) => ({ default: module.CollegeStaffPage })));
 const AcademicsPage = lazy(() => import("pages/AcademicsPage").then((module) => ({ default: module.AcademicsPage })));
+const AcademicManagementPage = lazy(() =>
+  import("pages/AcademicManagementPage").then((module) => ({ default: module.AcademicManagementPage }))
+);
+const AcademicCalendarPage = lazy(() =>
+  import("pages/AcademicCalendarPage").then((module) => ({ default: module.AcademicCalendarPage }))
+);
 const AttendancePage = lazy(() => import("pages/AttendancePage").then((module) => ({ default: module.AttendancePage })));
 const ExamsPage = lazy(() => import("pages/ExamsPage").then((module) => ({ default: module.ExamsPage })));
 const NoticesPage = lazy(() => import("pages/NoticesPage").then((module) => ({ default: module.NoticesPage })));
@@ -40,6 +46,9 @@ const CollegeAdministratorManagementPage = lazy(() =>
 );
 const StudentFeesPage = lazy(() => import("pages/StudentFeesPage").then((module) => ({ default: module.StudentFeesPage })));
 const StudentSubjectsPage = lazy(() => import("pages/StudentSubjectsPage").then((module) => ({ default: module.StudentSubjectsPage })));
+const StudentMyProfilePage = lazy(() =>
+  import("pages/StudentMyProfilePage").then((module) => ({ default: module.StudentMyProfilePage }))
+);
 const StudentProfilePage = lazy(() => import("pages/StudentProfilePage").then((module) => ({ default: module.StudentProfilePage })));
 
 const RootRedirect = () => {
@@ -79,7 +88,32 @@ export default function App() {
               <Route path="/notices" element={<NoticesPage />} />
             </Route>
 
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "STUDENT",
+                    "PARENT",
+                    "COLLEGE_STAFF",
+                    "LIBRARY_STAFF",
+                    "LABORATORY_STAFF",
+                    "ACCOUNTANT",
+                    "CASHIER",
+                    "AUDITOR",
+                    "PRINCIPAL"
+                  ]}
+                />
+              }
+            >
+              <Route path="/academic-calendar" element={<LazyRoute><AcademicCalendarPage /></LazyRoute>} />
+            </Route>
+
             <Route element={<ProtectedRoute roles={["STUDENT"]} />}>
+              <Route path="/my-profile" element={<LazyRoute><StudentMyProfilePage /></LazyRoute>} />
               <Route path="/my-subjects" element={<StudentSubjectsPage />} />
               <Route path="/my-fees" element={<StudentFeesPage />} />
             </Route>
@@ -163,6 +197,7 @@ export default function App() {
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
               <Route path="/timetable" element={<TimetablePage />} />
+              <Route path="/academic-management" element={<LazyRoute><AcademicManagementPage /></LazyRoute>} />
             </Route>
 
             <Route element={<ProtectedRoute roles={["TEACHER"]} />}>

@@ -51,6 +51,11 @@ export const getDeadlineStatus = (dueDateBs: string | undefined, todayBs: string
   return "UPCOMING";
 };
 
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+export const formatAdDate = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
 export const ensureValidBsDate = (dateBs: string): string => {
   const [year, month, day] = dateBs.split("-").map(Number);
 
@@ -73,6 +78,40 @@ export const ensureValidBsDate = (dateBs: string): string => {
   } catch (error) {
     throw new ApiError(400, `Invalid BS date: ${dateBs}`);
   }
+};
+
+export const getDaysInBsMonth = (year: number, month: number): number => {
+  const NepaliDateBs = NepaliDate as NepaliDateConstructor & {
+    new (year: number, monthIndex: number, date: number): NepaliDateInstance;
+  };
+
+  for (let day = 32; day >= 28; day -= 1) {
+    try {
+      const date = new NepaliDateBs(year, month - 1, day);
+      const formatted = formatBsDate(date);
+      const [, monthValue, dayValue] = formatted.split("-").map(Number);
+      if (monthValue === month && dayValue === day) {
+        return day;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return 30;
+};
+
+export const bsToAdDate = (dateBs: string): { dateAd: string; dayOfWeek: string } => {
+  const validated = ensureValidBsDate(dateBs);
+  const [year, month, day] = validated.split("-").map(Number);
+  const NepaliDateBs = NepaliDate as NepaliDateConstructor & {
+    new (year: number, monthIndex: number, date: number): NepaliDateInstance & { toJsDate(): Date };
+  };
+  const jsDate = new NepaliDateBs(year!, month! - 1, day!).toJsDate();
+  return {
+    dateAd: formatAdDate(jsDate),
+    dayOfWeek: WEEKDAY_NAMES[jsDate.getDay()] ?? "Sunday"
+  };
 };
 
 export const calculateResultGrade = (obtained: number, total: number): { percentage: number; gpa: number; grade: string } => {

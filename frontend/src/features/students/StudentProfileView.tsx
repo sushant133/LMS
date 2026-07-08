@@ -137,6 +137,7 @@ export const StudentProfileView = () => {
             <Badge className="bg-white text-slate-700 ring-1 ring-slate-200">
               {profile.secondaryLabel}: {profile.secondaryName}
             </Badge>
+            <Badge className="bg-brand-100 text-brand-800 ring-1 ring-brand-200">Faculty: HA</Badge>
           </div>
         </div>
 
@@ -167,12 +168,18 @@ export const StudentProfileView = () => {
                 <h3 className="mb-3 text-lg font-semibold">Personal Information</h3>
                 <InfoGrid
                   items={[
+                    { label: "Full Name", value: student.user.fullName },
+                    { label: "Registration / Admission No.", value: student.admissionNumber },
+                    { label: "Roll Number", value: student.rollNumber },
+                    { label: profile.primaryLabel, value: profile.primaryName },
+                    { label: profile.secondaryLabel, value: profile.secondaryName },
+                    { label: "Faculty", value: "HA" },
+                    { label: "Mobile Number", value: student.user.phone ?? "—" },
+                    { label: "Email", value: student.user.email },
                     { label: "Admission Date (BS)", value: student.admissionDateBs },
                     { label: "Date of Birth (BS)", value: student.dateOfBirthBs },
                     { label: "Gender", value: student.gender },
                     { label: "Blood Group", value: student.bloodGroup ?? "—" },
-                    { label: "Phone", value: student.user.phone ?? "—" },
-                    { label: "Email / Login ID", value: student.user.email },
                     { label: "Fees Due", value: formatCurrencyNpr(student.feesDueNpr) }
                   ]}
                 />
@@ -200,6 +207,8 @@ export const StudentProfileView = () => {
                 items={[
                   { label: profile.primaryLabel, value: profile.primaryName },
                   { label: profile.secondaryLabel, value: profile.secondaryName },
+                  { label: "Faculty", value: "HA" },
+                  { label: "Registration / Admission No.", value: student.admissionNumber },
                   { label: "Subjects Enrolled", value: profile.subjects.length },
                   { label: "Attendance %", value: `${profile.attendance.yearlyPercentage}%` }
                 ]}

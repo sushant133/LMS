@@ -18,6 +18,82 @@ import { sendSuccess } from "../utils/response.js";
 import { assertStudentSubjectAccess, getEnrolledSubjects, requireStudentProfile } from "../utils/studentScope.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
+/** Hardcoded faculty until multi-faculty support is added. */
+const DEFAULT_FACULTY = "HA";
+
+const formatAddress = (address?: {
+  province?: string;
+  district?: string;
+  municipality?: string;
+  ward?: string;
+  streetAddress?: string;
+}): string => {
+  if (!address) return "—";
+  return [address.streetAddress, address.ward ? `Ward ${address.ward}` : "", address.municipality, address.district, address.province]
+    .filter(Boolean)
+    .join(", ");
+};
+
+/**
+ * Student self-profile: name, address, batch, admission no., mobile, email, faculty.
+ */
+export const getMyStudentProfile = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user?.role !== "STUDENT") {
+    throw new ApiError(403, "Only students can access this profile");
+  }
+
+  const schoolId = tenantObjectId(req);
+  const student = await Student.findOne({ schoolId, user: req.user.userId }).populate("user", "-password").lean();
+
+  if (!student) {
+    throw new ApiError(404, "Student profile not found");
+  }
+
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+
+  const [batch, year, schoolClass, section] = await Promise.all([
+    student.batchId ? Batch.findById(student.batchId).select("name").lean() : null,
+    student.yearId ? Year.findById(student.yearId).select("name").lean() : null,
+    student.classId ? SchoolClass.findById(student.classId).select("name").lean() : null,
+    student.sectionId ? Section.findById(student.sectionId).select("name").lean() : null
+  ]);
+
+  const user = student.user as {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+    _id?: { toString(): string };
+  } | null;
+
+  const address = student.address as {
+    province: string;
+    district: string;
+    municipality: string;
+    ward: string;
+    streetAddress: string;
+  };
+
+  return sendSuccess(res, "Student profile fetched", {
+    studentId: student._id.toString(),
+    fullName: user?.fullName ?? "—",
+    email: user?.email ?? "—",
+    phone: user?.phone ?? "—",
+    address: formatAddress(address),
+    addressDetails: address,
+    admissionNumber: student.admissionNumber,
+    rollNumber: student.rollNumber,
+    batch: college ? (batch?.name ?? "—") : (schoolClass?.name ?? "—"),
+    year: college ? (year?.name ?? "—") : (section?.name ?? "—"),
+    batchLabel: college ? "Batch" : "Class",
+    yearLabel: college ? "Year" : "Section",
+    faculty: DEFAULT_FACULTY,
+    photoUrl: student.photoUrl,
+    gender: student.gender,
+    academicStatus: student.academicStatus ?? "ACTIVE"
+  });
+});
+
 export const listStudentSubjects = asyncHandler(async (req: Request, res: Response) => {
   if (req.user?.role !== "STUDENT") {
     throw new ApiError(403, "Only students can access enrolled subjects");

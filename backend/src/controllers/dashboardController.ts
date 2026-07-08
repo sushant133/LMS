@@ -254,12 +254,48 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   const parentFeesDueNpr = children.reduce((sum, child) => sum + child.feesDueNpr, 0);
 
   const adminLike = institutionAccess;
+
+  let collegeYearStats: Array<{ label: string; value: number }> = [];
+  if (adminLike && college) {
+    const [years, activeStudents, passedOutCount, alumniCount] = await Promise.all([
+      Year.find({ schoolId }).select("_id name level").lean(),
+      Student.find({
+        schoolId,
+        $or: [{ academicStatus: "ACTIVE" }, { academicStatus: { $exists: false } }, { academicStatus: null }]
+      })
+        .select("yearId")
+        .lean(),
+      Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
+      Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
+    ]);
+
+    const yearNameById = new Map(years.map((year) => [year._id.toString(), year.name]));
+    const countsByYearName = new Map<string, number>();
+    for (const year of years) {
+      countsByYearName.set(year.name, 0);
+    }
+    for (const student of activeStudents) {
+      const yearName = student.yearId ? yearNameById.get(student.yearId.toString()) : undefined;
+      if (!yearName) continue;
+      countsByYearName.set(yearName, (countsByYearName.get(yearName) ?? 0) + 1);
+    }
+
+    collegeYearStats = [
+      ...[...countsByYearName.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, value]) => ({ label, value })),
+      { label: "Passed Out", value: passedOutCount },
+      { label: "Alumni", value: alumniCount }
+    ];
+  }
+
   const stats = adminLike
     ? [
         { label: "Students", value: studentCount },
         { label: "Teachers", value: teacherCount },
         { label: groupLabel, value: groupCount },
-        { label: "Unread Alerts", value: unreadNotificationCount }
+        { label: "Unread Alerts", value: unreadNotificationCount },
+        ...collegeYearStats
       ]
     : studentProfile
       ? [
@@ -312,6 +348,12 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         value: `${noticeCount} active`,
         href: "/notices",
         tone: "info"
+      },
+      {
+        label: "Academic calendar",
+        value: "View BS holidays & events",
+        href: "/academic-calendar",
+        tone: "info"
       }
     );
   } else if (studentProfile) {
@@ -329,6 +371,12 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         value: "Open classroom stream",
         href: "/homework-view",
         tone: "info"
+      },
+      {
+        label: "Academic calendar",
+        value: "View holidays and exam dates",
+        href: "/academic-calendar",
+        tone: "info"
       }
     );
   } else if (isParent) {
@@ -344,6 +392,12 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         value: children.length ? `${children.length} linked child profile${children.length === 1 ? "" : "s"}` : "No children linked yet",
         href: "/parent-portal",
         tone: children.length ? "info" : "warning"
+      },
+      {
+        label: "Academic calendar",
+        value: "College holidays and events",
+        href: "/academic-calendar",
+        tone: "info"
       }
     );
   } else if (teacherScope) {
@@ -358,6 +412,12 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         label: "Assignments",
         value: "Publish homework and CAS updates",
         href: "/homework",
+        tone: "info"
+      },
+      {
+        label: "Academic calendar",
+        value: "BS holidays and exam schedule",
+        href: "/academic-calendar",
         tone: "info"
       }
     );

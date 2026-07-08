@@ -294,7 +294,7 @@ export const buildReportCsv = (reportType: AccountingReportType, rows: unknown[]
 
 export const buildFinancialSummaryCsv = (report: FinancialSummaryReport): string => {
   const lines: string[] = [
-    "PHIT ERP — Financial Summary",
+    "PHIT LMS — Financial Summary",
     `Period,${report.period.label}`,
     "",
     "Category,Transactions,Total (NPR)",

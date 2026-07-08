@@ -12,6 +12,7 @@ import {
   RESULT_SUBMISSION_STATUSES,
   INSTITUTION_TYPES,
   PUBLIC_REGISTER_ROLES,
+  STUDENT_ACADEMIC_STATUSES,
   USER_ROLES
 } from "./constants.js";
 
@@ -152,6 +153,7 @@ export const studentSchema = z.object({
   guardianPhone: z.string().min(7),
   feesDueNpr: moneySchema,
   remarks: z.string().optional(),
+  academicStatus: z.enum(STUDENT_ACADEMIC_STATUSES).optional().default("ACTIVE"),
   // Phase 0 foundation fields (optional for backward compatibility)
   photoUrl: z.string().optional().or(z.literal("")),
   documents: z
@@ -241,7 +243,7 @@ export const batchSchema = z.object({
 export const yearSchema = z.object({
   batchId: objectIdSchema,
   name: z.string().min(1),
-  level: z.coerce.number().min(1).max(3),
+  level: z.coerce.number().min(1).max(12),
   isActive: z.boolean().default(true)
 });
 
@@ -303,13 +305,55 @@ export const libraryInventoryAccessSchema = z.object({
   enabled: z.boolean()
 });
 
-export const dailyAttendanceSubmitSchema = z.object({
+export const dailyAttendanceSubmitSchema = z
+  .object({
+    classId: objectIdSchema.optional(),
+    sectionId: objectIdSchema.optional(),
+    batchId: objectIdSchema.optional(),
+    yearId: objectIdSchema.optional(),
+    dateBs: bsDateSchema,
+    /** Required for teachers. Optional for admins marking groups without a first-period slot. */
+    timetableSlotId: objectIdSchema.optional(),
+    /** Used when marking without a timetable slot (admin manual register). */
+    subjectId: optionalObjectIdSchema,
+    entries: z
+      .array(
+        z.object({
+          studentId: objectIdSchema,
+          status: z.enum(["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"]),
+          remarks: z.string().max(500).optional()
+        })
+      )
+      .min(1),
+    notes: z.string().max(2000).optional(),
+    adminOverride: z.boolean().optional(),
+    assignedTeacherId: optionalObjectIdSchema
+  })
+  .superRefine((data, ctx) => {
+    if (!data.timetableSlotId && !data.adminOverride) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["timetableSlotId"],
+        message: "Timetable slot is required to mark daily attendance"
+      });
+    }
+    if (!data.timetableSlotId && data.adminOverride && !data.assignedTeacherId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["assignedTeacherId"],
+        message: "Assign a teacher when marking attendance without a timetable slot"
+      });
+    }
+  });
+
+export const dailyAttendanceUpdateSchema = z.object({
   classId: objectIdSchema.optional(),
   sectionId: objectIdSchema.optional(),
   batchId: objectIdSchema.optional(),
   yearId: objectIdSchema.optional(),
   dateBs: bsDateSchema,
-  timetableSlotId: objectIdSchema,
+  timetableSlotId: objectIdSchema.optional(),
+  subjectId: optionalObjectIdSchema,
   entries: z
     .array(
       z.object({
@@ -321,16 +365,10 @@ export const dailyAttendanceSubmitSchema = z.object({
     .min(1),
   notes: z.string().max(2000).optional(),
   adminOverride: z.boolean().optional(),
-  assignedTeacherId: optionalObjectIdSchema
+  assignedTeacherId: optionalObjectIdSchema,
+  teacherId: optionalObjectIdSchema,
+  teacherReassignReason: z.string().max(500).optional()
 });
-
-export const dailyAttendanceUpdateSchema = dailyAttendanceSubmitSchema
-  .omit({ timetableSlotId: true })
-  .extend({
-    timetableSlotId: objectIdSchema.optional(),
-    teacherId: optionalObjectIdSchema,
-    teacherReassignReason: z.string().max(500).optional()
-  });
 
 export const dailyAttendanceUnlockSchema = z.object({
   reason: z.string().min(3).max(500)

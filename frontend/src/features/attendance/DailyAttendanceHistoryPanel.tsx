@@ -134,13 +134,13 @@ export const DailyAttendanceHistoryPanel = ({
     setReassignReason("");
     setStatusMap(
       selectedRecord.entries.reduce<Record<string, DailyAttendanceStatus>>((acc, entry) => {
-        acc[entry.studentId] = entry.status;
+        acc[String(entry.studentId)] = entry.status;
         return acc;
       }, {})
     );
     setRemarksMap(
       selectedRecord.entries.reduce<Record<string, string>>((acc, entry) => {
-        if (entry.remarks) acc[entry.studentId] = entry.remarks;
+        if (entry.remarks) acc[String(entry.studentId)] = entry.remarks;
         return acc;
       }, {})
     );

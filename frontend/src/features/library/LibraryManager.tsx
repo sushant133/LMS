@@ -170,9 +170,15 @@ export const LibraryManager = () => {
   });
 
   const createStaff = useMutation({
-    mutationFn: (payload: ModuleStaffInput) => unwrap(api.post("/library/staff", payload)),
-    onSuccess: async () => {
-      toast.success("Library staff created");
+    mutationFn: (payload: ModuleStaffInput) =>
+      unwrap<{
+        loginEmail?: string;
+        defaultPassword?: string;
+        credentialsEmail?: import("lib/credentialsEmail").CredentialsEmailResult;
+      }>(api.post("/library/staff", payload)),
+    onSuccess: async (data) => {
+      const { toastCredentialCreateResult } = await import("lib/credentialsEmail");
+      toastCredentialCreateResult(data ?? {}, { successTitle: "Library staff created successfully" });
       setStaffForm(defaultStaff);
       await queryClient.invalidateQueries({ queryKey: ["library-staff"] });
     },

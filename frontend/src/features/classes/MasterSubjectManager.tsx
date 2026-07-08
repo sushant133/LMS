@@ -18,6 +18,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
+import { downloadMasterSubjectsCsv, downloadMasterSubjectsExcel } from "./masterSubjectExportUtils";
 
 const defaultMasterSubjectValue: MasterSubjectInput = {
   name: "",
@@ -194,26 +195,58 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
             Define the fixed HA curriculum once. Subjects are organized by year and automatically assigned to every batch.
           </p>
         </div>
-        {canManage ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={() => {
-                setEditingId(null);
-                setForm(defaultMasterSubjectValue);
-                setShowForm(true);
-                requestAnimationFrame(() => {
-                  formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                });
-              }}
-            >
-              Add Subject
-            </Button>
-            <Button type="button" variant="outline" onClick={() => void reconcileCurriculum()}>
-              Sync All Batches
-            </Button>
-          </div>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={masterSubjects.length === 0}
+            onClick={() => {
+              try {
+                downloadMasterSubjectsExcel(masterSubjects);
+                toast.success("Master subject list downloaded (Excel)");
+              } catch (error) {
+                toast.error(parseErrorMessage(error));
+              }
+            }}
+          >
+            Export Excel
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={masterSubjects.length === 0}
+            onClick={() => {
+              try {
+                downloadMasterSubjectsCsv(masterSubjects);
+                toast.success("Master subject list downloaded (CSV)");
+              } catch (error) {
+                toast.error(parseErrorMessage(error));
+              }
+            }}
+          >
+            Export CSV
+          </Button>
+          {canManage ? (
+            <>
+              <Button
+                type="button"
+                onClick={() => {
+                  setEditingId(null);
+                  setForm(defaultMasterSubjectValue);
+                  setShowForm(true);
+                  requestAnimationFrame(() => {
+                    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  });
+                }}
+              >
+                Add Subject
+              </Button>
+              <Button type="button" variant="outline" onClick={() => void reconcileCurriculum()}>
+                Sync All Batches
+              </Button>
+            </>
+          ) : null}
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {canManage && showForm ? (

@@ -4,12 +4,14 @@ import { tenantGuard } from "../middleware/tenant.js";
 import {
   uploadBannerImageHandler,
   uploadClassroomAttachmentsHandler,
+  uploadAcademicAttachmentsHandler,
   uploadComplaintAttachmentsHandler,
   uploadDocumentsHandler,
   uploadStaffPhotoHandler,
   uploadStudentPhotoHandler
 } from "../controllers/uploadController.js";
 import {
+  uploadAcademicAttachments,
   uploadBannerImage,
   uploadClassroomAttachments,
   uploadComplaintAttachments,
@@ -44,6 +46,13 @@ router.post(
   authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT"),
   uploadClassroomAttachments,
   uploadClassroomAttachmentsHandler
+);
+
+router.post(
+  "/academic-management",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
+  uploadAcademicAttachments,
+  uploadAcademicAttachmentsHandler
 );
 
 router.post(

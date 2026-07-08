@@ -9,6 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
+import {
+  toastCredentialCreateResult,
+  toastResendCredentials,
+  type CredentialsEmailResult
+} from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 
@@ -33,9 +38,15 @@ export const ModuleStaffPanel = ({ title, apiBase, queryKey }: ModuleStaffPanelP
   });
 
   const createStaff = useMutation({
-    mutationFn: (payload: ModuleStaffInput) => unwrap(api.post(apiBase, payload)),
-    onSuccess: async () => {
-      toast.success(`${title} created`);
+    mutationFn: (payload: ModuleStaffInput) =>
+      unwrap<{
+        staff?: UserProfile;
+        loginEmail?: string;
+        defaultPassword?: string;
+        credentialsEmail?: CredentialsEmailResult;
+      }>(api.post(apiBase, payload)),
+    onSuccess: async (data) => {
+      toastCredentialCreateResult(data ?? {}, { successTitle: `${title} created successfully` });
       setForm(defaultStaff);
       await queryClient.invalidateQueries({ queryKey: [queryKey] });
     },
@@ -49,6 +60,10 @@ export const ModuleStaffPanel = ({ title, apiBase, queryKey }: ModuleStaffPanelP
       await queryClient.invalidateQueries({ queryKey: [queryKey] });
     },
     onError: (error) => toast.error(parseErrorMessage(error))
+  });
+
+  const resendCredentials = useMutation({
+    mutationFn: (userId: string) => toastResendCredentials(userId)
   });
 
   if (staffQuery.isLoading) {
@@ -112,7 +127,15 @@ export const ModuleStaffPanel = ({ title, apiBase, queryKey }: ModuleStaffPanelP
                       <Td>{member.email}</Td>
                       <Td>{member.phone ?? "—"}</Td>
                       <Td>{member.isActive ? "Active" : "Inactive"}</Td>
-                      <Td className="text-right">
+                      <Td className="space-x-2 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!member.isActive || resendCredentials.isPending}
+                          onClick={() => void resendCredentials.mutateAsync(member._id)}
+                        >
+                          Resend Credentials
+                        </Button>
                         <Button
                           size="sm"
                           variant="destructive"

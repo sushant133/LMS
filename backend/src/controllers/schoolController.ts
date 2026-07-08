@@ -1,11 +1,15 @@
 import type { Request, Response } from "express";
 import { createSchoolSchema, updateSchoolSchema } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { School } from "../models/School.js";
 import { Setting } from "../models/Setting.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import { deleteSchoolCascade } from "../utils/deleteSchoolCascade.js";
 import { buildSchoolSettingsPayload } from "../utils/schoolDefaults.js";
 import { resolveInstitutionSchool } from "../utils/institutionSchool.js";
@@ -80,6 +84,7 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
     );
     const school = createdSchools[0]!;
 
+    const { password: adminPassword } = resolvePortalPassword();
     const createdAdminUsers = await User.create(
       [
         {
@@ -87,7 +92,7 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
           fullName: payload.adminFullName,
           email: payload.adminEmail,
           phone: payload.adminPhone,
-          password: env.DEFAULT_USER_PASSWORD,
+          password: adminPassword,
           role: "COLLEGE_ADMIN",
           mustChangePassword: true
         }
@@ -116,9 +121,18 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
 
     await commitTransaction(session);
 
+    const credentialsEmail = await notifyAccountCredentials({
+      userId: adminUser._id.toString(),
+      fullName: adminUser.fullName,
+      email: adminUser.email,
+      password: adminPassword,
+      schoolId: school._id.toString(),
+      req
+    });
+
     return sendSuccess(
       res,
-      "College created successfully",
+      buildCredentialsAdminMessage(credentialsEmail),
       {
         school,
         schoolAdmin: {
@@ -128,7 +142,9 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
           role: adminUser.role,
           mustChangePassword: adminUser.mustChangePassword
         },
-        defaultPassword: env.DEFAULT_USER_PASSWORD
+        loginEmail: adminUser.email,
+        defaultPassword: adminPassword,
+        credentialsEmail
       },
       201
     );

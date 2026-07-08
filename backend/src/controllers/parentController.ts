@@ -5,7 +5,6 @@ import {
   type ParentFromStudentRelationship,
   type StudentParentCandidatesResponse
 } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { Assignment } from "../models/Assignment.js";
 import { AssignmentSubmission } from "../models/Assignment.js";
 import { Notification } from "../models/Notification.js";
@@ -17,6 +16,11 @@ import { Attendance } from "../models/Attendance.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import {
   buildSuggestedParentLoginId,
   getParentContactFromStudent,
@@ -171,7 +175,7 @@ export const createParentFromStudent = asyncHandler(async (req: Request, res: Re
   const baseLoginId =
     payload.email?.trim().toLowerCase() ??
     (await resolveUniqueParentLoginId(buildSuggestedParentLoginId(student.admissionNumber, payload.relationship)));
-  const portalPassword = payload.password?.trim() || env.DEFAULT_USER_PASSWORD;
+  const { password: portalPassword, wasGenerated } = resolvePortalPassword(payload.password);
 
   const session = await createSession();
 
@@ -201,7 +205,7 @@ export const createParentFromStudent = asyncHandler(async (req: Request, res: Re
             phone: contact.phone || undefined,
             password: portalPassword,
             role: "PARENT",
-            mustChangePassword: !payload.password?.trim()
+            mustChangePassword: wasGenerated
           }
         ],
         getSessionOption(session)
@@ -237,9 +241,25 @@ export const createParentFromStudent = asyncHandler(async (req: Request, res: Re
 
     await commitTransaction(session);
 
+    let credentialsEmail;
+    if (createdUser) {
+      credentialsEmail = await notifyAccountCredentials({
+        userId: parentUser._id.toString(),
+        fullName: parentUser.fullName,
+        email: parentUser.email,
+        password: portalPassword,
+        schoolId: schoolId.toString(),
+        req
+      });
+    }
+
     return sendSuccess(
       res,
-      createdUser ? "Parent portal account created and linked" : "Existing parent account linked to student",
+      createdUser && credentialsEmail
+        ? buildCredentialsAdminMessage(credentialsEmail)
+        : createdUser
+          ? "Parent portal account created and linked"
+          : "Existing parent account linked to student",
       {
         parent: {
           _id: parentUser._id.toString(),
@@ -250,7 +270,8 @@ export const createParentFromStudent = asyncHandler(async (req: Request, res: Re
         link,
         loginEmail: parentUser.email,
         defaultPassword: createdUser ? portalPassword : undefined,
-        createdUser
+        createdUser,
+        credentialsEmail
       },
       201
     );

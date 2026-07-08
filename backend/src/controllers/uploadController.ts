@@ -95,6 +95,29 @@ export const uploadStaffPhotoHandler = asyncHandler(async (req: Request, res: Re
   });
 });
 
+export const uploadAcademicAttachmentsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const files = (req as { files?: Express.Multer.File[] }).files;
+  if (!files || files.length === 0) {
+    throw new ApiError(400, "No files uploaded");
+  }
+
+  const attachments = files.map((file) => ({
+    url: getUploadPublicUrl(file.path),
+    name: file.originalname,
+    mimeType: file.mimetype,
+    kind: inferAttachmentKind(file.mimetype)
+  }));
+
+  await recordAudit(req, {
+    action: "academic.attachment.upload",
+    entity: "AcademicManagement",
+    entityId: "batch",
+    after: { count: attachments.length }
+  });
+
+  return sendSuccess(res, "Academic attachments uploaded", { attachments });
+});
+
 export const uploadComplaintAttachmentsHandler = asyncHandler(async (req: Request, res: Response) => {
   const files = (req as { files?: Express.Multer.File[] }).files;
   if (!files || files.length === 0) {

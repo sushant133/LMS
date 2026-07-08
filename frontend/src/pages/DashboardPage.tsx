@@ -33,6 +33,7 @@ import { PageContent } from "components/layout/PageContent";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { api, unwrap } from "lib/api";
 import { getCollegeDisplayName, roleLabelMap } from "lib/auth";
+import { AcademicCalendarWidgets } from "features/dashboard/AcademicCalendarWidgets";
 import { FeeDuesPanel } from "features/dashboard/FeeDuesPanel";
 import { DashboardBannerPopup } from "features/notices/DashboardBannerPopup";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
@@ -100,8 +101,12 @@ const DashboardHero = ({
   unreadCount: number;
 }) => (
   <section className="overflow-hidden rounded-3xl border border-brand-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_#ffffff_45%,_#eff6ff_100%)] p-6 shadow-sm md:p-8">
-    <div className="flex flex-col gap-5 lg:min-h-[11.5rem] lg:flex-row lg:items-start lg:justify-between lg:gap-8">
-      <div className="min-w-0 flex-1 space-y-3">
+    {/*
+      CSS grid keeps the action buttons pinned to the trailing edge.
+      Flex + w-full previously allowed the button group to jump left after client navigation.
+    */}
+    <div className="grid min-h-0 gap-5 lg:min-h-[11.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
+      <div className="min-w-0 space-y-3">
         <div className="flex min-h-7 flex-wrap items-center gap-2">
           <Badge className="shrink-0 bg-brand-600 text-white">{roleLabel}</Badge>
           <Badge
@@ -125,19 +130,25 @@ const DashboardHero = ({
           <p className="max-w-2xl text-sm leading-6 text-slate-600">{description}</p>
         </div>
       </div>
-      <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto lg:pt-1">
-        <Button asChild variant="outline" className="min-w-[9.75rem] justify-center">
-          <Link to="/notifications">
-            <Bell className="mr-2 h-4 w-4 shrink-0" />
-            Notifications
-          </Link>
-        </Button>
-        <Button asChild variant="outline" className="min-w-[9.75rem] justify-center">
-          <Link to="/notices">
-            <Megaphone className="mr-2 h-4 w-4 shrink-0" />
-            Notice Board
-          </Link>
-        </Button>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 justify-self-end lg:pt-1">
+        <Link
+          to="/notifications"
+          className={cn(
+            "inline-flex h-10 min-w-[9.75rem] items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+          )}
+        >
+          <Bell className="mr-2 h-4 w-4 shrink-0" />
+          Notifications
+        </Link>
+        <Link
+          to="/notices"
+          className={cn(
+            "inline-flex h-10 min-w-[9.75rem] items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+          )}
+        >
+          <Megaphone className="mr-2 h-4 w-4 shrink-0" />
+          Notice Board
+        </Link>
       </div>
     </div>
   </section>
@@ -145,8 +156,8 @@ const DashboardHero = ({
 
 const DashboardHeroSkeleton = () => (
   <section className="overflow-hidden rounded-3xl border border-brand-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_#ffffff_45%,_#eff6ff_100%)] p-6 shadow-sm md:p-8">
-    <div className="flex flex-col gap-5 lg:min-h-[11.5rem] lg:flex-row lg:items-start lg:justify-between lg:gap-8">
-      <div className="min-w-0 flex-1 space-y-3">
+    <div className="grid min-h-0 gap-5 lg:min-h-[11.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
+      <div className="min-w-0 space-y-3">
         <div className="flex min-h-7 gap-2">
           <div className="h-6 w-36 animate-pulse rounded-full bg-brand-100" />
         </div>
@@ -157,9 +168,9 @@ const DashboardHeroSkeleton = () => (
           <div className="h-16 w-full max-w-2xl animate-pulse rounded bg-slate-50" />
         </div>
       </div>
-      <div className="flex w-full shrink-0 gap-2 sm:w-auto lg:pt-1">
-        <div className="h-10 min-w-[9.75rem] flex-1 animate-pulse rounded-xl bg-slate-100 sm:flex-none" />
-        <div className="h-10 min-w-[9.75rem] flex-1 animate-pulse rounded-xl bg-slate-100 sm:flex-none" />
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 justify-self-end lg:pt-1">
+        <div className="h-10 w-[9.75rem] animate-pulse rounded-xl bg-slate-100" />
+        <div className="h-10 w-[9.75rem] animate-pulse rounded-xl bg-slate-100" />
       </div>
     </div>
   </section>
@@ -458,6 +469,7 @@ export const DashboardPage = () => {
           unreadCount={unreadCount}
         />
         <StatGrid stats={statsWithLiveUnread} />
+        <AcademicCalendarWidgets />
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <NotificationsPanel notifications={data.notifications} unreadCount={unreadCount} />
           <NoticesPanel notices={data.notices} />
@@ -479,6 +491,7 @@ export const DashboardPage = () => {
           unreadCount={unreadCount}
         />
         <StatGrid stats={statsWithLiveUnread} />
+        <AcademicCalendarWidgets />
         <HighlightsRow highlights={data.highlights} />
         <QuickActions
           actions={[
@@ -538,6 +551,7 @@ export const DashboardPage = () => {
           unreadCount={unreadCount}
         />
         <StatGrid stats={statsWithLiveUnread} />
+        <AcademicCalendarWidgets />
         <HighlightsRow highlights={data.highlights} />
         <QuickActions
           actions={[
@@ -600,6 +614,7 @@ export const DashboardPage = () => {
       />
 
       <StatGrid stats={statsWithLiveUnread} />
+      <AcademicCalendarWidgets />
       <HighlightsRow highlights={data.highlights} onAction={isCollegeAdmin ? handleHighlightAction : undefined} />
       <FeeDuesPanel open={feeDuesOpen && isCollegeAdmin} onClose={() => setFeeDuesOpen(false)} />
 

@@ -1,7 +1,0 @@
----
-pid: 2188
-cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npx tsc --noEmit; cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npx tsc --noEmit"
-started_at: 2026-07-08T00:11:11.154Z
-running_for_ms: 295001   
----

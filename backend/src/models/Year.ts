@@ -6,7 +6,8 @@ const yearSchema = new Schema(
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     batchId: { type: Schema.Types.ObjectId, ref: "Batch", required: true, index: true },
     name: { type: String, required: true, trim: true, enum: COLLEGE_YEAR_NAMES },
-    level: { type: Number, required: true, min: 1, max: 3 },
+    // Higher max allows future multi-year programs without schema migrations
+    level: { type: Number, required: true, min: 1, max: 12 },
     isActive: { type: Boolean, default: true }
   },
   { timestamps: true }

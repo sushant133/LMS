@@ -32,19 +32,19 @@ export const NoticesPage = () => {
           <Button
             type="button"
             variant={tab === "board" ? "default" : "outline"}
-            className={cn(tab === "board" && "bg-brand-600 hover:bg-brand-700")}
+            className={cn("min-w-[9.5rem] justify-center", tab === "board" && "bg-brand-600 hover:bg-brand-700")}
             onClick={() => setTab("board")}
           >
-            <Megaphone className="mr-2 h-4 w-4" />
+            <Megaphone className="mr-2 h-4 w-4 shrink-0" />
             Notice Board
           </Button>
           <Button
             type="button"
             variant={tab === "banners" ? "default" : "outline"}
-            className={cn(tab === "banners" && "bg-brand-600 hover:bg-brand-700")}
+            className={cn("min-w-[9.5rem] justify-center", tab === "banners" && "bg-brand-600 hover:bg-brand-700")}
             onClick={() => setTab("banners")}
           >
-            <Image className="mr-2 h-4 w-4" />
+            <Image className="mr-2 h-4 w-4 shrink-0" />
             Banner Management
           </Button>
         </div>

@@ -115,6 +115,12 @@ export const uploadComplaintAttachments = multer({
   fileFilter: complaintFileFilter
 }).array("files", 5);
 
+export const uploadAcademicAttachments = multer({
+  storage: createTenantStorage("academic-management"),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: complaintFileFilter
+}).array("files", 5);
+
 /**
  * Returns a public URL path for a stored file (relative).
  * In production you would return a signed S3/Cloudinary URL.

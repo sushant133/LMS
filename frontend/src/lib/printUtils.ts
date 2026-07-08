@@ -220,6 +220,29 @@ const printElement = async (element: HTMLElement | null, pageFormat: PageFormat)
   await printViaIframe(element, pageFormat);
 };
 
+export const printElementById = async (elementId: string, _title?: string): Promise<void> => {
+  const element = document.getElementById(elementId);
+  await printElement(element, "a4-landscape");
+};
+
+export const downloadPdfFromElementById = async (elementId: string, filename: string): Promise<void> => {
+  const element = document.getElementById(elementId);
+  if (!element) {
+    throw new Error("Report is not ready to export");
+  }
+
+  await yieldToUi();
+  const blob = await createPdfBlobFromElement(element, "a4-landscape");
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 export const printMarksheetElement = async (element: HTMLElement | null): Promise<void> => {
   await printElement(element, "a4-portrait");
 };

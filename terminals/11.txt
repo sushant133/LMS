@@ -1,7 +1,0 @@
----
-pid: 1072
-cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "Start-Sleep -Seconds 20"
-started_at: 2026-07-07T21:32:07.300Z
-running_for_ms: 969999   
----

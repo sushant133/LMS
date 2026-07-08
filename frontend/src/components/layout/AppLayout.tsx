@@ -10,7 +10,7 @@ import { Button } from "components/ui/button";
 import { cn } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
-import { getCollegeDisplayName, roleLabelMap } from "lib/auth";
+import { getCollegeDisplayName, getRoleRedirectPath, roleLabelMap } from "lib/auth";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
 
@@ -18,11 +18,30 @@ const institutionRoles: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_V
 
 const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
   { labelKey: "dashboard", path: "/dashboard", roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT"] },
+  { labelKey: "myProfile", path: "/my-profile", roles: ["STUDENT"] },
   { labelKey: "mySubjects", path: "/my-subjects", roles: ["STUDENT"] },
   { labelKey: "parentPortal", path: "/parent-portal", roles: ["PARENT"] },
   { labelKey: "students", path: "/students", roles: [...institutionRoles, "TEACHER"] },
   { labelKey: "collegeStaff", path: "/college-staff", roles: institutionRoles },
   { labelKey: "academics", path: "/academics", roles: institutionRoles },
+  { labelKey: "academicManagement", path: "/academic-management", roles: [...institutionRoles, "TEACHER"] },
+  {
+    labelKey: "academicCalendar",
+    path: "/academic-calendar",
+    roles: [
+      ...institutionRoles,
+      "TEACHER",
+      "STUDENT",
+      "PARENT",
+      "COLLEGE_STAFF",
+      "LIBRARY_STAFF",
+      "LABORATORY_STAFF",
+      "ACCOUNTANT",
+      "CASHIER",
+      "AUDITOR",
+      "PRINCIPAL"
+    ]
+  },
   { labelKey: "timetable", path: "/timetable", roles: [...institutionRoles, "TEACHER"] },
   { labelKey: "homework", path: "/homework", roles: ["TEACHER"] },
   { labelKey: "homework", path: "/homework-view", roles: ["STUDENT", "PARENT"] },
@@ -135,6 +154,11 @@ export const AppLayout = () => {
           : item.path
     }));
 
+  const brandHomePath =
+    visibleItems.find((item) => item.labelKey === "dashboard")?.path ??
+    getRoleRedirectPath(normalizedRole) ??
+    "/dashboard";
+
   return (
     <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(12,45,107,0.16),_transparent_28%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_100%)]">
       {open ? (
@@ -158,7 +182,12 @@ export const AppLayout = () => {
           )}
         >
           <div className="shrink-0">
-            <div className="flex items-center gap-3">
+            <NavLink
+              to={brandHomePath}
+              onClick={() => setOpen(false)}
+              title="Go to dashboard"
+              className="flex cursor-pointer items-center gap-3 rounded-2xl outline-none"
+            >
               <div className="rounded-2xl bg-white/10 p-2">
                 <CollegeLogo variant="light" className="h-10 w-10" />
               </div>
@@ -166,7 +195,7 @@ export const AppLayout = () => {
                 <h2 className="truncate text-lg font-semibold leading-tight">{t("appName")}</h2>
                 {showCollegeContext ? <p className="truncate text-xs text-slate-400">{INSTITUTION_NAME}</p> : null}
               </div>
-            </div>
+            </NavLink>
           </div>
 
           <div className="app-sidebar-scroll mt-8 min-h-0 flex-1">
@@ -175,18 +204,25 @@ export const AppLayout = () => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end={item.path === "/notifications" || item.path === "/notices"}
                   onClick={() => setOpen(false)}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium transition",
+                      "flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition",
                       isActive ? "bg-brand-500 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"
                     )
                   }
                 >
-                  <span>{t(item.labelKey)}</span>
-                  {item.path === "/notifications" && unreadCount > 0 ? (
-                    <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-amber-950">
-                      {unreadCount}
+                  <span className="min-w-0 flex-1 truncate text-left">{t(item.labelKey)}</span>
+                  {item.path === "/notifications" ? (
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-amber-950 tabular-nums",
+                        unreadCount > 0 ? "visible" : "invisible"
+                      )}
+                      aria-hidden={unreadCount === 0}
+                    >
+                      {unreadCount > 0 ? unreadCount : 0}
                     </span>
                   ) : null}
                 </NavLink>
@@ -228,8 +264,8 @@ export const AppLayout = () => {
         <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-20 shrink-0 border-b border-white/70 bg-white/90 backdrop-blur">
             <div className="mx-auto w-full max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8 lg:py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                   <Button variant="ghost" size="sm" className="shrink-0 md:hidden" onClick={() => setOpen((current) => !current)}>
                     <Menu className="h-4 w-4" />
                   </Button>
@@ -239,8 +275,8 @@ export const AppLayout = () => {
                   </div>
                 </div>
 
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <div className="flex min-w-0 max-w-full items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <div className="flex min-w-0 max-w-[10rem] items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
                     <CollegeLogo className="h-8 w-8 shrink-0" />
                     <div className="min-w-0">
                       <div className="truncate font-semibold leading-tight text-brand-950" title={collegeName}>

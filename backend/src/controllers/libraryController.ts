@@ -6,13 +6,17 @@ import {
   libraryReturnSchema,
   moduleStaffSchema
 } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import { enrichBookInventory } from "../utils/inventory.js";
 import {
   assertLibraryInventoryWriteAccess,
@@ -385,18 +389,38 @@ export const createLibraryStaff = asyncHandler(async (req: Request, res: Respons
     throw new ApiError(409, "A user with this email already exists");
   }
 
+  const { password: portalPassword, wasGenerated } = resolvePortalPassword(payload.password);
   const user = await User.create({
     schoolId: req.tenantSchoolId,
     fullName: payload.fullName,
     email,
     phone: payload.phone,
-    password: payload.password ?? env.DEFAULT_USER_PASSWORD,
+    password: portalPassword,
     role: "LIBRARY_STAFF",
-    mustChangePassword: !payload.password
+    mustChangePassword: wasGenerated
   });
 
   const safeUser = await User.findById(user._id).select("-password").lean();
-  return sendSuccess(res, "Library staff created", safeUser, 201);
+  const credentialsEmail = await notifyAccountCredentials({
+    userId: user._id.toString(),
+    fullName: payload.fullName,
+    email,
+    password: portalPassword,
+    schoolId: req.tenantSchoolId?.toString(),
+    req
+  });
+
+  return sendSuccess(
+    res,
+    buildCredentialsAdminMessage(credentialsEmail),
+    {
+      staff: safeUser,
+      loginEmail: email,
+      defaultPassword: portalPassword,
+      credentialsEmail
+    },
+    201
+  );
 });
 
 export const updateLibraryStaff = asyncHandler(async (req: Request, res: Response) => {

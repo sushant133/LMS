@@ -54,7 +54,8 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   guardianName: "",
   guardianPhone: "",
   feesDueNpr: 0,
-  remarks: ""
+  remarks: "",
+  academicStatus: "ACTIVE"
 });
 
 interface StudentFormProps {

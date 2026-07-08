@@ -11,6 +11,7 @@ import { protect } from "./middleware/auth.js";
 import routes from "./routes/index.js";
 import { ensureDemoData } from "./seed/index.js";
 import { migrateLegacyDemoDisplayNames } from "./utils/migrateLegacyDemoDisplayNames.js";
+import { startAcademicManagementNotificationScheduler } from "./utils/academicManagementNotifications.js";
 
 const app = express();
 
@@ -45,7 +46,7 @@ app.use("/uploads", express.static(uploadsDir));
 app.get("/", (_req, res) => {
   res.json({
     success: true,
-    message: "PHIT ERP backend API",
+    message: "PHIT LMS backend API",
     version: "1.0.0"
   });
 });
@@ -53,7 +54,7 @@ app.get("/", (_req, res) => {
 app.get("/api/health", (_req, res) => {
   res.json({
     success: true,
-    message: "PHIT ERP backend is running"
+    message: "PHIT LMS backend is running"
   });
 });
 
@@ -68,6 +69,8 @@ const startServer = async (): Promise<void> => {
   await connectDatabase();
   await migrateLegacyDemoDisplayNames();
   await ensureDemoData();
+
+  startAcademicManagementNotificationScheduler();
 
   app.listen(env.PORT, () => {
     console.log(`Backend server listening on http://localhost:${env.PORT}`);

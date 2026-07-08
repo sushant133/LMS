@@ -22,6 +22,7 @@ import { api, unwrap } from "lib/api";
 import { filterYearsByBatch } from "lib/academicStructureUtils";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
+import { AcademicPromotionManager } from "./AcademicPromotionManager";
 import { MasterSubjectManager } from "./MasterSubjectManager";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 
@@ -138,7 +139,7 @@ export const CollegeAcademicManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Academic Setup"
-        description="Manage the fixed HA curriculum once, then create batches that automatically inherit year-wise subjects."
+        description="Manage the fixed HA curriculum once, then create batches that automatically inherit year-wise subjects. Use Academic Promotion at the bottom for one-click yearly progression."
       />
 
       <MasterSubjectManager
@@ -344,6 +345,8 @@ export const CollegeAcademicManager = () => {
           </CardContent>
         </Card>
       </div>
+
+      <AcademicPromotionManager />
     </div>
   );
 };

@@ -1,6 +1,12 @@
 import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { BLOOD_GROUPS, DISABILITY_CATEGORIES, ETHNICITY_CATEGORIES, STUDENT_DOCUMENT_STATUSES } from "@phit-erp/shared";
+import {
+  BLOOD_GROUPS,
+  DISABILITY_CATEGORIES,
+  ETHNICITY_CATEGORIES,
+  STUDENT_ACADEMIC_STATUSES,
+  STUDENT_DOCUMENT_STATUSES
+} from "@phit-erp/shared";
 
 const studentDocumentSchema = new Schema(
   {
@@ -41,6 +47,12 @@ const studentSchema = new Schema(
     sectionId: { type: Schema.Types.ObjectId, ref: "Section" },
     batchId: { type: Schema.Types.ObjectId, ref: "Batch" },
     yearId: { type: Schema.Types.ObjectId, ref: "Year" },
+    academicStatus: {
+      type: String,
+      enum: STUDENT_ACADEMIC_STATUSES,
+      default: "ACTIVE",
+      index: true
+    },
     admissionDateBs: { type: String, required: true },
     dateOfBirthBs: { type: String, required: true },
     gender: { type: String, required: true },
@@ -64,6 +76,7 @@ const studentSchema = new Schema(
 );
 
 studentSchema.index({ schoolId: 1, admissionNumber: 1 }, { unique: true });
+studentSchema.index({ schoolId: 1, academicStatus: 1 });
 studentSchema.index(
   { schoolId: 1, rollNumber: 1, classId: 1, sectionId: 1 },
   { unique: true, partialFilterExpression: { classId: { $exists: true }, sectionId: { $exists: true } } }

@@ -1,6 +1,9 @@
 import { Router } from "express";
 import addressRoutes from "./addressRoutes.js";
 import academicRoutes from "./academicRoutes.js";
+import academicPromotionRoutes from "./academicPromotionRoutes.js";
+import academicManagementRoutes from "./academicManagementRoutes.js";
+import academicCalendarRoutes from "./academicCalendarRoutes.js";
 import attendanceRoutes from "./attendanceRoutes.js";
 import dailyAttendanceRoutes from "./dailyAttendanceRoutes.js";
 import authRoutes from "./authRoutes.js";
@@ -30,10 +33,12 @@ import collegeAdministratorRoutes from "./collegeAdministratorRoutes.js";
 import complaintRoutes from "./complaintRoutes.js";
 import studentPortalRoutes from "./studentPortalRoutes.js";
 import teacherPortalRoutes from "./teacherPortalRoutes.js";
+import userRoutes from "./userRoutes.js";
 
 const router = Router();
 
 router.use("/auth", authRoutes);
+router.use("/users", userRoutes);
 router.use("/admins", adminRoutes);
 router.use("/college-administrators", collegeAdministratorRoutes);
 router.use("/schools", schoolRoutes);
@@ -41,6 +46,9 @@ router.use("/students", studentRoutes);
 router.use("/teachers", teacherRoutes);
 router.use("/college-staff", collegeStaffRoutes);
 router.use("/academics", academicRoutes);
+router.use("/academic-promotion", academicPromotionRoutes);
+router.use("/academic-management", academicManagementRoutes);
+router.use("/academic-calendar", academicCalendarRoutes);
 router.use("/attendance", attendanceRoutes);
 router.use("/daily-attendance", dailyAttendanceRoutes);
 router.use("/exams", examRoutes);

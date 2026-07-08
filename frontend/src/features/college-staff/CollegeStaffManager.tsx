@@ -21,6 +21,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, resolveApiUrl, unwrap } from "lib/api";
+import { toastCredentialCreateResult, type CredentialsEmailResult } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
@@ -68,17 +69,18 @@ export const CollegeStaffManager = ({ category, title }: CollegeStaffManagerProp
       if (editing) {
         return unwrap<CollegeStaffRecord>(api.put(`/college-staff/${editing._id}`, body));
       }
-      return unwrap<{ staff: CollegeStaffRecord; loginEmail?: string; defaultPassword?: string }>(
-        api.post("/college-staff", body)
-      );
+      return unwrap<{
+        staff: CollegeStaffRecord;
+        loginEmail?: string;
+        defaultPassword?: string;
+        credentialsEmail?: CredentialsEmailResult;
+      }>(api.post("/college-staff", body));
     },
     onSuccess: async (data) => {
       if (editing) {
         toast.success("Staff member updated");
       } else if (data && typeof data === "object" && "loginEmail" in data && data.loginEmail) {
-        toast.success("Staff created with portal login", {
-          description: `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
-        });
+        toastCredentialCreateResult(data, { successTitle: "Staff created successfully" });
       } else {
         toast.success("Staff member created");
       }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { hasInstitutionAccess } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
@@ -75,6 +76,23 @@ export const ReportsPage = () => {
             : "Generate official IEMIS & Flash Report exports for Public Himal Institute of Technology."
         }
       />
+
+      <div>
+        <h2 className="mb-3 text-lg font-semibold text-slate-900">Academic Management</h2>
+        <Card>
+          <CardHeader>
+            <CardTitle>Teaching Documentation Reports</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-slate-600">
+            <p>
+              Session plans, lesson plans, log books, syllabus completion, teacher performance, pending approvals, and late submission reports are available inside the Academic Management module.
+            </p>
+            <Button asChild>
+              <Link to="/academic-management">Open Academic Management Reports</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Flash I - Core Data */}
       <div>

@@ -9,6 +9,7 @@ import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
+import { toastCredentialCreateResult, type CredentialsEmailResult } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { StudentForm } from "./StudentForm";
@@ -57,12 +58,15 @@ export const CreateStudentManager = () => {
     mutationFn: async (payload: StudentInput) =>
       editing
         ? unwrap<StudentRecord>(api.put(`/students/${editing._id}`, payload))
-        : unwrap<{ student: StudentRecord; loginEmail: string; defaultPassword: string }>(api.post("/students", payload)),
+        : unwrap<{
+            student: StudentRecord;
+            loginEmail: string;
+            defaultPassword: string;
+            credentialsEmail?: CredentialsEmailResult;
+          }>(api.post("/students", payload)),
     onSuccess: async (data) => {
       if ("loginEmail" in data) {
-        toast.success("Student created with portal login", {
-          description: `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
-        });
+        toastCredentialCreateResult(data, { successTitle: "Student created successfully" });
       } else {
         toast.success("Student updated");
       }

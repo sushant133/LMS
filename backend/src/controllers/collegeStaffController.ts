@@ -1,11 +1,15 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
 import { collegeStaffSchema, type CollegeStaffCategory } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { sendSuccess } from "../utils/response.js";
@@ -110,6 +114,7 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
     let userId: Types.ObjectId | undefined;
     let loginEmail: string | undefined;
     let defaultPassword: string | undefined;
+    let createdUserFullName: string | undefined;
 
     if (payload.enableLogin) {
       const email = payload.email!.toLowerCase().trim();
@@ -118,7 +123,8 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
         throw new ApiError(409, "A user with this email already exists");
       }
 
-      defaultPassword = payload.password ?? env.DEFAULT_USER_PASSWORD;
+      const resolved = resolvePortalPassword(payload.password);
+      defaultPassword = resolved.password;
       const user = await User.create(
         [
           {
@@ -129,13 +135,14 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
             password: defaultPassword,
             role: "COLLEGE_STAFF",
             isActive: payload.status === "ACTIVE",
-            mustChangePassword: !payload.password
+            mustChangePassword: resolved.wasGenerated
           }
         ],
         getSessionOption(session)
       );
       userId = user[0]!._id;
       loginEmail = email;
+      createdUserFullName = payload.fullName;
     }
 
     const staff = await CollegeStaff.create(
@@ -165,14 +172,26 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
 
     await commitTransaction(session);
     const serialized = await serializeStaff(staff[0]!.toObject() as CollegeStaffLean);
-    return sendSuccess(
-      res,
-      "College staff created",
-      loginEmail
-        ? { staff: serialized, loginEmail, defaultPassword }
-        : { staff: serialized },
-      201
-    );
+
+    if (userId && loginEmail && defaultPassword) {
+      const credentialsEmail = await notifyAccountCredentials({
+        userId: userId.toString(),
+        fullName: createdUserFullName ?? payload.fullName,
+        email: loginEmail,
+        password: defaultPassword,
+        schoolId: tenantObjectId(req).toString(),
+        req
+      });
+
+      return sendSuccess(
+        res,
+        buildCredentialsAdminMessage(credentialsEmail),
+        { staff: serialized, loginEmail, defaultPassword, credentialsEmail },
+        201
+      );
+    }
+
+    return sendSuccess(res, "College staff created", { staff: serialized }, 201);
   } catch (error) {
     await abortTransaction(session);
     throwIfDuplicateKey(error);
@@ -221,18 +240,29 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
     const duplicate = await User.findOne({ email });
     if (duplicate) throw new ApiError(409, "A user with this email already exists");
 
+    const resolved = resolvePortalPassword(payload.password);
     const user = await User.create({
       schoolId: tenantObjectId(req),
       fullName: payload.fullName ?? existing.fullName,
       email,
       phone: payload.phone ?? existing.phone,
-      password: payload.password ?? env.DEFAULT_USER_PASSWORD,
+      password: resolved.password,
       role: "COLLEGE_STAFF",
       isActive: (payload.status ?? existing.status) === "ACTIVE",
-      mustChangePassword: !payload.password
+      mustChangePassword: resolved.wasGenerated
     });
     existing.user = user._id;
     existing.enableLogin = true;
+
+    // Fire-and-forget after save path completes; email status not blocking update response.
+    void notifyAccountCredentials({
+      userId: user._id.toString(),
+      fullName: user.fullName,
+      email,
+      password: resolved.password,
+      schoolId: tenantObjectId(req).toString(),
+      req
+    });
   }
 
   if (payload.staffId) existing.staffId = payload.staffId;

@@ -295,9 +295,10 @@ export const StudentListManager = () => {
                   <Th>Admission No.</Th>
                   <Th>{labels.primary}</Th>
                   <Th>{labels.secondary}</Th>
+                  {isCollege ? <Th>Status</Th> : null}
                   <Th>Guardian</Th>
                   {canManage ? <Th>Fees Due</Th> : null}
-                  {canManage ? <Th /> : null}
+                  <Th />
                 </tr>
               </TableHead>
               <TableBody>
@@ -315,20 +316,49 @@ export const StudentListManager = () => {
                     <Td>{student.admissionNumber}</Td>
                     <Td>{primaryMap.get((isCollege ? student.batchId : student.classId) ?? "") ?? "—"}</Td>
                     <Td>{secondaryMap.get((isCollege ? student.yearId : student.sectionId) ?? "") ?? "—"}</Td>
-                    <Td>{student.guardianName}</Td>
-                    {canManage ? <Td>{formatCurrencyNpr(student.feesDueNpr)}</Td> : null}
-                    {canManage ? (
-                      <Td className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => handleEdit(student)}>
-                            Edit
-                          </Button>
-                          <Button variant="destructive" size="sm" onClick={() => void deleteMutation.mutateAsync(student._id)}>
-                            Delete
-                          </Button>
-                        </div>
+                    {isCollege ? (
+                      <Td>
+                        <span
+                          className={
+                            (student.academicStatus ?? "ACTIVE") === "ACTIVE"
+                              ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800"
+                              : (student.academicStatus ?? "") === "PASSED_OUT" ||
+                                  (student.academicStatus ?? "") === "ALUMNI"
+                                ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
+                                : "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
+                          }
+                        >
+                          {(student.academicStatus ?? "ACTIVE").replace("_", " ")}
+                        </span>
                       </Td>
                     ) : null}
+                    <Td>{student.guardianName}</Td>
+                    {canManage ? <Td>{formatCurrencyNpr(student.feesDueNpr)}</Td> : null}
+                    <Td className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/students/${student._id}/profile`)}
+                        >
+                          View Profile
+                        </Button>
+                        {canManage ? (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => handleEdit(student)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => void deleteMutation.mutateAsync(student._id)}
+                            >
+                              Delete
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </Td>
                   </tr>
                 ))}
               </TableBody>

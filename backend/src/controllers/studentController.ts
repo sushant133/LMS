@@ -1,7 +1,6 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
 import { studentSchema } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -11,6 +10,11 @@ import { getStudentScopeFilter } from "../utils/parentScope.js";
 import { getTeacherStudentFilter, getTeacherScope } from "../utils/teacherScope.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { recordAudit } from "../utils/audit.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import { sendSuccess } from "../utils/response.js";
 import { updatePortalUser } from "../utils/userPassword.js";
 import { validateStudentAdmissionScope } from "../utils/academicValidation.js";
@@ -66,7 +70,7 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
   const session = await createSession();
 
   try {
-    const portalPassword = payload.password?.trim() || env.DEFAULT_USER_PASSWORD;
+    const { password: portalPassword, wasGenerated } = resolvePortalPassword(payload.password);
 
     const createdUsers = await User.create(
       [
@@ -77,7 +81,7 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           phone: payload.phone,
           password: portalPassword,
           role: "STUDENT",
-          mustChangePassword: !payload.password?.trim()
+          mustChangePassword: wasGenerated
         }
       ],
       getSessionOption(session)
@@ -94,6 +98,7 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           ...(isCollege(institutionType)
             ? { batchId: payload.batchId, yearId: payload.yearId }
             : { classId: payload.classId, sectionId: payload.sectionId }),
+          academicStatus: payload.academicStatus ?? "ACTIVE",
           admissionDateBs: payload.admissionDateBs,
           dateOfBirthBs: payload.dateOfBirthBs,
           gender: payload.gender,
@@ -127,13 +132,23 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
       after: { admissionNumber: student.admissionNumber, fullName: payload.fullName }
     });
 
+    const credentialsEmail = await notifyAccountCredentials({
+      userId: user._id.toString(),
+      fullName: payload.fullName,
+      email: loginEmail,
+      password: portalPassword,
+      schoolId: schoolId.toString(),
+      req
+    });
+
     return sendSuccess(
       res,
-      "Student created successfully",
+      buildCredentialsAdminMessage(credentialsEmail),
       {
         student,
         loginEmail,
-        defaultPassword: portalPassword
+        defaultPassword: portalPassword,
+        credentialsEmail
       },
       201
     );
@@ -198,6 +213,7 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     guardianPhone: payload.guardianPhone,
     feesDueNpr: payload.feesDueNpr,
     remarks: payload.remarks,
+    academicStatus: payload.academicStatus ?? student.academicStatus ?? "ACTIVE",
     photoUrl: payload.photoUrl || undefined,
     documents: payload.documents ?? student.documents
   });

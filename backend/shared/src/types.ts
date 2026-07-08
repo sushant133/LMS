@@ -240,6 +240,7 @@ export interface StudentRecord {
   sectionId?: string;
   batchId?: string;
   yearId?: string;
+  academicStatus?: "ACTIVE" | "PASSED_OUT" | "ALUMNI" | "WITHDRAWN" | "CANCELLED" | "SUSPENDED";
   admissionDateBs: string;
   dateOfBirthBs: string;
   gender: string;
@@ -531,7 +532,8 @@ export interface DailyAttendanceAssignment {
   subjectId: string;
   subjectName: string;
   subjectCode?: string;
-  timetableSlotId: string;
+  /** Empty when admin marks a group that has no first-period slot for the day. */
+  timetableSlotId?: string;
   periodNumber: number;
   startTime: string;
   endTime: string;
@@ -544,6 +546,9 @@ export interface DailyAttendanceAssignment {
   isSubstituteSlot?: boolean;
   firstPeriodTeacherName?: string;
   canAdminEdit?: boolean;
+  /** True when there is no first-period (or any) timetable slot for this day. */
+  isManualAssignment?: boolean;
+  studentCount?: number;
 }
 
 export interface DailyAttendanceDashboard {

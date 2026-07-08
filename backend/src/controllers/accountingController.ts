@@ -18,7 +18,6 @@ import {
   type AccountingReportType,
   type FinancialSummaryReport
 } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { Accountant } from "../models/Accountant.js";
 import { AccountingExpense } from "../models/AccountingExpense.js";
 import { AccountingIncome } from "../models/AccountingIncome.js";
@@ -62,6 +61,11 @@ import { FeeRefund } from "../models/FeeRefund.js";
 import { recordAudit } from "../utils/audit.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { withFinancialTransaction } from "../utils/financialTransaction.js";
 import { voidFeeCollection, voidWithJournalReversal } from "../utils/accountingVoid.js";
@@ -1328,15 +1332,16 @@ export const createAccountant = asyncHandler(async (req: Request, res: Response)
   const existingUser = await User.findOne({ email });
   if (existingUser) throw new ApiError(409, "A user with this email already exists");
 
+  const { password: portalPassword, wasGenerated } = resolvePortalPassword(payload.password);
   const user = await User.create({
     schoolId: req.tenantSchoolId,
     fullName: payload.fullName,
     email,
     phone: payload.phone,
-    password: payload.password ?? env.DEFAULT_USER_PASSWORD,
+    password: portalPassword,
     role: "ACCOUNTANT",
     isActive: payload.status === "ACTIVE",
-    mustChangePassword: !payload.password
+    mustChangePassword: wasGenerated
   });
 
   const accountant = await Accountant.create({
@@ -1352,7 +1357,27 @@ export const createAccountant = asyncHandler(async (req: Request, res: Response)
 
   const populated = await Accountant.findById(accountant._id).populate("user", "-password");
   await recordAudit(req, { action: "accounting.accountant.create", entity: "Accountant", entityId: accountant._id.toString(), after: populated });
-  return sendSuccess(res, "Accountant created", populated, 201);
+
+  const credentialsEmail = await notifyAccountCredentials({
+    userId: user._id.toString(),
+    fullName: payload.fullName,
+    email,
+    password: portalPassword,
+    schoolId: req.tenantSchoolId?.toString(),
+    req
+  });
+
+  return sendSuccess(
+    res,
+    buildCredentialsAdminMessage(credentialsEmail),
+    {
+      accountant: populated,
+      loginEmail: email,
+      defaultPassword: portalPassword,
+      credentialsEmail
+    },
+    201
+  );
 });
 
 export const updateAccountant = asyncHandler(async (req: Request, res: Response) => {
@@ -1416,12 +1441,33 @@ export const resetAccountantPassword = asyncHandler(async (req: Request, res: Re
   const user = await User.findById(accountant.user);
   if (!user) throw new ApiError(404, "Accountant user not found");
 
-  user.password = password ?? env.DEFAULT_USER_PASSWORD;
+  const { password: portalPassword } = resolvePortalPassword(password);
+  user.password = portalPassword;
   user.mustChangePassword = true;
   await user.save();
 
+  const credentialsEmail = await notifyAccountCredentials({
+    userId: user._id.toString(),
+    fullName: user.fullName,
+    email: user.email,
+    password: portalPassword,
+    schoolId: user.schoolId?.toString(),
+    req,
+    emailType: "PASSWORD_RESET"
+  });
+
   await recordAudit(req, { action: "accounting.accountant.reset-password", entity: "Accountant", entityId: accountant._id.toString() });
-  return sendSuccess(res, "Accountant password reset");
+  return sendSuccess(
+    res,
+    credentialsEmail.sent
+      ? `Accountant password reset. Credentials sent to: ${credentialsEmail.email}`
+      : `Accountant password reset. Credential email could not be delivered. Reason: ${credentialsEmail.error ?? "Unknown error"}`,
+    {
+      loginEmail: user.email,
+      defaultPassword: portalPassword,
+      credentialsEmail
+    }
+  );
 });
 
 export const listSalaryEmployees = asyncHandler(async (req: Request, res: Response) => {

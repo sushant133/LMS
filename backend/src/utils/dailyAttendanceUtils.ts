@@ -1,5 +1,5 @@
 import NepaliDateImport from "nepali-date-converter";
-import type { ClientSession } from "mongoose";
+import mongoose, { type ClientSession } from "mongoose";
 import {
   DAYS_OF_WEEK,
   DEFAULT_DAILY_ATTENDANCE_CONFIG,
@@ -444,6 +444,15 @@ export const validateDailyAttendanceStudents = async (
   }
 
   const students = await Student.find(studentFilter).select("_id").lean();
+  if (students.length === 0) {
+    throw new ApiError(400, "No students are enrolled in this academic group.");
+  }
+
+  const entryIds = entries.map((entry) => entry.studentId);
+  if (new Set(entryIds).size !== entryIds.length) {
+    throw new ApiError(400, "Attendance entries contain duplicate students.");
+  }
+
   if (students.length !== entries.length) {
     throw new ApiError(400, "Every student in the class must have an attendance status.");
   }
@@ -456,3 +465,124 @@ export const validateDailyAttendanceStudents = async (
 };
 
 export const getDayName = (dayOfWeek: number): string => DAYS_OF_WEEK[dayOfWeek] ?? "Unknown";
+
+export type AcademicGroupScope = {
+  classId?: string;
+  sectionId?: string;
+  batchId?: string;
+  yearId?: string;
+};
+
+export const groupKeyFromScope = (scope: AcademicGroupScope, college: boolean): string =>
+  college
+    ? `${scope.batchId ?? ""}-${scope.yearId ?? ""}`
+    : `${scope.classId ?? ""}-${scope.sectionId ?? ""}`;
+
+/** Count enrolled students per academic group for a school. */
+export const getStudentCountByGroup = async (
+  schoolId: string,
+  college: boolean
+): Promise<Map<string, number>> => {
+  const schoolObjectId = new mongoose.Types.ObjectId(schoolId);
+  const results = college
+    ? await Student.aggregate([
+        {
+          $match: {
+            schoolId: schoolObjectId,
+            batchId: { $exists: true, $ne: null },
+            yearId: { $exists: true, $ne: null }
+          }
+        },
+        { $group: { _id: { batchId: "$batchId", yearId: "$yearId" }, count: { $sum: 1 } } }
+      ])
+    : await Student.aggregate([
+        {
+          $match: {
+            schoolId: schoolObjectId,
+            classId: { $exists: true, $ne: null },
+            sectionId: { $exists: true, $ne: null }
+          }
+        },
+        { $group: { _id: { classId: "$classId", sectionId: "$sectionId" }, count: { $sum: 1 } } }
+      ]);
+
+  const map = new Map<string, number>();
+  results.forEach((row: { _id: Record<string, { toString(): string } | undefined>; count: number }) => {
+    const key = college
+      ? `${row._id.batchId?.toString() ?? ""}-${row._id.yearId?.toString() ?? ""}`
+      : `${row._id.classId?.toString() ?? ""}-${row._id.sectionId?.toString() ?? ""}`;
+    map.set(key, row.count);
+  });
+  return map;
+};
+
+/** Find a period-1 (preferred) or any timetable slot for an academic group to seed subject/teacher defaults. */
+export const getFallbackSlotForGroup = async (
+  schoolId: string,
+  academicYearBs: string,
+  scope: AcademicGroupScope,
+  college: boolean,
+  preferredDayOfWeek?: number
+): Promise<TimetableSlotLean | null> => {
+  const base: Record<string, unknown> = { schoolId, academicYearBs };
+  if (college) {
+    base.batchId = scope.batchId;
+    base.yearId = scope.yearId;
+  } else {
+    base.classId = scope.classId;
+    base.sectionId = scope.sectionId;
+  }
+
+  if (preferredDayOfWeek !== undefined) {
+    const todayFirst = (await TimetableSlot.findOne({
+      ...base,
+      dayOfWeek: preferredDayOfWeek,
+      periodNumber: 1
+    }).lean()) as TimetableSlotLean | null;
+    if (todayFirst) return todayFirst;
+
+    const todayAny = (await TimetableSlot.findOne({
+      ...base,
+      dayOfWeek: preferredDayOfWeek
+    })
+      .sort({ periodNumber: 1 })
+      .lean()) as TimetableSlotLean | null;
+    if (todayAny) return todayAny;
+  }
+
+  const firstPeriod = (await TimetableSlot.findOne({ ...base, periodNumber: 1 })
+    .sort({ dayOfWeek: 1 })
+    .lean()) as TimetableSlotLean | null;
+  if (firstPeriod) return firstPeriod;
+
+  return (await TimetableSlot.findOne(base).sort({ dayOfWeek: 1, periodNumber: 1 }).lean()) as TimetableSlotLean | null;
+};
+
+export const loadGroupLabels = async (
+  scopes: AcademicGroupScope[],
+  college: boolean
+): Promise<{
+  classMap: Map<string, string>;
+  sectionMap: Map<string, string>;
+  batchMap: Map<string, string>;
+  yearMap: Map<string, string>;
+}> => {
+  const classIds = scopes.map((s) => s.classId).filter(Boolean) as string[];
+  const sectionIds = scopes.map((s) => s.sectionId).filter(Boolean) as string[];
+  const batchIds = scopes.map((s) => s.batchId).filter(Boolean) as string[];
+  const yearIds = scopes.map((s) => s.yearId).filter(Boolean) as string[];
+
+  const [classes, sections, batches, years] = await Promise.all([
+    college || !classIds.length ? [] : SchoolClass.find({ _id: { $in: classIds } }).lean(),
+    college || !sectionIds.length ? [] : Section.find({ _id: { $in: sectionIds } }).lean(),
+    !college || !batchIds.length ? [] : Batch.find({ _id: { $in: batchIds } }).lean(),
+    !college || !yearIds.length ? [] : Year.find({ _id: { $in: yearIds } }).lean()
+  ]);
+
+  return {
+    classMap: new Map(classes.map((item) => [item._id.toString(), item.name])),
+    sectionMap: new Map(sections.map((item) => [item._id.toString(), item.name])),
+    batchMap: new Map(batches.map((item) => [item._id.toString(), item.name])),
+    yearMap: new Map(years.map((item) => [item._id.toString(), item.name]))
+  };
+};

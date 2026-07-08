@@ -13,6 +13,11 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
+import {
+  toastCredentialCreateResult,
+  toastResendCredentials,
+  type CredentialsEmailResult
+} from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 
@@ -41,9 +46,21 @@ export const AccountantsStaffPanel = () => {
     mutationFn: (payload: AccountantInput) =>
       editing
         ? unwrap(api.put(`/accounting/accountants/${editing._id}`, payload))
-        : unwrap(api.post("/accounting/accountants", payload)),
-    onSuccess: async () => {
-      toast.success(editing ? "Accountant updated" : "Accountant created");
+        : unwrap<{
+            accountant: AccountantRecord;
+            loginEmail: string;
+            defaultPassword: string;
+            credentialsEmail?: CredentialsEmailResult;
+          }>(api.post("/accounting/accountants", payload)),
+    onSuccess: async (data) => {
+      if (editing) {
+        toast.success("Accountant updated");
+      } else {
+        toastCredentialCreateResult(
+          (data as { loginEmail?: string; defaultPassword?: string; credentialsEmail?: CredentialsEmailResult }) ?? {},
+          { successTitle: "Accountant created successfully" }
+        );
+      }
       setForm(defaultAccountant);
       setPassword("");
       setEditing(null);
@@ -59,6 +76,10 @@ export const AccountantsStaffPanel = () => {
       await queryClient.invalidateQueries({ queryKey: ["accounting-accountants"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error))
+  });
+
+  const resendCredentials = useMutation({
+    mutationFn: (userId: string) => toastResendCredentials(userId)
   });
 
   if (accountantsQuery.isLoading) {
@@ -181,6 +202,14 @@ export const AccountantsStaffPanel = () => {
                           }}
                         >
                           Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={accountant.status !== "ACTIVE" || resendCredentials.isPending}
+                          onClick={() => void resendCredentials.mutateAsync(accountant.user._id)}
+                        >
+                          Resend Credentials
                         </Button>
                         <Button size="sm" variant="destructive" onClick={() => void deactivateAccountant.mutateAsync(accountant._id)}>
                           Deactivate

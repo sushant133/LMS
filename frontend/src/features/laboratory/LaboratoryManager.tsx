@@ -186,9 +186,15 @@ export const LaboratoryManager = () => {
   });
 
   const createStaff = useMutation({
-    mutationFn: (payload: ModuleStaffInput) => unwrap(api.post("/laboratory/staff", payload)),
-    onSuccess: async () => {
-      toast.success("Laboratory staff created");
+    mutationFn: (payload: ModuleStaffInput) =>
+      unwrap<{
+        loginEmail?: string;
+        defaultPassword?: string;
+        credentialsEmail?: import("lib/credentialsEmail").CredentialsEmailResult;
+      }>(api.post("/laboratory/staff", payload)),
+    onSuccess: async (data) => {
+      const { toastCredentialCreateResult } = await import("lib/credentialsEmail");
+      toastCredentialCreateResult(data ?? {}, { successTitle: "Laboratory staff created successfully" });
       setStaffForm(defaultStaff);
       await queryClient.invalidateQueries({ queryKey: ["laboratory-staff"] });
     },

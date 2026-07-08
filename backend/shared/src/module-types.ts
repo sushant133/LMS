@@ -19,6 +19,9 @@ export type NotificationType =
   | "PAYROLL"
   | "EXAM"
   | "COMPLAINT"
+  | "ACADEMIC_MANAGEMENT"
+  | "ACADEMIC_CALENDAR"
+  | "ACADEMIC_PROMOTION"
   | "GENERAL";
 
 export type ComplaintCategory =

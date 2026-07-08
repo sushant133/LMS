@@ -23,6 +23,7 @@ export const mapStudentToInput = (student: StudentRecord): StudentInput => ({
   guardianPhone: student.guardianPhone,
   feesDueNpr: student.feesDueNpr,
   remarks: student.remarks ?? "",
+  academicStatus: student.academicStatus ?? "ACTIVE",
   photoUrl: student.photoUrl ?? "",
   documents: student.documents ?? []
 });

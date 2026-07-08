@@ -122,14 +122,21 @@ export const ParentLinkManager = () => {
 
   const createFromStudent = useMutation({
     mutationFn: (payload: CreateParentFromStudentInput) =>
-      unwrap<{ loginEmail: string; defaultPassword?: string; createdUser: boolean }>(
-        api.post("/parent/profiles/from-student", payload)
-      ),
+      unwrap<{
+        loginEmail: string;
+        defaultPassword?: string;
+        createdUser: boolean;
+        credentialsEmail?: import("lib/credentialsEmail").CredentialsEmailResult;
+      }>(api.post("/parent/profiles/from-student", payload)),
     onSuccess: async (data) => {
-      const description = data.createdUser && data.defaultPassword
-        ? `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
-        : `Linked to existing account: ${data.loginEmail}`;
-      toast.success("Parent linked to student portal", { description });
+      if (data.createdUser) {
+        const { toastCredentialCreateResult } = await import("lib/credentialsEmail");
+        toastCredentialCreateResult(data, { successTitle: "Parent portal account created and linked" });
+      } else {
+        toast.success("Parent linked to student portal", {
+          description: `Linked to existing account: ${data.loginEmail}`
+        });
+      }
       await invalidateParentData();
     },
     onError: (error) => toast.error(parseErrorMessage(error))

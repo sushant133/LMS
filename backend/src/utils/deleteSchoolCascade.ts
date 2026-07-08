@@ -2,6 +2,16 @@ import type { ClientSession } from "mongoose";
 import mongoose from "mongoose";
 import path from "path";
 import fs from "fs-extra";
+import { AcademicApproval } from "../models/AcademicApproval.js";
+import { AcademicCalendarEvent } from "../models/AcademicCalendarEvent.js";
+import { AcademicComment } from "../models/AcademicComment.js";
+import { AcademicLessonPlan } from "../models/AcademicLessonPlan.js";
+import { AcademicLessonPlanItem } from "../models/AcademicLessonPlanItem.js";
+import { AcademicLogBook } from "../models/AcademicLogBook.js";
+import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
+import { AcademicProgress } from "../models/AcademicProgress.js";
+import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
+import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
 import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
 import { Batch } from "../models/Batch.js";
 import { AssignmentComment } from "../models/AssignmentComment.js";
@@ -64,6 +74,16 @@ export const deleteSchoolCascade = async (
   const filter = { schoolId: schoolObjectId };
 
   await Promise.all([
+    AcademicApproval.deleteMany(filter, options),
+    AcademicCalendarEvent.deleteMany(filter, options),
+    AcademicComment.deleteMany(filter, options),
+    AcademicLogBookEntry.deleteMany(filter, options),
+    AcademicLogBook.deleteMany(filter, options),
+    AcademicLessonPlanItem.deleteMany(filter, options),
+    AcademicLessonPlan.deleteMany(filter, options),
+    AcademicSessionPlanUnit.deleteMany(filter, options),
+    AcademicProgress.deleteMany(filter, options),
+    AcademicSessionPlan.deleteMany(filter, options),
     AssignmentComment.deleteMany(filter, options),
     AssignmentSubmission.deleteMany(filter, options),
     Assignment.deleteMany(filter, options),

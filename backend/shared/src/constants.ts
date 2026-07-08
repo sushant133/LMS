@@ -1,7 +1,7 @@
 import type { GradeSymbol, UserRole } from "./types.js";
 
-/** Official PHIT ERP branding */
-export const APP_BRAND_NAME = "PHIT ERP";
+/** Official PHIT LMS branding */
+export const APP_BRAND_NAME = "PHIT LMS";
 export const APP_BRAND_SHORT = "PHIT";
 
 /** Primary UI theme color (navy blue) */
@@ -372,6 +372,38 @@ export const INSTITUTION_TYPES = ["SCHOOL", "COLLEGE"] as const;
 export const CLASS_LEVELS = ["ECD", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12"] as const;
 
 export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year"] as const;
+
+/** Academic lifecycle status for college students. Only ACTIVE students are promoted. */
+export const STUDENT_ACADEMIC_STATUSES = [
+  "ACTIVE",
+  "PASSED_OUT",
+  "ALUMNI",
+  "WITHDRAWN",
+  "CANCELLED",
+  "SUSPENDED"
+] as const;
+
+export const STUDENT_ACADEMIC_STATUS_LABELS: Record<(typeof STUDENT_ACADEMIC_STATUSES)[number], string> = {
+  ACTIVE: "Active",
+  PASSED_OUT: "Passed Out",
+  ALUMNI: "Alumni",
+  WITHDRAWN: "Withdrawn",
+  CANCELLED: "Cancelled",
+  SUSPENDED: "Suspended"
+};
+
+/** Statuses that block academic promotion. */
+export const NON_PROMOTABLE_STUDENT_STATUSES = [
+  "PASSED_OUT",
+  "ALUMNI",
+  "WITHDRAWN",
+  "CANCELLED",
+  "SUSPENDED"
+] as const;
+
+export const ACADEMIC_PROMOTION_STATUSES = ["COMPLETED", "ROLLED_BACK"] as const;
+
+export const ACADEMIC_PROMOTION_OUTCOMES = ["PROMOTED", "PASSED_OUT"] as const;
 
 export const EXAM_STATUSES = ["DRAFT", "SCHEDULED", "ONGOING", "COMPLETED", "PUBLISHED"] as const;
 

@@ -45,6 +45,60 @@ a {
   text-decoration: none;
 }
 
+/*
+ * Global clickable cursor — many interactive controls rely on default browser cursors.
+ * Apply pointer to all primary click targets project-wide; disabled controls keep not-allowed.
+ */
+button,
+a,
+label,
+select,
+summary,
+[role="button"],
+[role="link"],
+[role="tab"],
+[role="menuitem"],
+[role="option"],
+[role="switch"],
+[role="checkbox"],
+[role="radio"],
+[role="combobox"],
+[tabindex]:not([tabindex="-1"]),
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+input[type="checkbox"],
+input[type="radio"],
+input[type="file"],
+input[type="color"],
+input[type="range"],
+input[type="image"] {
+  cursor: pointer;
+}
+
+button:disabled,
+a[aria-disabled="true"],
+[aria-disabled="true"],
+[disabled],
+input:disabled,
+select:disabled,
+textarea:disabled,
+button[disabled],
+input[type="button"]:disabled,
+input[type="submit"]:disabled,
+input[type="reset"]:disabled,
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled,
+input[type="file"]:disabled {
+  cursor: not-allowed;
+}
+
+/* Clickable cards / rows often use onClick without button semantics */
+[data-clickable="true"],
+.clickable {
+  cursor: pointer;
+}
+
 .app-sidebar-scroll {
   overflow-x: hidden;
   overflow-y: auto;

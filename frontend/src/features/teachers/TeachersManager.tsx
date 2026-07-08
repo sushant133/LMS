@@ -10,6 +10,7 @@ import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { api, unwrap } from "lib/api";
+import { toastCredentialCreateResult, type CredentialsEmailResult } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
@@ -72,12 +73,15 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     mutationFn: async (payload: TeacherInput) =>
       editing
         ? unwrap<TeacherRecord>(api.put(`/teachers/${editing._id}`, payload))
-        : unwrap<{ teacher: TeacherRecord; loginEmail: string; defaultPassword: string }>(api.post("/teachers", payload)),
+        : unwrap<{
+            teacher: TeacherRecord;
+            loginEmail: string;
+            defaultPassword: string;
+            credentialsEmail?: CredentialsEmailResult;
+          }>(api.post("/teachers", payload)),
     onSuccess: async (data) => {
       if ("loginEmail" in data) {
-        toast.success("Teacher created with portal login", {
-          description: `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
-        });
+        toastCredentialCreateResult(data, { successTitle: "Teacher created successfully" });
       } else {
         toast.success("Teacher updated");
       }

@@ -7,7 +7,6 @@ import {
   sanitizeUserDisplayName,
   type CollegeAdministratorRecord
 } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -20,6 +19,11 @@ import {
   toDeletedAdminEmail
 } from "../utils/collegeViewerAccount.js";
 import { recordAudit } from "../utils/audit.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import { resolveInstitutionSchoolId } from "../utils/institutionSchool.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { sendSuccess } from "../utils/response.js";
@@ -129,7 +133,7 @@ export const createCollegeAdministrator = asyncHandler(async (req: Request, res:
     throw new ApiError(409, "An account with this login ID already exists");
   }
 
-  const password = payload.password ?? env.DEFAULT_USER_PASSWORD;
+  const { password } = resolvePortalPassword(payload.password);
 
   try {
     const admin = await User.create({
@@ -154,13 +158,23 @@ export const createCollegeAdministrator = asyncHandler(async (req: Request, res:
       after: serializeCollegeAdministrator(admin as UserLean)
     });
 
+    const credentialsEmail = await notifyAccountCredentials({
+      userId: admin._id.toString(),
+      fullName: payload.fullName,
+      email,
+      password,
+      schoolId: schoolId.toString(),
+      req
+    });
+
     return sendSuccess(
       res,
-      "College Administrator account created",
+      buildCredentialsAdminMessage(credentialsEmail),
       {
         admin: serializeCollegeAdministrator(admin as UserLean),
         loginEmail: email,
-        defaultPassword: password
+        defaultPassword: password,
+        credentialsEmail
       },
       201
     );

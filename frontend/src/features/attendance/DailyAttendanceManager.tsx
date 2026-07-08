@@ -18,6 +18,7 @@ import {
   type DailyAttendanceStudentReportRow,
   type DailyAttendanceSubmitInput
 } from "@phit-erp/shared";
+import { getTodayBs } from "@munatech/nepali-datepicker";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
@@ -87,12 +88,21 @@ interface AttendanceContext {
   holiday?: { title: string; dateBs: string };
 }
 
+const formatTodayBs = (): string => {
+  const today = getTodayBs();
+  return `${today.year}-${String(today.month).padStart(2, "0")}-${String(today.day).padStart(2, "0")}`;
+};
+
+const assignmentKey = (assignment: DailyAttendanceAssignment): string =>
+  assignment.timetableSlotId ||
+  `${assignment.batchId ?? assignment.classId ?? ""}-${assignment.yearId ?? assignment.sectionId ?? ""}-manual`;
+
 export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTeacher }: DailyAttendanceManagerProps) => {
   const isSuperAdmin = useIsSystemAdministrator();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const [view, setView] = useState<"mark" | "history" | "dashboard" | "reports">(isTeacher ? "mark" : "dashboard");
-  const [dateBs, setDateBs] = useState("");
+  const [dateBs, setDateBs] = useState(formatTodayBs);
   const [selectedAssignment, setSelectedAssignment] = useState<DailyAttendanceAssignment | null>(null);
   const [statusMap, setStatusMap] = useState<Record<string, DailyAttendanceStatus>>({});
   const [remarksMap, setRemarksMap] = useState<Record<string, string>>({});
@@ -123,18 +133,37 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
   });
 
   const contextQuery = useQuery({
-    queryKey: ["daily-attendance-context", selectedAssignment?.timetableSlotId, dateBs, hasInstitutionRead],
+    queryKey: [
+      "daily-attendance-context",
+      selectedAssignment?.timetableSlotId,
+      selectedAssignment?.batchId,
+      selectedAssignment?.yearId,
+      selectedAssignment?.classId,
+      selectedAssignment?.sectionId,
+      dateBs,
+      hasInstitutionRead
+    ],
     queryFn: () =>
-      unwrap<AttendanceContext & { isAdmin?: boolean }>(
+      unwrap<AttendanceContext & { isAdmin?: boolean; studentCount?: number; isManualAssignment?: boolean }>(
         api.get("/daily-attendance/context", {
           params: {
-            timetableSlotId: selectedAssignment!.timetableSlotId,
+            ...(selectedAssignment?.timetableSlotId
+              ? { timetableSlotId: selectedAssignment.timetableSlotId }
+              : isCollege
+                ? { batchId: selectedAssignment!.batchId, yearId: selectedAssignment!.yearId }
+                : { classId: selectedAssignment!.classId, sectionId: selectedAssignment!.sectionId }),
             ...(dateBs ? { dateBs } : {}),
             ...adminParams
           }
         })
       ),
-    enabled: Boolean(selectedAssignment?.timetableSlotId)
+    enabled: Boolean(
+      selectedAssignment &&
+        (selectedAssignment.timetableSlotId ||
+          (isCollege
+            ? selectedAssignment.batchId && selectedAssignment.yearId
+            : selectedAssignment.classId && selectedAssignment.sectionId))
+    )
   });
 
   const attendancePeriodParams = useMemo(() => buildAttendanceQueryParams(periodSelection), [periodSelection]);
@@ -202,6 +231,11 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
       unwrap<DailyAttendanceRecord>(api.post("/daily-attendance", payload)),
     onSuccess: async () => {
       toast.success("Daily attendance submitted and synchronized with first-period subject attendance");
+      setSelectedAssignment(null);
+      setStatusMap({});
+      setRemarksMap({});
+      setNotes("");
+      setSelectedIds(new Set());
       await queryClient.invalidateQueries({ queryKey: ["daily-attendance"] });
       await queryClient.invalidateQueries({ queryKey: ["daily-attendance-assignments"] });
       await queryClient.invalidateQueries({ queryKey: ["daily-attendance-context"] });
@@ -210,6 +244,16 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
     },
     onError: (error) => toast.error(parseErrorMessage(error))
   });
+
+  // Changing the date invalidates the selected slot for that day.
+  useEffect(() => {
+    setSelectedAssignment(null);
+    setStatusMap({});
+    setRemarksMap({});
+    setNotes("");
+    setSelectedIds(new Set());
+    setSearch("");
+  }, [dateBs]);
 
   useEffect(() => {
     const existing = contextQuery.data?.existingRecord;
@@ -222,13 +266,13 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
 
     setStatusMap(
       existing.entries.reduce<Record<string, DailyAttendanceStatus>>((acc, entry) => {
-        acc[entry.studentId] = entry.status;
+        acc[String(entry.studentId)] = entry.status;
         return acc;
       }, {})
     );
     setRemarksMap(
       existing.entries.reduce<Record<string, string>>((acc, entry) => {
-        if (entry.remarks) acc[entry.studentId] = entry.remarks;
+        if (entry.remarks) acc[String(entry.studentId)] = entry.remarks;
         return acc;
       }, {})
     );
@@ -265,17 +309,20 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
     return counts;
   }, [contextQuery.data?.students, statusMap]);
 
+  const studentCount =
+    contextQuery.data?.students?.length ?? selectedAssignment?.studentCount ?? 0;
   const isLocked = Boolean(
     selectedAssignment?.isLocked || contextQuery.data?.existingRecord?.status === "LOCKED"
   );
   const canMark =
-    canWriteAdmin
+    studentCount > 0 &&
+    (canWriteAdmin
       ? !isLocked
-      : (isTeacher && !isLocked && (contextQuery.data?.availability.canMark ?? false));
+      : isTeacher && !isLocked && (contextQuery.data?.availability.canMark ?? false));
 
   useEffect(() => {
     if (!selectedAssignment) return;
-    setAssignedTeacherId(selectedAssignment.teacherId);
+    setAssignedTeacherId(selectedAssignment.teacherId || "");
   }, [selectedAssignment]);
 
   const applyStatus = (studentIds: string[], status: DailyAttendanceStatus) => {
@@ -300,9 +347,17 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
   const handleSubmit = async () => {
     if (!selectedAssignment) return;
     const students = contextQuery.data?.students ?? [];
+    if (students.length === 0) {
+      toast.error("No students are enrolled in this academic group.");
+      return;
+    }
     const missing = students.find((student) => !statusMap[student._id]);
     if (missing) {
       toast.error("Every student must have an attendance status before submission.");
+      return;
+    }
+    if (canWriteAdmin && !assignedTeacherId && !selectedAssignment.teacherId) {
+      toast.error("Please assign a teacher before submitting attendance.");
       return;
     }
 
@@ -310,16 +365,24 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
       ...(isCollege
         ? { batchId: selectedAssignment.batchId, yearId: selectedAssignment.yearId }
         : { classId: selectedAssignment.classId, sectionId: selectedAssignment.sectionId }),
-      dateBs: contextQuery.data?.dateBs ?? selectedAssignment.dateBs,
-      timetableSlotId: selectedAssignment.timetableSlotId,
+      dateBs: contextQuery.data?.dateBs ?? selectedAssignment.dateBs ?? dateBs,
+      ...(selectedAssignment.timetableSlotId
+        ? { timetableSlotId: selectedAssignment.timetableSlotId }
+        : {}),
+      ...(selectedAssignment.subjectId ? { subjectId: selectedAssignment.subjectId } : {}),
       notes,
-      ...(canWriteAdmin ? { adminOverride: true, assignedTeacherId: assignedTeacherId || selectedAssignment.teacherId } : {}),
+      ...(canWriteAdmin
+        ? {
+            adminOverride: true,
+            assignedTeacherId: assignedTeacherId || selectedAssignment.teacherId || undefined
+          }
+        : {}),
       entries: students.map((student) => ({
         studentId: student._id,
         status: statusMap[student._id]!,
         remarks: remarksMap[student._id]
       }))
-    });
+    } as DailyAttendanceSubmitInput);
   };
 
   if (assignmentsQuery.isLoading && view === "mark") {
@@ -468,60 +531,81 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
               </div>
             </CardContent>
             <CardContent>
-              {(assignmentsQuery.data ?? []).length === 0 ? (
+              {assignmentsQuery.isError ? (
+                <EmptyState
+                  title="Unable to load assignments"
+                  description={parseErrorMessage(assignmentsQuery.error)}
+                />
+              ) : (assignmentsQuery.data ?? []).length === 0 ? (
                 <EmptyState
                   title="No daily attendance assignments"
-                  description="Ensure the timetable has first-period slots assigned for this day."
+                  description={
+                    isTeacher
+                      ? "No first-period (or substitute) classes are assigned to you for this day. Ask admin to set the timetable."
+                      : "No enrolled classes found for this day. Add students and timetable first-period slots, or pick another date."
+                  }
                 />
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {(assignmentsQuery.data ?? []).map((assignment) => (
-                    <button
-                      key={assignment.timetableSlotId}
-                      type="button"
-                      onClick={() => setSelectedAssignment(assignment)}
-                      className={`rounded-xl border p-4 text-left transition hover:border-brand-300 ${
-                        selectedAssignment?.timetableSlotId === assignment.timetableSlotId
-                          ? "border-brand-500 bg-brand-50"
-                          : "border-slate-200 bg-white"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="font-semibold text-slate-900">
-                            {isCollege
-                              ? `${assignment.batchName} · ${assignment.yearName}`
-                              : `${assignment.className} · ${assignment.sectionName}`}
-                          </p>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {assignment.subjectName} · {assignment.startTime}–{assignment.endTime}
-                          </p>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {assignment.isSubstituteSlot ? "Substitute: " : ""}
-                            {assignment.teacherName}
-                            {assignment.isSubstituteSlot && assignment.firstPeriodTeacherName
-                              ? ` (1st period: ${assignment.firstPeriodTeacherName})`
-                              : ""}
-                          </p>
-                          {assignment.isSubstituteSlot ? (
-                            <Badge className="mt-2 bg-violet-100 text-violet-800">Substitute Slot</Badge>
-                          ) : null}
+                  {(assignmentsQuery.data ?? []).map((assignment) => {
+                    const key = assignmentKey(assignment);
+                    const selected = selectedAssignment ? assignmentKey(selectedAssignment) === key : false;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setSelectedAssignment(assignment)}
+                        className={`rounded-xl border p-4 text-left transition hover:border-brand-300 ${
+                          selected ? "border-brand-500 bg-brand-50" : "border-slate-200 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {isCollege
+                                ? `${assignment.batchName ?? "Batch"} · ${assignment.yearName ?? "Year"}`
+                                : `${assignment.className ?? "Class"} · ${assignment.sectionName ?? "Section"}`}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {assignment.subjectName || "Daily register"} · {assignment.startTime}–{assignment.endTime}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-500">
+                              {assignment.isSubstituteSlot ? "Substitute: " : ""}
+                              {assignment.teacherName || "Assign teacher"}
+                              {assignment.isSubstituteSlot && assignment.firstPeriodTeacherName
+                                ? ` (1st period: ${assignment.firstPeriodTeacherName})`
+                                : ""}
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-slate-500">
+                              {assignment.studentCount ?? "—"} students
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {assignment.isSubstituteSlot ? (
+                                <Badge className="bg-violet-100 text-violet-800">Substitute Slot</Badge>
+                              ) : null}
+                              {assignment.isManualAssignment ? (
+                                <Badge className="bg-sky-100 text-sky-800">Manual / No period slot</Badge>
+                              ) : null}
+                            </div>
+                          </div>
+                          {assignment.isLocked ? (
+                            <Badge className="bg-slate-100 text-slate-700">Locked</Badge>
+                          ) : assignment.isHoliday ? (
+                            <Badge className="bg-amber-100 text-amber-800">Holiday</Badge>
+                          ) : (assignment.studentCount ?? 0) === 0 ? (
+                            <Badge className="bg-slate-100 text-slate-600">Empty</Badge>
+                          ) : assignment.canMark ? (
+                            <Badge className="bg-emerald-100 text-emerald-800">Open</Badge>
+                          ) : (
+                            <Badge className="bg-rose-100 text-rose-800">Closed</Badge>
+                          )}
                         </div>
-                        {assignment.isLocked ? (
-                          <Badge className="bg-slate-100 text-slate-700">Locked</Badge>
-                        ) : assignment.isHoliday ? (
-                          <Badge className="bg-amber-100 text-amber-800">Holiday</Badge>
-                        ) : assignment.canMark ? (
-                          <Badge className="bg-emerald-100 text-emerald-800">Open</Badge>
-                        ) : (
-                          <Badge className="bg-rose-100 text-rose-800">Closed</Badge>
-                        )}
-                      </div>
-                      {assignment.availabilityMessage ? (
-                        <p className="mt-3 text-xs text-slate-500">{assignment.availabilityMessage}</p>
-                      ) : null}
-                    </button>
-                  ))}
+                        {assignment.availabilityMessage ? (
+                          <p className="mt-3 text-xs text-slate-500">{assignment.availabilityMessage}</p>
+                        ) : null}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -586,9 +670,15 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                   </div>
                 ) : null}
 
-                {contextQuery.data?.availability.message && !canMark && !hasInstitutionRead ? (
+                {contextQuery.data?.availability.message && !canMark ? (
                   <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
                     {contextQuery.data.availability.message}
+                  </div>
+                ) : null}
+
+                {canWriteAdmin && selectedAssignment?.isManualAssignment && !isLocked ? (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                    No first-period timetable for this day. Assign a teacher and mark the daily register manually.
                   </div>
                 ) : null}
 
@@ -604,6 +694,11 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                   <EmptyState
                     title="Unable to load attendance register"
                     description={parseErrorMessage(contextQuery.error)}
+                  />
+                ) : (contextQuery.data?.students?.length ?? 0) === 0 ? (
+                  <EmptyState
+                    title="No students in this group"
+                    description="Enroll students in this batch/year (or class/section) before marking daily attendance."
                   />
                 ) : (
                   <>

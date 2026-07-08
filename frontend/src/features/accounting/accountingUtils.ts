@@ -80,7 +80,7 @@ export const downloadFinancialSummaryExcel = (report: FinancialSummaryReport): v
   const workbook = XLSX.utils.book_new();
 
   const summarySheet = XLSX.utils.aoa_to_sheet([
-    ["PHIT ERP — Financial Summary"],
+    ["PHIT LMS — Financial Summary"],
     ["Period", report.period.label],
     [],
     ["Category", "Transactions", "Total (NPR)"],

@@ -26,6 +26,7 @@ import { SalaryPayment } from "../models/SalaryPayment.js";
 import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
 import { Laboratory, LaboratoryCategory, LaboratoryEquipment, LaboratoryIssue } from "../models/Laboratory.js";
 import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
+import { AcademicCalendarEvent } from "../models/AcademicCalendarEvent.js";
 import { Notice } from "../models/Notice.js";
 import { Notification } from "../models/Notification.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
@@ -44,7 +45,7 @@ import { TransportAssignment, TransportRoute } from "../models/TransportRoute.js
 import { User } from "../models/User.js";
 import { deleteSchoolCascade } from "../utils/deleteSchoolCascade.js";
 import { buildResultTotals } from "../utils/examResults.js";
-import { getOffsetBsDate, getTodayBs } from "../utils/nepaliDate.js";
+import { bsToAdDate, getOffsetBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { defaultSchoolAddress, buildSchoolSettingsPayload } from "../utils/schoolDefaults.js";
 import { withTransaction } from "../utils/transaction.js";
 
@@ -838,11 +839,72 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
+    const seedCalendarEvent = (dateBs: string, name: string, eventType: "FESTIVAL" | "SEMESTER_START" | "FINAL_EXAMINATION" | "COLLEGE_HOLIDAY", reason: string) => {
+      const { dateAd, dayOfWeek } = bsToAdDate(dateBs);
+      return {
+        schoolId,
+        academicYearBs: DEFAULT_ACADEMIC_YEAR_BS,
+        dateBs,
+        dateAd,
+        dayOfWeek,
+        name,
+        eventType,
+        reason,
+        isHoliday: eventType === "FESTIVAL" || eventType === "COLLEGE_HOLIDAY",
+        audit: { createdBy: adminUser!._id }
+      };
+    };
+
+    await AcademicCalendarEvent.create(
+      [
+        seedCalendarEvent("2083-06-15", "Dashain Vacation", "FESTIVAL", "College Closed"),
+        seedCalendarEvent("2083-08-01", "Semester Begins", "SEMESTER_START", "First Semester Starts"),
+        seedCalendarEvent("2083-11-10", "Final Examination", "FINAL_EXAMINATION", "End of semester examinations"),
+        seedCalendarEvent("2083-05-01", "College Holiday", "COLLEGE_HOLIDAY", "Staff development day")
+      ],
+      options
+    );
+
+    // First-period coverage Sun–Fri so daily attendance works every working day in the demo.
+    const year1FirstPeriodDays = [
+      { day: 0, subject: subjectByCode.ANAT, teacher: teacherByCode.ram },
+      { day: 1, subject: subjectByCode.ANAT, teacher: teacherByCode.ram },
+      { day: 2, subject: subjectByCode.PHYS, teacher: teacherByCode.ram },
+      { day: 3, subject: subjectByCode.ENG, teacher: teacherByCode.sita },
+      { day: 4, subject: subjectByCode.ANAT, teacher: teacherByCode.ram },
+      { day: 5, subject: subjectByCode.PHYS, teacher: teacherByCode.ram }
+    ];
+    const year2FirstPeriodDays = [
+      { day: 0, subject: subjectByCode.PHAR, teacher: teacherByCode.hari },
+      { day: 1, subject: subjectByCode.PHAR, teacher: teacherByCode.hari },
+      { day: 2, subject: subjectByCode.MIC, teacher: teacherByCode.sita },
+      { day: 3, subject: subjectByCode.PHAR, teacher: teacherByCode.hari },
+      { day: 4, subject: subjectByCode.MIC, teacher: teacherByCode.gita },
+      { day: 5, subject: subjectByCode.PHAR, teacher: teacherByCode.hari }
+    ];
+
     const timetableRows = [
-      { batchId: batch2082!._id, yearId: year1._id, day: 1, period: 1, subject: subjectByCode.ANAT, teacher: teacherByCode.ram, start: "10:00", end: "10:45" },
+      ...year1FirstPeriodDays.map((row) => ({
+        batchId: batch2082!._id,
+        yearId: year1._id,
+        day: row.day,
+        period: 1,
+        subject: row.subject,
+        teacher: row.teacher,
+        start: "10:00",
+        end: "10:45"
+      })),
       { batchId: batch2082!._id, yearId: year1._id, day: 1, period: 2, subject: subjectByCode.ENG, teacher: teacherByCode.sita, start: "10:45", end: "11:30" },
-      { batchId: batch2082!._id, yearId: year1._id, day: 2, period: 1, subject: subjectByCode.PHYS, teacher: teacherByCode.ram, start: "10:00", end: "10:45" },
-      { batchId: batch2082!._id, yearId: year2._id, day: 1, period: 1, subject: subjectByCode.PHAR, teacher: teacherByCode.hari, start: "10:00", end: "10:45" },
+      ...year2FirstPeriodDays.map((row) => ({
+        batchId: batch2082!._id,
+        yearId: year2._id,
+        day: row.day,
+        period: 1,
+        subject: row.subject,
+        teacher: row.teacher,
+        start: "10:00",
+        end: "10:45"
+      })),
       { batchId: batch2082!._id, yearId: year2._id, day: 1, period: 2, subject: subjectByCode.MIC, teacher: teacherByCode.sita, start: "10:45", end: "11:30" }
     ];
 

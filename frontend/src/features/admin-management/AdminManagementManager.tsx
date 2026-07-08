@@ -18,6 +18,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
+import {
+  toastCredentialCreateResult,
+  toastResendCredentials,
+  type CredentialsEmailResult
+} from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 
@@ -62,15 +67,25 @@ export const AdminManagementManager = () => {
 
   const createMutation = useMutation({
     mutationFn: async (payload: AdminAccountInput) =>
-      unwrap<{ admin: AdminAccountRecord; loginEmail: string; defaultPassword: string }>(api.post("/admins", payload)),
+      unwrap<{
+        admin: AdminAccountRecord;
+        loginEmail: string;
+        defaultPassword: string;
+        credentialsEmail?: CredentialsEmailResult;
+      }>(api.post("/admins", payload)),
     onSuccess: async (data) => {
-      toast.success("Administrator created", {
-        description: `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
-      });
+      toastCredentialCreateResult(data, { successTitle: "Administrator created successfully" });
       setForm(defaultForm);
       await invalidateAdmins();
     },
     onError: (error) => toast.error(parseErrorMessage(error))
+  });
+
+  const resendCredentialsMutation = useMutation({
+    mutationFn: async (userId: string) => toastResendCredentials(userId),
+    onSuccess: async () => {
+      await invalidateAdmins();
+    }
   });
 
   const updateMutation = useMutation({
@@ -133,7 +148,7 @@ export const AdminManagementManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Admin Users"
-        description="Create, update, lock, reset passwords, restore, and audit full Administrator accounts with complete ERP write access."
+        description="Create, update, lock, reset passwords, restore, and audit full Administrator accounts with complete LMS write access."
       />
 
       <Card>
@@ -367,7 +382,7 @@ export const AdminManagementManager = () => {
             </Button>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <div className="grid gap-4 md:grid-cols-[1fr_auto_auto] md:items-end">
               <FormField label="Reset Password">
                 <Input
                   type="password"
@@ -381,6 +396,13 @@ export const AdminManagementManager = () => {
                 onClick={() => void resetPasswordMutation.mutateAsync({ id: selectedAdmin._id, password: resetPassword })}
               >
                 Reset Password
+              </Button>
+              <Button
+                variant="outline"
+                disabled={resendCredentialsMutation.isPending || selectedAdmin.isDeleted || !selectedAdmin.isActive}
+                onClick={() => void resendCredentialsMutation.mutateAsync(selectedAdmin._id)}
+              >
+                Resend Credentials
               </Button>
             </div>
 

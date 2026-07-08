@@ -1,7 +1,6 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
 import { teacherSchema } from "@phit-erp/shared";
-import { env } from "../config/env.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Subject } from "../models/Subject.js";
@@ -11,6 +10,11 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { validateCollegeTeacherScope } from "../utils/academicValidation.js";
+import {
+  buildCredentialsAdminMessage,
+  notifyAccountCredentials,
+  resolvePortalPassword
+} from "../utils/credentialEmail.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { sendSuccess } from "../utils/response.js";
@@ -213,7 +217,7 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
   }
 
   const session = await createSession();
-  const portalPassword = payload.password?.trim() || env.DEFAULT_USER_PASSWORD;
+  const { password: portalPassword, wasGenerated } = resolvePortalPassword(payload.password);
 
   try {
     const createdUsers = await User.create(
@@ -225,7 +229,7 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
           phone: payload.phone,
           password: portalPassword,
           role: "TEACHER",
-          mustChangePassword: !payload.password?.trim()
+          mustChangePassword: wasGenerated
         }
       ],
       getSessionOption(session)
@@ -249,13 +253,23 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
     await commitTransaction(session);
     await teacher.populate("user", "-password");
 
+    const credentialsEmail = await notifyAccountCredentials({
+      userId: user._id.toString(),
+      fullName: payload.fullName,
+      email: loginEmail,
+      password: portalPassword,
+      schoolId: schoolId.toString(),
+      req
+    });
+
     return sendSuccess(
       res,
-      "Teacher created successfully",
+      buildCredentialsAdminMessage(credentialsEmail),
       {
         teacher,
         loginEmail,
-        defaultPassword: portalPassword
+        defaultPassword: portalPassword,
+        credentialsEmail
       },
       201
     );

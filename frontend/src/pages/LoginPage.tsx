@@ -14,9 +14,7 @@ import { useIsDesktopViewport } from "hooks/useIsDesktopViewport";
 import { getRoleRedirectPath } from "lib/auth";
 import { parseErrorMessage } from "lib/utils";
 
-const HERO_TAGLINE = "Official ERP for Public Himal Institute of Technology.";
-const HERO_SUPPORT =
-  "BS calendar, attendance, exams, fees, accounting, library, transport, and college operations in one place.";
+const HERO_TAGLINE = "Official LMS for Public Himal Institute of Technology.";
 
 const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
   const { t } = useTranslation();
@@ -45,9 +43,7 @@ const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
       </div>
 
       <div className="max-w-xl">
-        <p className="text-sm uppercase tracking-[0.3em] text-brand-200">2026 Nepal-ready</p>
-        <h2 className="mt-4 text-5xl font-semibold leading-tight">{HERO_TAGLINE}</h2>
-        <p className="mt-6 text-lg text-brand-50/85">{HERO_SUPPORT}</p>
+        <h2 className="text-5xl font-semibold leading-tight">{HERO_TAGLINE}</h2>
       </div>
     </div>
   );
