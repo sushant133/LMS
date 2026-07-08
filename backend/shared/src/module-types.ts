@@ -18,7 +18,38 @@ export type NotificationType =
   | "LABORATORY"
   | "PAYROLL"
   | "EXAM"
+  | "COMPLAINT"
   | "GENERAL";
+
+export type ComplaintCategory =
+  | "TEACHER"
+  | "STAFF"
+  | "STUDENT"
+  | "STUDY"
+  | "FACILITY"
+  | "ADMINISTRATION"
+  | "OTHER";
+
+export type ComplaintStatus = "SUBMITTED" | "UNDER_REVIEW" | "RESOLVED" | "CLOSED";
+
+export interface ComplaintRecord {
+  _id: string;
+  schoolId: string;
+  submittedBy: string;
+  submitterRole: UserRole;
+  submitterName?: string;
+  subject: string;
+  category: ComplaintCategory;
+  content: string;
+  attachments: AssignmentAttachment[];
+  status: ComplaintStatus;
+  adminResponse?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolvedByName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 export type InventoryStockStatus = "AVAILABLE" | "LOW_STOCK" | "OUT_OF_STOCK";
 
@@ -208,12 +239,17 @@ export interface LibraryIssueRecord {
   updatedAt?: string;
 }
 
+export interface LibraryInventoryAccessResponse {
+  enabled: boolean;
+}
+
 export interface LibraryDashboardResponse {
   totalBooks: number;
   availableBooks: number;
   issuedBooks: number;
   overdueBooks: number;
   recentlyIssued: LibraryIssueRecord[];
+  inventoryAccessEnabled: boolean;
 }
 
 export interface LaboratoryRecord {

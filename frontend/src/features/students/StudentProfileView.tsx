@@ -241,7 +241,7 @@ export const StudentProfileView = () => {
                             <Badge
                               className={
                                 result.passFailStatus === "PASS"
-                                  ? "bg-emerald-100 text-emerald-700"
+                                  ? "bg-brand-100 text-brand-700"
                                   : "bg-red-100 text-red-700"
                               }
                             >
@@ -311,7 +311,7 @@ export const StudentProfileView = () => {
                         <Badge
                           className={
                             result.passFailStatus === "PASS"
-                              ? "bg-emerald-100 text-emerald-700"
+                              ? "bg-brand-100 text-brand-700"
                               : "bg-red-100 text-red-700"
                           }
                         >
@@ -413,7 +413,7 @@ export const StudentProfileView = () => {
                         <Td>
                           <Badge
                             className={
-                              row.status === "PRESENT" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                              row.status === "PRESENT" ? "bg-brand-100 text-brand-700" : "bg-red-100 text-red-700"
                             }
                           >
                             {row.status}

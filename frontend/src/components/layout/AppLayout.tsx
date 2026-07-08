@@ -1,48 +1,76 @@
-import { Building2, LogOut, Menu } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
+import { ReadOnlyBanner } from "components/shared/ReadOnlyBanner";
 import { useTranslation } from "react-i18next";
-import { INSTITUTION_NAME, isInstitutionAdmin, normalizeUserRole, type UserRole } from "@phit-erp/shared";
+import { INSTITUTION_NAME, hasInstitutionAccess, normalizeUserRole, type UserRole } from "@phit-erp/shared";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { Button } from "components/ui/button";
 import { cn } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
+import { useNotificationBadge } from "hooks/useNotificationBadge";
 import { getCollegeDisplayName, roleLabelMap } from "lib/auth";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
 
+const institutionRoles: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"];
+
 const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
-  { labelKey: "dashboard", path: "/dashboard", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
+  { labelKey: "dashboard", path: "/dashboard", roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT"] },
   { labelKey: "mySubjects", path: "/my-subjects", roles: ["STUDENT"] },
   { labelKey: "parentPortal", path: "/parent-portal", roles: ["PARENT"] },
-  { labelKey: "students", path: "/students", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"] },
-  { labelKey: "collegeStaff", path: "/college-staff", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "academics", path: "/academics", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "timetable", path: "/timetable", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"] },
+  { labelKey: "students", path: "/students", roles: [...institutionRoles, "TEACHER"] },
+  { labelKey: "collegeStaff", path: "/college-staff", roles: institutionRoles },
+  { labelKey: "academics", path: "/academics", roles: institutionRoles },
+  { labelKey: "timetable", path: "/timetable", roles: [...institutionRoles, "TEACHER"] },
   { labelKey: "homework", path: "/homework", roles: ["TEACHER"] },
   { labelKey: "homework", path: "/homework-view", roles: ["STUDENT", "PARENT"] },
   { labelKey: "attendance", path: "/attendance", roles: ["TEACHER"] },
-  { labelKey: "attendance", path: "/attendance-view", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
+  { labelKey: "attendance", path: "/attendance-view", roles: institutionRoles },
   { labelKey: "exams", path: "/exams", roles: ["TEACHER", "STUDENT", "PARENT"] },
-  { labelKey: "exams", path: "/exams-view", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "accounting", path: "/accounting", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"] },
+  { labelKey: "exams", path: "/exams-view", roles: institutionRoles },
+  { labelKey: "accounting", path: "/accounting", roles: [...institutionRoles, "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"] },
   { labelKey: "myFees", path: "/my-fees", roles: ["STUDENT"] },
-  { labelKey: "library", path: "/library", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "LIBRARY_STAFF"] },
+  { labelKey: "library", path: "/library", roles: [...institutionRoles, "LIBRARY_STAFF"] },
   { labelKey: "myLibrary", path: "/my-library", roles: ["STUDENT", "TEACHER"] },
-  { labelKey: "laboratory", path: "/laboratory", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "LABORATORY_STAFF"] },
-  { labelKey: "transport", path: "/transport", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "hr", path: "/hr", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "parentLinks", path: "/parent-links", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "notifications", path: "/notifications", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
-  { labelKey: "notices", path: "/notices", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"] },
-  { labelKey: "settings", path: "/settings", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "reports", path: "/reports", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] },
-  { labelKey: "adminManagement", path: "/admin-management", roles: ["SUPER_ADMIN"] }
+  { labelKey: "laboratory", path: "/laboratory", roles: [...institutionRoles, "LABORATORY_STAFF"] },
+  { labelKey: "transport", path: "/transport", roles: institutionRoles },
+  { labelKey: "hr", path: "/hr", roles: institutionRoles },
+  { labelKey: "parentLinks", path: "/parent-links", roles: institutionRoles },
+  { labelKey: "notifications", path: "/notifications", roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT"] },
+  { labelKey: "notices", path: "/notices", roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT"] },
+  {
+    labelKey: "complains",
+    path: "/complains",
+    roles: [
+      "SUPER_ADMIN",
+      "COLLEGE_ADMIN",
+      "COLLEGE_VIEWER",
+      "TEACHER",
+      "STUDENT",
+      "COLLEGE_STAFF",
+      "LIBRARY_STAFF",
+      "LABORATORY_STAFF",
+      "ACCOUNTANT",
+      "CASHIER",
+      "AUDITOR",
+      "PRINCIPAL"
+    ]
+  },
+  { labelKey: "settings", path: "/settings", roles: institutionRoles },
+  { labelKey: "reports", path: "/reports", roles: institutionRoles }
+];
+
+const administrationItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
+  { labelKey: "adminUsers", path: "/admin-management", roles: ["SUPER_ADMIN"] },
+  { labelKey: "collegeAdministrators", path: "/college-administrators", roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"] }
 ];
 
 export const AppLayout = () => {
   const [open, setOpen] = useState(false);
   const { user, logout, availableSchools } = useAuth();
+  const { unreadCount } = useNotificationBadge();
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -78,30 +106,37 @@ export const AppLayout = () => {
   }
 
   const normalizedRole = normalizeUserRole(user.role);
-  const institutionAdmin = isInstitutionAdmin(normalizedRole);
+  const institutionAccess = hasInstitutionAccess(normalizedRole);
+  const visibleAdministrationItems = administrationItems.filter((item) => item.roles.includes(normalizedRole));
+  const showAdministrationSection = visibleAdministrationItems.length > 0;
   const moduleOnlyRoles: UserRole[] = ["LIBRARY_STAFF", "LABORATORY_STAFF", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"];
   const isModuleOnlyUser = moduleOnlyRoles.includes(normalizedRole);
   const collegeName = getCollegeDisplayName(availableSchools, user);
-  const showCollegeContext = !institutionAdmin;
+  const showCollegeContext = !institutionAccess;
 
   const visibleItems = navItems
     .filter((item) => item.roles.includes(normalizedRole))
     .filter((item) => {
       if (isModuleOnlyUser) {
         if (normalizedRole === "ACCOUNTANT" || normalizedRole === "CASHIER" || normalizedRole === "AUDITOR" || normalizedRole === "PRINCIPAL") {
-          return item.path === "/accounting" || item.path === "/notifications";
+          return item.path === "/accounting" || item.path === "/notifications" || item.path === "/complains";
         }
-        return item.path === "/library" || item.path === "/laboratory" || item.path === "/notifications";
+        return item.path === "/library" || item.path === "/laboratory" || item.path === "/notifications" || item.path === "/complains";
       }
       return true;
     })
     .map((item) => ({
       ...item,
-      path: item.path === "/dashboard" ? `/dashboard/${normalizedRole.toLowerCase()}` : item.path
+      path:
+        item.path === "/dashboard"
+          ? normalizedRole === "COLLEGE_VIEWER"
+            ? "/dashboard/college_admin"
+            : `/dashboard/${normalizedRole.toLowerCase()}`
+          : item.path
     }));
 
   return (
-    <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.16),_transparent_28%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_100%)]">
+    <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(12,45,107,0.16),_transparent_28%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_100%)]">
       {open ? (
         <button
           type="button"
@@ -124,8 +159,8 @@ export const AppLayout = () => {
         >
           <div className="shrink-0">
             <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-emerald-500/20 p-3">
-                <Building2 className="h-6 w-6 text-emerald-300" />
+              <div className="rounded-2xl bg-white/10 p-2">
+                <CollegeLogo variant="light" className="h-10 w-10" />
               </div>
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-semibold leading-tight">{t("appName")}</h2>
@@ -143,14 +178,40 @@ export const AppLayout = () => {
                   onClick={() => setOpen(false)}
                   className={({ isActive }) =>
                     cn(
-                      "block rounded-2xl px-4 py-3 text-sm font-medium transition",
-                      isActive ? "bg-emerald-500 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"
+                      "flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium transition",
+                      isActive ? "bg-brand-500 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"
                     )
                   }
                 >
-                  {t(item.labelKey)}
+                  <span>{t(item.labelKey)}</span>
+                  {item.path === "/notifications" && unreadCount > 0 ? (
+                    <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-amber-950">
+                      {unreadCount}
+                    </span>
+                  ) : null}
                 </NavLink>
               ))}
+
+              {showAdministrationSection ? (
+                <div className="mt-4 space-y-2 border-t border-white/10 pt-4">
+                  <p className="px-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{t("administration")}</p>
+                  {visibleAdministrationItems.map((item) => (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      onClick={() => setOpen(false)}
+                      className={({ isActive }) =>
+                        cn(
+                          "block rounded-2xl px-4 py-2.5 text-sm font-medium transition",
+                          isActive ? "bg-brand-500 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"
+                        )
+                      }
+                    >
+                      {t(item.labelKey)}
+                    </NavLink>
+                  ))}
+                </div>
+              ) : null}
             </nav>
 
             <div className="mt-4 pt-4">
@@ -173,19 +234,19 @@ export const AppLayout = () => {
                     <Menu className="h-4 w-4" />
                   </Button>
                   <div className="min-w-0">
-                    <p className="text-xs uppercase tracking-[0.2em] text-emerald-600">{t("welcome")}</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-brand-600">{t("welcome")}</p>
                     <h1 className="truncate text-lg font-semibold text-slate-900">{user.fullName}</h1>
                   </div>
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <div className="flex min-w-0 max-w-full items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
-                    <Building2 className="h-4 w-4 shrink-0 text-emerald-700" />
+                  <div className="flex min-w-0 max-w-full items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
+                    <CollegeLogo className="h-8 w-8 shrink-0" />
                     <div className="min-w-0">
-                      <div className="truncate font-semibold leading-tight text-emerald-950" title={collegeName}>
+                      <div className="truncate font-semibold leading-tight text-brand-950" title={collegeName}>
                         {collegeName}
                       </div>
-                      <div className="text-[10px] font-medium uppercase tracking-widest text-emerald-700/80">
+                      <div className="text-[10px] font-medium uppercase tracking-widest text-brand-700/80">
                         {roleLabelMap[normalizedRole]}
                       </div>
                     </div>
@@ -201,6 +262,7 @@ export const AppLayout = () => {
 
           <main className="min-w-0 flex-1 overflow-x-clip px-4 py-6 sm:px-6 lg:px-8">
             <div className="mx-auto min-w-0 w-full max-w-[1600px]">
+              <ReadOnlyBanner />
               <Suspense fallback={<LoadingState />}>
                 <Outlet />
               </Suspense>

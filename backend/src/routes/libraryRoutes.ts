@@ -4,6 +4,7 @@ import {
   createLibraryStaff,
   deleteBook,
   deleteLibraryStaff,
+  getInventoryAccess,
   getLibraryDashboard,
   issueBook,
   listBooks,
@@ -11,6 +12,7 @@ import {
   listLibraryStaff,
   listMyBooks,
   returnBook,
+  setInventoryAccess,
   updateBook,
   updateLibraryStaff
 } from "../controllers/libraryController.js";
@@ -23,6 +25,9 @@ router.use(protect, tenantGuard);
 
 router.get("/dashboard", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), getLibraryDashboard);
 router.get("/my-books", authorize("STUDENT", "TEACHER"), listMyBooks);
+
+router.get("/inventory-access", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), getInventoryAccess);
+router.put("/inventory-access", authorizeInstitutionAdmin, setInventoryAccess);
 
 router.get("/books", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), listBooks);
 router.post("/books", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), createBook);

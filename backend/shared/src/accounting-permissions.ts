@@ -35,6 +35,7 @@ const ALL_PERMISSIONS: AccountingPermission[] = [...ACCOUNTING_PERMISSIONS];
 export const ACCOUNTING_ROLE_PERMISSIONS: Partial<Record<UserRole, AccountingPermission[]>> = {
   SUPER_ADMIN: ALL_PERMISSIONS,
   COLLEGE_ADMIN: ALL_PERMISSIONS,
+  COLLEGE_VIEWER: ["read", "view_audit", "print_receipt"],
   ACCOUNTANT: [
     "read",
     "collect_fees",

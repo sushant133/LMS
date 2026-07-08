@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import {
   libraryBookSchema,
+  libraryInventoryAccessSchema,
   libraryIssueSchema,
   libraryReturnSchema,
   moduleStaffSchema
@@ -13,8 +14,13 @@ import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { enrichBookInventory } from "../utils/inventory.js";
+import {
+  assertLibraryInventoryWriteAccess,
+  getLibraryInventoryAccessEnabled
+} from "../utils/libraryInventoryAccess.js";
+import { Setting } from "../models/Setting.js";
 import { processLibraryIssueReminders, syncSchoolLibraryOverdueStatuses } from "../utils/libraryNotifications.js";
-import { getTodayBs } from "../utils/nepaliDate.js";
+import { compareBsDates, getTodayBs } from "../utils/nepaliDate.js";
 import { notifyParentsOfStudent, sendNotification } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
 import { getStudentProfile } from "../utils/studentScope.js";
@@ -81,12 +87,37 @@ export const getLibraryDashboard = asyncHandler(async (req: Request, res: Respon
   const issuedBooks = enrichedBooks.reduce((sum, book) => sum + book.issuedCopies, 0);
   const overdueBooks = activeIssues.filter((issue) => issue.status === "OVERDUE").length;
 
+  const inventoryAccessEnabled = await getLibraryInventoryAccessEnabled(req.tenantSchoolId!);
+
   return sendSuccess(res, "Library dashboard fetched", {
     totalBooks: enrichedBooks.reduce((sum, book) => sum + book.totalCopies, 0),
     availableBooks,
     issuedBooks,
     overdueBooks,
-    recentlyIssued: recentlyIssued.map((issue) => formatIssue(issue as Record<string, unknown>))
+    recentlyIssued: recentlyIssued.map((issue) => formatIssue(issue as Record<string, unknown>)),
+    inventoryAccessEnabled
+  });
+});
+
+export const getInventoryAccess = asyncHandler(async (req: Request, res: Response) => {
+  const enabled = await getLibraryInventoryAccessEnabled(req.tenantSchoolId!);
+  return sendSuccess(res, "Inventory access status fetched", { enabled });
+});
+
+export const setInventoryAccess = asyncHandler(async (req: Request, res: Response) => {
+  const payload = libraryInventoryAccessSchema.parse(req.body);
+  const settings = await Setting.findOneAndUpdate(
+    withTenantScope(req),
+    { $set: { libraryInventoryAccess: payload } },
+    { new: true }
+  );
+
+  if (!settings) {
+    throw new ApiError(404, "School settings not found. Configure school settings before managing inventory access.");
+  }
+
+  return sendSuccess(res, payload.enabled ? "Inventory access enabled" : "Inventory access disabled", {
+    enabled: payload.enabled
   });
 });
 
@@ -96,6 +127,7 @@ export const listBooks = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createBook = asyncHandler(async (req: Request, res: Response) => {
+  await assertLibraryInventoryWriteAccess(req);
   const payload = libraryBookSchema.parse(req.body);
   const book = await LibraryBook.create({
     ...payload,
@@ -107,6 +139,7 @@ export const createBook = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateBook = asyncHandler(async (req: Request, res: Response) => {
+  await assertLibraryInventoryWriteAccess(req);
   const payload = libraryBookSchema.partial().parse(req.body);
   const book = await LibraryBook.findOne(withTenantScope(req, { _id: req.params.id }));
 
@@ -137,6 +170,7 @@ export const updateBook = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const deleteBook = asyncHandler(async (req: Request, res: Response) => {
+  await assertLibraryInventoryWriteAccess(req);
   const activeIssues = await LibraryIssue.countDocuments(
     withTenantScope(req, { bookId: req.params.id, status: { $in: ["ISSUED", "OVERDUE"] } })
   );
@@ -156,7 +190,17 @@ export const deleteBook = asyncHandler(async (req: Request, res: Response) => {
 export const listIssues = asyncHandler(async (req: Request, res: Response) => {
   await syncSchoolLibraryOverdueStatuses(req.tenantSchoolId!);
 
-  const issues = await LibraryIssue.find(withTenantScope(req))
+  const statusParam = typeof req.query.status === "string" ? req.query.status : undefined;
+  const scope = withTenantScope(req);
+
+  let statusFilter: Record<string, unknown> = {};
+  if (statusParam === "active") {
+    statusFilter = { status: { $in: ["ISSUED", "OVERDUE"] } };
+  } else if (statusParam === "returned") {
+    statusFilter = { status: "RETURNED" };
+  }
+
+  const issues = await LibraryIssue.find({ ...scope, ...statusFilter })
     .populate("bookId")
     .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
     .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
@@ -270,12 +314,58 @@ export const returnBook = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(404, "Active issue not found");
   }
 
+  if (compareBsDates(payload.returnedDateBs, issue.issuedDateBs) < 0) {
+    throw new ApiError(400, "Return date cannot be before the issue date");
+  }
+
+  const book = await LibraryBook.findById(issue.bookId).select("title").lean();
+  const bookTitle = book?.title ?? "Book";
+
   issue.status = "RETURNED";
   issue.returnedDateBs = payload.returnedDateBs;
   issue.fineNpr = payload.fineNpr;
   await issue.save();
 
   await LibraryBook.findByIdAndUpdate(issue.bookId, { $inc: { availableCopies: 1 } });
+
+  const fineMessage = payload.fineNpr > 0 ? ` Fine: NPR ${payload.fineNpr}.` : "";
+
+  if (issue.borrowerType === "STUDENT" && issue.studentId) {
+    const student = await Student.findById(issue.studentId).select("user").lean();
+    if (student?.user) {
+      await sendNotification({
+        schoolId: req.tenantSchoolId!,
+        recipientUserId: student.user.toString(),
+        title: "Library book returned",
+        message: `"${bookTitle}" was returned on ${payload.returnedDateBs}.${fineMessage}`,
+        type: "LIBRARY",
+        channel: "BOTH",
+        metadata: { libraryIssueId: issue._id.toString(), action: "RETURNED" }
+      });
+    }
+
+    await notifyParentsOfStudent(
+      req.tenantSchoolId!,
+      issue.studentId.toString(),
+      "Library book returned",
+      `"${bookTitle}" was returned on ${payload.returnedDateBs}.${fineMessage}`,
+      "LIBRARY"
+    );
+  } else if (issue.borrowerType === "TEACHER" && issue.teacherId) {
+    const teacher = await Teacher.findById(issue.teacherId).select("user").lean();
+    if (teacher?.user) {
+      await sendNotification({
+        schoolId: req.tenantSchoolId!,
+        recipientUserId: teacher.user.toString(),
+        title: "Library book returned",
+        message: `"${bookTitle}" was returned on ${payload.returnedDateBs}.${fineMessage}`,
+        type: "LIBRARY",
+        channel: "BOTH",
+        metadata: { libraryIssueId: issue._id.toString(), action: "RETURNED" }
+      });
+    }
+  }
+
   return sendSuccess(res, "Book returned", issue);
 });
 

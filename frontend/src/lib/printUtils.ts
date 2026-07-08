@@ -1,11 +1,50 @@
 import { parseErrorMessage } from "lib/utils";
 
 export type PrintMode = "printing-bulk-results" | "printing-marksheet";
+type PageFormat = "a4-portrait" | "a4-landscape";
 
-const cloneMarksheetElement = (element: HTMLElement): HTMLElement => {
+const PRINT_CLEANUP_MS = 60_000;
+
+const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.querySelectorAll(".no-print").forEach((node) => node.remove());
+  clone.style.display = "block";
+  clone.style.visibility = "visible";
   return clone;
+};
+
+const yieldToUi = (): Promise<void> =>
+  new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+
+const waitForImages = async (root: HTMLElement, timeoutMs = 5_000): Promise<void> => {
+  const images = Array.from(root.querySelectorAll("img"));
+  if (images.length === 0) {
+    return;
+  }
+
+  await Promise.race([
+    Promise.all(
+      images.map(
+        (image) =>
+          new Promise<void>((resolve) => {
+            if (image.complete) {
+              resolve();
+              return;
+            }
+
+            image.addEventListener("load", () => resolve(), { once: true });
+            image.addEventListener("error", () => resolve(), { once: true });
+          })
+      )
+    ),
+    new Promise<void>((resolve) => {
+      window.setTimeout(resolve, timeoutMs);
+    })
+  ]);
 };
 
 const collectDocumentStyles = (): string => {
@@ -24,13 +63,15 @@ const collectDocumentStyles = (): string => {
   return `${links}${inlineStyles}`;
 };
 
-const buildPrintableHtml = (element: HTMLElement): string => {
-  const clone = cloneMarksheetElement(element);
+const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): string => {
+  const clone = clonePrintableElement(element);
+  const isLandscape = pageFormat === "a4-landscape";
+
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Marksheet</title>
+    <title></title>
     ${collectDocumentStyles()}
     <style>
       html, body {
@@ -40,8 +81,21 @@ const buildPrintableHtml = (element: HTMLElement): string => {
         color: #000000;
       }
       @page {
-        size: A4 portrait;
-        margin: 12mm 14mm;
+        size: A4 ${isLandscape ? "landscape" : "portrait"};
+        margin: ${isLandscape ? "10mm 12mm" : "12mm 14mm"};
+      }
+      .print-results-bulk-table {
+        display: block !important;
+        visibility: visible !important;
+        width: 100%;
+        color: #000000;
+        background: #ffffff;
+      }
+      .official-marksheet {
+        max-width: none;
+        width: 100%;
+        margin: 0;
+        padding: 0;
       }
     </style>
   </head>
@@ -49,7 +103,7 @@ const buildPrintableHtml = (element: HTMLElement): string => {
 </html>`;
 };
 
-const printViaIframe = (element: HTMLElement): Promise<void> =>
+const printViaIframe = (element: HTMLElement, pageFormat: PageFormat): Promise<void> =>
   new Promise((resolve, reject) => {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -69,37 +123,109 @@ const printViaIframe = (element: HTMLElement): Promise<void> =>
       return;
     }
 
-    doc.open();
-    doc.write(buildPrintableHtml(element));
-    doc.close();
-
-    const cleanup = () => {
-      window.setTimeout(() => {
-        if (iframe.parentNode) {
-          document.body.removeChild(iframe);
-        }
-        resolve();
-      }, 300);
+    let settled = false;
+    const removeIframe = () => {
+      window.clearTimeout(fallbackTimer);
+      if (iframe.parentNode) {
+        document.body.removeChild(iframe);
+      }
     };
 
-    win.addEventListener("afterprint", cleanup, { once: true });
+    const fallbackTimer = window.setTimeout(removeIframe, PRINT_CLEANUP_MS);
 
-    window.setTimeout(() => {
-      try {
-        win.focus();
-        win.print();
-      } catch (error) {
-        document.body.removeChild(iframe);
-        reject(error);
-      }
-    }, 350);
+    const startPrint = () => {
+      win.addEventListener("afterprint", removeIframe, { once: true });
+
+      window.setTimeout(() => {
+        try {
+          win.focus();
+          win.print();
+          if (!settled) {
+            settled = true;
+            resolve();
+          }
+        } catch (error) {
+          settled = true;
+          removeIframe();
+          reject(error);
+        }
+      }, 250);
+    };
+
+    doc.open();
+    doc.write(buildPrintableHtml(element, pageFormat));
+    doc.close();
+
+    void waitForImages(doc.body).then(startPrint);
   });
 
-export const printMarksheetElement = async (element: HTMLElement | null): Promise<void> => {
-  if (!element) {
-    throw new Error("Marksheet is not ready to print");
+const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
+  const isLandscape = pageFormat === "a4-landscape";
+  const clone = clonePrintableElement(element);
+
+  clone.style.maxWidth = isLandscape ? "297mm" : "210mm";
+  clone.style.width = isLandscape ? "297mm" : "210mm";
+  clone.style.margin = "0";
+  clone.style.padding = isLandscape ? "10mm 12mm" : "12mm 14mm";
+  clone.style.background = "#ffffff";
+  clone.style.color = "#000000";
+
+  const wrapper = document.createElement("div");
+  wrapper.style.position = "fixed";
+  wrapper.style.left = "-10000px";
+  wrapper.style.top = "0";
+  wrapper.style.width = isLandscape ? "297mm" : "210mm";
+  wrapper.style.background = "#ffffff";
+  wrapper.appendChild(clone);
+  document.body.appendChild(wrapper);
+
+  return { clone, wrapper, isLandscape };
+};
+
+const createPdfBlobFromElement = async (
+  element: HTMLElement,
+  pageFormat: PageFormat = "a4-portrait"
+): Promise<Blob> => {
+  const { clone, wrapper, isLandscape } = mountPrintableClone(element, pageFormat);
+
+  try {
+    await waitForImages(clone);
+    const { default: html2pdf } = await import("html2pdf.js");
+    return html2pdf()
+      .set({
+        margin: isLandscape ? [10, 12, 10, 12] : [12, 14, 12, 14],
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: "#ffffff",
+          logging: false
+        },
+        jsPDF: { unit: "mm", format: "a4", orientation: isLandscape ? "landscape" : "portrait" }
+      })
+      .from(clone)
+      .outputPdf("blob");
+  } finally {
+    document.body.removeChild(wrapper);
   }
-  await printViaIframe(element);
+};
+
+const printElement = async (element: HTMLElement | null, pageFormat: PageFormat): Promise<void> => {
+  if (!element) {
+    throw new Error("Document is not ready to print");
+  }
+
+  await yieldToUi();
+  await printViaIframe(element, pageFormat);
+};
+
+export const printMarksheetElement = async (element: HTMLElement | null): Promise<void> => {
+  await printElement(element, "a4-portrait");
+};
+
+export const printBulkResultsElement = async (element: HTMLElement | null): Promise<void> => {
+  await printElement(element, "a4-landscape");
 };
 
 export const downloadMarksheetPdfFromElement = async (
@@ -110,43 +236,16 @@ export const downloadMarksheetPdfFromElement = async (
     throw new Error("Marksheet is not ready to download");
   }
 
-  const clone = cloneMarksheetElement(element);
-  clone.style.maxWidth = "210mm";
-  clone.style.width = "210mm";
-  clone.style.margin = "0";
-  clone.style.padding = "12mm 14mm";
-  clone.style.background = "#ffffff";
-  clone.style.color = "#000000";
-
-  const wrapper = document.createElement("div");
-  wrapper.style.position = "fixed";
-  wrapper.style.left = "-10000px";
-  wrapper.style.top = "0";
-  wrapper.style.width = "210mm";
-  wrapper.style.background = "#ffffff";
-  wrapper.appendChild(clone);
-  document.body.appendChild(wrapper);
-
-  try {
-    const { default: html2pdf } = await import("html2pdf.js");
-    await html2pdf()
-      .set({
-        margin: [12, 14, 12, 14],
-        filename,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: "#ffffff",
-          logging: false
-        },
-        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-      })
-      .from(clone)
-      .save();
-  } finally {
-    document.body.removeChild(wrapper);
-  }
+  await yieldToUi();
+  const blob = await createPdfBlobFromElement(element, "a4-portrait");
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 };
 
 export const printWithMode = (mode: PrintMode): void => {

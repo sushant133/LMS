@@ -36,14 +36,10 @@ import {
   getTeacherScope,
   requireTeacherScope
 } from "../utils/teacherScope.js";
+import { hasInstitutionAccess } from "@phit-erp/shared";
+import { assertInstitutionWrite } from "../utils/institutionAccess.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
-
-const assertAdmin = (req: Request): void => {
-  if (req.user?.role !== "COLLEGE_ADMIN" && req.user?.role !== "SUPER_ADMIN") {
-    throw new ApiError(403, "Only college administrators can perform this action");
-  }
-};
 
 const getExamOrThrow = async (req: Request, examId: string) => {
   const exam = await Exam.findOne(withTenantScope(req, { _id: examId }));
@@ -247,7 +243,7 @@ export const listExams = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createExam = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const payload = examSchema.parse(req.body);
   ensureValidBsDate(payload.startDateBs);
   ensureValidBsDate(payload.endDateBs);
@@ -266,7 +262,7 @@ export const createExam = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateExam = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const payload = examSchema.parse(req.body);
   ensureValidBsDate(payload.startDateBs);
   ensureValidBsDate(payload.endDateBs);
@@ -283,7 +279,7 @@ export const updateExam = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const deleteExam = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const schoolId = tenantObjectId(req);
   const exam = await Exam.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
   if (!exam) {
@@ -365,7 +361,7 @@ export const upsertResult = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const adminUpsertResult = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const payload = resultSchema.parse(req.body);
   const result = await persistResultMarks(req, payload, { isAdmin: true });
 
@@ -373,7 +369,7 @@ export const adminUpsertResult = asyncHandler(async (req: Request, res: Response
 });
 
 export const deleteResult = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const result = await Result.findOneAndDelete(withTenantScope(req, { _id: req.params.resultId }));
   if (!result) {
     throw new ApiError(404, "Result not found");
@@ -493,7 +489,7 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
 });
 
 export const publishExamResults = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const examId = String(req.params.examId);
   const exam = await getExamOrThrow(req, examId);
   const tenantSchoolId = tenantObjectId(req);
@@ -589,7 +585,7 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
 });
 
 export const unpublishExamResults = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const examId = String(req.params.examId);
   const exam = await getExamOrThrow(req, examId);
   const schoolId = tenantObjectId(req);
@@ -618,7 +614,7 @@ export const unpublishExamResults = asyncHandler(async (req: Request, res: Respo
 });
 
 export const lockExamResults = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const exam = await getExamOrThrow(req, String(req.params.examId));
   const beforeExam = exam.toObject();
   exam.resultsLocked = true;
@@ -636,7 +632,7 @@ export const lockExamResults = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const unlockExamResults = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const exam = await getExamOrThrow(req, String(req.params.examId));
   const beforeExam = exam.toObject();
   exam.resultsLocked = false;
@@ -654,7 +650,7 @@ export const unlockExamResults = asyncHandler(async (req: Request, res: Response
 });
 
 export const getExamAnalytics = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const examId = String(req.params.examId);
   const schoolId = tenantObjectId(req);
   const exam = await getExamOrThrow(req, examId);
@@ -764,11 +760,7 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     if (!result.publishedAtBs) {
       throw new ApiError(403, "Results are not published yet");
     }
-  } else if (
-    (req.user?.role === "COLLEGE_ADMIN" || req.user?.role === "SUPER_ADMIN") &&
-    exam.resultsPublished &&
-    !result.publishedAtBs
-  ) {
+  } else if (hasInstitutionAccess(req.user?.role ?? "") && exam.resultsPublished && !result.publishedAtBs) {
     throw new ApiError(404, "Published result not found");
   }
 
@@ -843,7 +835,10 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     if (!canViewPublishedResults(exam)) {
       throw new ApiError(403, "Results are not published yet");
     }
-  } else if (req.user?.role !== "COLLEGE_ADMIN" && req.user?.role !== "SUPER_ADMIN" && req.user?.role !== "TEACHER") {
+  } else if (
+    !hasInstitutionAccess(req.user?.role ?? "") &&
+    req.user?.role !== "TEACHER"
+  ) {
     throw new ApiError(403, "You do not have permission to download this marksheet");
   }
 

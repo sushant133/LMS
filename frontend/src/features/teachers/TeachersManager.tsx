@@ -12,6 +12,7 @@ import { useIsCollege } from "hooks/useInstitutionType";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { TeacherForm } from "./TeacherForm";
 
 const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
@@ -35,6 +36,7 @@ interface TeachersManagerProps {
 }
 
 export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
+  const canManage = useIsTenantAdmin();
   const isCollege = useIsCollege();
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
@@ -115,6 +117,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
         <PageHeader title="Teacher Management" description="Manage teacher accounts, qualifications, BS joining dates, classes, and subject assignments." />
       ) : null}
 
+      {canManage ? (
       <Card>
         <CardHeader>
           <CardTitle>{editing ? "Edit Teacher" : "Create Teacher"}</CardTitle>
@@ -137,6 +140,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
           />
         </CardContent>
       </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -173,16 +177,18 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                       <Td>{teacher.assignedClassIds.map((id) => classMap.get(id) ?? id).join(", ")}</Td>
                       <Td>{teacher.subjects.map((id) => subjectMap.get(id) ?? id).join(", ")}</Td>
                       <Td>{formatCurrencyNpr(teacher.basicSalaryNpr)}</Td>
-                      <Td className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setEditing(teacher)}>
-                            Edit
-                          </Button>
-                          <Button variant="destructive" size="sm" onClick={() => void deleteMutation.mutateAsync(teacher._id)}>
-                            Delete
-                          </Button>
-                        </div>
-                      </Td>
+                      {canManage ? (
+                        <Td className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setEditing(teacher)}>
+                              Edit
+                            </Button>
+                            <Button variant="destructive" size="sm" onClick={() => void deleteMutation.mutateAsync(teacher._id)}>
+                              Delete
+                            </Button>
+                          </div>
+                        </Td>
+                      ) : null}
                     </tr>
                   ))}
                 </TableBody>

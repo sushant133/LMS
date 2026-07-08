@@ -1,35 +1,26 @@
 ---
-pid: 22996
+pid: 11960
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
-command: "Stop-Process -Id 12108 -Force -ErrorAction SilentlyContinue; Stop-Process -Id 34612 -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run build; npm start"
-started_at: 2026-07-04T19:09:36.347Z
-running_for_ms: 2100006  
+command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\frontend\"; npm run typecheck 2>&1"
+started_at: 2026-07-07T23:08:21.339Z
+running_for_ms: 2670014  
 ---
 
-> @nepal-school-erp/backend@1.0.0 build
-> npm run build:shared && tsc -p tsconfig.json
+> @phit-erp/frontend@1.0.0 typecheck
+> npm run build:shared && tsc --noEmit
 
 
-> @nepal-school-erp/backend@1.0.0 build:shared
-> npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
+> @phit-erp/frontend@1.0.0 build:shared
+> npm install --include=dev --prefix ../backend/shared && npm run build --prefix ../backend/shared
 
 
-up to date, audited 3 packages in 830ms
+up to date, audited 3 packages in 901ms
 
 1 package is looking for funding
   run `npm fund` for details
 
 found 0 vulnerabilities
 
-> @nepal-school-erp/shared@1.0.0 build
+> @phit-erp/shared@1.0.0 build
 > tsc -p tsconfig.json
 
-
-> @nepal-school-erp/backend@1.0.0 start
-> node dist/server.js
-
-MongoDB connected: ac-g3lnccv-shard-00-00.8xa9foz.mongodb.net
-Demo institution (DEMOERP) is complete.
-Backend server listening on http://localhost:5000
-GET /api/exams/results/published/exams 401 2.252 ms - 53
-GET /api/exams/result-submissions?status=PENDING_ADMIN_REVIEW 304 127.627 ms - -

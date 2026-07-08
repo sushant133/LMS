@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { isInstitutionAdmin, noticeSchema, USER_ROLES, type NoticeInput, type NoticeRecord } from "@phit-erp/shared";
+import { canManageInstitution, noticeSchema, USER_ROLES, type NoticeInput, type NoticeRecord } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherScope } from "hooks/useTeacherScope";
@@ -50,7 +50,7 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
   const teacherScopeQuery = useTeacherScope(isTeacher);
   const [form, setForm] = useState<NoticeInput>(adminDefaultNoticeValue);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const canManageNotices = isInstitutionAdmin(user?.role ?? "") || isTeacher;
+  const canManageNotices = canManageInstitution(user?.role ?? "") || isTeacher;
   const isReadOnlyViewer = user?.role === "STUDENT" || user?.role === "PARENT";
 
   useEffect(() => {
@@ -108,7 +108,10 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
       toast.success("Notice deleted");
       setEditingId(null);
       setForm(isTeacher ? teacherDefaultNoticeValue : adminDefaultNoticeValue);
-      await queryClient.invalidateQueries({ queryKey: ["notices"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["notices"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      ]);
     },
     onError: (error) => toast.error(parseErrorMessage(error))
   });
@@ -394,16 +397,22 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                             >
                               Edit
                             </Button>
-                            {isTeacher ? (
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                disabled={deleteMutation.isPending}
-                                onClick={() => void deleteMutation.mutateAsync(notice._id)}
-                              >
-                                Delete
-                              </Button>
-                            ) : null}
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={deleteMutation.isPending}
+                              onClick={() => {
+                                const confirmed = window.confirm(
+                                  `Delete "${notice.title}"? This announcement will be removed permanently.`
+                                );
+                                if (!confirmed) {
+                                  return;
+                                }
+                                void deleteMutation.mutateAsync(notice._id);
+                              }}
+                            >
+                              Delete
+                            </Button>
                           </div>
                         ) : null}
                       </Td>

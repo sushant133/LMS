@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { computeSubjectMark, type MarksheetViewResponse } from "@phit-erp/shared";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Download, Printer } from "lucide-react";
@@ -92,11 +93,7 @@ export const ResultMarksheetView = ({ data, showActions = true }: ResultMarkshee
 
       <header className="om-header">
         <div className="om-logo">
-          {data.collegeLogoUrl ? (
-            <img src={data.collegeLogoUrl} alt={`${data.collegeName} logo`} />
-          ) : (
-            <span className="om-logo-fallback">{data.collegeName.slice(0, 1).toUpperCase()}</span>
-          )}
+          <CollegeLogo src={data.collegeLogoUrl} alt={`${data.collegeName} logo`} />
         </div>
         <h1 className="om-college-name">{data.collegeName}</h1>
         {data.collegeNameNp ? <p className="om-college-name-np">{data.collegeNameNp}</p> : null}
@@ -245,18 +242,12 @@ export const ResultMarksheetView = ({ data, showActions = true }: ResultMarkshee
         <div className="om-footer-block">
           <div className="om-footer-line">{data.controllerOfExamination ?? "Controller of Examination"}</div>
         </div>
-        <div className="om-footer-block">
-          <div className="om-seal">College Seal</div>
-        </div>
       </footer>
 
       <div className="om-meta">
         <div className="om-meta-lines">
           {data.printedDateBs ? <p>Printed Date: {data.printedDateBs}</p> : null}
           {data.verificationNumber ? <p>Verification No.: {data.verificationNumber}</p> : null}
-        </div>
-        <div className="om-qr-placeholder" aria-label="QR code placeholder">
-          QR Code
         </div>
       </div>
     </article>

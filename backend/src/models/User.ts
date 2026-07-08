@@ -8,6 +8,10 @@ export interface UserDocument {
   email: string;
   password: string;
   phone?: string;
+  employeeId?: string;
+  designation?: string;
+  department?: string;
+  profilePhotoUrl?: string;
   role: UserRole;
   isActive: boolean;
   mustChangePassword: boolean;
@@ -23,6 +27,10 @@ const userSchema = new Schema<UserDocument, UserModel>(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, minlength: 6 },
     phone: { type: String, trim: true },
+    employeeId: { type: String, trim: true },
+    designation: { type: String, trim: true },
+    department: { type: String, trim: true },
+    profilePhotoUrl: { type: String, trim: true },
     role: { type: String, enum: USER_ROLES, required: true },
     isActive: { type: Boolean, default: true },
     mustChangePassword: { type: Boolean, default: false }

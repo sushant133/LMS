@@ -64,7 +64,7 @@ export const ExamAnalyticsPanel = ({ examId }: ExamAnalyticsPanelProps) => {
             <CardTitle>Pass / Fail Summary</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-3">
-            <Badge className="bg-emerald-100 px-4 py-2 text-base text-emerald-700">{analytics.passCount} Passed</Badge>
+            <Badge className="bg-brand-100 px-4 py-2 text-base text-brand-700">{analytics.passCount} Passed</Badge>
             <Badge className="bg-red-100 px-4 py-2 text-base text-red-700">{analytics.failCount} Failed</Badge>
           </CardContent>
         </Card>

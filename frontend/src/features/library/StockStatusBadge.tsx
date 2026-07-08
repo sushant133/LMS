@@ -2,7 +2,7 @@ import type { InventoryStockStatus } from "@phit-erp/shared";
 import { Badge } from "components/ui/badge";
 
 const statusStyles: Record<InventoryStockStatus, string> = {
-  AVAILABLE: "bg-emerald-100 text-emerald-800",
+  AVAILABLE: "bg-brand-100 text-brand-800",
   LOW_STOCK: "bg-amber-100 text-amber-800",
   OUT_OF_STOCK: "bg-rose-100 text-rose-800"
 };

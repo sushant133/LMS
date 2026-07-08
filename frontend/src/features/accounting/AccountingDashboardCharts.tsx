@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { formatCurrencyNpr } from "lib/utils";
 
-const CHART_COLORS = ["#059669", "#0ea5e9", "#8b5cf6", "#f59e0b", "#ef4444", "#64748b"];
+const CHART_COLORS = ["#0c2d6b", "#0ea5e9", "#8b5cf6", "#f59e0b", "#ef4444", "#64748b"];
 
 interface Props {
   data: AccountingDashboardResponse;
@@ -23,7 +23,7 @@ export const AccountingDashboardCharts = ({ data }: Props) => (
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip formatter={(value) => formatCurrencyNpr(Number(value))} />
-              <Bar dataKey="amount" fill="#059669" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="amount" fill="#0c2d6b" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}

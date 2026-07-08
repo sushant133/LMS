@@ -10,8 +10,8 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
   cn(
     "inline-flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition-all",
     isActive
-      ? "border-green-300 bg-green-200 text-green-900 shadow-sm"
-      : "border-green-100 bg-green-50 text-green-700 hover:border-green-200 hover:bg-green-100"
+      ? "border-brand-300 bg-brand-200 text-brand-900 shadow-sm"
+      : "border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-200 hover:bg-brand-100"
   );
 
 export const StudentsLayout = () => {
@@ -31,7 +31,7 @@ export const StudentsLayout = () => {
       />
 
       {canManage ? (
-        <div className="flex gap-2 rounded-2xl border border-green-100 bg-green-50 p-1.5">
+        <div className="flex gap-2 rounded-2xl border border-brand-100 bg-brand-50 p-1.5">
           <NavLink to="/students/create" className={tabClass}>
             <UserPlus className="h-4 w-4" />
             Create Student

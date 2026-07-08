@@ -37,7 +37,7 @@ export const CollegeStaffPage = () => {
             type="button"
             size="sm"
             variant={tab === item.id ? "default" : "outline"}
-            className={cn(tab === item.id && "bg-emerald-600 hover:bg-emerald-700")}
+            className={cn(tab === item.id && "bg-brand-600 hover:bg-brand-700")}
             onClick={() => setTab(item.id)}
           >
             <Users className="mr-2 h-4 w-4" />

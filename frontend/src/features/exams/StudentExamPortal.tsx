@@ -139,7 +139,7 @@ export const StudentExamPortal = ({ exams, results, isLoading }: StudentExamPort
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
             {publishedExams.map((exam) => (
-              <div key={exam._id} className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+              <div key={exam._id} className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
                 <p className="font-semibold text-slate-900">{exam.name}</p>
                 <p className="mt-1 text-sm text-slate-600">
                   {exam.startDateBs} to {exam.endDateBs} · {exam.academicYearBs}

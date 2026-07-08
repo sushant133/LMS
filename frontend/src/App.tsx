@@ -18,6 +18,7 @@ const AcademicsPage = lazy(() => import("pages/AcademicsPage").then((module) => 
 const AttendancePage = lazy(() => import("pages/AttendancePage").then((module) => ({ default: module.AttendancePage })));
 const ExamsPage = lazy(() => import("pages/ExamsPage").then((module) => ({ default: module.ExamsPage })));
 const NoticesPage = lazy(() => import("pages/NoticesPage").then((module) => ({ default: module.NoticesPage })));
+const ComplaintsPage = lazy(() => import("pages/ComplaintsPage").then((module) => ({ default: module.ComplaintsPage })));
 const SettingsPage = lazy(() => import("pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
 
 const NotFoundPage = lazy(() => import("pages/NotFoundPage").then((module) => ({ default: module.NotFoundPage })));
@@ -34,6 +35,9 @@ const TransportPage = lazy(() => import("pages/TransportPage").then((module) => 
 const HrPage = lazy(() => import("pages/HrPage").then((module) => ({ default: module.HrPage })));
 const AccountingPage = lazy(() => import("pages/AccountingPage").then((module) => ({ default: module.AccountingPage })));
 const AdminManagementPage = lazy(() => import("pages/AdminManagementPage").then((module) => ({ default: module.AdminManagementPage })));
+const CollegeAdministratorManagementPage = lazy(() =>
+  import("pages/CollegeAdministratorManagementPage").then((module) => ({ default: module.CollegeAdministratorManagementPage }))
+);
 const StudentFeesPage = lazy(() => import("pages/StudentFeesPage").then((module) => ({ default: module.StudentFeesPage })));
 const StudentSubjectsPage = lazy(() => import("pages/StudentSubjectsPage").then((module) => ({ default: module.StudentSubjectsPage })));
 const StudentProfilePage = lazy(() => import("pages/StudentProfilePage").then((module) => ({ default: module.StudentProfilePage })));
@@ -66,7 +70,7 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             {/* Shared portal layout: dashboard + all student/parent pages render in the same AppLayout shell */}
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT", "COLLEGE_STAFF"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "STUDENT", "PARENT", "COLLEGE_STAFF"]} />}>
               <Route path="/dashboard/school_admin" element={<Navigate to="/dashboard/college_admin" replace />} />
               <Route path="/dashboard/:role" element={<DashboardPage />} />
               <Route path="/homework-view" element={<HomeworkPage />} />
@@ -84,7 +88,7 @@ export default function App() {
               <Route path="/my-library" element={<MyLibraryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
               <Route path="/students" element={<LazyRoute><StudentsLayout /></LazyRoute>}>
                 <Route index element={<Navigate to="list" replace />} />
                 <Route path="list" element={<LazyRoute><StudentListPage /></LazyRoute>} />
@@ -94,7 +98,7 @@ export default function App() {
 
             <Route
               element={
-                <ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT", "ACCOUNTANT"]} />
+                <ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "STUDENT", "PARENT", "ACCOUNTANT"]} />
               }
             >
               <Route path="/students/:studentId/profile" element={<LazyRoute><StudentProfilePage /></LazyRoute>} />
@@ -104,23 +108,46 @@ export default function App() {
               <Route path="/attendance" element={<AttendancePage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
               <Route path="/attendance-view" element={<AttendancePage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "LIBRARY_STAFF"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LIBRARY_STAFF"]} />}>
               <Route path="/library" element={<LibraryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "LABORATORY_STAFF"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LABORATORY_STAFF"]} />}>
               <Route path="/laboratory" element={<LaboratoryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"]} />}>
               <Route path="/accounting" element={<AccountingPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "STUDENT",
+                    "COLLEGE_STAFF",
+                    "LIBRARY_STAFF",
+                    "LABORATORY_STAFF",
+                    "ACCOUNTANT",
+                    "CASHIER",
+                    "AUDITOR",
+                    "PRINCIPAL"
+                  ]}
+                />
+              }
+            >
+              <Route path="/complains" element={<LazyRoute><ComplaintsPage /></LazyRoute>} />
+            </Route>
+
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
               <Route path="/college-staff" element={<CollegeStaffPage />} />
               <Route path="/teachers" element={<TeachersPage />} />
               <Route path="/academics" element={<AcademicsPage />} />
@@ -134,7 +161,7 @@ export default function App() {
 
 
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
               <Route path="/timetable" element={<TimetablePage />} />
             </Route>
 
@@ -144,7 +171,7 @@ export default function App() {
 
 
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
               <Route path="/exams-view" element={<ExamsPage />} />
             </Route>
 
@@ -156,6 +183,10 @@ export default function App() {
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN"]} />}>
               <Route path="/admin-management" element={<LazyRoute><AdminManagementPage /></LazyRoute>} />
+            </Route>
+
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
+              <Route path="/college-administrators" element={<LazyRoute><CollegeAdministratorManagementPage /></LazyRoute>} />
             </Route>
 
             <Route path="/colleges" element={<Navigate to="/dashboard/super_admin" replace />} />

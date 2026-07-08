@@ -20,10 +20,10 @@ export const PortalLoginFields = ({
   onEmailChange,
   showReset = true
 }: PortalLoginFieldsProps) => (
-  <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
-    <p className="text-sm font-semibold text-emerald-950">Portal login</p>
+  <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
+    <p className="text-sm font-semibold text-brand-950">Portal login</p>
     {!showReset ? (
-      <p className="mt-1 text-xs text-emerald-800">Leave password blank to keep the current login password.</p>
+      <p className="mt-1 text-xs text-brand-800">Leave password blank to keep the current login password.</p>
     ) : null}
     <div className="mt-4 grid gap-4 md:grid-cols-2">
       <FormField label="Login ID">

@@ -252,7 +252,7 @@ export const ResultReviewPanel = ({ examId, students, subjects, isCollege, compa
                     {submission.missingStudents.length > 0 ? (
                       <Badge className="bg-red-100 text-red-700">{submission.missingStudents.length} missing</Badge>
                     ) : (
-                      <Badge className="bg-emerald-100 text-emerald-700">Complete</Badge>
+                      <Badge className="bg-brand-100 text-brand-700">Complete</Badge>
                     )}
                   </Td>
                   <Td className="text-sm text-slate-600">
@@ -304,9 +304,9 @@ export const ResultReviewPanel = ({ examId, students, subjects, isCollege, compa
                 <p className="text-xs text-slate-500">Average GPA</p>
                 <p className="text-lg font-semibold text-slate-900">{reviewSummary.averageGpa.toFixed(2)}</p>
               </div>
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                <p className="text-xs text-emerald-700">Pass</p>
-                <p className="text-lg font-semibold text-emerald-900">{reviewSummary.passCount}</p>
+              <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+                <p className="text-xs text-brand-700">Pass</p>
+                <p className="text-lg font-semibold text-brand-900">{reviewSummary.passCount}</p>
               </div>
               <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
                 <p className="text-xs text-red-700">Fail</p>

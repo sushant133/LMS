@@ -20,7 +20,7 @@ export const StudentNoticeBoard = ({ notices }: StudentNoticeBoardProps) => {
   return (
     <PageContent className="space-y-4">
       {notices.map((notice) => (
-        <Card key={notice._id} className="min-w-0 border-emerald-100">
+        <Card key={notice._id} className="min-w-0 border-brand-100">
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">

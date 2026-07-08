@@ -23,7 +23,7 @@ export const AttachmentViewer = ({ attachments, title = "Materials" }: Attachmen
             <div key={`${file.url}-${index}`} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
                 <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
-                  {kind === "IMAGE" ? <ImageIcon className="h-4 w-4 shrink-0 text-emerald-600" /> : <FileText className="h-4 w-4 shrink-0 text-emerald-600" />}
+                  {kind === "IMAGE" ? <ImageIcon className="h-4 w-4 shrink-0 text-brand-600" /> : <FileText className="h-4 w-4 shrink-0 text-brand-600" />}
                   <span className="truncate">{file.name}</span>
                 </div>
                 <div className="flex items-center gap-2">

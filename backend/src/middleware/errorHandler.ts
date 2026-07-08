@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { Error as MongooseError } from "mongoose";
 import { ZodError } from "zod";
 import { ApiError } from "../utils/apiError.js";
 
@@ -19,6 +20,13 @@ export const errorHandler = (error: unknown, _req: Request, res: Response, _next
     return res.status(error.statusCode).json({
       success: false,
       message: error.message
+    });
+  }
+
+  if (error instanceof MongooseError.CastError) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid identifier"
     });
   }
 

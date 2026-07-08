@@ -5,7 +5,9 @@ import morgan from "morgan";
 import path from "path";
 import { connectDatabase } from "./config/db.js";
 import { env } from "./config/env.js";
+import { serveComplaintAttachment } from "./controllers/complaintFileController.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import { protect } from "./middleware/auth.js";
 import routes from "./routes/index.js";
 import { ensureDemoData } from "./seed/index.js";
 import { migrateLegacyDemoDisplayNames } from "./utils/migrateLegacyDemoDisplayNames.js";
@@ -31,6 +33,13 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
 
 const uploadsDir = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
+app.get("/uploads/:schoolId/complaints/:filename", protect, serveComplaintAttachment);
+app.use("/uploads", (req, res, next) => {
+  if (req.path.includes("/complaints/")) {
+    return res.status(401).json({ success: false, message: "Authentication required" });
+  }
+  return next();
+});
 app.use("/uploads", express.static(uploadsDir));
 
 app.get("/", (_req, res) => {

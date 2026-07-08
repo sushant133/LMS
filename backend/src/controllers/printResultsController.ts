@@ -13,14 +13,9 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { toCsv } from "../utils/iemisExport.js";
+import { assertInstitutionRead } from "../utils/institutionAccess.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
-
-const assertAdmin = (req: Request): void => {
-  if (req.user?.role !== "COLLEGE_ADMIN" && req.user?.role !== "SUPER_ADMIN") {
-    throw new ApiError(403, "Only college administrators can access print results");
-  }
-};
 
 const buildPublishedExamFilter = (req: Request) => {
   const schoolId = tenantObjectId(req);
@@ -53,7 +48,7 @@ const loadSubjectColumns = async (schoolId: Types.ObjectId, yearId?: string, cla
 };
 
 const buildPrintResultsGrid = async (req: Request) => {
-  assertAdmin(req);
+  assertInstitutionRead(req, "Only institution administrators can access print results");
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
@@ -184,7 +179,9 @@ const buildPrintResultsGrid = async (req: Request) => {
     className: schoolClass?.name,
     sectionName: section?.name,
     collegeName: branding.collegeName,
-    collegeNameNp: branding.collegeNameNp
+    collegeNameNp: branding.collegeNameNp,
+    collegeAddress: branding.collegeAddress,
+    collegeLogoUrl: branding.collegeLogoUrl
   };
 };
 
@@ -224,7 +221,7 @@ export const exportPrintResultsCsv = asyncHandler(async (req: Request, res: Resp
 });
 
 export const listPublishedExams = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionRead(req, "Only institution administrators can access print results");
   const exams = await Exam.find(buildPublishedExamFilter(req)).sort({ startDateBs: -1 }).lean();
   return sendSuccess(
     res,
@@ -238,7 +235,7 @@ export const listPublishedExams = asyncHandler(async (req: Request, res: Respons
 });
 
 export const getPrintSettings = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionRead(req, "Only institution administrators can access print results");
   const branding = await resolveSchoolBranding(tenantObjectId(req));
   return sendSuccess(res, "Print settings fetched", branding);
 });

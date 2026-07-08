@@ -3,15 +3,30 @@ import type { GradeSymbol, UserRole } from "./types.js";
 /** Official PHIT ERP branding */
 export const APP_BRAND_NAME = "PHIT ERP";
 export const APP_BRAND_SHORT = "PHIT";
+
+/** Primary UI theme color (navy blue) */
+export const BRAND_COLOR_PRIMARY = "#0c2d6b";
+export const BRAND_COLOR_PRIMARY_HOVER = "#0a2559";
+export const BRAND_COLOR_LIGHT = "#eef3fb";
 export const INSTITUTION_NAME = "Public Himal Institute of Technology";
 export const INSTITUTION_NAME_NP = "पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी";
+
+/**
+ * College branding assets:
+ * - Favicon: frontend/public/favicon.svg (browser tab icon)
+ * - College logo UI: frontend/public/college-logo.png (header, login, marksheets)
+ * - College logo PDF: backend/assets/college-logo.png (server-side receipt & marksheet generation)
+ */
+export const FAVICON_URL = "/favicon.svg";
+export const COLLEGE_LOGO_URL = "/college-logo.png";
 
 /** Known school codes for PHIT — matches existing database records without modification */
 export const INSTITUTION_SCHOOL_CODES = ["DEMOERP", "PHIT", "DEMO"] as const;
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   SUPER_ADMIN: "System Administrator",
-  COLLEGE_ADMIN: "College Administrator",
+  COLLEGE_ADMIN: "Administrator",
+  COLLEGE_VIEWER: "College Administrator",
   TEACHER: "Teacher",
   STUDENT: "Student",
   PARENT: "Parent",
@@ -32,17 +47,59 @@ export const LEGACY_USER_ROLE_ALIASES: Record<string, UserRole> = {
 export const normalizeUserRole = (role: string): UserRole =>
   (LEGACY_USER_ROLE_ALIASES[role] ?? role) as UserRole;
 
-/** Roles with full institution operational access (College Admin + System Administrator). */
+/** Roles with full institution write access (Administrator + System Administrator). */
 export const INSTITUTION_ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN"];
+
+/** Roles with institution-wide read access including read-only College Administrators. */
+export const INSTITUTION_ACCESS_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"];
 
 export const isInstitutionAdmin = (role: string): boolean =>
   INSTITUTION_ADMIN_ROLES.includes(normalizeUserRole(role));
 
+export const isCollegeViewer = (role: string): boolean => normalizeUserRole(role) === "COLLEGE_VIEWER";
+
+export const hasInstitutionAccess = (role: string): boolean =>
+  INSTITUTION_ACCESS_ROLES.includes(normalizeUserRole(role));
+
+export const canManageInstitution = (role: string): boolean => isInstitutionAdmin(role);
+
 export const isSystemAdministrator = (role: string): boolean => normalizeUserRole(role) === "SUPER_ADMIN";
+
+export const READ_ONLY_ACCESS_MESSAGE = "You have read-only access.";
+
+export const getInstitutionPermissions = (role: string) => {
+  const normalized = normalizeUserRole(role);
+
+  if (normalized === "COLLEGE_VIEWER") {
+    return {
+      canRead: true,
+      canWrite: false,
+      canManageUsers: false,
+      canExport: true
+    };
+  }
+
+  if (isInstitutionAdmin(normalized)) {
+    return {
+      canRead: true,
+      canWrite: true,
+      canManageUsers: true,
+      canExport: true
+    };
+  }
+
+  return {
+    canRead: false,
+    canWrite: false,
+    canManageUsers: false,
+    canExport: false
+  };
+};
 
 export const USER_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "COLLEGE_ADMIN",
+  "COLLEGE_VIEWER",
   "TEACHER",
   "STUDENT",
   "PARENT",
@@ -79,8 +136,50 @@ export const EMPLOYMENT_TYPES = ["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN"]
 
 export const PUBLIC_REGISTER_ROLES: UserRole[] = ["PARENT"];
 
+export const COMPLAINT_CATEGORIES = [
+  "TEACHER",
+  "STAFF",
+  "STUDENT",
+  "STUDY",
+  "FACILITY",
+  "ADMINISTRATION",
+  "OTHER"
+] as const;
+
+export const COMPLAINT_CATEGORY_LABELS: Record<(typeof COMPLAINT_CATEGORIES)[number], string> = {
+  TEACHER: "Teacher",
+  STAFF: "Staff",
+  STUDENT: "Student",
+  STUDY: "Study / Academics",
+  FACILITY: "Facility / Infrastructure",
+  ADMINISTRATION: "Administration",
+  OTHER: "Other"
+};
+
+export const COMPLAINT_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "RESOLVED", "CLOSED"] as const;
+
+export const COMPLAINT_STATUS_LABELS: Record<(typeof COMPLAINT_STATUSES)[number], string> = {
+  SUBMITTED: "Submitted",
+  UNDER_REVIEW: "Under Review",
+  RESOLVED: "Resolved",
+  CLOSED: "Closed"
+};
+
+export const COMPLAINANT_ROLES: UserRole[] = [
+  "STUDENT",
+  "TEACHER",
+  "COLLEGE_STAFF",
+  "LIBRARY_STAFF",
+  "LABORATORY_STAFF",
+  "ACCOUNTANT",
+  "CASHIER",
+  "AUDITOR",
+  "PRINCIPAL"
+];
+
 export const TENANT_STAFF_ROLES: UserRole[] = [
   "COLLEGE_ADMIN",
+  "COLLEGE_VIEWER",
   "TEACHER",
   "STUDENT",
   "PARENT",
@@ -93,9 +192,9 @@ export const TENANT_STAFF_ROLES: UserRole[] = [
   "COLLEGE_STAFF"
 ];
 
-export const LIBRARY_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "LIBRARY_STAFF"];
+export const LIBRARY_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LIBRARY_STAFF"];
 
-export const LABORATORY_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "LABORATORY_STAFF"];
+export const LABORATORY_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LABORATORY_STAFF"];
 
 export const ACCOUNTING_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT"];
 
@@ -109,6 +208,7 @@ export const ACCOUNTING_AUDITOR_ROLES: UserRole[] = ["AUDITOR"];
 export const ACCOUNTING_ACCESS_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "COLLEGE_ADMIN",
+  "COLLEGE_VIEWER",
   "ACCOUNTANT",
   "CASHIER",
   "AUDITOR",
@@ -331,6 +431,21 @@ export const ETHNICITY_CATEGORIES = [
 
 // Document types for student/teacher records and admissions
 export const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+export const DAILY_ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"] as const;
+
+export const DAILY_ATTENDANCE_RECORD_STATUSES = ["DRAFT", "SUBMITTED", "LOCKED"] as const;
+
+export const DEFAULT_DAILY_ATTENDANCE_CONFIG = {
+  startTime: "06:00",
+  endTime: "12:00",
+  closeBeforeFirstPeriodEnds: true,
+  allowMedicalLeave: true
+} as const;
+
+export const DEFAULT_LIBRARY_INVENTORY_ACCESS = {
+  enabled: false
+} as const;
 
 export const ASSIGNMENT_TYPES = ["HOMEWORK", "CAS", "NOTE"] as const;
 

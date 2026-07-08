@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
-  BANNER_PRIORITIES,
-  BANNER_TARGET_ROLES,
+
   BLOOD_GROUPS,
   CLASS_LEVELS,
   COLLEGE_STAFF_CATEGORIES,
@@ -287,9 +286,54 @@ export const attendanceSchema = z.object({
   entries: z.array(
     z.object({
       studentId: objectIdSchema,
-      status: z.enum(["PRESENT", "ABSENT", "LEAVE", "LATE"])
+      status: z.enum(["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"])
     })
-  )
+  ),
+  confirmSyncOverride: z.boolean().optional()
+});
+
+export const dailyAttendanceConfigSchema = z.object({
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  closeBeforeFirstPeriodEnds: z.boolean().default(true),
+  allowMedicalLeave: z.boolean().default(true)
+});
+
+export const libraryInventoryAccessSchema = z.object({
+  enabled: z.boolean()
+});
+
+export const dailyAttendanceSubmitSchema = z.object({
+  classId: objectIdSchema.optional(),
+  sectionId: objectIdSchema.optional(),
+  batchId: objectIdSchema.optional(),
+  yearId: objectIdSchema.optional(),
+  dateBs: bsDateSchema,
+  timetableSlotId: objectIdSchema,
+  entries: z
+    .array(
+      z.object({
+        studentId: objectIdSchema,
+        status: z.enum(["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"]),
+        remarks: z.string().max(500).optional()
+      })
+    )
+    .min(1),
+  notes: z.string().max(2000).optional(),
+  adminOverride: z.boolean().optional(),
+  assignedTeacherId: optionalObjectIdSchema
+});
+
+export const dailyAttendanceUpdateSchema = dailyAttendanceSubmitSchema
+  .omit({ timetableSlotId: true })
+  .extend({
+    timetableSlotId: objectIdSchema.optional(),
+    teacherId: optionalObjectIdSchema,
+    teacherReassignReason: z.string().max(500).optional()
+  });
+
+export const dailyAttendanceUnlockSchema = z.object({
+  reason: z.string().min(3).max(500)
 });
 
 export const examSchema = z.object({
@@ -384,20 +428,22 @@ export const noticeSchema = z.object({
 });
 
 export const bannerSchema = z.object({
-  title: z.string().min(1),
-  description: z.string().min(1),
-  imageUrl: z.string().optional().or(z.literal("")),
-  buttonText: z.string().optional().or(z.literal("")),
-  buttonUrl: z.union([z.url(), z.literal("")]).optional(),
-  backgroundColor: z.string().optional().or(z.literal("")),
-  textColor: z.string().optional().or(z.literal("")),
-  priority: z.enum(BANNER_PRIORITIES).default("MEDIUM"),
-  startAt: z.string().min(1),
-  endAt: z.string().min(1),
+  imageUrl: z.string().min(1, "Banner image is required"),
+  thumbnailUrl: z.string().optional(),
   isActive: z.boolean().default(true),
-  showOnce: z.boolean().default(false),
-  dismissible: z.boolean().default(true),
-  targetRoles: z.array(z.enum(BANNER_TARGET_ROLES)).min(1)
+  fileSizeBytes: z.number().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  originalFileName: z.string().optional()
+});
+
+export const bannerImageReplaceSchema = z.object({
+  imageUrl: z.string().min(1, "Banner image is required"),
+  thumbnailUrl: z.string().optional(),
+  fileSizeBytes: z.number().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  originalFileName: z.string().optional()
 });
 
 export const infrastructureSchema = z.object({
@@ -444,6 +490,38 @@ export const adminAccountUpdateSchema = adminAccountSchema.partial().extend({
   email: portalLoginIdSchema.optional()
 });
 
+export const collegeAdministratorSchema = z.object({
+  fullName: z.string().min(2),
+  employeeId: z.string().min(1),
+  designation: z.string().min(1),
+  department: z.string().min(1),
+  phone: z.string().min(7),
+  email: portalLoginIdSchema,
+  password: optionalPortalPasswordSchema,
+  profilePhotoUrl: z.string().url().optional().or(z.literal(""))
+});
+
+export const collegeAdministratorUpdateSchema = collegeAdministratorSchema.partial().extend({
+  fullName: z.string().min(2).optional(),
+  employeeId: z.string().min(1).optional(),
+  designation: z.string().min(1).optional(),
+  department: z.string().min(1).optional(),
+  phone: z.string().min(7).optional(),
+  email: portalLoginIdSchema.optional(),
+  profilePhotoUrl: z.string().url().optional().or(z.literal(""))
+});
+
+export const selfProfileUpdateSchema = z.object({
+  fullName: z.string().min(2).optional(),
+  phone: z.string().min(7).optional(),
+  profilePhotoUrl: z.string().url().optional().or(z.literal(""))
+});
+
+export const selfPasswordChangeSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: portalPasswordSchema
+});
+
 export const adminPasswordResetSchema = z.object({
   password: portalPasswordSchema,
   mustChangePassword: z.boolean().default(true)
@@ -463,7 +541,8 @@ export const settingsSchema = z.object({
       dateBs: bsDateSchema
     })
   ),
-  infrastructure: infrastructureSchema
+  infrastructure: infrastructureSchema,
+  dailyAttendance: dailyAttendanceConfigSchema.optional()
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -484,6 +563,9 @@ export type AcademicSubjectInput = z.infer<typeof academicSubjectSchema>;
 export type MasterSubjectInput = z.infer<typeof masterSubjectSchema>;
 export type SubjectInput = z.infer<typeof subjectSchema>;
 export type AttendanceInput = z.infer<typeof attendanceSchema>;
+export type DailyAttendanceSubmitInput = z.infer<typeof dailyAttendanceSubmitSchema>;
+export type DailyAttendanceUpdateInput = z.infer<typeof dailyAttendanceUpdateSchema>;
+export type DailyAttendanceUnlockInput = z.infer<typeof dailyAttendanceUnlockSchema>;
 export type ExamInput = z.infer<typeof examSchema>;
 export type ExamRoutineInput = z.infer<typeof examRoutineSchema>;
 export type ResultMarkInput = z.infer<typeof resultMarkSchema>;
@@ -498,4 +580,8 @@ export type InfrastructureInput = z.infer<typeof infrastructureSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;
 export type AdminAccountInput = z.infer<typeof adminAccountSchema>;
 export type AdminAccountUpdateInput = z.infer<typeof adminAccountUpdateSchema>;
+export type CollegeAdministratorInput = z.infer<typeof collegeAdministratorSchema>;
+export type CollegeAdministratorUpdateInput = z.infer<typeof collegeAdministratorUpdateSchema>;
+export type SelfProfileUpdateInput = z.infer<typeof selfProfileUpdateSchema>;
+export type SelfPasswordChangeInput = z.infer<typeof selfPasswordChangeSchema>;
 export type AdminPasswordResetInput = z.infer<typeof adminPasswordResetSchema>;

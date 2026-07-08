@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ACCOUNTING_ACCESS_ROLES,
@@ -104,9 +105,10 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
-import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
+
 import { FinancialApprovalsPanel } from "features/accounting/FinancialApprovalsPanel";
 import { api, unwrap } from "lib/api";
+import { invalidateDashboardQueries } from "lib/dashboardQueries";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 
@@ -129,6 +131,27 @@ type Tab =
   | "accountants"
   | "audit-logs"
   | "approvals";
+
+const accountingTabs: Tab[] = [
+  "dashboard",
+  "fee-collection",
+  "receipts",
+  "refunds",
+  "student-accounts",
+  "salaries",
+  "purchases",
+  "expenses",
+  "income",
+  "cash-book",
+  "chart-of-accounts",
+  "journal-entries",
+  "vendors",
+  "reports",
+  "settings",
+  "accountants",
+  "audit-logs",
+  "approvals"
+];
 
 const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminOnly?: boolean }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -292,7 +315,8 @@ export const AccountingManager = () => {
   const isAuditor = normalizedRole === "AUDITOR";
   const isPrincipal = normalizedRole === "PRINCIPAL";
   const isCashier = normalizedRole === "CASHIER";
-  const canWrite = !isAuditor && !isPrincipal;
+  const isReadOnlyCollegeAdmin = normalizedRole === "COLLEGE_VIEWER";
+  const canWrite = !isAuditor && !isPrincipal && !isReadOnlyCollegeAdmin;
   const canApprove = ACCOUNTING_APPROVER_ROLES.includes(normalizedRole);
   const canViewAudit = hasAccountingPermission(normalizedRole, "view_audit");
   const canReverse = hasAccountingPermission(normalizedRole, "reverse_transaction");
@@ -320,6 +344,22 @@ export const AccountingManager = () => {
   const [reportDate, setReportDate] = useState("2081-09-01");
   const [summarySection, setSummarySection] = useState<(typeof FINANCIAL_SUMMARY_SECTIONS)[number]["key"]>("fees");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    const studentIdParam = searchParams.get("studentId");
+    if (tabParam && accountingTabs.includes(tabParam as Tab)) {
+      setTab(tabParam as Tab);
+    }
+    if (studentIdParam) {
+      setSelectedStudentId(studentIdParam);
+      setCollectionForm((current) => ({ ...current, studentId: studentIdParam }));
+      if (!tabParam) {
+        setTab("student-accounts");
+      }
+    }
+  }, [searchParams]);
 
   const cashierTabs: Tab[] = ["dashboard", "fee-collection", "receipts", "student-accounts", "refunds"];
   const visibleTabs = tabs
@@ -480,7 +520,8 @@ export const AccountingManager = () => {
       queryClient.invalidateQueries({ queryKey: ["accounting-salaries"] }),
       queryClient.invalidateQueries({ queryKey: ["accounting-cash-book"] }),
 
-      queryClient.invalidateQueries({ queryKey: ["students"] })
+      queryClient.invalidateQueries({ queryKey: ["students"] }),
+      invalidateDashboardQueries()
     ]);
   };
 
@@ -776,7 +817,7 @@ export const AccountingManager = () => {
         description="Fee collection, salaries, expenses, purchases, income, cash book, and financial reports."
       />
 
-      <DashboardBannerStrip />
+
 
       <div className="flex flex-wrap gap-2">
         {visibleTabs.map((item) => {
@@ -786,7 +827,7 @@ export const AccountingManager = () => {
               key={item.id}
               variant={tab === item.id ? "default" : "outline"}
               size="sm"
-              className={cn(tab === item.id && "bg-emerald-600 hover:bg-emerald-700")}
+              className={cn(tab === item.id && "bg-brand-600 hover:bg-brand-700")}
               onClick={() => setTab(item.id)}
             >
               <Icon className="mr-2 h-4 w-4" />
@@ -814,7 +855,7 @@ export const AccountingManager = () => {
               ))}
               <Card>
                 <CardHeader><CardTitle>Cash Balance</CardTitle></CardHeader>
-                <CardContent className="text-2xl font-semibold text-emerald-700">
+                <CardContent className="text-2xl font-semibold text-brand-700">
                   {formatCurrencyNpr(dashboardQuery.data?.cashBalanceNpr ?? 0)}
                 </CardContent>
               </Card>
@@ -833,7 +874,7 @@ export const AccountingManager = () => {
                           <div className="font-medium">{collection.receiptNumber}</div>
                           <div className="text-slate-500">{collection.paidDateBs}</div>
                         </div>
-                        <div className="font-semibold text-emerald-700">{formatCurrencyNpr(collection.amountPaidNpr)}</div>
+                        <div className="font-semibold text-brand-700">{formatCurrencyNpr(collection.amountPaidNpr)}</div>
                       </div>
                     ))
                   )}

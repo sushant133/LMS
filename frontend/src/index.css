@@ -2,9 +2,17 @@
 @import "./styles/marksheet.css";
 
 @theme {
-  --color-brand-50: #f0fdf4;
-  --color-brand-500: #10b981;
-  --color-brand-700: #047857;
+  --color-brand-50: #eef3fb;
+  --color-brand-100: #d6e2f5;
+  --color-brand-200: #adc5eb;
+  --color-brand-300: #7fa3dc;
+  --color-brand-400: #4f7fc8;
+  --color-brand-500: #2b5da8;
+  --color-brand-600: #0c2d6b;
+  --color-brand-700: #0a2559;
+  --color-brand-800: #081d47;
+  --color-brand-900: #061535;
+  --color-brand-950: #040e22;
 }
 
 :root {
@@ -16,6 +24,10 @@
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -46,38 +58,108 @@ a {
   display: none;
 }
 
+.print-results-bulk-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  text-align: center;
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 0.75rem;
+}
+
+.print-results-bulk-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4rem;
+  height: 4rem;
+}
+
+.print-results-bulk-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.print-results-bulk-college {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+}
+
+.print-results-bulk-college-np {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: #334155;
+}
+
+.print-results-bulk-address {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+.print-results-bulk-exam {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.print-results-bulk-meta,
+.print-results-bulk-count {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
 @media print {
-  @page {
-    margin: 12mm;
-    size: auto;
-  }
-
-  body.printing-bulk-results {
-    background: #fff !important;
-  }
-
-  body.printing-bulk-results * {
-    visibility: hidden !important;
-  }
-
-  body.printing-bulk-results .print-results-bulk-table,
-  body.printing-bulk-results .print-results-bulk-table * {
-    visibility: visible !important;
-  }
-
-  body.printing-bulk-results .print-results-bulk-table {
-    display: block !important;
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    padding: 0;
-    color: #000 !important;
-    background: #fff !important;
-  }
-
-  body.printing-marksheet .no-print,
-  body.printing-bulk-results .no-print {
+  body.printing-marksheet .no-print {
     display: none !important;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes scaleOut {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
   }
 }

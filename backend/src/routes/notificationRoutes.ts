@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  getUnreadNotificationCount,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
@@ -12,6 +13,7 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/", listNotifications);
+router.get("/unread-count", getUnreadNotificationCount);
 router.post("/send", authorize("COLLEGE_ADMIN", "TEACHER"), sendManualNotification);
 router.put("/:id/read", markNotificationRead);
 router.put("/read-all", markAllNotificationsRead);

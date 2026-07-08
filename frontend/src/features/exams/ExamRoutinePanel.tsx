@@ -111,7 +111,7 @@ export const ExamRoutinePanel = ({ exam, subjects, isAdmin, readOnly = false }: 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge className={exam.routinePublished ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-700"}>
+        <Badge className={exam.routinePublished ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-700"}>
           {exam.routinePublished ? "Routine Published" : "Routine Draft"}
         </Badge>
         {isAdmin && !readOnly ? (

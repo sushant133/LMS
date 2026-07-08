@@ -21,6 +21,7 @@ import { filterSectionsByClass, filterYearsByBatch, getAcademicLabels } from "li
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { downloadStudentsExcel } from "./studentExportUtils";
 
 export const StudentListManager = () => {
   const navigate = useNavigate();
@@ -145,7 +146,7 @@ export const StudentListManager = () => {
         variant="outline"
         className={cn(
           "h-10 w-full border-slate-300 bg-white transition-colors",
-          "hover:border-green-300 hover:bg-green-100 hover:text-green-800",
+          "hover:border-brand-300 hover:bg-brand-100 hover:text-brand-800",
           "disabled:hover:border-slate-300 disabled:hover:bg-white disabled:hover:text-slate-900"
         )}
         disabled={!hasActiveFilters}
@@ -171,11 +172,30 @@ export const StudentListManager = () => {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{canManage ? "All Students" : "Assigned Students"}</CardTitle>
-        <p className="mt-1 text-sm text-slate-500">
-          Showing {filteredStudents.length} of {students.length} student{students.length === 1 ? "" : "s"}
-        </p>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <CardTitle>{canManage ? "All Students" : "Assigned Students"}</CardTitle>
+          <p className="mt-1 text-sm text-slate-500">
+            Showing {filteredStudents.length} of {students.length} student{students.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          disabled={filteredStudents.length === 0}
+          onClick={() => {
+            downloadStudentsExcel(filteredStudents, {
+              isCollege,
+              primaryLabel: labels.primary,
+              secondaryLabel: labels.secondary,
+              primaryMap,
+              secondaryMap,
+              includeFees: canManage
+            });
+            toast.success("Student data exported to Excel");
+          }}
+        >
+          Export Excel
+        </Button>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-2 xl:grid-cols-4">

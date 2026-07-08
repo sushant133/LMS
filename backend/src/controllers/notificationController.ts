@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { sendNotificationSchema } from "@phit-erp/shared";
+import { hasInstitutionAccess, sendNotificationSchema } from "@phit-erp/shared";
 import { Notification } from "../models/Notification.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
@@ -7,19 +7,27 @@ import { sendNotification } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
 import { withTenantScope } from "../utils/tenant.js";
 
-export const listNotifications = asyncHandler(async (req: Request, res: Response) => {
-  const filter = withTenantScope(req);
-  if (req.user?.role !== "SUPER_ADMIN" && req.user?.role !== "COLLEGE_ADMIN") {
+const buildNotificationFilter = (req: Request, extra: Record<string, unknown> = {}): Record<string, unknown> => {
+  const filter = withTenantScope(req, extra);
+  if (!hasInstitutionAccess(req.user?.role ?? "")) {
     Object.assign(filter, { recipientUserId: req.user?.userId });
   }
+  return filter;
+};
 
-  const notifications = await Notification.find(filter).sort({ createdAt: -1 }).limit(100);
+export const listNotifications = asyncHandler(async (req: Request, res: Response) => {
+  const notifications = await Notification.find(buildNotificationFilter(req)).sort({ createdAt: -1 }).limit(100);
   return sendSuccess(res, "Notifications fetched", notifications);
+});
+
+export const getUnreadNotificationCount = asyncHandler(async (req: Request, res: Response) => {
+  const count = await Notification.countDocuments(buildNotificationFilter(req, { read: false }));
+  return sendSuccess(res, "Unread notification count fetched", { count });
 });
 
 export const markNotificationRead = asyncHandler(async (req: Request, res: Response) => {
   const notification = await Notification.findOneAndUpdate(
-    withTenantScope(req, { _id: req.params.id, recipientUserId: req.user?.userId }),
+    buildNotificationFilter(req, { _id: req.params.id }),
     { read: true },
     { new: true }
   );
@@ -28,10 +36,7 @@ export const markNotificationRead = asyncHandler(async (req: Request, res: Respo
 });
 
 export const markAllNotificationsRead = asyncHandler(async (req: Request, res: Response) => {
-  await Notification.updateMany(
-    withTenantScope(req, { recipientUserId: req.user?.userId, read: false }),
-    { read: true }
-  );
+  await Notification.updateMany(buildNotificationFilter(req, { read: false }), { read: true });
   return sendSuccess(res, "All notifications marked as read");
 });
 

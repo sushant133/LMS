@@ -10,7 +10,7 @@ import { api, unwrap } from "lib/api";
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
-  RETURNED: "bg-emerald-100 text-emerald-800",
+  RETURNED: "bg-brand-100 text-brand-800",
   OVERDUE: "bg-rose-100 text-rose-800"
 };
 
@@ -32,10 +32,10 @@ export const LibraryPortal = () => {
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="bg-[linear-gradient(135deg,_white_0%,_#ecfdf5_100%)]">
+        <Card className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
           <CardContent className="flex items-center gap-4 py-6">
-            <div className="rounded-2xl bg-emerald-100 p-3">
-              <BookOpen className="h-6 w-6 text-emerald-700" />
+            <div className="rounded-2xl bg-brand-100 p-3">
+              <BookOpen className="h-6 w-6 text-brand-700" />
             </div>
             <div>
               <p className="text-sm text-slate-500">Currently borrowed</p>

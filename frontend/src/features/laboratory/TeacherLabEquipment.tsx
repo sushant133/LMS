@@ -8,7 +8,7 @@ import { api, unwrap } from "lib/api";
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
-  RETURNED: "bg-emerald-100 text-emerald-800",
+  RETURNED: "bg-brand-100 text-brand-800",
   OVERDUE: "bg-rose-100 text-rose-800"
 };
 

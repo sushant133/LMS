@@ -1,37 +1,32 @@
 ---
-pid: 28808
+pid: 15464
 cwd: "C:\Users\Sushant\Documents\New LMS Project"
 command: "cd \"C:\\Users\\Sushant\\Documents\\New LMS Project\\backend\"; npm run build 2>&1"
-started_at: 2026-07-04T16:10:50.289Z
-running_for_ms: 3009999  
+started_at: 2026-07-07T20:35:58.846Z
+running_for_ms: 4340000  
 ---
 
-> @nepal-school-erp/backend@1.0.0 build
+> @phit-erp/backend@1.0.0 build
 > npm run build:shared && tsc -p tsconfig.json
 
 
-> @nepal-school-erp/backend@1.0.0 build:shared
+> @phit-erp/backend@1.0.0 build:shared
 > npm install --include=dev --prefix ./shared && npm run build --prefix ./shared
 
 
-up to date, audited 3 packages in 983ms
+up to date, audited 3 packages in 982ms
 
 1 package is looking for funding
   run `npm fund` for details
 
 found 0 vulnerabilities
 
-> @nepal-school-erp/shared@1.0.0 build
+> @phit-erp/shared@1.0.0 build
 > tsc -p tsconfig.json
 
-src/controllers/examController.ts(496,9): error TS2451: Cannot redeclare block-scoped variable 'schoolId'.
-src/controllers/examController.ts(551,9): error TS2451: Cannot redeclare block-scoped variable 'schoolId'.
-src/controllers/examController.ts(556,11): error TS2322: Type 'ObjectId' is not assignable to type 'string'.
-src/controllers/examController.ts(565,11): error TS2345: Argument of type 'ObjectId' is not assignable to parameter of type 'string'.
-src/controllers/resultSubmissionController.ts(146,29): error TS2339: Property 'toObject' does not exist on type '{ createdAt: NativeDate; updatedAt: NativeDate; } & { schoolId: ObjectId; status: "DRAFT" | "PUBLISHED" | "SUBMITTED_FOR_REVIEW" | "PENDING_ADMIN_REVIEW" | "RETURNED_FOR_CORRECTION" | "APPROVED"; ... 15 more ...; publishedAt?: NativeDate | ... 1 more ... | undefined; }'.
-src/controllers/resultSubmissionController.ts(151,20): error TS2339: Property 'save' does not exist on type '{ createdAt: NativeDate; updatedAt: NativeDate; } & { schoolId: ObjectId; status: "DRAFT" | "PUBLISHED" | "SUBMITTED_FOR_REVIEW" | "PENDING_ADMIN_REVIEW" | "RETURNED_FOR_CORRECTION" | "APPROVED"; ... 15 more ...; publishedAt?: NativeDate | ... 1 more ... | undefined; }'.
-src/controllers/resultSubmissionController.ts(156,26): error TS2339: Property '_id' does not exist on type '{ createdAt: NativeDate; updatedAt: NativeDate; } & { schoolId: ObjectId; status: "DRAFT" | "PUBLISHED" | "SUBMITTED_FOR_REVIEW" | "PENDING_ADMIN_REVIEW" | "RETURNED_FOR_CORRECTION" | "APPROVED"; ... 15 more ...; publishedAt?: NativeDate | ... 1 more ... | undefined; }'.
-src/controllers/resultSubmissionController.ts(158,23): error TS2339: Property 'toObject' does not exist on type '{ createdAt: NativeDate; updatedAt: NativeDate; } & { schoolId: ObjectId; status: "DRAFT" | "PUBLISHED" | "SUBMITTED_FOR_REVIEW" | "PENDING_ADMIN_REVIEW" | "RETURNED_FOR_CORRECTION" | "APPROVED"; ... 15 more ...; publishedAt?: NativeDate | ... 1 more ... | undefined; }'.
-src/controllers/resultSubmissionController.ts(166,54): error TS2339: Property '_id' does not exist on type '{ createdAt: NativeDate; updatedAt: NativeDate; } & { schoolId: ObjectId; status: "DRAFT" | "PUBLISHED" | "SUBMITTED_FOR_REVIEW" | "PENDING_ADMIN_REVIEW" | "RETURNED_FOR_CORRECTION" | "APPROVED"; ... 15 more ...; publishedAt?: NativeDate | ... 1 more ... | undefined; }'.
-src/utils/resultSubmission.ts(89,17): error TS2345: Argument of type 'string' is not assignable to parameter of type 'InstitutionType | null | undefined'.
-src/utils/resultSubmission.ts(194,17): error TS2345: Argument of type 'string' is not assignable to parameter of type 'InstitutionType | null | undefined'.
+src/controllers/dailyAttendanceController.ts(446,5): error TS2740: Type '{ studentId: string; status: "PRESENT" | "ABSENT" | "LEAVE" | "LATE" | "MEDICAL_LEAVE"; remarks?: string | undefined; }[]' is missing the following properties from type 'DocumentArray<{ studentId: ObjectId; status: "PRESENT" | "ABSENT" | "LEAVE" | "LATE" | "MEDICAL_LEAVE"; remarks: string; }, Subdocument<ObjectId, any, { studentId: ObjectId; status: "PRESENT" | ... 3 more ... | "MEDICAL_LEAVE"; remarks: string; }> & { ...; }>': isMongooseDocumentArray, create, id, $pop, and 8 more.
+src/controllers/dailyAttendanceController.ts(521,9): error TS2554: Expected 2 arguments, but got 1.
+src/controllers/dailyAttendanceController.ts(557,9): error TS2554: Expected 2 arguments, but got 1.
+src/utils/dailyAttendanceUtils.ts(302,27): error TS18047: 'attendance' is possibly 'null'.
+src/utils/dailyAttendanceUtils.ts(316,14): error TS18047: 'attendance' is possibly 'null'.
+src/utils/dailyAttendanceUtils.ts(318,39): error TS18047: 'attendance' is possibly 'null'.

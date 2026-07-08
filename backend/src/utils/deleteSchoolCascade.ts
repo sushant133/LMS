@@ -6,6 +6,8 @@ import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
 import { Batch } from "../models/Batch.js";
 import { AssignmentComment } from "../models/AssignmentComment.js";
 import { Attendance } from "../models/Attendance.js";
+import { DailyAttendance } from "../models/DailyAttendance.js";
+import { DailyAttendanceLog } from "../models/DailyAttendanceLog.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { Exam } from "../models/Exam.js";
 import { ExamRoutine } from "../models/ExamRoutine.js";
@@ -30,6 +32,7 @@ import { Laboratory, LaboratoryCategory, LaboratoryEquipment, LaboratoryIssue } 
 import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
 import { Banner } from "../models/Banner.js";
 import { BannerDismissal } from "../models/BannerDismissal.js";
+import { Complaint } from "../models/Complaint.js";
 import { Notice } from "../models/Notice.js";
 import { Notification } from "../models/Notification.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
@@ -65,11 +68,14 @@ export const deleteSchoolCascade = async (
     AssignmentSubmission.deleteMany(filter, options),
     Assignment.deleteMany(filter, options),
     Attendance.deleteMany(filter, options),
+    DailyAttendanceLog.deleteMany(filter, options),
+    DailyAttendance.deleteMany(filter, options),
     Result.deleteMany(filter, options),
     ResultSubmission.deleteMany(filter, options),
     ExamRoutine.deleteMany(filter, options),
     Exam.deleteMany(filter, options),
     Notice.deleteMany(filter, options),
+    Complaint.deleteMany(filter, options),
     BannerDismissal.deleteMany(filter, options),
     Banner.deleteMany(filter, options),
     TimetableSlot.deleteMany(filter, options),

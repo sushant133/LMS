@@ -91,12 +91,12 @@ export const uploadClassroomAttachments = multer({
   fileFilter: classroomFileFilter
 }).array("files", 10);
 
-const bannerMimeTypes = ["image/jpeg", "image/png", "image/webp"];
-const bannerFileFilter = createFileFilter(bannerMimeTypes, "Invalid file type. Allowed: JPG, PNG, WEBP");
+const bannerMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const bannerFileFilter = createFileFilter(bannerMimeTypes, "Invalid file type. Allowed: JPG, JPEG, PNG, WEBP");
 
 export const uploadBannerImage = multer({
   storage: createTenantStorage("banners"),
-  limits: { fileSize: 3 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: bannerFileFilter
 }).single("image");
 
@@ -105,6 +105,15 @@ export const uploadStaffPhoto = multer({
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: bannerFileFilter
 }).single("photo");
+
+const complaintMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"];
+const complaintFileFilter = createFileFilter(complaintMimeTypes, "Invalid file type. Allowed: JPG, JPEG, PNG, WEBP, PDF");
+
+export const uploadComplaintAttachments = multer({
+  storage: createTenantStorage("complaints"),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: complaintFileFilter
+}).array("files", 5);
 
 /**
  * Returns a public URL path for a stored file (relative).

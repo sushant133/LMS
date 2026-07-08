@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
-import { noticeSchema } from "@phit-erp/shared";
+import { hasInstitutionAccess, noticeSchema } from "@phit-erp/shared";
 import { Notice } from "../models/Notice.js";
 import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
@@ -103,7 +103,7 @@ const enrichNotices = async (notices: NoticeLean[]) => {
 };
 
 export const listNotices = asyncHandler(async (req: Request, res: Response) => {
-  const adminLike = req.user?.role === "COLLEGE_ADMIN" || req.user?.role === "SUPER_ADMIN";
+  const adminLike = hasInstitutionAccess(req.user?.role ?? "");
   const schoolId = tenantObjectId(req);
 
   if (adminLike) {

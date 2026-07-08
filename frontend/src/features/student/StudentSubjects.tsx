@@ -176,8 +176,8 @@ export const StudentSubjects = () => {
                 <p className="text-sm text-slate-500">No announcements for this subject.</p>
               ) : (
                 detail.notices.map((notice) => (
-                  <div key={notice._id} className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
-                    <p className="font-medium text-emerald-950">{notice.title}</p>
+                  <div key={notice._id} className="rounded-xl border border-brand-100 bg-brand-50/40 p-3">
+                    <p className="font-medium text-brand-950">{notice.title}</p>
                     <p className="mt-1 text-sm text-slate-700">{notice.content}</p>
                     <p className="mt-1 text-xs text-slate-500">{notice.publishDateBs}</p>
                   </div>
@@ -204,14 +204,14 @@ export const StudentSubjects = () => {
       ) : (
         <div className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {subjects.map((subject) => (
-            <Card key={subject._id} className="min-w-0 cursor-pointer transition hover:border-emerald-200 hover:shadow-md" onClick={() => setSelectedSubjectId(subject._id)}>
+            <Card key={subject._id} className="min-w-0 cursor-pointer transition hover:border-brand-200 hover:shadow-md" onClick={() => setSelectedSubjectId(subject._id)}>
               <CardHeader className="flex flex-row items-start justify-between gap-3">
                 <div>
                   <CardTitle className="text-base">{subject.name}</CardTitle>
                   <p className="text-sm text-slate-500">{subject.code}</p>
                 </div>
-                <div className="rounded-xl bg-emerald-50 p-2">
-                  <BookOpen className="h-5 w-5 text-emerald-600" />
+                <div className="rounded-xl bg-brand-50 p-2">
+                  <BookOpen className="h-5 w-5 text-brand-600" />
                 </div>
               </CardHeader>
               <CardContent>

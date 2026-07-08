@@ -1,3 +1,4 @@
+import { COLLEGE_LOGO_URL } from "@phit-erp/shared";
 import type { Types } from "mongoose";
 import { School } from "../models/School.js";
 import { Setting } from "../models/Setting.js";
@@ -24,6 +25,6 @@ export const resolveSchoolBranding = async (schoolId: Types.ObjectId): Promise<S
     collegeNameNp: settings?.schoolNameNp ?? school?.nameNp,
     principalName: settings?.principalName ?? school?.principalName,
     collegeAddress: formatAddressLine(address),
-    collegeLogoUrl: undefined
+    collegeLogoUrl: COLLEGE_LOGO_URL
   };
 };

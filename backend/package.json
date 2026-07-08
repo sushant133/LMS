@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@phit-erp/shared": "file:./shared",
+    "@types/sharp": "^0.31.1",
     "bcryptjs": "3.0.2",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",
@@ -31,6 +32,7 @@
     "multer": "^2.1.1",
     "nepali-date-converter": "^3.3.1",
     "pdfkit": "^0.18.0",
+    "sharp": "^0.35.3",
     "zod": "4.1.5"
   },
   "devDependencies": {

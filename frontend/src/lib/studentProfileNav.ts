@@ -12,6 +12,7 @@ export const getStudentProfileBackPath = (role: UserRole | string | null | undef
       return "/parent-portal";
     case "TEACHER":
     case "COLLEGE_ADMIN":
+    case "COLLEGE_VIEWER":
     case "SUPER_ADMIN":
       return "/students/list";
     default:
@@ -31,6 +32,7 @@ export const getStudentProfileBackLabel = (role: UserRole | string | null | unde
       return "Back to Parent Portal";
     case "TEACHER":
     case "COLLEGE_ADMIN":
+    case "COLLEGE_VIEWER":
     case "SUPER_ADMIN":
       return "Back to Students";
     default:

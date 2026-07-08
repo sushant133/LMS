@@ -10,6 +10,7 @@ import { Table, TableBody, TableHead, Th, Td } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { formatCurrencyNpr } from "lib/utils";
 import { api, unwrap } from "lib/api";
+import { invalidateDashboardQueries } from "lib/dashboardQueries";
 
 interface FinancialApprovalRecord {
   _id: string;
@@ -45,6 +46,7 @@ export const FinancialApprovalsPanel = ({ canApprove }: Props) => {
       void queryClient.invalidateQueries({ queryKey: ["accounting-dashboard"] });
       void queryClient.invalidateQueries({ queryKey: ["accounting-receipts"] });
       void queryClient.invalidateQueries({ queryKey: ["accounting-audit-logs"] });
+      void invalidateDashboardQueries();
     },
     onError: (error: Error) => toast.error(error.message)
   });
@@ -101,7 +103,7 @@ export const FinancialApprovalsPanel = ({ canApprove }: Props) => {
                       <div className="flex flex-wrap gap-2">
                         <Button
                           size="sm"
-                          className="bg-emerald-600 hover:bg-emerald-700"
+                          className="bg-brand-600 hover:bg-brand-700"
                           disabled={approveMutation.isPending}
                           onClick={() => approveMutation.mutate(row._id)}
                         >

@@ -13,8 +13,10 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 
 export const TransportManager = () => {
+  const canManage = useIsTenantAdmin();
   const [routeForm, setRouteForm] = useState<TransportRouteInput>({
     name: "", vehicleNumber: "", driverName: "", driverPhone: "", stops: [{ name: "Main Gate", pickupTime: "07:30" }], monthlyFeeNpr: 0, isActive: true
   });
@@ -55,6 +57,8 @@ export const TransportManager = () => {
     <div className="space-y-6">
       <PageHeader title="Transport" description="Manage bus routes, stops, and student assignments." />
       <div className="grid gap-6 lg:grid-cols-2">
+        {canManage ? (
+        <>
         <Card>
           <CardHeader><CardTitle>New route</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -86,6 +90,8 @@ export const TransportManager = () => {
             <Button onClick={() => { const p = transportAssignmentSchema.safeParse(assignForm); if (!p.success) return toast.error("Invalid assignment"); assignStudent.mutate(p.data); }}>Assign</Button>
           </CardContent>
         </Card>
+        </>
+        ) : null}
       </div>
       <Card>
         <CardHeader><CardTitle>Routes</CardTitle></CardHeader>

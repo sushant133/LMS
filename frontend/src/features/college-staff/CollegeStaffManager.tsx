@@ -23,6 +23,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, resolveApiUrl, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 
 const emptyAddress = { province: "", district: "", municipality: "", ward: "", streetAddress: "" };
 
@@ -50,6 +51,7 @@ interface CollegeStaffManagerProps {
 }
 
 export const CollegeStaffManager = ({ category, title }: CollegeStaffManagerProps) => {
+  const canManage = useIsTenantAdmin();
   const [form, setForm] = useState<CollegeStaffInput>(() => createDefaultStaff(category));
   const [password, setPassword] = useState("");
   const [editing, setEditing] = useState<CollegeStaffRecord | null>(null);
@@ -155,6 +157,7 @@ export const CollegeStaffManager = ({ category, title }: CollegeStaffManagerProp
 
   return (
     <div className="space-y-6">
+      {canManage ? (
       <Card>
         <CardHeader>
           <CardTitle>{editing ? `Edit ${title}` : `Create ${title}`}</CardTitle>
@@ -263,6 +266,7 @@ export const CollegeStaffManager = ({ category, title }: CollegeStaffManagerProp
           </div>
         </CardContent>
       </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -309,16 +313,18 @@ export const CollegeStaffManager = ({ category, title }: CollegeStaffManagerProp
                       <Td>
                         <Badge>{staff.status}</Badge>
                       </Td>
-                      <Td className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="outline" onClick={() => loadStaff(staff)}>
-                            Edit
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => void deactivateMutation.mutateAsync(staff._id)}>
-                            Deactivate
-                          </Button>
-                        </div>
-                      </Td>
+                      {canManage ? (
+                        <Td className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => loadStaff(staff)}>
+                              Edit
+                            </Button>
+                            <Button size="sm" variant="destructive" onClick={() => void deactivateMutation.mutateAsync(staff._id)}>
+                              Deactivate
+                            </Button>
+                          </div>
+                        </Td>
+                      ) : null}
                     </tr>
                   ))}
                 </TableBody>

@@ -17,6 +17,7 @@ export const roleLabelMap: Record<UserRole, string> = USER_ROLE_LABELS;
 export const roleRedirectMap: Record<UserRole, string> = {
   SUPER_ADMIN: "/dashboard/super_admin",
   COLLEGE_ADMIN: "/dashboard/college_admin",
+  COLLEGE_VIEWER: "/dashboard/college_admin",
   TEACHER: "/dashboard/teacher",
   STUDENT: "/my-subjects",
   PARENT: "/dashboard/parent",

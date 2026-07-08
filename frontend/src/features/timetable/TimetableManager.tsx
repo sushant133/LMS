@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { DAYS_OF_WEEK, isInstitutionAdmin, timetableSlotSchema, type TimetableSlotInput } from "@phit-erp/shared";
+import { canManageInstitution, DAYS_OF_WEEK, timetableSlotSchema, type TimetableSlotInput } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { FormField } from "components/shared/FormField";
@@ -43,7 +43,7 @@ const defaultSlot: TimetableSlotInput = {
 export const TimetableManager = () => {
   const { user } = useAuth();
   const isTeacher = user?.role === "TEACHER";
-  const isAdmin = isInstitutionAdmin(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "");
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const teacherScopeQuery = useTeacherScope(isTeacher);
@@ -181,9 +181,28 @@ export const TimetableManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error))
   });
 
+  const buildPayload = (): TimetableSlotInput => {
+    const base: TimetableSlotInput = {
+      dayOfWeek: form.dayOfWeek,
+      periodNumber: form.periodNumber,
+      subjectId: form.subjectId,
+      teacherId: isTeacher ? teacherId : form.teacherId,
+      room: form.room?.trim() ? form.room : undefined,
+      startTime: form.startTime,
+      endTime: form.endTime,
+      academicYearBs: form.academicYearBs
+    };
+
+    if (isCollege) {
+      return { ...base, batchId: form.batchId, yearId: form.yearId };
+    }
+
+    return { ...base, classId: form.classId, sectionId: form.sectionId };
+  };
+
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const payload = isTeacher ? { ...form, teacherId } : form;
+    const payload = buildPayload();
     const parsed = timetableSlotSchema.safeParse(payload);
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message ?? "Validation failed");

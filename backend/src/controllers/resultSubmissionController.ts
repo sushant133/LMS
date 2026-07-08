@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { resultSubmissionReviewSchema, resultSubmissionScopeSchema } from "@phit-erp/shared";
+import { hasInstitutionAccess, resultSubmissionReviewSchema, resultSubmissionScopeSchema } from "@phit-erp/shared";
 import { Exam } from "../models/Exam.js";
 import { ResultSubmission } from "../models/ResultSubmission.js";
 import { AuditLog } from "../models/AuditLog.js";
@@ -24,13 +24,8 @@ import {
 } from "../utils/teacherScope.js";
 import { sendSuccess } from "../utils/response.js";
 import { recordAudit } from "../utils/audit.js";
+import { assertInstitutionWrite } from "../utils/institutionAccess.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
-
-const assertAdmin = (req: Request): void => {
-  if (req.user?.role !== "COLLEGE_ADMIN" && req.user?.role !== "SUPER_ADMIN") {
-    throw new ApiError(403, "Only college administrators can perform this action");
-  }
-};
 
 const parseScope = (req: Request): SubmissionScope => {
   const payload = resultSubmissionScopeSchema.parse(req.body);
@@ -82,7 +77,7 @@ export const listResultSubmissions = asyncHandler(async (req: Request, res: Resp
     if (teacherScope.sectionIds.length) {
       filter.sectionId = { $in: teacherScope.sectionIds };
     }
-  } else if (req.user?.role !== "COLLEGE_ADMIN" && req.user?.role !== "SUPER_ADMIN") {
+  } else if (!hasInstitutionAccess(req.user?.role ?? "")) {
     throw new ApiError(403, "You do not have permission to view result submissions");
   }
 
@@ -176,7 +171,7 @@ export const submitResultForReview = asyncHandler(async (req: Request, res: Resp
 });
 
 export const approveResultSubmission = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const submissionId = String(req.params.submissionId);
   const { comments } = resultSubmissionReviewSchema.parse(req.body ?? {});
 
@@ -237,7 +232,7 @@ export const approveResultSubmission = asyncHandler(async (req: Request, res: Re
 });
 
 export const returnResultSubmission = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req);
   const submissionId = String(req.params.submissionId);
   const { comments } = resultSubmissionReviewSchema.parse(req.body);
 
@@ -300,9 +295,8 @@ export const returnResultSubmission = asyncHandler(async (req: Request, res: Res
 });
 
 export const getResultAuditLog = asyncHandler(async (req: Request, res: Response) => {
-  const isAdmin = req.user?.role === "COLLEGE_ADMIN" || req.user?.role === "SUPER_ADMIN";
-  if (!isAdmin) {
-    throw new ApiError(403, "Only college administrators can view result audit logs");
+  if (!hasInstitutionAccess(req.user?.role ?? "")) {
+    throw new ApiError(403, "Only institution administrators can view result audit logs");
   }
 
   const schoolId = tenantObjectId(req);
@@ -349,7 +343,7 @@ export const getSubmissionByScope = asyncHandler(async (req: Request, res: Respo
       throw new ApiError(403, "You can only view submissions for your assigned subjects");
     }
     await assertTeacherAcademicScope(req, scope);
-  } else if (req.user?.role !== "COLLEGE_ADMIN" && req.user?.role !== "SUPER_ADMIN") {
+  } else if (!hasInstitutionAccess(req.user?.role ?? "")) {
     throw new ApiError(403, "You do not have permission to view this submission");
   }
 

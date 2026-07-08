@@ -39,6 +39,23 @@ const infrastructureSchema = new Schema(
   { _id: false }
 );
 
+const dailyAttendanceConfigSchema = new Schema(
+  {
+    startTime: { type: String, default: "06:00" },
+    endTime: { type: String, default: "12:00" },
+    closeBeforeFirstPeriodEnds: { type: Boolean, default: true },
+    allowMedicalLeave: { type: Boolean, default: true }
+  },
+  { _id: false }
+);
+
+const libraryInventoryAccessSchema = new Schema(
+  {
+    enabled: { type: Boolean, default: false }
+  },
+  { _id: false }
+);
+
 const settingSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, unique: true, index: true },
@@ -50,7 +67,9 @@ const settingSchema = new Schema(
     contactPhone: { type: String, required: true },
     address: { type: addressSchema, required: true },
     holidays: { type: [holidaySchema], default: [] },
-    infrastructure: { type: infrastructureSchema, default: () => ({}) }
+    infrastructure: { type: infrastructureSchema, default: () => ({}) },
+    dailyAttendance: { type: dailyAttendanceConfigSchema, default: () => ({}) },
+    libraryInventoryAccess: { type: libraryInventoryAccessSchema, default: () => ({}) }
   },
   { timestamps: true }
 );

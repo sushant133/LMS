@@ -768,7 +768,7 @@ export const ExamManager = () => {
                 (examsQuery.data ?? []).map((exam) => (
                   <div
                     key={exam._id}
-                    className={`rounded-2xl border p-4 transition-colors ${selectedExamId === exam._id ? "border-emerald-300 bg-emerald-50/30" : "border-slate-200"}`}
+                    className={`rounded-2xl border p-4 transition-colors ${selectedExamId === exam._id ? "border-brand-300 bg-brand-50/30" : "border-slate-200"}`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -779,7 +779,7 @@ export const ExamManager = () => {
                         <div className="mt-2 flex flex-wrap gap-2">
                           <Badge>{EXAM_STATUS_LABELS[exam.status] ?? exam.status}</Badge>
                           {exam.routinePublished ? <Badge className="bg-blue-100 text-blue-700">Routine Live</Badge> : null}
-                          {exam.resultsPublished ? <Badge className="bg-emerald-100 text-emerald-700">Results Published</Badge> : null}
+                          {exam.resultsPublished ? <Badge className="bg-brand-100 text-brand-700">Results Published</Badge> : null}
                           {exam.resultsLocked ? <Badge className="bg-amber-100 text-amber-700">Locked</Badge> : null}
                         </div>
                       </div>
@@ -1257,7 +1257,7 @@ export const ExamManager = () => {
                               {computed.obtainedMarks} / {computed.fullMarks}
                             </Td>
                             <Td>
-                              <Badge className={computed.passFail === "PASS" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
+                              <Badge className={computed.passFail === "PASS" ? "bg-brand-100 text-brand-700" : "bg-red-100 text-red-700"}>
                                 {computed.passFail}
                               </Badge>
                             </Td>
@@ -1304,7 +1304,7 @@ export const ExamManager = () => {
             ) : (
               <div className="space-y-4">
                 {viewStudentId && selectedStudentResult ? (
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="rounded-2xl border border-brand-200 bg-brand-50 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h3 className="font-semibold text-slate-900">
@@ -1316,7 +1316,7 @@ export const ExamManager = () => {
                       </div>
                       <div className="flex gap-2">
                         <Badge>{selectedStudentResult.grade}</Badge>
-                        <Badge className={selectedStudentResult.passFailStatus === "PASS" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
+                        <Badge className={selectedStudentResult.passFailStatus === "PASS" ? "bg-brand-100 text-brand-700" : "bg-red-100 text-red-700"}>
                           {selectedStudentResult.passFailStatus}
                         </Badge>
                         <Button
@@ -1407,7 +1407,7 @@ export const ExamManager = () => {
                           </Td>
                           <Td>{result.gpa.toFixed(2)}</Td>
                           <Td>
-                            <Badge className={result.passFailStatus === "PASS" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
+                            <Badge className={result.passFailStatus === "PASS" ? "bg-brand-100 text-brand-700" : "bg-red-100 text-red-700"}>
                               {result.passFailStatus}
                             </Badge>
                           </Td>
@@ -1443,7 +1443,7 @@ export const ExamManager = () => {
                 </div>
 
                 {marksheetQuery.data ? (
-                  <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
+                  <div className="rounded-3xl border border-brand-200 bg-brand-50 p-5">
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="text-lg font-semibold text-slate-900">{marksheetQuery.data.student.user.fullName}</h3>

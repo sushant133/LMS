@@ -1,10 +1,14 @@
 import type { Request, Response } from "express";
+import jwt from "jsonwebtoken";
 import {
   activeSchoolSchema,
+  getInstitutionPermissions,
   loginSchema,
   normalizeUserRole,
   parentSelfRegisterSchema,
   sanitizeUserDisplayName,
+  selfPasswordChangeSchema,
+  selfProfileUpdateSchema,
   type AuthResponse,
   type SchoolRecord,
   type UserRole
@@ -13,9 +17,11 @@ import { env } from "../config/env.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
 import { School } from "../models/School.js";
 import { Student } from "../models/Student.js";
+import { AuditLog } from "../models/AuditLog.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { recordAudit } from "../utils/audit.js";
 import { resolveInstitutionSchool, resolveInstitutionSchoolId } from "../utils/institutionSchool.js";
 import { clearActiveSchoolCookie, clearAuthCookie, setActiveSchoolCookie, setAuthCookie, signJwt } from "../utils/jwt.js";
 import { sendSuccess } from "../utils/response.js";
@@ -25,6 +31,7 @@ const getRedirectPath = (role: UserRole | string): string => {
     case "SUPER_ADMIN":
       return "/dashboard/super_admin";
     case "COLLEGE_ADMIN":
+    case "COLLEGE_VIEWER":
       return "/dashboard/college_admin";
     case "TEACHER":
       return "/dashboard/teacher";
@@ -78,6 +85,10 @@ const getSafeUser = async (userId: string) => {
     email: user.email,
     role: normalizeUserRole(user.role as string),
     phone: user.phone,
+    employeeId: user.employeeId,
+    designation: user.designation,
+    department: user.department,
+    profilePhotoUrl: user.profilePhotoUrl,
     isActive: user.isActive,
     mustChangePassword: user.mustChangePassword
   };
@@ -93,6 +104,7 @@ const buildAuthResponse = async (userId: string, activeSchoolId?: string | null)
 
   return {
     user: safeUser,
+    permissions: getInstitutionPermissions(safeUser.role),
     redirectTo: getRedirectPath(safeUser.role),
     activeSchoolId: resolvedActiveSchoolId,
     availableSchools
@@ -278,6 +290,20 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   setAuthCookie(res, token);
 
+  if (user.schoolId) {
+    await AuditLog.create({
+      schoolId: user.schoolId,
+      actorUserId: user._id,
+      actorRole: normalizedRole,
+      action: "auth.login",
+      entity: "User",
+      entityId: user._id.toString(),
+      after: { email: user.email },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || ""
+    });
+  }
+
   return sendSuccess(
     res,
     "Login successful",
@@ -322,10 +348,86 @@ export const switchActiveSchool = asyncHandler(async (req: Request, res: Respons
   });
 });
 
-export const logout = asyncHandler(async (_req: Request, res: Response) => {
+export const logout = asyncHandler(async (req: Request, res: Response) => {
+  const token = req.cookies?.[env.COOKIE_NAME] as string | undefined;
+
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string; role: string; schoolId?: string | null };
+      if (decoded.schoolId) {
+        await AuditLog.create({
+          schoolId: decoded.schoolId,
+          actorUserId: decoded.userId,
+          actorRole: decoded.role,
+          action: "auth.logout",
+          entity: "User",
+          entityId: decoded.userId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || ""
+        }).catch(() => undefined);
+      }
+    } catch {
+      // Ignore invalid/expired tokens during logout.
+    }
+  }
+
   clearAuthCookie(res);
   clearActiveSchoolCookie(res);
   return sendSuccess(res, "Logged out successfully");
+});
+
+export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.userId) {
+    throw new ApiError(401, "Authentication required");
+  }
+
+  const payload = selfProfileUpdateSchema.parse(req.body);
+  const user = await User.findById(req.user.userId);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  if (payload.fullName) user.fullName = payload.fullName;
+  if (payload.phone) user.phone = payload.phone;
+  if (payload.profilePhotoUrl !== undefined) {
+    user.profilePhotoUrl = payload.profilePhotoUrl || undefined;
+  }
+
+  await user.save();
+  await recordAudit(req, {
+    action: "auth.profile_update",
+    entity: "User",
+    entityId: user._id.toString(),
+    after: { fullName: user.fullName, phone: user.phone, profilePhotoUrl: user.profilePhotoUrl }
+  });
+
+  return sendSuccess(res, "Profile updated", await buildAuthResponse(user._id.toString(), req.user.schoolId ?? null));
+});
+
+export const changePassword = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.userId) {
+    throw new ApiError(401, "Authentication required");
+  }
+
+  const payload = selfPasswordChangeSchema.parse(req.body);
+  const user = await User.findById(req.user.userId);
+
+  if (!user || !(await user.comparePassword(payload.currentPassword))) {
+    throw new ApiError(401, "Current password is incorrect");
+  }
+
+  user.password = payload.newPassword;
+  user.mustChangePassword = false;
+  await user.save();
+
+  await recordAudit(req, {
+    action: "auth.password_change",
+    entity: "User",
+    entityId: user._id.toString()
+  });
+
+  return sendSuccess(res, "Password changed successfully");
 });
 
 export const getMe = asyncHandler(async (req: Request, res: Response) => {

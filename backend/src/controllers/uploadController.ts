@@ -95,15 +95,37 @@ export const uploadStaffPhotoHandler = asyncHandler(async (req: Request, res: Re
   });
 });
 
+export const uploadComplaintAttachmentsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const files = (req as { files?: Express.Multer.File[] }).files;
+  if (!files || files.length === 0) {
+    throw new ApiError(400, "No files uploaded");
+  }
+
+  const attachments = files.map((file) => ({
+    url: getUploadPublicUrl(file.path),
+    name: file.originalname,
+    mimeType: file.mimetype,
+    kind: inferAttachmentKind(file.mimetype)
+  }));
+
+  return sendSuccess(res, "Complaint attachments uploaded", { attachments });
+});
+
 export const uploadBannerImageHandler = asyncHandler(async (req: Request, res: Response) => {
   const file = (req as { file?: Express.Multer.File }).file;
   if (!file) {
     throw new ApiError(400, "No banner image uploaded");
   }
 
+  const { processBannerImage } = await import("../utils/bannerImage.js");
+  const processed = await processBannerImage(file.path);
+
   return sendSuccess(res, "Banner image uploaded successfully", {
-    url: getUploadPublicUrl(file.path),
+    url: processed.imageUrl,
+    thumbnailUrl: processed.thumbnailUrl,
     originalName: file.originalname,
-    size: file.size
+    size: processed.fileSizeBytes,
+    width: processed.width,
+    height: processed.height
   });
 });

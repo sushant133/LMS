@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   ClassRecord,
@@ -18,9 +18,10 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { ResultMarksheetView } from "features/exams/ResultMarksheetView";
 import { api, unwrap } from "lib/api";
-import { printWithMode } from "lib/printUtils";
+import { getPdfErrorMessage, printBulkResultsElement } from "lib/printUtils";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
 
@@ -53,6 +54,8 @@ export const PrintResultsPanel = ({
   const [examId, setExamId] = useState("");
   const [studentId, setStudentId] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [bulkPrintLoading, setBulkPrintLoading] = useState(false);
+  const bulkResultsRef = useRef<HTMLDivElement | null>(null);
 
   const publishedExamsQuery = useQuery({
     queryKey: ["print-results", "exams", academicYearBs],
@@ -173,7 +176,16 @@ export const PrintResultsPanel = ({
     }
   };
 
-  const printBulk = () => printWithMode("printing-bulk-results");
+  const printBulk = async () => {
+    setBulkPrintLoading(true);
+    try {
+      await printBulkResultsElement(bulkResultsRef.current);
+    } catch (error) {
+      toast.error(getPdfErrorMessage(error));
+    } finally {
+      setBulkPrintLoading(false);
+    }
+  };
 
   if (publishedExamsQuery.isLoading && publishedExams.length === 0) {
     return <LoadingState />;
@@ -328,9 +340,9 @@ export const PrintResultsPanel = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={printBulk}>
+                  <Button size="sm" variant="outline" disabled={bulkPrintLoading} onClick={() => void printBulk()}>
                     <Printer className="mr-2 h-4 w-4" />
-                    Print Bulk
+                    {bulkPrintLoading ? "Preparing..." : "Print Bulk"}
                   </Button>
                   <Button size="sm" variant="outline" disabled={exporting} onClick={() => void downloadExport()}>
                     <FileSpreadsheet className="mr-2 h-4 w-4" />
@@ -378,7 +390,7 @@ export const PrintResultsPanel = ({
                         </Td>
                         <Td>{row.gpa.toFixed(2)}</Td>
                         <Td>
-                          <Badge className={row.passFailStatus === "PASS" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
+                          <Badge className={row.passFailStatus === "PASS" ? "bg-brand-100 text-brand-700" : "bg-red-100 text-red-700"}>
                             {row.passFailStatus}
                           </Badge>
                         </Td>
@@ -409,17 +421,27 @@ export const PrintResultsPanel = ({
             </CardContent>
           </Card>
 
-          <div className="print-results-bulk-table">
-            <div className="mb-4 text-center">
-              <h1 className="text-lg font-bold">{grid.collegeName ?? "College"}</h1>
-              {grid.collegeNameNp ? <p className="text-sm text-slate-700">{grid.collegeNameNp}</p> : null}
-              <h2 className="mt-2 text-base font-semibold">{selectedExam?.name}</h2>
-              <p className="text-sm text-slate-600">
-                {scopeLabel}
-                {grid.academicYearBs ? ` · Academic Session: ${grid.academicYearBs}` : ""}
-              </p>
-              <p className="text-xs text-slate-500">Published Results · {grid.rows.length} students</p>
-            </div>
+          <div ref={bulkResultsRef} className="print-results-bulk-table">
+            <header className="print-results-bulk-header">
+              <div className="print-results-bulk-logo">
+                <CollegeLogo
+                  src={grid.collegeLogoUrl}
+                  alt={`${grid.collegeName ?? "College"} logo`}
+                  className="h-16 w-16"
+                />
+              </div>
+              <div className="print-results-bulk-heading">
+                <h1 className="print-results-bulk-college">{grid.collegeName ?? "College"}</h1>
+                {grid.collegeNameNp ? <p className="print-results-bulk-college-np">{grid.collegeNameNp}</p> : null}
+                {grid.collegeAddress ? <p className="print-results-bulk-address">{grid.collegeAddress}</p> : null}
+                <h2 className="print-results-bulk-exam">{selectedExam?.name}</h2>
+                <p className="print-results-bulk-meta">
+                  {scopeLabel}
+                  {grid.academicYearBs ? ` · Academic Session: ${grid.academicYearBs}` : ""}
+                </p>
+                <p className="print-results-bulk-count">Published Results · {grid.rows.length} students</p>
+              </div>
+            </header>
             <table className="w-full border-collapse border border-slate-300 text-[10px]">
               <thead>
                 <tr className="bg-slate-100">

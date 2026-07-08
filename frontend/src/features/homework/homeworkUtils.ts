@@ -43,7 +43,7 @@ export const SUBMISSION_LABELS: Record<AssignmentSubmissionStatus, string> = {
 
 export const SUBMISSION_COLORS: Record<AssignmentSubmissionStatus, string> = {
   PENDING: "bg-slate-100 text-slate-700",
-  SUBMITTED: "bg-emerald-100 text-emerald-800",
+  SUBMITTED: "bg-brand-100 text-brand-800",
   GRADED: "bg-indigo-100 text-indigo-800"
 };
 

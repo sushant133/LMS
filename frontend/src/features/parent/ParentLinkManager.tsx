@@ -23,6 +23,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 
 type ParentLinkRecord = {
   _id: string;
@@ -43,6 +44,7 @@ const relationshipLabels: Record<ParentFromStudentRelationship, string> = {
 };
 
 export const ParentLinkManager = () => {
+  const canManage = useIsTenantAdmin();
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [customLoginByRelationship, setCustomLoginByRelationship] = useState<Record<ParentFromStudentRelationship, string>>({
     FATHER: "",
@@ -245,27 +247,31 @@ export const ParentLinkManager = () => {
                     <Td>{row.relationship}</Td>
                     <Td>{row.createdAt ? new Date(row.createdAt).toLocaleString() : "—"}</Td>
                     <Td>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          className="bg-emerald-600 hover:bg-emerald-700"
-                          disabled={approveRegistration.isPending}
-                          onClick={() => approveRegistration.mutate(row._id)}
-                        >
-                          Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={rejectRegistration.isPending}
-                          onClick={() => {
-                            const reason = window.prompt("Rejection reason (optional):");
-                            rejectRegistration.mutate({ id: row._id, reason: reason ?? undefined });
-                          }}
-                        >
-                          Reject
-                        </Button>
-                      </div>
+                      {canManage ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            className="bg-brand-600 hover:bg-brand-700"
+                            disabled={approveRegistration.isPending}
+                            onClick={() => approveRegistration.mutate(row._id)}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={rejectRegistration.isPending}
+                            onClick={() => {
+                              const reason = window.prompt("Rejection reason (optional):");
+                              rejectRegistration.mutate({ id: row._id, reason: reason ?? undefined });
+                            }}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        "—"
+                      )}
                     </Td>
                   </tr>
                 ))}
@@ -275,6 +281,7 @@ export const ParentLinkManager = () => {
         </CardContent>
       </Card>
 
+      {canManage ? (
       <Card>
         <CardHeader>
           <CardTitle>Create parent from student details</CardTitle>
@@ -377,7 +384,9 @@ export const ParentLinkManager = () => {
           ) : null}
         </CardContent>
       </Card>
+      ) : null}
 
+      {canManage ? (
       <Card>
         <CardHeader><CardTitle>Manual link (existing parent account)</CardTitle></CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
@@ -423,6 +432,7 @@ export const ParentLinkManager = () => {
           </div>
         </CardContent>
       </Card>
+      ) : null}
 
       <Card>
         <CardHeader><CardTitle>Existing links</CardTitle></CardHeader>
@@ -463,7 +473,7 @@ export const ParentLinkManager = () => {
                       ) : link.status === "REJECTED" ? (
                         <Badge className="bg-red-100 text-red-700">Rejected</Badge>
                       ) : (
-                        <Badge className="bg-emerald-100 text-emerald-800">Approved</Badge>
+                        <Badge className="bg-brand-100 text-brand-800">Approved</Badge>
                       )}
                     </Td>
                     <Td>

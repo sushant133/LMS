@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
-import type { DashboardHighlight } from "@phit-erp/shared";
+import { hasInstitutionAccess, type DashboardFeeDueStudent, type DashboardHighlight } from "@phit-erp/shared";
+import { AccountingSettings } from "../models/AccountingSettings.js";
 import { Attendance } from "../models/Attendance.js";
 import { Batch } from "../models/Batch.js";
 import { FeeCollection } from "../models/FeeCollection.js";
@@ -7,16 +8,114 @@ import { Notice } from "../models/Notice.js";
 import { Notification } from "../models/Notification.js";
 import { getActiveBannersForUser } from "./bannerController.js";
 import { SchoolClass } from "../models/SchoolClass.js";
+import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
 import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
+import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { assertInstitutionRead, assertInstitutionWrite } from "../utils/institutionAccess.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getLinkedStudentIds } from "../utils/parentScope.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { getTeacherScope } from "../utils/teacherScope.js";
+import { sendNotification, notifyParentsOfStudent } from "../utils/notificationService.js";
+import { ApiError } from "../utils/apiError.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
+
+const resolvePaymentStatus = (
+  outstandingAmountNpr: number,
+  amountPaidNpr: number,
+  dueDateBs?: string,
+  graceDays = 0
+): DashboardFeeDueStudent["paymentStatus"] => {
+  if (outstandingAmountNpr <= 0) {
+    return "PARTIAL";
+  }
+  if (amountPaidNpr <= 0) {
+    return "PENDING";
+  }
+  if (!dueDateBs) {
+    return "PARTIAL";
+  }
+
+  const dueParts = dueDateBs.split("-").map(Number);
+  const [year, month, day] = dueParts;
+  if (dueParts.length !== 3 || year === undefined || month === undefined || day === undefined || dueParts.some((part) => Number.isNaN(part))) {
+    return "PARTIAL";
+  }
+
+  const dueTimestamp = Date.UTC(year, month - 1, day + graceDays);
+  return Date.now() > dueTimestamp ? "OVERDUE" : "PARTIAL";
+};
+
+const buildFeeDueStudents = async (req: Request, schoolId: ReturnType<typeof tenantObjectId>): Promise<DashboardFeeDueStudent[]> => {
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+
+  const [students, primaryGroups, secondaryGroups, collections, settings] = await Promise.all([
+    Student.find({ schoolId, feesDueNpr: { $gt: 0 } })
+      .populate("user", "-password")
+      .sort({ feesDueNpr: -1 })
+      .lean(),
+    college ? Batch.find({ schoolId }).lean() : SchoolClass.find({ schoolId }).lean(),
+    college ? Year.find({ schoolId }).lean() : Section.find({ schoolId }).lean(),
+    FeeCollection.find({ schoolId, isDeleted: false }).lean(),
+    AccountingSettings.findOne({ schoolId }).lean()
+  ]);
+
+  const primaryMap = new Map(primaryGroups.map((item) => [item._id.toString(), item.name]));
+  const secondaryMap = new Map(secondaryGroups.map((item) => [item._id.toString(), item.name]));
+  const graceDays = settings?.lateFineGraceDays ?? 0;
+
+  return students.map((student) => {
+    const studentCollections = collections
+      .filter((item) => item.studentId.toString() === student._id.toString())
+      .sort((a, b) => b.paidDateBs.localeCompare(a.paidDateBs));
+    const totalPaid = studentCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
+    const totalDiscount = studentCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
+    const totalScholarship = studentCollections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
+    const outstandingAmountNpr = student.feesDueNpr ?? 0;
+    const totalFeeNpr = totalPaid + outstandingAmountNpr + totalDiscount + totalScholarship;
+    const latestCollection = studentCollections[0];
+    const installmentCollections = studentCollections.filter((item) => item.isInstallment && item.totalInstallments);
+    const maxInstallments = installmentCollections.reduce(
+      (max, item) => Math.max(max, item.totalInstallments ?? 0),
+      0
+    );
+    const paidInstallments = new Set(
+      installmentCollections.map((item) => item.installmentNumber).filter((value): value is number => typeof value === "number")
+    ).size;
+    const pendingInstallments = maxInstallments > 0 ? Math.max(maxInstallments - paidInstallments, 1) : outstandingAmountNpr > 0 ? 1 : 0;
+
+    const primaryId = college ? student.batchId?.toString() : student.classId?.toString();
+    const secondaryId = college ? student.yearId?.toString() : student.sectionId?.toString();
+    const user = student.user as { _id?: { toString(): string }; fullName?: string; email?: string } | null;
+
+    return {
+      studentId: student._id.toString(),
+      recipientUserId: user?._id?.toString() ?? "",
+      photoUrl: student.photoUrl ?? undefined,
+      fullName: user?.fullName ?? "Student",
+      admissionNumber: student.admissionNumber,
+      rollNumber: student.rollNumber,
+      courseName: primaryId ? (primaryMap.get(primaryId) ?? "") : "",
+      yearName: college && secondaryId ? (secondaryMap.get(secondaryId) ?? "") : undefined,
+      sectionName: !college && secondaryId ? (secondaryMap.get(secondaryId) ?? "") : undefined,
+      parentName: student.guardianName || student.fatherName,
+      contactNumber: student.guardianPhone || student.fatherPhone || "",
+      email: user?.email ?? "",
+      totalFeeNpr,
+      amountPaidNpr: totalPaid,
+      outstandingAmountNpr,
+      dueDateBs: latestCollection?.paidDateBs,
+      pendingInstallments,
+      paymentStatus: resolvePaymentStatus(outstandingAmountNpr, totalPaid, latestCollection?.paidDateBs, graceDays),
+      lastReceiptId: latestCollection?._id.toString()
+    };
+  });
+};
 
 export const getDashboard = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
@@ -25,13 +124,12 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   const role = req.user?.role;
   const isParent = role === "PARENT";
 
-  const noticeFilter =
-    role === "COLLEGE_ADMIN" || role === "SUPER_ADMIN"
-      ? { schoolId }
-      : { schoolId, visibleTo: role };
+  const institutionAccess = hasInstitutionAccess(role ?? "");
+
+  const noticeFilter = institutionAccess ? { schoolId } : { schoolId, visibleTo: role };
 
   const notificationFilter: Record<string, unknown> = { schoolId };
-  if (role !== "COLLEGE_ADMIN" && role !== "SUPER_ADMIN" && req.user?.userId) {
+  if (!institutionAccess && req.user?.userId) {
     notificationFilter.recipientUserId = req.user.userId;
   }
 
@@ -74,7 +172,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     feeFilter.studentId = studentProfile.studentId;
   }
 
-  const includeFees = role === "COLLEGE_ADMIN" || role === "SUPER_ADMIN";
+  const includeFees = institutionAccess;
   const groupLabel = college ? "Batches" : "Classes";
 
   const [
@@ -107,7 +205,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
           : Promise.resolve(0)
       : Promise.resolve(0),
     getActiveBannersForUser(req),
-    Notification.find(notificationFilter).sort({ createdAt: -1 }).limit(5).lean(),
+    Notification.find({ ...notificationFilter, read: false }).sort({ createdAt: -1 }).limit(5).lean(),
     Notification.countDocuments({ ...notificationFilter, read: false }),
     includeFees
       ? Student.find({ schoolId, feesDueNpr: { $gt: 0 } }).select("feesDueNpr").lean()
@@ -155,7 +253,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   }));
   const parentFeesDueNpr = children.reduce((sum, child) => sum + child.feesDueNpr, 0);
 
-  const adminLike = role === "COLLEGE_ADMIN" || role === "SUPER_ADMIN";
+  const adminLike = institutionAccess;
   const stats = adminLike
     ? [
         { label: "Students", value: studentCount },
@@ -206,7 +304,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       {
         label: "Students with fee dues",
         value: `${studentsWithDueFees} student${studentsWithDueFees === 1 ? "" : "s"}`,
-        href: "/students",
+        action: "fee-dues",
         tone: studentsWithDueFees > 0 ? "warning" : "default"
       },
       {
@@ -313,4 +411,48 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     studentsWithDueFees: adminLike ? studentsWithDueFees : undefined,
     children: isParent ? children : undefined
   });
+});
+
+export const getDashboardFeeDues = asyncHandler(async (req: Request, res: Response) => {
+  assertInstitutionRead(req);
+  const schoolId = tenantObjectId(req);
+  const students = await buildFeeDueStudents(req, schoolId);
+  return sendSuccess(res, "Students with fee dues fetched", students);
+});
+
+export const sendFeeDueReminder = asyncHandler(async (req: Request, res: Response) => {
+  assertInstitutionWrite(req);
+  const schoolId = tenantObjectId(req);
+  const student = await Student.findOne({ _id: req.params.studentId, schoolId, feesDueNpr: { $gt: 0 } })
+    .populate("user", "-password")
+    .lean();
+
+  if (!student) {
+    throw new ApiError(404, "Student with fee dues not found");
+  }
+
+  const user = student.user as { _id?: { toString(): string }; fullName?: string } | null;
+  const recipientUserId = user?._id?.toString();
+  if (!recipientUserId) {
+    throw new ApiError(400, "Student account is missing a linked user");
+  }
+
+  const outstandingAmountNpr = student.feesDueNpr ?? 0;
+  const studentName = user?.fullName ?? "Student";
+  const title = "Fee payment reminder";
+  const message = `${studentName}, an outstanding fee balance of NPR ${outstandingAmountNpr.toLocaleString("en-NP")} is due. Please contact the accounts office to settle your dues.`;
+
+  await sendNotification({
+    schoolId: schoolId.toString(),
+    recipientUserId,
+    title,
+    message,
+    type: "FEE",
+    channel: "BOTH",
+    metadata: { studentId: student._id.toString() }
+  });
+
+  await notifyParentsOfStudent(schoolId.toString(), student._id.toString(), title, message, "FEE", "BOTH");
+
+  return sendSuccess(res, "Fee reminder sent");
 });

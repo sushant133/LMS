@@ -218,7 +218,7 @@ export const PostDetailPanel = ({
             ) : null}
 
             {canSubmit ? (
-              <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
+              <div className="space-y-3 rounded-2xl border border-brand-200 bg-brand-50/50 p-4">
                 <h4 className="text-sm font-semibold text-slate-800">Your work</h4>
                 <Textarea
                   rows={3}
@@ -311,7 +311,7 @@ export const PostDetailPanel = ({
                               href={resolveAttachmentUrl(submission.attachmentUrl)}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="mt-1 inline-block text-emerald-700 hover:underline"
+                              className="mt-1 inline-block text-brand-700 hover:underline"
                             >
                               View attachment
                             </a>

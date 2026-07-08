@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  isInstitutionAdmin,
+  canManageInstitution,
   laboratoryEquipmentSchema,
   laboratoryIssueSchema,
   laboratorySchema,
@@ -30,7 +30,7 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
-import { DashboardBannerStrip } from "features/notices/DashboardBannerStrip";
+
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
@@ -59,7 +59,7 @@ const defaultStaff: ModuleStaffInput = { fullName: "", email: "", phone: "" };
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
-  RETURNED: "bg-emerald-100 text-emerald-800",
+  RETURNED: "bg-brand-100 text-brand-800",
   OVERDUE: "bg-rose-100 text-rose-800"
 };
 
@@ -73,7 +73,7 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminO
 
 export const LaboratoryManager = () => {
   const { user } = useAuth();
-  const isAdmin = isInstitutionAdmin(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [labForm, setLabForm] = useState<LaboratoryInput>(defaultLab);
   const [equipmentForm, setEquipmentForm] = useState<LaboratoryEquipmentInput>(defaultEquipment);
@@ -207,7 +207,7 @@ export const LaboratoryManager = () => {
         description="Create laboratories, manage equipment inventory, and issue items to teachers."
       />
 
-      <DashboardBannerStrip />
+
 
       <div className="flex flex-wrap gap-2">
         {visibleTabs.map((item) => {
@@ -218,7 +218,7 @@ export const LaboratoryManager = () => {
               variant={tab === item.id ? "default" : "secondary"}
               size="sm"
               onClick={() => setTab(item.id)}
-              className={cn(tab === item.id && "bg-emerald-600 hover:bg-emerald-700")}
+              className={cn(tab === item.id && "bg-brand-600 hover:bg-brand-700")}
             >
               <Icon className="mr-2 h-4 w-4" />
               {item.label}
@@ -236,7 +236,7 @@ export const LaboratoryManager = () => {
               { label: "Issued", value: dashboardQuery.data?.issuedEquipment ?? 0 },
               { label: "Remaining Stock", value: dashboardQuery.data?.remainingStock ?? 0 }
             ].map((stat) => (
-              <Card key={stat.label} className="bg-[linear-gradient(135deg,_white_0%,_#ecfdf5_100%)]">
+              <Card key={stat.label} className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
                 <CardContent className="py-6">
                   <p className="text-sm text-slate-500">{stat.label}</p>
                   <p className="text-3xl font-semibold text-slate-900">{stat.value}</p>
@@ -331,7 +331,7 @@ export const LaboratoryManager = () => {
                         <Td className="font-medium">{lab.name}</Td>
                         <Td>{lab.type}</Td>
                         <Td>
-                          <Badge className={lab.isActive ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}>
+                          <Badge className={lab.isActive ? "bg-brand-100 text-brand-800" : "bg-slate-100 text-slate-600"}>
                             {lab.isActive ? "Active" : "Inactive"}
                           </Badge>
                         </Td>
@@ -648,7 +648,7 @@ export const LaboratoryManager = () => {
                       <Td>{member.email}</Td>
                       <Td>{member.phone ?? "—"}</Td>
                       <Td>
-                        <Badge className={member.isActive ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}>
+                        <Badge className={member.isActive ? "bg-brand-100 text-brand-800" : "bg-slate-100 text-slate-600"}>
                           {member.isActive ? "Active" : "Inactive"}
                         </Badge>
                       </Td>

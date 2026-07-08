@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LABORATORY_TYPES, USER_ROLES } from "./constants.js";
+import { COMPLAINT_CATEGORIES, COMPLAINT_STATUSES, LABORATORY_TYPES, USER_ROLES } from "./constants.js";
 import {
   academicYearSchema,
   bsDateSchema,
@@ -13,10 +13,10 @@ import {
 export const dayOfWeekSchema = z.coerce.number().int().min(0).max(6);
 
 export const timetableSlotSchema = z.object({
-  classId: objectIdSchema.optional(),
-  sectionId: objectIdSchema.optional(),
-  batchId: objectIdSchema.optional(),
-  yearId: objectIdSchema.optional(),
+  classId: optionalObjectIdSchema,
+  sectionId: optionalObjectIdSchema,
+  batchId: optionalObjectIdSchema,
+  yearId: optionalObjectIdSchema,
   dayOfWeek: dayOfWeekSchema,
   periodNumber: z.coerce.number().int().min(1).max(12),
   subjectId: objectIdSchema,
@@ -243,3 +243,18 @@ export type TransportRouteInput = z.infer<typeof transportRouteSchema>;
 export type TransportAssignmentInput = z.infer<typeof transportAssignmentSchema>;
 export type LeaveRequestInput = z.infer<typeof leaveRequestSchema>;
 export type PayrollInput = z.infer<typeof payrollSchema>;
+
+export const createComplaintSchema = z.object({
+  subject: z.string().trim().min(3, "Subject must be at least 3 characters").max(200),
+  category: z.enum(COMPLAINT_CATEGORIES),
+  content: z.string().trim().min(10, "Please describe your complaint in at least 10 characters").max(5000),
+  attachments: z.array(assignmentAttachmentSchema).max(5).default([])
+});
+
+export const updateComplaintStatusSchema = z.object({
+  status: z.enum(COMPLAINT_STATUSES),
+  adminResponse: z.string().trim().max(2000).optional().or(z.literal(""))
+});
+
+export type CreateComplaintInput = z.infer<typeof createComplaintSchema>;
+export type UpdateComplaintStatusInput = z.infer<typeof updateComplaintStatusSchema>;

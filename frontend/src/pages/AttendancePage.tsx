@@ -1,4 +1,4 @@
-import { AttendanceManager } from "features/attendance/AttendanceManager";
+import { AttendanceHub } from "features/attendance/AttendanceHub";
 
-export const AttendancePage = () => <AttendanceManager />;
+export const AttendancePage = () => <AttendanceHub />;
 

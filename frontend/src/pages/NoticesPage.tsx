@@ -3,7 +3,7 @@ import { Image, Megaphone } from "lucide-react";
 import { PageContent } from "components/layout/PageContent";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
-import { isInstitutionAdmin } from "@phit-erp/shared";
+import { canManageInstitution } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
 import { BannerManager } from "features/notices/BannerManager";
 import { NoticeManager } from "features/notices/NoticeManager";
@@ -13,7 +13,7 @@ type NoticeTab = "board" | "banners";
 
 export const NoticesPage = () => {
   const { user } = useAuth();
-  const isAdmin = isInstitutionAdmin(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "");
   const [tab, setTab] = useState<NoticeTab>("board");
 
   return (
@@ -32,7 +32,7 @@ export const NoticesPage = () => {
           <Button
             type="button"
             variant={tab === "board" ? "default" : "outline"}
-            className={cn(tab === "board" && "bg-emerald-600 hover:bg-emerald-700")}
+            className={cn(tab === "board" && "bg-brand-600 hover:bg-brand-700")}
             onClick={() => setTab("board")}
           >
             <Megaphone className="mr-2 h-4 w-4" />
@@ -41,7 +41,7 @@ export const NoticesPage = () => {
           <Button
             type="button"
             variant={tab === "banners" ? "default" : "outline"}
-            className={cn(tab === "banners" && "bg-emerald-600 hover:bg-emerald-700")}
+            className={cn(tab === "banners" && "bg-brand-600 hover:bg-brand-700")}
             onClick={() => setTab("banners")}
           >
             <Image className="mr-2 h-4 w-4" />

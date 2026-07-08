@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import type { Response } from "express";
 import fs from "fs";
 import path from "path";
+import { collegeLogoExists, getCollegeLogoPath } from "./collegeLogo.js";
 import { formatCurrencyNpr } from "./currency.js";
 
 const FONTS_DIR = path.join(process.cwd(), "assets", "fonts");
@@ -90,6 +91,24 @@ const registerPdfFonts = (doc: PDFKit.PDFDocument): { regular: string; bold: str
 
 const hasDevanagari = (text: string): boolean => /[\u0900-\u097F]/.test(text);
 
+const drawCollegeLogo = (
+  doc: PDFKit.PDFDocument,
+  x: number,
+  y: number,
+  size: number
+): boolean => {
+  if (!collegeLogoExists()) {
+    return false;
+  }
+
+  doc.image(getCollegeLogoPath(), x, y, {
+    fit: [size, size],
+    align: "center",
+    valign: "center"
+  });
+  return true;
+};
+
 const drawReceiptRow = (
   doc: PDFKit.PDFDocument,
   label: string,
@@ -128,11 +147,15 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
 
   // Header band
   const headerTop = 40;
+  const logoSize = 64;
+  const logoInset = 14;
   doc
     .roundedRect(50, headerTop, contentWidth, 88, 8)
     .lineWidth(1)
-    .strokeColor("#059669")
+    .strokeColor("#0c2d6b")
     .stroke();
+
+  drawCollegeLogo(doc, 50 + logoInset, headerTop + 12, logoSize);
 
   doc.font(fonts.bold).fontSize(18).fillColor("#0f172a").text(data.schoolName, 50, headerTop + 16, {
     align: "center",
@@ -149,7 +172,7 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   doc
     .font(fonts.regular)
     .fontSize(10)
-    .fillColor("#059669")
+    .fillColor("#0c2d6b")
     .text("OFFICIAL FEE RECEIPT", 50, headerTop + (data.schoolNameNp ? 64 : 52), {
       align: "center",
       width: contentWidth,
@@ -194,7 +217,7 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   const colAmount = 430;
   const tableWidth = contentWidth;
 
-  doc.rect(colDesc, tableTop, tableWidth, 22).fill("#ecfdf5");
+  doc.rect(colDesc, tableTop, tableWidth, 22).fill("#eef3fb");
   doc.fillColor("#0f172a").font(fonts.bold).fontSize(10);
   doc.text("Description", colDesc + 10, tableTop + 6);
   doc.text("Amount (NPR)", colAmount, tableTop + 6, { width: 115, align: "right" });
@@ -242,7 +265,7 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   });
 
   y += 4;
-  doc.roundedRect(280, y, 265, 30, 6).fill("#059669");
+  doc.roundedRect(280, y, 265, 30, 6).fill("#0c2d6b");
   doc.font(fonts.bold).fontSize(12).fillColor("#ffffff");
   doc.text("Total Received", 295, y + 9, { width: 120 });
   doc.text(formatCurrencyNpr(data.totalPaid), 430, y + 9, { width: 100, align: "right" });
@@ -308,17 +331,21 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
 
   let y = margin;
 
-  doc.rect(leftX + contentWidth / 2 - 28, y, 56, 56).lineWidth(1).strokeColor("#000000").stroke();
-  doc
-    .font(fonts.bold)
-    .fontSize(18)
-    .fillColor("#000000")
-    .text(data.schoolName.slice(0, 1).toUpperCase(), leftX + contentWidth / 2 - 28, y + 16, {
-      width: 56,
-      align: "center"
-    });
+  const logoSize = 64;
+  const logoX = leftX + contentWidth / 2 - logoSize / 2;
+  if (!drawCollegeLogo(doc, logoX, y, logoSize)) {
+    doc.rect(logoX, y, logoSize, logoSize).lineWidth(1).strokeColor("#000000").stroke();
+    doc
+      .font(fonts.bold)
+      .fontSize(18)
+      .fillColor("#000000")
+      .text(data.schoolName.slice(0, 1).toUpperCase(), logoX, y + 20, {
+        width: logoSize,
+        align: "center"
+      });
+  }
 
-  y += 64;
+  y += logoSize + 8;
   doc.font(fonts.bold).fontSize(16).text(data.schoolName, leftX, y, { align: "center", width: contentWidth });
   y += 20;
 
@@ -450,25 +477,20 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
 
   y += 18;
   const footerTop = y;
-  const third = contentWidth / 3;
+  const half = contentWidth / 2;
 
-  doc.moveTo(leftX, footerTop + 40).lineTo(leftX + third - 20, footerTop + 40).strokeColor("#000000").stroke();
-  doc.font(fonts.regular).fontSize(8).text("Principal Signature", leftX, footerTop + 44, { width: third - 20, align: "center" });
+  doc.moveTo(leftX, footerTop + 40).lineTo(leftX + half - 20, footerTop + 40).strokeColor("#000000").stroke();
+  doc.font(fonts.regular).fontSize(8).text("Principal Signature", leftX, footerTop + 44, { width: half - 20, align: "center" });
   if (data.principalName) {
-    doc.font(fonts.regular).fontSize(8).text(data.principalName, leftX, footerTop + 24, { width: third - 20, align: "center" });
+    doc.font(fonts.regular).fontSize(8).text(data.principalName, leftX, footerTop + 24, { width: half - 20, align: "center" });
   }
 
   const controller = data.controllerOfExamination ?? "Controller of Examination";
   doc
-    .moveTo(leftX + third + 10, footerTop + 40)
-    .lineTo(leftX + third * 2 - 10, footerTop + 40)
+    .moveTo(leftX + half + 10, footerTop + 40)
+    .lineTo(leftX + contentWidth, footerTop + 40)
     .stroke();
-  doc.text(controller, leftX + third, footerTop + 44, { width: third, align: "center" });
-
-  const sealX = leftX + third * 2 + 20;
-  doc.rect(sealX, footerTop, 70, 70).lineWidth(1).dash(2, { space: 2 }).strokeColor("#000000").stroke();
-  doc.undash();
-  doc.text("College Seal", sealX, footerTop + 28, { width: 70, align: "center" });
+  doc.text(controller, leftX + half, footerTop + 44, { width: half - 10, align: "center" });
 
   y = footerTop + 82;
   doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(0.5).strokeColor("#000000").stroke();
@@ -481,10 +503,6 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
   if (data.verificationNumber) {
     doc.text(`Verification No.: ${data.verificationNumber}`, leftX + 180, y);
   }
-
-  const qrX = leftX + contentWidth - 52;
-  doc.rect(qrX, y - 4, 48, 48).lineWidth(0.5).strokeColor("#000000").stroke();
-  doc.fontSize(7).text("QR Code", qrX, y + 16, { width: 48, align: "center" });
 
   doc.end();
 }

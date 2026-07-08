@@ -13,6 +13,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { PAYMENT_METHODS } from "@phit-erp/shared";
 import { api, unwrap } from "lib/api";
+import { invalidateDashboardQueries } from "lib/dashboardQueries";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 
@@ -44,7 +45,12 @@ export const FeeRefundsPanel = ({ canWrite }: { canWrite: boolean }) => {
     onSuccess: async () => {
       toast.success("Refund processed");
       setForm(defaultForm);
-      await queryClient.invalidateQueries({ queryKey: ["fee-refunds", "accounting-student-accounts", "accounting-dashboard"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["fee-refunds"] }),
+        queryClient.invalidateQueries({ queryKey: ["accounting-student-accounts"] }),
+        queryClient.invalidateQueries({ queryKey: ["accounting-dashboard"] }),
+        invalidateDashboardQueries()
+      ]);
     },
     onError: (e) => toast.error(parseErrorMessage(e))
   });

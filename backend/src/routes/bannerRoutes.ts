@@ -3,9 +3,9 @@ import {
   createBanner,
   deleteBanner,
   dismissBanner,
-  duplicateBanner,
   listActiveBanners,
   listBanners,
+  replaceBannerImage,
   toggleBannerActive,
   updateBanner
 } from "../controllers/bannerController.js";
@@ -20,7 +20,7 @@ router.get("/active", listActiveBanners);
 router.get("/", admins, listBanners);
 router.post("/", admins, createBanner);
 router.put("/:id", admins, updateBanner);
-router.post("/:id/duplicate", admins, duplicateBanner);
+router.put("/:id/image", admins, replaceBannerImage);
 router.post("/:id/toggle-active", admins, toggleBannerActive);
 router.post("/:id/dismiss", dismissBanner);
 router.delete("/:id", admins, deleteBanner);

@@ -4,6 +4,7 @@ import { tenantGuard } from "../middleware/tenant.js";
 import {
   uploadBannerImageHandler,
   uploadClassroomAttachmentsHandler,
+  uploadComplaintAttachmentsHandler,
   uploadDocumentsHandler,
   uploadStaffPhotoHandler,
   uploadStudentPhotoHandler
@@ -11,6 +12,7 @@ import {
 import {
   uploadBannerImage,
   uploadClassroomAttachments,
+  uploadComplaintAttachments,
   uploadStaffPhoto,
   uploadStudentDocuments,
   uploadStudentPhoto
@@ -42,6 +44,25 @@ router.post(
   authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER", "STUDENT"),
   uploadClassroomAttachments,
   uploadClassroomAttachmentsHandler
+);
+
+router.post(
+  "/complaints",
+  authorize(
+    "SUPER_ADMIN",
+    "COLLEGE_ADMIN",
+    "TEACHER",
+    "STUDENT",
+    "COLLEGE_STAFF",
+    "LIBRARY_STAFF",
+    "LABORATORY_STAFF",
+    "ACCOUNTANT",
+    "CASHIER",
+    "AUDITOR",
+    "PRINCIPAL"
+  ),
+  uploadComplaintAttachments,
+  uploadComplaintAttachmentsHandler
 );
 
 router.post(

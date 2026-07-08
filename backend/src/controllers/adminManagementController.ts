@@ -80,7 +80,7 @@ const findManagedAdmin = async (req: Request, adminId: string) => {
   });
 
   if (!admin) {
-    throw new ApiError(404, "College Administrator account not found");
+    throw new ApiError(404, "Administrator account not found");
   }
 
   return admin;
@@ -105,14 +105,14 @@ export const listAdmins = asyncHandler(async (req: Request, res: Response) => {
 
   return sendSuccess(
     res,
-    "College Administrator accounts fetched",
+    "Administrator accounts fetched",
     (admins as UserLean[]).map(serializeAdmin)
   );
 });
 
 export const getAdmin = asyncHandler(async (req: Request, res: Response) => {
   const admin = await findManagedAdmin(req, String(req.params.id));
-  return sendSuccess(res, "College Administrator account fetched", serializeAdmin(admin as UserLean));
+  return sendSuccess(res, "Administrator account fetched", serializeAdmin(admin as UserLean));
 });
 
 export const createAdmin = asyncHandler(async (req: Request, res: Response) => {
@@ -148,7 +148,7 @@ export const createAdmin = asyncHandler(async (req: Request, res: Response) => {
 
     return sendSuccess(
       res,
-      "College Administrator account created",
+      "Administrator account created",
       {
         admin: serializeAdmin(admin as UserLean),
         loginEmail: email,
@@ -202,7 +202,7 @@ export const updateAdmin = asyncHandler(async (req: Request, res: Response) => {
     after
   });
 
-  return sendSuccess(res, "College Administrator account updated", after);
+  return sendSuccess(res, "Administrator account updated", after);
 });
 
 export const activateAdmin = asyncHandler(async (req: Request, res: Response) => {
@@ -222,7 +222,7 @@ export const activateAdmin = asyncHandler(async (req: Request, res: Response) =>
     after
   });
 
-  return sendSuccess(res, "College Administrator account activated", after);
+  return sendSuccess(res, "Administrator account activated", after);
 });
 
 export const deactivateAdmin = asyncHandler(async (req: Request, res: Response) => {
@@ -242,7 +242,7 @@ export const deactivateAdmin = asyncHandler(async (req: Request, res: Response) 
     after
   });
 
-  return sendSuccess(res, "College Administrator account deactivated", after);
+  return sendSuccess(res, "Administrator account deactivated", after);
 });
 
 export const lockAdmin = asyncHandler(async (req: Request, res: Response) => {
@@ -262,7 +262,7 @@ export const lockAdmin = asyncHandler(async (req: Request, res: Response) => {
     after
   });
 
-  return sendSuccess(res, "College Administrator account locked", after);
+  return sendSuccess(res, "Administrator account locked", after);
 });
 
 export const unlockAdmin = asyncHandler(async (req: Request, res: Response) => {
@@ -282,7 +282,7 @@ export const unlockAdmin = asyncHandler(async (req: Request, res: Response) => {
     after
   });
 
-  return sendSuccess(res, "College Administrator account unlocked", after);
+  return sendSuccess(res, "Administrator account unlocked", after);
 });
 
 export const resetAdminPassword = asyncHandler(async (req: Request, res: Response) => {
@@ -304,7 +304,7 @@ export const resetAdminPassword = asyncHandler(async (req: Request, res: Respons
     after: { ...after, password: "[redacted]" }
   });
 
-  return sendSuccess(res, "College Administrator password reset", {
+  return sendSuccess(res, "Administrator password reset", {
     admin: after,
     loginEmail: after.email
   });
@@ -328,7 +328,7 @@ export const softDeleteAdmin = asyncHandler(async (req: Request, res: Response) 
     after
   });
 
-  return sendSuccess(res, "College Administrator account deleted", after);
+  return sendSuccess(res, "Administrator account deleted", after);
 });
 
 export const getAdminActivityLogs = asyncHandler(async (req: Request, res: Response) => {
@@ -386,7 +386,7 @@ export const restoreAdmin = asyncHandler(async (req: Request, res: Response) => 
     after
   });
 
-  return sendSuccess(res, "College Administrator account restored", after);
+  return sendSuccess(res, "Administrator account restored", after);
 });
 
 export const impersonateAdmin = asyncHandler(async (req: Request, res: Response) => {

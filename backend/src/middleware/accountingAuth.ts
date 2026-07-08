@@ -14,6 +14,16 @@ export const requireAccountingPermission =
       return next();
     }
 
+    if (role === "COLLEGE_VIEWER") {
+      const readOnlyAllowed = permissions.every(
+        (permission) => permission === "read" || permission === "view_audit" || permission === "print_receipt"
+      );
+      if (readOnlyAllowed && permissions.some((permission) => hasAccountingPermission(role, permission))) {
+        return next();
+      }
+      return next(new ApiError(403, "You do not have permission to perform this accounting action"));
+    }
+
     const allowed = permissions.some((permission) => hasAccountingPermission(role, permission));
     if (!allowed) {
       return next(new ApiError(403, "You do not have permission to perform this accounting action"));

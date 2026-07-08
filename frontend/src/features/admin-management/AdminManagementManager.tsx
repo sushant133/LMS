@@ -35,7 +35,7 @@ const statusBadge = (admin: AdminAccountRecord) => {
   if (!admin.isActive) {
     return <Badge className="bg-amber-100 text-amber-800">Inactive / Locked</Badge>;
   }
-  return <Badge className="bg-emerald-100 text-emerald-800">Active</Badge>;
+  return <Badge className="bg-brand-100 text-brand-800">Active</Badge>;
 };
 
 export const AdminManagementManager = () => {
@@ -64,7 +64,7 @@ export const AdminManagementManager = () => {
     mutationFn: async (payload: AdminAccountInput) =>
       unwrap<{ admin: AdminAccountRecord; loginEmail: string; defaultPassword: string }>(api.post("/admins", payload)),
     onSuccess: async (data) => {
-      toast.success("College Administrator created", {
+      toast.success("Administrator created", {
         description: `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
       });
       setForm(defaultForm);
@@ -77,7 +77,7 @@ export const AdminManagementManager = () => {
     mutationFn: async ({ id, payload }: { id: string; payload: AdminAccountInput }) =>
       unwrap<AdminAccountRecord>(api.put(`/admins/${id}`, payload)),
     onSuccess: async () => {
-      toast.success("College Administrator updated");
+      toast.success("Administrator updated");
       setEditing(null);
       setForm(defaultForm);
       await invalidateAdmins();
@@ -132,15 +132,15 @@ export const AdminManagementManager = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Admin Management"
-        description="Create, update, lock, reset passwords, restore, and audit College Administrator accounts. System Administrator has full authority over every College Admin function."
+        title="Admin Users"
+        description="Create, update, lock, reset passwords, restore, and audit full Administrator accounts with complete ERP write access."
       />
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <UserCog className="h-5 w-5 text-emerald-700" />
-            {editing ? "Edit College Administrator" : "Create College Administrator"}
+            <UserCog className="h-5 w-5 text-brand-700" />
+            {editing ? "Edit Administrator" : "Create Administrator"}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -203,8 +203,8 @@ export const AdminManagementManager = () => {
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5 text-emerald-700" />
-            College Administrators
+            <Shield className="h-5 w-5 text-brand-700" />
+            Administrators
           </CardTitle>
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
@@ -217,7 +217,7 @@ export const AdminManagementManager = () => {
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {(adminsQuery.data ?? []).length === 0 ? (
-            <EmptyState title="No administrators found" description="Create the first College Administrator account for PHIT." />
+            <EmptyState title="No administrators found" description="Create the first Administrator account for PHIT." />
           ) : (
             <Table>
               <TableHead>
@@ -240,7 +240,7 @@ export const AdminManagementManager = () => {
                     <Td>{admin.email}</Td>
                     <Td>{admin.phone || "—"}</Td>
                     <Td>{statusBadge(admin)}</Td>
-                    <Td>College Administrator</Td>
+                    <Td>Administrator</Td>
                     <Td className="text-right">
                       <div className="flex flex-wrap justify-end gap-2">
                         <Button
@@ -359,7 +359,7 @@ export const AdminManagementManager = () => {
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-2">
-              <KeyRound className="h-5 w-5 text-emerald-700" />
+              <KeyRound className="h-5 w-5 text-brand-700" />
               {selectedAdmin.fullName} — Credentials & Activity
             </CardTitle>
             <Button size="sm" variant="outline" onClick={() => setSelectedAdminId(null)}>

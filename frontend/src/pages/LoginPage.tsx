@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Building2, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { getDemoLoginEntries, loginSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
@@ -23,11 +24,11 @@ const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
   if (!isDesktop) {
     return (
       <div className="flex flex-col items-center gap-3 px-6 pt-8 text-center text-white">
-        <div className="rounded-2xl bg-white/10 p-3">
-          <Building2 className="h-7 w-7" />
+        <div className="rounded-2xl bg-white/10 p-2">
+          <CollegeLogo variant="light" className="h-12 w-12" />
         </div>
         <h1 className="text-2xl font-semibold">{t("appName")}</h1>
-        <p className="max-w-sm text-sm text-emerald-50/85">{HERO_TAGLINE}</p>
+        <p className="max-w-sm text-sm text-brand-50/85">{HERO_TAGLINE}</p>
       </div>
     );
   }
@@ -35,8 +36,8 @@ const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
   return (
     <div className="flex min-h-full flex-col justify-between p-12 text-white">
       <div className="flex items-center gap-3">
-        <div className="rounded-2xl bg-white/10 p-3">
-          <Building2 className="h-7 w-7" />
+        <div className="rounded-2xl bg-white/10 p-2">
+          <CollegeLogo variant="light" className="h-12 w-12" />
         </div>
         <div>
           <h1 className="text-2xl font-semibold">{t("appName")}</h1>
@@ -44,9 +45,9 @@ const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
       </div>
 
       <div className="max-w-xl">
-        <p className="text-sm uppercase tracking-[0.3em] text-emerald-200">2026 Nepal-ready</p>
+        <p className="text-sm uppercase tracking-[0.3em] text-brand-200">2026 Nepal-ready</p>
         <h2 className="mt-4 text-5xl font-semibold leading-tight">{HERO_TAGLINE}</h2>
-        <p className="mt-6 text-lg text-emerald-50/85">{HERO_SUPPORT}</p>
+        <p className="mt-6 text-lg text-brand-50/85">{HERO_SUPPORT}</p>
       </div>
     </div>
   );
@@ -110,7 +111,7 @@ export const LoginPage = () => {
   return (
     <div
       key={logoutEpoch}
-      className="grid min-h-screen w-full bg-[linear-gradient(135deg,_#0f172a_0%,_#064e3b_45%,_#dcfce7_100%)]"
+      className="grid min-h-screen w-full bg-[linear-gradient(135deg,_#0f172a_0%,_#061535_45%,_#d6e2f5_100%)]"
       style={isDesktop ? { gridTemplateColumns: "1.2fr 0.8fr" } : undefined}
     >
       <LoginHero isDesktop={isDesktop} />
@@ -154,8 +155,8 @@ export const LoginPage = () => {
               </Button>
             </form>
 
-            <div className="mt-4 space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900">
-              <p className="font-semibold text-emerald-950">Demo login credentials</p>
+            <div className="mt-4 space-y-2 rounded-xl border border-brand-100 bg-brand-50/80 px-3 py-2 text-xs text-brand-900">
+              <p className="font-semibold text-brand-950">Demo login credentials</p>
               {getDemoLoginEntries().map((entry) => (
                 <p key={entry.email}>
                   {entry.label}: <span className="font-medium">{entry.email}</span> / <span className="font-medium">{entry.password}</span>
@@ -164,7 +165,7 @@ export const LoginPage = () => {
             </div>
             <p className="mt-4 text-sm text-slate-600">
               Parent without an account?{" "}
-              <Link className="font-semibold text-emerald-700" to="/register">
+              <Link className="font-semibold text-brand-700" to="/register">
                 Register with student registration number
               </Link>
             </p>

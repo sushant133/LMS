@@ -48,7 +48,7 @@ const assertStudentProfileAccess = async (req: Request, studentId: string): Prom
   const role = req.user?.role;
   if (!role) throw new ApiError(401, "Authentication required");
 
-  if (role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN" || role === "ACCOUNTANT") {
+  if (role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN" || role === "COLLEGE_VIEWER" || role === "ACCOUNTANT") {
     return;
   }
 
@@ -86,8 +86,8 @@ const getProfilePermissions = (req: Request) => {
   const role = req.user?.role ?? "";
   return {
     canManageDocuments: role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN",
-    canViewFinancial: ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "STUDENT", "PARENT"].includes(role),
-    canViewActivity: ["SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"].includes(role)
+    canViewFinancial: ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "ACCOUNTANT", "STUDENT", "PARENT"].includes(role),
+    canViewActivity: ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"].includes(role)
   };
 };
 

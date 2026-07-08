@@ -10,6 +10,7 @@ import {
   type SchoolRecord
 } from "@phit-erp/shared";
 import { toast } from "sonner";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
@@ -104,10 +105,16 @@ export const RegisterPage = () => {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[linear-gradient(160deg,_#ecfeff_0%,_#f8fafc_50%,_#dcfce7_100%)] p-6">
+    <div className="flex min-h-screen items-center justify-center bg-[linear-gradient(160deg,_#ecfeff_0%,_#f8fafc_50%,_#d6e2f5_100%)] p-6">
       <Card className="w-full max-w-lg">
         <CardHeader>
-          <CardTitle>Parent Registration</CardTitle>
+          <div className="mb-3 flex items-center gap-3">
+            <CollegeLogo className="h-14 w-14" />
+            <div>
+              <CardTitle>Parent Registration</CardTitle>
+              <p className="text-sm font-medium text-brand-800">{INSTITUTION_NAME}</p>
+            </div>
+          </div>
           <p className="text-sm text-slate-500">
             Register using your child&apos;s student registration (admission) number. Your account will be activated after
             college administrator approval.
@@ -117,7 +124,7 @@ export const RegisterPage = () => {
           <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
             <div className="md:col-span-2">
               <FormField label="Institution">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-medium text-emerald-950">
+                <div className="rounded-xl border border-brand-200 bg-brand-50/70 px-4 py-3 text-sm font-medium text-brand-950">
                   {schoolsQuery.data?.[0]?.name ?? INSTITUTION_NAME}
                 </div>
               </FormField>
@@ -192,7 +199,7 @@ export const RegisterPage = () => {
             </div>
 
             <div className="md:col-span-2 flex items-center justify-between">
-              <Link className="text-sm font-medium text-emerald-700" to="/login">
+              <Link className="text-sm font-medium text-brand-700" to="/login">
                 {t("login")}
               </Link>
               <Button type="submit" disabled={submitting}>

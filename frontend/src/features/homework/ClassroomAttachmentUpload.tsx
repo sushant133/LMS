@@ -77,7 +77,7 @@ export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }: C
                 ) : (
                   <FileText className="h-4 w-4 shrink-0 text-slate-500" />
                 )}
-                <a href={file.url} target="_blank" rel="noopener noreferrer" className="truncate text-emerald-700 hover:underline">
+                <a href={file.url} target="_blank" rel="noopener noreferrer" className="truncate text-brand-700 hover:underline">
                   {file.name}
                 </a>
               </div>

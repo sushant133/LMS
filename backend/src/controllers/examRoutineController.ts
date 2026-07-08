@@ -10,15 +10,10 @@ import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { getTeacherScope } from "../utils/teacherScope.js";
 import { sendNotification, getSchoolIdFromRequest } from "../utils/notificationService.js";
+import { assertInstitutionWrite } from "../utils/institutionAccess.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import { isCollege, getInstitutionType } from "../utils/institution.js";
-
-const assertAdmin = (req: Request): void => {
-  if (req.user?.role !== "COLLEGE_ADMIN" && req.user?.role !== "SUPER_ADMIN") {
-    throw new ApiError(403, "Only college administrators can manage exam routines");
-  }
-};
 
 const getExamOrThrow = async (req: Request, examId: string) => {
   const exam = await Exam.findOne(withTenantScope(req, { _id: examId }));
@@ -77,7 +72,7 @@ export const listExamRoutines = asyncHandler(async (req: Request, res: Response)
 });
 
 export const createExamRoutine = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req, "Only administrators can manage exam routines");
   const examId = String(req.params.examId);
   await getExamOrThrow(req, examId);
 
@@ -104,7 +99,7 @@ export const createExamRoutine = asyncHandler(async (req: Request, res: Response
 });
 
 export const updateExamRoutine = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req, "Only administrators can manage exam routines");
   const examId = String(req.params.examId);
   const routineId = String(req.params.routineId);
   await getExamOrThrow(req, examId);
@@ -135,7 +130,7 @@ export const updateExamRoutine = asyncHandler(async (req: Request, res: Response
 });
 
 export const deleteExamRoutine = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req, "Only administrators can manage exam routines");
   const examId = String(req.params.examId);
   const routineId = String(req.params.routineId);
 
@@ -186,7 +181,7 @@ const notifyExamAudience = async (req: Request, exam: { _id: unknown; name: stri
 };
 
 export const publishExamRoutine = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req, "Only administrators can manage exam routines");
   const examId = String(req.params.examId);
   const exam = await getExamOrThrow(req, examId);
 
@@ -212,7 +207,7 @@ export const publishExamRoutine = asyncHandler(async (req: Request, res: Respons
 });
 
 export const unpublishExamRoutine = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  assertInstitutionWrite(req, "Only administrators can manage exam routines");
   const examId = String(req.params.examId);
   const exam = await getExamOrThrow(req, examId);
   exam.routinePublished = false;

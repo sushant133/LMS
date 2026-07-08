@@ -23,6 +23,7 @@ import { filterYearsByBatch } from "lib/academicStructureUtils";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { MasterSubjectManager } from "./MasterSubjectManager";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 
 const defaultBatchValue: BatchInput = {
   name: "",
@@ -31,6 +32,7 @@ const defaultBatchValue: BatchInput = {
 };
 
 export const CollegeAcademicManager = () => {
+  const canManage = useIsTenantAdmin();
   const [batchForm, setBatchForm] = useState<BatchInput>(defaultBatchValue);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
@@ -140,6 +142,7 @@ export const CollegeAcademicManager = () => {
       />
 
       <MasterSubjectManager
+        canManage={canManage}
         pendingEditId={pendingMasterEditId}
         onPendingEditHandled={() => setPendingMasterEditId(null)}
       />
@@ -150,6 +153,7 @@ export const CollegeAcademicManager = () => {
             <CardTitle>Batches</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {canManage ? (
             <form
               className="space-y-3"
               onSubmit={(event) => {
@@ -179,6 +183,7 @@ export const CollegeAcademicManager = () => {
                 {editingBatchId ? "Update Batch" : "Create Batch"}
               </Button>
             </form>
+            ) : null}
 
             {batches.length === 0 ? (
               <EmptyState
@@ -199,29 +204,31 @@ export const CollegeAcademicManager = () => {
                           ))}
                         </ul>
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setEditingBatchId(item._id);
-                            setBatchForm({
-                              name: item.name,
-                              academicYearBs: item.academicYearBs,
-                              isActive: item.isActive
-                            });
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => void deleteEntity(`/academics/batches/${item._id}`, "batches")}
-                        >
-                          Delete
-                        </Button>
-                      </div>
+                      {canManage ? (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingBatchId(item._id);
+                              setBatchForm({
+                                name: item.name,
+                                academicYearBs: item.academicYearBs,
+                                isActive: item.isActive
+                              });
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => void deleteEntity(`/academics/batches/${item._id}`, "batches")}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}

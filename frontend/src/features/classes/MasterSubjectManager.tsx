@@ -33,11 +33,12 @@ const defaultMasterSubjectValue: MasterSubjectInput = {
 };
 
 interface MasterSubjectManagerProps {
+  canManage?: boolean;
   pendingEditId?: string | null;
   onPendingEditHandled?: () => void;
 }
 
-export const MasterSubjectManager = ({ pendingEditId, onPendingEditHandled }: MasterSubjectManagerProps) => {
+export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendingEditHandled }: MasterSubjectManagerProps) => {
   const formRef = useRef<HTMLDivElement>(null);
   const [form, setForm] = useState<MasterSubjectInput>(defaultMasterSubjectValue);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -193,30 +194,32 @@ export const MasterSubjectManager = ({ pendingEditId, onPendingEditHandled }: Ma
             Define the fixed HA curriculum once. Subjects are organized by year and automatically assigned to every batch.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            onClick={() => {
-              setEditingId(null);
-              setForm(defaultMasterSubjectValue);
-              setShowForm(true);
-              requestAnimationFrame(() => {
-                formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-              });
-            }}
-          >
-            Add Subject
-          </Button>
-          <Button type="button" variant="outline" onClick={() => void reconcileCurriculum()}>
-            Sync All Batches
-          </Button>
-        </div>
+        {canManage ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                setEditingId(null);
+                setForm(defaultMasterSubjectValue);
+                setShowForm(true);
+                requestAnimationFrame(() => {
+                  formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                });
+              }}
+            >
+              Add Subject
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void reconcileCurriculum()}>
+              Sync All Batches
+            </Button>
+          </div>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-6">
-        {showForm ? (
-          <div ref={formRef} className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
+        {canManage && showForm ? (
+          <div ref={formRef} className="rounded-2xl border border-brand-200 bg-brand-50/40 p-4">
             {editingSubject ? (
-              <p className="mb-4 text-sm font-medium text-emerald-900">
+              <p className="mb-4 text-sm font-medium text-brand-900">
                 Editing: {editingSubject.name} ({editingSubject.code}) — changes apply to all batches
               </p>
             ) : (
@@ -369,7 +372,7 @@ export const MasterSubjectManager = ({ pendingEditId, onPendingEditHandled }: Ma
                           yearSubjects.map((subject) => (
                             <tr
                               key={subject._id}
-                              className={editingId === subject._id ? "bg-emerald-50/60" : undefined}
+                              className={editingId === subject._id ? "bg-brand-50/60" : undefined}
                             >
                               <Td>
                                 <div className="font-medium">{subject.name}</div>

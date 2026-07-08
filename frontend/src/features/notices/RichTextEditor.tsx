@@ -50,7 +50,7 @@ export const RichTextEditor = ({ value, onChange, placeholder, className }: Rich
         role="textbox"
         aria-multiline
         data-placeholder={placeholder}
-        className="min-h-[120px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)]"
+        className="min-h-[120px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)]"
         onInput={() => onChange(editorRef.current?.innerHTML ?? "")}
         onBlur={() => onChange(editorRef.current?.innerHTML ?? "")}
         suppressContentEditableWarning

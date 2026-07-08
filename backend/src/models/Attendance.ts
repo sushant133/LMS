@@ -3,7 +3,7 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 const attendanceEntrySchema = new Schema(
   {
     studentId: { type: Schema.Types.ObjectId, ref: "Student", required: true },
-    status: { type: String, enum: ["PRESENT", "ABSENT", "LEAVE", "LATE"], required: true }
+    status: { type: String, enum: ["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"], required: true }
   },
   { _id: false }
 );

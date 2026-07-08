@@ -14,8 +14,10 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 
 export const HrManager = () => {
+  const canManage = useIsTenantAdmin();
   const [leaveForm, setLeaveForm] = useState<LeaveRequestInput>({ teacherId: "", type: "CASUAL", startDateBs: "", endDateBs: "", reason: "" });
   const [payrollForm, setPayrollForm] = useState<PayrollInput>({ teacherId: "", monthBs: "2082-01", basicSalaryNpr: 0, allowancesNpr: 0, deductionsNpr: 0, status: "DRAFT", paidDateBs: "" });
 
@@ -60,6 +62,8 @@ export const HrManager = () => {
     <div className="space-y-6">
       <PageHeader title="HR & Payroll" description="Leave requests, approvals, and monthly salary processing." />
       <div className="grid gap-6 lg:grid-cols-2">
+        {canManage ? (
+        <>
         <Card>
           <CardHeader><CardTitle>Leave request</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -98,6 +102,8 @@ export const HrManager = () => {
             <Button onClick={() => { const p = payrollSchema.safeParse(payrollForm); if (!p.success) return toast.error("Invalid payroll"); createPayroll.mutate(p.data); }}>Create payroll</Button>
           </CardContent>
         </Card>
+        </>
+        ) : null}
       </div>
       <Card>
         <CardHeader><CardTitle>Leave requests</CardTitle></CardHeader>
@@ -108,7 +114,7 @@ export const HrManager = () => {
               {(leavesQuery.data ?? []).map((l: { _id: string; teacherId?: { user: { fullName: string } }; type: string; startDateBs: string; endDateBs: string; status: string }) => (
                 <tr key={l._id}>
                   <Td>{l.teacherId?.user?.fullName}</Td><Td>{l.type}</Td><Td>{l.startDateBs} – {l.endDateBs}</Td><Td>{l.status}</Td>
-                  <Td>{l.status === "PENDING" ? (
+                  <Td>{canManage && l.status === "PENDING" ? (
                     <div className="flex gap-2">
                       <Button size="sm" onClick={() => updateLeave.mutate({ id: l._id, status: "APPROVED" })}>Approve</Button>
                       <Button size="sm" variant="secondary" onClick={() => updateLeave.mutate({ id: l._id, status: "REJECTED" })}>Reject</Button>

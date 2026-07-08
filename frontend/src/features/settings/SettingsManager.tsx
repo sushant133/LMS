@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { isInstitutionAdmin, settingsSchema, type SchoolSettingsRecord, type SettingsInput } from "@phit-erp/shared";
+import {
+  DEFAULT_DAILY_ATTENDANCE_CONFIG,
+  hasInstitutionAccess,
+  settingsSchema,
+  type SchoolSettingsRecord,
+  type SettingsInput
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
@@ -13,6 +20,7 @@ import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
+import { useReadOnlyAccess } from "hooks/useNormalizedRole";
 
 const defaultSettingsValue: SettingsInput = {
   schoolName: "",
@@ -29,6 +37,7 @@ const defaultSettingsValue: SettingsInput = {
     streetAddress: ""
   },
   holidays: [],
+  dailyAttendance: { ...DEFAULT_DAILY_ATTENDANCE_CONFIG },
   infrastructure: {
     classrooms: 0,
     usableClassrooms: 0,
@@ -49,6 +58,7 @@ const defaultSettingsValue: SettingsInput = {
 
 export const SettingsManager = () => {
   const { user, availableSchools } = useAuth();
+  const { isReadOnly, readOnlyMessage } = useReadOnlyAccess();
   const [form, setForm] = useState<SettingsInput>(defaultSettingsValue);
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -69,6 +79,7 @@ export const SettingsManager = () => {
       contactPhone: settingsQuery.data.contactPhone,
       address: settingsQuery.data.address,
       holidays: settingsQuery.data.holidays,
+      dailyAttendance: settingsQuery.data.dailyAttendance ?? { ...DEFAULT_DAILY_ATTENDANCE_CONFIG },
       infrastructure: (settingsQuery.data as any).infrastructure || defaultSettingsValue.infrastructure
     });
   }, [settingsQuery.data]);
@@ -88,8 +99,8 @@ export const SettingsManager = () => {
         title="Institution Settings" 
         description="Manage Public Himal Institute of Technology profile, contact details, holidays, and infrastructure data required for IEMIS reporting." 
       />
-      {isInstitutionAdmin(user?.role ?? "") && availableSchools?.[0] && (
-        <div className="-mt-4 text-sm text-emerald-700">
+      {hasInstitutionAccess(user?.role ?? "") && availableSchools?.[0] && (
+        <div className="-mt-4 text-sm text-brand-700">
           Updating details for <span className="font-medium">{availableSchools[0].name}</span>
         </div>
       )}
@@ -111,6 +122,12 @@ export const SettingsManager = () => {
             <CardTitle>College Profile</CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 flex items-center gap-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+              <CollegeLogo className="h-16 w-16" />
+              <p className="text-sm text-slate-600">
+                Official college logo used on marksheets, fee receipts, login screen, and application header.
+              </p>
+            </div>
             <div className="grid gap-4 md:grid-cols-2">
               <FormField label="College Name (English)">
                 <Input value={form.schoolName} onChange={(event) => setForm((current) => ({ ...current, schoolName: event.target.value }))} />
@@ -147,7 +164,7 @@ export const SettingsManager = () => {
         </Card>
 
         {/* Infrastructure (IEMIS) */}
-        <Card className="mb-6 border-emerald-200">
+        <Card className="mb-6 border-brand-200">
           <CardHeader>
             <CardTitle>Infrastructure Details (IEMIS)</CardTitle>
             <p className="text-sm text-slate-600">This data is used for government IEMIS / Flash Report submissions.</p>
@@ -197,7 +214,7 @@ export const SettingsManager = () => {
                           ...c,
                           infrastructure: { ...c.infrastructure, [key]: e.target.checked }
                         }))}
-                        className="h-4 w-4 accent-emerald-600"
+                        className="h-4 w-4 accent-brand-600"
                       />
                       {label}
                     </label>
@@ -211,6 +228,76 @@ export const SettingsManager = () => {
                 </FormField>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Daily Attendance Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <FormField label="Attendance Start Time">
+              <Input
+                value={form.dailyAttendance?.startTime ?? DEFAULT_DAILY_ATTENDANCE_CONFIG.startTime}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    dailyAttendance: {
+                      ...(current.dailyAttendance ?? DEFAULT_DAILY_ATTENDANCE_CONFIG),
+                      startTime: event.target.value
+                    }
+                  }))
+                }
+                placeholder="06:00"
+              />
+            </FormField>
+            <FormField label="Attendance End Time">
+              <Input
+                value={form.dailyAttendance?.endTime ?? DEFAULT_DAILY_ATTENDANCE_CONFIG.endTime}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    dailyAttendance: {
+                      ...(current.dailyAttendance ?? DEFAULT_DAILY_ATTENDANCE_CONFIG),
+                      endTime: event.target.value
+                    }
+                  }))
+                }
+                placeholder="12:00"
+              />
+            </FormField>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.dailyAttendance?.closeBeforeFirstPeriodEnds ?? true}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    dailyAttendance: {
+                      ...(current.dailyAttendance ?? DEFAULT_DAILY_ATTENDANCE_CONFIG),
+                      closeBeforeFirstPeriodEnds: event.target.checked
+                    }
+                  }))
+                }
+              />
+              Close attendance when the first period ends
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.dailyAttendance?.allowMedicalLeave ?? true}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    dailyAttendance: {
+                      ...(current.dailyAttendance ?? DEFAULT_DAILY_ATTENDANCE_CONFIG),
+                      allowMedicalLeave: event.target.checked
+                    }
+                  }))
+                }
+              />
+              Allow Medical Leave status
+            </label>
           </CardContent>
         </Card>
 
@@ -287,7 +374,7 @@ export const SettingsManager = () => {
         </Card>
 
         <div className="flex justify-end pt-2">
-          <Button type="submit" disabled={settingsMutation.isPending}>
+          <Button type="submit" disabled={settingsMutation.isPending || isReadOnly} title={isReadOnly ? readOnlyMessage : undefined}>
             {settingsMutation.isPending ? "Saving..." : "Save All Settings"}
           </Button>
         </div>

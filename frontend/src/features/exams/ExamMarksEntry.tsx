@@ -496,7 +496,7 @@ export const ExamMarksEntry = ({
               </ul>
             </div>
           ) : coverage.studentsTotal > 0 && canEditMarks ? (
-            <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            <p className="mt-3 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-800">
               All students have marks. You can submit for admin review.
             </p>
           ) : null}
@@ -602,7 +602,7 @@ export const ExamMarksEntry = ({
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
+      <div className="rounded-2xl border border-brand-200 bg-brand-50/40 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h4 className="font-semibold text-slate-900">Submit for Review</h4>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { isInstitutionAdmin } from "@phit-erp/shared";
+import { hasInstitutionAccess } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
 import { api } from "lib/api";
 import { Button } from "components/ui/button";
@@ -13,7 +13,7 @@ export const ReportsPage = () => {
   const { user, activeSchoolId } = useAuth();
   const [loading, setLoading] = useState<string | null>(null);
 
-  const canExport = isInstitutionAdmin(user?.role ?? "");
+  const canExport = hasInstitutionAccess(user?.role ?? "");
 
   const downloadExport = async (endpoint: string, label: string) => {
     if (!activeSchoolId) {
@@ -70,7 +70,7 @@ export const ReportsPage = () => {
       <PageHeader
         title={t("reports") || "Reports & IEMIS Compliance"}
         description={
-          isInstitutionAdmin(user?.role ?? "")
+          hasInstitutionAccess(user?.role ?? "")
             ? "Official IEMIS & Flash Report exports for Public Himal Institute of Technology. Use these for mandatory government submissions."
             : "Generate official IEMIS & Flash Report exports for Public Himal Institute of Technology."
         }
@@ -81,9 +81,9 @@ export const ReportsPage = () => {
         <h2 className="text-lg font-semibold mb-3 text-slate-800">Flash I – Input Data</h2>
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {/* Student Master */}
-          <Card className="border-emerald-100">
+          <Card className="border-brand-100">
             <CardHeader>
-              <CardTitle className="text-emerald-800">Student Master Data</CardTitle>
+              <CardTitle className="text-brand-800">Student Master Data</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-sm text-slate-600">Full student roster with disability, ethnicity, and guardian details.</p>
