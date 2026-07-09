@@ -4,7 +4,7 @@ import {
   adminAccountSchema,
   type AdminAccountInput,
   type AdminAccountRecord,
-  type AdminActivityLogEntry
+  type AdminActivityLogEntry,
 } from "@phit-erp/shared";
 import { KeyRound, LogIn, Shield, Trash2, UserCog } from "lucide-react";
 import { toast } from "sonner";
@@ -19,9 +19,10 @@ import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import {
+  toastAdminCredentialsUpdated,
   toastCredentialCreateResult,
   toastResendCredentials,
-  type CredentialsEmailResult
+  type CredentialsEmailResult,
 } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -30,7 +31,14 @@ const defaultForm: AdminAccountInput = {
   fullName: "",
   email: "",
   phone: "",
-  password: ""
+  password: "",
+};
+
+type AdminCredentialUpdateResult = {
+  admin: AdminAccountRecord;
+  loginEmail?: string;
+  defaultPassword?: string;
+  credentialsEmail?: CredentialsEmailResult;
 };
 
 const statusBadge = (admin: AdminAccountRecord) => {
@@ -38,7 +46,9 @@ const statusBadge = (admin: AdminAccountRecord) => {
     return <Badge className="bg-slate-200 text-slate-700">Deleted</Badge>;
   }
   if (!admin.isActive) {
-    return <Badge className="bg-amber-100 text-amber-800">Inactive / Locked</Badge>;
+    return (
+      <Badge className="bg-amber-100 text-amber-800">Inactive / Locked</Badge>
+    );
   }
   return <Badge className="bg-brand-100 text-brand-800">Active</Badge>;
 };
@@ -48,17 +58,24 @@ export const AdminManagementManager = () => {
   const [editing, setEditing] = useState<AdminAccountRecord | null>(null);
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
-  const [resetPassword, setResetPassword] = useState("");
+  const [credentialLoginId, setCredentialLoginId] = useState("");
+  const [credentialPassword, setCredentialPassword] = useState("");
 
   const adminsQuery = useQuery({
     queryKey: ["admins", includeDeleted],
-    queryFn: () => unwrap<AdminAccountRecord[]>(api.get("/admins", { params: { includeDeleted } }))
+    queryFn: () =>
+      unwrap<AdminAccountRecord[]>(
+        api.get("/admins", { params: { includeDeleted } }),
+      ),
   });
 
   const activityQuery = useQuery({
     queryKey: ["admins", selectedAdminId, "activity"],
-    queryFn: () => unwrap<AdminActivityLogEntry[]>(api.get(`/admins/${selectedAdminId}/activity`)),
-    enabled: Boolean(selectedAdminId)
+    queryFn: () =>
+      unwrap<AdminActivityLogEntry[]>(
+        api.get(`/admins/${selectedAdminId}/activity`),
+      ),
+    enabled: Boolean(selectedAdminId),
   });
 
   const invalidateAdmins = async () => {
@@ -74,30 +91,45 @@ export const AdminManagementManager = () => {
         credentialsEmail?: CredentialsEmailResult;
       }>(api.post("/admins", payload)),
     onSuccess: async (data) => {
-      toastCredentialCreateResult(data, { successTitle: "Administrator created successfully" });
+      toastCredentialCreateResult(data, {
+        successTitle: "Administrator created successfully",
+      });
       setForm(defaultForm);
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const resendCredentialsMutation = useMutation({
     mutationFn: async (userId: string) => toastResendCredentials(userId),
     onSuccess: async () => {
       await invalidateAdmins();
-    }
+    },
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, payload }: { id: string; payload: AdminAccountInput }) =>
-      unwrap<AdminAccountRecord>(api.put(`/admins/${id}`, payload)),
-    onSuccess: async () => {
-      toast.success("Administrator updated");
+    mutationFn: async ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: AdminAccountInput;
+    }) => unwrap<AdminCredentialUpdateResult>(api.put(`/admins/${id}`, payload)),
+    onSuccess: async (data) => {
+      if (data.credentialsEmail) {
+        toastAdminCredentialsUpdated(data, {
+          successTitle: "Administrator updated",
+        });
+      } else {
+        toast.success("Administrator updated");
+      }
       setEditing(null);
       setForm(defaultForm);
+      setCredentialLoginId(data.admin?.email ?? "");
+      setCredentialPassword("");
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const actionMutation = useMutation({
@@ -108,37 +140,83 @@ export const AdminManagementManager = () => {
       return unwrap<AdminAccountRecord>(api.post(`/admins/${id}/${action}`));
     },
     onSuccess: async (_data, variables) => {
-      toast.success(`Administrator ${variables.action.replace("-", " ")} successful`);
+      toast.success(
+        `Administrator ${variables.action.replace("-", " ")} successful`,
+      );
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const updateCredentialsMutation = useMutation({
+    mutationFn: async ({
+      id,
+      email,
+      password,
+    }: {
+      id: string;
+      email: string;
+      password?: string;
+    }) =>
+      unwrap<AdminCredentialUpdateResult>(
+        api.put(`/admins/${id}`, {
+          email,
+          ...(password ? { password } : {}),
+        }),
+      ),
+    onSuccess: async (data) => {
+      toastAdminCredentialsUpdated(data, {
+        successTitle: "Admin login credentials updated",
+      });
+      setCredentialPassword("");
+      if (data.admin?.email) {
+        setCredentialLoginId(data.admin.email);
+      }
+      await invalidateAdmins();
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const resetPasswordMutation = useMutation({
     mutationFn: async ({ id, password }: { id: string; password: string }) =>
-      unwrap<{ admin: AdminAccountRecord; loginEmail: string }>(api.post(`/admins/${id}/reset-password`, { password })),
+      unwrap<AdminCredentialUpdateResult>(
+        api.post(`/admins/${id}/reset-password`, {
+          password,
+          mustChangePassword: true,
+        }),
+      ),
     onSuccess: async (data) => {
-      toast.success("Password reset", { description: `Login ID: ${data.loginEmail}` });
-      setResetPassword("");
-      setSelectedAdminId(null);
+      toastAdminCredentialsUpdated(data, {
+        successTitle: "Administrator password reset",
+      });
+      setCredentialPassword("");
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const impersonateMutation = useMutation({
-    mutationFn: async (id: string) => unwrap<{ redirectTo: string }>(api.post(`/admins/${id}/impersonate`)),
+    mutationFn: async (id: string) =>
+      unwrap<{ redirectTo: string }>(api.post(`/admins/${id}/impersonate`)),
     onSuccess: async (data) => {
       toast.success("Impersonation started");
       window.location.href = data.redirectTo ?? "/dashboard/college_admin";
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const selectedAdmin = useMemo(
-    () => (adminsQuery.data ?? []).find((admin) => admin._id === selectedAdminId) ?? null,
-    [adminsQuery.data, selectedAdminId]
+    () =>
+      (adminsQuery.data ?? []).find((admin) => admin._id === selectedAdminId) ??
+      null,
+    [adminsQuery.data, selectedAdminId],
   );
+
+  const openCredentialsPanel = (admin: AdminAccountRecord) => {
+    setSelectedAdminId(admin._id);
+    setCredentialLoginId(admin.email);
+    setCredentialPassword("");
+  };
 
   if (adminsQuery.isLoading) {
     return <LoadingState />;
@@ -148,7 +226,7 @@ export const AdminManagementManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Admin Users"
-        description="Create, update, lock, reset passwords, restore, and audit full Administrator accounts with complete LMS write access."
+        description="As Super Admin, create and manage Administrators, change their login ID and password, and email them the new credentials automatically."
       />
 
       <Card>
@@ -165,12 +243,17 @@ export const AdminManagementManager = () => {
               event.preventDefault();
               const parsed = adminAccountSchema.safeParse(form);
               if (!parsed.success) {
-                toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                toast.error(
+                  parsed.error.issues[0]?.message ?? "Validation failed",
+                );
                 return;
               }
 
               if (editing) {
-                void updateMutation.mutateAsync({ id: editing._id, payload: parsed.data });
+                void updateMutation.mutateAsync({
+                  id: editing._id,
+                  payload: parsed.data,
+                });
                 return;
               }
 
@@ -178,22 +261,68 @@ export const AdminManagementManager = () => {
             }}
           >
             <FormField label="Full Name">
-              <Input value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
+              <Input
+                value={form.fullName}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    fullName: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Login ID (Email or Username)">
-              <Input value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+              <Input
+                value={form.email}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    email: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Phone">
-              <Input value={form.phone ?? ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+              <Input
+                value={form.phone ?? ""}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                  }))
+                }
+              />
             </FormField>
-            <FormField label={editing ? "New Password (optional)" : "Initial Password (optional)"}>
+            <FormField
+              label={
+                editing
+                  ? "New Password (optional — emailed if changed)"
+                  : "Initial Password (optional)"
+              }
+            >
               <Input
                 type="password"
                 value={form.password ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                placeholder={editing ? "Leave blank to keep current password" : "Uses system default if blank"}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    password: event.target.value,
+                  }))
+                }
+                placeholder={
+                  editing
+                    ? "Leave blank to keep current password"
+                    : "Uses system default if blank"
+                }
               />
             </FormField>
+            {editing ? (
+              <p className="md:col-span-2 text-xs text-slate-500">
+                Changing Login ID or password emails the Administrator their
+                updated credentials. Use &quot;Login &amp; Password&quot; on a
+                row for a dedicated credentials update panel.
+              </p>
+            ) : null}
             <div className="md:col-span-2 flex flex-wrap justify-end gap-2">
               {editing ? (
                 <Button
@@ -207,8 +336,17 @@ export const AdminManagementManager = () => {
                   Cancel
                 </Button>
               ) : null}
-              <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
-                {editing ? (updateMutation.isPending ? "Saving..." : "Save Changes") : createMutation.isPending ? "Creating..." : "Create Administrator"}
+              <Button
+                type="submit"
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
+                {editing
+                  ? updateMutation.isPending
+                    ? "Saving..."
+                    : "Save Changes"
+                  : createMutation.isPending
+                    ? "Creating..."
+                    : "Create Administrator"}
               </Button>
             </div>
           </form>
@@ -232,7 +370,10 @@ export const AdminManagementManager = () => {
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {(adminsQuery.data ?? []).length === 0 ? (
-            <EmptyState title="No administrators found" description="Create the first Administrator account for PHIT." />
+            <EmptyState
+              title="No administrators found"
+              description="Create the first Administrator account for PHIT."
+            />
           ) : (
             <Table>
               <TableHead>
@@ -249,8 +390,14 @@ export const AdminManagementManager = () => {
                 {(adminsQuery.data ?? []).map((admin) => (
                   <tr key={admin._id}>
                     <Td>
-                      <div className="font-medium text-slate-900">{admin.fullName}</div>
-                      {admin.mustChangePassword ? <div className="text-xs text-amber-700">Must change password</div> : null}
+                      <div className="font-medium text-slate-900">
+                        {admin.fullName}
+                      </div>
+                      {admin.mustChangePassword ? (
+                        <div className="text-xs text-amber-700">
+                          Must change password
+                        </div>
+                      ) : null}
                     </Td>
                     <Td>{admin.email}</Td>
                     <Td>{admin.phone || "—"}</Td>
@@ -268,7 +415,7 @@ export const AdminManagementManager = () => {
                               fullName: admin.fullName,
                               email: admin.email,
                               phone: admin.phone ?? "",
-                              password: ""
+                              password: "",
                             });
                           }}
                         >
@@ -278,9 +425,10 @@ export const AdminManagementManager = () => {
                           size="sm"
                           variant="outline"
                           disabled={admin.isDeleted}
-                          onClick={() => setSelectedAdminId(admin._id)}
+                          onClick={() => openCredentialsPanel(admin)}
                         >
-                          Activity
+                          <KeyRound className="mr-1 h-3.5 w-3.5" />
+                          Login & Password
                         </Button>
                         {admin.isActive && !admin.isDeleted ? (
                           <>
@@ -288,7 +436,12 @@ export const AdminManagementManager = () => {
                               size="sm"
                               variant="outline"
                               disabled={actionMutation.isPending}
-                              onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "deactivate" })}
+                              onClick={() =>
+                                void actionMutation.mutateAsync({
+                                  id: admin._id,
+                                  action: "deactivate",
+                                })
+                              }
                             >
                               Deactivate
                             </Button>
@@ -296,7 +449,12 @@ export const AdminManagementManager = () => {
                               size="sm"
                               variant="outline"
                               disabled={actionMutation.isPending}
-                              onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "lock" })}
+                              onClick={() =>
+                                void actionMutation.mutateAsync({
+                                  id: admin._id,
+                                  action: "lock",
+                                })
+                              }
                             >
                               Lock
                             </Button>
@@ -307,7 +465,12 @@ export const AdminManagementManager = () => {
                               size="sm"
                               variant="outline"
                               disabled={actionMutation.isPending}
-                              onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "activate" })}
+                              onClick={() =>
+                                void actionMutation.mutateAsync({
+                                  id: admin._id,
+                                  action: "activate",
+                                })
+                              }
                             >
                               Activate
                             </Button>
@@ -315,7 +478,12 @@ export const AdminManagementManager = () => {
                               size="sm"
                               variant="outline"
                               disabled={actionMutation.isPending}
-                              onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "unlock" })}
+                              onClick={() =>
+                                void actionMutation.mutateAsync({
+                                  id: admin._id,
+                                  action: "unlock",
+                                })
+                              }
                             >
                               Unlock
                             </Button>
@@ -326,7 +494,12 @@ export const AdminManagementManager = () => {
                             size="sm"
                             variant="outline"
                             disabled={actionMutation.isPending}
-                            onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "restore" })}
+                            onClick={() =>
+                              void actionMutation.mutateAsync({
+                                id: admin._id,
+                                action: "restore",
+                              })
+                            }
                           >
                             Restore
                           </Button>
@@ -335,10 +508,18 @@ export const AdminManagementManager = () => {
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={impersonateMutation.isPending || !admin.isActive}
+                              disabled={
+                                impersonateMutation.isPending || !admin.isActive
+                              }
                               onClick={() => {
-                                if (window.confirm(`Login as ${admin.fullName} for troubleshooting?`)) {
-                                  void impersonateMutation.mutateAsync(admin._id);
+                                if (
+                                  window.confirm(
+                                    `Login as ${admin.fullName} for troubleshooting?`,
+                                  )
+                                ) {
+                                  void impersonateMutation.mutateAsync(
+                                    admin._id,
+                                  );
                                 }
                               }}
                             >
@@ -350,8 +531,15 @@ export const AdminManagementManager = () => {
                               variant="destructive"
                               disabled={actionMutation.isPending}
                               onClick={() => {
-                                if (window.confirm(`Delete ${admin.fullName}? This is a soft delete and preserves audit history.`)) {
-                                  void actionMutation.mutateAsync({ id: admin._id, action: "delete" });
+                                if (
+                                  window.confirm(
+                                    `Delete ${admin.fullName}? This is a soft delete and preserves audit history.`,
+                                  )
+                                ) {
+                                  void actionMutation.mutateAsync({
+                                    id: admin._id,
+                                    action: "delete",
+                                  });
                                 }
                               }}
                             >
@@ -375,50 +563,155 @@ export const AdminManagementManager = () => {
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-2">
               <KeyRound className="h-5 w-5 text-brand-700" />
-              {selectedAdmin.fullName} — Credentials & Activity
+              {selectedAdmin.fullName} — Login Credentials & Activity
             </CardTitle>
-            <Button size="sm" variant="outline" onClick={() => setSelectedAdminId(null)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSelectedAdminId(null);
+                setCredentialPassword("");
+              }}
+            >
               Close
             </Button>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-[1fr_auto_auto] md:items-end">
-              <FormField label="Reset Password">
-                <Input
-                  type="password"
-                  value={resetPassword}
-                  onChange={(event) => setResetPassword(event.target.value)}
-                  placeholder="Enter a new password (min 6 characters)"
-                />
-              </FormField>
-              <Button
-                disabled={resetPasswordMutation.isPending || resetPassword.length < 6 || selectedAdmin.isDeleted}
-                onClick={() => void resetPasswordMutation.mutateAsync({ id: selectedAdmin._id, password: resetPassword })}
-              >
-                Reset Password
-              </Button>
-              <Button
-                variant="outline"
-                disabled={resendCredentialsMutation.isPending || selectedAdmin.isDeleted || !selectedAdmin.isActive}
-                onClick={() => void resendCredentialsMutation.mutateAsync(selectedAdmin._id)}
-              >
-                Resend Credentials
-              </Button>
+            <div className="rounded-2xl border border-brand-100 bg-brand-50/50 p-4">
+              <h3 className="text-sm font-semibold text-brand-900">
+                Change Administrator Login ID & Password
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Super Admin can update the Administrator login ID and/or
+                password. When either is changed, an email is sent to the
+                Administrator with the new login details.
+              </p>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <FormField label="Admin Login ID (Email or Username)">
+                  <Input
+                    value={credentialLoginId}
+                    onChange={(event) =>
+                      setCredentialLoginId(event.target.value)
+                    }
+                    placeholder="admin@college.edu or admin.login"
+                    disabled={selectedAdmin.isDeleted}
+                  />
+                </FormField>
+                <FormField label="New Password (optional)">
+                  <Input
+                    type="password"
+                    value={credentialPassword}
+                    onChange={(event) =>
+                      setCredentialPassword(event.target.value)
+                    }
+                    placeholder="Min 6 characters — leave blank to keep current"
+                    disabled={selectedAdmin.isDeleted}
+                  />
+                </FormField>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  disabled={
+                    updateCredentialsMutation.isPending ||
+                    selectedAdmin.isDeleted ||
+                    !credentialLoginId.trim() ||
+                    (credentialLoginId.trim().toLowerCase() ===
+                      selectedAdmin.email.toLowerCase() &&
+                      !credentialPassword)
+                  }
+                  onClick={() => {
+                    if (
+                      credentialPassword &&
+                      credentialPassword.trim().length < 6
+                    ) {
+                      toast.error("Password must be at least 6 characters");
+                      return;
+                    }
+                    if (
+                      !window.confirm(
+                        `Update login credentials for ${selectedAdmin.fullName} and email the new details to ${credentialLoginId.trim()}?`,
+                      )
+                    ) {
+                      return;
+                    }
+                    void updateCredentialsMutation.mutateAsync({
+                      id: selectedAdmin._id,
+                      email: credentialLoginId.trim(),
+                      password: credentialPassword.trim() || undefined,
+                    });
+                  }}
+                >
+                  {updateCredentialsMutation.isPending
+                    ? "Updating..."
+                    : "Update Login & Email Admin"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={
+                    resetPasswordMutation.isPending ||
+                    selectedAdmin.isDeleted ||
+                    credentialPassword.trim().length < 6
+                  }
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        `Reset password for ${selectedAdmin.fullName} and email the new password to ${selectedAdmin.email}?`,
+                      )
+                    ) {
+                      return;
+                    }
+                    void resetPasswordMutation.mutateAsync({
+                      id: selectedAdmin._id,
+                      password: credentialPassword.trim(),
+                    });
+                  }}
+                >
+                  {resetPasswordMutation.isPending
+                    ? "Resetting..."
+                    : "Reset Password Only & Email"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={
+                    resendCredentialsMutation.isPending ||
+                    selectedAdmin.isDeleted ||
+                    !selectedAdmin.isActive
+                  }
+                  onClick={() =>
+                    void resendCredentialsMutation.mutateAsync(
+                      selectedAdmin._id,
+                    )
+                  }
+                >
+                  Generate New Password & Resend Email
+                </Button>
+              </div>
             </div>
 
             <div>
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-slate-500">Activity Logs</h3>
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-slate-500">
+                Activity Logs
+              </h3>
               {activityQuery.isLoading ? (
                 <LoadingState />
               ) : (activityQuery.data ?? []).length === 0 ? (
-                <p className="text-sm text-slate-600">No activity recorded for this administrator yet.</p>
+                <p className="text-sm text-slate-600">
+                  No activity recorded for this administrator yet.
+                </p>
               ) : (
                 <div className="space-y-3">
                   {(activityQuery.data ?? []).map((entry) => (
-                    <div key={entry._id} className="rounded-xl border border-slate-200 px-4 py-3 text-sm">
+                    <div
+                      key={entry._id}
+                      className="rounded-xl border border-slate-200 px-4 py-3 text-sm"
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-medium text-slate-900">{entry.action}</span>
-                        <span className="text-xs text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span>
+                        <span className="font-medium text-slate-900">
+                          {entry.action}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {new Date(entry.createdAt).toLocaleString()}
+                        </span>
                       </div>
                       <p className="mt-1 text-slate-600">
                         {entry.entity} · {entry.entityId}

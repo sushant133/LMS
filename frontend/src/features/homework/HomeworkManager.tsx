@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { BookOpen, Filter, Plus } from "lucide-react";
-import type { AssignmentInput, ClassroomFeedResponse, ClassroomPost } from "@phit-erp/shared";
+import type {
+  AssignmentInput,
+  ClassroomFeedResponse,
+  ClassroomPost,
+} from "@phit-erp/shared";
 import { ASSIGNMENT_TYPES } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
@@ -27,7 +31,7 @@ const STATUS_FILTER_OPTIONS = [
   { value: "OVERDUE", label: "Overdue" },
   { value: "PENDING", label: "Not Submitted" },
   { value: "SUBMITTED", label: "Submitted" },
-  { value: "GRADED", label: "Graded" }
+  { value: "GRADED", label: "Graded" },
 ];
 
 export const HomeworkManager = () => {
@@ -48,19 +52,25 @@ export const HomeworkManager = () => {
     type: "",
     status: "",
     dateFrom: "",
-    dateTo: ""
+    dateTo: "",
   });
 
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string; code: string }>>(api.get("/academics/subjects")),
-    enabled: isParent
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string; code: string }>>(
+        api.get("/academics/subjects"),
+      ),
+    enabled: isParent,
   });
 
   const studentSubjectsQuery = useQuery({
     queryKey: ["student-subjects"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string; code: string }>>(api.get("/student/subjects")),
-    enabled: isStudent
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string; code: string }>>(
+        api.get("/student/subjects"),
+      ),
+    enabled: isStudent,
   });
 
   const classes = isTeacher ? (teacherScopeQuery.data?.classes ?? []) : [];
@@ -84,10 +94,10 @@ export const HomeworkManager = () => {
             type: filters.type || undefined,
             status: filters.status || undefined,
             dateFrom: filters.dateFrom || undefined,
-            dateTo: filters.dateTo || undefined
-          }
-        })
-      )
+            dateTo: filters.dateTo || undefined,
+          },
+        }),
+      ),
   });
 
   const saveMutation = useMutation({
@@ -103,19 +113,21 @@ export const HomeworkManager = () => {
       setEditingPost(null);
       await queryClient.invalidateQueries({ queryKey: ["homework-feed"] });
       if (selectedPostId) {
-        await queryClient.invalidateQueries({ queryKey: ["homework-detail", selectedPostId] });
+        await queryClient.invalidateQueries({
+          queryKey: ["homework-detail", selectedPostId],
+        });
       }
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const pinnedPosts = useMemo(
     () => (feedQuery.data?.posts ?? []).filter((post) => post.isPinned),
-    [feedQuery.data?.posts]
+    [feedQuery.data?.posts],
   );
   const streamPosts = useMemo(
     () => (feedQuery.data?.posts ?? []).filter((post) => !post.isPinned),
-    [feedQuery.data?.posts]
+    [feedQuery.data?.posts],
   );
   const topicSuggestions = feedQuery.data?.topics ?? [];
 
@@ -127,7 +139,9 @@ export const HomeworkManager = () => {
             <BookOpen className="h-3.5 w-3.5 shrink-0" />
             Classroom Stream
           </div>
-          <h1 className="text-xl font-bold sm:text-3xl">Assignments, CAS & Notes</h1>
+          <h1 className="text-xl font-bold sm:text-3xl">
+            Assignments, CAS & Notes
+          </h1>
           <p className="max-w-2xl text-sm text-sky-100 sm:text-base">
             {canManage
               ? "Share assignments, activities, and notes with your class."
@@ -160,7 +174,12 @@ export const HomeworkManager = () => {
         <Select
           className="min-w-0"
           value={filters.subjectId}
-          onChange={(event) => setFilters((current) => ({ ...current, subjectId: event.target.value }))}
+          onChange={(event) =>
+            setFilters((current) => ({
+              ...current,
+              subjectId: event.target.value,
+            }))
+          }
         >
           <option value="">All subjects</option>
           {subjects.map((subject) => (
@@ -172,7 +191,9 @@ export const HomeworkManager = () => {
         <Select
           className="min-w-0"
           value={filters.type}
-          onChange={(event) => setFilters((current) => ({ ...current, type: event.target.value }))}
+          onChange={(event) =>
+            setFilters((current) => ({ ...current, type: event.target.value }))
+          }
         >
           <option value="">All types</option>
           {ASSIGNMENT_TYPES.map((type) => (
@@ -184,7 +205,12 @@ export const HomeworkManager = () => {
         <Select
           className="min-w-0"
           value={filters.status}
-          onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+          onChange={(event) =>
+            setFilters((current) => ({
+              ...current,
+              status: event.target.value,
+            }))
+          }
         >
           {STATUS_FILTER_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -196,7 +222,9 @@ export const HomeworkManager = () => {
           className="min-w-0 sm:col-span-2 xl:col-span-3"
           placeholder="Topic / unit"
           value={filters.topic}
-          onChange={(event) => setFilters((current) => ({ ...current, topic: event.target.value }))}
+          onChange={(event) =>
+            setFilters((current) => ({ ...current, topic: event.target.value }))
+          }
           list="stream-topic-suggestions"
         />
         {!isPortalUser ? (
@@ -204,12 +232,22 @@ export const HomeworkManager = () => {
             <Input
               placeholder="From (BS)"
               value={filters.dateFrom}
-              onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  dateFrom: event.target.value,
+                }))
+              }
             />
             <Input
               placeholder="To (BS)"
               value={filters.dateTo}
-              onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  dateTo: event.target.value,
+                }))
+              }
             />
           </div>
         ) : null}
@@ -255,16 +293,26 @@ export const HomeworkManager = () => {
       {(feedQuery.data?.posts.length ?? 0) === 0 ? (
         <EmptyState
           title="No posts yet"
-          description={canManage ? "Create your first assignment, CAS activity, or class note." : "Your teachers have not posted anything yet."}
+          description={
+            canManage
+              ? "Create your first assignment, CAS activity, or class note."
+              : "Your teachers have not posted anything yet."
+          }
         />
       ) : (
         <div className="space-y-6">
           {pinnedPosts.length > 0 ? (
             <section className="space-y-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Pinned</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                Pinned
+              </h2>
               <div className="space-y-3">
                 {pinnedPosts.map((post) => (
-                  <ClassroomPostCard key={post._id} post={post} onOpen={(item) => setSelectedPostId(item._id)} />
+                  <ClassroomPostCard
+                    key={post._id}
+                    post={post}
+                    onOpen={(item) => setSelectedPostId(item._id)}
+                  />
                 ))}
               </div>
             </section>
@@ -272,11 +320,17 @@ export const HomeworkManager = () => {
 
           <section className="space-y-3">
             {pinnedPosts.length > 0 ? (
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Stream</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                Stream
+              </h2>
             ) : null}
             <div className="space-y-3">
               {streamPosts.map((post) => (
-                <ClassroomPostCard key={post._id} post={post} onOpen={(item) => setSelectedPostId(item._id)} />
+                <ClassroomPostCard
+                  key={post._id}
+                  post={post}
+                  onOpen={(item) => setSelectedPostId(item._id)}
+                />
               ))}
             </div>
           </section>
@@ -315,7 +369,9 @@ export const HomeworkManager = () => {
           }}
           onDeleted={async () => {
             setSelectedPostId(null);
-            await queryClient.invalidateQueries({ queryKey: ["homework-feed"] });
+            await queryClient.invalidateQueries({
+              queryKey: ["homework-feed"],
+            });
           }}
         />
       ) : null}

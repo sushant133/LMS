@@ -35,32 +35,48 @@ export const FinancialApprovalsPanel = ({ canApprove }: Props) => {
 
   const approvalsQuery = useQuery({
     queryKey: ["accounting-approvals"],
-    queryFn: () => unwrap<FinancialApprovalRecord[]>(api.get("/accounting/approvals", { params: { status: "PENDING" } }))
+    queryFn: () =>
+      unwrap<FinancialApprovalRecord[]>(
+        api.get("/accounting/approvals", { params: { status: "PENDING" } }),
+      ),
   });
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => unwrap(api.post(`/accounting/approvals/${id}/approve`)),
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/accounting/approvals/${id}/approve`)),
     onSuccess: () => {
       toast.success("Transaction approved and processed");
-      void queryClient.invalidateQueries({ queryKey: ["accounting-approvals"] });
-      void queryClient.invalidateQueries({ queryKey: ["accounting-dashboard"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["accounting-approvals"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["accounting-dashboard"],
+      });
       void queryClient.invalidateQueries({ queryKey: ["accounting-receipts"] });
-      void queryClient.invalidateQueries({ queryKey: ["accounting-audit-logs"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["accounting-audit-logs"],
+      });
       void invalidateDashboardQueries();
     },
-    onError: (error: Error) => toast.error(error.message)
+    onError: (error: Error) => toast.error(error.message),
   });
 
   const rejectMutation = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      unwrap(api.post(`/accounting/approvals/${id}/reject`, { rejectionReason: reason })),
+      unwrap(
+        api.post(`/accounting/approvals/${id}/reject`, {
+          rejectionReason: reason,
+        }),
+      ),
     onSuccess: () => {
       toast.success("Approval request rejected");
       setRejectId(null);
       setRejectionReason("");
-      void queryClient.invalidateQueries({ queryKey: ["accounting-approvals"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["accounting-approvals"],
+      });
     },
-    onError: (error: Error) => toast.error(error.message)
+    onError: (error: Error) => toast.error(error.message),
   });
 
   const pending = approvalsQuery.data ?? [];
@@ -70,14 +86,18 @@ export const FinancialApprovalsPanel = ({ canApprove }: Props) => {
       <CardHeader>
         <CardTitle>Pending Approvals</CardTitle>
         <p className="text-sm text-slate-500">
-          High-value reversals and voids require Principal or Finance Administrator approval.
+          High-value reversals and voids require Principal or Finance
+          Administrator approval.
         </p>
       </CardHeader>
       <CardContent className="overflow-x-auto">
         {approvalsQuery.isLoading ? (
           <LoadingState />
         ) : pending.length === 0 ? (
-          <EmptyState title="No pending approvals" description="All financial actions are up to date." />
+          <EmptyState
+            title="No pending approvals"
+            description="All financial actions are up to date."
+          />
         ) : (
           <Table>
             <TableHead>
@@ -118,7 +138,9 @@ export const FinancialApprovalsPanel = ({ canApprove }: Props) => {
                         </Button>
                       </div>
                     ) : (
-                      <span className="text-sm text-amber-600">Awaiting approval</span>
+                      <span className="text-sm text-amber-600">
+                        Awaiting approval
+                      </span>
                     )}
                   </Td>
                 </tr>
@@ -140,12 +162,23 @@ export const FinancialApprovalsPanel = ({ canApprove }: Props) => {
               <Button
                 variant="destructive"
                 size="sm"
-                disabled={rejectMutation.isPending || rejectionReason.length < 3}
-                onClick={() => rejectMutation.mutate({ id: rejectId, reason: rejectionReason })}
+                disabled={
+                  rejectMutation.isPending || rejectionReason.length < 3
+                }
+                onClick={() =>
+                  rejectMutation.mutate({
+                    id: rejectId,
+                    reason: rejectionReason,
+                  })
+                }
               >
                 Confirm Reject
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setRejectId(null)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setRejectId(null)}
+              >
                 Cancel
               </Button>
             </div>

@@ -6,7 +6,7 @@ import {
   type BatchInput,
   type BatchRecord,
   type SubjectRecord,
-  type YearRecord
+  type YearRecord,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -29,7 +29,7 @@ import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 const defaultBatchValue: BatchInput = {
   name: "",
   academicYearBs: "2083/2084",
-  isActive: true
+  isActive: true,
 };
 
 export const CollegeAcademicManager = () => {
@@ -37,48 +37,57 @@ export const CollegeAcademicManager = () => {
   const [batchForm, setBatchForm] = useState<BatchInput>(defaultBatchValue);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
-  const [pendingMasterEditId, setPendingMasterEditId] = useState<string | null>(null);
+  const [pendingMasterEditId, setPendingMasterEditId] = useState<string | null>(
+    null,
+  );
 
   const batchesQuery = useQuery({
     queryKey: ["batches"],
-    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches"))
+    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
   });
   const yearsQuery = useQuery({
     queryKey: ["years"],
-    queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years"))
+    queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
-    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects"))
+    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects")),
   });
   const refreshAcademicQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["batches"] }),
       queryClient.invalidateQueries({ queryKey: ["years"] }),
       queryClient.invalidateQueries({ queryKey: ["subjects"] }),
-      queryClient.invalidateQueries({ queryKey: ["master-subjects"] })
+      queryClient.invalidateQueries({ queryKey: ["master-subjects"] }),
     ]);
   };
 
   const batchMutation = useMutation({
     mutationFn: async (payload: BatchInput) =>
       editingBatchId
-        ? unwrap<BatchRecord>(api.put(`/academics/batches/${editingBatchId}`, payload))
+        ? unwrap<BatchRecord>(
+            api.put(`/academics/batches/${editingBatchId}`, payload),
+          )
         : unwrap<BatchRecord>(api.post("/academics/batches", payload)),
     onSuccess: async () => {
       toast.success(
-        editingBatchId ? "Batch updated" : "Batch created with years and curriculum subjects"
+        editingBatchId
+          ? "Batch updated"
+          : "Batch created with years and curriculum subjects",
       );
       setBatchForm(defaultBatchValue);
       setEditingBatchId(null);
       await refreshAcademicQueries();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const removeMasterSubject = async (masterSubjectId: string, subjectName: string) => {
+  const removeMasterSubject = async (
+    masterSubjectId: string,
+    subjectName: string,
+  ) => {
     const confirmed = window.confirm(
-      `Remove "${subjectName}" from the master curriculum?\n\nThis removes the subject from all batches if it is not in use.`
+      `Remove "${subjectName}" from the master curriculum?\n\nThis removes the subject from all batches if it is not in use.`,
     );
     if (!confirmed) {
       return;
@@ -111,13 +120,18 @@ export const CollegeAcademicManager = () => {
   const subjects = subjectsQuery.data ?? [];
   const yearsForSelectedBatch = useMemo(
     () => filterYearsByBatch(years, selectedBatchId),
-    [years, selectedBatchId]
+    [years, selectedBatchId],
   );
 
   const yearsByBatch = useMemo(() => {
     const map = new Map<string, YearRecord[]>();
     for (const batch of batches) {
-      map.set(batch._id, years.filter((year) => year.batchId === batch._id).sort((a, b) => a.level - b.level));
+      map.set(
+        batch._id,
+        years
+          .filter((year) => year.batchId === batch._id)
+          .sort((a, b) => a.level - b.level),
+      );
     }
     return map;
   }, [batches, years]);
@@ -128,8 +142,10 @@ export const CollegeAcademicManager = () => {
       map.set(
         year._id,
         subjects.filter(
-          (subject) => (subject.yearIds ?? []).includes(year._id) && subject.isActive !== false
-        )
+          (subject) =>
+            (subject.yearIds ?? []).includes(year._id) &&
+            subject.isActive !== false,
+        ),
       );
     }
     return map;
@@ -155,35 +171,47 @@ export const CollegeAcademicManager = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             {canManage ? (
-            <form
-              className="space-y-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const parsed = batchSchema.safeParse(batchForm);
-                if (!parsed.success) {
-                  toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
-                  return;
-                }
-                void batchMutation.mutateAsync(parsed.data);
-              }}
-            >
-              <FormField label="Batch Name">
-                <Input
-                  placeholder="e.g. Batch 2083"
-                  value={batchForm.name}
-                  onChange={(event) => setBatchForm((current) => ({ ...current, name: event.target.value }))}
-                />
-              </FormField>
-              <FormField label="Academic Year (BS)">
-                <Input
-                  value={batchForm.academicYearBs}
-                  onChange={(event) => setBatchForm((current) => ({ ...current, academicYearBs: event.target.value }))}
-                />
-              </FormField>
-              <Button className="w-full" type="submit">
-                {editingBatchId ? "Update Batch" : "Create Batch"}
-              </Button>
-            </form>
+              <form
+                className="space-y-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const parsed = batchSchema.safeParse(batchForm);
+                  if (!parsed.success) {
+                    toast.error(
+                      parsed.error.issues[0]?.message ?? "Validation failed",
+                    );
+                    return;
+                  }
+                  void batchMutation.mutateAsync(parsed.data);
+                }}
+              >
+                <FormField label="Batch Name">
+                  <Input
+                    placeholder="e.g. Batch 2083"
+                    value={batchForm.name}
+                    onChange={(event) =>
+                      setBatchForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                  />
+                </FormField>
+                <FormField label="Academic Year (BS)">
+                  <Input
+                    value={batchForm.academicYearBs}
+                    onChange={(event) =>
+                      setBatchForm((current) => ({
+                        ...current,
+                        academicYearBs: event.target.value,
+                      }))
+                    }
+                  />
+                </FormField>
+                <Button className="w-full" type="submit">
+                  {editingBatchId ? "Update Batch" : "Create Batch"}
+                </Button>
+              </form>
             ) : null}
 
             {batches.length === 0 ? (
@@ -194,11 +222,18 @@ export const CollegeAcademicManager = () => {
             ) : (
               <div className="space-y-3">
                 {batches.map((item) => (
-                  <div key={item._id} className="rounded-2xl border border-slate-200 p-4">
+                  <div
+                    key={item._id}
+                    className="rounded-2xl border border-slate-200 p-4"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="font-semibold text-slate-900">{item.name}</h3>
-                        <p className="text-sm text-slate-500">{item.academicYearBs}</p>
+                        <h3 className="font-semibold text-slate-900">
+                          {item.name}
+                        </h3>
+                        <p className="text-sm text-slate-500">
+                          {item.academicYearBs}
+                        </p>
                         <ul className="mt-2 space-y-1 text-sm text-slate-600">
                           {(yearsByBatch.get(item._id) ?? []).map((year) => (
                             <li key={year._id}>• {year.name}</li>
@@ -215,7 +250,7 @@ export const CollegeAcademicManager = () => {
                               setBatchForm({
                                 name: item.name,
                                 academicYearBs: item.academicYearBs,
-                                isActive: item.isActive
+                                isActive: item.isActive,
                               });
                             }}
                           >
@@ -224,7 +259,12 @@ export const CollegeAcademicManager = () => {
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => void deleteEntity(`/academics/batches/${item._id}`, "batches")}
+                            onClick={() =>
+                              void deleteEntity(
+                                `/academics/batches/${item._id}`,
+                                "batches",
+                              )
+                            }
                           >
                             Delete
                           </Button>
@@ -242,12 +282,16 @@ export const CollegeAcademicManager = () => {
           <CardHeader>
             <CardTitle>Batch Subjects</CardTitle>
             <p className="text-sm text-slate-500">
-              Auto-assigned from the Master Subject List. Use Edit or Remove to manage subjects in the master curriculum.
+              Auto-assigned from the Master Subject List. Use Edit or Remove to
+              manage subjects in the master curriculum.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <FormField label="Select Batch">
-              <Select value={selectedBatchId} onChange={(event) => setSelectedBatchId(event.target.value)}>
+              <Select
+                value={selectedBatchId}
+                onChange={(event) => setSelectedBatchId(event.target.value)}
+              >
                 <option value="">Select batch</option>
                 {batches.map((batch) => (
                   <option key={batch._id} value={batch._id}>
@@ -259,14 +303,25 @@ export const CollegeAcademicManager = () => {
 
             {selectedBatchId ? (
               <div className="space-y-4">
-                {(yearsForSelectedBatch.length > 0 ? yearsForSelectedBatch : []).map((year) => {
+                {(yearsForSelectedBatch.length > 0
+                  ? yearsForSelectedBatch
+                  : []
+                ).map((year) => {
                   const yearSubjects = batchSubjectsByYear.get(year._id) ?? [];
 
                   return (
-                    <div key={year._id} className="rounded-2xl border border-slate-200 p-4">
-                      <h3 className="font-semibold text-slate-900">{year.name}</h3>
+                    <div
+                      key={year._id}
+                      className="rounded-2xl border border-slate-200 p-4"
+                    >
+                      <h3 className="font-semibold text-slate-900">
+                        {year.name}
+                      </h3>
                       {yearSubjects.length === 0 ? (
-                        <p className="mt-2 text-sm text-slate-500">No subjects assigned yet. Add subjects to the Master Subject List.</p>
+                        <p className="mt-2 text-sm text-slate-500">
+                          No subjects assigned yet. Add subjects to the Master
+                          Subject List.
+                        </p>
                       ) : (
                         <div className="mt-3 overflow-x-auto">
                           <Table>
@@ -282,19 +337,28 @@ export const CollegeAcademicManager = () => {
                               {yearSubjects.map((subject) => (
                                 <tr key={subject._id}>
                                   <Td>
-                                    <div className="font-medium">{subject.name}</div>
-                                    <div className="text-xs text-slate-500">{subject.code}</div>
+                                    <div className="font-medium">
+                                      {subject.name}
+                                    </div>
+                                    <div className="text-xs text-slate-500">
+                                      {subject.code}
+                                    </div>
                                   </Td>
                                   <Td className="text-sm text-slate-600">
-                                    Pass {subject.passMarks} / Full {subject.fullMarks}
+                                    Pass {subject.passMarks} / Full{" "}
+                                    {subject.fullMarks}
                                   </Td>
                                   <Td>
                                     <Badge
                                       className={
-                                        subject.isActive === false ? "bg-slate-100 text-slate-600" : undefined
+                                        subject.isActive === false
+                                          ? "bg-slate-100 text-slate-600"
+                                          : undefined
                                       }
                                     >
-                                      {subject.isActive === false ? "Inactive" : "Active"}
+                                      {subject.isActive === false
+                                        ? "Inactive"
+                                        : "Active"}
                                     </Badge>
                                   </Td>
                                   <Td className="text-right">
@@ -303,7 +367,11 @@ export const CollegeAcademicManager = () => {
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          onClick={() => setPendingMasterEditId(subject.masterSubjectId!)}
+                                          onClick={() =>
+                                            setPendingMasterEditId(
+                                              subject.masterSubjectId!,
+                                            )
+                                          }
                                         >
                                           Edit
                                         </Button>
@@ -311,14 +379,19 @@ export const CollegeAcademicManager = () => {
                                           size="sm"
                                           variant="destructive"
                                           onClick={() =>
-                                            void removeMasterSubject(subject.masterSubjectId!, subject.name)
+                                            void removeMasterSubject(
+                                              subject.masterSubjectId!,
+                                              subject.name,
+                                            )
                                           }
                                         >
                                           Remove
                                         </Button>
                                       </div>
                                     ) : (
-                                      <span className="text-xs text-slate-500">Legacy subject</span>
+                                      <span className="text-xs text-slate-500">
+                                        Legacy subject
+                                      </span>
                                     )}
                                   </Td>
                                 </tr>
@@ -332,7 +405,8 @@ export const CollegeAcademicManager = () => {
                 })}
                 {yearsForSelectedBatch.length === 0 ? (
                   <p className="text-sm text-slate-500">
-                    Years are auto-created with each batch ({COLLEGE_YEAR_NAMES.join(", ")}).
+                    Years are auto-created with each batch (
+                    {COLLEGE_YEAR_NAMES.join(", ")}).
                   </p>
                 ) : null}
               </div>

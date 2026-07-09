@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { INSTITUTION_TYPES, type CreateSchoolInput, type SchoolInput, type SchoolRecord } from "@phit-erp/shared";
+import {
+  INSTITUTION_TYPES,
+  type CreateSchoolInput,
+  type SchoolInput,
+  type SchoolRecord,
+} from "@phit-erp/shared";
 import { createSchoolSchema, schoolSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
@@ -25,7 +30,7 @@ const schoolToForm = (school: SchoolRecord): SchoolInput => ({
   academicYearBs: school.academicYearBs,
   institutionType: school.institutionType ?? "SCHOOL",
   address: school.address,
-  isActive: school.isActive
+  isActive: school.isActive,
 });
 
 const defaultSchoolValue: CreateSchoolInput = {
@@ -42,12 +47,12 @@ const defaultSchoolValue: CreateSchoolInput = {
     district: "",
     municipality: "",
     ward: "",
-    streetAddress: ""
+    streetAddress: "",
   },
   isActive: true,
   adminFullName: "",
   adminEmail: "",
-  adminPhone: ""
+  adminPhone: "",
 };
 
 export const SchoolManager = () => {
@@ -55,22 +60,29 @@ export const SchoolManager = () => {
   const [editingSchoolId, setEditingSchoolId] = useState<string | null>(null);
   const collegesQuery = useQuery({
     queryKey: ["schools"],
-    queryFn: () => unwrap<SchoolRecord[]>(api.get("/schools"))
+    queryFn: () => unwrap<SchoolRecord[]>(api.get("/schools")),
   });
 
   const createMutation = useMutation({
-    mutationFn: async (payload: CreateSchoolInput) => unwrap(api.post("/schools", payload)),
+    mutationFn: async (payload: CreateSchoolInput) =>
+      unwrap(api.post("/schools", payload)),
     onSuccess: async () => {
       toast.success("College created successfully");
       setForm(defaultSchoolValue);
       await queryClient.invalidateQueries({ queryKey: ["schools"] });
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ schoolId, payload }: { schoolId: string; payload: SchoolInput }) => unwrap(api.put(`/schools/${schoolId}`, payload)),
+    mutationFn: async ({
+      schoolId,
+      payload,
+    }: {
+      schoolId: string;
+      payload: SchoolInput;
+    }) => unwrap(api.put(`/schools/${schoolId}`, payload)),
     onSuccess: async () => {
       toast.success("College updated successfully");
       setEditingSchoolId(null);
@@ -78,17 +90,18 @@ export const SchoolManager = () => {
       await queryClient.invalidateQueries({ queryKey: ["schools"] });
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (schoolId: string) => unwrap(api.delete(`/schools/${schoolId}`)),
+    mutationFn: async (schoolId: string) =>
+      unwrap(api.delete(`/schools/${schoolId}`)),
     onSuccess: async () => {
       toast.success("College and all associated data deleted");
       await queryClient.invalidateQueries({ queryKey: ["schools"] });
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   return (
@@ -100,7 +113,9 @@ export const SchoolManager = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>{editingSchoolId ? "Edit College" : "Create College"}</CardTitle>
+          <CardTitle>
+            {editingSchoolId ? "Edit College" : "Create College"}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form
@@ -111,16 +126,23 @@ export const SchoolManager = () => {
               if (editingSchoolId) {
                 const parsed = schoolSchema.safeParse(form);
                 if (!parsed.success) {
-                  toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                  toast.error(
+                    parsed.error.issues[0]?.message ?? "Validation failed",
+                  );
                   return;
                 }
-                void updateMutation.mutateAsync({ schoolId: editingSchoolId, payload: parsed.data });
+                void updateMutation.mutateAsync({
+                  schoolId: editingSchoolId,
+                  payload: parsed.data,
+                });
                 return;
               }
 
               const parsed = createSchoolSchema.safeParse(form);
               if (!parsed.success) {
-                toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                toast.error(
+                  parsed.error.issues[0]?.message ?? "Validation failed",
+                );
                 return;
               }
               void createMutation.mutateAsync(parsed.data);
@@ -128,16 +150,48 @@ export const SchoolManager = () => {
           >
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <FormField label="College Name (English)">
-                <Input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+                <Input
+                  value={form.name}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="College Name (Nepali)">
-                <Input value={form.nameNp} onChange={(event) => setForm((current) => ({ ...current, nameNp: event.target.value }))} />
+                <Input
+                  value={form.nameNp}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      nameNp: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Code">
-                <Input value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))} />
+                <Input
+                  value={form.code}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      code: event.target.value.toUpperCase(),
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Academic Year (BS)">
-                <Input value={form.academicYearBs} onChange={(event) => setForm((current) => ({ ...current, academicYearBs: event.target.value }))} />
+                <Input
+                  value={form.academicYearBs}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      academicYearBs: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Institution Type">
                 <Select
@@ -145,47 +199,111 @@ export const SchoolManager = () => {
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      institutionType: event.target.value as CreateSchoolInput["institutionType"]
+                      institutionType: event.target
+                        .value as CreateSchoolInput["institutionType"],
                     }))
                   }
                   disabled={Boolean(editingSchoolId)}
                 >
                   {INSTITUTION_TYPES.map((type) => (
                     <option key={type} value={type}>
-                      {type === "COLLEGE" ? "Diploma/HA (Batch & Year)" : "Class & Section Program"}
+                      {type === "COLLEGE"
+                        ? "Diploma/HA (Batch & Year)"
+                        : "Class & Section Program"}
                     </option>
                   ))}
                 </Select>
               </FormField>
               <FormField label="College Email">
-                <Input value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+                <Input
+                  value={form.email}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="College Phone">
-                <Input value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+                <Input
+                  value={form.phone}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      phone: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Principal Name">
-                <Input value={form.principalName} onChange={(event) => setForm((current) => ({ ...current, principalName: event.target.value }))} />
+                <Input
+                  value={form.principalName}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      principalName: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Status">
-                <Select value={String(form.isActive)} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.value === "true" }))}>
+                <Select
+                  value={String(form.isActive)}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      isActive: event.target.value === "true",
+                    }))
+                  }
+                >
                   <option value="true">Active</option>
                   <option value="false">Inactive</option>
                 </Select>
               </FormField>
             </div>
 
-            <AddressFields value={form.address} onChange={(address) => setForm((current) => ({ ...current, address }))} />
+            <AddressFields
+              value={form.address}
+              onChange={(address) =>
+                setForm((current) => ({ ...current, address }))
+              }
+            />
 
             {editingSchoolId ? null : (
               <div className="grid gap-4 md:grid-cols-3">
                 <FormField label="College Admin Name">
-                  <Input value={form.adminFullName} onChange={(event) => setForm((current) => ({ ...current, adminFullName: event.target.value }))} />
+                  <Input
+                    value={form.adminFullName}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        adminFullName: event.target.value,
+                      }))
+                    }
+                  />
                 </FormField>
                 <FormField label="College Admin Email">
-                  <Input value={form.adminEmail} onChange={(event) => setForm((current) => ({ ...current, adminEmail: event.target.value }))} />
+                  <Input
+                    value={form.adminEmail}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        adminEmail: event.target.value,
+                      }))
+                    }
+                  />
                 </FormField>
                 <FormField label="College Admin Phone">
-                  <Input value={form.adminPhone} onChange={(event) => setForm((current) => ({ ...current, adminPhone: event.target.value }))} />
+                  <Input
+                    value={form.adminPhone}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        adminPhone: event.target.value,
+                      }))
+                    }
+                  />
                 </FormField>
               </div>
             )}
@@ -203,7 +321,10 @@ export const SchoolManager = () => {
                   Cancel
                 </Button>
               ) : null}
-              <Button disabled={createMutation.isPending || updateMutation.isPending} type="submit">
+              <Button
+                disabled={createMutation.isPending || updateMutation.isPending}
+                type="submit"
+              >
                 {editingSchoolId
                   ? updateMutation.isPending
                     ? "Saving..."
@@ -237,8 +358,12 @@ export const SchoolManager = () => {
               {(collegesQuery.data ?? []).map((college) => (
                 <tr key={college._id}>
                   <Td>
-                    <div className="font-medium text-slate-900">{college.name}</div>
-                    <div className="text-xs text-slate-500">{college.email}</div>
+                    <div className="font-medium text-slate-900">
+                      {college.name}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {college.email}
+                    </div>
                   </Td>
                   <Td>{college.code}</Td>
                   <Td>{college.academicYearBs}</Td>
@@ -249,10 +374,17 @@ export const SchoolManager = () => {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={deleteMutation.isPending || updateMutation.isPending}
+                        disabled={
+                          deleteMutation.isPending || updateMutation.isPending
+                        }
                         onClick={() => {
                           setEditingSchoolId(college._id);
-                          setForm({ ...schoolToForm(college), adminFullName: "", adminEmail: "", adminPhone: "" });
+                          setForm({
+                            ...schoolToForm(college),
+                            adminFullName: "",
+                            adminEmail: "",
+                            adminPhone: "",
+                          });
                         }}
                       >
                         Edit
@@ -262,7 +394,11 @@ export const SchoolManager = () => {
                         variant="destructive"
                         disabled={deleteMutation.isPending}
                         onClick={() => {
-                          if (window.confirm(`Delete ${college.name} and all associated data permanently?`)) {
+                          if (
+                            window.confirm(
+                              `Delete ${college.name} and all associated data permanently?`,
+                            )
+                          ) {
                             void deleteMutation.mutateAsync(college._id);
                           }
                         }}

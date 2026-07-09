@@ -1,6 +1,9 @@
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
-import type { DailyAttendanceRecord, DailyAttendanceStudentReportRow } from "@phit-erp/shared";
+import type {
+  DailyAttendanceRecord,
+  DailyAttendanceStudentReportRow,
+} from "@phit-erp/shared";
 
 interface AttendanceStudentLookup {
   _id: string;
@@ -14,45 +17,63 @@ const statusAbbreviation: Record<string, string> = {
   ABSENT: "A",
   LATE: "L",
   LEAVE: "LV",
-  MEDICAL_LEAVE: "ML"
+  MEDICAL_LEAVE: "ML",
 };
 
-const writeWorkbook = (rows: Array<Array<string | number>>, sheetName: string, filename: string) => {
+const writeWorkbook = (
+  rows: Array<Array<string | number>>,
+  sheetName: string,
+  filename: string,
+) => {
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, sheet, sheetName);
   const buffer = XLSX.write(book, { bookType: "xlsx", type: "array" });
   saveAs(
     new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }),
-    filename
+    filename,
   );
 };
 
 const writeMultiSheetWorkbook = (
   sheets: Array<{ name: string; rows: Array<Array<string | number>> }>,
-  filename: string
+  filename: string,
 ) => {
   const book = XLSX.utils.book_new();
   sheets.forEach((sheet) => {
-    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(sheet.rows), sheet.name.slice(0, 31));
+    XLSX.utils.book_append_sheet(
+      book,
+      XLSX.utils.aoa_to_sheet(sheet.rows),
+      sheet.name.slice(0, 31),
+    );
   });
   const buffer = XLSX.write(book, { bookType: "xlsx", type: "array" });
   saveAs(
     new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }),
-    filename
+    filename,
   );
 };
 
 export const downloadDailyAttendanceExcel = (
   records: DailyAttendanceRecord[],
-  filename = "daily-attendance-report.xlsx"
+  filename = "daily-attendance-report.xlsx",
 ) => {
   const rows: Array<Array<string | number>> = [
-    ["Date (BS)", "Class/Batch", "Section/Year", "Teacher ID", "Present", "Absent", "Late", "Leave", "Medical Leave"]
+    [
+      "Date (BS)",
+      "Class/Batch",
+      "Section/Year",
+      "Teacher ID",
+      "Present",
+      "Absent",
+      "Late",
+      "Leave",
+      "Medical Leave",
+    ],
   ];
 
   records.forEach((record) => {
@@ -74,7 +95,7 @@ export const downloadDailyAttendanceExcel = (
       counts.absent,
       counts.late,
       counts.leave,
-      counts.medical
+      counts.medical,
     ]);
   });
 
@@ -83,7 +104,7 @@ export const downloadDailyAttendanceExcel = (
 
 export const downloadStudentAttendanceExcel = (
   rows: DailyAttendanceStudentReportRow[],
-  filename = "student-attendance-report.xlsx"
+  filename = "student-attendance-report.xlsx",
 ) => {
   const sheetRows: Array<Array<string | number>> = [
     [
@@ -97,8 +118,8 @@ export const downloadStudentAttendanceExcel = (
       "Leave",
       "Medical Leave",
       "Percentage",
-      "Defaulter"
-    ]
+      "Defaulter",
+    ],
   ];
 
   rows.forEach((row) => {
@@ -113,7 +134,7 @@ export const downloadStudentAttendanceExcel = (
       row.leave,
       row.medicalLeave,
       row.percentage,
-      row.isDefaulter ? "Yes" : "No"
+      row.isDefaulter ? "Yes" : "No",
     ]);
   });
 
@@ -121,10 +142,17 @@ export const downloadStudentAttendanceExcel = (
 };
 
 export const downloadClassSummaryExcel = (
-  rows: Array<{ label: string; present: number; absent: number; percentage: number }>,
-  filename = "class-attendance-summary.xlsx"
+  rows: Array<{
+    label: string;
+    present: number;
+    absent: number;
+    percentage: number;
+  }>,
+  filename = "class-attendance-summary.xlsx",
 ) => {
-  const sheetRows: Array<Array<string | number>> = [["Class", "Present", "Absent", "Attendance %"]];
+  const sheetRows: Array<Array<string | number>> = [
+    ["Class", "Present", "Absent", "Attendance %"],
+  ];
   rows.forEach((row) => {
     sheetRows.push([row.label, row.present, row.absent, row.percentage]);
   });
@@ -133,10 +161,12 @@ export const downloadClassSummaryExcel = (
 
 const buildStudentDailyMatrixRows = (
   records: DailyAttendanceRecord[],
-  students: AttendanceStudentLookup[]
+  students: AttendanceStudentLookup[],
 ): Array<Array<string | number>> => {
   const dates = [...new Set(records.map((record) => record.dateBs))].sort();
-  const studentLookup = new Map(students.map((student) => [student._id, student]));
+  const studentLookup = new Map(
+    students.map((student) => [student._id, student]),
+  );
   const matrix = new Map<
     string,
     {
@@ -144,7 +174,13 @@ const buildStudentDailyMatrixRows = (
       rollNumber: number;
       admissionNumber: string;
       statuses: Record<string, string>;
-      counts: { present: number; absent: number; late: number; leave: number; medicalLeave: number };
+      counts: {
+        present: number;
+        absent: number;
+        late: number;
+        leave: number;
+        medicalLeave: number;
+      };
     }
   >();
 
@@ -156,10 +192,11 @@ const buildStudentDailyMatrixRows = (
         rollNumber: student?.rollNumber ?? 0,
         admissionNumber: student?.admissionNumber ?? "",
         statuses: {},
-        counts: { present: 0, absent: 0, late: 0, leave: 0, medicalLeave: 0 }
+        counts: { present: 0, absent: 0, late: 0, leave: 0, medicalLeave: 0 },
       };
 
-      existing.statuses[record.dateBs] = statusAbbreviation[entry.status] ?? entry.status;
+      existing.statuses[record.dateBs] =
+        statusAbbreviation[entry.status] ?? entry.status;
       if (entry.status === "PRESENT") existing.counts.present += 1;
       if (entry.status === "ABSENT") existing.counts.absent += 1;
       if (entry.status === "LATE") existing.counts.late += 1;
@@ -180,17 +217,31 @@ const buildStudentDailyMatrixRows = (
     "Late",
     "Leave",
     "Medical Leave",
-    "Attendance %"
+    "Attendance %",
   ];
 
   const rows = [...matrix.values()]
-    .sort((left, right) => left.rollNumber - right.rollNumber || left.fullName.localeCompare(right.fullName))
+    .sort(
+      (left, right) =>
+        left.rollNumber - right.rollNumber ||
+        left.fullName.localeCompare(right.fullName),
+    )
     .map((row) => {
-      const markedDays = row.counts.present + row.counts.absent + row.counts.late + row.counts.leave + row.counts.medicalLeave;
+      const markedDays =
+        row.counts.present +
+        row.counts.absent +
+        row.counts.late +
+        row.counts.leave +
+        row.counts.medicalLeave;
       const percentage =
         markedDays === 0
           ? 0
-          : Number((((row.counts.present + row.counts.late) / markedDays) * 100).toFixed(2));
+          : Number(
+              (
+                ((row.counts.present + row.counts.late) / markedDays) *
+                100
+              ).toFixed(2),
+            );
 
       return [
         row.fullName,
@@ -202,7 +253,7 @@ const buildStudentDailyMatrixRows = (
         row.counts.late,
         row.counts.leave,
         row.counts.medicalLeave,
-        percentage
+        percentage,
       ];
     });
 
@@ -210,22 +261,32 @@ const buildStudentDailyMatrixRows = (
 };
 
 export const buildAttendanceStudentLookup = (
-  studentRows: DailyAttendanceStudentReportRow[]
+  studentRows: DailyAttendanceStudentReportRow[],
 ): AttendanceStudentLookup[] =>
   studentRows.map((row) => ({
     _id: row.studentId,
     fullName: row.fullName,
     rollNumber: row.rollNumber,
-    admissionNumber: row.admissionNumber
+    admissionNumber: row.admissionNumber,
   }));
 
 export const downloadOverallAttendanceWorkbook = (
   records: DailyAttendanceRecord[],
   studentRows: DailyAttendanceStudentReportRow[],
-  filename = "overall-attendance.xlsx"
+  filename = "overall-attendance.xlsx",
 ): void => {
   const dailySummaryRows: Array<Array<string | number>> = [
-    ["Date (BS)", "Class/Batch", "Section/Year", "Teacher ID", "Present", "Absent", "Late", "Leave", "Medical Leave"]
+    [
+      "Date (BS)",
+      "Class/Batch",
+      "Section/Year",
+      "Teacher ID",
+      "Present",
+      "Absent",
+      "Late",
+      "Leave",
+      "Medical Leave",
+    ],
   ];
 
   records.forEach((record) => {
@@ -247,7 +308,7 @@ export const downloadOverallAttendanceWorkbook = (
       counts.absent,
       counts.late,
       counts.leave,
-      counts.medical
+      counts.medical,
     ]);
   });
 
@@ -263,7 +324,7 @@ export const downloadOverallAttendanceWorkbook = (
       "Leave",
       "Medical Leave",
       "Percentage",
-      "Defaulter"
+      "Defaulter",
     ],
     ...studentRows.map((row) => [
       row.fullName,
@@ -276,16 +337,22 @@ export const downloadOverallAttendanceWorkbook = (
       row.leave,
       row.medicalLeave,
       row.percentage,
-      row.isDefaulter ? "Yes" : "No"
-    ])
+      row.isDefaulter ? "Yes" : "No",
+    ]),
   ];
 
   writeMultiSheetWorkbook(
     [
       { name: "Daily Summary", rows: dailySummaryRows },
       { name: "Student Summary", rows: studentSummaryRows },
-      { name: "Student Daily Detail", rows: buildStudentDailyMatrixRows(records, buildAttendanceStudentLookup(studentRows)) }
+      {
+        name: "Student Daily Detail",
+        rows: buildStudentDailyMatrixRows(
+          records,
+          buildAttendanceStudentLookup(studentRows),
+        ),
+      },
     ],
-    filename
+    filename,
   );
 };

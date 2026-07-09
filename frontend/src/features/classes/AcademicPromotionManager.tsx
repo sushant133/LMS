@@ -3,9 +3,15 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_ACADEMIC_YEAR_BS,
   type AcademicPromotionPreview,
-  type AcademicPromotionRecord
+  type AcademicPromotionRecord,
 } from "@phit-erp/shared";
-import { ArrowRight, History, RotateCcw, ShieldCheck, Users } from "lucide-react";
+import {
+  ArrowRight,
+  History,
+  RotateCcw,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -28,7 +34,9 @@ const statusBadgeClass = (status: string): string => {
 
 export const AcademicPromotionManager = () => {
   const canManage = useIsTenantAdmin();
-  const [academicSessionBs, setAcademicSessionBs] = useState(DEFAULT_ACADEMIC_YEAR_BS);
+  const [academicSessionBs, setAcademicSessionBs] = useState(
+    DEFAULT_ACADEMIC_YEAR_BS,
+  );
   const [remarks, setRemarks] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rollbackRemarks, setRollbackRemarks] = useState("");
@@ -37,23 +45,30 @@ export const AcademicPromotionManager = () => {
     queryKey: ["academic-promotion-preview", academicSessionBs],
     queryFn: () =>
       unwrap<AcademicPromotionPreview>(
-        api.get("/academic-promotion/preview", { params: { academicSessionBs } })
-      )
+        api.get("/academic-promotion/preview", {
+          params: { academicSessionBs },
+        }),
+      ),
   });
 
   const historyQuery = useQuery({
     queryKey: ["academic-promotion-history"],
-    queryFn: () => unwrap<AcademicPromotionRecord[]>(api.get("/academic-promotion/history"))
+    queryFn: () =>
+      unwrap<AcademicPromotionRecord[]>(api.get("/academic-promotion/history")),
   });
 
   const invalidateAll = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["academic-promotion-preview"] }),
-      queryClient.invalidateQueries({ queryKey: ["academic-promotion-history"] }),
+      queryClient.invalidateQueries({
+        queryKey: ["academic-promotion-preview"],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ["academic-promotion-history"],
+      }),
       queryClient.invalidateQueries({ queryKey: ["students"] }),
       queryClient.invalidateQueries({ queryKey: ["batches"] }),
       queryClient.invalidateQueries({ queryKey: ["years"] }),
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
     ]);
   };
 
@@ -66,8 +81,8 @@ export const AcademicPromotionManager = () => {
       }>(
         api.post("/academic-promotion/execute", {
           academicSessionBs,
-          remarks: remarks.trim() || undefined
-        })
+          remarks: remarks.trim() || undefined,
+        }),
       ),
     onSuccess: async (result) => {
       toast.success(result.notificationMessage.replace(/\n/g, " · "));
@@ -75,29 +90,31 @@ export const AcademicPromotionManager = () => {
       setRemarks("");
       await invalidateAll();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const rollbackMutation = useMutation({
     mutationFn: async () =>
       unwrap<{ promotion: AcademicPromotionRecord; restoredStudents: number }>(
         api.post("/academic-promotion/rollback", {
-          remarks: rollbackRemarks.trim() || undefined
-        })
+          remarks: rollbackRemarks.trim() || undefined,
+        }),
       ),
     onSuccess: async (result) => {
-      toast.success(`Promotion rolled back. ${result.restoredStudents} student(s) restored.`);
+      toast.success(
+        `Promotion rolled back. ${result.restoredStudents} student(s) restored.`,
+      );
       setRollbackRemarks("");
       await invalidateAll();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const preview = previewQuery.data;
   const history = historyQuery.data ?? [];
   const latestCompleted = useMemo(
     () => history.find((item) => item.status === "COMPLETED"),
-    [history]
+    [history],
   );
 
   return (
@@ -115,8 +132,8 @@ export const AcademicPromotionManager = () => {
               Promote Academic Year
             </CardTitle>
             <p className="mt-1 text-sm text-slate-600">
-              Detects all active batches automatically. Student IDs, admission numbers, fees, attendance,
-              and exam history are preserved.
+              Detects all active batches automatically. Student IDs, admission
+              numbers, fees, attendance, and exam history are preserved.
             </p>
           </div>
         </CardHeader>
@@ -146,7 +163,9 @@ export const AcademicPromotionManager = () => {
               onClick={() => void previewQuery.refetch()}
               disabled={previewQuery.isFetching}
             >
-              {previewQuery.isFetching ? "Refreshing preview…" : "Refresh Preview"}
+              {previewQuery.isFetching
+                ? "Refreshing preview…"
+                : "Refresh Preview"}
             </Button>
             {canManage ? (
               <Button
@@ -156,40 +175,58 @@ export const AcademicPromotionManager = () => {
                 disabled={!preview?.canPromote || executeMutation.isPending}
                 onClick={() => setConfirmOpen(true)}
               >
-                {executeMutation.isPending ? "Promoting…" : "Promote Academic Year"}
+                {executeMutation.isPending
+                  ? "Promoting…"
+                  : "Promote Academic Year"}
               </Button>
             ) : (
-              <p className="text-sm text-slate-500">Only Super Admin and Admin can execute promotions.</p>
+              <p className="text-sm text-slate-500">
+                Only Super Admin and Admin can execute promotions.
+              </p>
             )}
           </div>
 
           {previewQuery.isError ? (
-            <p className="text-sm text-red-600">{parseErrorMessage(previewQuery.error)}</p>
+            <p className="text-sm text-red-600">
+              {parseErrorMessage(previewQuery.error)}
+            </p>
           ) : null}
 
           {preview ? (
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Eligible Students</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Eligible Students
+                  </p>
                   <p className="mt-1 flex items-center gap-2 text-2xl font-semibold text-slate-900">
                     <Users className="h-5 w-5 text-brand-600" />
                     {preview.totalStudents}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Batches Detected</p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">{preview.batchesDetected}</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Batches Detected
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-900">
+                    {preview.batchesDetected}
+                  </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Session</p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">{preview.academicSessionBs}</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    Session
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-900">
+                    {preview.academicSessionBs}
+                  </p>
                 </div>
               </div>
 
               {preview.validationErrors.length > 0 ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                  <p className="font-semibold">Validation errors (no changes will be applied)</p>
+                  <p className="font-semibold">
+                    Validation errors (no changes will be applied)
+                  </p>
                   <ul className="mt-2 list-disc space-y-1 pl-5">
                     {preview.validationErrors.map((error) => (
                       <li key={error}>{error}</li>
@@ -211,7 +248,9 @@ export const AcademicPromotionManager = () => {
 
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-                  <h3 className="font-semibold text-slate-900">Promotion Summary</h3>
+                  <h3 className="font-semibold text-slate-900">
+                    Promotion Summary
+                  </h3>
                 </div>
                 {preview.groups.length === 0 ? (
                   <div className="p-6">
@@ -234,7 +273,9 @@ export const AcademicPromotionManager = () => {
                     </TableHead>
                     <TableBody>
                       {preview.groups.map((group) => (
-                        <tr key={`${group.batchId}-${group.previousLevel}-${group.outcome}`}>
+                        <tr
+                          key={`${group.batchId}-${group.previousLevel}-${group.outcome}`}
+                        >
                           <Td className="font-medium">{group.batchName}</Td>
                           <Td>{group.previousYearName}</Td>
                           <Td>
@@ -250,7 +291,9 @@ export const AcademicPromotionManager = () => {
                                   : "bg-emerald-100 text-emerald-800"
                               }
                             >
-                              {group.outcome === "PASSED_OUT" ? "Passed Out / Alumni" : "Promote"}
+                              {group.outcome === "PASSED_OUT"
+                                ? "Passed Out / Alumni"
+                                : "Promote"}
                             </Badge>
                           </Td>
                         </tr>
@@ -279,9 +322,11 @@ export const AcademicPromotionManager = () => {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-slate-600">
-                You are about to promote <strong>{preview.totalStudents}</strong> student(s) across{" "}
+                You are about to promote{" "}
+                <strong>{preview.totalStudents}</strong> student(s) across{" "}
                 <strong>{preview.batchesDetected}</strong> batch(es) for session{" "}
-                <strong>{preview.academicSessionBs}</strong>. This runs in a single transaction.
+                <strong>{preview.academicSessionBs}</strong>. This runs in a
+                single transaction.
               </p>
               <ul className="max-h-48 space-y-2 overflow-y-auto text-sm text-slate-700">
                 {preview.groups.map((group) => (
@@ -289,13 +334,18 @@ export const AcademicPromotionManager = () => {
                     key={`confirm-${group.batchId}-${group.previousLevel}`}
                     className="rounded-xl border border-slate-200 px-3 py-2"
                   >
-                    <span className="font-medium">{group.batchName}</span>: {group.previousYearName} →{" "}
-                    {group.newYearName} ({group.studentCount})
+                    <span className="font-medium">{group.batchName}</span>:{" "}
+                    {group.previousYearName} → {group.newYearName} (
+                    {group.studentCount})
                   </li>
                 ))}
               </ul>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setConfirmOpen(false)}
+                >
                   Cancel
                 </Button>
                 <Button
@@ -303,7 +353,9 @@ export const AcademicPromotionManager = () => {
                   disabled={executeMutation.isPending}
                   onClick={() => void executeMutation.mutateAsync()}
                 >
-                  {executeMutation.isPending ? "Confirming…" : "Confirm Promotion"}
+                  {executeMutation.isPending
+                    ? "Confirming…"
+                    : "Confirm Promotion"}
                 </Button>
               </div>
             </CardContent>
@@ -331,7 +383,7 @@ export const AcademicPromotionManager = () => {
                 disabled={rollbackMutation.isPending}
                 onClick={() => {
                   const confirmed = window.confirm(
-                    `Roll back the most recent promotion for session ${latestCompleted.academicSessionBs}? This restores academic year and student status for ${latestCompleted.totalStudents} student(s).`
+                    `Roll back the most recent promotion for session ${latestCompleted.academicSessionBs}? This restores academic year and student status for ${latestCompleted.totalStudents} student(s).`,
                   );
                   if (confirmed) {
                     void rollbackMutation.mutateAsync();
@@ -339,7 +391,9 @@ export const AcademicPromotionManager = () => {
                 }}
               >
                 <RotateCcw className="mr-2 h-4 w-4" />
-                {rollbackMutation.isPending ? "Rolling back…" : "Rollback Latest"}
+                {rollbackMutation.isPending
+                  ? "Rolling back…"
+                  : "Rollback Latest"}
               </Button>
             </div>
           ) : null}
@@ -372,11 +426,16 @@ export const AcademicPromotionManager = () => {
                     <Td>{item.totalStudents}</Td>
                     <Td>{item.promotedByName}</Td>
                     <Td>
-                      <Badge className={statusBadgeClass(item.status)}>{item.status}</Badge>
+                      <Badge className={statusBadgeClass(item.status)}>
+                        {item.status}
+                      </Badge>
                       {item.rolledBackAt ? (
                         <p className="mt-1 text-xs text-slate-500">
-                          Rolled back {new Date(item.rolledBackAt).toLocaleString()}
-                          {item.rolledBackByName ? ` by ${item.rolledBackByName}` : ""}
+                          Rolled back{" "}
+                          {new Date(item.rolledBackAt).toLocaleString()}
+                          {item.rolledBackByName
+                            ? ` by ${item.rolledBackByName}`
+                            : ""}
                         </p>
                       ) : null}
                     </Td>
@@ -384,11 +443,13 @@ export const AcademicPromotionManager = () => {
                       {item.groups
                         .map(
                           (group) =>
-                            `${group.batchName}: ${group.previousYearName} → ${group.newYearName} (${group.studentCount})`
+                            `${group.batchName}: ${group.previousYearName} → ${group.newYearName} (${group.studentCount})`,
                         )
                         .join(" · ")}
                       {item.remarks ? (
-                        <p className="mt-1 text-xs text-slate-500">Remarks: {item.remarks}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Remarks: {item.remarks}
+                        </p>
                       ) : null}
                     </Td>
                   </tr>

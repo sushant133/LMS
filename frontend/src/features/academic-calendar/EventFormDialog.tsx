@@ -1,7 +1,7 @@
 import {
   academicCalendarEventInputSchema,
   type AcademicCalendarEventInput,
-  type AcademicCalendarEventRecord
+  type AcademicCalendarEventRecord,
 } from "@phit-erp/shared";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -10,7 +10,12 @@ import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
-import { bsToAdString, buildDefaultEventInput, eventTypeOptions, getWeekdayFromBs } from "./academicCalendarUtils";
+import {
+  bsToAdString,
+  buildDefaultEventInput,
+  eventTypeOptions,
+  getWeekdayFromBs,
+} from "./academicCalendarUtils";
 
 interface EventFormDialogProps {
   open: boolean;
@@ -29,9 +34,11 @@ export const EventFormDialog = ({
   editingEvent,
   saving = false,
   onClose,
-  onSave
+  onSave,
 }: EventFormDialogProps) => {
-  const [form, setForm] = useState<AcademicCalendarEventInput>(buildDefaultEventInput(academicYearBs, dateBs));
+  const [form, setForm] = useState<AcademicCalendarEventInput>(
+    buildDefaultEventInput(academicYearBs, dateBs),
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -41,7 +48,7 @@ export const EventFormDialog = ({
         dateBs: editingEvent.dateBs,
         name: editingEvent.name,
         eventType: editingEvent.eventType,
-        reason: editingEvent.reason ?? ""
+        reason: editingEvent.reason ?? "",
       });
       return;
     }
@@ -82,12 +89,16 @@ export const EventFormDialog = ({
             </FormField>
           </div>
 
-          {weekday ? <p className="text-sm text-slate-600">Day: {weekday}</p> : null}
+          {weekday ? (
+            <p className="text-sm text-slate-600">Day: {weekday}</p>
+          ) : null}
 
           <FormField label="Holiday / Event Name">
             <Input
               value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, name: event.target.value }))
+              }
               placeholder="e.g. Dashain Vacation"
               required
             />
@@ -97,7 +108,11 @@ export const EventFormDialog = ({
             <Select
               value={form.eventType}
               onChange={(event) =>
-                setForm((current) => ({ ...current, eventType: event.target.value as AcademicCalendarEventInput["eventType"] }))
+                setForm((current) => ({
+                  ...current,
+                  eventType: event.target
+                    .value as AcademicCalendarEventInput["eventType"],
+                }))
               }
             >
               {eventTypeOptions.map((option) => (
@@ -111,7 +126,12 @@ export const EventFormDialog = ({
           <FormField label="Reason / Description">
             <Textarea
               value={form.reason ?? ""}
-              onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reason: event.target.value,
+                }))
+              }
               placeholder="Optional details"
               rows={3}
             />

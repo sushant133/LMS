@@ -25,7 +25,8 @@ interface AcademicManagementFilterBarProps {
   onExportExcel: () => void;
   onExportPdf: () => void;
   onPrint: () => void;
-  activeTab: "dashboard" | "session-plan" | "lesson-plan" | "log-book" | "reports";
+  activeTab:
+    "dashboard" | "session-plan" | "lesson-plan" | "log-book" | "reports";
   classes: Option[];
   sections: Option[];
   batches: Option[];
@@ -52,12 +53,13 @@ export const AcademicManagementFilterBar = ({
   subjects,
   teachers,
   academicYearBs,
-  showTeacherFilter
+  showTeacherFilter,
 }: AcademicManagementFilterBarProps) => {
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
 
-  const update = (patch: Partial<AcademicManagementFilters>) => onChange({ ...filters, ...patch });
+  const update = (patch: Partial<AcademicManagementFilters>) =>
+    onChange({ ...filters, ...patch });
 
   return (
     <div className="rounded-3xl border border-white/70 bg-white/90 p-4 shadow-sm">
@@ -72,17 +74,31 @@ export const AcademicManagementFilterBar = ({
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-medium text-slate-700">Session</span>
-          <Input value={filters.session} onChange={(event) => update({ session: event.target.value })} placeholder="2082/083" />
+          <Input
+            value={filters.session}
+            onChange={(event) => update({ session: event.target.value })}
+            placeholder="2082/083"
+          />
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-medium text-slate-700">Faculty / Program</span>
-          <Input value={filters.faculty} onChange={(event) => update({ faculty: event.target.value })} placeholder="Science" />
+          <Input
+            value={filters.faculty}
+            onChange={(event) => update({ faculty: event.target.value })}
+          />
         </label>
         {isCollege ? (
           <>
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-slate-700">{labels.primary}</span>
-              <Select value={filters.batchId ?? ""} onChange={(event) => update({ batchId: event.target.value, yearId: "" })}>
+              <span className="font-medium text-slate-700">
+                {labels.primary}
+              </span>
+              <Select
+                value={filters.batchId ?? ""}
+                onChange={(event) =>
+                  update({ batchId: event.target.value, yearId: "" })
+                }
+              >
                 <option value="">All</option>
                 {batches.map((batch) => (
                   <option key={batch._id} value={batch._id}>
@@ -92,11 +108,21 @@ export const AcademicManagementFilterBar = ({
               </Select>
             </label>
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-slate-700">{labels.secondary}</span>
-              <Select value={filters.yearId ?? ""} onChange={(event) => update({ yearId: event.target.value })}>
+              <span className="font-medium text-slate-700">
+                {labels.secondary}
+              </span>
+              <Select
+                value={filters.yearId ?? ""}
+                onChange={(event) => update({ yearId: event.target.value })}
+              >
                 <option value="">All</option>
                 {years
-                  .filter((year) => !filters.batchId || (year as Option & { batchId?: string }).batchId === filters.batchId)
+                  .filter(
+                    (year) =>
+                      !filters.batchId ||
+                      (year as Option & { batchId?: string }).batchId ===
+                        filters.batchId,
+                  )
                   .map((year) => (
                     <option key={year._id} value={year._id}>
                       {year.name}
@@ -106,14 +132,25 @@ export const AcademicManagementFilterBar = ({
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium text-slate-700">Semester</span>
-              <Input value={filters.semesterBs} onChange={(event) => update({ semesterBs: event.target.value })} placeholder="1st" />
+              <Input
+                value={filters.semesterBs}
+                onChange={(event) => update({ semesterBs: event.target.value })}
+                placeholder="1st"
+              />
             </label>
           </>
         ) : (
           <>
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-slate-700">{labels.primary}</span>
-              <Select value={filters.classId ?? ""} onChange={(event) => update({ classId: event.target.value, sectionId: "" })}>
+              <span className="font-medium text-slate-700">
+                {labels.primary}
+              </span>
+              <Select
+                value={filters.classId ?? ""}
+                onChange={(event) =>
+                  update({ classId: event.target.value, sectionId: "" })
+                }
+              >
                 <option value="">All</option>
                 {classes.map((schoolClass) => (
                   <option key={schoolClass._id} value={schoolClass._id}>
@@ -123,11 +160,21 @@ export const AcademicManagementFilterBar = ({
               </Select>
             </label>
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-slate-700">{labels.secondary}</span>
-              <Select value={filters.sectionId ?? ""} onChange={(event) => update({ sectionId: event.target.value })}>
+              <span className="font-medium text-slate-700">
+                {labels.secondary}
+              </span>
+              <Select
+                value={filters.sectionId ?? ""}
+                onChange={(event) => update({ sectionId: event.target.value })}
+              >
                 <option value="">All</option>
                 {sections
-                  .filter((section) => !filters.classId || (section as Option & { classId?: string }).classId === filters.classId)
+                  .filter(
+                    (section) =>
+                      !filters.classId ||
+                      (section as Option & { classId?: string }).classId ===
+                        filters.classId,
+                  )
                   .map((section) => (
                     <option key={section._id} value={section._id}>
                       {section.name}
@@ -139,7 +186,10 @@ export const AcademicManagementFilterBar = ({
         )}
         <label className="space-y-1 text-sm">
           <span className="font-medium text-slate-700">Subject</span>
-          <Select value={filters.subjectId ?? ""} onChange={(event) => update({ subjectId: event.target.value })}>
+          <Select
+            value={filters.subjectId ?? ""}
+            onChange={(event) => update({ subjectId: event.target.value })}
+          >
             <option value="">All</option>
             {subjects.map((subject) => (
               <option key={subject._id} value={subject._id}>
@@ -151,7 +201,10 @@ export const AcademicManagementFilterBar = ({
         {showTeacherFilter ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium text-slate-700">Teacher</span>
-            <Select value={filters.teacherId ?? ""} onChange={(event) => update({ teacherId: event.target.value })}>
+            <Select
+              value={filters.teacherId ?? ""}
+              onChange={(event) => update({ teacherId: event.target.value })}
+            >
               <option value="">All</option>
               {teachers.map((teacher) => (
                 <option key={teacher._id} value={teacher._id}>
@@ -164,7 +217,10 @@ export const AcademicManagementFilterBar = ({
         {activeTab !== "session-plan" ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium text-slate-700">Month</span>
-            <Select value={filters.month ?? ""} onChange={(event) => update({ month: event.target.value })}>
+            <Select
+              value={filters.month ?? ""}
+              onChange={(event) => update({ month: event.target.value })}
+            >
               <option value="">All</option>
               {NEPALI_MONTHS.map((month) => (
                 <option key={month} value={month}>
@@ -178,11 +234,19 @@ export const AcademicManagementFilterBar = ({
           <>
             <label className="space-y-1 text-sm">
               <span className="font-medium text-slate-700">Date From</span>
-              <Input value={filters.dateFrom} onChange={(event) => update({ dateFrom: event.target.value })} placeholder="2082-01-01" />
+              <Input
+                value={filters.dateFrom}
+                onChange={(event) => update({ dateFrom: event.target.value })}
+                placeholder="2082-01-01"
+              />
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium text-slate-700">Date To</span>
-              <Input value={filters.dateTo} onChange={(event) => update({ dateTo: event.target.value })} placeholder="2082-01-31" />
+              <Input
+                value={filters.dateTo}
+                onChange={(event) => update({ dateTo: event.target.value })}
+                placeholder="2082-01-31"
+              />
             </label>
           </>
         ) : null}
@@ -192,7 +256,8 @@ export const AcademicManagementFilterBar = ({
             value={filters.status ?? ""}
             onChange={(event) =>
               update({
-                status: (event.target.value || undefined) as AcademicManagementFilters["status"]
+                status: (event.target.value ||
+                  undefined) as AcademicManagementFilters["status"],
               })
             }
           >
@@ -217,7 +282,11 @@ export const AcademicManagementFilterBar = ({
         </label>
         <label className="space-y-1 text-sm md:col-span-2">
           <span className="font-medium text-slate-700">Keyword</span>
-          <Input value={filters.keyword} onChange={(event) => update({ keyword: event.target.value })} placeholder="Search topic, unit, status..." />
+          <Input
+            value={filters.keyword}
+            onChange={(event) => update({ keyword: event.target.value })}
+            placeholder="Search topic, unit, status..."
+          />
         </label>
       </div>
 

@@ -4,7 +4,7 @@ import {
   type DailyAttendanceLogRecord,
   type DailyAttendanceRecord,
   type DailyAttendanceStatus,
-  type DailyAttendanceUpdateInput
+  type DailyAttendanceUpdateInput,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -20,7 +20,13 @@ import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 
-const statuses: DailyAttendanceStatus[] = ["PRESENT", "ABSENT", "LATE", "LEAVE", "MEDICAL_LEAVE"];
+const statuses: DailyAttendanceStatus[] = [
+  "PRESENT",
+  "ABSENT",
+  "LATE",
+  "LEAVE",
+  "MEDICAL_LEAVE",
+];
 
 interface EnrichedEntry {
   studentId: string;
@@ -61,12 +67,14 @@ export const DailyAttendanceHistoryPanel = ({
   hasInstitutionRead,
   canWriteAdmin,
   isSuperAdmin,
-  isLoading
+  isLoading,
 }: DailyAttendanceHistoryPanelProps) => {
   const [selectedId, setSelectedId] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const [statusMap, setStatusMap] = useState<Record<string, DailyAttendanceStatus>>({});
+  const [statusMap, setStatusMap] = useState<
+    Record<string, DailyAttendanceStatus>
+  >({});
   const [remarksMap, setRemarksMap] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [assignedTeacherId, setAssignedTeacherId] = useState("");
@@ -74,48 +82,64 @@ export const DailyAttendanceHistoryPanel = ({
 
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
-    queryFn: () => unwrap<Array<{ _id: string; user: { fullName: string } }>>(api.get("/teachers")),
-    enabled: canWriteAdmin
+    queryFn: () =>
+      unwrap<Array<{ _id: string; user: { fullName: string } }>>(
+        api.get("/teachers"),
+      ),
+    enabled: canWriteAdmin,
   });
 
   const detailQuery = useQuery({
     queryKey: ["daily-attendance-detail", selectedId],
-    queryFn: () => unwrap<EnrichedRecord>(api.get(`/daily-attendance/${selectedId}`)),
-    enabled: Boolean(selectedId)
+    queryFn: () =>
+      unwrap<EnrichedRecord>(api.get(`/daily-attendance/${selectedId}`)),
+    enabled: Boolean(selectedId),
   });
 
   const logsQuery = useQuery({
     queryKey: ["daily-attendance-logs", selectedId],
-    queryFn: () => unwrap<DailyAttendanceLogRecord[]>(api.get(`/daily-attendance/${selectedId}/logs`)),
-    enabled: Boolean(selectedId) && showLogs && hasInstitutionRead
+    queryFn: () =>
+      unwrap<DailyAttendanceLogRecord[]>(
+        api.get(`/daily-attendance/${selectedId}/logs`),
+      ),
+    enabled: Boolean(selectedId) && showLogs && hasInstitutionRead,
   });
 
   const unlockMutation = useMutation({
     mutationFn: async (reason: string) =>
-      unwrap<DailyAttendanceRecord>(api.post(`/daily-attendance/${selectedId}/unlock`, { reason })),
+      unwrap<DailyAttendanceRecord>(
+        api.post(`/daily-attendance/${selectedId}/unlock`, { reason }),
+      ),
     onSuccess: async () => {
       toast.success("Attendance unlocked");
       await queryClient.invalidateQueries({ queryKey: ["daily-attendance"] });
-      await queryClient.invalidateQueries({ queryKey: ["daily-attendance-detail"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["daily-attendance-detail"],
+      });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const updateMutation = useMutation({
     mutationFn: async (payload: DailyAttendanceUpdateInput) =>
-      unwrap<DailyAttendanceRecord>(api.put(`/daily-attendance/${selectedId}`, payload)),
+      unwrap<DailyAttendanceRecord>(
+        api.put(`/daily-attendance/${selectedId}`, payload),
+      ),
     onSuccess: async () => {
       toast.success("Attendance updated and re-synchronized");
       setIsEditing(false);
       await queryClient.invalidateQueries({ queryKey: ["daily-attendance"] });
-      await queryClient.invalidateQueries({ queryKey: ["daily-attendance-detail"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["daily-attendance-detail"],
+      });
       await queryClient.invalidateQueries({ queryKey: ["attendance"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async () => unwrap<null>(api.delete(`/daily-attendance/${selectedId}`)),
+    mutationFn: async () =>
+      unwrap<null>(api.delete(`/daily-attendance/${selectedId}`)),
     onSuccess: async () => {
       toast.success("Attendance record deleted");
       setSelectedId("");
@@ -123,7 +147,7 @@ export const DailyAttendanceHistoryPanel = ({
       setShowLogs(false);
       await queryClient.invalidateQueries({ queryKey: ["daily-attendance"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const selectedRecord = detailQuery.data;
@@ -133,16 +157,19 @@ export const DailyAttendanceHistoryPanel = ({
     setAssignedTeacherId(selectedRecord.teacherId);
     setReassignReason("");
     setStatusMap(
-      selectedRecord.entries.reduce<Record<string, DailyAttendanceStatus>>((acc, entry) => {
-        acc[String(entry.studentId)] = entry.status;
-        return acc;
-      }, {})
+      selectedRecord.entries.reduce<Record<string, DailyAttendanceStatus>>(
+        (acc, entry) => {
+          acc[String(entry.studentId)] = entry.status;
+          return acc;
+        },
+        {},
+      ),
     );
     setRemarksMap(
       selectedRecord.entries.reduce<Record<string, string>>((acc, entry) => {
         if (entry.remarks) acc[String(entry.studentId)] = entry.remarks;
         return acc;
-      }, {})
+      }, {}),
     );
     setNotes(selectedRecord.notes ?? "");
     setIsEditing(true);
@@ -159,32 +186,42 @@ export const DailyAttendanceHistoryPanel = ({
 
   const handleSaveEdit = async () => {
     if (!selectedRecord) return;
-    const teacherChanged = assignedTeacherId && assignedTeacherId !== selectedRecord.teacherId;
+    const teacherChanged =
+      assignedTeacherId && assignedTeacherId !== selectedRecord.teacherId;
     if (teacherChanged && reassignReason.trim().length < 3) {
-      toast.error("Enter a reason when reassigning the teacher (min 3 characters).");
+      toast.error(
+        "Enter a reason when reassigning the teacher (min 3 characters).",
+      );
       return;
     }
 
     await updateMutation.mutateAsync({
       ...(selectedRecord.batchId
         ? { batchId: selectedRecord.batchId, yearId: selectedRecord.yearId }
-        : { classId: selectedRecord.classId, sectionId: selectedRecord.sectionId }),
+        : {
+            classId: selectedRecord.classId,
+            sectionId: selectedRecord.sectionId,
+          }),
       dateBs: selectedRecord.dateBs,
       notes,
       ...(teacherChanged
-        ? { teacherId: assignedTeacherId, teacherReassignReason: reassignReason.trim() }
+        ? {
+            teacherId: assignedTeacherId,
+            teacherReassignReason: reassignReason.trim(),
+          }
         : {}),
       entries: selectedRecord.entries.map((entry) => ({
         studentId: entry.studentId,
         status: statusMap[entry.studentId]!,
-        remarks: remarksMap[entry.studentId]
-      }))
+        remarks: remarksMap[entry.studentId],
+      })),
     });
   };
 
   const statusBadge = useMemo(() => {
     if (!selectedRecord) return null;
-    if (selectedRecord.status === "LOCKED") return <Badge className="bg-slate-100 text-slate-700">Locked</Badge>;
+    if (selectedRecord.status === "LOCKED")
+      return <Badge className="bg-slate-100 text-slate-700">Locked</Badge>;
     return <Badge className="bg-amber-100 text-amber-800">Unlocked</Badge>;
   }, [selectedRecord]);
 
@@ -198,7 +235,10 @@ export const DailyAttendanceHistoryPanel = ({
           {isLoading ? (
             <LoadingState />
           ) : records.length === 0 ? (
-            <EmptyState title="No attendance history" description="Submitted records will appear here." />
+            <EmptyState
+              title="No attendance history"
+              description="Submitted records will appear here."
+            />
           ) : (
             <div className="overflow-x-auto">
               <Table>
@@ -213,15 +253,28 @@ export const DailyAttendanceHistoryPanel = ({
                 </TableHead>
                 <TableBody>
                   {records.map((record) => (
-                    <tr key={record._id} className={selectedId === record._id ? "bg-brand-50" : undefined}>
+                    <tr
+                      key={record._id}
+                      className={
+                        selectedId === record._id ? "bg-brand-50" : undefined
+                      }
+                    >
                       <Td>{record.dateBs}</Td>
-                      <Td>{record.batchId ? "College group" : "School group"}</Td>
                       <Td>
-                        <Badge className="bg-slate-100 text-slate-700">{record.status}</Badge>
+                        {record.batchId ? "College group" : "School group"}
+                      </Td>
+                      <Td>
+                        <Badge className="bg-slate-100 text-slate-700">
+                          {record.status}
+                        </Badge>
                       </Td>
                       <Td>{record.entries.length}</Td>
                       <Td>
-                        <Button size="sm" variant="outline" onClick={() => setSelectedId(record._id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSelectedId(record._id)}
+                        >
                           View
                         </Button>
                       </Td>
@@ -240,25 +293,40 @@ export const DailyAttendanceHistoryPanel = ({
         </CardHeader>
         <CardContent>
           {!selectedId ? (
-            <EmptyState title="Select a record" description="Choose an attendance record from the history table." />
+            <EmptyState
+              title="Select a record"
+              description="Choose an attendance record from the history table."
+            />
           ) : detailQuery.isLoading ? (
             <LoadingState />
           ) : !selectedRecord ? (
-            <EmptyState title="Record not found" description="This attendance record may have been deleted." />
+            <EmptyState
+              title="Record not found"
+              description="This attendance record may have been deleted."
+            />
           ) : (
             <div className="space-y-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-slate-900">{selectedRecord.groupLabel}</p>
+                  <p className="font-semibold text-slate-900">
+                    {selectedRecord.groupLabel}
+                  </p>
                   {statusBadge}
                 </div>
-                <p className="mt-2 text-slate-600">Date: {selectedRecord.dateBs}</p>
-                <p className="text-slate-600">Teacher: {selectedRecord.teacherName}</p>
+                <p className="mt-2 text-slate-600">
+                  Date: {selectedRecord.dateBs}
+                </p>
                 <p className="text-slate-600">
-                  Summary: {selectedRecord.summary?.present ?? 0} present, {selectedRecord.summary?.absent ?? 0} absent
+                  Teacher: {selectedRecord.teacherName}
+                </p>
+                <p className="text-slate-600">
+                  Summary: {selectedRecord.summary?.present ?? 0} present,{" "}
+                  {selectedRecord.summary?.absent ?? 0} absent
                 </p>
                 {selectedRecord.syncedAttendanceId ? (
-                  <p className="mt-2 text-sky-700">Synchronized with first-period subject attendance.</p>
+                  <p className="mt-2 text-sky-700">
+                    Synchronized with first-period subject attendance.
+                  </p>
                 ) : null}
               </div>
 
@@ -266,18 +334,34 @@ export const DailyAttendanceHistoryPanel = ({
                 <div className="flex flex-wrap gap-2">
                   {canWriteAdmin ? (
                     <>
-                      <Button size="sm" variant="outline" onClick={beginEdit} disabled={isEditing}>
-                        {selectedRecord.status === "LOCKED" ? "Edit Locked Record" : "Edit"}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={beginEdit}
+                        disabled={isEditing}
+                      >
+                        {selectedRecord.status === "LOCKED"
+                          ? "Edit Locked Record"
+                          : "Edit"}
                       </Button>
                       {selectedRecord.status === "LOCKED" ? (
-                        <Button size="sm" variant="outline" disabled={unlockMutation.isPending} onClick={handleUnlock}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={unlockMutation.isPending}
+                          onClick={handleUnlock}
+                        >
                           Unlock for Teacher
                         </Button>
                       ) : null}
                     </>
                   ) : null}
                   {hasInstitutionRead ? (
-                    <Button size="sm" variant="outline" onClick={() => setShowLogs((current) => !current)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowLogs((current) => !current)}
+                    >
                       {showLogs ? "Hide Logs" : "View Logs"}
                     </Button>
                   ) : null}
@@ -287,7 +371,11 @@ export const DailyAttendanceHistoryPanel = ({
                       variant="destructive"
                       disabled={deleteMutation.isPending}
                       onClick={() => {
-                        if (window.confirm("Delete this attendance record permanently?")) {
+                        if (
+                          window.confirm(
+                            "Delete this attendance record permanently?",
+                          )
+                        ) {
                           void deleteMutation.mutateAsync();
                         }
                       }}
@@ -308,10 +396,21 @@ export const DailyAttendanceHistoryPanel = ({
                     ) : (
                       <ul className="space-y-2">
                         {(logsQuery.data ?? []).map((log) => (
-                          <li key={log._id} className="border-b border-slate-100 pb-2 last:border-0">
-                            <span className="font-medium">{log.action}</span> by {log.actorRole}
-                            {log.synchronizationStatus ? ` · ${log.synchronizationStatus}` : ""}
-                            {log.createdAt ? <span className="text-slate-500"> · {log.createdAt}</span> : null}
+                          <li
+                            key={log._id}
+                            className="border-b border-slate-100 pb-2 last:border-0"
+                          >
+                            <span className="font-medium">{log.action}</span> by{" "}
+                            {log.actorRole}
+                            {log.synchronizationStatus
+                              ? ` · ${log.synchronizationStatus}`
+                              : ""}
+                            {log.createdAt ? (
+                              <span className="text-slate-500">
+                                {" "}
+                                · {log.createdAt}
+                              </span>
+                            ) : null}
                           </li>
                         ))}
                       </ul>
@@ -342,7 +441,8 @@ export const DailyAttendanceHistoryPanel = ({
                               onChange={(event) =>
                                 setStatusMap((current) => ({
                                   ...current,
-                                  [entry.studentId]: event.target.value as DailyAttendanceStatus
+                                  [entry.studentId]: event.target
+                                    .value as DailyAttendanceStatus,
                                 }))
                               }
                             >
@@ -363,12 +463,12 @@ export const DailyAttendanceHistoryPanel = ({
                               onChange={(event) =>
                                 setRemarksMap((current) => ({
                                   ...current,
-                                  [entry.studentId]: event.target.value
+                                  [entry.studentId]: event.target.value,
                                 }))
                               }
                             />
                           ) : (
-                            entry.remarks ?? "—"
+                            (entry.remarks ?? "—")
                           )}
                         </Td>
                       </tr>
@@ -381,8 +481,15 @@ export const DailyAttendanceHistoryPanel = ({
                 <>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Assigned Teacher</label>
-                      <Select value={assignedTeacherId} onChange={(event) => setAssignedTeacherId(event.target.value)}>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        Assigned Teacher
+                      </label>
+                      <Select
+                        value={assignedTeacherId}
+                        onChange={(event) =>
+                          setAssignedTeacherId(event.target.value)
+                        }
+                      >
                         <option value="">Select teacher</option>
                         {(teachersQuery.data ?? []).map((teacher) => (
                           <option key={teacher._id} value={teacher._id}>
@@ -392,20 +499,34 @@ export const DailyAttendanceHistoryPanel = ({
                       </Select>
                     </div>
                     <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Reassign Reason</label>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        Reassign Reason
+                      </label>
                       <Input
                         value={reassignReason}
-                        onChange={(event) => setReassignReason(event.target.value)}
+                        onChange={(event) =>
+                          setReassignReason(event.target.value)
+                        }
                         placeholder="Required if changing teacher"
                       />
                     </div>
                   </div>
-                  <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Class notes" />
+                  <Textarea
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Class notes"
+                  />
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => setIsEditing(false)}>
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsEditing(false)}
+                    >
                       Cancel
                     </Button>
-                    <Button disabled={updateMutation.isPending} onClick={() => void handleSaveEdit()}>
+                    <Button
+                      disabled={updateMutation.isPending}
+                      onClick={() => void handleSaveEdit()}
+                    >
                       Save Changes
                     </Button>
                   </div>

@@ -10,7 +10,11 @@ interface ClassroomAttachmentUploadProps {
   disabled?: boolean;
 }
 
-export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }: ClassroomAttachmentUploadProps) => {
+export const ClassroomAttachmentUpload = ({
+  attachments,
+  onChange,
+  disabled,
+}: ClassroomAttachmentUploadProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +31,7 @@ export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }: C
       const response = await fetch(resolveApiUrl("/uploads/classroom"), {
         method: "POST",
         body: formData,
-        credentials: "include"
+        credentials: "include",
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -37,7 +41,9 @@ export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }: C
       const uploaded = (body.data?.attachments ?? []) as AssignmentAttachment[];
       onChange([...attachments, ...uploaded]);
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
+      setError(
+        uploadError instanceof Error ? uploadError.message : "Upload failed",
+      );
     } finally {
       setIsUploading(false);
       event.target.value = "";
@@ -70,18 +76,33 @@ export const ClassroomAttachmentUpload = ({ attachments, onChange, disabled }: C
       {attachments.length > 0 ? (
         <div className="space-y-2 rounded-xl border bg-slate-50 p-3">
           {attachments.map((file, index) => (
-            <div key={`${file.url}-${index}`} className="flex items-center justify-between gap-2 text-sm">
+            <div
+              key={`${file.url}-${index}`}
+              className="flex items-center justify-between gap-2 text-sm"
+            >
               <div className="flex min-w-0 items-center gap-2">
-                {file.kind === "IMAGE" || file.url.match(/\.(jpg|jpeg|png|webp)$/i) ? (
+                {file.kind === "IMAGE" ||
+                file.url.match(/\.(jpg|jpeg|png|webp)$/i) ? (
                   <ImageIcon className="h-4 w-4 shrink-0 text-slate-500" />
                 ) : (
                   <FileText className="h-4 w-4 shrink-0 text-slate-500" />
                 )}
-                <a href={file.url} target="_blank" rel="noopener noreferrer" className="truncate text-brand-700 hover:underline">
+                <a
+                  href={file.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="truncate text-brand-700 hover:underline"
+                >
                   {file.name}
                 </a>
               </div>
-              <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => removeAttachment(index)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={() => removeAttachment(index)}
+              >
                 <X className="h-3.5 w-3.5" />
               </Button>
             </div>

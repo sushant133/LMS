@@ -6,7 +6,7 @@ import {
   type FinancialSummaryReport,
   type ReportColumn,
   type StudentAccountSummary,
-  type StudentRecord
+  type StudentRecord,
 } from "@phit-erp/shared";
 import { saveAs } from "file-saver";
 import { formatCurrencyNpr } from "lib/utils";
@@ -28,7 +28,10 @@ const getNestedValue = (row: Record<string, unknown>, key: string): unknown => {
   return row[key];
 };
 
-export const formatReportCell = (value: unknown, format?: ReportColumn["format"]): string => {
+export const formatReportCell = (
+  value: unknown,
+  format?: ReportColumn["format"],
+): string => {
   if (value === null || value === undefined || value === "") {
     return "—";
   }
@@ -44,25 +47,34 @@ export const formatReportCell = (value: unknown, format?: ReportColumn["format"]
   return String(value).replace(/_/g, " ");
 };
 
-export const getReportRows = (reportType: AccountingReportType, rows: unknown[]): Array<Record<string, unknown>> =>
-  getSharedReportRows(reportType, rows);
+export const getReportRows = (
+  reportType: AccountingReportType,
+  rows: unknown[],
+): Array<Record<string, unknown>> => getSharedReportRows(reportType, rows);
 
-export const getReportCellValue = (row: Record<string, unknown>, column: ReportColumn): string =>
-  formatReportCell(getNestedValue(row, column.key), column.format);
+export const getReportCellValue = (
+  row: Record<string, unknown>,
+  column: ReportColumn,
+): string => formatReportCell(getNestedValue(row, column.key), column.format);
 
-const buildSheetData = (reportType: AccountingReportType, rows: unknown[]): string[][] => {
+const buildSheetData = (
+  reportType: AccountingReportType,
+  rows: unknown[],
+): string[][] => {
   const columns = REPORT_COLUMNS[reportType];
   const enrichedRows = getReportRows(reportType, rows);
   return [
     columns.map((column) => column.label),
-    ...enrichedRows.map((row) => columns.map((column) => getReportCellValue(row, column)))
+    ...enrichedRows.map((row) =>
+      columns.map((column) => getReportCellValue(row, column)),
+    ),
   ];
 };
 
 export const downloadReportExcel = (
   reportType: AccountingReportType,
   reportLabel: string,
-  rows: unknown[]
+  rows: unknown[],
 ): void => {
   const worksheet = XLSX.utils.aoa_to_sheet(buildSheetData(reportType, rows));
   const workbook = XLSX.utils.book_new();
@@ -70,13 +82,15 @@ export const downloadReportExcel = (
 
   const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
   const blob = new Blob([buffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   const safeLabel = reportLabel.replace(/[^\w-]+/g, "_").replace(/_+/g, "_");
   saveAs(blob, `${safeLabel}_${reportType}.xlsx`);
 };
 
-export const downloadFinancialSummaryExcel = (report: FinancialSummaryReport): void => {
+export const downloadFinancialSummaryExcel = (
+  report: FinancialSummaryReport,
+): void => {
   const workbook = XLSX.utils.book_new();
 
   const summarySheet = XLSX.utils.aoa_to_sheet([
@@ -92,7 +106,7 @@ export const downloadFinancialSummaryExcel = (report: FinancialSummaryReport): v
     ["Total Purchases", "", report.totals.purchaseNpr],
     ["Total Salaries", "", report.totals.salaryNpr],
     ["Pending Student Fees", "", report.totals.pendingFeesNpr],
-    ["Net Surplus", "", report.totals.netSurplusNpr]
+    ["Net Surplus", "", report.totals.netSurplusNpr],
   ]);
   XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
 
@@ -103,8 +117,8 @@ export const downloadFinancialSummaryExcel = (report: FinancialSummaryReport): v
         ? buildSheetData(section.reportType, rows)
         : [
             REPORT_COLUMNS[section.reportType].map((column) => column.label),
-            ["No records for this period"]
-          ]
+            ["No records for this period"],
+          ],
     );
     const safeName = section.label.slice(0, 31);
     XLSX.utils.book_append_sheet(workbook, sheet, safeName);
@@ -112,12 +126,14 @@ export const downloadFinancialSummaryExcel = (report: FinancialSummaryReport): v
 
   const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
   const blob = new Blob([buffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   saveAs(blob, `Financial_Summary_${report.period.monthBs}.xlsx`);
 };
 
-export const reportUsesMonthFilter = (reportType: AccountingReportType): boolean =>
+export const reportUsesMonthFilter = (
+  reportType: AccountingReportType,
+): boolean =>
   reportType.includes("monthly") ||
   reportType === "salary-payments" ||
   reportType === "expenses" ||
@@ -126,7 +142,10 @@ export const reportUsesMonthFilter = (reportType: AccountingReportType): boolean
   reportType === "cash-summary" ||
   reportType === "financial-summary";
 
-export const matchesStudentSearch = (student: StudentRecord, query: string): boolean => {
+export const matchesStudentSearch = (
+  student: StudentRecord,
+  query: string,
+): boolean => {
   const normalized = query.trim().toLowerCase();
   if (!normalized) {
     return true;
@@ -141,5 +160,7 @@ export const matchesStudentSearch = (student: StudentRecord, query: string): boo
   );
 };
 
-export const matchesStudentAccountSearch = (account: StudentAccountSummary, query: string): boolean =>
-  matchesStudentSearch(account.student, query);
+export const matchesStudentAccountSearch = (
+  account: StudentAccountSummary,
+  query: string,
+): boolean => matchesStudentSearch(account.student, query);

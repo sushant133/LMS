@@ -10,7 +10,12 @@ interface RichTextEditorProps {
   className?: string;
 }
 
-export const RichTextEditor = ({ value, onChange, placeholder, className }: RichTextEditorProps) => {
+export const RichTextEditor = ({
+  value,
+  onChange,
+  placeholder,
+  className,
+}: RichTextEditorProps) => {
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,19 +33,49 @@ export const RichTextEditor = ({ value, onChange, placeholder, className }: Rich
   return (
     <div className={cn("space-y-2", className)}>
       <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-        <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => applyCommand("bold")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          onClick={() => applyCommand("bold")}
+        >
           <Bold className="h-4 w-4" />
         </Button>
-        <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => applyCommand("italic")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          onClick={() => applyCommand("italic")}
+        >
           <Italic className="h-4 w-4" />
         </Button>
-        <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => applyCommand("underline")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          onClick={() => applyCommand("underline")}
+        >
           <Underline className="h-4 w-4" />
         </Button>
-        <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => applyCommand("insertUnorderedList")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          onClick={() => applyCommand("insertUnorderedList")}
+        >
           <List className="h-4 w-4" />
         </Button>
-        <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => applyCommand("insertOrderedList")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          onClick={() => applyCommand("insertOrderedList")}
+        >
           <ListOrdered className="h-4 w-4" />
         </Button>
       </div>

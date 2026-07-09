@@ -251,16 +251,28 @@ export const listDailyAttendanceAssignments = asyncHandler(async (req: Request, 
   };
 
   const assignments: AssignmentRow[] = slotRows.map(
-    ({ slot, className, sectionName, batchName, yearName, subject, teacherName, firstPeriodTeacherName, isSubstituteSlot }) => {
+    ({
+      slot,
+      className,
+      sectionName,
+      batchName,
+      yearName,
+      subject,
+      teacherName,
+      firstPeriodTeacherName,
+      firstPeriodEndTime,
+      isSubstituteSlot
+    }) => {
     const key = getAcademicGroupKey(slot, college);
     coveredKeys.add(key);
     const existing = existingMap.get(key);
     const studentCount = studentCountMap.get(key) ?? 0;
+    // Always use first-period end time for the close window (not substitute period end)
     const availability = evaluateAttendanceAvailability({
       dateBs,
       config,
-      firstPeriodEndTime: slot.endTime,
-      adminOverride,
+      firstPeriodEndTime: firstPeriodEndTime ?? slot.endTime,
+      adminOverride: canWriteAsAdmin && adminOverride,
       holidayTitle: holiday?.title
     });
     const isLocked = existing?.status === "LOCKED";
@@ -452,7 +464,12 @@ export const listDailyAttendance = asyncHandler(async (req: Request, res: Respon
       $lte: ensureValidBsDate(req.query.toDateBs)
     };
   } else if (typeof req.query.monthBs === "string") {
-    query.dateBs = { $regex: `^${req.query.monthBs}` };
+    if (!/^\d{4}-\d{2}$/.test(req.query.monthBs)) {
+      throw new ApiError(400, "monthBs must be in YYYY-MM format");
+    }
+    const monthStart = `${req.query.monthBs}-01`;
+    ensureValidBsDate(monthStart);
+    query.dateBs = { $gte: monthStart, $lt: `${req.query.monthBs}-32` };
   }
   if (typeof req.query.teacherId === "string") query.teacherId = req.query.teacherId;
 
@@ -653,6 +670,14 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
       throw new ApiError(400, "Invalid timetable slot");
     }
 
+    const dateDayOfWeek = getDayOfWeekFromDate(payload.dateBs);
+    if (slot.dayOfWeek !== dateDayOfWeek) {
+      throw new ApiError(400, "Timetable slot day does not match the attendance date");
+    }
+    if (slot.academicYearBs !== school.academicYearBs) {
+      throw new ApiError(400, "Timetable slot does not match the institution academic year");
+    }
+
     await assertTeacherSlotAccess(req, slot, {
       adminOverride,
       forWrite: true,
@@ -669,15 +694,14 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
     }
   }
 
-  const scope: AcademicGroupScope = college
-    ? {
-        batchId: payload.batchId ?? slot?.batchId?.toString(),
-        yearId: payload.yearId ?? slot?.yearId?.toString()
-      }
-    : {
-        classId: payload.classId ?? slot?.classId?.toString(),
-        sectionId: payload.sectionId ?? slot?.sectionId?.toString()
-      };
+  // When a slot is provided, force academic group from the slot (prevents cross-group IDOR)
+  const scope: AcademicGroupScope = slot
+    ? college
+      ? { batchId: slot.batchId?.toString(), yearId: slot.yearId?.toString() }
+      : { classId: slot.classId?.toString(), sectionId: slot.sectionId?.toString() }
+    : college
+      ? { batchId: payload.batchId, yearId: payload.yearId }
+      : { classId: payload.classId, sectionId: payload.sectionId };
 
   const firstPeriodSlot = slot
     ? await getFirstPeriodSlotForGroup(
@@ -720,8 +744,8 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
   const availability = evaluateAttendanceAvailability({
     dateBs: payload.dateBs,
     config,
-    firstPeriodEndTime: slot?.endTime ?? firstPeriodSlot?.endTime,
-    adminOverride,
+    firstPeriodEndTime: firstPeriodSlot?.endTime ?? slot?.endTime,
+    adminOverride: canManageInstitution(req.user?.role ?? "") && adminOverride,
     holidayTitle: holiday?.title
   });
 
@@ -884,6 +908,14 @@ export const updateDailyAttendance = asyncHandler(async (req: Request, res: Resp
 
   await validateDailyAttendanceStudents(schoolId.toString(), college, payload, payload.entries);
 
+  const config = await getDailyAttendanceConfig(schoolId.toString());
+  if (config.allowMedicalLeave === false) {
+    const hasMedical = payload.entries.some((entry) => entry.status === "MEDICAL_LEAVE");
+    if (hasMedical) {
+      throw new ApiError(400, "Medical leave is disabled in attendance settings");
+    }
+  }
+
   const updated = await withTransaction(async (session: ClientSession | null) => {
     const before = record.toObject();
     record.set(
@@ -1032,6 +1064,14 @@ export const deleteDailyAttendance = asyncHandler(async (req: Request, res: Resp
   }
 
   const before = record.toObject();
+  const syncedAttendanceId = record.syncedAttendanceId?.toString();
+
+  // Remove linked subject-wise attendance so reports stay consistent
+  if (syncedAttendanceId) {
+    const { Attendance } = await import("../models/Attendance.js");
+    await Attendance.deleteOne({ _id: syncedAttendanceId, schoolId });
+  }
+
   await record.deleteOne();
 
   await recordDailyAttendanceLog(
@@ -1160,7 +1200,12 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
   if (typeof req.query.dateBs === "string") {
     filter.dateBs = ensureValidBsDate(req.query.dateBs);
   } else if (typeof req.query.monthBs === "string") {
-    filter.dateBs = { $regex: `^${req.query.monthBs}` };
+    if (!/^\d{4}-\d{2}$/.test(req.query.monthBs)) {
+      throw new ApiError(400, "monthBs must be in YYYY-MM format");
+    }
+    const monthStart = `${req.query.monthBs}-01`;
+    ensureValidBsDate(monthStart);
+    filter.dateBs = { $gte: monthStart, $lt: `${req.query.monthBs}-32` };
   } else if (typeof req.query.fromDateBs === "string" && typeof req.query.toDateBs === "string") {
     filter.dateBs = {
       $gte: ensureValidBsDate(req.query.fromDateBs),
@@ -1186,14 +1231,14 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
   if (reportType === "leave") {
     return sendSuccess(res, "Leave report generated", {
       type: reportType,
-      rows: buildStatusReport(reportRecords, "LEAVE")
+      rows: await buildStatusReport(reportRecords, "LEAVE")
     });
   }
 
   if (reportType === "late") {
     return sendSuccess(res, "Late arrival report generated", {
       type: reportType,
-      rows: buildStatusReport(reportRecords, "LATE")
+      rows: await buildStatusReport(reportRecords, "LATE")
     });
   }
 
@@ -1205,13 +1250,17 @@ export const getDailyAttendanceReports = asyncHandler(async (req: Request, res: 
   }
 
   const totals = aggregateRecords(reportRecords);
+  const classWise = await buildClassWiseSummary(reportRecords, college);
+  const teacherWise = await buildTeacherWiseSummary(reportRecords, college);
   return sendSuccess(res, "Daily attendance summary generated", {
     type: "summary",
     totals,
     attendancePercentage: attendancePercentage(totals),
     records: records.length,
-    classWise: await buildClassWiseSummary(reportRecords, college),
-    teacherWise: await buildTeacherWiseSummary(reportRecords, college)
+    classWise,
+    teacherWise,
+    // FE tables expect `rows`; expose class-wise summary as default tabular view
+    rows: classWise
   });
 });
 

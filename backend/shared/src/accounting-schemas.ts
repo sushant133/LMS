@@ -141,6 +141,8 @@ export const accountingSettingsSchema = z.object({
   voucherPrefix: z.string().default("JV"),
   currentFiscalYearBs: academicYearSchema.optional(),
   auditLockDateBs: z.string().optional().or(z.literal("")),
+  /** Amounts at or above this NPR require dual approval for reverse/void. */
+  approvalThresholdNpr: z.coerce.number().min(0).default(25000),
   panNumber: z.string().optional().or(z.literal("")),
   vatNumber: z.string().optional().or(z.literal("")),
   tdsEnabled: z.boolean().default(false),

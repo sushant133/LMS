@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import type { AcademicCalendarDashboard } from "@phit-erp/shared";
-import { CalendarDays, GraduationCap, PartyPopper, ScrollText } from "lucide-react";
+import {
+  CalendarDays,
+  GraduationCap,
+  PartyPopper,
+  ScrollText,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { api, unwrap } from "lib/api";
@@ -10,7 +15,7 @@ const WidgetCard = ({
   title,
   icon: Icon,
   value,
-  items
+  items,
 }: {
   title: string;
   icon: typeof CalendarDays;
@@ -47,14 +52,20 @@ const WidgetCard = ({
 export const AcademicCalendarWidgets = () => {
   const dashboardQuery = useQuery({
     queryKey: ["academic-calendar", "dashboard"],
-    queryFn: () => unwrap<AcademicCalendarDashboard>(api.get("/academic-calendar/dashboard"))
+    queryFn: () =>
+      unwrap<AcademicCalendarDashboard>(
+        api.get("/academic-calendar/dashboard"),
+      ),
   });
 
   if (dashboardQuery.isPending) {
     return (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="h-36 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+          <div
+            key={index}
+            className="h-36 animate-pulse rounded-2xl border border-slate-200 bg-white"
+          />
         ))}
       </div>
     );
@@ -77,7 +88,7 @@ export const AcademicCalendarWidgets = () => {
         value={`${data.upcomingHolidays.length}`}
         items={data.upcomingHolidays.map((event) => ({
           label: event.name,
-          meta: event.dateBs
+          meta: event.dateBs,
         }))}
       />
       <WidgetCard
@@ -86,7 +97,7 @@ export const AcademicCalendarWidgets = () => {
         value={`${data.upcomingAcademicEvents.length}`}
         items={data.upcomingAcademicEvents.map((event) => ({
           label: event.name,
-          meta: event.dateBs
+          meta: event.dateBs,
         }))}
       />
       <WidgetCard
@@ -95,7 +106,7 @@ export const AcademicCalendarWidgets = () => {
         value={`${data.upcomingExaminations.length}`}
         items={data.upcomingExaminations.map((event) => ({
           label: event.name,
-          meta: `${event.dateBs} · ${getEventTypeLabel(event.eventType)}`
+          meta: `${event.dateBs} · ${getEventTypeLabel(event.eventType)}`,
         }))}
       />
     </div>

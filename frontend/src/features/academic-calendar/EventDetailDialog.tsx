@@ -25,7 +25,7 @@ export const EventDetailDialog = ({
   onClose,
   onEdit,
   onDelete,
-  onAdd
+  onAdd,
 }: EventDetailDialogProps) => {
   if (!open) return null;
 
@@ -34,8 +34,12 @@ export const EventDetailDialog = ({
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl">
         <div className="sticky top-0 flex items-center justify-between border-b bg-white px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Events on {dateBs}</h2>
-            <p className="text-sm text-slate-500">{events.length} event{events.length === 1 ? "" : "s"}</p>
+            <h2 className="text-lg font-semibold text-slate-900">
+              Events on {dateBs}
+            </h2>
+            <p className="text-sm text-slate-500">
+              {events.length} event{events.length === 1 ? "" : "s"}
+            </p>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>
             <X className="h-4 w-4" />
@@ -44,18 +48,25 @@ export const EventDetailDialog = ({
 
         <div className="space-y-3 p-5">
           {events.length === 0 ? (
-            <p className="text-sm text-slate-600">No events scheduled for this date.</p>
+            <p className="text-sm text-slate-600">
+              No events scheduled for this date.
+            </p>
           ) : (
             events.map((event) => (
-              <div key={event._id} className="rounded-xl border border-slate-200 p-4">
+              <div
+                key={event._id}
+                className="rounded-xl border border-slate-200 p-4"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-2">
-                    <h3 className="font-semibold text-slate-900">{event.name}</h3>
+                    <h3 className="font-semibold text-slate-900">
+                      {event.name}
+                    </h3>
                     <Badge
                       style={{
                         backgroundColor: `${getEventTypeColor(event.eventType)}22`,
                         color: getEventTypeColor(event.eventType),
-                        borderColor: `${getEventTypeColor(event.eventType)}55`
+                        borderColor: `${getEventTypeColor(event.eventType)}55`,
                       }}
                     >
                       {getEventTypeLabel(event.eventType)}
@@ -63,7 +74,12 @@ export const EventDetailDialog = ({
                   </div>
                   {canManage ? (
                     <div className="flex gap-1">
-                      <Button type="button" variant="ghost" size="sm" onClick={() => onEdit(event)}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onEdit(event)}
+                      >
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button

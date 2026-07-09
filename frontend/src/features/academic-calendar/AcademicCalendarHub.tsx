@@ -4,7 +4,7 @@ import {
   formatAcademicYearLabel,
   type AcademicCalendarEventInput,
   type AcademicCalendarEventRecord,
-  type AcademicCalendarFilters
+  type AcademicCalendarFilters,
 } from "@phit-erp/shared";
 import { Download, FileSpreadsheet, Printer, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -33,7 +33,7 @@ import {
   formatMonthKey,
   getEventTypeLabel,
   groupEventsByDate,
-  resolvePreferredAcademicYear
+  resolvePreferredAcademicYear,
 } from "./academicCalendarUtils";
 
 export const AcademicCalendarHub = () => {
@@ -41,49 +41,64 @@ export const AcademicCalendarHub = () => {
   const canManage = canManageInstitution(user?.role ?? "");
   const schoolAcademicYearBs = user?.school?.academicYearBs ?? "";
   const [academicYearBs, setAcademicYearBs] = useState(schoolAcademicYearBs);
-  const [draftFilters, setDraftFilters] = useState<AcademicCalendarFilters>(defaultCalendarFilters());
-  const [appliedFilters, setAppliedFilters] = useState<AcademicCalendarFilters>(defaultCalendarFilters());
+  const [draftFilters, setDraftFilters] = useState<AcademicCalendarFilters>(
+    defaultCalendarFilters(),
+  );
+  const [appliedFilters, setAppliedFilters] = useState<AcademicCalendarFilters>(
+    defaultCalendarFilters(),
+  );
   const [selectedDateBs, setSelectedDateBs] = useState("");
-  const [selectedEvents, setSelectedEvents] = useState<AcademicCalendarEventRecord[]>([]);
+  const [selectedEvents, setSelectedEvents] = useState<
+    AcademicCalendarEventRecord[]
+  >([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<AcademicCalendarEventRecord | null>(null);
+  const [editingEvent, setEditingEvent] =
+    useState<AcademicCalendarEventRecord | null>(null);
 
   const yearsQuery = useQuery({
     queryKey: ["academic-calendar", "years"],
-    queryFn: () => unwrap<string[]>(api.get("/academic-calendar/years"))
+    queryFn: () => unwrap<string[]>(api.get("/academic-calendar/years")),
   });
 
   const dashboardQuery = useQuery({
     queryKey: ["academic-calendar", "dashboard", academicYearBs],
     queryFn: () =>
       unwrap<{ todayBs: string; academicYearBs?: string }>(
-        api.get("/academic-calendar/dashboard", { params: academicYearBs ? { academicYearBs } : undefined })
+        api.get("/academic-calendar/dashboard", {
+          params: academicYearBs ? { academicYearBs } : undefined,
+        }),
       ),
-    enabled: Boolean(academicYearBs) || yearsQuery.isSuccess
+    enabled: Boolean(academicYearBs) || yearsQuery.isSuccess,
   });
 
   const eventsQuery = useQuery({
     queryKey: ["academic-calendar", "events", academicYearBs],
     queryFn: () =>
       unwrap<AcademicCalendarEventRecord[]>(
-        api.get("/academic-calendar/events", { params: { academicYearBs } })
+        api.get("/academic-calendar/events", { params: { academicYearBs } }),
       ),
-    enabled: Boolean(academicYearBs)
+    enabled: Boolean(academicYearBs),
   });
 
   const resolvedYear =
     academicYearBs ||
-    resolvePreferredAcademicYear(yearsQuery.data, schoolAcademicYearBs || dashboardQuery.data?.academicYearBs);
+    resolvePreferredAcademicYear(
+      yearsQuery.data,
+      schoolAcademicYearBs || dashboardQuery.data?.academicYearBs,
+    );
   const todayBs = dashboardQuery.data?.todayBs ?? "";
   const allMonths = buildAcademicYearMonths(resolvedYear);
   const months = appliedFilters.monthBs
-    ? allMonths.filter((month) => formatMonthKey(month.year, month.month) === appliedFilters.monthBs)
+    ? allMonths.filter(
+        (month) =>
+          formatMonthKey(month.year, month.month) === appliedFilters.monthBs,
+      )
     : allMonths;
   const events = eventsQuery.data ?? [];
   const filteredEvents = useMemo(
     () => filterEventsLocally(events, appliedFilters),
-    [events, appliedFilters]
+    [events, appliedFilters],
   );
   const eventsByDate = useMemo(() => groupEventsByDate(events), [events]);
 
@@ -94,11 +109,21 @@ export const AcademicCalendarHub = () => {
   }, [filteredEvents, selectedDateBs]);
 
   const saveMutation = useMutation({
-    mutationFn: async ({ payload, isEdit }: { payload: AcademicCalendarEventInput; isEdit: boolean }) => {
+    mutationFn: async ({
+      payload,
+      isEdit,
+    }: {
+      payload: AcademicCalendarEventInput;
+      isEdit: boolean;
+    }) => {
       if (isEdit && editingEvent) {
-        return unwrap<AcademicCalendarEventRecord>(api.put(`/academic-calendar/events/${editingEvent._id}`, payload));
+        return unwrap<AcademicCalendarEventRecord>(
+          api.put(`/academic-calendar/events/${editingEvent._id}`, payload),
+        );
       }
-      return unwrap<AcademicCalendarEventRecord>(api.post("/academic-calendar/events", payload));
+      return unwrap<AcademicCalendarEventRecord>(
+        api.post("/academic-calendar/events", payload),
+      );
     },
     onSuccess: async (_data, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["academic-calendar"] });
@@ -107,20 +132,24 @@ export const AcademicCalendarHub = () => {
       setDetailOpen(false);
       toast.success(variables.isEdit ? "Event updated" : "Event saved");
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (eventId: string) => unwrap(api.delete(`/academic-calendar/events/${eventId}`)),
+    mutationFn: (eventId: string) =>
+      unwrap(api.delete(`/academic-calendar/events/${eventId}`)),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["academic-calendar"] });
       setDetailOpen(false);
       toast.success("Event deleted");
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const handleDateClick = (dateBs: string, dayEvents: AcademicCalendarEventRecord[]) => {
+  const handleDateClick = (
+    dateBs: string,
+    dayEvents: AcademicCalendarEventRecord[],
+  ) => {
     setSelectedDateBs(dateBs);
     setSelectedEvents(dayEvents);
 
@@ -141,12 +170,18 @@ export const AcademicCalendarHub = () => {
 
   const handleExportExcel = () => {
     const rows = selectedDateBs ? dateScopedEvents : filteredEvents;
-    exportEventsExcel(rows, `academic-calendar-${resolvedYear.replace("/", "-")}.xlsx`);
+    exportEventsExcel(
+      rows,
+      `academic-calendar-${resolvedYear.replace("/", "-")}.xlsx`,
+    );
   };
 
   const handlePrint = () => printElementById("academic-calendar-print");
   const handleDownloadPdf = () =>
-    downloadPdfFromElementById("academic-calendar-print", `academic-calendar-${resolvedYear.replace("/", "-")}.pdf`);
+    downloadPdfFromElementById(
+      "academic-calendar-print",
+      `academic-calendar-${resolvedYear.replace("/", "-")}.pdf`,
+    );
 
   // Always land on the institution's current academic year (not the newest year in the list).
   useEffect(() => {
@@ -154,12 +189,17 @@ export const AcademicCalendarHub = () => {
 
     const preferred = resolvePreferredAcademicYear(
       yearsQuery.data,
-      schoolAcademicYearBs || dashboardQuery.data?.academicYearBs
+      schoolAcademicYearBs || dashboardQuery.data?.academicYearBs,
     );
     if (preferred) {
       setAcademicYearBs(preferred);
     }
-  }, [academicYearBs, yearsQuery.data, schoolAcademicYearBs, dashboardQuery.data?.academicYearBs]);
+  }, [
+    academicYearBs,
+    yearsQuery.data,
+    schoolAcademicYearBs,
+    dashboardQuery.data?.academicYearBs,
+  ]);
 
   // If auth school year loads after mount and user hasn't picked another year, sync to current.
   useEffect(() => {
@@ -170,7 +210,10 @@ export const AcademicCalendarHub = () => {
   }, [schoolAcademicYearBs, academicYearBs]);
 
   useEffect(() => {
-    setAppliedFilters((current) => ({ ...current, academicYearBs: resolvedYear }));
+    setAppliedFilters((current) => ({
+      ...current,
+      academicYearBs: resolvedYear,
+    }));
   }, [resolvedYear]);
 
   // Keep selected-date list in sync when events reload after create/edit/delete.
@@ -215,8 +258,13 @@ export const AcademicCalendarHub = () => {
       <Card>
         <CardContent className="grid gap-4 p-4 md:grid-cols-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Academic Year</label>
-            <Select value={resolvedYear} onChange={(event) => setAcademicYearBs(event.target.value)}>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Academic Year
+            </label>
+            <Select
+              value={resolvedYear}
+              onChange={(event) => setAcademicYearBs(event.target.value)}
+            >
               {(yearsQuery.data ?? [resolvedYear]).map((year) => (
                 <option key={year} value={year}>
                   {formatAcademicYearLabel(year)}
@@ -225,27 +273,40 @@ export const AcademicCalendarHub = () => {
             </Select>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">BS Month</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              BS Month
+            </label>
             <Select
               value={draftFilters.monthBs ?? ""}
-              onChange={(event) => setDraftFilters((current) => ({ ...current, monthBs: event.target.value }))}
+              onChange={(event) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  monthBs: event.target.value,
+                }))
+              }
             >
               <option value="">All months</option>
               {allMonths.map((month) => (
-                <option key={formatMonthKey(month.year, month.month)} value={formatMonthKey(month.year, month.month)}>
+                <option
+                  key={formatMonthKey(month.year, month.month)}
+                  value={formatMonthKey(month.year, month.month)}
+                >
                   {month.name}
                 </option>
               ))}
             </Select>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Event Category</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Event Category
+            </label>
             <Select
               value={draftFilters.eventType ?? ""}
               onChange={(event) =>
                 setDraftFilters((current) => ({
                   ...current,
-                  eventType: (event.target.value || undefined) as AcademicCalendarFilters["eventType"]
+                  eventType: (event.target.value ||
+                    undefined) as AcademicCalendarFilters["eventType"],
                 }))
               }
             >
@@ -258,11 +319,18 @@ export const AcademicCalendarHub = () => {
             </Select>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Search</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Search
+            </label>
             <div className="flex gap-2">
               <Input
                 value={draftFilters.keyword ?? ""}
-                onChange={(event) => setDraftFilters((current) => ({ ...current, keyword: event.target.value }))}
+                onChange={(event) =>
+                  setDraftFilters((current) => ({
+                    ...current,
+                    keyword: event.target.value,
+                  }))
+                }
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     handleApplyFilters();
@@ -282,24 +350,27 @@ export const AcademicCalendarHub = () => {
         {eventsQuery.isPending ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 12 }).map((_, index) => (
-              <div key={index} className="h-52 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+              <div
+                key={index}
+                className="h-52 animate-pulse rounded-2xl border border-slate-200 bg-white"
+              />
             ))}
           </div>
         ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {months.map((month) => (
-            <AcademicCalendarMonth
-              key={`${month.year}-${month.month}`}
-              year={month.year}
-              month={month.month}
-              monthName={month.name}
-              eventsByDate={eventsByDate}
-              todayBs={todayBs}
-              selectedDateBs={selectedDateBs}
-              onDateClick={handleDateClick}
-            />
-          ))}
-        </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {months.map((month) => (
+              <AcademicCalendarMonth
+                key={`${month.year}-${month.month}`}
+                year={month.year}
+                month={month.month}
+                monthName={month.name}
+                eventsByDate={eventsByDate}
+                todayBs={todayBs}
+                selectedDateBs={selectedDateBs}
+                onDateClick={handleDateClick}
+              />
+            ))}
+          </div>
         )}
 
         <Card>
@@ -360,14 +431,22 @@ export const AcademicCalendarHub = () => {
                       key={event._id}
                       className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
                       onClick={() => {
-                        setSelectedEvents(eventsByDate.get(event.dateBs) ?? [event]);
+                        setSelectedEvents(
+                          eventsByDate.get(event.dateBs) ?? [event],
+                        );
                         setDetailOpen(true);
                       }}
                     >
                       <Td>{event.dateBs}</Td>
                       <Td>{event.dateAd}</Td>
                       <Td>{event.dayOfWeek}</Td>
-                      <Td className={event.isHoliday ? "font-medium text-red-700" : ""}>{event.name}</Td>
+                      <Td
+                        className={
+                          event.isHoliday ? "font-medium text-red-700" : ""
+                        }
+                      >
+                        {event.name}
+                      </Td>
                       <Td>{getEventTypeLabel(event.eventType)}</Td>
                       <Td>{event.reason ?? "—"}</Td>
                     </tr>
@@ -381,7 +460,10 @@ export const AcademicCalendarHub = () => {
         <div className="no-print flex flex-wrap gap-3 text-xs text-slate-600">
           {eventTypeOptions.map((option) => (
             <span key={option.value} className="inline-flex items-center gap-1">
-              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: option.color }} />
+              <span
+                className="h-3 w-3 rounded-full"
+                style={{ backgroundColor: option.color }}
+              />
               {option.label}
             </span>
           ))}
@@ -419,7 +501,10 @@ export const AcademicCalendarHub = () => {
           setEditingEvent(null);
         }}
         onSave={async (payload) => {
-          await saveMutation.mutateAsync({ payload, isEdit: Boolean(editingEvent) });
+          await saveMutation.mutateAsync({
+            payload,
+            isEdit: Boolean(editingEvent),
+          });
         }}
       />
     </div>

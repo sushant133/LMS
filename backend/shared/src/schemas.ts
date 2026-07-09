@@ -384,6 +384,15 @@ export const examSchema = z.object({
   classIds: z.array(objectIdSchema).default([]),
   batchIds: z.array(objectIdSchema).default([]),
   yearIds: z.array(objectIdSchema).default([])
+}).superRefine((exam, ctx) => {
+  // Lexicographic compare works for YYYY-MM-DD BS strings
+  if (exam.startDateBs && exam.endDateBs && exam.startDateBs > exam.endDateBs) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Exam start date must be on or before end date",
+      path: ["endDateBs"]
+    });
+  }
 });
 
 export const examRoutineSchema = z.object({
@@ -398,16 +407,37 @@ export const examRoutineSchema = z.object({
   remarks: z.string().optional().or(z.literal(""))
 });
 
-export const resultMarkSchema = z.object({
-  subjectId: objectIdSchema,
-  fullMarks: z.coerce.number().min(1),
-  passMarks: z.coerce.number().min(0),
-  theoryMarks: z.coerce.number().min(0).optional(),
-  practicalMarks: z.coerce.number().min(0).optional(),
-  internalMarks: z.coerce.number().min(0).optional(),
-  attendanceStatus: z.enum(EXAM_ATTENDANCE_STATUSES).default("PRESENT"),
-  teacherRemarks: z.string().optional().or(z.literal(""))
-});
+export const resultMarkSchema = z
+  .object({
+    subjectId: objectIdSchema,
+    fullMarks: z.coerce.number().min(1),
+    passMarks: z.coerce.number().min(0),
+    theoryMarks: z.coerce.number().min(0).optional(),
+    practicalMarks: z.coerce.number().min(0).optional(),
+    internalMarks: z.coerce.number().min(0).optional(),
+    attendanceStatus: z.enum(EXAM_ATTENDANCE_STATUSES).default("PRESENT"),
+    teacherRemarks: z.string().optional().or(z.literal(""))
+  })
+  .superRefine((mark, ctx) => {
+    if (mark.passMarks > mark.fullMarks) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pass marks cannot exceed full marks",
+        path: ["passMarks"]
+      });
+    }
+    if (mark.attendanceStatus === "ABSENT") {
+      return;
+    }
+    const obtained = (mark.theoryMarks ?? 0) + (mark.practicalMarks ?? 0) + (mark.internalMarks ?? 0);
+    if (obtained > mark.fullMarks) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Total obtained marks (${obtained}) cannot exceed full marks (${mark.fullMarks})`,
+        path: ["theoryMarks"]
+      });
+    }
+  });
 
 export const resultSchema = z.object({
   examId: objectIdSchema,

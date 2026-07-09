@@ -80,10 +80,11 @@ export const recalculateStudentFeesDue = async (
   if (session) query.session(session);
   const collections = await query.lean();
 
+  // Replay chronologically using running balance only (ignore frozen previousDue snapshots)
   let runningDue = 0;
   for (const collection of collections) {
     const totals = calculateFeeTotals({
-      previousDueNpr: collection.previousDueNpr ?? runningDue,
+      previousDueNpr: runningDue,
       currentChargesNpr: collection.currentChargesNpr ?? 0,
       amountPaidNpr: collection.amountPaidNpr,
       discountNpr: collection.discountNpr ?? 0,

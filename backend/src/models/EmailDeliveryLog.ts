@@ -8,7 +8,7 @@ const emailDeliveryLogSchema = new Schema(
     subject: { type: String, required: true },
     emailType: {
       type: String,
-      enum: ["ACCOUNT_CREDENTIALS", "PASSWORD_RESET", "GENERAL"],
+      enum: ["ACCOUNT_CREDENTIALS", "PASSWORD_RESET", "ADMIN_CREDENTIALS_UPDATED", "GENERAL"],
       default: "ACCOUNT_CREDENTIALS",
       index: true
     },

@@ -9,13 +9,14 @@ import { api, unwrap } from "lib/api";
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
   RETURNED: "bg-brand-100 text-brand-800",
-  OVERDUE: "bg-rose-100 text-rose-800"
+  OVERDUE: "bg-rose-100 text-rose-800",
 };
 
 export const TeacherLabEquipment = () => {
   const issuesQuery = useQuery({
     queryKey: ["laboratory-my-equipment"],
-    queryFn: () => unwrap<LaboratoryIssueRecord[]>(api.get("/laboratory/my-equipment"))
+    queryFn: () =>
+      unwrap<LaboratoryIssueRecord[]>(api.get("/laboratory/my-equipment")),
   });
 
   const issues = issuesQuery.data ?? [];
@@ -23,7 +24,10 @@ export const TeacherLabEquipment = () => {
   if (issues.length === 0) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Laboratory Equipment" description="Equipment issued to you by the laboratory." />
+        <PageHeader
+          title="Laboratory Equipment"
+          description="Equipment issued to you by the laboratory."
+        />
         <Card>
           <CardContent className="py-10 text-center text-sm text-slate-500">
             No laboratory equipment has been issued to you.
@@ -35,7 +39,10 @@ export const TeacherLabEquipment = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Laboratory Equipment" description="Equipment issued to you by the laboratory." />
+      <PageHeader
+        title="Laboratory Equipment"
+        description="Equipment issued to you by the laboratory."
+      />
       <Card>
         <CardHeader>
           <CardTitle>Issued equipment</CardTitle>
@@ -61,7 +68,9 @@ export const TeacherLabEquipment = () => {
                   <Td>{issue.dueDateBs}</Td>
                   <Td>{issue.returnedDateBs ?? "—"}</Td>
                   <Td>
-                    <Badge className={issueStatusStyles[issue.status] ?? ""}>{issue.status}</Badge>
+                    <Badge className={issueStatusStyles[issue.status] ?? ""}>
+                      {issue.status}
+                    </Badge>
                   </Td>
                 </tr>
               ))}

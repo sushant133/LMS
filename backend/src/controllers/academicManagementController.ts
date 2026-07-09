@@ -22,6 +22,7 @@ import { recordAudit } from "../utils/audit.js";
 import {
   addAcademicComment,
   applyTeacherScopeToFilter,
+  assertApprovableStatus,
   assertEditableStatus,
   assertTeacherOwnership,
   buildAcademicFilter,
@@ -33,6 +34,7 @@ import {
   notifyAdmins,
   notifyTeacher,
   recordApproval,
+  sanitizeTeacherOwnedUpdate,
   serializeLessonPlan,
   serializeLogBookEntry,
   serializeSessionPlan,
@@ -41,7 +43,9 @@ import {
   matchesKeyword
 } from "../utils/academicManagementService.js";
 import { exportAcademicReportCsv, generateAcademicReport, type AcademicReportType } from "../utils/academicManagementReports.js";
+import { AcademicProgress } from "../models/AcademicProgress.js";
 import { User } from "../models/User.js";
+import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { tenantObjectId } from "../utils/tenant.js";
 import { sendSuccess } from "../utils/response.js";
 import { requireTeacherScope } from "../utils/teacherScope.js";
@@ -180,22 +184,51 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
   await assertTeacherOwnership(req, existing.teacherId.toString());
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
+  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+
   await withTransaction(async (session) => {
-    Object.assign(existing, payload, {
+    Object.assign(existing, safePayload, {
       audit: { ...existing.audit, updatedBy: actorObjectId(req) }
     });
     await existing.save({ session });
 
     if (payload.units) {
-      await AcademicSessionPlanUnit.deleteMany({ sessionPlanId: existing._id }, { session });
-      await AcademicSessionPlanUnit.insertMany(
-        payload.units.map((unit) => ({
-          ...unit,
-          schoolId: tenantObjectId(req),
-          sessionPlanId: existing._id
-        })),
-        { session }
-      );
+      const existingUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: existing._id }).session(session);
+      const byUnitNo = new Map(existingUnits.map((unit) => [unit.unitNo, unit]));
+      const kept = new Set<number>();
+
+      for (const unit of payload.units) {
+        kept.add(unit.unitNo);
+        const prev = byUnitNo.get(unit.unitNo);
+        if (prev) {
+          const preservedStatus = prev.status;
+          Object.assign(prev, unit, {
+            schoolId: tenantObjectId(req),
+            sessionPlanId: existing._id,
+            status: preservedStatus
+          });
+          await prev.save({ session });
+        } else {
+          await AcademicSessionPlanUnit.create(
+            [{ ...unit, schoolId: tenantObjectId(req), sessionPlanId: existing._id }],
+            { session }
+          );
+        }
+      }
+
+      for (const prev of existingUnits) {
+        if (kept.has(prev.unitNo)) continue;
+        const linkedItems = await AcademicLessonPlanItem.countDocuments({
+          sessionPlanUnitId: prev._id
+        }).session(session);
+        if (linkedItems > 0) {
+          throw new ApiError(
+            400,
+            `Cannot remove unit ${prev.unitNo} ("${prev.chapterName}") because lesson plan topics are linked to it.`
+          );
+        }
+        await prev.deleteOne({ session });
+      }
     }
 
     await syncSessionPlanProgress(existing._id.toString());
@@ -225,6 +258,7 @@ export const deleteSessionPlan = asyncHandler(async (req: Request, res: Response
   existing.isDeleted = true;
   existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
   await existing.save();
+  await AcademicProgress.deleteMany({ sessionPlanId: existing._id, schoolId: tenantObjectId(req) });
   await recordAudit(req, { action: "academic.session_plan.delete", entity: "SESSION_PLAN", entityId: existing._id.toString() });
   return sendSuccess(res, "Session plan deleted");
 });
@@ -235,7 +269,7 @@ export const submitSessionPlan = asyncHandler(async (req: Request, res: Response
   await assertTeacherOwnership(req, existing.teacherId.toString());
   assertEditableStatus(existing.status);
 
-  existing.status = "SUBMITTED";
+  existing.status = "PENDING_APPROVAL";
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
   await recordApproval(req, "SESSION_PLAN", existing._id.toString(), "SUBMITTED");
@@ -253,6 +287,7 @@ export const approveSessionPlan = asyncHandler(async (req: Request, res: Respons
 
   const existing = await AcademicSessionPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Session plan not found");
+  assertApprovableStatus(existing.status);
 
   existing.status = "APPROVED";
   existing.adminRemarks = remarks;
@@ -278,6 +313,7 @@ export const rejectSessionPlan = asyncHandler(async (req: Request, res: Response
 
   const existing = await AcademicSessionPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Session plan not found");
+  assertApprovableStatus(existing.status);
 
   existing.status = "REJECTED";
   existing.adminRemarks = remarks;
@@ -386,16 +422,53 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   await assertTeacherOwnership(req, existing.teacherId.toString());
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
+  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+
   await withTransaction(async (session) => {
-    Object.assign(existing, payload, { audit: { ...existing.audit, updatedBy: actorObjectId(req) } });
+    Object.assign(existing, safePayload, { audit: { ...existing.audit, updatedBy: actorObjectId(req) } });
     await existing.save({ session });
 
     if (payload.items) {
-      await AcademicLessonPlanItem.deleteMany({ lessonPlanId: existing._id }, { session });
-      await AcademicLessonPlanItem.insertMany(
-        payload.items.map((item) => ({ ...item, schoolId: tenantObjectId(req), lessonPlanId: existing._id })),
-        { session }
-      );
+      const existingItems = await AcademicLessonPlanItem.find({ lessonPlanId: existing._id }).session(session);
+      const bySerial = new Map(existingItems.map((item) => [item.serialNo, item]));
+      const keptSerials = new Set<number>();
+
+      for (const item of payload.items) {
+        keptSerials.add(item.serialNo);
+        const prev = bySerial.get(item.serialNo);
+        if (prev) {
+          // Preserve progress fields; re-sync after save if needed
+          const completedClasses = prev.completedClasses;
+          const completionStatus = prev.completionStatus;
+          Object.assign(prev, item, {
+            schoolId: tenantObjectId(req),
+            lessonPlanId: existing._id,
+            completedClasses,
+            completionStatus
+          });
+          await prev.save({ session });
+        } else {
+          await AcademicLessonPlanItem.create(
+            [{ ...item, schoolId: tenantObjectId(req), lessonPlanId: existing._id }],
+            { session }
+          );
+        }
+      }
+
+      for (const prev of existingItems) {
+        if (keptSerials.has(prev.serialNo)) continue;
+        const linkedLogs = await AcademicLogBookEntry.countDocuments({
+          lessonPlanItemId: prev._id,
+          isDeleted: false
+        }).session(session);
+        if (linkedLogs > 0) {
+          throw new ApiError(
+            400,
+            `Cannot remove topic "${prev.plannedTopic}" (SN ${prev.serialNo}) because log book entries are linked to it.`
+          );
+        }
+        await prev.deleteOne({ session });
+      }
     }
 
     if (existing.sessionPlanId) await syncSessionPlanProgress(existing.sessionPlanId.toString());
@@ -444,11 +517,12 @@ export const approveLessonPlan = asyncHandler(async (req: Request, res: Response
 
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Lesson plan not found");
+  assertApprovableStatus(existing.status);
 
   existing.status = "APPROVED";
   existing.adminRemarks = remarks;
   existing.approvedByName = await getActorName(req.user!.userId);
-  existing.approvalDate = new Date().toISOString().slice(0, 10);
+  existing.approvalDate = getTodayBs();
   existing.audit = { ...existing.audit, approvedBy: actorObjectId(req), approvedAt: new Date(), updatedBy: actorObjectId(req) };
   await existing.save();
   await recordApproval(req, "LESSON_PLAN", existing._id.toString(), "APPROVED", remarks);
@@ -466,6 +540,7 @@ export const rejectLessonPlan = asyncHandler(async (req: Request, res: Response)
 
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Lesson plan not found");
+  assertApprovableStatus(existing.status);
 
   existing.status = "REJECTED";
   existing.adminRemarks = remarks;
@@ -515,20 +590,44 @@ export const listLogBookEntries = asyncHandler(async (req: Request, res: Respons
 });
 
 export const createLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
-  const payload = academicLogBookEntrySchema.parse(req.body);
+  const parsed = academicLogBookEntrySchema.parse(req.body);
+  const dateBs = ensureValidBsDate(parsed.dateBs);
+  const payload = { ...parsed, dateBs };
 
   if (req.user?.role === "TEACHER") {
     const scope = await requireTeacherScope(req);
     if (payload.teacherId !== scope.teacherId) throw new ApiError(403, "Teachers can only create their own log book entries");
   }
 
-  const month = payload.dateBs.slice(0, 7);
+  // Validate optional lesson-plan item link belongs to school / teacher / subject
+  if (payload.lessonPlanItemId) {
+    const item = await AcademicLessonPlanItem.findById(payload.lessonPlanItemId).lean();
+    if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
+      throw new ApiError(400, "Invalid lesson plan item");
+    }
+    const plan = await AcademicLessonPlan.findOne({
+      _id: item.lessonPlanId,
+      schoolId: tenantObjectId(req),
+      isDeleted: false
+    }).lean();
+    if (!plan) throw new ApiError(400, "Lesson plan for this item was not found");
+    if (plan.teacherId.toString() !== payload.teacherId) {
+      throw new ApiError(400, "Lesson plan item does not belong to the selected teacher");
+    }
+    if (plan.subjectId.toString() !== payload.subjectId) {
+      throw new ApiError(400, "Lesson plan item subject does not match this log entry");
+    }
+    payload.lessonPlanId = plan._id.toString();
+    if (item.sessionPlanUnitId) payload.sessionPlanUnitId = item.sessionPlanUnitId.toString();
+  }
+
+  const month = dateBs.slice(0, 7);
   const logBookId = await getOrCreateLogBook(req, { ...payload, month });
 
   const attendance = await getAttendanceForSession(req, {
     subjectId: payload.subjectId,
     teacherId: payload.teacherId,
-    dateBs: payload.dateBs,
+    dateBs,
     classId: payload.classId,
     sectionId: payload.sectionId,
     batchId: payload.batchId,
@@ -559,7 +658,11 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
 });
 
 export const updateLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
-  const payload = academicLogBookEntrySchema.partial().parse(req.body);
+  const parsed = academicLogBookEntrySchema.partial().parse(req.body);
+  const payload = {
+    ...parsed,
+    ...(parsed.dateBs ? { dateBs: ensureValidBsDate(parsed.dateBs) } : {})
+  };
   const existing = await AcademicLogBookEntry.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Log book entry not found");
 
@@ -568,10 +671,16 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     throw new ApiError(403, "Approved log book entries cannot be modified");
   }
 
-  Object.assign(existing, payload, { audit: { ...existing.audit, updatedBy: actorObjectId(req) } });
+  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+  const previousItemId = existing.lessonPlanItemId?.toString();
+
+  Object.assign(existing, safePayload, { audit: { ...existing.audit, updatedBy: actorObjectId(req) } });
   await existing.save();
 
-  if (existing.lessonPlanItemId) await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
+  if (previousItemId) await syncLessonPlanItemProgress(previousItemId);
+  if (existing.lessonPlanItemId && existing.lessonPlanItemId.toString() !== previousItemId) {
+    await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
+  }
   await recordAudit(req, { action: "academic.log_book.update", entity: "LOG_BOOK_ENTRY", entityId: existing._id.toString(), after: existing });
 
   const serialized = await serializeLogBookEntry(existing._id.toString());
@@ -618,24 +727,42 @@ export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Respons
 });
 
 export const listSessionPlanUnits = asyncHandler(async (req: Request, res: Response) => {
-  const filter: Record<string, unknown> = { schoolId: tenantObjectId(req) };
-  if (typeof req.query.sessionPlanId === "string") filter.sessionPlanId = req.query.sessionPlanId;
+  const sessionPlanId = typeof req.query.sessionPlanId === "string" ? req.query.sessionPlanId : "";
+  if (!sessionPlanId) throw new ApiError(400, "sessionPlanId is required");
 
-  const units = await AcademicSessionPlanUnit.find(filter).sort({ unitNo: 1 }).lean();
+  const plan = await AcademicSessionPlan.findOne({
+    _id: sessionPlanId,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  }).lean();
+  if (!plan) throw new ApiError(404, "Session plan not found");
+  await assertTeacherOwnership(req, plan.teacherId.toString());
+
+  const units = await AcademicSessionPlanUnit.find({
+    schoolId: tenantObjectId(req),
+    sessionPlanId
+  })
+    .sort({ unitNo: 1 })
+    .lean();
   return sendSuccess(res, "Session plan units fetched", units);
 });
 
 export const getTodayTimetableSlots = asyncHandler(async (req: Request, res: Response) => {
-  const dateBs = typeof req.query.dateBs === "string" ? req.query.dateBs : new Date().toISOString().slice(0, 10);
+  const dateBs = typeof req.query.dateBs === "string" && req.query.dateBs ? req.query.dateBs : getTodayBs();
   const slots = await getTodayTimetable(req, dateBs);
   return sendSuccess(res, "Today's timetable fetched", slots);
 });
 
 export const getSessionAttendance = asyncHandler(async (req: Request, res: Response) => {
+  const teacherId = String(req.query.teacherId ?? "");
+  if (teacherId) await assertTeacherOwnership(req, teacherId);
+  const dateBsRaw = typeof req.query.dateBs === "string" ? req.query.dateBs : "";
+  const dateBs = dateBsRaw ? ensureValidBsDate(dateBsRaw) : getTodayBs();
+
   const summary = await getAttendanceForSession(req, {
     subjectId: String(req.query.subjectId ?? ""),
-    teacherId: String(req.query.teacherId ?? ""),
-    dateBs: String(req.query.dateBs ?? ""),
+    teacherId,
+    dateBs,
     classId: typeof req.query.classId === "string" ? req.query.classId : undefined,
     sectionId: typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
     batchId: typeof req.query.batchId === "string" ? req.query.batchId : undefined,
@@ -646,16 +773,22 @@ export const getSessionAttendance = asyncHandler(async (req: Request, res: Respo
 
 export const addComment = asyncHandler(async (req: Request, res: Response) => {
   const payload = academicCommentSchema.parse(req.body);
-  const comment = await addAcademicComment(req, payload.entityType, payload.entityId, payload.comment);
 
   const entity =
     payload.entityType === "SESSION_PLAN"
-      ? await AcademicSessionPlan.findById(payload.entityId)
+      ? await AcademicSessionPlan.findOne({ _id: payload.entityId, schoolId: tenantObjectId(req), isDeleted: false })
       : payload.entityType === "LESSON_PLAN"
-        ? await AcademicLessonPlan.findById(payload.entityId)
-        : await AcademicLogBookEntry.findById(payload.entityId);
+        ? await AcademicLessonPlan.findOne({ _id: payload.entityId, schoolId: tenantObjectId(req), isDeleted: false })
+        : await AcademicLogBookEntry.findOne({ _id: payload.entityId, schoolId: tenantObjectId(req), isDeleted: false });
 
-  if (entity && "teacherId" in entity) {
+  if (!entity) throw new ApiError(404, "Entity not found for comment");
+  if ("teacherId" in entity && entity.teacherId) {
+    await assertTeacherOwnership(req, entity.teacherId.toString());
+  }
+
+  const comment = await addAcademicComment(req, payload.entityType, payload.entityId, payload.comment);
+
+  if ("teacherId" in entity && entity.teacherId && isAcademicAdmin(req.user?.role ?? "")) {
     await notifyTeacher(req, entity.teacherId.toString(), "Admin Comment Added", payload.comment, { entityId: payload.entityId });
   }
 
@@ -696,6 +829,16 @@ export const listComments = asyncHandler(async (req: Request, res: Response) => 
   if (typeof entityType !== "string" || typeof entityId !== "string") {
     throw new ApiError(400, "entityType and entityId are required");
   }
+
+  const entity =
+    entityType === "SESSION_PLAN"
+      ? await AcademicSessionPlan.findOne({ _id: entityId, schoolId: tenantObjectId(req), isDeleted: false }).select("teacherId").lean()
+      : entityType === "LESSON_PLAN"
+        ? await AcademicLessonPlan.findOne({ _id: entityId, schoolId: tenantObjectId(req), isDeleted: false }).select("teacherId").lean()
+        : await AcademicLogBookEntry.findOne({ _id: entityId, schoolId: tenantObjectId(req), isDeleted: false }).select("teacherId").lean();
+
+  if (!entity) throw new ApiError(404, "Entity not found");
+  if (entity.teacherId) await assertTeacherOwnership(req, entity.teacherId.toString());
 
   const comments = await AcademicComment.find({
     schoolId: tenantObjectId(req),

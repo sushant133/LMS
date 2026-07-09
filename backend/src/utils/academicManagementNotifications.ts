@@ -4,7 +4,14 @@ import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { School } from "../models/School.js";
 import { Teacher } from "../models/Teacher.js";
+import { TimetableSlot } from "../models/TimetableSlot.js";
 import { User } from "../models/User.js";
+import {
+  calcRemainingPercent,
+  computeItemStatus,
+  isDeadlineApproaching
+} from "./academicManagementService.js";
+import { getDayOfWeekFromBs, getTodayBs } from "./nepaliDate.js";
 import { sendNotification } from "./notificationService.js";
 
 const notifiedCache = new Set<string>();
@@ -49,12 +56,34 @@ const notifyTeacherUser = async (schoolId: string, teacherId: string, title: str
   });
 };
 
+/**
+ * Refresh stored completionStatus for items with deadlines so DELAYED is current
+ * even when no new log book entry was submitted.
+ */
+const refreshLessonPlanItemStatuses = async (schoolId: string, todayBs: string): Promise<void> => {
+  const items = await AcademicLessonPlanItem.find({
+    schoolId,
+    completionStatus: { $ne: "COMPLETED" }
+  }).limit(500);
+
+  for (const item of items) {
+    const next = computeItemStatus(item.estimatedClasses, item.completedClasses, item.deadline, todayBs);
+    if (next !== item.completionStatus) {
+      item.completionStatus = next;
+      await item.save();
+    }
+  }
+};
+
 export const runAcademicManagementNotifications = async (): Promise<void> => {
   const schools = await School.find({}).select("_id").lean();
-  const today = new Date().toISOString().slice(0, 10);
+  const todayBs = getTodayBs();
+  const dayOfWeek = getDayOfWeekFromBs(todayBs);
 
   for (const school of schools) {
     const schoolId = school._id.toString();
+
+    await refreshLessonPlanItemStatuses(schoolId, todayBs);
 
     const pendingSessionPlans = await AcademicSessionPlan.countDocuments({
       schoolId,
@@ -64,60 +93,106 @@ export const runAcademicManagementNotifications = async (): Promise<void> => {
     const pendingLessonPlans = await AcademicLessonPlan.countDocuments({
       schoolId,
       isDeleted: false,
-      status: "PENDING_APPROVAL"
+      status: { $in: ["SUBMITTED", "PENDING_APPROVAL"] }
     });
 
     if (pendingSessionPlans + pendingLessonPlans > 0) {
-      const key = cacheKey(["admin-pending", schoolId, today]);
+      const key = cacheKey(["admin-pending", schoolId, todayBs]);
       if (shouldNotify(key)) {
         await notifySchoolAdmins(
           schoolId,
           "Pending Academic Approvals",
           `${pendingSessionPlans + pendingLessonPlans} plan(s) are waiting for administrator review.`,
-          { dateBs: today }
+          { dateBs: todayBs }
         );
       }
     }
 
-    const delayedItems = await AcademicLessonPlanItem.find({
+    // Incomplete lesson plan items — batch-load plans (avoid N+1)
+    const incompleteItems = await AcademicLessonPlanItem.find({
       schoolId,
-      completionStatus: "DELAYED"
+      completionStatus: { $ne: "COMPLETED" }
     })
-      .limit(20)
+      .limit(200)
       .lean();
 
-    for (const item of delayedItems) {
-      const plan = await AcademicLessonPlan.findById(item.lessonPlanId).select("teacherId month").lean();
-      if (!plan) continue;
-      const key = cacheKey(["delayed", schoolId, item._id.toString(), today]);
-      if (!shouldNotify(key)) continue;
-      await notifyTeacherUser(
-        schoolId,
-        plan.teacherId.toString(),
-        "Lesson Plan Deadline Approaching",
-        `The topic "${item.plannedTopic}" (${plan.month}) is delayed or nearing its deadline.`,
-        { lessonPlanItemId: item._id.toString() }
-      );
+    const planIds = [...new Set(incompleteItems.map((item) => item.lessonPlanId.toString()))];
+    const plans = planIds.length
+      ? await AcademicLessonPlan.find({
+          _id: { $in: planIds },
+          schoolId,
+          isDeleted: false
+        })
+          .select("teacherId month subjectId")
+          .populate("subjectId", "name")
+          .lean()
+      : [];
+    const planMap = new Map(plans.map((plan) => [plan._id.toString(), plan]));
+
+    for (const item of incompleteItems) {
+      const plan = planMap.get(item.lessonPlanId.toString());
+      if (!plan?.teacherId) continue;
+
+      const liveStatus = computeItemStatus(item.estimatedClasses, item.completedClasses, item.deadline, todayBs);
+      if (liveStatus === "COMPLETED") continue;
+
+      const remainingPercent = calcRemainingPercent(item.estimatedClasses, item.completedClasses);
+      const subjectName = (plan.subjectId as unknown as { name?: string } | null)?.name ?? "Subject";
+      const teacherId = plan.teacherId.toString();
+      const meta = {
+        lessonPlanItemId: item._id.toString(),
+        lessonPlanId: plan._id.toString(),
+        remainingPercent: String(remainingPercent),
+        completedClasses: String(item.completedClasses),
+        estimatedClasses: String(item.estimatedClasses),
+        dateBs: todayBs
+      };
+
+      if (liveStatus === "DELAYED") {
+        const key = cacheKey(["overdue", schoolId, item._id.toString(), todayBs]);
+        if (!shouldNotify(key)) continue;
+        await notifyTeacherUser(
+          schoolId,
+          teacherId,
+          "Lesson Plan Overdue",
+          `${subjectName} (${plan.month}): "${item.plannedTopic}" is not on time. ${remainingPercent}% remaining (${item.completedClasses}/${item.estimatedClasses} classes). Please complete and update the log book.`,
+          meta
+        );
+      } else if (isDeadlineApproaching(item.deadline, item.estimatedClasses, item.completedClasses, 3, todayBs)) {
+        const key = cacheKey(["approaching", schoolId, item._id.toString(), todayBs]);
+        if (!shouldNotify(key)) continue;
+        await notifyTeacherUser(
+          schoolId,
+          teacherId,
+          "Lesson Plan Deadline Approaching",
+          `${subjectName} (${plan.month}): "${item.plannedTopic}" deadline is near (${item.deadline}). ${remainingPercent}% remaining — finish on time.`,
+          meta
+        );
+      }
     }
 
-    const teachers = await Teacher.find({ schoolId }).select("_id").lean();
+    // Missing daily log book — only teachers with timetable periods today (reduces noise)
+    const teachersWithSlots = await TimetableSlot.distinct("teacherId", { schoolId, dayOfWeek });
+    if (teachersWithSlots.length === 0) continue;
+
     const teachersWithLog = await AcademicLogBookEntry.distinct("teacherId", {
       schoolId,
-      dateBs: today,
+      dateBs: todayBs,
       isDeleted: false
     });
     const loggedSet = new Set(teachersWithLog.map((id) => id.toString()));
 
-    for (const teacher of teachers) {
-      if (loggedSet.has(teacher._id.toString())) continue;
-      const key = cacheKey(["missing-log", schoolId, teacher._id.toString(), today]);
+    for (const teacherId of teachersWithSlots) {
+      const tid = teacherId.toString();
+      if (loggedSet.has(tid)) continue;
+      const key = cacheKey(["missing-log", schoolId, tid, todayBs]);
       if (!shouldNotify(key)) continue;
       await notifyTeacherUser(
         schoolId,
-        teacher._id.toString(),
+        tid,
         "Log Book Not Submitted",
-        `Please submit today's teaching log book entry.`,
-        { dateBs: today }
+        `You have a class scheduled today but have not submitted the teaching log book (${todayBs}). Please submit it so lesson plan progress stays up to date.`,
+        { dateBs: todayBs }
       );
     }
   }

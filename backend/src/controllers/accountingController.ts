@@ -101,7 +101,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
   const today = getTodayBs();
   const currentMonth = today.slice(0, 7);
 
-  const [collections, expenses, students, recentCollections, recentExpenses, cashEntries, bankAccounts] =
+  const [collections, expenses, students, recentCollections, recentExpenses, cashEntries, bankAccounts, pendingApprovals] =
     await Promise.all([
       FeeCollection.find({ schoolId, isDeleted: false }).lean(),
       AccountingExpense.find({ schoolId, isDeleted: false }).lean(),
@@ -109,7 +109,8 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       FeeCollection.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(5).lean(),
       AccountingExpense.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(5).lean(),
       CashBookEntry.find({ schoolId }).sort({ dateBs: -1, createdAt: -1 }).limit(10).lean(),
-      BankAccount.find({ schoolId, isActive: true }).lean()
+      BankAccount.find({ schoolId, isActive: true }).lean(),
+      FinancialApproval.countDocuments({ schoolId, status: "PENDING", isDeleted: false })
     ]);
 
   const totalExpenses = expenses.reduce((sum, item) => sum + item.amountNpr, 0);
@@ -170,7 +171,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     monthlyCollectionNpr,
     cashBalanceNpr,
     bankBalanceNpr: bankBalance,
-    pendingApprovals: 0,
+    pendingApprovals,
     generatedAt: today
   });
 });
@@ -357,6 +358,9 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
   ensureValidBsDate(payload.paidDateBs);
 
   const schoolId = tenantObjectId(req);
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, payload.paidDateBs);
+
   const settings = await getOrCreateSettings(schoolId);
   const student = await Student.findOne({ _id: payload.studentId, schoolId });
   if (!student) throw new ApiError(404, "Student not found");
@@ -489,37 +493,29 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
 export const updateAccountingFeeCollection = asyncHandler(async (req: Request, res: Response) => {
   const payload = enhancedFeeCollectionSchema.partial().parse(req.body);
   const schoolId = tenantObjectId(req);
-  const existing = await FeeCollection.findOne({ _id: req.params.id, schoolId });
+  const existing = await FeeCollection.findOne({ _id: req.params.id, schoolId, isDeleted: false });
   if (!existing) throw new ApiError(404, "Fee collection not found");
 
-  const student = await Student.findOne({ _id: existing.studentId, schoolId });
-  if (!student) throw new ApiError(404, "Student not found");
+  // Posted collections cannot change money fields without reverse + re-collect
+  const moneyFieldsChanged =
+    (payload.amountPaidNpr !== undefined && payload.amountPaidNpr !== existing.amountPaidNpr) ||
+    (payload.currentChargesNpr !== undefined && payload.currentChargesNpr !== existing.currentChargesNpr) ||
+    (payload.discountNpr !== undefined && payload.discountNpr !== existing.discountNpr) ||
+    (payload.scholarshipNpr !== undefined && payload.scholarshipNpr !== existing.scholarshipNpr) ||
+    (payload.lateFeeNpr !== undefined && payload.lateFeeNpr !== existing.lateFeeNpr) ||
+    (payload.paidDateBs !== undefined && payload.paidDateBs !== existing.paidDateBs);
 
-  const previousDueNpr = payload.currentChargesNpr !== undefined ? existing.previousDueNpr : existing.previousDueNpr;
-  const currentChargesNpr = payload.currentChargesNpr ?? existing.currentChargesNpr;
-  const amountPaidNpr = payload.amountPaidNpr ?? existing.amountPaidNpr;
-  const discountNpr = payload.discountNpr ?? existing.discountNpr;
-  const scholarshipNpr = payload.scholarshipNpr ?? existing.scholarshipNpr;
-  const lateFeeNpr = payload.lateFeeNpr ?? existing.lateFeeNpr;
-
-  const totals = calculateFeeTotals({
-    previousDueNpr,
-    currentChargesNpr,
-    amountPaidNpr,
-    discountNpr,
-    scholarshipNpr,
-    lateFeeNpr
-  });
+  if (moneyFieldsChanged) {
+    throw new ApiError(
+      400,
+      "Cannot change payment amounts or date on a posted fee collection. Reverse it and collect again."
+    );
+  }
 
   const before = existing.toObject();
-  Object.assign(existing, payload, {
-    remainingDueNpr: totals.remainingDueNpr,
-    advancePaymentNpr: totals.advancePaymentNpr
-  });
+  if (payload.notes !== undefined) existing.notes = payload.notes;
+  if (payload.transactionNumber !== undefined) existing.transactionNumber = payload.transactionNumber;
   await existing.save();
-
-  student.feesDueNpr = totals.remainingDueNpr;
-  await student.save();
 
   await recordAudit(req, {
     action: "accounting.fee.update",
@@ -684,9 +680,12 @@ export const listExpenses = asyncHandler(async (req: Request, res: Response) => 
 export const createExpense = asyncHandler(async (req: Request, res: Response) => {
   const payload = accountingExpenseSchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
+  const schoolId = tenantObjectId(req);
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, payload.dateBs);
   const expense = await AccountingExpense.create({
     ...payload,
-    schoolId: tenantObjectId(req),
+    schoolId,
     createdBy: req.user!.userId
   });
 
@@ -702,7 +701,7 @@ export const createExpense = asyncHandler(async (req: Request, res: Response) =>
   });
 
   await postExpenseJournal({
-    schoolId: tenantObjectId(req),
+    schoolId,
     userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
     expenseId: expense._id,
     dateBs: payload.dateBs,
@@ -718,10 +717,26 @@ export const createExpense = asyncHandler(async (req: Request, res: Response) =>
 
 export const updateExpense = asyncHandler(async (req: Request, res: Response) => {
   const payload = accountingExpenseSchema.partial().parse(req.body);
-  const before = await AccountingExpense.findOne(withTenantScope(req, { _id: req.params.id }));
+  const before = await AccountingExpense.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!before) throw new ApiError(404, "Expense not found");
 
-  const expense = await AccountingExpense.findOneAndUpdate(withTenantScope(req, { _id: req.params.id }), payload, { new: true });
+  // Amount/date changes after posting would desync journal/cash — require void + re-enter
+  if (
+    (payload.amountNpr !== undefined && payload.amountNpr !== before.amountNpr) ||
+    (payload.dateBs !== undefined && payload.dateBs !== before.dateBs) ||
+    (payload.paymentMethod !== undefined && payload.paymentMethod !== before.paymentMethod)
+  ) {
+    throw new ApiError(
+      400,
+      "Cannot change amount, date, or payment method on a posted expense. Void it and create a new entry."
+    );
+  }
+
+  const expense = await AccountingExpense.findOneAndUpdate(
+    withTenantScope(req, { _id: req.params.id, isDeleted: false }),
+    payload,
+    { new: true }
+  );
   await recordAudit(req, { action: "accounting.expense.update", entity: "AccountingExpense", entityId: String(req.params.id), before, after: expense });
   return sendSuccess(res, "Expense updated", expense);
 });
@@ -875,9 +890,12 @@ export const listIncome = asyncHandler(async (req: Request, res: Response) => {
 export const createIncome = asyncHandler(async (req: Request, res: Response) => {
   const payload = accountingIncomeSchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
+  const schoolId = tenantObjectId(req);
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, payload.dateBs);
   const income = await AccountingIncome.create({
     ...payload,
-    schoolId: tenantObjectId(req),
+    schoolId,
     createdBy: req.user!.userId
   });
 
@@ -1058,6 +1076,10 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
   const isPaid = (salary?.status ?? before.status) === "PAID";
   const paidDateBs = salary?.paidDateBs || payload.paidDateBs;
   if (!wasPaid && isPaid && salary && paidDateBs) {
+    const schoolId = tenantObjectId(req);
+    const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+    await assertFiscalPeriodOpen(schoolId, paidDateBs);
+
     await recordCashEntry(req, {
       dateBs: paidDateBs,
       entryType: "DEBIT",
@@ -1067,6 +1089,16 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
       paymentMethod: salary.paymentMethod,
       referenceType: "SalaryPayment",
       referenceId: salary._id.toString()
+    });
+
+    await postSalaryJournal({
+      schoolId,
+      userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+      salaryId: salary._id,
+      dateBs: paidDateBs,
+      amountNpr: netSalaryNpr,
+      paymentMethod: salary.paymentMethod,
+      monthBs: salary.monthBs
     });
   }
 
@@ -1255,7 +1287,7 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
         AccountingIncome.find({ schoolId, dateBs: monthFilter, isDeleted: false }).sort({ dateBs: -1 }).lean(),
         AccountingExpense.find({ schoolId, dateBs: monthFilter, isDeleted: false }).sort({ dateBs: -1 }).lean(),
         AccountingPurchase.find({ schoolId, purchaseDateBs: monthFilter, isDeleted: false }).sort({ purchaseDateBs: -1 }).lean(),
-        SalaryPayment.find({ schoolId, monthBs })
+        SalaryPayment.find({ schoolId, monthBs, status: "PAID" })
           .populate({ path: "teacherId", populate: { path: "user", select: "-password" } })
           .populate("staffId")
           .sort({ monthBs: -1 })
@@ -1266,7 +1298,9 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       const feeCollectionNpr = sumAmount(fees, "amountPaidNpr");
       const incomeNpr = sumAmount(income, "amountNpr");
       const expenseNpr = sumAmount(expenses, "amountNpr");
-      const purchaseNpr = sumAmount(purchases, "totalAmountNpr");
+      // Cash-basis summary: only paid purchases count as outflow
+      const paidPurchases = purchases.filter((p) => p.paymentStatus === "PAID");
+      const purchaseNpr = sumAmount(paidPurchases, "totalAmountNpr");
       const salaryNpr = sumAmount(salaries, "netSalaryNpr");
       const pendingFeesNpr = sumAmount(pendingStudents, "feesDueNpr");
       const inflowNpr = feeCollectionNpr + incomeNpr;

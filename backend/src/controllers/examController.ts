@@ -32,6 +32,7 @@ import { buildStudentAcademicFilter, buildTeacherAcademicFilter } from "../utils
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import {
   assertTeacherAcademicScope,
+  assertTeacherQueryScope,
   assertTeacherSubjectAcademicScope,
   getTeacherScope,
   requireTeacherScope
@@ -40,6 +41,21 @@ import { hasInstitutionAccess } from "@phit-erp/shared";
 import { assertInstitutionWrite } from "../utils/institutionAccess.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+
+const examAudienceStudentFilter = (
+  schoolId: unknown,
+  exam: { batchIds?: unknown[]; yearIds?: unknown[]; classIds?: unknown[] },
+  college: boolean
+): Record<string, unknown> => {
+  const filter: Record<string, unknown> = { schoolId };
+  if (college) {
+    if (exam.batchIds?.length) filter.batchId = { $in: exam.batchIds };
+    if (exam.yearIds?.length) filter.yearId = { $in: exam.yearIds };
+  } else if (exam.classIds?.length) {
+    filter.classId = { $in: exam.classIds };
+  }
+  return filter;
+};
 
 const getExamOrThrow = async (req: Request, examId: string) => {
   const exam = await Exam.findOne(withTenantScope(req, { _id: examId }));
@@ -120,16 +136,30 @@ const persistResultMarks = async (
 
   const incomingMarks = payload.marks.map((mark) => {
     const subject = subjectMap.get(mark.subjectId);
-    return computeSubjectMark({
+    const computed = computeSubjectMark({
       ...mark,
       fullMarks: mark.fullMarks ?? subject?.fullMarks ?? 100,
       passMarks: mark.passMarks ?? subject?.passMarks ?? 35,
       obtainedMarks: 0
     });
+    if (computed.obtainedMarks > computed.fullMarks) {
+      throw new ApiError(400, `Obtained marks for a subject cannot exceed full marks (${computed.fullMarks})`);
+    }
+    return computed;
   });
 
+  // Re-read latest marks just before merge to reduce concurrent overwrite risk
+  const latestResult = await Result.findOne({
+    schoolId,
+    examId: payload.examId,
+    studentId: payload.studentId
+  }).lean();
+
+  const baseMarks = latestResult?.marks ?? existingResult?.marks ?? [];
+  const retainedFromLatest = baseMarks.filter((mark) => !editableSubjectIds.has(mark.subjectId.toString()));
+
   const mergedMarksMap = new Map<string, ReturnType<typeof computeSubjectMark>>();
-  for (const mark of retainedMarks) {
+  for (const mark of retainedFromLatest) {
     mergedMarksMap.set(mark.subjectId.toString(), mark as ReturnType<typeof computeSubjectMark>);
   }
   for (const mark of incomingMarks) {
@@ -145,7 +175,7 @@ const persistResultMarks = async (
     }))
   );
 
-  const beforeMarks = existingResult?.marks.filter((mark) =>
+  const beforeMarks = baseMarks.filter((mark) =>
     payload.marks.some((incoming) => incoming.subjectId === mark.subjectId.toString())
   );
 
@@ -164,7 +194,7 @@ const persistResultMarks = async (
       gpa: totals.gpa,
       grade: totals.grade,
       passFailStatus: totals.passFailStatus,
-      publishedAtBs: existingResult?.publishedAtBs
+      publishedAtBs: latestResult?.publishedAtBs ?? existingResult?.publishedAtBs
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
@@ -281,22 +311,35 @@ export const updateExam = asyncHandler(async (req: Request, res: Response) => {
 export const deleteExam = asyncHandler(async (req: Request, res: Response) => {
   assertInstitutionWrite(req);
   const schoolId = tenantObjectId(req);
-  const exam = await Exam.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
+  const exam = await Exam.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!exam) {
     throw new ApiError(404, "Exam not found");
   }
 
+  if (exam.resultsPublished) {
+    throw new ApiError(400, "Cannot delete a published exam. Unpublish results first.");
+  }
+
+  const resultCount = await Result.countDocuments({ examId: exam._id, schoolId });
+  if (resultCount > 0) {
+    throw new ApiError(
+      400,
+      `Cannot delete exam with ${resultCount} result record(s). Remove marks first or unpublish and clean results.`
+    );
+  }
+
   await Promise.all([
-    Result.deleteMany({ examId: req.params.id, schoolId }),
-    ResultSubmission.deleteMany({ examId: req.params.id, schoolId }),
-    ExamRoutine.deleteMany({ examId: req.params.id, schoolId })
+    ResultSubmission.deleteMany({ examId: exam._id, schoolId }),
+    ExamRoutine.deleteMany({ examId: exam._id, schoolId })
   ]);
+  await exam.deleteOne();
   return sendSuccess(res, "Exam deleted successfully");
 });
 
 export const listResults = asyncHandler(async (req: Request, res: Response) => {
   const query: Record<string, unknown> = { schoolId: tenantObjectId(req) };
   const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
 
   if (typeof req.query.examId === "string") query.examId = req.query.examId;
   if (typeof req.query.classId === "string") query.classId = req.query.classId;
@@ -306,7 +349,17 @@ export const listResults = asyncHandler(async (req: Request, res: Response) => {
   if (typeof req.query.studentId === "string") query.studentId = req.query.studentId;
 
   const teacherScope = await getTeacherScope(req);
-  if (teacherScope) {
+  if (req.user?.role === "TEACHER") {
+    if (!teacherScope) {
+      throw new ApiError(403, "Teacher profile not found");
+    }
+    assertTeacherQueryScope(teacherScope, {
+      classId: typeof req.query.classId === "string" ? req.query.classId : undefined,
+      sectionId: typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
+      batchId: typeof req.query.batchId === "string" ? req.query.batchId : undefined,
+      yearId: typeof req.query.yearId === "string" ? req.query.yearId : undefined,
+      isCollege: college
+    });
     Object.assign(
       query,
       buildTeacherAcademicFilter(teacherScope, institutionType, {
@@ -334,6 +387,14 @@ export const listResults = asyncHandler(async (req: Request, res: Response) => {
   }
 
   let results = await Result.find(query).sort({ updatedAt: -1 }).lean();
+
+  // Teachers only see their assigned subject marks (never other teachers' marks)
+  if (req.user?.role === "TEACHER" && teacherScope) {
+    results = results.map((result) => ({
+      ...result,
+      marks: result.marks.filter((mark) => teacherScope.subjectIds.includes(mark.subjectId.toString()))
+    })) as typeof results;
+  }
 
   if (studentProfile || req.user?.role === "PARENT") {
     const examIds = [...new Set(results.map((result) => result.examId.toString()))];
@@ -499,13 +560,19 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
   const blockingSubmissions = await ResultSubmission.find({
     schoolId: tenantSchoolId,
     examId,
-    status: { $in: ["PENDING_ADMIN_REVIEW", "SUBMITTED_FOR_REVIEW", "RETURNED_FOR_CORRECTION"] }
+    status: {
+      $in: ["DRAFT", "PENDING_ADMIN_REVIEW", "SUBMITTED_FOR_REVIEW", "RETURNED_FOR_CORRECTION"]
+    }
   }).lean();
 
   if (blockingSubmissions.length > 0) {
+    const draftCount = blockingSubmissions.filter((row) => row.status === "DRAFT").length;
+    const reviewCount = blockingSubmissions.length - draftCount;
     throw new ApiError(
       400,
-      `Cannot publish results. ${blockingSubmissions.length} subject submission(s) are awaiting review or correction. Approve or return them before publishing.`
+      `Cannot publish results. ${draftCount > 0 ? `${draftCount} draft submission(s) not submitted. ` : ""}${
+        reviewCount > 0 ? `${reviewCount} submission(s) awaiting review or correction. ` : ""
+      }Approve all subject submissions before publishing.`
     );
   }
 
@@ -552,11 +619,9 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
     after: exam.toObject()
   });
 
-  const students = await Student.find({
-    schoolId: tenantSchoolId,
-    ...(exam.batchIds?.length ? { batchId: { $in: exam.batchIds } } : {}),
-    ...(exam.yearIds?.length ? { yearId: { $in: exam.yearIds } } : {})
-  }).lean();
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+  const students = await Student.find(examAudienceStudentFilter(tenantSchoolId, exam, college)).lean();
 
   await Promise.all(
     students.map((student) =>
@@ -654,10 +719,9 @@ export const getExamAnalytics = asyncHandler(async (req: Request, res: Response)
   const examId = String(req.params.examId);
   const schoolId = tenantObjectId(req);
   const exam = await getExamOrThrow(req, examId);
-
-  const studentFilter: Record<string, unknown> = { schoolId };
-  if (exam.batchIds?.length) studentFilter.batchId = { $in: exam.batchIds };
-  if (exam.yearIds?.length) studentFilter.yearId = { $in: exam.yearIds };
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+  const studentFilter = examAudienceStudentFilter(schoolId, exam, college);
 
   const [students, results, subjects] = await Promise.all([
     Student.find(studentFilter).populate("user", "-password").lean(),
@@ -823,22 +887,40 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
   const examId = String(req.params.examId);
   const studentId = String(req.params.studentId);
   const schoolId = tenantObjectId(req);
+  const institutionType = await getInstitutionType(req);
 
   const exam = await Exam.findOne(withTenantScope(req, { _id: examId }));
   if (!exam) {
     throw new ApiError(404, "Exam not found");
   }
 
-  if (req.user?.role === "STUDENT" || req.user?.role === "PARENT") {
+  if (req.user?.role === "TEACHER") {
+    const scope = await requireTeacherScope(req);
+    const student = await Student.findOne({ _id: studentId, schoolId }).lean();
+    if (!student) {
+      throw new ApiError(404, "Student not found");
+    }
+    if (isCollege(institutionType)) {
+      await assertTeacherAcademicScope(req, {
+        batchId: student.batchId?.toString(),
+        yearId: student.yearId?.toString()
+      });
+    } else {
+      await assertTeacherAcademicScope(req, {
+        classId: student.classId?.toString(),
+        sectionId: student.sectionId?.toString()
+      });
+    }
+    if (!scope.subjectIds.length) {
+      throw new ApiError(403, "No assigned subjects");
+    }
+  } else if (req.user?.role === "STUDENT" || req.user?.role === "PARENT") {
     await assertStudentOwnRecord(req, studentId);
     await assertParentAccessToStudent(req, studentId);
     if (!canViewPublishedResults(exam)) {
       throw new ApiError(403, "Results are not published yet");
     }
-  } else if (
-    !hasInstitutionAccess(req.user?.role ?? "") &&
-    req.user?.role !== "TEACHER"
-  ) {
+  } else if (!hasInstitutionAccess(req.user?.role ?? "")) {
     throw new ApiError(403, "You do not have permission to download this marksheet");
   }
 
@@ -858,6 +940,21 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(404, "Published result not found");
   }
 
+  const teacherScope = await getTeacherScope(req);
+  if (req.user?.role === "TEACHER" && teacherScope) {
+    const hasAssignedMarks = resultDoc.marks.some((mark) =>
+      teacherScope.subjectIds.includes(mark.subjectId.toString())
+    );
+    if (!hasAssignedMarks) {
+      throw new ApiError(403, "You do not have marks assigned for this student in your subjects");
+    }
+  }
+
+  const scopedMarks =
+    req.user?.role === "TEACHER" && teacherScope
+      ? resultDoc.marks.filter((mark) => teacherScope.subjectIds.includes(mark.subjectId.toString()))
+      : resultDoc.marks;
+
   const [student, branding, batch, year, schoolClass, section, subjects] = await Promise.all([
     Student.findOne(withTenantScope(req, { _id: studentId })).populate("user", "-password"),
     resolveSchoolBranding(schoolId),
@@ -865,7 +962,7 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     resultDoc.yearId ? Year.findById(resultDoc.yearId).lean() : null,
     resultDoc.classId ? SchoolClass.findById(resultDoc.classId).lean() : null,
     resultDoc.sectionId ? Section.findById(resultDoc.sectionId).lean() : null,
-    Subject.find({ _id: { $in: resultDoc.marks.map((mark) => mark.subjectId) }, schoolId }).lean()
+    Subject.find({ _id: { $in: scopedMarks.map((mark) => mark.subjectId) }, schoolId }).lean()
   ]);
 
   if (!student) {
@@ -875,7 +972,7 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
   const subjectMap = new Map(subjects.map((subject) => [subject._id.toString(), subject]));
   const user = student.user as { fullName?: string };
   const totals = buildResultTotals(
-    resultDoc.marks.map((mark) => ({
+    scopedMarks.map((mark) => ({
       obtainedMarks: mark.obtainedMarks,
       fullMarks: mark.fullMarks,
       passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
@@ -898,7 +995,7 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
       batchName: batch?.name,
       yearName: year?.name,
       rollNumber: student.rollNumber,
-      marks: resultDoc.marks.map((mark) => ({
+      marks: scopedMarks.map((mark) => ({
         subject: subjectMap.get(mark.subjectId.toString())?.name ?? "Subject",
         fullMarks: mark.fullMarks,
         obtained: mark.obtainedMarks,

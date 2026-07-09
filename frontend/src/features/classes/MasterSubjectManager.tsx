@@ -4,7 +4,7 @@ import {
   COLLEGE_YEAR_NAMES,
   masterSubjectSchema,
   type MasterSubjectInput,
-  type MasterSubjectRecord
+  type MasterSubjectRecord,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -13,12 +13,16 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
-import { downloadMasterSubjectsCsv, downloadMasterSubjectsExcel } from "./masterSubjectExportUtils";
+import {
+  downloadMasterSubjectsCsv,
+  downloadMasterSubjectsExcel,
+} from "./masterSubjectExportUtils";
 
 const defaultMasterSubjectValue: MasterSubjectInput = {
   name: "",
@@ -30,7 +34,7 @@ const defaultMasterSubjectValue: MasterSubjectInput = {
   internalMarks: undefined,
   passMarks: 35,
   fullMarks: 100,
-  isActive: true
+  isActive: true,
 };
 
 interface MasterSubjectManagerProps {
@@ -39,41 +43,52 @@ interface MasterSubjectManagerProps {
   onPendingEditHandled?: () => void;
 }
 
-export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendingEditHandled }: MasterSubjectManagerProps) => {
+export const MasterSubjectManager = ({
+  canManage = true,
+  pendingEditId,
+  onPendingEditHandled,
+}: MasterSubjectManagerProps) => {
   const formRef = useRef<HTMLDivElement>(null);
-  const [form, setForm] = useState<MasterSubjectInput>(defaultMasterSubjectValue);
+  const [form, setForm] = useState<MasterSubjectInput>(
+    defaultMasterSubjectValue,
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   const masterSubjectsQuery = useQuery({
     queryKey: ["master-subjects"],
-    queryFn: () => unwrap<MasterSubjectRecord[]>(api.get("/academics/master-subjects"))
+    queryFn: () =>
+      unwrap<MasterSubjectRecord[]>(api.get("/academics/master-subjects")),
   });
 
   const refreshQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["master-subjects"] }),
-      queryClient.invalidateQueries({ queryKey: ["subjects"] })
+      queryClient.invalidateQueries({ queryKey: ["subjects"] }),
     ]);
   };
 
   const mutation = useMutation({
     mutationFn: async (payload: MasterSubjectInput) =>
       editingId
-        ? unwrap<MasterSubjectRecord>(api.put(`/academics/master-subjects/${editingId}`, payload))
-        : unwrap<MasterSubjectRecord>(api.post("/academics/master-subjects", payload)),
+        ? unwrap<MasterSubjectRecord>(
+            api.put(`/academics/master-subjects/${editingId}`, payload),
+          )
+        : unwrap<MasterSubjectRecord>(
+            api.post("/academics/master-subjects", payload),
+          ),
     onSuccess: async () => {
       toast.success(
         editingId
           ? "Master subject updated across all batches"
-          : "Master subject created and assigned to all batches"
+          : "Master subject created and assigned to all batches",
       );
       setForm(defaultMasterSubjectValue);
       setEditingId(null);
       setShowForm(false);
       await refreshQueries();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const reconcileCurriculum = async () => {
@@ -84,7 +99,7 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
         batchesProcessed: number;
       }>(api.post("/academics/master-subjects/reconcile"));
       toast.success("Curriculum synced across all batches", {
-        description: `${result.batchesProcessed} batch(es) processed`
+        description: `${result.batchesProcessed} batch(es) processed`,
       });
       await refreshQueries();
     } catch (error) {
@@ -105,14 +120,14 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
       internalMarks: subject.internalMarks,
       passMarks: subject.passMarks,
       fullMarks: subject.fullMarks,
-      isActive: subject.isActive
+      isActive: subject.isActive,
     });
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const deleteMasterSubject = async (subject: MasterSubjectRecord) => {
     const confirmed = window.confirm(
-      `Remove "${subject.name}" from the master curriculum?\n\nThis deletes the subject from all batches if it is not in use. Subjects used in attendance, exams, or results cannot be deleted — deactivate them instead.`
+      `Remove "${subject.name}" from the master curriculum?\n\nThis deletes the subject from all batches if it is not in use. Subjects used in attendance, exams, or results cannot be deleted — deactivate them instead.`,
     );
     if (!confirmed) {
       return;
@@ -143,10 +158,12 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
           internalMarks: subject.internalMarks,
           passMarks: subject.passMarks,
           fullMarks: subject.fullMarks,
-          isActive: !subject.isActive
-        })
+          isActive: !subject.isActive,
+        }),
       );
-      toast.success(subject.isActive ? "Subject deactivated" : "Subject activated");
+      toast.success(
+        subject.isActive ? "Subject deactivated" : "Subject activated",
+      );
       await refreshQueries();
     } catch (error) {
       toast.error(parseErrorMessage(error));
@@ -172,7 +189,9 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
     for (const level of [1, 2, 3]) {
       grouped.set(
         level,
-        masterSubjects.filter((subject) => subject.yearLevel === level).sort((a, b) => a.name.localeCompare(b.name))
+        masterSubjects
+          .filter((subject) => subject.yearLevel === level)
+          .sort((a, b) => a.name.localeCompare(b.name)),
       );
     }
     return grouped;
@@ -184,7 +203,9 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
     setForm(defaultMasterSubjectValue);
   };
 
-  const editingSubject = editingId ? masterSubjects.find((subject) => subject._id === editingId) : null;
+  const editingSubject = editingId
+    ? masterSubjects.find((subject) => subject._id === editingId)
+    : null;
 
   return (
     <Card>
@@ -192,7 +213,8 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
         <div>
           <CardTitle>Master Subject List</CardTitle>
           <p className="text-sm text-slate-500">
-            Define the fixed HA curriculum once. Subjects are organized by year and automatically assigned to every batch.
+            Define the fixed HA curriculum once. Subjects are organized by year
+            and automatically assigned to every batch.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -235,13 +257,20 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
                   setForm(defaultMasterSubjectValue);
                   setShowForm(true);
                   requestAnimationFrame(() => {
-                    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    formRef.current?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
                   });
                 }}
               >
                 Add Subject
               </Button>
-              <Button type="button" variant="outline" onClick={() => void reconcileCurriculum()}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void reconcileCurriculum()}
+              >
                 Sync All Batches
               </Button>
             </>
@@ -250,122 +279,173 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
       </CardHeader>
       <CardContent className="space-y-6">
         {canManage && showForm ? (
-          <div ref={formRef} className="rounded-2xl border border-brand-200 bg-brand-50/40 p-4">
+          <div
+            ref={formRef}
+            className="rounded-2xl border border-brand-200 bg-brand-50/40 p-4"
+          >
             {editingSubject ? (
               <p className="mb-4 text-sm font-medium text-brand-900">
-                Editing: {editingSubject.name} ({editingSubject.code}) — changes apply to all batches
+                Editing: {editingSubject.name} ({editingSubject.code}) — changes
+                apply to all batches
               </p>
             ) : (
-              <p className="mb-4 text-sm text-slate-600">Add a new subject to the master curriculum.</p>
+              <p className="mb-4 text-sm text-slate-600">
+                Add a new subject to the master curriculum.
+              </p>
             )}
             <form
               className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
               onSubmit={(event) => {
-            event.preventDefault();
-            const parsed = masterSubjectSchema.safeParse(form);
-            if (!parsed.success) {
-              toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
-              return;
-            }
-            void mutation.mutateAsync(parsed.data);
-          }}
-        >
-          <FormField label="Subject Name">
-            <Input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-          </FormField>
-          <FormField label="Subject Code">
-            <Input value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} />
-          </FormField>
-          <FormField label="Year">
-            <Select
-              value={String(form.yearLevel)}
-              onChange={(event) => setForm((current) => ({ ...current, yearLevel: Number(event.target.value) }))}
+                event.preventDefault();
+                const parsed = masterSubjectSchema.safeParse(form);
+                if (!parsed.success) {
+                  toast.error(
+                    parsed.error.issues[0]?.message ?? "Validation failed",
+                  );
+                  return;
+                }
+                void mutation.mutateAsync(parsed.data);
+              }}
             >
-              {COLLEGE_YEAR_NAMES.map((name, index) => (
-                <option key={name} value={index + 1}>
-                  {name}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          <FormField label="Credit Hours (Optional)">
-            <Input
-              type="number"
-              min={0}
-              value={form.creditHours ?? ""}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  creditHours: Number.isNaN(event.target.valueAsNumber) ? undefined : event.target.valueAsNumber
-                }))
-              }
-            />
-          </FormField>
-          <FormField label="Theory Marks">
-            <Input
-              type="number"
-              min={0}
-              value={form.theoryMarks}
-              onChange={(event) => setForm((current) => ({ ...current, theoryMarks: event.target.valueAsNumber }))}
-            />
-          </FormField>
-          <FormField label="Practical Marks (Optional)">
-            <Input
-              type="number"
-              min={0}
-              value={form.practicalMarks ?? ""}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  practicalMarks: Number.isNaN(event.target.valueAsNumber) ? undefined : event.target.valueAsNumber
-                }))
-              }
-            />
-          </FormField>
-          <FormField label="Internal Marks (Optional)">
-            <Input
-              type="number"
-              min={0}
-              value={form.internalMarks ?? ""}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  internalMarks: Number.isNaN(event.target.valueAsNumber) ? undefined : event.target.valueAsNumber
-                }))
-              }
-            />
-          </FormField>
-          <FormField label="Pass Marks">
-            <Input
-              type="number"
-              min={0}
-              value={form.passMarks}
-              onChange={(event) => setForm((current) => ({ ...current, passMarks: event.target.valueAsNumber }))}
-            />
-          </FormField>
-          <FormField label="Full Marks">
-            <Input
-              type="number"
-              min={1}
-              value={form.fullMarks}
-              onChange={(event) => setForm((current) => ({ ...current, fullMarks: event.target.valueAsNumber }))}
-            />
-          </FormField>
-          <FormField label="Status">
-            <Select
-              value={form.isActive ? "active" : "inactive"}
-              onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.value === "active" }))}
-            >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </Select>
-          </FormField>
-          <div className="flex items-end gap-2 md:col-span-2 xl:col-span-4">
-            <Button type="submit">{editingId ? "Update Master Subject" : "Add Master Subject"}</Button>
-            <Button type="button" variant="outline" onClick={resetForm}>
-              Cancel
-            </Button>
-          </div>
+              <FormField label="Subject Name">
+                <Input
+                  value={form.name}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Subject Code">
+                <Input
+                  value={form.code}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      code: event.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Year">
+                <Select
+                  value={String(form.yearLevel)}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      yearLevel: Number(event.target.value),
+                    }))
+                  }
+                >
+                  {COLLEGE_YEAR_NAMES.map((name, index) => (
+                    <option key={name} value={index + 1}>
+                      {name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Credit Hours (Optional)">
+                <NumberInput
+                  min={0}
+                  value={form.creditHours ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      creditHours: Number.isNaN(event.target.valueAsNumber)
+                        ? undefined
+                        : event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Theory Marks">
+                <NumberInput
+                  min={0}
+                  value={form.theoryMarks}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      theoryMarks: event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Practical Marks (Optional)">
+                <NumberInput
+                  min={0}
+                  value={form.practicalMarks ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      practicalMarks: Number.isNaN(event.target.valueAsNumber)
+                        ? undefined
+                        : event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Internal Marks (Optional)">
+                <NumberInput
+                  min={0}
+                  value={form.internalMarks ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      internalMarks: Number.isNaN(event.target.valueAsNumber)
+                        ? undefined
+                        : event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Pass Marks">
+                <NumberInput
+                  min={0}
+                  value={form.passMarks}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      passMarks: event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Full Marks">
+                <NumberInput
+                  min={1}
+                  value={form.fullMarks}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      fullMarks: event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Status">
+                <Select
+                  value={form.isActive ? "active" : "inactive"}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      isActive: event.target.value === "active",
+                    }))
+                  }
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </Select>
+              </FormField>
+              <div className="flex items-end gap-2 md:col-span-2 xl:col-span-4">
+                <Button type="submit">
+                  {editingId ? "Update Master Subject" : "Add Master Subject"}
+                </Button>
+                <Button type="button" variant="outline" onClick={resetForm}>
+                  Cancel
+                </Button>
+              </div>
             </form>
           </div>
         ) : null}
@@ -383,7 +463,9 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
 
               return (
                 <div key={yearName} className="space-y-3">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{yearName}</h3>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                    {yearName}
+                  </h3>
                   <div className="overflow-x-auto rounded-2xl border border-slate-200">
                     <Table>
                       <TableHead>
@@ -397,7 +479,10 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
                       <TableBody>
                         {yearSubjects.length === 0 ? (
                           <tr>
-                            <Td colSpan={4} className="text-center text-sm text-slate-500">
+                            <Td
+                              colSpan={4}
+                              className="text-center text-sm text-slate-500"
+                            >
                               No subjects for {yearName}
                             </Td>
                           </tr>
@@ -405,44 +490,75 @@ export const MasterSubjectManager = ({ canManage = true, pendingEditId, onPendin
                           yearSubjects.map((subject) => (
                             <tr
                               key={subject._id}
-                              className={editingId === subject._id ? "bg-brand-50/60" : undefined}
+                              className={
+                                editingId === subject._id
+                                  ? "bg-brand-50/60"
+                                  : undefined
+                              }
                             >
                               <Td>
-                                <div className="font-medium">{subject.name}</div>
-                                <div className="text-xs text-slate-500">{subject.code}</div>
+                                <div className="font-medium">
+                                  {subject.name}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                  {subject.code}
+                                </div>
                                 {subject.creditHours ? (
-                                  <div className="text-xs text-slate-500">{subject.creditHours} credit hours</div>
+                                  <div className="text-xs text-slate-500">
+                                    {subject.creditHours} credit hours
+                                  </div>
                                 ) : null}
                               </Td>
                               <Td className="text-sm text-slate-600">
                                 <div>Theory: {subject.theoryMarks}</div>
-                                {subject.practicalMarks != null ? <div>Practical: {subject.practicalMarks}</div> : null}
-                                {subject.internalMarks != null ? <div>Internal: {subject.internalMarks}</div> : null}
+                                {subject.practicalMarks != null ? (
+                                  <div>Practical: {subject.practicalMarks}</div>
+                                ) : null}
+                                {subject.internalMarks != null ? (
+                                  <div>Internal: {subject.internalMarks}</div>
+                                ) : null}
                                 <div>
-                                  Pass {subject.passMarks} / Full {subject.fullMarks}
+                                  Pass {subject.passMarks} / Full{" "}
+                                  {subject.fullMarks}
                                 </div>
                               </Td>
                               <Td>
-                                <Badge className={subject.isActive ? undefined : "bg-slate-100 text-slate-600"}>
+                                <Badge
+                                  className={
+                                    subject.isActive
+                                      ? undefined
+                                      : "bg-slate-100 text-slate-600"
+                                  }
+                                >
                                   {subject.isActive ? "Active" : "Inactive"}
                                 </Badge>
                               </Td>
                               <Td className="text-right">
                                 <div className="flex flex-wrap justify-end gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => startEditing(subject)}>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => startEditing(subject)}
+                                  >
                                     Edit
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => void toggleSubjectStatus(subject)}
+                                    onClick={() =>
+                                      void toggleSubjectStatus(subject)
+                                    }
                                   >
-                                    {subject.isActive ? "Deactivate" : "Activate"}
+                                    {subject.isActive
+                                      ? "Deactivate"
+                                      : "Activate"}
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="destructive"
-                                    onClick={() => void deleteMasterSubject(subject)}
+                                    onClick={() =>
+                                      void deleteMasterSubject(subject)
+                                    }
                                   >
                                     Remove
                                   </Button>

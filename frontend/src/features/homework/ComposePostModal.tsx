@@ -7,7 +7,7 @@ import {
   filterSubjectsByYear,
   filterYearsByBatch,
   hasSingleOption,
-  type ScopeOption
+  type ScopeOption,
 } from "lib/teacherScopeUtils";
 import { X } from "lucide-react";
 import {
@@ -15,12 +15,13 @@ import {
   assignmentSchema,
   type AssignmentInput,
   type AssignmentLink,
-  type ClassroomPost
+  type ClassroomPost,
 } from "@phit-erp/shared";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { toast } from "sonner";
@@ -44,7 +45,7 @@ const defaultForm: AssignmentInput = {
   allowSubmission: true,
   isPinned: false,
   attachments: [],
-  links: []
+  links: [],
 };
 
 interface ComposePostModalProps {
@@ -74,12 +75,15 @@ export const ComposePostModal = ({
   scopedOnly = false,
   onClose,
   onSave,
-  saving
+  saving,
 }: ComposePostModalProps) => {
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const [form, setForm] = useState<AssignmentInput>(defaultForm);
-  const [linkDraft, setLinkDraft] = useState<AssignmentLink>({ title: "", url: "" });
+  const [linkDraft, setLinkDraft] = useState<AssignmentLink>({
+    title: "",
+    url: "",
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -101,7 +105,7 @@ export const ComposePostModal = ({
         allowSubmission: editingPost.allowSubmission ?? true,
         isPinned: editingPost.isPinned ?? false,
         attachments: editingPost.attachments ?? [],
-        links: editingPost.links ?? []
+        links: editingPost.links ?? [],
       });
     } else {
       setForm(defaultForm);
@@ -109,11 +113,20 @@ export const ComposePostModal = ({
     setLinkDraft({ title: "", url: "" });
   }, [open, editingPost]);
 
-  const filteredSections = useMemo(() => filterSectionsByClass(sections, form.classId ?? ""), [sections, form.classId]);
-  const filteredYears = useMemo(() => filterYearsByBatch(years, form.batchId ?? ""), [years, form.batchId]);
+  const filteredSections = useMemo(
+    () => filterSectionsByClass(sections, form.classId ?? ""),
+    [sections, form.classId],
+  );
+  const filteredYears = useMemo(
+    () => filterYearsByBatch(years, form.batchId ?? ""),
+    [years, form.batchId],
+  );
   const filteredSubjects = useMemo(
-    () => (isCollege ? filterSubjectsByYear(subjects, form.yearId ?? "") : filterSubjectsByClass(subjects, form.classId ?? "")),
-    [form.classId, form.yearId, isCollege, subjects]
+    () =>
+      isCollege
+        ? filterSubjectsByYear(subjects, form.yearId ?? "")
+        : filterSubjectsByClass(subjects, form.classId ?? ""),
+    [form.classId, form.yearId, isCollege, subjects],
   );
 
   const primaryOptions = isCollege ? batches : classes;
@@ -123,32 +136,69 @@ export const ComposePostModal = ({
 
   useEffect(() => {
     if (!open || editingPost || !scopedOnly) return;
-    if (hasSingleOption(primaryOptions) && primaryFormId !== primaryOptions[0]!._id) {
+    if (
+      hasSingleOption(primaryOptions) &&
+      primaryFormId !== primaryOptions[0]!._id
+    ) {
       setForm((current) =>
         isCollege
-          ? { ...current, batchId: primaryOptions[0]!._id, yearId: "", subjectId: "" }
-          : { ...current, classId: primaryOptions[0]!._id, sectionId: "", subjectId: "" }
+          ? {
+              ...current,
+              batchId: primaryOptions[0]!._id,
+              yearId: "",
+              subjectId: "",
+            }
+          : {
+              ...current,
+              classId: primaryOptions[0]!._id,
+              sectionId: "",
+              subjectId: "",
+            },
       );
     }
   }, [editingPost, isCollege, open, primaryFormId, primaryOptions, scopedOnly]);
 
   useEffect(() => {
     if (!open || editingPost || !scopedOnly || !primaryFormId) return;
-    if (hasSingleOption(scopedSecondary) && secondaryFormId !== scopedSecondary[0]!._id) {
+    if (
+      hasSingleOption(scopedSecondary) &&
+      secondaryFormId !== scopedSecondary[0]!._id
+    ) {
       setForm((current) =>
         isCollege
           ? { ...current, yearId: scopedSecondary[0]!._id, subjectId: "" }
-          : { ...current, sectionId: scopedSecondary[0]!._id, subjectId: "" }
+          : { ...current, sectionId: scopedSecondary[0]!._id, subjectId: "" },
       );
     }
-  }, [editingPost, isCollege, open, primaryFormId, scopedOnly, scopedSecondary, secondaryFormId]);
+  }, [
+    editingPost,
+    isCollege,
+    open,
+    primaryFormId,
+    scopedOnly,
+    scopedSecondary,
+    secondaryFormId,
+  ]);
 
   useEffect(() => {
     if (!open || editingPost || !scopedOnly || !primaryFormId) return;
-    if (hasSingleOption(filteredSubjects) && form.subjectId !== filteredSubjects[0]!._id) {
-      setForm((current) => ({ ...current, subjectId: filteredSubjects[0]!._id }));
+    if (
+      hasSingleOption(filteredSubjects) &&
+      form.subjectId !== filteredSubjects[0]!._id
+    ) {
+      setForm((current) => ({
+        ...current,
+        subjectId: filteredSubjects[0]!._id,
+      }));
     }
-  }, [editingPost, filteredSubjects, form.subjectId, open, primaryFormId, scopedOnly]);
+  }, [
+    editingPost,
+    filteredSubjects,
+    form.subjectId,
+    open,
+    primaryFormId,
+    scopedOnly,
+  ]);
 
   if (!open) return null;
 
@@ -156,7 +206,10 @@ export const ComposePostModal = ({
     if (!linkDraft.title.trim() || !linkDraft.url.trim()) return;
     setForm((current) => ({
       ...current,
-      links: [...(current.links ?? []), { title: linkDraft.title.trim(), url: linkDraft.url.trim() }]
+      links: [
+        ...(current.links ?? []),
+        { title: linkDraft.title.trim(), url: linkDraft.url.trim() },
+      ],
     }));
     setLinkDraft({ title: "", url: "" });
   };
@@ -188,7 +241,12 @@ export const ComposePostModal = ({
             <FormField label="Type">
               <Select
                 value={form.type}
-                onChange={(event) => setForm((current) => ({ ...current, type: event.target.value as AssignmentInput["type"] }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    type: event.target.value as AssignmentInput["type"],
+                  }))
+                }
               >
                 {ASSIGNMENT_TYPES.map((type) => (
                   <option key={type} value={type}>
@@ -201,7 +259,12 @@ export const ComposePostModal = ({
               <Input
                 list="topic-suggestions"
                 value={form.topic ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, topic: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    topic: event.target.value,
+                  }))
+                }
                 placeholder="e.g. Algebra, Unit 3"
               />
               <datalist id="topic-suggestions">
@@ -213,7 +276,15 @@ export const ComposePostModal = ({
           </div>
 
           <FormField label="Title">
-            <Input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
+            <Input
+              value={form.title}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
+            />
           </FormField>
 
           <div className="grid gap-4 sm:grid-cols-3">
@@ -228,12 +299,24 @@ export const ComposePostModal = ({
                   onChange={(event) =>
                     setForm((current) =>
                       isCollege
-                        ? { ...current, batchId: event.target.value, yearId: "", subjectId: "" }
-                        : { ...current, classId: event.target.value, sectionId: "", subjectId: "" }
+                        ? {
+                            ...current,
+                            batchId: event.target.value,
+                            yearId: "",
+                            subjectId: "",
+                          }
+                        : {
+                            ...current,
+                            classId: event.target.value,
+                            sectionId: "",
+                            subjectId: "",
+                          },
                     )
                   }
                 >
-                  <option value="">Select {labels.primary.toLowerCase()}</option>
+                  <option value="">
+                    Select {labels.primary.toLowerCase()}
+                  </option>
                   {primaryOptions.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
@@ -253,13 +336,23 @@ export const ComposePostModal = ({
                   onChange={(event) =>
                     setForm((current) =>
                       isCollege
-                        ? { ...current, yearId: event.target.value, subjectId: "" }
-                        : { ...current, sectionId: event.target.value, subjectId: "" }
+                        ? {
+                            ...current,
+                            yearId: event.target.value,
+                            subjectId: "",
+                          }
+                        : {
+                            ...current,
+                            sectionId: event.target.value,
+                            subjectId: "",
+                          },
                     )
                   }
                   disabled={!primaryFormId}
                 >
-                  <option value="">Select {labels.secondary.toLowerCase()}</option>
+                  <option value="">
+                    Select {labels.secondary.toLowerCase()}
+                  </option>
                   {scopedSecondary.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
@@ -284,7 +377,12 @@ export const ComposePostModal = ({
               <FormField label="Subject">
                 <Select
                   value={form.subjectId}
-                  onChange={(event) => setForm((current) => ({ ...current, subjectId: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      subjectId: event.target.value,
+                    }))
+                  }
                   disabled={!primaryFormId}
                 >
                   <option value="">Select subject</option>
@@ -304,15 +402,21 @@ export const ComposePostModal = ({
               <FormField label="Due date (BS)">
                 <NepaliDateField
                   value={form.dueDateBs ?? ""}
-                  onChange={(value) => setForm((current) => ({ ...current, dueDateBs: value }))}
+                  onChange={(value) =>
+                    setForm((current) => ({ ...current, dueDateBs: value }))
+                  }
                 />
               </FormField>
               {form.type === "CAS" ? (
                 <FormField label="Max marks">
-                  <Input
-                    type="number"
+                  <NumberInput
                     value={form.maxMarks ?? ""}
-                    onChange={(event) => setForm((current) => ({ ...current, maxMarks: event.target.valueAsNumber }))}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        maxMarks: event.target.valueAsNumber,
+                      }))
+                    }
                   />
                 </FormField>
               ) : null}
@@ -323,7 +427,12 @@ export const ComposePostModal = ({
             <Textarea
               rows={4}
               value={form.description}
-              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
             />
           </FormField>
 
@@ -332,7 +441,12 @@ export const ComposePostModal = ({
               <Textarea
                 rows={2}
                 value={form.rubric ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, rubric: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    rubric: event.target.value,
+                  }))
+                }
               />
             </FormField>
           ) : null}
@@ -340,7 +454,9 @@ export const ComposePostModal = ({
           <FormField label="Attachments">
             <ClassroomAttachmentUpload
               attachments={form.attachments ?? []}
-              onChange={(attachments) => setForm((current) => ({ ...current, attachments }))}
+              onChange={(attachments) =>
+                setForm((current) => ({ ...current, attachments }))
+              }
             />
           </FormField>
 
@@ -350,12 +466,22 @@ export const ComposePostModal = ({
               <Input
                 placeholder="Link title"
                 value={linkDraft.title}
-                onChange={(event) => setLinkDraft((current) => ({ ...current, title: event.target.value }))}
+                onChange={(event) =>
+                  setLinkDraft((current) => ({
+                    ...current,
+                    title: event.target.value,
+                  }))
+                }
               />
               <Input
                 placeholder="https://..."
                 value={linkDraft.url}
-                onChange={(event) => setLinkDraft((current) => ({ ...current, url: event.target.value }))}
+                onChange={(event) =>
+                  setLinkDraft((current) => ({
+                    ...current,
+                    url: event.target.value,
+                  }))
+                }
               />
               <Button type="button" variant="outline" onClick={addLink}>
                 Add
@@ -364,7 +490,10 @@ export const ComposePostModal = ({
             {(form.links ?? []).length > 0 ? (
               <ul className="space-y-1 text-sm text-slate-600">
                 {form.links?.map((link, index) => (
-                  <li key={`${link.url}-${index}`} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                  <li
+                    key={`${link.url}-${index}`}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2"
+                  >
                     <span className="truncate">
                       {link.title} — {link.url}
                     </span>
@@ -375,7 +504,9 @@ export const ComposePostModal = ({
                       onClick={() =>
                         setForm((current) => ({
                           ...current,
-                          links: (current.links ?? []).filter((_, i) => i !== index)
+                          links: (current.links ?? []).filter(
+                            (_, i) => i !== index,
+                          ),
                         }))
                       }
                     >
@@ -393,7 +524,12 @@ export const ComposePostModal = ({
                 <input
                   type="checkbox"
                   checked={form.allowSubmission ?? true}
-                  onChange={(event) => setForm((current) => ({ ...current, allowSubmission: event.target.checked }))}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      allowSubmission: event.target.checked,
+                    }))
+                  }
                 />
                 Allow student submissions
               </label>
@@ -402,7 +538,12 @@ export const ComposePostModal = ({
               <input
                 type="checkbox"
                 checked={form.isPinned ?? false}
-                onChange={(event) => setForm((current) => ({ ...current, isPinned: event.target.checked }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    isPinned: event.target.checked,
+                  }))
+                }
               />
               Pin to top of stream
             </label>

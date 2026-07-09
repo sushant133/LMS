@@ -31,7 +31,7 @@ import {
   ensureDefaultChartOfAccounts,
   postFeeRefundJournal,
   postJournalEntry,
-  reverseJournalEntry
+  reverseJournalEntryById
 } from "../utils/journalPosting.js";
 import { generateRefundNumber } from "../utils/receiptVerification.js";
 import {
@@ -99,14 +99,12 @@ export const createJournalEntry = asyncHandler(async (req: Request, res: Respons
   ensureValidBsDate(payload.dateBs);
   const schoolId = tenantObjectId(req);
 
-  const settings = await AccountingSettings.findOne({ schoolId }).lean();
-  if (settings?.auditLockDateBs && payload.dateBs <= settings.auditLockDateBs) {
-    throw new ApiError(403, "This fiscal period is audit-locked. Cannot post entries.");
-  }
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, payload.dateBs);
 
   const entry = await postJournalEntry({
     schoolId,
-    userId: tenantObjectId(req) as unknown as import("mongoose").Types.ObjectId,
+    userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
     dateBs: payload.dateBs,
     narration: payload.narration,
     lines: payload.lines,
@@ -122,19 +120,32 @@ export const createJournalEntry = asyncHandler(async (req: Request, res: Respons
 
 export const reverseJournalEntryHandler = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
   const entry = await JournalEntry.findOne({ _id: req.params.id, schoolId, isDeleted: false });
   if (!entry) throw new ApiError(404, "Journal entry not found");
   if (entry.isReversal) throw new ApiError(400, "Cannot reverse a reversal entry");
+  if (entry.isReversed) throw new ApiError(400, "Journal entry has already been reversed");
+
+  // Domain-linked entries must be reversed via fee/expense void APIs (cash + operational docs)
+  if (entry.referenceType && entry.referenceType !== "Manual" && entry.referenceId) {
+    throw new ApiError(
+      400,
+      `This journal is linked to ${entry.referenceType}. Reverse it from that module (void/reverse transaction) so cash book and source documents stay in sync.`
+    );
+  }
+
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, entry.dateBs);
 
   const before = entry.toObject();
-  await reverseJournalEntry(schoolId, entry.createdBy, entry.referenceType ?? "Manual", entry.referenceId ?? entry._id);
+  await reverseJournalEntryById(schoolId, userId, entry._id);
   const updated = await JournalEntry.findById(entry._id).lean();
   await recordAudit(req, {
     action: "accounting.journal.reverse",
     entity: "JournalEntry",
     entityId: entry._id.toString(),
     before,
-    after: { isDeleted: true, reversedEntryId: updated?._id }
+    after: { isReversed: true, reversed: updated }
   });
   return sendSuccess(res, "Journal entry reversed");
 });
@@ -406,8 +417,20 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
     case "vendor-ledger": {
       const vendorName = typeof req.query.vendor === "string" ? req.query.vendor : undefined;
       const [expenses, purchases] = await Promise.all([
-        AccountingExpense.find({ schoolId, ...(vendorName ? { vendor: vendorName } : {}) }).sort({ dateBs: -1 }).lean(),
-        AccountingPurchase.find({ schoolId, ...(vendorName ? { vendor: vendorName } : {}) }).sort({ purchaseDateBs: -1 }).lean()
+        AccountingExpense.find({
+          schoolId,
+          isDeleted: false,
+          ...(vendorName ? { vendor: vendorName } : {})
+        })
+          .sort({ dateBs: -1 })
+          .lean(),
+        AccountingPurchase.find({
+          schoolId,
+          isDeleted: false,
+          ...(vendorName ? { vendor: vendorName } : {})
+        })
+          .sort({ purchaseDateBs: -1 })
+          .lean()
       ]);
       return sendSuccess(res, "Vendor ledger generated", { reportType, data: { expenses, purchases } });
     }

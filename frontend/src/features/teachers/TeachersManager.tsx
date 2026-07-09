@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { BatchRecord, ClassRecord, SectionRecord, SubjectRecord, TeacherInput, TeacherRecord, YearRecord } from "@phit-erp/shared";
+import type {
+  BatchRecord,
+  ClassRecord,
+  SectionRecord,
+  SubjectRecord,
+  TeacherInput,
+  TeacherRecord,
+  YearRecord,
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
@@ -9,8 +17,12 @@ import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
+import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
-import { toastCredentialCreateResult, type CredentialsEmailResult } from "lib/credentialsEmail";
+import {
+  toastCredentialCreateResult,
+  type CredentialsEmailResult,
+} from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
@@ -29,7 +41,7 @@ const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   assignedSectionIds: teacher.assignedSectionIds,
   assignedBatchIds: teacher.assignedBatchIds ?? [],
   assignedYearIds: teacher.assignedYearIds ?? [],
-  basicSalaryNpr: teacher.basicSalaryNpr
+  basicSalaryNpr: teacher.basicSalaryNpr,
 });
 
 interface TeachersManagerProps {
@@ -42,31 +54,31 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
-    queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers"))
+    queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers")),
   });
   const classesQuery = useQuery({
     queryKey: ["classes"],
     queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes")),
-    enabled: !isCollege
+    enabled: !isCollege,
   });
   const sectionsQuery = useQuery({
     queryKey: ["sections"],
     queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections")),
-    enabled: !isCollege
+    enabled: !isCollege,
   });
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
-    enabled: isCollege
+    enabled: isCollege,
   });
   const yearsQuery = useQuery({
     queryKey: ["years"],
     queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
-    enabled: isCollege
+    enabled: isCollege,
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
-    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects"))
+    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects")),
   });
 
   const teacherMutation = useMutation({
@@ -81,14 +93,16 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
           }>(api.post("/teachers", payload)),
     onSuccess: async (data) => {
       if ("loginEmail" in data) {
-        toastCredentialCreateResult(data, { successTitle: "Teacher created successfully" });
+        toastCredentialCreateResult(data, {
+          successTitle: "Teacher created successfully",
+        });
       } else {
         toast.success("Teacher updated");
       }
       setEditing(null);
       await queryClient.invalidateQueries({ queryKey: ["teachers"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const deleteMutation = useMutation({
@@ -96,19 +110,39 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       await api.delete(`/teachers/${id}`);
     },
     onSuccess: async () => {
-      toast.success("Teacher deleted");
+      toast.success("Teacher permanently deleted");
       await queryClient.invalidateQueries({ queryKey: ["teachers"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const classMap = useMemo(() => new Map((classesQuery.data ?? []).map((item) => [item._id, item.name])), [classesQuery.data]);
-  const subjectMap = useMemo(() => new Map((subjectsQuery.data ?? []).map((item) => [item._id, item.name])), [subjectsQuery.data]);
+  const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
+  const classMap = useMemo(
+    () =>
+      new Map((classesQuery.data ?? []).map((item) => [item._id, item.name])),
+    [classesQuery.data],
+  );
+  const batchMap = useMemo(
+    () =>
+      new Map((batchesQuery.data ?? []).map((item) => [item._id, item.name])),
+    [batchesQuery.data],
+  );
+  const yearMap = useMemo(
+    () => new Map((yearsQuery.data ?? []).map((item) => [item._id, item.name])),
+    [yearsQuery.data],
+  );
+  const subjectMap = useMemo(
+    () =>
+      new Map((subjectsQuery.data ?? []).map((item) => [item._id, item.name])),
+    [subjectsQuery.data],
+  );
 
   if (
     teachersQuery.isLoading ||
     subjectsQuery.isLoading ||
-    (isCollege ? batchesQuery.isLoading || yearsQuery.isLoading : classesQuery.isLoading || sectionsQuery.isLoading)
+    (isCollege
+      ? batchesQuery.isLoading || yearsQuery.isLoading
+      : classesQuery.isLoading || sectionsQuery.isLoading)
   ) {
     return <LoadingState />;
   }
@@ -118,32 +152,35 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const content = (
     <>
       {!embedded ? (
-        <PageHeader title="Teacher Management" description="Manage teacher accounts, qualifications, BS joining dates, classes, and subject assignments." />
+        <PageHeader
+          title="Teacher Management"
+          description="Manage teacher accounts, qualifications, BS joining dates, classes, and subject assignments."
+        />
       ) : null}
 
       {canManage ? (
-      <Card>
-        <CardHeader>
-          <CardTitle>{editing ? "Edit Teacher" : "Create Teacher"}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <TeacherForm
-            key={editing?._id ?? "new-teacher"}
-            isEditing={Boolean(editing)}
-            initialValue={editing ? mapTeacherToInput(editing) : undefined}
-            classes={classesQuery.data ?? []}
-            sections={sectionsQuery.data ?? []}
-            batches={batchesQuery.data ?? []}
-            years={yearsQuery.data ?? []}
-            subjects={subjectsQuery.data ?? []}
-            submitting={teacherMutation.isPending}
-            onCancel={editing ? () => setEditing(null) : undefined}
-            onSubmit={async (value) => {
-              await teacherMutation.mutateAsync(value);
-            }}
-          />
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{editing ? "Edit Teacher" : "Create Teacher"}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TeacherForm
+              key={editing?._id ?? "new-teacher"}
+              isEditing={Boolean(editing)}
+              initialValue={editing ? mapTeacherToInput(editing) : undefined}
+              classes={classesQuery.data ?? []}
+              sections={sectionsQuery.data ?? []}
+              batches={batchesQuery.data ?? []}
+              years={yearsQuery.data ?? []}
+              subjects={subjectsQuery.data ?? []}
+              submitting={teacherMutation.isPending}
+              onCancel={editing ? () => setEditing(null) : undefined}
+              onSubmit={async (value) => {
+                await teacherMutation.mutateAsync(value);
+              }}
+            />
+          </CardContent>
+        </Card>
       ) : null}
 
       <Card>
@@ -152,7 +189,10 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
         </CardHeader>
         <CardContent>
           {teachers.length === 0 ? (
-            <EmptyState title="No teachers yet" description="Create teacher profiles and link them with subjects and class responsibilities." />
+            <EmptyState
+              title="No teachers yet"
+              description="Create teacher profiles and link them with subjects and class responsibilities."
+            />
           ) : (
             <div className="overflow-x-auto">
               <Table>
@@ -161,7 +201,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     <Th>Name</Th>
                     <Th>Code</Th>
                     <Th>Qualification</Th>
-                    <Th>Classes</Th>
+                    <Th>{isCollege ? labels.primary : "Classes"}</Th>
+                    {isCollege ? <Th>{labels.secondary}</Th> : null}
                     <Th>Subjects</Th>
                     <Th>Salary</Th>
                     <Th />
@@ -172,22 +213,62 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     <tr key={teacher._id}>
                       <Td>
                         <div>
-                          <div className="font-medium text-slate-900">{teacher.user.fullName}</div>
-                          <div className="text-xs text-slate-500">{teacher.user.email}</div>
+                          <div className="font-medium text-slate-900">
+                            {teacher.user.fullName}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {teacher.user.email}
+                          </div>
                         </div>
                       </Td>
                       <Td>{teacher.teacherCode}</Td>
                       <Td>{teacher.qualification}</Td>
-                      <Td>{teacher.assignedClassIds.map((id) => classMap.get(id) ?? id).join(", ")}</Td>
-                      <Td>{teacher.subjects.map((id) => subjectMap.get(id) ?? id).join(", ")}</Td>
+                      <Td>
+                        {isCollege
+                          ? (teacher.assignedBatchIds ?? [])
+                              .map((id) => batchMap.get(id) ?? id)
+                              .join(", ") || "—"
+                          : teacher.assignedClassIds
+                              .map((id) => classMap.get(id) ?? id)
+                              .join(", ") || "—"}
+                      </Td>
+                      {isCollege ? (
+                        <Td>
+                          {(teacher.assignedYearIds ?? [])
+                            .map((id) => yearMap.get(id) ?? id)
+                            .join(", ") || "—"}
+                        </Td>
+                      ) : null}
+                      <Td>
+                        {teacher.subjects
+                          .map((id) => subjectMap.get(id) ?? id)
+                          .join(", ")}
+                      </Td>
                       <Td>{formatCurrencyNpr(teacher.basicSalaryNpr)}</Td>
                       {canManage ? (
                         <Td className="text-right">
                           <div className="flex justify-end gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setEditing(teacher)}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setEditing(teacher)}
+                            >
                               Edit
                             </Button>
-                            <Button variant="destructive" size="sm" onClick={() => void deleteMutation.mutateAsync(teacher._id)}>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    `Permanently delete ${teacher.user.fullName}?\n\nThis removes the teacher record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
+                                  )
+                                ) {
+                                  return;
+                                }
+                                void deleteMutation.mutateAsync(teacher._id);
+                              }}
+                            >
                               Delete
                             </Button>
                           </div>

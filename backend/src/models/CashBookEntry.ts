@@ -8,7 +8,11 @@ const cashBookEntrySchema = new Schema(
     category: { type: String, required: true },
     description: { type: String, required: true },
     amountNpr: { type: Number, required: true },
-    paymentMethod: { type: String, enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "OTHER"], default: "CASH" },
+    paymentMethod: {
+      type: String,
+      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "FONEPAY", "OTHER"],
+      default: "CASH"
+    },
     referenceType: { type: String },
     referenceId: { type: Schema.Types.ObjectId },
     balanceAfterNpr: { type: Number, required: true },

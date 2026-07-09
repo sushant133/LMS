@@ -32,8 +32,7 @@ export const listExamRoutines = asyncHandler(async (req: Request, res: Response)
 
   const teacherScope = await getTeacherScope(req);
   const studentProfile = await getStudentProfile(req);
-  const institutionType = await getInstitutionType(req);
-  const college = isCollege(institutionType);
+  const isStudentOrParent = Boolean(studentProfile) || req.user?.role === "PARENT";
 
   let routines = await ExamRoutine.find(filter).sort({ examDateBs: 1, startTime: 1 }).lean();
 
@@ -43,19 +42,27 @@ export const listExamRoutines = asyncHandler(async (req: Request, res: Response)
       throw new ApiError(404, "Exam not found");
     }
 
-    if (studentProfile || req.user?.role === "PARENT") {
-      if (!exam.routinePublished) {
-        return sendSuccess(res, "Exam routines fetched", []);
-      }
+    if (isStudentOrParent && !exam.routinePublished) {
+      return sendSuccess(res, "Exam routines fetched", []);
     }
 
-    if (teacherScope) {
+    if (teacherScope && req.user?.role === "TEACHER") {
       routines = routines.filter((routine) => teacherScope.subjectIds.includes(routine.subjectId.toString()));
     }
-  }
-
-  if (studentProfile && examId) {
-    routines = routines;
+  } else if (isStudentOrParent) {
+    // Without examId, only show routines for published exam schedules
+    const examIds = [...new Set(routines.map((routine) => routine.examId.toString()))];
+    const publishedExams = await Exam.find({
+      _id: { $in: examIds },
+      schoolId: tenantObjectId(req),
+      routinePublished: true
+    })
+      .select("_id")
+      .lean();
+    const publishedSet = new Set(publishedExams.map((exam) => exam._id.toString()));
+    routines = routines.filter((routine) => publishedSet.has(routine.examId.toString()));
+  } else if (teacherScope && req.user?.role === "TEACHER") {
+    routines = routines.filter((routine) => teacherScope.subjectIds.includes(routine.subjectId.toString()));
   }
 
   const subjectIds = [...new Set(routines.map((routine) => routine.subjectId.toString()))];

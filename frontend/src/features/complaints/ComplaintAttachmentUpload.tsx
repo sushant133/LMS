@@ -10,7 +10,11 @@ interface ComplaintAttachmentUploadProps {
   disabled?: boolean;
 }
 
-export const ComplaintAttachmentUpload = ({ attachments, onChange, disabled }: ComplaintAttachmentUploadProps) => {
+export const ComplaintAttachmentUpload = ({
+  attachments,
+  onChange,
+  disabled,
+}: ComplaintAttachmentUploadProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +37,7 @@ export const ComplaintAttachmentUpload = ({ attachments, onChange, disabled }: C
       const response = await fetch(resolveApiUrl("/uploads/complaints"), {
         method: "POST",
         body: formData,
-        credentials: "include"
+        credentials: "include",
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -43,7 +47,9 @@ export const ComplaintAttachmentUpload = ({ attachments, onChange, disabled }: C
       const uploaded = (body.data?.attachments ?? []) as AssignmentAttachment[];
       onChange([...attachments, ...uploaded]);
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
+      setError(
+        uploadError instanceof Error ? uploadError.message : "Upload failed",
+      );
     } finally {
       setIsUploading(false);
       event.target.value = "";
@@ -56,7 +62,9 @@ export const ComplaintAttachmentUpload = ({ attachments, onChange, disabled }: C
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-slate-500">Attach images or PDFs as supporting evidence (max 5 files, 10 MB each).</p>
+      <p className="text-xs text-slate-500">
+        Attach images or PDFs as supporting evidence (max 5 files, 10 MB each).
+      </p>
       <label className="cursor-pointer">
         <div className="inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 hover:border-brand-400 hover:bg-brand-50/50">
           <Upload className="h-4 w-4" />
@@ -77,7 +85,10 @@ export const ComplaintAttachmentUpload = ({ attachments, onChange, disabled }: C
       {attachments.length > 0 ? (
         <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
           {attachments.map((file, index) => (
-            <div key={`${file.url}-${index}`} className="flex items-center justify-between gap-2 text-sm">
+            <div
+              key={`${file.url}-${index}`}
+              className="flex items-center justify-between gap-2 text-sm"
+            >
               <div className="flex min-w-0 items-center gap-2">
                 {file.kind === "IMAGE" || file.kind === "PDF" ? (
                   file.kind === "IMAGE" ? (
@@ -90,7 +101,13 @@ export const ComplaintAttachmentUpload = ({ attachments, onChange, disabled }: C
                 )}
                 <span className="truncate text-slate-700">{file.name}</span>
               </div>
-              <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => removeAttachment(index)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={() => removeAttachment(index)}
+              >
                 <X className="h-3.5 w-3.5" />
               </Button>
             </div>

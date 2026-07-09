@@ -14,6 +14,8 @@ export const mapStudentToInput = (student: StudentRecord): StudentInput => ({
   dateOfBirthBs: student.dateOfBirthBs,
   gender: student.gender,
   bloodGroup: student.bloodGroup,
+  disabilityCategory: student.disabilityCategory ?? "None",
+  ethnicityCategory: student.ethnicityCategory ?? "Other",
   address: student.address,
   fatherName: student.fatherName,
   fatherPhone: student.fatherPhone ?? "",
@@ -25,7 +27,7 @@ export const mapStudentToInput = (student: StudentRecord): StudentInput => ({
   remarks: student.remarks ?? "",
   academicStatus: student.academicStatus ?? "ACTIVE",
   photoUrl: student.photoUrl ?? "",
-  documents: student.documents ?? []
+  documents: student.documents ?? [],
 });
 
 export type StudentEditLocationState = {

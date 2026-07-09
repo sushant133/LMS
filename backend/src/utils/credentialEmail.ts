@@ -16,6 +16,12 @@ export interface CredentialEmailResult {
   skipped?: boolean;
 }
 
+export type CredentialEmailType =
+  | "ACCOUNT_CREDENTIALS"
+  | "PASSWORD_RESET"
+  | "ADMIN_CREDENTIALS_UPDATED"
+  | "GENERAL";
+
 export interface NotifyCredentialsInput {
   userId: string;
   fullName: string;
@@ -25,7 +31,22 @@ export interface NotifyCredentialsInput {
   schoolId?: string | null;
   /** Optional request for audit logging. */
   req?: Request;
-  emailType?: "ACCOUNT_CREDENTIALS" | "PASSWORD_RESET";
+  emailType?: CredentialEmailType;
+}
+
+export interface NotifyAdminCredentialsUpdatedInput {
+  userId: string;
+  fullName: string;
+  /** Destination address for the notification (admin login ID / email). */
+  email: string;
+  /** New or current login ID shown in the message. */
+  loginId: string;
+  /** Plaintext password when it was changed; omit when only login ID changed. */
+  password?: string;
+  loginIdChanged: boolean;
+  passwordChanged: boolean;
+  schoolId?: string | null;
+  req?: Request;
 }
 
 /**
@@ -75,6 +96,15 @@ export const buildCredentialsAdminMessage = (result: CredentialEmailResult): str
 
   const reason = result.error ?? "Unknown error";
   return `User created successfully. Credential email could not be delivered. Reason: ${reason}`;
+};
+
+export const buildAdminCredentialsUpdatedMessage = (result: CredentialEmailResult): string => {
+  if (result.sent) {
+    return `Administrator login credentials updated. Notification email sent to: ${result.email}`;
+  }
+
+  const reason = result.error ?? "Unknown error";
+  return `Administrator login credentials updated. Notification email could not be delivered. Reason: ${reason}`;
 };
 
 const escapeHtml = (value: string): string =>
@@ -139,14 +169,17 @@ const buildWelcomeEmailHtml = (params: {
                     </div>
                     <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Login ID (Email)</div>
                     <div style="font-size:15px;font-weight:600;margin-bottom:14px;color:#111827;">${email}</div>
-                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Password</div>
+                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Temporary access code</div>
                     <div style="font-size:15px;font-weight:700;letter-spacing:0.03em;color:#111827;font-family:Consolas,Monaco,monospace;">${password}</div>
                   </td>
                 </tr>
               </table>
+              <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+                Please sign in and change this temporary access code after your first login.
+              </p>
               <div style="text-align:center;margin:24px 0 8px;">
                 <a href="${loginUrl}" style="display:inline-block;background:#0c2d6b;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:999px;">
-                  Login to LMS
+                  Open PHIT LMS
                 </a>
               </div>
               <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
@@ -195,8 +228,10 @@ ${params.loginUrl}
 Login ID (Email)
 ${params.email}
 
-Password
+Temporary access code
 ${params.password}
+
+Please sign in and change this temporary access code after your first login.
 
 If you experience any issues accessing your account, please contact the LMS Administrator.
 
@@ -213,7 +248,8 @@ export const notifyAccountCredentials = async (
 ): Promise<CredentialEmailResult> => {
   const email = input.email.toLowerCase().trim();
   const loginUrl = getAppLoginUrl();
-  const subject = "Welcome to PHIT LMS – Your Login Credentials";
+  // Avoid spammy phrases like "Your Login Credentials" / "Password" in the subject line
+  const subject = "Welcome to PHIT LMS – Account access details";
   const emailType = input.emailType ?? "ACCOUNT_CREDENTIALS";
   const logoCid = "college-logo";
   const includeLogo = collegeLogoExists();
@@ -339,6 +375,255 @@ export const resendAccountCredentials = async (params: {
     password,
     credentialsEmail
   };
+};
+
+const buildAdminCredentialsUpdatedHtml = (params: {
+  fullName: string;
+  loginId: string;
+  password?: string;
+  loginIdChanged: boolean;
+  passwordChanged: boolean;
+  loginUrl: string;
+  logoCid?: string;
+}): string => {
+  const name = escapeHtml(params.fullName);
+  const loginId = escapeHtml(params.loginId);
+  const loginUrl = escapeHtml(params.loginUrl);
+  const institution = escapeHtml(INSTITUTION_NAME);
+  const passwordBlock = params.password
+    ? `<div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">New temporary access code</div>
+                    <div style="font-size:15px;font-weight:700;letter-spacing:0.03em;color:#111827;font-family:Consolas,Monaco,monospace;margin-bottom:14px;">${escapeHtml(params.password)}</div>`
+    : `<div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Access code</div>
+                    <div style="font-size:14px;color:#374151;margin-bottom:14px;">Your existing access code was not changed.</div>`;
+
+  const changeSummary = [
+    params.loginIdChanged ? "login ID" : null,
+    params.passwordChanged ? "password" : null
+  ]
+    .filter(Boolean)
+    .join(" and ");
+
+  const logoBlock = params.logoCid
+    ? `<img src="cid:${params.logoCid}" alt="${institution}" width="72" height="72" style="display:block;margin:0 auto 12px;border-radius:12px;" />`
+    : `<div style="width:72px;height:72px;margin:0 auto 12px;border-radius:12px;background:#0c2d6b;color:#fff;font-weight:700;font-size:22px;line-height:72px;text-align:center;">PHIT</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Administrator Login Credentials Updated</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f6fb;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f6fb;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(12,45,107,0.08);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#0c2d6b,#1648a0);padding:28px 24px;text-align:center;color:#ffffff;">
+              ${logoBlock}
+              <div style="font-size:18px;font-weight:700;letter-spacing:0.2px;">${institution}</div>
+              <div style="margin-top:6px;font-size:13px;opacity:0.9;">Administrator Account Security Notice</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 24px 8px;">
+              <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#0c2d6b;">Administrator login updated</h1>
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#374151;">
+                Hello <strong>${name}</strong>,
+              </p>
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#374151;">
+                Your <strong>Administrator</strong> account ${changeSummary ? `${changeSummary} has` : "credentials have"} been updated by the Super Admin for <strong>${institution}</strong> LMS.
+              </p>
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#374151;">
+                Please use the following credentials to sign in from now on:
+              </p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
+                <tr>
+                  <td style="padding:16px 18px;">
+                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Login URL</div>
+                    <div style="font-size:14px;word-break:break-all;margin-bottom:14px;">
+                      <a href="${loginUrl}" style="color:#0c2d6b;text-decoration:none;font-weight:600;">${loginUrl}</a>
+                    </div>
+                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Admin Login ID</div>
+                    <div style="font-size:15px;font-weight:600;margin-bottom:14px;color:#111827;">${loginId}</div>
+                    ${passwordBlock}
+                  </td>
+                </tr>
+              </table>
+              <div style="text-align:center;margin:24px 0 8px;">
+                <a href="${loginUrl}" style="display:inline-block;background:#0c2d6b;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:999px;">
+                  Login to LMS
+                </a>
+              </div>
+              <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+                For your security, do not share this password. If you did not expect this change, contact the Super Admin immediately.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 24px 28px;">
+              <p style="margin:0;font-size:14px;line-height:1.6;color:#374151;">
+                Regards,<br />
+                <strong>${institution}</strong><br />
+                LMS Super Administration
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f8fafc;border-top:1px solid #e5e7eb;padding:16px 24px;text-align:center;font-size:12px;color:#9ca3af;">
+              This is an automated security notice from PHIT LMS. Please keep your Administrator credentials confidential.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+};
+
+const buildAdminCredentialsUpdatedText = (params: {
+  fullName: string;
+  loginId: string;
+  password?: string;
+  loginIdChanged: boolean;
+  passwordChanged: boolean;
+  loginUrl: string;
+}): string => {
+  const changeSummary = [
+    params.loginIdChanged ? "login ID" : null,
+    params.passwordChanged ? "password" : null
+  ]
+    .filter(Boolean)
+    .join(" and ");
+
+  const passwordSection = params.password
+    ? `New temporary access code
+${params.password}`
+    : `Access code
+Your existing access code was not changed.`;
+
+  return `Hello ${params.fullName},
+
+Your Administrator account ${changeSummary ? `${changeSummary} has` : "credentials have"} been updated by the Super Admin for ${INSTITUTION_NAME} LMS.
+
+Please use the following credentials to sign in from now on:
+
+Login URL
+${params.loginUrl}
+
+Admin Login ID
+${params.loginId}
+
+${passwordSection}
+
+For your security, do not share this password. If you did not expect this change, contact the Super Admin immediately.
+
+Regards,
+${INSTITUTION_NAME}
+LMS Super Administration`;
+};
+
+/**
+ * Notifies an Administrator that Super Admin changed their login ID and/or password.
+ * Never throws — credential updates must succeed even if email fails.
+ */
+export const notifyAdminCredentialsUpdated = async (
+  input: NotifyAdminCredentialsUpdatedInput
+): Promise<CredentialEmailResult> => {
+  const email = input.email.toLowerCase().trim();
+  const loginUrl = getAppLoginUrl();
+  const subject = "PHIT LMS – Administrator account access updated";
+  const emailType: CredentialEmailType = "ADMIN_CREDENTIALS_UPDATED";
+  const logoCid = "college-logo";
+  const includeLogo = collegeLogoExists();
+
+  const html = buildAdminCredentialsUpdatedHtml({
+    fullName: input.fullName,
+    loginId: input.loginId,
+    password: input.password,
+    loginIdChanged: input.loginIdChanged,
+    passwordChanged: input.passwordChanged,
+    loginUrl,
+    logoCid: includeLogo ? logoCid : undefined
+  });
+  const text = buildAdminCredentialsUpdatedText({
+    fullName: input.fullName,
+    loginId: input.loginId,
+    password: input.password,
+    loginIdChanged: input.loginIdChanged,
+    passwordChanged: input.passwordChanged,
+    loginUrl
+  });
+
+  const delivery = await sendEmail({
+    to: email,
+    subject,
+    html,
+    text,
+    attachments: includeLogo
+      ? [
+          {
+            filename: "college-logo.png",
+            path: getCollegeLogoPath(),
+            cid: logoCid,
+            contentType: "image/png"
+          }
+        ]
+      : undefined
+  });
+
+  const result: CredentialEmailResult = {
+    sent: delivery.sent,
+    email,
+    error: delivery.error,
+    messageId: delivery.messageId,
+    skipped: delivery.skipped
+  };
+
+  try {
+    await EmailDeliveryLog.create({
+      schoolId: input.schoolId || null,
+      userId: input.userId,
+      recipientEmail: email,
+      subject,
+      emailType,
+      status: delivery.sent ? "SENT" : delivery.skipped ? "SKIPPED" : "FAILED",
+      errorMessage: delivery.error,
+      messageId: delivery.messageId,
+      triggeredByUserId: input.req?.user?.userId || null,
+      metadata: {
+        fullName: input.fullName,
+        loginId: input.loginId,
+        loginIdChanged: input.loginIdChanged,
+        passwordChanged: input.passwordChanged,
+        loginUrl
+      }
+    });
+  } catch (error) {
+    console.error("[email] Failed to log admin credentials update delivery:", error);
+  }
+
+  if (input.req) {
+    await recordAudit(input.req, {
+      action: delivery.sent
+        ? "admin.credentials.email.sent"
+        : "admin.credentials.email.failed",
+      entity: "User",
+      entityId: input.userId,
+      after: {
+        email,
+        loginId: input.loginId,
+        loginIdChanged: input.loginIdChanged,
+        passwordChanged: input.passwordChanged,
+        status: delivery.sent ? "SENT" : "FAILED",
+        error: delivery.error
+      }
+    });
+  }
+
+  return result;
 };
 
 

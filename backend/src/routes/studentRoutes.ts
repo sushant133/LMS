@@ -18,15 +18,24 @@ const profileReaders = authorize(
   "ACCOUNTANT"
 );
 
+/** List/get: institution staff + scoped parents/students. COLLEGE_VIEWER inherits GET via COLLEGE_ADMIN. */
+const studentReaders = authorize(
+  "COLLEGE_ADMIN",
+  "TEACHER",
+  "ACCOUNTANT",
+  "PARENT",
+  "STUDENT"
+);
+
 const router = Router();
 
 router.use(protect, tenantGuard);
-router.get("/", listStudents);
+router.get("/", studentReaders, listStudents);
 router.get("/:id/profile", profileReaders, getStudentProfileOverview);
 router.post("/:id/documents", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), addStudentDocument);
 router.put("/:id/documents/replace", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), replaceStudentDocument);
 router.delete("/:id/documents/:documentId", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), deleteStudentDocument);
-router.get("/:id", getStudentById);
+router.get("/:id", studentReaders, getStudentById);
 router.post("/", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createStudent);
 router.put("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), updateStudent);
 router.delete("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteStudent);

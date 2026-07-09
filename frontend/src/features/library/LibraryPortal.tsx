@@ -11,13 +11,13 @@ import { api, unwrap } from "lib/api";
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
   RETURNED: "bg-brand-100 text-brand-800",
-  OVERDUE: "bg-rose-100 text-rose-800"
+  OVERDUE: "bg-rose-100 text-rose-800",
 };
 
 export const LibraryPortal = () => {
   const booksQuery = useQuery({
     queryKey: ["library-my-books"],
-    queryFn: () => unwrap<LibraryIssueRecord[]>(api.get("/library/my-books"))
+    queryFn: () => unwrap<LibraryIssueRecord[]>(api.get("/library/my-books")),
   });
 
   const issues = booksQuery.data ?? [];
@@ -39,20 +39,26 @@ export const LibraryPortal = () => {
             </div>
             <div>
               <p className="text-sm text-slate-500">Currently borrowed</p>
-              <p className="text-2xl font-semibold text-slate-900">{active.length}</p>
+              <p className="text-2xl font-semibold text-slate-900">
+                {active.length}
+              </p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="py-6">
             <p className="text-sm text-slate-500">Overdue</p>
-            <p className="text-2xl font-semibold text-rose-600">{active.filter((i) => i.status === "OVERDUE").length}</p>
+            <p className="text-2xl font-semibold text-rose-600">
+              {active.filter((i) => i.status === "OVERDUE").length}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="py-6">
             <p className="text-sm text-slate-500">Returned (all time)</p>
-            <p className="text-2xl font-semibold text-slate-900">{history.length}</p>
+            <p className="text-2xl font-semibold text-slate-900">
+              {history.length}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -63,38 +69,45 @@ export const LibraryPortal = () => {
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
-          <Table>
-            <TableHead>
-              <tr>
-                <Th>Book</Th>
-                <Th>Issued</Th>
-                <Th>Due</Th>
-                <Th>Returned</Th>
-                <Th>Status</Th>
-              </tr>
-            </TableHead>
-            <TableBody>
-              {active.length === 0 ? (
+            <Table>
+              <TableHead>
                 <tr>
-                  <Td colSpan={5} className="py-8 text-center text-sm text-slate-500">
-                    No books currently borrowed.
-                  </Td>
+                  <Th>Book</Th>
+                  <Th>Issued</Th>
+                  <Th>Due</Th>
+                  <Th>Returned</Th>
+                  <Th>Status</Th>
                 </tr>
-              ) : (
-                active.map((issue) => (
-                  <tr key={issue._id}>
-                    <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
-                    <Td>{issue.issuedDateBs}</Td>
-                    <Td>{issue.dueDateBs}</Td>
-                    <Td>{issue.returnedDateBs ?? "—"}</Td>
-                    <Td>
-                      <Badge className={issueStatusStyles[issue.status] ?? ""}>{issue.status}</Badge>
+              </TableHead>
+              <TableBody>
+                {active.length === 0 ? (
+                  <tr>
+                    <Td
+                      colSpan={5}
+                      className="py-8 text-center text-sm text-slate-500"
+                    >
+                      No books currently borrowed.
                     </Td>
                   </tr>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : (
+                  active.map((issue) => (
+                    <tr key={issue._id}>
+                      <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
+                      <Td>{issue.issuedDateBs}</Td>
+                      <Td>{issue.dueDateBs}</Td>
+                      <Td>{issue.returnedDateBs ?? "—"}</Td>
+                      <Td>
+                        <Badge
+                          className={issueStatusStyles[issue.status] ?? ""}
+                        >
+                          {issue.status}
+                        </Badge>
+                      </Td>
+                    </tr>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>
@@ -105,38 +118,45 @@ export const LibraryPortal = () => {
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
-          <Table>
-            <TableHead>
-              <tr>
-                <Th>Book</Th>
-                <Th>Issued</Th>
-                <Th>Due</Th>
-                <Th>Returned</Th>
-                <Th>Status</Th>
-              </tr>
-            </TableHead>
-            <TableBody>
-              {history.length === 0 ? (
+            <Table>
+              <TableHead>
                 <tr>
-                  <Td colSpan={5} className="py-8 text-center text-sm text-slate-500">
-                    No borrowing history yet.
-                  </Td>
+                  <Th>Book</Th>
+                  <Th>Issued</Th>
+                  <Th>Due</Th>
+                  <Th>Returned</Th>
+                  <Th>Status</Th>
                 </tr>
-              ) : (
-                history.map((issue) => (
-                  <tr key={issue._id}>
-                    <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
-                    <Td>{issue.issuedDateBs}</Td>
-                    <Td>{issue.dueDateBs}</Td>
-                    <Td>{issue.returnedDateBs ?? "—"}</Td>
-                    <Td>
-                      <Badge className={issueStatusStyles[issue.status] ?? ""}>{issue.status}</Badge>
+              </TableHead>
+              <TableBody>
+                {history.length === 0 ? (
+                  <tr>
+                    <Td
+                      colSpan={5}
+                      className="py-8 text-center text-sm text-slate-500"
+                    >
+                      No borrowing history yet.
                     </Td>
                   </tr>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : (
+                  history.map((issue) => (
+                    <tr key={issue._id}>
+                      <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
+                      <Td>{issue.issuedDateBs}</Td>
+                      <Td>{issue.dueDateBs}</Td>
+                      <Td>{issue.returnedDateBs ?? "—"}</Td>
+                      <Td>
+                        <Badge
+                          className={issueStatusStyles[issue.status] ?? ""}
+                        >
+                          {issue.status}
+                        </Badge>
+                      </Td>
+                    </tr>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>

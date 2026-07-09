@@ -27,6 +27,7 @@ import {
   endSession,
   getSessionOption
 } from "../utils/transaction.js";
+import { hardDeleteStudentAccount } from "../utils/deletePersonCascade.js";
 
 const getReadableStudentFilter = async (req: Request): Promise<Record<string, unknown>> => {
   if (req.user?.role === "TEACHER") {
@@ -231,6 +232,10 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   return sendSuccess(res, "Student updated successfully", student);
 });
 
+/**
+ * Hard-delete student: removes Student + User (email, phone, password) and linked records
+ * (attendance entries, results, fee rows, parent links, library/transport issues, notifications).
+ */
 export const deleteStudent = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
   const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
@@ -239,8 +244,37 @@ export const deleteStudent = asyncHandler(async (req: Request, res: Response) =>
     throw new ApiError(404, "Student not found");
   }
 
-  await User.findOneAndDelete({ _id: student.user, schoolId });
-  await student.deleteOne();
+  const session = await createSession();
+  try {
+    const deleted = await hardDeleteStudentAccount({
+      schoolId,
+      studentId: student._id,
+      session
+    });
 
-  return sendSuccess(res, "Student deleted successfully");
+    await commitTransaction(session);
+
+    await recordAudit(req, {
+      action: "student.hard_delete",
+      entity: "Student",
+      entityId: deleted.studentId,
+      before: {
+        admissionNumber: deleted.admissionNumber,
+        fullName: deleted.fullName,
+        email: deleted.email,
+        userId: deleted.userId
+      },
+      after: { deleted: true }
+    });
+
+    return sendSuccess(res, "Student and login account permanently deleted");
+  } catch (error) {
+    await abortTransaction(session);
+    if (error instanceof Error && error.message === "STUDENT_NOT_FOUND") {
+      throw new ApiError(404, "Student not found");
+    }
+    throw error;
+  } finally {
+    await endSession(session);
+  }
 });

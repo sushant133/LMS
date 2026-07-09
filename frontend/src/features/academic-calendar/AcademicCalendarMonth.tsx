@@ -6,7 +6,7 @@ import {
   formatMonthKey,
   getDateCellClass,
   getDateCellStyle,
-  getEventTypeLabel
+  getEventTypeLabel,
 } from "./academicCalendarUtils";
 
 interface AcademicCalendarMonthProps {
@@ -26,7 +26,7 @@ export const AcademicCalendarMonth = ({
   eventsByDate,
   todayBs,
   selectedDateBs,
-  onDateClick
+  onDateClick,
 }: AcademicCalendarMonthProps) => {
   const cells = buildMonthGrid(year, month);
 
@@ -34,7 +34,9 @@ export const AcademicCalendarMonth = ({
     <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-900">{monthName}</h3>
-        <span className="text-xs text-slate-500">{formatMonthKey(year, month)}</span>
+        <span className="text-xs text-slate-500">
+          {formatMonthKey(year, month)}
+        </span>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500">
         {WEEKDAY_LABELS.map((label) => (
@@ -51,8 +53,15 @@ export const AcademicCalendarMonth = ({
           const dayEvents = eventsByDate.get(dateBs) ?? [];
           const primaryEvent = dayEvents[0];
           const isToday = dateBs === todayBs;
-          const isSelected = Boolean(selectedDateBs && dateBs === selectedDateBs);
-          const title = dayEvents.map((event) => `${event.name} (${getEventTypeLabel(event.eventType)})`).join("\n");
+          const isSelected = Boolean(
+            selectedDateBs && dateBs === selectedDateBs,
+          );
+          const title = dayEvents
+            .map(
+              (event) =>
+                `${event.name} (${getEventTypeLabel(event.eventType)})`,
+            )
+            .join("\n");
 
           return (
             <button
@@ -64,7 +73,7 @@ export const AcademicCalendarMonth = ({
               className={cn(
                 "relative flex h-8 items-center justify-center rounded-md text-xs font-medium transition cursor-pointer",
                 getDateCellClass(primaryEvent, isToday),
-                isSelected && "ring-2 ring-brand-600 ring-offset-1"
+                isSelected && "ring-2 ring-brand-600 ring-offset-1",
               )}
             >
               {day}

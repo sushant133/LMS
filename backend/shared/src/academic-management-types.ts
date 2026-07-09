@@ -118,7 +118,27 @@ export interface AcademicLessonPlanItemRecord {
   completionStatus: LessonPlanItemStatus;
   remarks: string;
   completedPercent: number;
+  /** Percent of estimated classes still remaining (100 - completedPercent, floored at 0). */
+  remainingPercent: number;
   unit?: Pick<AcademicSessionPlanUnitRecord, "_id" | "unitNo" | "chapterName">;
+}
+
+export type AcademicTeacherAlertType = "LOG_BOOK_MISSING" | "LESSON_PLAN_APPROACHING" | "LESSON_PLAN_OVERDUE";
+
+export interface AcademicTeacherAlert {
+  type: AcademicTeacherAlertType;
+  teacherId: string;
+  lessonPlanId?: string;
+  lessonPlanItemId?: string;
+  subjectName: string;
+  topic: string;
+  month: string;
+  deadline?: string;
+  completedPercent: number;
+  remainingPercent: number;
+  estimatedClasses: number;
+  completedClasses: number;
+  message: string;
 }
 
 export interface AcademicLessonPlanRecord extends AcademicManagementScope {
@@ -227,12 +247,16 @@ export interface AcademicManagementDashboard {
   pendingApprovals: number;
   delayedLessonPlans: number;
   syllabusCompletionPercent: number;
+  /** Overall syllabus still remaining (100 - completion). */
+  syllabusRemainingPercent: number;
   teachersPendingLogBook: number;
+  /** Actionable teacher alerts: missing log book, near/overdue lesson plans with remaining %. */
+  teacherAlerts: AcademicTeacherAlert[];
   monthlyProgress: Array<{ month: string; completed: number; planned: number }>;
-  teacherPerformance: Array<{ teacherId: string; teacherName: string; completionPercent: number }>;
-  subjectProgress: Array<{ subjectId: string; subjectName: string; completionPercent: number }>;
-  facultyProgress: Array<{ faculty: string; completionPercent: number }>;
-  syllabusCompletion: Array<{ subjectName: string; percent: number }>;
+  teacherPerformance: Array<{ teacherId: string; teacherName: string; completionPercent: number; remainingPercent: number }>;
+  subjectProgress: Array<{ subjectId: string; subjectName: string; completionPercent: number; remainingPercent: number }>;
+  facultyProgress: Array<{ faculty: string; completionPercent: number; remainingPercent: number }>;
+  syllabusCompletion: Array<{ subjectName: string; percent: number; remainingPercent: number }>;
 }
 
 export interface TodayTimetableSlot {

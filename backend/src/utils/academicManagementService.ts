@@ -2,7 +2,6 @@ import type { Request } from "express";
 import mongoose from "mongoose";
 import {
   canManageInstitution,
-  hasInstitutionAccess,
   type AcademicManagementDashboard,
   type AcademicManagementFilters,
   type AcademicPlanStatus,
@@ -29,15 +28,88 @@ import { User } from "../models/User.js";
 import { ApiError } from "./apiError.js";
 import { recordAudit } from "./audit.js";
 import { getInstitutionType, isCollege } from "./institution.js";
+import { compareBsDates, getDayOfWeekFromBs, getOffsetFromBsDate, getTodayBs } from "./nepaliDate.js";
 import { sendNotification, getSchoolIdFromRequest } from "./notificationService.js";
 import { getTeacherScope, requireTeacherScope } from "./teacherScope.js";
 import { tenantObjectId } from "./tenant.js";
 
+/** BS date pattern YYYY-MM-DD (used for lesson plan item deadlines). */
+const BS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export const isBsDateString = (value?: string | null): value is string => Boolean(value && BS_DATE_RE.test(value.trim()));
+
+/**
+ * Compute lesson-plan item status from completed classes and optional BS deadline.
+ * - COMPLETED when classes done
+ * - DELAYED when incomplete and deadline is today or in the past (not on time)
+ * - IN_PROGRESS when some classes done (and not yet due)
+ * - PENDING otherwise
+ */
+export const computeItemStatus = (
+  estimated: number,
+  completed: number,
+  deadline?: string,
+  todayBs: string = getTodayBs()
+): LessonPlanItemStatus => {
+  if (estimated > 0 && completed >= estimated) return "COMPLETED";
+
+  if (isBsDateString(deadline) && compareBsDates(deadline.trim(), todayBs) <= 0 && completed < Math.max(estimated, 1)) {
+    return "DELAYED";
+  }
+
+  if (completed > 0) return "IN_PROGRESS";
+  return "PENDING";
+};
+
+export const calcRemainingPercent = (estimated: number, completed: number): number => {
+  if (estimated <= 0) return 100;
+  const remaining = Math.max(estimated - completed, 0);
+  return Math.round((remaining / estimated) * 100);
+};
+
+export const calcCompletedPercent = (estimated: number, completed: number): number => {
+  if (estimated <= 0) return 0;
+  return Math.min(100, Math.round((completed / estimated) * 100));
+};
+
+/**
+ * Incomplete item with deadline after today and within the next `withinDays` days.
+ * Deadline day itself is treated as delayed/overdue (not "approaching").
+ */
+export const isDeadlineApproaching = (
+  deadline: string | undefined,
+  estimated: number,
+  completed: number,
+  withinDays = 3,
+  todayBs: string = getTodayBs()
+): boolean => {
+  if (!isBsDateString(deadline)) return false;
+  if (estimated > 0 && completed >= estimated) return false;
+  const d = deadline.trim();
+  // Future only — today/past are overdue/delayed
+  if (compareBsDates(d, todayBs) <= 0) return false;
+  const horizon = getOffsetFromBsDate(todayBs, withinDays);
+  return compareBsDates(d, horizon) <= 0;
+};
+
+/** Incomplete and deadline is today or earlier (aligned with DELAYED status). */
+export const isDeadlineOverdue = (
+  deadline: string | undefined,
+  estimated: number,
+  completed: number,
+  todayBs: string = getTodayBs()
+): boolean => {
+  if (!isBsDateString(deadline)) return false;
+  if (estimated > 0 && completed >= estimated) return false;
+  return compareBsDates(deadline.trim(), todayBs) <= 0;
+};
+
 const APPROVED_STATUSES: AcademicPlanStatus[] = ["APPROVED"];
+/** Statuses locked for teacher edit until admin unlocks (or rejects). */
+const LOCKED_EDIT_STATUSES: AcademicPlanStatus[] = ["APPROVED", "SUBMITTED", "PENDING_APPROVAL"];
+const APPROVABLE_STATUSES: AcademicPlanStatus[] = ["SUBMITTED", "PENDING_APPROVAL"];
 
 export const isAcademicAdmin = (role: string): boolean => canManageInstitution(role);
-
-export const canReadAllAcademicRecords = (role: string): boolean => hasInstitutionAccess(role);
 
 export const buildAcademicFilter = (req: Request, query: AcademicManagementFilters): Record<string, unknown> => {
   const filter: Record<string, unknown> = {
@@ -68,20 +140,6 @@ export const applyTeacherScopeToFilter = async (req: Request, filter: Record<str
   }
 };
 
-export const assertCanModifyPlan = (req: Request, status: AcademicPlanStatus, ownerTeacherId: string): void => {
-  if (!req.user) throw new ApiError(401, "Authentication required");
-
-  if (isAcademicAdmin(req.user.role)) return;
-
-  if (req.user.role !== "TEACHER") {
-    throw new ApiError(403, "You do not have permission to modify this record");
-  }
-
-  if (ownerTeacherId !== req.user.userId && ownerTeacherId) {
-    // ownerTeacherId is Teacher._id, need to compare via scope
-  }
-};
-
 export const assertTeacherOwnership = async (req: Request, teacherId: string): Promise<void> => {
   if (!req.user) throw new ApiError(401, "Authentication required");
   if (isAcademicAdmin(req.user.role)) return;
@@ -93,9 +151,31 @@ export const assertTeacherOwnership = async (req: Request, teacherId: string): P
 };
 
 export const assertEditableStatus = (status: AcademicPlanStatus): void => {
-  if (APPROVED_STATUSES.includes(status)) {
-    throw new ApiError(403, "Approved records cannot be modified. Contact an administrator to unlock.");
+  if (LOCKED_EDIT_STATUSES.includes(status)) {
+    throw new ApiError(
+      403,
+      status === "APPROVED"
+        ? "Approved records cannot be modified. Contact an administrator to unlock."
+        : "Submitted plans cannot be modified until an administrator unlocks or rejects them."
+    );
   }
+};
+
+export const assertApprovableStatus = (status: AcademicPlanStatus): void => {
+  if (!APPROVABLE_STATUSES.includes(status)) {
+    throw new ApiError(400, "Only submitted plans can be approved or rejected.");
+  }
+};
+
+/** Strip ownership fields teachers must not reassign on update. */
+export const sanitizeTeacherOwnedUpdate = <T extends Record<string, unknown>>(
+  req: Request,
+  payload: T
+): T => {
+  if (isAcademicAdmin(req.user?.role ?? "")) return payload;
+  const next = { ...payload };
+  delete next.teacherId;
+  return next;
 };
 
 export const recordApproval = async (
@@ -160,21 +240,15 @@ export const notifyAdmins = async (req: Request, title: string, message: string,
   );
 };
 
-const computeItemStatus = (estimated: number, completed: number, deadline?: string): LessonPlanItemStatus => {
-  if (completed >= estimated && estimated > 0) return "COMPLETED";
-  if (completed > 0) return "IN_PROGRESS";
-  if (deadline) return "DELAYED";
-  return "PENDING";
-};
-
 export const syncLessonPlanItemProgress = async (lessonPlanItemId: string): Promise<void> => {
   const item = await AcademicLessonPlanItem.findById(lessonPlanItemId);
   if (!item) return;
 
+  // Count submitted teaching logs (pending admin review still means class was taught)
   const completed = await AcademicLogBookEntry.countDocuments({
     lessonPlanItemId: item._id,
     isDeleted: false,
-    reviewStatus: { $in: ["REVIEWED", "APPROVED"] }
+    reviewStatus: { $ne: "NEEDS_IMPROVEMENT" }
   });
 
   item.completedClasses = completed;
@@ -301,7 +375,7 @@ export const getAttendanceForSession = async (
 
 export const getTodayTimetable = async (req: Request, dateBs: string) => {
   const scope = await requireTeacherScope(req);
-  const dayOfWeek = new Date().getDay();
+  const dayOfWeek = getDayOfWeekFromBs(dateBs || getTodayBs());
 
   const slots = await TimetableSlot.find({
     schoolId: tenantObjectId(req),
@@ -445,10 +519,12 @@ export const serializeLessonPlan = async (planId: string) => {
   }).lean();
   const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
 
+  const todayBs = getTodayBs();
   const enrichedItems = items.map((item) => {
     const unit = item.sessionPlanUnitId ? unitMap.get(item.sessionPlanUnitId.toString()) : undefined;
-    const completedPercent =
-      item.estimatedClasses > 0 ? Math.round((item.completedClasses / item.estimatedClasses) * 100) : 0;
+    const completionStatus = computeItemStatus(item.estimatedClasses, item.completedClasses, item.deadline, todayBs);
+    const completedPercent = calcCompletedPercent(item.estimatedClasses, item.completedClasses);
+    const remainingPercent = calcRemainingPercent(item.estimatedClasses, item.completedClasses);
 
     return {
       _id: item._id.toString(),
@@ -465,9 +541,10 @@ export const serializeLessonPlan = async (planId: string) => {
       deadline: item.deadline,
       estimatedClasses: item.estimatedClasses,
       completedClasses: item.completedClasses,
-      completionStatus: item.completionStatus,
+      completionStatus,
       remarks: item.remarks,
       completedPercent,
+      remainingPercent,
       unit: unit
         ? { _id: unit._id.toString(), unitNo: unit.unitNo, chapterName: unit.chapterName }
         : undefined
@@ -478,6 +555,8 @@ export const serializeLessonPlan = async (planId: string) => {
   const completedClasses = enrichedItems.reduce((sum, item) => sum + item.completedClasses, 0);
   const pendingUnits = enrichedItems.filter((item) => item.completionStatus === "PENDING").length;
   const delayedUnits = enrichedItems.filter((item) => item.completionStatus === "DELAYED").length;
+  const completedPercent = calcCompletedPercent(totalClasses, completedClasses);
+  const remainingPercent = calcRemainingPercent(totalClasses, completedClasses);
 
   return {
     _id: plan._id.toString(),
@@ -501,8 +580,8 @@ export const serializeLessonPlan = async (planId: string) => {
     approvalDate: plan.approvalDate,
     adminRemarks: plan.adminRemarks,
     items: enrichedItems,
-    completedPercent: totalClasses > 0 ? Math.round((completedClasses / totalClasses) * 100) : 0,
-    remainingPercent: totalClasses > 0 ? Math.round(((totalClasses - completedClasses) / totalClasses) * 100) : 100,
+    completedPercent,
+    remainingPercent,
     pendingUnits,
     delayedUnits,
     audit: formatAudit(plan),
@@ -570,16 +649,34 @@ export const serializeLogBookEntry = async (entryId: string) => {
 export const buildDashboard = async (req: Request, filters: AcademicManagementFilters): Promise<AcademicManagementDashboard> => {
   const baseFilter = buildAcademicFilter(req, filters);
   await applyTeacherScopeToFilter(req, baseFilter);
+  const todayBs = getTodayBs();
+  const schoolId = tenantObjectId(req);
+  const teacherScope = await getTeacherScope(req);
+
+  const liveSessionPlanIds = (
+    await AcademicSessionPlan.find({ schoolId, isDeleted: false, ...(teacherScope ? { teacherId: teacherScope.teacherId } : {}) })
+      .select("_id")
+      .lean()
+  ).map((plan) => plan._id);
+
+  const progressQuery: Record<string, unknown> = {
+    schoolId,
+    sessionPlanId: { $in: liveSessionPlanIds }
+  };
+  if (teacherScope) progressQuery.teacherId = teacherScope.teacherId;
+  if (filters.academicYearBs) progressQuery.academicYearBs = filters.academicYearBs;
+  if (filters.teacherId && !teacherScope) progressQuery.teacherId = filters.teacherId;
+  if (filters.subjectId) progressQuery.subjectId = filters.subjectId;
 
   const [sessionPlans, lessonPlans, logEntries, progressRows, subjects] = await Promise.all([
     AcademicSessionPlan.countDocuments(baseFilter),
     AcademicLessonPlan.countDocuments(baseFilter),
     AcademicLogBookEntry.countDocuments({
       ...baseFilter,
-      dateBs: filters.dateFrom ?? new Date().toISOString().slice(0, 10)
+      dateBs: filters.dateFrom || todayBs
     }),
-    AcademicProgress.find({ schoolId: tenantObjectId(req) }).lean(),
-    Subject.countDocuments({ schoolId: tenantObjectId(req), isActive: { $ne: false } })
+    AcademicProgress.find(progressQuery).lean(),
+    Subject.countDocuments({ schoolId, isActive: { $ne: false } })
   ]);
 
   const [pendingLessonApprovals, pendingSessionApprovals] = await Promise.all([
@@ -588,30 +685,143 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
   ]);
   const pendingApprovals = pendingLessonApprovals + pendingSessionApprovals;
   const approvedPlans = await AcademicLessonPlan.countDocuments({ ...baseFilter, status: "APPROVED" });
-  const delayedLessonPlans = await AcademicLessonPlan.countDocuments({ ...baseFilter, status: "APPROVED" });
-
-  const delayedItems = await AcademicLessonPlanItem.countDocuments({ completionStatus: "DELAYED", schoolId: tenantObjectId(req) });
 
   const avgCompletion =
     progressRows.length > 0
       ? Math.round(progressRows.reduce((sum, row) => sum + row.completedPercent, 0) / progressRows.length)
       : 0;
+  const avgRemaining = Math.max(0, 100 - avgCompletion);
 
-  const teachersWithLogToday = await AcademicLogBookEntry.distinct("teacherId", {
-    schoolId: tenantObjectId(req),
-    dateBs: filters.dateFrom,
-    isDeleted: false
-  });
-  const allTeachers = await Teacher.countDocuments({ schoolId: tenantObjectId(req) });
+  const logDateBs = filters.dateFrom || todayBs;
+  const logDayOfWeek = getDayOfWeekFromBs(logDateBs);
+  const [teachersWithLogToday, scheduledTeacherIds] = await Promise.all([
+    AcademicLogBookEntry.distinct("teacherId", {
+      schoolId,
+      dateBs: logDateBs,
+      isDeleted: false
+    }),
+    TimetableSlot.distinct("teacherId", { schoolId, dayOfWeek: logDayOfWeek })
+  ]);
+  const scheduledTeacherCount = scheduledTeacherIds.length;
+  const scheduledLoggedCount = scheduledTeacherIds.filter((id) =>
+    teachersWithLogToday.some((logged) => logged.toString() === id.toString())
+  ).length;
+  const teachersPendingLogBook = Math.max(scheduledTeacherCount - scheduledLoggedCount, 0);
+
+  // Action alerts + live delayed count (same rules as serializeLessonPlan)
+  const teacherAlerts: AcademicManagementDashboard["teacherAlerts"] = [];
+  const planTeacherFilter = teacherScope ? { teacherId: teacherScope.teacherId } : {};
+
+  const plansForAlerts = await AcademicLessonPlan.find({
+    schoolId,
+    isDeleted: false,
+    ...planTeacherFilter,
+    status: { $in: ["APPROVED", "PENDING_APPROVAL", "SUBMITTED", "DRAFT"] }
+  })
+    .select("_id teacherId month subjectId")
+    .populate("subjectId", "name")
+    .lean();
+
+  const planIds = plansForAlerts.map((p) => p._id);
+  const planMap = new Map(plansForAlerts.map((p) => [p._id.toString(), p]));
+  const alertItems = planIds.length
+    ? await AcademicLessonPlanItem.find({
+        lessonPlanId: { $in: planIds }
+      }).lean()
+    : [];
+
+  let delayedItems = 0;
+  for (const item of alertItems) {
+    const liveStatus = computeItemStatus(item.estimatedClasses, item.completedClasses, item.deadline, todayBs);
+    if (liveStatus === "COMPLETED") continue;
+    if (liveStatus === "DELAYED") delayedItems += 1;
+
+    const plan = planMap.get(item.lessonPlanId.toString());
+    if (!plan) continue;
+    const remainingPercent = calcRemainingPercent(item.estimatedClasses, item.completedClasses);
+    const completedPercent = calcCompletedPercent(item.estimatedClasses, item.completedClasses);
+    const subjectName =
+      (plan.subjectId as unknown as { name?: string } | null)?.name ?? "Subject";
+    const base = {
+      teacherId: plan.teacherId.toString(),
+      lessonPlanId: plan._id.toString(),
+      lessonPlanItemId: item._id.toString(),
+      subjectName,
+      topic: item.plannedTopic,
+      month: plan.month,
+      deadline: item.deadline || undefined,
+      completedPercent,
+      remainingPercent,
+      estimatedClasses: item.estimatedClasses,
+      completedClasses: item.completedClasses
+    };
+
+    if (liveStatus === "DELAYED" || isDeadlineOverdue(item.deadline, item.estimatedClasses, item.completedClasses, todayBs)) {
+      teacherAlerts.push({
+        ...base,
+        type: "LESSON_PLAN_OVERDUE",
+        message: `"${item.plannedTopic}" is overdue or delayed. ${remainingPercent}% remaining (${item.completedClasses}/${item.estimatedClasses} classes).`
+      });
+    } else if (isDeadlineApproaching(item.deadline, item.estimatedClasses, item.completedClasses, 3, todayBs)) {
+      teacherAlerts.push({
+        ...base,
+        type: "LESSON_PLAN_APPROACHING",
+        message: `"${item.plannedTopic}" deadline is near (${item.deadline}). ${remainingPercent}% remaining — complete on time.`
+      });
+    }
+  }
+
+  // Teachers see missing-log only when scheduled today; admins see scheduled pending summary
+  if (teacherScope) {
+    const isScheduled = scheduledTeacherIds.some((id) => id.toString() === teacherScope.teacherId);
+    const hasLog = teachersWithLogToday.some((id) => id.toString() === teacherScope.teacherId);
+    if (isScheduled && !hasLog) {
+      teacherAlerts.push({
+        type: "LOG_BOOK_MISSING",
+        teacherId: teacherScope.teacherId,
+        subjectName: "",
+        topic: "Daily log book",
+        month: "",
+        completedPercent: 0,
+        remainingPercent: 100,
+        estimatedClasses: 0,
+        completedClasses: 0,
+        message: `Log book not submitted for ${logDateBs}. Please submit today's teaching log.`
+      });
+    }
+  } else if (teachersPendingLogBook > 0) {
+    teacherAlerts.push({
+      type: "LOG_BOOK_MISSING",
+      teacherId: "",
+      subjectName: "",
+      topic: "Daily log book",
+      month: "",
+      completedPercent: 0,
+      remainingPercent: 100,
+      estimatedClasses: 0,
+      completedClasses: 0,
+      message: `${teachersPendingLogBook} scheduled teacher(s) have not submitted the log book for ${logDateBs}.`
+    });
+  }
+
+  // Sort: overdue → approaching → missing log; cap list for UI
+  const typeOrder = { LESSON_PLAN_OVERDUE: 0, LESSON_PLAN_APPROACHING: 1, LOG_BOOK_MISSING: 2 } as const;
+  teacherAlerts.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || b.remainingPercent - a.remainingPercent);
+
+  const monthlyMatch: Record<string, unknown> = { schoolId, isDeleted: false };
+  if (teacherScope) monthlyMatch.teacherId = teacherScope.teacherId;
+  if (filters.teacherId && !teacherScope) monthlyMatch.teacherId = filters.teacherId;
+  if (filters.academicYearBs) monthlyMatch.academicYearBs = filters.academicYearBs;
+  if (filters.subjectId) monthlyMatch.subjectId = filters.subjectId;
 
   const monthlyProgress = await AcademicLessonPlan.aggregate([
-    { $match: { schoolId: tenantObjectId(req), isDeleted: false } },
+    { $match: monthlyMatch },
     { $group: { _id: "$month", planned: { $sum: 1 }, completed: { $sum: { $cond: [{ $eq: ["$status", "APPROVED"] }, 1, 0] } } } },
     { $sort: { _id: 1 } }
   ]);
 
   const teacherPerformance = await AcademicProgress.aggregate([
-    { $match: { schoolId: tenantObjectId(req) } },
+    { $match: progressQuery },
     { $group: { _id: "$teacherId", completionPercent: { $avg: "$completedPercent" } } },
     { $limit: 10 }
   ]);
@@ -628,7 +838,7 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
   );
 
   const subjectProgress = await AcademicProgress.aggregate([
-    { $match: { schoolId: tenantObjectId(req) } },
+    { $match: progressQuery },
     { $group: { _id: "$subjectId", completionPercent: { $avg: "$completedPercent" } } },
     { $limit: 10 }
   ]);
@@ -638,8 +848,18 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
     .lean();
   const subjectNameMap = new Map(subjectDocs.map((subject) => [subject._id.toString(), subject.name]));
 
+  const facultyMatch: Record<string, unknown> = {
+    schoolId,
+    isDeleted: false,
+    faculty: { $exists: true, $ne: "" }
+  };
+  if (teacherScope) facultyMatch.teacherId = teacherScope.teacherId;
+  if (filters.teacherId && !teacherScope) facultyMatch.teacherId = filters.teacherId;
+  if (filters.academicYearBs) facultyMatch.academicYearBs = filters.academicYearBs;
+  if (filters.subjectId) facultyMatch.subjectId = filters.subjectId;
+
   const facultyProgressRows = await AcademicSessionPlan.aggregate([
-    { $match: { schoolId: tenantObjectId(req), isDeleted: false, faculty: { $exists: true, $ne: "" } } },
+    { $match: facultyMatch },
     {
       $lookup: {
         from: "academicprogresses",
@@ -665,9 +885,11 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
     todaysLogBooks: logEntries,
     approvedPlans,
     pendingApprovals,
-    delayedLessonPlans: delayedItems || delayedLessonPlans,
+    delayedLessonPlans: delayedItems,
     syllabusCompletionPercent: avgCompletion,
-    teachersPendingLogBook: Math.max(allTeachers - teachersWithLogToday.length, 0),
+    syllabusRemainingPercent: avgRemaining,
+    teachersPendingLogBook,
+    teacherAlerts: teacherAlerts.slice(0, 30),
     monthlyProgress: monthlyProgress.map((row) => ({
       month: row._id as string,
       planned: row.planned as number,
@@ -676,20 +898,24 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
     teacherPerformance: teacherPerformance.map((row) => ({
       teacherId: row._id.toString(),
       teacherName: teacherNameMap.get(row._id.toString()) ?? "Teacher",
-      completionPercent: Math.round(row.completionPercent as number)
+      completionPercent: Math.round(row.completionPercent as number),
+      remainingPercent: Math.max(0, 100 - Math.round(row.completionPercent as number))
     })),
     subjectProgress: subjectProgress.map((row) => ({
       subjectId: row._id.toString(),
       subjectName: subjectNameMap.get(row._id.toString()) ?? "Subject",
-      completionPercent: Math.round(row.completionPercent as number)
+      completionPercent: Math.round(row.completionPercent as number),
+      remainingPercent: Math.max(0, 100 - Math.round(row.completionPercent as number))
     })),
     facultyProgress: facultyProgressRows.map((row) => ({
       faculty: row._id as string,
-      completionPercent: Math.round((row.completionPercent as number) || 0)
+      completionPercent: Math.round((row.completionPercent as number) || 0),
+      remainingPercent: Math.max(0, 100 - Math.round((row.completionPercent as number) || 0))
     })),
     syllabusCompletion: subjectProgress.map((row) => ({
       subjectName: subjectNameMap.get(row._id.toString()) ?? "Subject",
-      percent: Math.round(row.completionPercent as number)
+      percent: Math.round(row.completionPercent as number),
+      remainingPercent: Math.max(0, 100 - Math.round(row.completionPercent as number))
     }))
   };
 };

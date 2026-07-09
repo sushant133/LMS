@@ -11,9 +11,17 @@ import {
   type LibraryInventoryAccessResponse,
   type LibraryIssueInput,
   type ModuleStaffInput,
-  type UserProfile
+  type UserProfile,
 } from "@phit-erp/shared";
-import { BookOpen, History, LayoutDashboard, Lock, Package, RotateCcw, Users } from "lucide-react";
+import {
+  BookOpen,
+  History,
+  LayoutDashboard,
+  Lock,
+  Package,
+  RotateCcw,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
 import { StudentNameLink } from "components/shared/StudentNameLink";
@@ -26,6 +34,7 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 
@@ -42,7 +51,7 @@ const defaultBook: LibraryBookInput = {
   isbn: "",
   category: "General",
   totalCopies: 1,
-  shelfLocation: ""
+  shelfLocation: "",
 };
 
 const defaultIssue: LibraryIssueInput = {
@@ -51,27 +60,32 @@ const defaultIssue: LibraryIssueInput = {
   studentId: "",
   teacherId: "",
   issuedDateBs: "",
-  dueDateBs: ""
+  dueDateBs: "",
 };
 
 const defaultStaff: ModuleStaffInput = {
   fullName: "",
   email: "",
-  phone: ""
+  phone: "",
 };
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
   RETURNED: "bg-brand-100 text-brand-800",
-  OVERDUE: "bg-rose-100 text-rose-800"
+  OVERDUE: "bg-rose-100 text-rose-800",
 };
 
-const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard; adminOnly?: boolean }> = [
+const tabs: Array<{
+  id: Tab;
+  label: string;
+  icon: typeof LayoutDashboard;
+  adminOnly?: boolean;
+}> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "inventory", label: "Inventory", icon: Package },
   { id: "issue", label: "Issue Books", icon: BookOpen },
   { id: "returns", label: "Returns", icon: RotateCcw },
-  { id: "staff", label: "Staff", icon: Users, adminOnly: true }
+  { id: "staff", label: "Staff", icon: Users, adminOnly: true },
 ];
 
 export const LibraryManager = () => {
@@ -85,18 +99,22 @@ export const LibraryManager = () => {
 
   const dashboardQuery = useQuery({
     queryKey: ["library-dashboard"],
-    queryFn: () => unwrap<LibraryDashboardResponse>(api.get("/library/dashboard")),
-    enabled: tab === "dashboard"
+    queryFn: () =>
+      unwrap<LibraryDashboardResponse>(api.get("/library/dashboard")),
+    enabled: tab === "dashboard",
   });
 
   const booksQuery = useQuery({
     queryKey: ["library-books"],
-    queryFn: () => unwrap<LibraryBookRecord[]>(api.get("/library/books"))
+    queryFn: () => unwrap<LibraryBookRecord[]>(api.get("/library/books")),
   });
 
   const inventoryAccessQuery = useQuery({
     queryKey: ["library-inventory-access"],
-    queryFn: () => unwrap<LibraryInventoryAccessResponse>(api.get("/library/inventory-access"))
+    queryFn: () =>
+      unwrap<LibraryInventoryAccessResponse>(
+        api.get("/library/inventory-access"),
+      ),
   });
 
   const inventoryAccessEnabled = inventoryAccessQuery.data?.enabled ?? false;
@@ -104,36 +122,52 @@ export const LibraryManager = () => {
 
   const studentsQuery = useQuery({
     queryKey: ["students"],
-    queryFn: () => unwrap<Array<{ _id: string; user: { fullName: string } }>>(api.get("/students"))
+    queryFn: () =>
+      unwrap<Array<{ _id: string; user: { fullName: string } }>>(
+        api.get("/students"),
+      ),
   });
 
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
-    queryFn: () => unwrap<Array<{ _id: string; user: { fullName: string } }>>(api.get("/teachers"))
+    queryFn: () =>
+      unwrap<Array<{ _id: string; user: { fullName: string } }>>(
+        api.get("/teachers"),
+      ),
   });
 
   const staffQuery = useQuery({
     queryKey: ["library-staff"],
     queryFn: () => unwrap<UserProfile[]>(api.get("/library/staff")),
-    enabled: isAdmin && tab === "staff"
+    enabled: isAdmin && tab === "staff",
   });
 
   const invalidateLibrary = async () => {
     await queryClient.invalidateQueries({ queryKey: ["library-books"] });
     await queryClient.invalidateQueries({ queryKey: ["library-issues"] });
     await queryClient.invalidateQueries({ queryKey: ["library-dashboard"] });
-    await queryClient.invalidateQueries({ queryKey: ["library-inventory-access"] });
+    await queryClient.invalidateQueries({
+      queryKey: ["library-inventory-access"],
+    });
   };
 
   const toggleInventoryAccess = useMutation({
     mutationFn: (enabled: boolean) =>
-      unwrap<LibraryInventoryAccessResponse>(api.put("/library/inventory-access", { enabled })),
+      unwrap<LibraryInventoryAccessResponse>(
+        api.put("/library/inventory-access", { enabled }),
+      ),
     onSuccess: async (_data, enabled) => {
-      toast.success(enabled ? "Inventory access enabled for library staff" : "Inventory access disabled");
-      await queryClient.invalidateQueries({ queryKey: ["library-inventory-access"] });
+      toast.success(
+        enabled
+          ? "Inventory access enabled for library staff"
+          : "Inventory access disabled",
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["library-inventory-access"],
+      });
       await queryClient.invalidateQueries({ queryKey: ["library-dashboard"] });
     },
-    onError: (e) => toast.error(parseErrorMessage(e))
+    onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
   const saveBook = useMutation({
@@ -147,7 +181,7 @@ export const LibraryManager = () => {
       setEditingBookId(null);
       await invalidateLibrary();
     },
-    onError: (e) => toast.error(parseErrorMessage(e))
+    onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
   const deleteBook = useMutation({
@@ -156,17 +190,18 @@ export const LibraryManager = () => {
       toast.success("Book deleted");
       await invalidateLibrary();
     },
-    onError: (e) => toast.error(parseErrorMessage(e))
+    onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
   const issueBook = useMutation({
-    mutationFn: (payload: LibraryIssueInput) => unwrap(api.post("/library/issues", payload)),
+    mutationFn: (payload: LibraryIssueInput) =>
+      unwrap(api.post("/library/issues", payload)),
     onSuccess: async () => {
       toast.success("Book issued");
       setIssueForm(defaultIssue);
       await invalidateLibrary();
     },
-    onError: (e) => toast.error(parseErrorMessage(e))
+    onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
   const createStaff = useMutation({
@@ -177,12 +212,15 @@ export const LibraryManager = () => {
         credentialsEmail?: import("lib/credentialsEmail").CredentialsEmailResult;
       }>(api.post("/library/staff", payload)),
     onSuccess: async (data) => {
-      const { toastCredentialCreateResult } = await import("lib/credentialsEmail");
-      toastCredentialCreateResult(data ?? {}, { successTitle: "Library staff created successfully" });
+      const { toastCredentialCreateResult } =
+        await import("lib/credentialsEmail");
+      toastCredentialCreateResult(data ?? {}, {
+        successTitle: "Library staff created successfully",
+      });
       setStaffForm(defaultStaff);
       await queryClient.invalidateQueries({ queryKey: ["library-staff"] });
     },
-    onError: (e) => toast.error(parseErrorMessage(e))
+    onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
   const visibleTabs = tabs.filter((item) => !item.adminOnly || isAdmin);
@@ -194,8 +232,6 @@ export const LibraryManager = () => {
         description="Manage catalog, inventory, issue books, process returns, and track borrowing activity."
       />
 
-
-
       <div className="flex flex-wrap gap-2">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
@@ -205,7 +241,9 @@ export const LibraryManager = () => {
               variant={tab === item.id ? "default" : "secondary"}
               size="sm"
               onClick={() => setTab(item.id)}
-              className={cn(tab === item.id && "bg-brand-600 hover:bg-brand-700")}
+              className={cn(
+                tab === item.id && "bg-brand-600 hover:bg-brand-700",
+              )}
             >
               <Icon className="mr-2 h-4 w-4" />
               {item.label}
@@ -218,15 +256,29 @@ export const LibraryManager = () => {
         <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {[
-              { label: "Total Books", value: dashboardQuery.data?.totalBooks ?? 0 },
-              { label: "Available", value: dashboardQuery.data?.availableBooks ?? 0 },
+              {
+                label: "Total Books",
+                value: dashboardQuery.data?.totalBooks ?? 0,
+              },
+              {
+                label: "Available",
+                value: dashboardQuery.data?.availableBooks ?? 0,
+              },
               { label: "Issued", value: dashboardQuery.data?.issuedBooks ?? 0 },
-              { label: "Overdue", value: dashboardQuery.data?.overdueBooks ?? 0 }
+              {
+                label: "Overdue",
+                value: dashboardQuery.data?.overdueBooks ?? 0,
+              },
             ].map((stat) => (
-              <Card key={stat.label} className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
+              <Card
+                key={stat.label}
+                className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]"
+              >
                 <CardContent className="py-6">
                   <p className="text-sm text-slate-500">{stat.label}</p>
-                  <p className="text-3xl font-semibold text-slate-900">{stat.value}</p>
+                  <p className="text-3xl font-semibold text-slate-900">
+                    {stat.value}
+                  </p>
                 </CardContent>
               </Card>
             ))}
@@ -254,15 +306,24 @@ export const LibraryManager = () => {
                     <tr key={issue._id}>
                       <Td>{issue.bookTitle ?? "—"}</Td>
                       <Td>
-                        {issue.borrowerType === "STUDENT" && resolveStudentId(issue.studentId) && issue.borrowerName ? (
-                          <StudentNameLink studentId={resolveStudentId(issue.studentId)!} name={issue.borrowerName} />
+                        {issue.borrowerType === "STUDENT" &&
+                        resolveStudentId(issue.studentId) &&
+                        issue.borrowerName ? (
+                          <StudentNameLink
+                            studentId={resolveStudentId(issue.studentId)!}
+                            name={issue.borrowerName}
+                          />
                         ) : (
-                          issue.borrowerName ?? "—"
+                          (issue.borrowerName ?? "—")
                         )}
                       </Td>
                       <Td>{issue.dueDateBs}</Td>
                       <Td>
-                        <Badge className={issueStatusStyles[issue.status] ?? ""}>{issue.status}</Badge>
+                        <Badge
+                          className={issueStatusStyles[issue.status] ?? ""}
+                        >
+                          {issue.status}
+                        </Badge>
                       </Td>
                     </tr>
                   ))}
@@ -279,20 +340,29 @@ export const LibraryManager = () => {
             <Card className="border-brand-200 bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
               <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
                 <div>
-                  <p className="font-medium text-slate-900">Inventory access for library staff</p>
+                  <p className="font-medium text-slate-900">
+                    Inventory access for library staff
+                  </p>
                   <p className="text-sm text-slate-500">
-                    Turn on when new stock arrives so staff can add, edit, or remove books. Turn off to freeze inventory
-                    changes.
+                    Turn on when new stock arrives so staff can add, edit, or
+                    remove books. Turn off to freeze inventory changes.
                   </p>
                 </div>
                 <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700">
                   <input
                     type="checkbox"
                     checked={inventoryAccessEnabled}
-                    disabled={toggleInventoryAccess.isPending || inventoryAccessQuery.isLoading}
-                    onChange={(event) => toggleInventoryAccess.mutate(event.target.checked)}
+                    disabled={
+                      toggleInventoryAccess.isPending ||
+                      inventoryAccessQuery.isLoading
+                    }
+                    onChange={(event) =>
+                      toggleInventoryAccess.mutate(event.target.checked)
+                    }
                   />
-                  {inventoryAccessEnabled ? "Access enabled" : "Access disabled"}
+                  {inventoryAccessEnabled
+                    ? "Access enabled"
+                    : "Access disabled"}
                 </label>
               </CardContent>
             </Card>
@@ -303,47 +373,82 @@ export const LibraryManager = () => {
               <CardContent className="flex items-start gap-3 py-4">
                 <Lock className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
                 <div>
-                  <p className="font-medium text-amber-900">Inventory is frozen</p>
+                  <p className="font-medium text-amber-900">
+                    Inventory is frozen
+                  </p>
                   <p className="text-sm text-amber-800">
-                    You can view the catalog, but adding, editing, or deleting books is disabled until an administrator
-                    enables inventory access.
+                    You can view the catalog, but adding, editing, or deleting
+                    books is disabled until an administrator enables inventory
+                    access.
                   </p>
                 </div>
               </CardContent>
             </Card>
           ) : null}
 
-          <div className={cn("grid gap-6", canManageInventory && "xl:grid-cols-[360px_1fr]")}>
+          <div
+            className={cn(
+              "grid gap-6",
+              canManageInventory && "xl:grid-cols-[360px_1fr]",
+            )}
+          >
             {canManageInventory ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>{editingBookId ? "Edit book" : "Add book"}</CardTitle>
+                  <CardTitle>
+                    {editingBookId ? "Edit book" : "Add book"}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <FormField label="Title">
-                    <Input value={bookForm.title} onChange={(e) => setBookForm((c) => ({ ...c, title: e.target.value }))} />
+                    <Input
+                      value={bookForm.title}
+                      onChange={(e) =>
+                        setBookForm((c) => ({ ...c, title: e.target.value }))
+                      }
+                    />
                   </FormField>
                   <FormField label="Author">
-                    <Input value={bookForm.author} onChange={(e) => setBookForm((c) => ({ ...c, author: e.target.value }))} />
+                    <Input
+                      value={bookForm.author}
+                      onChange={(e) =>
+                        setBookForm((c) => ({ ...c, author: e.target.value }))
+                      }
+                    />
                   </FormField>
                   <FormField label="Category">
-                    <Input value={bookForm.category} onChange={(e) => setBookForm((c) => ({ ...c, category: e.target.value }))} />
+                    <Input
+                      value={bookForm.category}
+                      onChange={(e) =>
+                        setBookForm((c) => ({ ...c, category: e.target.value }))
+                      }
+                    />
                   </FormField>
                   <FormField label="ISBN (optional)">
-                    <Input value={bookForm.isbn} onChange={(e) => setBookForm((c) => ({ ...c, isbn: e.target.value }))} />
+                    <Input
+                      value={bookForm.isbn}
+                      onChange={(e) =>
+                        setBookForm((c) => ({ ...c, isbn: e.target.value }))
+                      }
+                    />
                   </FormField>
                   <FormField label="Total copies">
-                    <Input
-                      type="number"
+                    <NumberInput
                       value={bookForm.totalCopies}
-                      onChange={(e) => setBookForm((c) => ({ ...c, totalCopies: e.target.valueAsNumber }))}
+                      onChange={(e) =>
+                        setBookForm((c) => ({
+                          ...c,
+                          totalCopies: e.target.valueAsNumber,
+                        }))
+                      }
                     />
                   </FormField>
                   <div className="flex gap-2">
                     <Button
                       onClick={() => {
                         const parsed = libraryBookSchema.safeParse(bookForm);
-                        if (!parsed.success) return toast.error("Invalid book details");
+                        if (!parsed.success)
+                          return toast.error("Invalid book details");
                         saveBook.mutate(parsed.data);
                       }}
                     >
@@ -409,13 +514,17 @@ export const LibraryManager = () => {
                                     isbn: book.isbn ?? "",
                                     category: book.category,
                                     totalCopies: book.totalCopies,
-                                    shelfLocation: book.shelfLocation ?? ""
+                                    shelfLocation: book.shelfLocation ?? "",
                                   });
                                 }}
                               >
                                 Edit
                               </Button>
-                              <Button size="sm" variant="outline" onClick={() => deleteBook.mutate(book._id)}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => deleteBook.mutate(book._id)}
+                              >
                                 Delete
                               </Button>
                             </div>
@@ -438,7 +547,12 @@ export const LibraryManager = () => {
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <FormField label="Book">
-              <Select value={issueForm.bookId} onChange={(e) => setIssueForm((c) => ({ ...c, bookId: e.target.value }))}>
+              <Select
+                value={issueForm.bookId}
+                onChange={(e) =>
+                  setIssueForm((c) => ({ ...c, bookId: e.target.value }))
+                }
+              >
                 <option value="">Select book</option>
                 {(booksQuery.data ?? [])
                   .filter((b) => b.availableCopies > 0)
@@ -457,7 +571,7 @@ export const LibraryManager = () => {
                     ...c,
                     borrowerType: e.target.value as "STUDENT" | "TEACHER",
                     studentId: "",
-                    teacherId: ""
+                    teacherId: "",
                   }))
                 }
               >
@@ -467,7 +581,12 @@ export const LibraryManager = () => {
             </FormField>
             {issueForm.borrowerType === "STUDENT" ? (
               <FormField label="Student">
-                <Select value={issueForm.studentId} onChange={(e) => setIssueForm((c) => ({ ...c, studentId: e.target.value }))}>
+                <Select
+                  value={issueForm.studentId}
+                  onChange={(e) =>
+                    setIssueForm((c) => ({ ...c, studentId: e.target.value }))
+                  }
+                >
                   <option value="">Select student</option>
                   {(studentsQuery.data ?? []).map((s) => (
                     <option key={s._id} value={s._id}>
@@ -478,7 +597,12 @@ export const LibraryManager = () => {
               </FormField>
             ) : (
               <FormField label="Teacher">
-                <Select value={issueForm.teacherId} onChange={(e) => setIssueForm((c) => ({ ...c, teacherId: e.target.value }))}>
+                <Select
+                  value={issueForm.teacherId}
+                  onChange={(e) =>
+                    setIssueForm((c) => ({ ...c, teacherId: e.target.value }))
+                  }
+                >
                   <option value="">Select teacher</option>
                   {(teachersQuery.data ?? []).map((t) => (
                     <option key={t._id} value={t._id}>
@@ -489,16 +613,25 @@ export const LibraryManager = () => {
               </FormField>
             )}
             <FormField label="Issued (BS)">
-              <NepaliDateField value={issueForm.issuedDateBs} onChange={(v) => setIssueForm((c) => ({ ...c, issuedDateBs: v }))} />
+              <NepaliDateField
+                value={issueForm.issuedDateBs}
+                onChange={(v) =>
+                  setIssueForm((c) => ({ ...c, issuedDateBs: v }))
+                }
+              />
             </FormField>
             <FormField label="Due (BS)">
-              <NepaliDateField value={issueForm.dueDateBs} onChange={(v) => setIssueForm((c) => ({ ...c, dueDateBs: v }))} />
+              <NepaliDateField
+                value={issueForm.dueDateBs}
+                onChange={(v) => setIssueForm((c) => ({ ...c, dueDateBs: v }))}
+              />
             </FormField>
             <div className="flex items-end">
               <Button
                 onClick={() => {
                   const parsed = libraryIssueSchema.safeParse(issueForm);
-                  if (!parsed.success) return toast.error("Invalid issue details");
+                  if (!parsed.success)
+                    return toast.error("Invalid issue details");
                   issueBook.mutate(parsed.data);
                 }}
               >
@@ -519,24 +652,42 @@ export const LibraryManager = () => {
             </CardHeader>
             <CardContent className="space-y-3">
               <FormField label="Full name">
-                <Input value={staffForm.fullName} onChange={(e) => setStaffForm((c) => ({ ...c, fullName: e.target.value }))} />
+                <Input
+                  value={staffForm.fullName}
+                  onChange={(e) =>
+                    setStaffForm((c) => ({ ...c, fullName: e.target.value }))
+                  }
+                />
               </FormField>
               <FormField label="Email">
-                <Input value={staffForm.email} onChange={(e) => setStaffForm((c) => ({ ...c, email: e.target.value }))} />
+                <Input
+                  value={staffForm.email}
+                  onChange={(e) =>
+                    setStaffForm((c) => ({ ...c, email: e.target.value }))
+                  }
+                />
               </FormField>
               <FormField label="Phone">
-                <Input value={staffForm.phone} onChange={(e) => setStaffForm((c) => ({ ...c, phone: e.target.value }))} />
+                <Input
+                  value={staffForm.phone}
+                  onChange={(e) =>
+                    setStaffForm((c) => ({ ...c, phone: e.target.value }))
+                  }
+                />
               </FormField>
               <Button
                 onClick={() => {
                   const parsed = moduleStaffSchema.safeParse(staffForm);
-                  if (!parsed.success) return toast.error("Invalid staff details");
+                  if (!parsed.success)
+                    return toast.error("Invalid staff details");
                   createStaff.mutate(parsed.data);
                 }}
               >
                 Create account
               </Button>
-              <p className="text-xs text-slate-500">Default password applies unless you set a custom one via API.</p>
+              <p className="text-xs text-slate-500">
+                Default password applies unless you set a custom one via API.
+              </p>
             </CardContent>
           </Card>
 
@@ -561,7 +712,13 @@ export const LibraryManager = () => {
                       <Td>{member.email}</Td>
                       <Td>{member.phone ?? "—"}</Td>
                       <Td>
-                        <Badge className={member.isActive ? "bg-brand-100 text-brand-800" : "bg-slate-100 text-slate-600"}>
+                        <Badge
+                          className={
+                            member.isActive
+                              ? "bg-brand-100 text-brand-800"
+                              : "bg-slate-100 text-slate-600"
+                          }
+                        >
                           {member.isActive ? "Active" : "Inactive"}
                         </Badge>
                       </Td>

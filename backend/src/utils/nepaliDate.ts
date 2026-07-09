@@ -20,12 +20,39 @@ const NepaliDate = ((NepaliDateImport as { default?: NepaliDateConstructor }).de
 const formatBsDate = (date: NepaliDateInstance): string =>
   `${date.getYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
-export const getTodayBs = (): string => formatBsDate(new NepaliDate(new Date()));
+/** Nepal (NPT) is UTC+5:45. */
+const NEPAL_TIMEZONE_OFFSET_MINUTES = 345;
 
-export const getOffsetBsDate = (offsetDays: number): string => {
-  const date = new Date();
+/**
+ * Nepal wall-clock AD calendar day as a local Date at noon.
+ * Uses UTC epoch + NPT offset, then UTC Y/M/D so result is independent of server TZ.
+ * (nepali-date-converter reads getFullYear/getMonth/getDate of the Date.)
+ */
+export const getNepalTodayAdDate = (): Date => {
+  const nepalNow = new Date(Date.now() + NEPAL_TIMEZONE_OFFSET_MINUTES * 60_000);
+  return new Date(nepalNow.getUTCFullYear(), nepalNow.getUTCMonth(), nepalNow.getUTCDate(), 12, 0, 0);
+};
+
+/**
+ * Today's BS date in Nepal timezone (not server local TZ).
+ * Critical for attendance "current working day" checks on UTC hosts.
+ */
+export const getTodayBs = (): string => formatBsDate(new NepaliDate(getNepalTodayAdDate()));
+
+/** Offset from Nepal "today" (or a provided AD base) by N days, returned as BS. */
+export const getOffsetBsDate = (offsetDays: number, fromAd: Date = getNepalTodayAdDate()): string => {
+  const date = new Date(fromAd);
   date.setDate(date.getDate() + offsetDays);
   return formatBsDate(new NepaliDate(date));
+};
+
+/** Offset a BS date (YYYY-MM-DD) by N calendar days, returned as BS. */
+export const getOffsetFromBsDate = (dateBs: string, offsetDays: number): string => {
+  const { dateAd } = bsToAdDate(dateBs);
+  const [y, m, d] = dateAd.split("-").map(Number);
+  const ad = new Date(y!, (m ?? 1) - 1, d ?? 1, 12, 0, 0);
+  ad.setDate(ad.getDate() + offsetDays);
+  return formatBsDate(new NepaliDate(ad));
 };
 
 export const compareBsDates = (left: string, right: string): number => {
@@ -112,6 +139,16 @@ export const bsToAdDate = (dateBs: string): { dateAd: string; dayOfWeek: string 
     dateAd: formatAdDate(jsDate),
     dayOfWeek: WEEKDAY_NAMES[jsDate.getDay()] ?? "Sunday"
   };
+};
+
+/** JS weekday (0=Sunday … 6=Saturday) for a BS calendar date. */
+export const getDayOfWeekFromBs = (dateBs: string): number => {
+  const validated = ensureValidBsDate(dateBs);
+  const [year, month, day] = validated.split("-").map(Number);
+  const NepaliDateBs = NepaliDate as NepaliDateConstructor & {
+    new (year: number, monthIndex: number, date: number): NepaliDateInstance & { toJsDate(): Date };
+  };
+  return new NepaliDateBs(year!, month! - 1, day!).toJsDate().getDay();
 };
 
 export const calculateResultGrade = (obtained: number, total: number): { percentage: number; gpa: number; grade: string } => {

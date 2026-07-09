@@ -287,7 +287,23 @@ export const getDailyAttendanceSlots = async (
     });
   }
 
-  return slots.map((slot) => ({
+  const firstPeriodEndMap = new Map<string, string>();
+  firstPeriodSlots.forEach((slot) => {
+    firstPeriodEndMap.set(getAcademicGroupKey(slot, college), slot.endTime);
+  });
+
+  // Prefer one card per academic group (period 1, else earliest substitute)
+  const byGroup = new Map<string, (typeof slots)[number]>();
+  for (const slot of slots) {
+    const key = getAcademicGroupKey(slot, college);
+    const existing = byGroup.get(key);
+    if (!existing || slot.periodNumber < existing.periodNumber) {
+      byGroup.set(key, slot);
+    }
+  }
+  const uniqueSlots = [...byGroup.values()];
+
+  return uniqueSlots.map((slot) => ({
     slot,
     className: slot.classId ? classMap.get(slot.classId.toString()) : undefined,
     sectionName: slot.sectionId ? sectionMap.get(slot.sectionId.toString()) : undefined,
@@ -296,6 +312,7 @@ export const getDailyAttendanceSlots = async (
     subject: subjectMap.get(slot.subjectId.toString()),
     teacherName: teacherMap.get(slot.teacherId.toString()) ?? "Teacher",
     firstPeriodTeacherName: firstPeriodTeacherMap.get(getAcademicGroupKey(slot, college)),
+    firstPeriodEndTime: firstPeriodEndMap.get(getAcademicGroupKey(slot, college)) ?? slot.endTime,
     isSubstituteSlot: slot.periodNumber > 1
   }));
 };

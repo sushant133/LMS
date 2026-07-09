@@ -7,7 +7,7 @@ import {
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis
+  YAxis,
 } from "recharts";
 import {
   type DailyAttendanceAssignment,
@@ -16,7 +16,7 @@ import {
   type DailyAttendanceReportType,
   type DailyAttendanceStatus,
   type DailyAttendanceStudentReportRow,
-  type DailyAttendanceSubmitInput
+  type DailyAttendanceSubmitInput,
 } from "@phit-erp/shared";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 import { toast } from "sonner";
@@ -40,25 +40,31 @@ import {
   buildAttendanceQueryParams,
   createDefaultAttendancePeriod,
   getAttendancePeriodLabel,
-  type AttendancePeriodSelection
+  type AttendancePeriodSelection,
 } from "lib/attendancePeriodUtils";
 import {
   downloadClassSummaryExcel,
   downloadDailyAttendanceExcel,
   downloadOverallAttendanceWorkbook,
-  downloadStudentAttendanceExcel
+  downloadStudentAttendanceExcel,
 } from "./attendanceUtils";
 import { AttendancePeriodFilter } from "./AttendancePeriodFilter";
 import { DailyAttendanceHistoryPanel } from "./DailyAttendanceHistoryPanel";
 
-const statuses: DailyAttendanceStatus[] = ["PRESENT", "ABSENT", "LATE", "LEAVE", "MEDICAL_LEAVE"];
+const statuses: DailyAttendanceStatus[] = [
+  "PRESENT",
+  "ABSENT",
+  "LATE",
+  "LEAVE",
+  "MEDICAL_LEAVE",
+];
 
 const statusBadgeStyles: Record<DailyAttendanceStatus, string> = {
   PRESENT: "bg-brand-100 text-brand-800",
   ABSENT: "bg-rose-100 text-rose-800",
   LATE: "bg-amber-100 text-amber-800",
   LEAVE: "bg-sky-100 text-sky-800",
-  MEDICAL_LEAVE: "bg-violet-100 text-violet-800"
+  MEDICAL_LEAVE: "bg-violet-100 text-violet-800",
 };
 
 interface DailyAttendanceManagerProps {
@@ -97,29 +103,44 @@ const assignmentKey = (assignment: DailyAttendanceAssignment): string =>
   assignment.timetableSlotId ||
   `${assignment.batchId ?? assignment.classId ?? ""}-${assignment.yearId ?? assignment.sectionId ?? ""}-manual`;
 
-export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTeacher }: DailyAttendanceManagerProps) => {
+export const DailyAttendanceManager = ({
+  hasInstitutionRead,
+  canWriteAdmin,
+  isTeacher,
+}: DailyAttendanceManagerProps) => {
   const isSuperAdmin = useIsSystemAdministrator();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
-  const [view, setView] = useState<"mark" | "history" | "dashboard" | "reports">(isTeacher ? "mark" : "dashboard");
+  const [view, setView] = useState<
+    "mark" | "history" | "dashboard" | "reports"
+  >(isTeacher ? "mark" : "dashboard");
   const [dateBs, setDateBs] = useState(formatTodayBs);
-  const [selectedAssignment, setSelectedAssignment] = useState<DailyAttendanceAssignment | null>(null);
-  const [statusMap, setStatusMap] = useState<Record<string, DailyAttendanceStatus>>({});
+  const [selectedAssignment, setSelectedAssignment] =
+    useState<DailyAttendanceAssignment | null>(null);
+  const [statusMap, setStatusMap] = useState<
+    Record<string, DailyAttendanceStatus>
+  >({});
   const [remarksMap, setRemarksMap] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [periodSelection, setPeriodSelection] = useState<AttendancePeriodSelection>(createDefaultAttendancePeriod);
-  const [reportType, setReportType] = useState<DailyAttendanceReportType>("summary");
+  const [periodSelection, setPeriodSelection] =
+    useState<AttendancePeriodSelection>(createDefaultAttendancePeriod);
+  const [reportType, setReportType] =
+    useState<DailyAttendanceReportType>("summary");
   const [isExporting, setIsExporting] = useState(false);
   const [assignedTeacherId, setAssignedTeacherId] = useState("");
 
-  const adminParams = hasInstitutionRead ? { adminOverride: true } : {};
+  // Only write admins bypass time/holiday windows; viewers must see real availability
+  const adminParams = canWriteAdmin ? { adminOverride: true } : {};
 
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
-    queryFn: () => unwrap<Array<{ _id: string; user: { fullName: string } }>>(api.get("/teachers")),
-    enabled: canWriteAdmin
+    queryFn: () =>
+      unwrap<Array<{ _id: string; user: { fullName: string } }>>(
+        api.get("/teachers"),
+      ),
+    enabled: canWriteAdmin,
   });
 
   const assignmentsQuery = useQuery({
@@ -127,9 +148,9 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
     queryFn: () =>
       unwrap<DailyAttendanceAssignment[]>(
         api.get("/daily-attendance/assignments", {
-          params: { ...(dateBs ? { dateBs } : {}), ...adminParams }
-        })
-      )
+          params: { ...(dateBs ? { dateBs } : {}), ...adminParams },
+        }),
+      ),
   });
 
   const contextQuery = useQuery({
@@ -141,58 +162,86 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
       selectedAssignment?.classId,
       selectedAssignment?.sectionId,
       dateBs,
-      hasInstitutionRead
+      hasInstitutionRead,
     ],
     queryFn: () =>
-      unwrap<AttendanceContext & { isAdmin?: boolean; studentCount?: number; isManualAssignment?: boolean }>(
+      unwrap<
+        AttendanceContext & {
+          isAdmin?: boolean;
+          studentCount?: number;
+          isManualAssignment?: boolean;
+        }
+      >(
         api.get("/daily-attendance/context", {
           params: {
             ...(selectedAssignment?.timetableSlotId
               ? { timetableSlotId: selectedAssignment.timetableSlotId }
               : isCollege
-                ? { batchId: selectedAssignment!.batchId, yearId: selectedAssignment!.yearId }
-                : { classId: selectedAssignment!.classId, sectionId: selectedAssignment!.sectionId }),
+                ? {
+                    batchId: selectedAssignment!.batchId,
+                    yearId: selectedAssignment!.yearId,
+                  }
+                : {
+                    classId: selectedAssignment!.classId,
+                    sectionId: selectedAssignment!.sectionId,
+                  }),
             ...(dateBs ? { dateBs } : {}),
-            ...adminParams
-          }
-        })
+            ...adminParams,
+          },
+        }),
       ),
     enabled: Boolean(
       selectedAssignment &&
-        (selectedAssignment.timetableSlotId ||
-          (isCollege
-            ? selectedAssignment.batchId && selectedAssignment.yearId
-            : selectedAssignment.classId && selectedAssignment.sectionId))
-    )
+      (selectedAssignment.timetableSlotId ||
+        (isCollege
+          ? selectedAssignment.batchId && selectedAssignment.yearId
+          : selectedAssignment.classId && selectedAssignment.sectionId)),
+    ),
   });
 
-  const attendancePeriodParams = useMemo(() => buildAttendanceQueryParams(periodSelection), [periodSelection]);
+  const attendancePeriodParams = useMemo(
+    () => buildAttendanceQueryParams(periodSelection),
+    [periodSelection],
+  );
 
   const historyQuery = useQuery({
     queryKey: ["daily-attendance-history", attendancePeriodParams],
     queryFn: () =>
-      unwrap<DailyAttendanceRecord[]>(api.get("/daily-attendance", { params: attendancePeriodParams })),
-    enabled: view === "history" || view === "reports"
+      unwrap<DailyAttendanceRecord[]>(
+        api.get("/daily-attendance", { params: attendancePeriodParams }),
+      ),
+    enabled: view === "history" || view === "reports",
   });
 
   const dashboardQuery = useQuery({
     queryKey: ["daily-attendance-dashboard"],
-    queryFn: () => unwrap<DailyAttendanceDashboard>(api.get("/daily-attendance/dashboard")),
-    enabled: view === "dashboard" && hasInstitutionRead
+    queryFn: () =>
+      unwrap<DailyAttendanceDashboard>(api.get("/daily-attendance/dashboard")),
+    enabled: view === "dashboard" && hasInstitutionRead,
   });
 
   const reportsQuery = useQuery({
     queryKey: ["daily-attendance-reports", reportType, attendancePeriodParams],
     queryFn: () =>
-      unwrap<{ type: string; rows?: DailyAttendanceStudentReportRow[] | Array<{ label: string; present: number; absent: number; percentage: number }> }>(
+      unwrap<{
+        type: string;
+        rows?:
+          | DailyAttendanceStudentReportRow[]
+          | Array<{
+              label: string;
+              present: number;
+              absent: number;
+              percentage: number;
+            }>;
+      }>(
         api.get("/daily-attendance/reports", {
           params: {
             type: reportType,
-            ...attendancePeriodParams
-          }
-        })
+            ...attendancePeriodParams,
+          },
+        }),
       ),
-    enabled: view === "reports" && hasInstitutionRead
+    enabled: view === "reports" && hasInstitutionRead,
   });
 
   const exportAttendanceWorkbook = async () => {
@@ -200,12 +249,14 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
     try {
       const periodLabel = getAttendancePeriodLabel(periodSelection);
       const [records, report] = await Promise.all([
-        unwrap<DailyAttendanceRecord[]>(api.get("/daily-attendance", { params: attendancePeriodParams })),
+        unwrap<DailyAttendanceRecord[]>(
+          api.get("/daily-attendance", { params: attendancePeriodParams }),
+        ),
         unwrap<{ rows?: DailyAttendanceStudentReportRow[] }>(
           api.get("/daily-attendance/reports", {
-            params: { type: "student", ...attendancePeriodParams }
-          })
-        )
+            params: { type: "student", ...attendancePeriodParams },
+          }),
+        ),
       ]);
 
       if (!records.length) {
@@ -216,7 +267,7 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
       downloadOverallAttendanceWorkbook(
         records,
         report.rows ?? [],
-        `overall-attendance_${periodLabel}.xlsx`
+        `overall-attendance_${periodLabel}.xlsx`,
       );
       toast.success("Overall attendance Excel downloaded");
     } catch (error) {
@@ -230,19 +281,27 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
     mutationFn: (payload: DailyAttendanceSubmitInput) =>
       unwrap<DailyAttendanceRecord>(api.post("/daily-attendance", payload)),
     onSuccess: async () => {
-      toast.success("Daily attendance submitted and synchronized with first-period subject attendance");
+      toast.success(
+        "Daily attendance submitted and synchronized with first-period subject attendance",
+      );
       setSelectedAssignment(null);
       setStatusMap({});
       setRemarksMap({});
       setNotes("");
       setSelectedIds(new Set());
       await queryClient.invalidateQueries({ queryKey: ["daily-attendance"] });
-      await queryClient.invalidateQueries({ queryKey: ["daily-attendance-assignments"] });
-      await queryClient.invalidateQueries({ queryKey: ["daily-attendance-context"] });
-      await queryClient.invalidateQueries({ queryKey: ["daily-attendance-dashboard"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["daily-attendance-assignments"],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["daily-attendance-context"],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["daily-attendance-dashboard"],
+      });
       await queryClient.invalidateQueries({ queryKey: ["attendance"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   // Changing the date invalidates the selected slot for that day.
@@ -265,16 +324,19 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
     }
 
     setStatusMap(
-      existing.entries.reduce<Record<string, DailyAttendanceStatus>>((acc, entry) => {
-        acc[String(entry.studentId)] = entry.status;
-        return acc;
-      }, {})
+      existing.entries.reduce<Record<string, DailyAttendanceStatus>>(
+        (acc, entry) => {
+          acc[String(entry.studentId)] = entry.status;
+          return acc;
+        },
+        {},
+      ),
     );
     setRemarksMap(
       existing.entries.reduce<Record<string, string>>((acc, entry) => {
         if (entry.remarks) acc[String(entry.studentId)] = entry.remarks;
         return acc;
-      }, {})
+      }, {}),
     );
     setNotes(existing.notes ?? "");
   }, [contextQuery.data?.existingRecord]);
@@ -287,13 +349,20 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
       (student) =>
         student.fullName.toLowerCase().includes(query) ||
         String(student.rollNumber).includes(query) ||
-        student.admissionNumber.toLowerCase().includes(query)
+        student.admissionNumber.toLowerCase().includes(query),
     );
   }, [contextQuery.data?.students, search]);
 
   const summary = useMemo(() => {
     const students = contextQuery.data?.students ?? [];
-    const counts = { present: 0, absent: 0, late: 0, leave: 0, medical: 0, notMarked: 0 };
+    const counts = {
+      present: 0,
+      absent: 0,
+      late: 0,
+      leave: 0,
+      medical: 0,
+      notMarked: 0,
+    };
     students.forEach((student) => {
       const status = statusMap[student._id];
       if (!status) {
@@ -310,15 +379,20 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
   }, [contextQuery.data?.students, statusMap]);
 
   const studentCount =
-    contextQuery.data?.students?.length ?? selectedAssignment?.studentCount ?? 0;
+    contextQuery.data?.students?.length ??
+    selectedAssignment?.studentCount ??
+    0;
   const isLocked = Boolean(
-    selectedAssignment?.isLocked || contextQuery.data?.existingRecord?.status === "LOCKED"
+    selectedAssignment?.isLocked ||
+    contextQuery.data?.existingRecord?.status === "LOCKED",
   );
   const canMark =
     studentCount > 0 &&
     (canWriteAdmin
       ? !isLocked
-      : isTeacher && !isLocked && (contextQuery.data?.availability.canMark ?? false));
+      : isTeacher &&
+        !isLocked &&
+        (contextQuery.data?.availability.canMark ?? false));
 
   useEffect(() => {
     if (!selectedAssignment) return;
@@ -353,7 +427,9 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
     }
     const missing = students.find((student) => !statusMap[student._id]);
     if (missing) {
-      toast.error("Every student must have an attendance status before submission.");
+      toast.error(
+        "Every student must have an attendance status before submission.",
+      );
       return;
     }
     if (canWriteAdmin && !assignedTeacherId && !selectedAssignment.teacherId) {
@@ -363,25 +439,34 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
 
     await submitMutation.mutateAsync({
       ...(isCollege
-        ? { batchId: selectedAssignment.batchId, yearId: selectedAssignment.yearId }
-        : { classId: selectedAssignment.classId, sectionId: selectedAssignment.sectionId }),
+        ? {
+            batchId: selectedAssignment.batchId,
+            yearId: selectedAssignment.yearId,
+          }
+        : {
+            classId: selectedAssignment.classId,
+            sectionId: selectedAssignment.sectionId,
+          }),
       dateBs: contextQuery.data?.dateBs ?? selectedAssignment.dateBs ?? dateBs,
       ...(selectedAssignment.timetableSlotId
         ? { timetableSlotId: selectedAssignment.timetableSlotId }
         : {}),
-      ...(selectedAssignment.subjectId ? { subjectId: selectedAssignment.subjectId } : {}),
+      ...(selectedAssignment.subjectId
+        ? { subjectId: selectedAssignment.subjectId }
+        : {}),
       notes,
       ...(canWriteAdmin
         ? {
             adminOverride: true,
-            assignedTeacherId: assignedTeacherId || selectedAssignment.teacherId || undefined
+            assignedTeacherId:
+              assignedTeacherId || selectedAssignment.teacherId || undefined,
           }
         : {}),
       entries: students.map((student) => ({
         studentId: student._id,
         status: statusMap[student._id]!,
-        remarks: remarksMap[student._id]
-      }))
+        remarks: remarksMap[student._id],
+      })),
     } as DailyAttendanceSubmitInput);
   };
 
@@ -392,9 +477,18 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
-        {(isTeacher ? ["mark", "history"] : ["dashboard", "mark", "history", "reports"]).map((tab) => (
-          <Button key={tab} variant={view === tab ? "default" : "outline"} onClick={() => setView(tab as typeof view)}>
-            {tab === "mark" ? "Mark Attendance" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+        {(isTeacher
+          ? ["mark", "history"]
+          : ["dashboard", "mark", "history", "reports"]
+        ).map((tab) => (
+          <Button
+            key={tab}
+            variant={view === tab ? "default" : "outline"}
+            onClick={() => setView(tab as typeof view)}
+          >
+            {tab === "mark"
+              ? "Mark Attendance"
+              : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </Button>
         ))}
       </div>
@@ -406,20 +500,34 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
           <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
               {[
-                { label: "Total Students", value: dashboardQuery.data?.totalStudents ?? 0 },
-                { label: "Present Today", value: dashboardQuery.data?.presentToday ?? 0 },
-                { label: "Absent Today", value: dashboardQuery.data?.absentToday ?? 0 },
+                {
+                  label: "Total Students",
+                  value: dashboardQuery.data?.totalStudents ?? 0,
+                },
+                {
+                  label: "Present Today",
+                  value: dashboardQuery.data?.presentToday ?? 0,
+                },
+                {
+                  label: "Absent Today",
+                  value: dashboardQuery.data?.absentToday ?? 0,
+                },
                 { label: "Late", value: dashboardQuery.data?.lateToday ?? 0 },
                 { label: "Leave", value: dashboardQuery.data?.leaveToday ?? 0 },
                 {
                   label: "Attendance %",
-                  value: `${dashboardQuery.data?.attendancePercentage ?? 0}%`
-                }
+                  value: `${dashboardQuery.data?.attendancePercentage ?? 0}%`,
+                },
               ].map((stat) => (
-                <Card key={stat.label} className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
+                <Card
+                  key={stat.label}
+                  className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]"
+                >
                   <CardContent className="py-5">
                     <p className="text-sm text-slate-500">{stat.label}</p>
-                    <p className="mt-1 text-3xl font-semibold text-brand-700">{stat.value}</p>
+                    <p className="mt-1 text-3xl font-semibold text-brand-700">
+                      {stat.value}
+                    </p>
                   </CardContent>
                 </Card>
               ))}
@@ -432,7 +540,10 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                 </CardHeader>
                 <CardContent className="h-72">
                   {(dashboardQuery.data?.dailyTrend.length ?? 0) === 0 ? (
-                    <EmptyState title="No trend data yet" description="Submit daily attendance to populate charts." />
+                    <EmptyState
+                      title="No trend data yet"
+                      description="Submit daily attendance to populate charts."
+                    />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dashboardQuery.data?.dailyTrend ?? []}>
@@ -454,7 +565,10 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                 </CardHeader>
                 <CardContent className="h-72">
                   {(dashboardQuery.data?.monthlyTrend.length ?? 0) === 0 ? (
-                    <EmptyState title="No monthly data yet" description="Monthly trends appear after attendance is recorded." />
+                    <EmptyState
+                      title="No monthly data yet"
+                      description="Monthly trends appear after attendance is recorded."
+                    />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dashboardQuery.data?.monthlyTrend ?? []}>
@@ -476,7 +590,10 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                 </CardHeader>
                 <CardContent className="h-72">
                   {(dashboardQuery.data?.classWise.length ?? 0) === 0 ? (
-                    <EmptyState title="No class data yet" description="Class comparisons appear after attendance is recorded." />
+                    <EmptyState
+                      title="No class data yet"
+                      description="Class comparisons appear after attendance is recorded."
+                    />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dashboardQuery.data?.classWise ?? []}>
@@ -497,16 +614,28 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                 </CardHeader>
                 <CardContent>
                   {(dashboardQuery.data?.teacherWise.length ?? 0) === 0 ? (
-                    <EmptyState title="No teacher data yet" description="Teacher summaries appear after attendance is recorded." />
+                    <EmptyState
+                      title="No teacher data yet"
+                      description="Teacher summaries appear after attendance is recorded."
+                    />
                   ) : (
                     <div className="space-y-3">
                       {(dashboardQuery.data?.teacherWise ?? []).map((item) => (
-                        <div key={item.teacherName} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
+                        <div
+                          key={item.teacherName}
+                          className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3"
+                        >
                           <div>
-                            <p className="font-medium text-slate-900">{item.teacherName}</p>
-                            <p className="text-sm text-slate-500">{item.classesMarked} classes marked</p>
+                            <p className="font-medium text-slate-900">
+                              {item.teacherName}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              {item.classesMarked} classes marked
+                            </p>
                           </div>
-                          <p className="text-lg font-semibold text-brand-700">{item.percentage}%</p>
+                          <p className="text-lg font-semibold text-brand-700">
+                            {item.percentage}%
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -522,11 +651,17 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
         <>
           <Card>
             <CardHeader>
-              <CardTitle>{hasInstitutionRead ? "All Class Assignments" : "Today's Assignments"}</CardTitle>
+              <CardTitle>
+                {hasInstitutionRead
+                  ? "All Class Assignments"
+                  : "Today's Assignments"}
+              </CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-4">
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">Date (BS)</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Date (BS)
+                </label>
                 <NepaliDateField value={dateBs} onChange={setDateBs} />
               </div>
             </CardContent>
@@ -549,14 +684,18 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {(assignmentsQuery.data ?? []).map((assignment) => {
                     const key = assignmentKey(assignment);
-                    const selected = selectedAssignment ? assignmentKey(selectedAssignment) === key : false;
+                    const selected = selectedAssignment
+                      ? assignmentKey(selectedAssignment) === key
+                      : false;
                     return (
                       <button
                         key={key}
                         type="button"
                         onClick={() => setSelectedAssignment(assignment)}
                         className={`rounded-xl border p-4 text-left transition hover:border-brand-300 ${
-                          selected ? "border-brand-500 bg-brand-50" : "border-slate-200 bg-white"
+                          selected
+                            ? "border-brand-500 bg-brand-50"
+                            : "border-slate-200 bg-white"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -567,12 +706,16 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                                 : `${assignment.className ?? "Class"} · ${assignment.sectionName ?? "Section"}`}
                             </p>
                             <p className="mt-1 text-sm text-slate-600">
-                              {assignment.subjectName || "Daily register"} · {assignment.startTime}–{assignment.endTime}
+                              {assignment.subjectName || "Daily register"} ·{" "}
+                              {assignment.startTime}–{assignment.endTime}
                             </p>
                             <p className="mt-1 text-sm text-slate-500">
-                              {assignment.isSubstituteSlot ? "Substitute: " : ""}
+                              {assignment.isSubstituteSlot
+                                ? "Substitute: "
+                                : ""}
                               {assignment.teacherName || "Assign teacher"}
-                              {assignment.isSubstituteSlot && assignment.firstPeriodTeacherName
+                              {assignment.isSubstituteSlot &&
+                              assignment.firstPeriodTeacherName
                                 ? ` (1st period: ${assignment.firstPeriodTeacherName})`
                                 : ""}
                             </p>
@@ -581,27 +724,43 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                             </p>
                             <div className="mt-2 flex flex-wrap gap-1">
                               {assignment.isSubstituteSlot ? (
-                                <Badge className="bg-violet-100 text-violet-800">Substitute Slot</Badge>
+                                <Badge className="bg-violet-100 text-violet-800">
+                                  Substitute Slot
+                                </Badge>
                               ) : null}
                               {assignment.isManualAssignment ? (
-                                <Badge className="bg-sky-100 text-sky-800">Manual / No period slot</Badge>
+                                <Badge className="bg-sky-100 text-sky-800">
+                                  Manual / No period slot
+                                </Badge>
                               ) : null}
                             </div>
                           </div>
                           {assignment.isLocked ? (
-                            <Badge className="bg-slate-100 text-slate-700">Locked</Badge>
+                            <Badge className="bg-slate-100 text-slate-700">
+                              Locked
+                            </Badge>
                           ) : assignment.isHoliday ? (
-                            <Badge className="bg-amber-100 text-amber-800">Holiday</Badge>
+                            <Badge className="bg-amber-100 text-amber-800">
+                              Holiday
+                            </Badge>
                           ) : (assignment.studentCount ?? 0) === 0 ? (
-                            <Badge className="bg-slate-100 text-slate-600">Empty</Badge>
+                            <Badge className="bg-slate-100 text-slate-600">
+                              Empty
+                            </Badge>
                           ) : assignment.canMark ? (
-                            <Badge className="bg-emerald-100 text-emerald-800">Open</Badge>
+                            <Badge className="bg-emerald-100 text-emerald-800">
+                              Open
+                            </Badge>
                           ) : (
-                            <Badge className="bg-rose-100 text-rose-800">Closed</Badge>
+                            <Badge className="bg-rose-100 text-rose-800">
+                              Closed
+                            </Badge>
                           )}
                         </div>
                         {assignment.availabilityMessage ? (
-                          <p className="mt-3 text-xs text-slate-500">{assignment.availabilityMessage}</p>
+                          <p className="mt-3 text-xs text-slate-500">
+                            {assignment.availabilityMessage}
+                          </p>
                         ) : null}
                       </button>
                     );
@@ -619,30 +778,50 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
               <CardContent className="space-y-4">
                 <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-3">
                   <p>
-                    <span className="font-medium text-slate-700">Date:</span> {contextQuery.data?.dateBs}
+                    <span className="font-medium text-slate-700">Date:</span>{" "}
+                    {contextQuery.data?.dateBs}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-700">Day:</span> {contextQuery.data?.dayName}
+                    <span className="font-medium text-slate-700">Day:</span>{" "}
+                    {contextQuery.data?.dayName}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-700">Academic Year:</span>{" "}
+                    <span className="font-medium text-slate-700">
+                      Academic Year:
+                    </span>{" "}
                     {selectedAssignment.academicYearBs}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-700">{labels.primary}:</span>{" "}
-                    {isCollege ? selectedAssignment.batchName : selectedAssignment.className}
+                    <span className="font-medium text-slate-700">
+                      {labels.primary}:
+                    </span>{" "}
+                    {isCollege
+                      ? selectedAssignment.batchName
+                      : selectedAssignment.className}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-700">{labels.secondary}:</span>{" "}
-                    {isCollege ? selectedAssignment.yearName : selectedAssignment.sectionName}
+                    <span className="font-medium text-slate-700">
+                      {labels.secondary}:
+                    </span>{" "}
+                    {isCollege
+                      ? selectedAssignment.yearName
+                      : selectedAssignment.sectionName}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-700">Teacher:</span> {selectedAssignment.teacherName}
+                    <span className="font-medium text-slate-700">Teacher:</span>{" "}
+                    {selectedAssignment.teacherName}
                   </p>
                   {canWriteAdmin ? (
                     <div className="md:col-span-3">
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Assign Teacher</label>
-                      <Select value={assignedTeacherId} onChange={(event) => setAssignedTeacherId(event.target.value)}>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        Assign Teacher
+                      </label>
+                      <Select
+                        value={assignedTeacherId}
+                        onChange={(event) =>
+                          setAssignedTeacherId(event.target.value)
+                        }
+                      >
                         <option value="">Select teacher</option>
                         {(teachersQuery.data ?? []).map((teacher) => (
                           <option key={teacher._id} value={teacher._id}>
@@ -651,16 +830,22 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                         ))}
                       </Select>
                       <p className="mt-1 text-xs text-slate-500">
-                        Admins can assign any teacher if the first-period teacher missed attendance.
+                        Admins can assign any teacher if the first-period
+                        teacher missed attendance.
                       </p>
                     </div>
                   ) : null}
                   <p>
-                    <span className="font-medium text-slate-700">First Subject:</span> {selectedAssignment.subjectName}
+                    <span className="font-medium text-slate-700">
+                      First Subject:
+                    </span>{" "}
+                    {selectedAssignment.subjectName}
                   </p>
                   <p>
-                    <span className="font-medium text-slate-700">First Period:</span> {selectedAssignment.startTime}–
-                    {selectedAssignment.endTime}
+                    <span className="font-medium text-slate-700">
+                      First Period:
+                    </span>{" "}
+                    {selectedAssignment.startTime}–{selectedAssignment.endTime}
                   </p>
                 </div>
 
@@ -676,15 +861,20 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                   </div>
                 ) : null}
 
-                {canWriteAdmin && selectedAssignment?.isManualAssignment && !isLocked ? (
+                {canWriteAdmin &&
+                selectedAssignment?.isManualAssignment &&
+                !isLocked ? (
                   <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-                    No first-period timetable for this day. Assign a teacher and mark the daily register manually.
+                    No first-period timetable for this day. Assign a teacher and
+                    mark the daily register manually.
                   </div>
                 ) : null}
 
                 {canWriteAdmin && isLocked ? (
                   <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-                    This record is locked. Edit it anytime from the <strong>History</strong> tab — unlock is not required for admins.
+                    This record is locked. Edit it anytime from the{" "}
+                    <strong>History</strong> tab — unlock is not required for
+                    admins.
                   </div>
                 ) : null}
 
@@ -709,11 +899,16 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                         { label: "Late", value: summary.late },
                         { label: "Leave", value: summary.leave },
                         { label: "Medical", value: summary.medical },
-                        { label: "Not marked", value: summary.notMarked }
+                        { label: "Not marked", value: summary.notMarked },
                       ].map((stat) => (
-                        <div key={stat.label} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div
+                          key={stat.label}
+                          className="rounded-xl border border-slate-200 bg-white p-4"
+                        >
                           <p className="text-sm text-slate-500">{stat.label}</p>
-                          <p className="mt-1 text-2xl font-semibold text-brand-700">{stat.value}</p>
+                          <p className="mt-1 text-2xl font-semibold text-brand-700">
+                            {stat.value}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -727,22 +922,42 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                       />
                       {canMark ? (
                         <>
-                          <Button variant="outline" onClick={() => applyStatus(filteredStudents.map((s) => s._id), "PRESENT")}>
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              applyStatus(
+                                filteredStudents.map((s) => s._id),
+                                "PRESENT",
+                              )
+                            }
+                          >
                             Mark All Present
                           </Button>
-                          <Button variant="outline" onClick={() => applyStatus(filteredStudents.map((s) => s._id), "ABSENT")}>
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              applyStatus(
+                                filteredStudents.map((s) => s._id),
+                                "ABSENT",
+                              )
+                            }
+                          >
                             Mark All Absent
                           </Button>
                           <Button
                             variant="outline"
-                            onClick={() => applyStatus([...selectedIds], "PRESENT")}
+                            onClick={() =>
+                              applyStatus([...selectedIds], "PRESENT")
+                            }
                             disabled={selectedIds.size === 0}
                           >
                             Mark Selected Present
                           </Button>
                           <Button
                             variant="outline"
-                            onClick={() => applyStatus([...selectedIds], "ABSENT")}
+                            onClick={() =>
+                              applyStatus([...selectedIds], "ABSENT")
+                            }
                             disabled={selectedIds.size === 0}
                           >
                             Mark Selected Absent
@@ -784,7 +999,9 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                                     <input
                                       type="checkbox"
                                       checked={selectedIds.has(student._id)}
-                                      onChange={() => toggleSelected(student._id)}
+                                      onChange={() =>
+                                        toggleSelected(student._id)
+                                      }
                                     />
                                   </Td>
                                 ) : null}
@@ -811,7 +1028,8 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                                       onChange={(event) =>
                                         setStatusMap((current) => ({
                                           ...current,
-                                          [student._id]: event.target.value as DailyAttendanceStatus
+                                          [student._id]: event.target
+                                            .value as DailyAttendanceStatus,
                                         }))
                                       }
                                     >
@@ -823,9 +1041,15 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                                       ))}
                                     </Select>
                                   ) : status ? (
-                                    <Badge className={statusBadgeStyles[status]}>{status.replace("_", " ")}</Badge>
+                                    <Badge
+                                      className={statusBadgeStyles[status]}
+                                    >
+                                      {status.replace("_", " ")}
+                                    </Badge>
                                   ) : (
-                                    <Badge className="bg-slate-100 text-slate-600">Not marked</Badge>
+                                    <Badge className="bg-slate-100 text-slate-600">
+                                      Not marked
+                                    </Badge>
                                   )}
                                 </Td>
                                 <Td>
@@ -835,13 +1059,13 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                                       onChange={(event) =>
                                         setRemarksMap((current) => ({
                                           ...current,
-                                          [student._id]: event.target.value
+                                          [student._id]: event.target.value,
                                         }))
                                       }
                                       placeholder="Remarks"
                                     />
                                   ) : (
-                                    remarksMap[student._id] ?? "—"
+                                    (remarksMap[student._id] ?? "—")
                                   )}
                                 </Td>
                               </tr>
@@ -852,7 +1076,9 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                     </div>
 
                     <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Class Notes</label>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        Class Notes
+                      </label>
                       <Textarea
                         value={notes}
                         onChange={(event) => setNotes(event.target.value)}
@@ -863,13 +1089,17 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
 
                     {canMark ? (
                       <div className="flex justify-end">
-                        <Button disabled={submitMutation.isPending} onClick={() => void handleSubmit()}>
+                        <Button
+                          disabled={submitMutation.isPending}
+                          onClick={() => void handleSubmit()}
+                        >
                           Submit Attendance
                         </Button>
                       </div>
                     ) : isLocked ? (
                       <p className="text-sm text-slate-500">
-                        This attendance record is locked. Administrators can unlock it from the history view.
+                        This attendance record is locked. Administrators can
+                        unlock it from the history view.
                       </p>
                     ) : null}
                   </>
@@ -887,7 +1117,10 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
               <CardTitle>Filter & Export</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <AttendancePeriodFilter value={periodSelection} onChange={setPeriodSelection} />
+              <AttendancePeriodFilter
+                value={periodSelection}
+                onChange={setPeriodSelection}
+              />
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
@@ -895,18 +1128,29 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                   onClick={() => {
                     const records = historyQuery.data ?? [];
                     if (!records.length) {
-                      toast.error("No attendance records in the selected period.");
+                      toast.error(
+                        "No attendance records in the selected period.",
+                      );
                       return;
                     }
-                    downloadDailyAttendanceExcel(records, `daily-attendance_${getAttendancePeriodLabel(periodSelection)}.xlsx`);
+                    downloadDailyAttendanceExcel(
+                      records,
+                      `daily-attendance_${getAttendancePeriodLabel(periodSelection)}.xlsx`,
+                    );
                     toast.success("Daily attendance Excel downloaded");
                   }}
                 >
                   Export Daily Summary Excel
                 </Button>
                 {hasInstitutionRead ? (
-                  <Button variant="outline" disabled={isExporting} onClick={() => void exportAttendanceWorkbook()}>
-                    {isExporting ? "Exporting..." : "Export Overall Attendance Excel"}
+                  <Button
+                    variant="outline"
+                    disabled={isExporting}
+                    onClick={() => void exportAttendanceWorkbook()}
+                  >
+                    {isExporting
+                      ? "Exporting..."
+                      : "Export Overall Attendance Excel"}
                   </Button>
                 ) : null}
               </div>
@@ -930,8 +1174,17 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">Report Type</label>
-                <Select value={reportType} onChange={(event) => setReportType(event.target.value as DailyAttendanceReportType)}>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Report Type
+                </label>
+                <Select
+                  value={reportType}
+                  onChange={(event) =>
+                    setReportType(
+                      event.target.value as DailyAttendanceReportType,
+                    )
+                  }
+                >
                   <option value="summary">Summary Report</option>
                   <option value="class">Class-wise Report</option>
                   <option value="student">Student-wise Report</option>
@@ -942,7 +1195,10 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
               </div>
             </div>
 
-            <AttendancePeriodFilter value={periodSelection} onChange={setPeriodSelection} />
+            <AttendancePeriodFilter
+              value={periodSelection}
+              onChange={setPeriodSelection}
+            />
 
             {reportsQuery.isLoading ? (
               <LoadingState />
@@ -958,15 +1214,21 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                       }
                       downloadDailyAttendanceExcel(
                         historyQuery.data,
-                        `daily-attendance_${getAttendancePeriodLabel(periodSelection)}.xlsx`
+                        `daily-attendance_${getAttendancePeriodLabel(periodSelection)}.xlsx`,
                       );
                       toast.success("Daily attendance Excel downloaded");
                     }}
                   >
                     Export Daily Summary Excel
                   </Button>
-                  <Button variant="outline" disabled={isExporting} onClick={() => void exportAttendanceWorkbook()}>
-                    {isExporting ? "Exporting..." : "Export Overall Attendance Excel"}
+                  <Button
+                    variant="outline"
+                    disabled={isExporting}
+                    onClick={() => void exportAttendanceWorkbook()}
+                  >
+                    {isExporting
+                      ? "Exporting..."
+                      : "Export Overall Attendance Excel"}
                   </Button>
                   <Button
                     variant="outline"
@@ -976,19 +1238,30 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                         toast.error("No report rows available to export.");
                         return;
                       }
-                      const periodLabel = getAttendancePeriodLabel(periodSelection);
+                      const periodLabel =
+                        getAttendancePeriodLabel(periodSelection);
                       if (reportType === "class") {
                         downloadClassSummaryExcel(
-                          rows as Array<{ label: string; present: number; absent: number; percentage: number }>,
-                          `class-attendance_${periodLabel}.xlsx`
+                          rows as Array<{
+                            label: string;
+                            present: number;
+                            absent: number;
+                            percentage: number;
+                          }>,
+                          `class-attendance_${periodLabel}.xlsx`,
                         );
-                      } else if (reportType === "student" || reportType === "defaulter") {
+                      } else if (
+                        reportType === "student" ||
+                        reportType === "defaulter"
+                      ) {
                         downloadStudentAttendanceExcel(
                           rows as DailyAttendanceStudentReportRow[],
-                          `student-attendance_${periodLabel}.xlsx`
+                          `student-attendance_${periodLabel}.xlsx`,
                         );
                       } else {
-                        toast.error("Use overall attendance export for this report type.");
+                        toast.error(
+                          "Use overall attendance export for this report type.",
+                        );
                         return;
                       }
                       toast.success("Report Excel downloaded");
@@ -1001,7 +1274,96 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                   </Button>
                 </div>
 
-                {reportsQuery.data?.rows && reportsQuery.data.rows.length > 0 ? (
+                {reportType === "summary" && reportsQuery.data ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <Card>
+                        <CardContent className="pt-4">
+                          <p className="text-xs text-slate-500">Records</p>
+                          <p className="text-2xl font-semibold">
+                            {(reportsQuery.data as { records?: number })
+                              .records ?? 0}
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-4">
+                          <p className="text-xs text-slate-500">Attendance %</p>
+                          <p className="text-2xl font-semibold">
+                            {(
+                              reportsQuery.data as {
+                                attendancePercentage?: number;
+                              }
+                            ).attendancePercentage ?? 0}
+                            %
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-4">
+                          <p className="text-xs text-slate-500">Present</p>
+                          <p className="text-2xl font-semibold text-emerald-700">
+                            {(
+                              reportsQuery.data as {
+                                totals?: { present?: number };
+                              }
+                            ).totals?.present ?? 0}
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="pt-4">
+                          <p className="text-xs text-slate-500">Absent</p>
+                          <p className="text-2xl font-semibold text-rose-700">
+                            {(
+                              reportsQuery.data as {
+                                totals?: { absent?: number };
+                              }
+                            ).totals?.absent ?? 0}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                    {reportsQuery.data.rows &&
+                    reportsQuery.data.rows.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHead>
+                            <tr>
+                              <Th>Class / Group</Th>
+                              <Th>Present</Th>
+                              <Th>Absent</Th>
+                              <Th>Percentage</Th>
+                            </tr>
+                          </TableHead>
+                          <TableBody>
+                            {(
+                              reportsQuery.data.rows as Array<{
+                                label: string;
+                                present: number;
+                                absent: number;
+                                percentage: number;
+                              }>
+                            ).map((row) => (
+                              <tr key={row.label}>
+                                <Td>{row.label}</Td>
+                                <Td>{row.present}</Td>
+                                <Td>{row.absent}</Td>
+                                <Td>{row.percentage}%</Td>
+                              </tr>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <EmptyState
+                        title="No class breakdown"
+                        description="No class-wise rows for this period."
+                      />
+                    )}
+                  </div>
+                ) : reportsQuery.data?.rows &&
+                  reportsQuery.data.rows.length > 0 ? (
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHead>
@@ -1013,7 +1375,8 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                               <Th>Absent</Th>
                               <Th>Percentage</Th>
                             </>
-                          ) : reportType === "student" || reportType === "defaulter" ? (
+                          ) : reportType === "student" ||
+                            reportType === "defaulter" ? (
                             <>
                               <Th>Student</Th>
                               <Th>Roll</Th>
@@ -1024,7 +1387,7 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                           ) : (
                             <>
                               <Th>Date</Th>
-                              <Th>Student ID</Th>
+                              <Th>Student</Th>
                               <Th>Status</Th>
                             </>
                           )}
@@ -1032,18 +1395,27 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                       </TableHead>
                       <TableBody>
                         {reportType === "class"
-                          ? (reportsQuery.data.rows as Array<{ label: string; present: number; absent: number; percentage: number }>).map(
-                              (row) => (
-                                <tr key={row.label}>
-                                  <Td>{row.label}</Td>
-                                  <Td>{row.present}</Td>
-                                  <Td>{row.absent}</Td>
-                                  <Td>{row.percentage}%</Td>
-                                </tr>
-                              )
-                            )
-                          : reportType === "student" || reportType === "defaulter"
-                            ? (reportsQuery.data.rows as DailyAttendanceStudentReportRow[]).map((row) => (
+                          ? (
+                              reportsQuery.data.rows as Array<{
+                                label: string;
+                                present: number;
+                                absent: number;
+                                percentage: number;
+                              }>
+                            ).map((row) => (
+                              <tr key={row.label}>
+                                <Td>{row.label}</Td>
+                                <Td>{row.present}</Td>
+                                <Td>{row.absent}</Td>
+                                <Td>{row.percentage}%</Td>
+                              </tr>
+                            ))
+                          : reportType === "student" ||
+                              reportType === "defaulter"
+                            ? (
+                                reportsQuery.data
+                                  .rows as DailyAttendanceStudentReportRow[]
+                              ).map((row) => (
                                 <tr key={row.studentId}>
                                   <Td>{row.fullName}</Td>
                                   <Td>{row.rollNumber}</Td>
@@ -1052,20 +1424,28 @@ export const DailyAttendanceManager = ({ hasInstitutionRead, canWriteAdmin, isTe
                                   <Td>{row.percentage}%</Td>
                                 </tr>
                               ))
-                            : (reportsQuery.data.rows as unknown as Array<{ dateBs: string; studentId: string; status: string }>).map(
-                                (row) => (
-                                  <tr key={`${row.dateBs}-${row.studentId}`}>
-                                    <Td>{row.dateBs}</Td>
-                                    <Td>{row.studentId}</Td>
-                                    <Td>{row.status}</Td>
-                                  </tr>
-                                )
-                              )}
+                            : (
+                                reportsQuery.data.rows as unknown as Array<{
+                                  dateBs: string;
+                                  studentId: string;
+                                  studentName?: string;
+                                  status: string;
+                                }>
+                              ).map((row) => (
+                                <tr key={`${row.dateBs}-${row.studentId}`}>
+                                  <Td>{row.dateBs}</Td>
+                                  <Td>{row.studentName ?? row.studentId}</Td>
+                                  <Td>{row.status}</Td>
+                                </tr>
+                              ))}
                       </TableBody>
                     </Table>
                   </div>
                 ) : (
-                  <EmptyState title="No report data" description="Adjust filters or record attendance to generate reports." />
+                  <EmptyState
+                    title="No report data"
+                    description="Adjust filters or record attendance to generate reports."
+                  />
                 )}
               </>
             )}

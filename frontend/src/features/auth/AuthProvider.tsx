@@ -2,7 +2,13 @@ import type { PropsWithChildren } from "react";
 import { createContext, useContext, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { AuthResponse, LoginInput, RegisterInput, SchoolRecord, UserProfile } from "@phit-erp/shared";
+import type {
+  AuthResponse,
+  LoginInput,
+  RegisterInput,
+  SchoolRecord,
+  UserProfile,
+} from "@phit-erp/shared";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 
@@ -43,27 +49,29 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
     staleTime: Number.POSITIVE_INFINITY,
     refetchOnMount: false,
     refetchOnReconnect: false,
-    refetchOnWindowFocus: false
+    refetchOnWindowFocus: false,
   });
 
   const loginMutation = useMutation({
-    mutationFn: async (payload: LoginInput) => unwrap<AuthResponse>(api.post("/auth/login", payload)),
+    mutationFn: async (payload: LoginInput) =>
+      unwrap<AuthResponse>(api.post("/auth/login", payload)),
     onSuccess: async (data) => {
       queryClient.setQueryData<MeResponse>(["auth", "me"], data);
       await queryClient.invalidateQueries({
-        predicate: (query) => !keepAuthMeQuery(query.queryKey)
+        predicate: (query) => !keepAuthMeQuery(query.queryKey),
       });
-    }
+    },
   });
 
   const registerMutation = useMutation({
-    mutationFn: async (payload: RegisterInput) => unwrap<AuthResponse>(api.post("/auth/register", payload)),
+    mutationFn: async (payload: RegisterInput) =>
+      unwrap<AuthResponse>(api.post("/auth/register", payload)),
     onSuccess: async (data) => {
       queryClient.setQueryData<MeResponse>(["auth", "me"], data);
       await queryClient.invalidateQueries({
-        predicate: (query) => !keepAuthMeQuery(query.queryKey)
+        predicate: (query) => !keepAuthMeQuery(query.queryKey),
       });
-    }
+    },
   });
 
   const switchSchoolMutation = useMutation({
@@ -72,7 +80,7 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries();
-    }
+    },
   });
 
   const logoutMutation = useMutation({
@@ -86,18 +94,18 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
         setAuthEpoch((current) => current + 1);
       });
       await queryClient.cancelQueries({
-        predicate: (query) => !keepAuthMeQuery(query.queryKey)
+        predicate: (query) => !keepAuthMeQuery(query.queryKey),
       });
     },
     onSettled: async () => {
       queryClient.setQueryData<MeResponse | null>(["auth", "me"], null);
       queryClient.removeQueries({
-        predicate: (query) => !keepAuthMeQuery(query.queryKey)
+        predicate: (query) => !keepAuthMeQuery(query.queryKey),
       });
       flushSync(() => {
         setLoggingOut(false);
       });
-    }
+    },
   });
 
   const isBootstrapping = meQuery.isPending && meQuery.data === undefined;
@@ -107,13 +115,16 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       user: meQuery.data?.user ?? null,
       availableSchools: meQuery.data?.availableSchools ?? [],
       activeSchoolId: meQuery.data?.activeSchoolId ?? null,
-      loading: isBootstrapping || loginMutation.isPending || registerMutation.isPending,
+      loading:
+        isBootstrapping ||
+        loginMutation.isPending ||
+        registerMutation.isPending,
       loggingOut,
       authEpoch,
       login: loginMutation.mutateAsync,
       register: registerMutation.mutateAsync,
       logout: logoutMutation.mutateAsync,
-      setActiveSchool: switchSchoolMutation.mutateAsync
+      setActiveSchool: switchSchoolMutation.mutateAsync,
     }),
     [
       authEpoch,
@@ -127,8 +138,8 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       loginMutation.isPending,
       registerMutation.isPending,
       registerMutation.mutateAsync,
-      switchSchoolMutation.mutateAsync
-    ]
+      switchSchoolMutation.mutateAsync,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

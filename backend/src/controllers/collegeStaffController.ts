@@ -215,6 +215,10 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
     throw new ApiError(400, "Email is required when login is enabled");
   }
 
+  let createdLoginEmail: string | undefined;
+  let createdDefaultPassword: string | undefined;
+  let credentialsEmail: Awaited<ReturnType<typeof notifyAccountCredentials>> | undefined;
+
   if (existing.user) {
     const user = await User.findById(existing.user);
     if (user) {
@@ -232,6 +236,12 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
       }
       if (payload.status) {
         user.isActive = payload.status === "ACTIVE";
+      }
+      // Disabling portal login must revoke access
+      if (payload.enableLogin === false) {
+        user.isActive = false;
+      } else if (payload.enableLogin === true && (payload.status ?? existing.status) === "ACTIVE") {
+        user.isActive = true;
       }
       await user.save();
     }
@@ -253,9 +263,10 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
     });
     existing.user = user._id;
     existing.enableLogin = true;
+    createdLoginEmail = email;
+    createdDefaultPassword = resolved.password;
 
-    // Fire-and-forget after save path completes; email status not blocking update response.
-    void notifyAccountCredentials({
+    credentialsEmail = await notifyAccountCredentials({
       userId: user._id.toString(),
       fullName: user.fullName,
       email,
@@ -288,7 +299,23 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
     throw error;
   }
 
-  return sendSuccess(res, "College staff updated", await serializeStaff(existing.toObject() as CollegeStaffLean));
+  const serialized = await serializeStaff(existing.toObject() as CollegeStaffLean);
+
+  if (createdLoginEmail && createdDefaultPassword) {
+    const emailResult = credentialsEmail ?? {
+      sent: false,
+      email: createdLoginEmail,
+      error: "Credential email was not sent"
+    };
+    return sendSuccess(res, buildCredentialsAdminMessage(emailResult), {
+      staff: serialized,
+      loginEmail: createdLoginEmail,
+      defaultPassword: createdDefaultPassword,
+      credentialsEmail: emailResult
+    });
+  }
+
+  return sendSuccess(res, "College staff updated", serialized);
 });
 
 export const deleteCollegeStaff = asyncHandler(async (req: Request, res: Response) => {
@@ -299,6 +326,9 @@ export const deleteCollegeStaff = asyncHandler(async (req: Request, res: Respons
 
   staff.isDeleted = true;
   staff.status = "INACTIVE";
+  staff.enableLogin = false;
+  // Free staffId for reuse after soft-delete (unique index is unconditional)
+  staff.staffId = `${staff.staffId}__deleted__${staff._id.toString().slice(-6)}`;
   await staff.save();
 
   if (staff.user) {

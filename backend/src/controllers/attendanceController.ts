@@ -23,16 +23,23 @@ export const listAttendance = asyncHandler(async (req: Request, res: Response) =
   const query: Record<string, unknown> = { schoolId: tenantObjectId(req) };
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
+  const role = req.user?.role ?? "";
 
   if (typeof req.query.classId === "string") query.classId = req.query.classId;
   if (typeof req.query.sectionId === "string") query.sectionId = req.query.sectionId;
   if (typeof req.query.batchId === "string") query.batchId = req.query.batchId;
   if (typeof req.query.yearId === "string") query.yearId = req.query.yearId;
   if (typeof req.query.subjectId === "string") query.subjectId = req.query.subjectId;
-  if (typeof req.query.dateBs === "string") query.dateBs = req.query.dateBs;
+  if (typeof req.query.dateBs === "string") {
+    ensureValidBsDate(req.query.dateBs);
+    query.dateBs = req.query.dateBs;
+  }
 
   const teacherScope = await getTeacherScope(req);
-  if (teacherScope) {
+  if (role === "TEACHER") {
+    if (!teacherScope) {
+      throw new ApiError(403, "Teacher profile not found");
+    }
     assertTeacherQueryScope(teacherScope, {
       classId: typeof req.query.classId === "string" ? req.query.classId : undefined,
       sectionId: typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
@@ -52,6 +59,8 @@ export const listAttendance = asyncHandler(async (req: Request, res: Response) =
     }
 
     query.subjectId = typeof req.query.subjectId === "string" ? req.query.subjectId : { $in: teacherScope.subjectIds };
+  } else if (teacherScope) {
+    // Non-teacher with accidental teacher profile: ignore
   }
 
   const studentProfile = await getStudentProfile(req);

@@ -8,14 +8,16 @@ interface DashboardBannerPopupProps {
   banners: BannerRecord[];
 }
 
-export const DashboardBannerPopup = ({ banners }: DashboardBannerPopupProps) => {
+export const DashboardBannerPopup = ({
+  banners,
+}: DashboardBannerPopupProps) => {
   const [dismissed, setDismissed] = useState(false);
   const [closing, setClosing] = useState(false);
   const [index, setIndex] = useState(0);
 
   const activeBanners = useMemo(
     () => banners.filter((banner) => banner.isActive && banner.imageUrl),
-    [banners]
+    [banners],
   );
 
   const open = activeBanners.length > 0 && !dismissed;
@@ -53,7 +55,9 @@ export const DashboardBannerPopup = ({ banners }: DashboardBannerPopupProps) => 
       className={cn(
         "fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-6",
         "bg-slate-950/60 backdrop-blur-[2px]",
-        closing ? "animate-[fadeOut_0.22s_ease-in_forwards]" : "animate-[fadeIn_0.28s_ease-out]"
+        closing
+          ? "animate-[fadeOut_0.22s_ease-in_forwards]"
+          : "animate-[fadeIn_0.28s_ease-out]",
       )}
       role="dialog"
       aria-modal="true"
@@ -62,7 +66,9 @@ export const DashboardBannerPopup = ({ banners }: DashboardBannerPopupProps) => 
       <div
         className={cn(
           "relative w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl",
-          closing ? "animate-[scaleOut_0.22s_ease-in_forwards]" : "animate-[scaleIn_0.28s_ease-out]"
+          closing
+            ? "animate-[scaleOut_0.22s_ease-in_forwards]"
+            : "animate-[scaleIn_0.28s_ease-out]",
         )}
       >
         <Button
@@ -91,7 +97,12 @@ export const DashboardBannerPopup = ({ banners }: DashboardBannerPopupProps) => 
                 size="sm"
                 className="absolute left-3 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full bg-black/45 p-0 text-white hover:bg-black/65 hover:text-white"
                 aria-label="Previous banner"
-                onClick={() => setIndex((value) => (value - 1 + activeBanners.length) % activeBanners.length)}
+                onClick={() =>
+                  setIndex(
+                    (value) =>
+                      (value - 1 + activeBanners.length) % activeBanners.length,
+                  )
+                }
               >
                 <ChevronLeft className="h-5 w-5" />
               </Button>
@@ -101,7 +112,9 @@ export const DashboardBannerPopup = ({ banners }: DashboardBannerPopupProps) => 
                 size="sm"
                 className="absolute right-3 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full bg-black/45 p-0 text-white hover:bg-black/65 hover:text-white"
                 aria-label="Next banner"
-                onClick={() => setIndex((value) => (value + 1) % activeBanners.length)}
+                onClick={() =>
+                  setIndex((value) => (value + 1) % activeBanners.length)
+                }
               >
                 <ChevronRight className="h-5 w-5" />
               </Button>
@@ -118,7 +131,9 @@ export const DashboardBannerPopup = ({ banners }: DashboardBannerPopupProps) => 
                 aria-label={`Show banner ${itemIndex + 1}`}
                 className={cn(
                   "h-2.5 rounded-full transition-all",
-                  itemIndex === currentIndex ? "w-7 bg-brand-600" : "w-2.5 bg-slate-300 hover:bg-slate-400"
+                  itemIndex === currentIndex
+                    ? "w-7 bg-brand-600"
+                    : "w-2.5 bg-slate-300 hover:bg-slate-400",
                 )}
                 onClick={() => setIndex(itemIndex)}
               />

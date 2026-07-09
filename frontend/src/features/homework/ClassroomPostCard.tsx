@@ -7,7 +7,7 @@ import {
   getDisplayStatus,
   TYPE_BADGE_COLORS,
   TYPE_COLORS,
-  TYPE_LABELS
+  TYPE_LABELS,
 } from "./homeworkUtils";
 
 interface ClassroomPostCardProps {
@@ -25,7 +25,7 @@ export const ClassroomPostCard = ({ post, onOpen }: ClassroomPostCardProps) => {
       onClick={() => onOpen(post)}
       className={cn(
         "w-full min-w-0 rounded-2xl border border-slate-200 border-l-4 bg-white p-4 text-left shadow-sm transition hover:shadow-md",
-        TYPE_COLORS[post.type]
+        TYPE_COLORS[post.type],
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -37,11 +37,19 @@ export const ClassroomPostCard = ({ post, onOpen }: ClassroomPostCardProps) => {
                 Pinned
               </span>
             ) : null}
-            <Badge className={TYPE_BADGE_COLORS[post.type]}>{TYPE_LABELS[post.type]}</Badge>
-            {status ? <Badge className={status.className}>{status.label}</Badge> : null}
+            <Badge className={TYPE_BADGE_COLORS[post.type]}>
+              {TYPE_LABELS[post.type]}
+            </Badge>
+            {status ? (
+              <Badge className={status.className}>{status.label}</Badge>
+            ) : null}
           </div>
-          <h3 className="text-base font-semibold text-slate-900">{post.title}</h3>
-          <p className="line-clamp-2 text-sm text-slate-600">{post.description}</p>
+          <h3 className="text-base font-semibold text-slate-900">
+            {post.title}
+          </h3>
+          <p className="line-clamp-2 text-sm text-slate-600">
+            {post.description}
+          </p>
         </div>
       </div>
 

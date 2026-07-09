@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { hasInstitutionAccess, type AttendanceInput, type AttendanceRecord, type AttendanceStatus, type StudentRecord } from "@phit-erp/shared";
+import {
+  hasInstitutionAccess,
+  type AttendanceInput,
+  type AttendanceRecord,
+  type AttendanceStatus,
+  type StudentRecord,
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { EmptyState } from "components/shared/EmptyState";
@@ -24,21 +30,31 @@ import {
   filterSubjectsByClass,
   filterSubjectsByYear,
   filterYearsByBatch,
-  hasSingleOption
+  hasSingleOption,
 } from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
 
-const statuses: AttendanceStatus[] = ["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"];
+const statuses: AttendanceStatus[] = [
+  "PRESENT",
+  "ABSENT",
+  "LEAVE",
+  "LATE",
+  "MEDICAL_LEAVE",
+];
 
 const statusBadgeStyles: Record<AttendanceStatus, string> = {
   PRESENT: "bg-brand-100 text-brand-800",
   ABSENT: "bg-rose-100 text-rose-800",
   LATE: "bg-amber-100 text-amber-800",
   LEAVE: "bg-sky-100 text-sky-800",
-  MEDICAL_LEAVE: "bg-violet-100 text-violet-800"
+  MEDICAL_LEAVE: "bg-violet-100 text-violet-800",
 };
 
-const StatusBadge = ({ status }: { status: AttendanceStatus | "NOT_MARKED" }) => {
+const StatusBadge = ({
+  status,
+}: {
+  status: AttendanceStatus | "NOT_MARKED";
+}) => {
   if (status === "NOT_MARKED") {
     return <Badge className="bg-slate-100 text-slate-600">Not marked</Badge>;
   }
@@ -49,7 +65,9 @@ interface AttendanceManagerProps {
   embedded?: boolean;
 }
 
-export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) => {
+export const AttendanceManager = ({
+  embedded = false,
+}: AttendanceManagerProps) => {
   const { user } = useAuth();
   const isTeacher = user?.role === "TEACHER";
   const isAdminViewer = hasInstitutionAccess(user?.role ?? "");
@@ -64,78 +82,132 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
   const [yearId, setYearId] = useState("");
   const [subjectId, setSubjectId] = useState("");
   const [dateBs, setDateBs] = useState("");
-  const [statusMap, setStatusMap] = useState<Record<string, AttendanceStatus>>({});
+  const [statusMap, setStatusMap] = useState<Record<string, AttendanceStatus>>(
+    {},
+  );
 
   const classesQuery = useQuery({
     queryKey: ["classes"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string }>>(api.get("/academics/classes")),
-    enabled: isAdminViewer && !isCollege
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string }>>(
+        api.get("/academics/classes"),
+      ),
+    enabled: isAdminViewer && !isCollege,
   });
   const sectionsQuery = useQuery({
     queryKey: ["sections"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string; classId: string }>>(api.get("/academics/sections")),
-    enabled: isAdminViewer && !isCollege
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string; classId: string }>>(
+        api.get("/academics/sections"),
+      ),
+    enabled: isAdminViewer && !isCollege,
   });
   const batchesQuery = useQuery({
     queryKey: ["batches"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string }>>(api.get("/academics/batches")),
-    enabled: isAdminViewer && isCollege
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string }>>(
+        api.get("/academics/batches"),
+      ),
+    enabled: isAdminViewer && isCollege,
   });
   const yearsQuery = useQuery({
     queryKey: ["years"],
-    queryFn: () => unwrap<Array<{ _id: string; name: string; batchId: string }>>(api.get("/academics/years")),
-    enabled: isAdminViewer && isCollege
+    queryFn: () =>
+      unwrap<Array<{ _id: string; name: string; batchId: string }>>(
+        api.get("/academics/years"),
+      ),
+    enabled: isAdminViewer && isCollege,
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
     queryFn: () =>
-      unwrap<Array<{ _id: string; name: string; code: string; classIds?: string[]; yearIds?: string[] }>>(
-        api.get("/academics/subjects")
-      ),
-    enabled: isAdminViewer
+      unwrap<
+        Array<{
+          _id: string;
+          name: string;
+          code: string;
+          classIds?: string[];
+          yearIds?: string[];
+        }>
+      >(api.get("/academics/subjects")),
+    enabled: isAdminViewer,
   });
   const studentsQuery = useQuery({
     queryKey: ["students"],
     queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
-    enabled: isAdminViewer
+    enabled: isAdminViewer,
   });
 
-  const classes = isTeacher ? (teacherScopeQuery.data?.classes ?? []) : (classesQuery.data ?? []);
-  const sections = isTeacher ? (teacherScopeQuery.data?.sections ?? []) : (sectionsQuery.data ?? []);
-  const batches = isTeacher ? (teacherScopeQuery.data?.batches ?? []) : (batchesQuery.data ?? []);
-  const years = isTeacher ? (teacherScopeQuery.data?.years ?? []) : (yearsQuery.data ?? []);
-  const subjects = isTeacher ? (teacherScopeQuery.data?.subjects ?? []) : (subjectsQuery.data ?? []);
-  const students = isTeacher ? (teacherScopeQuery.data?.students ?? []) : (studentsQuery.data ?? []);
+  const classes = isTeacher
+    ? (teacherScopeQuery.data?.classes ?? [])
+    : (classesQuery.data ?? []);
+  const sections = isTeacher
+    ? (teacherScopeQuery.data?.sections ?? [])
+    : (sectionsQuery.data ?? []);
+  const batches = isTeacher
+    ? (teacherScopeQuery.data?.batches ?? [])
+    : (batchesQuery.data ?? []);
+  const years = isTeacher
+    ? (teacherScopeQuery.data?.years ?? [])
+    : (yearsQuery.data ?? []);
+  const subjects = isTeacher
+    ? (teacherScopeQuery.data?.subjects ?? [])
+    : (subjectsQuery.data ?? []);
+  const students = isTeacher
+    ? (teacherScopeQuery.data?.students ?? [])
+    : (studentsQuery.data ?? []);
 
   const primaryId = isCollege ? batchId : classId;
   const secondaryId = isCollege ? yearId : sectionId;
-  const filtersComplete = Boolean(primaryId && secondaryId && subjectId && dateBs);
+  const filtersComplete = Boolean(
+    primaryId && secondaryId && subjectId && dateBs,
+  );
 
   const attendanceQuery = useQuery({
-    queryKey: ["attendance", classId, sectionId, batchId, yearId, subjectId, dateBs],
+    queryKey: [
+      "attendance",
+      classId,
+      sectionId,
+      batchId,
+      yearId,
+      subjectId,
+      dateBs,
+    ],
     queryFn: () =>
       unwrap<AttendanceRecord[]>(
         api.get("/attendance", {
-          params: isCollege ? { batchId, yearId, subjectId, dateBs } : { classId, sectionId, subjectId, dateBs }
-        })
+          params: isCollege
+            ? { batchId, yearId, subjectId, dateBs }
+            : { classId, sectionId, subjectId, dateBs },
+        }),
       ),
-    enabled: filtersComplete
+    enabled: filtersComplete,
   });
 
   const saveAttendance = useMutation({
-    mutationFn: async (payload: AttendanceInput) => unwrap<AttendanceRecord>(api.post("/attendance", payload)),
+    mutationFn: async (payload: AttendanceInput) =>
+      unwrap<AttendanceRecord>(api.post("/attendance", payload)),
     onSuccess: async () => {
       toast.success("Attendance saved");
       await queryClient.invalidateQueries({ queryKey: ["attendance"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const filteredSections = useMemo(() => filterSectionsByClass(sections, classId), [classId, sections]);
-  const filteredYears = useMemo(() => filterYearsByBatch(years, batchId), [batchId, years]);
+  const filteredSections = useMemo(
+    () => filterSectionsByClass(sections, classId),
+    [classId, sections],
+  );
+  const filteredYears = useMemo(
+    () => filterYearsByBatch(years, batchId),
+    [batchId, years],
+  );
   const filteredSubjects = useMemo(
-    () => (isCollege ? filterSubjectsByYear(subjects, yearId) : filterSubjectsByClass(subjects, classId)),
-    [classId, isCollege, subjects, yearId]
+    () =>
+      isCollege
+        ? filterSubjectsByYear(subjects, yearId)
+        : filterSubjectsByClass(subjects, classId),
+    [classId, isCollege, subjects, yearId],
   );
 
   useEffect(() => {
@@ -174,30 +246,55 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
     }
 
     if (!classId) return;
-    if (hasSingleOption(filteredSections) && sectionId !== filteredSections[0]!._id) {
+    if (
+      hasSingleOption(filteredSections) &&
+      sectionId !== filteredSections[0]!._id
+    ) {
       setSectionId(filteredSections[0]!._id);
       setSubjectId("");
     }
-  }, [batchId, classId, filteredSections, filteredYears, isCollege, isTeacher, sectionId, yearId]);
+  }, [
+    batchId,
+    classId,
+    filteredSections,
+    filteredYears,
+    isCollege,
+    isTeacher,
+    sectionId,
+    yearId,
+  ]);
 
   useEffect(() => {
     if (!isTeacher) return;
-    const scopeReady = isCollege ? Boolean(batchId && yearId) : Boolean(classId);
+    const scopeReady = isCollege
+      ? Boolean(batchId && yearId)
+      : Boolean(classId);
     if (!scopeReady) return;
 
-    if (hasSingleOption(filteredSubjects) && subjectId !== filteredSubjects[0]!._id) {
+    if (
+      hasSingleOption(filteredSubjects) &&
+      subjectId !== filteredSubjects[0]!._id
+    ) {
       setSubjectId(filteredSubjects[0]!._id);
     }
-  }, [batchId, classId, filteredSubjects, isCollege, isTeacher, subjectId, yearId]);
+  }, [
+    batchId,
+    classId,
+    filteredSubjects,
+    isCollege,
+    isTeacher,
+    subjectId,
+    yearId,
+  ]);
 
   const filteredStudents = useMemo(
     () =>
       students.filter((student) =>
         isCollege
           ? student.batchId === batchId && student.yearId === yearId
-          : student.classId === classId && student.sectionId === sectionId
+          : student.classId === classId && student.sectionId === sectionId,
       ),
-    [batchId, classId, isCollege, sectionId, students, yearId]
+    [batchId, classId, isCollege, sectionId, students, yearId],
   );
 
   useEffect(() => {
@@ -207,7 +304,9 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
       return;
     }
 
-    const nextStatusMap = existing.entries.reduce<Record<string, AttendanceStatus>>((acc, item) => {
+    const nextStatusMap = existing.entries.reduce<
+      Record<string, AttendanceStatus>
+    >((acc, item) => {
       acc[item.studentId] = item.status;
       return acc;
     }, {});
@@ -234,7 +333,9 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
     ? teacherScopeQuery.isLoading
     : studentsQuery.isLoading ||
       subjectsQuery.isLoading ||
-      (isCollege ? batchesQuery.isLoading || yearsQuery.isLoading : classesQuery.isLoading || sectionsQuery.isLoading);
+      (isCollege
+        ? batchesQuery.isLoading || yearsQuery.isLoading
+        : classesQuery.isLoading || sectionsQuery.isLoading);
 
   if (isLoading) {
     return <LoadingState />;
@@ -246,9 +347,19 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
   const handleSave = async () => {
     if (isSyncedFromDaily) {
       const confirmed = window.confirm(
-        "This subject attendance is synchronized with Daily Attendance. Editing it may break synchronization. Continue?"
+        "This subject attendance is synchronized with Daily Attendance. Editing it may break synchronization. Continue?",
       );
       if (!confirmed) return;
+    }
+
+    const unmarked = filteredStudents.filter(
+      (student) => !statusMap[student._id],
+    );
+    if (unmarked.length > 0) {
+      toast.error(
+        `Mark status for all students (${unmarked.length} not marked)`,
+      );
+      return;
     }
 
     await saveAttendance.mutateAsync({
@@ -258,8 +369,8 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
       confirmSyncOverride: isSyncedFromDaily,
       entries: filteredStudents.map((student) => ({
         studentId: student._id,
-        status: statusMap[student._id] ?? "PRESENT"
-      }))
+        status: statusMap[student._id]!,
+      })),
     });
   };
 
@@ -278,13 +389,21 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
 
       <Card>
         <CardHeader>
-          <CardTitle>{canMark ? "Attendance Sheet" : "Attendance Lookup"}</CardTitle>
+          <CardTitle>
+            {canMark ? "Attendance Sheet" : "Attendance Lookup"}
+          </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-4">
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">{labels.primary}</label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">
+              {labels.primary}
+            </label>
             {isTeacher && hasSingleOption(isCollege ? batches : classes) ? (
-              <Input value={(isCollege ? batches : classes)[0]!.name} readOnly disabled />
+              <Input
+                value={(isCollege ? batches : classes)[0]!.name}
+                readOnly
+                disabled
+              />
             ) : (
               <Select
                 value={isCollege ? batchId : classId}
@@ -309,9 +428,16 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
             )}
           </div>
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">{labels.secondary}</label>
-            {isTeacher && hasSingleOption(isCollege ? filteredYears : filteredSections) ? (
-              <Input value={(isCollege ? filteredYears : filteredSections)[0]!.name} readOnly disabled />
+            <label className="mb-2 block text-sm font-medium text-slate-700">
+              {labels.secondary}
+            </label>
+            {isTeacher &&
+            hasSingleOption(isCollege ? filteredYears : filteredSections) ? (
+              <Input
+                value={(isCollege ? filteredYears : filteredSections)[0]!.name}
+                readOnly
+                disabled
+              />
             ) : (
               <Select
                 value={isCollege ? yearId : sectionId}
@@ -325,7 +451,9 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
                 }}
                 disabled={!primaryId}
               >
-                <option value="">Select {labels.secondary.toLowerCase()}</option>
+                <option value="">
+                  Select {labels.secondary.toLowerCase()}
+                </option>
                 {(isCollege ? filteredYears : filteredSections).map((item) => (
                   <option key={item._id} value={item._id}>
                     {item.name}
@@ -335,7 +463,9 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
             )}
           </div>
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Subject</label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">
+              Subject
+            </label>
             {isTeacher && hasSingleOption(filteredSubjects) ? (
               <Input
                 value={
@@ -347,7 +477,11 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
                 disabled
               />
             ) : (
-              <Select value={subjectId} onChange={(event) => setSubjectId(event.target.value)} disabled={!primaryId}>
+              <Select
+                value={subjectId}
+                onChange={(event) => setSubjectId(event.target.value)}
+                disabled={!primaryId}
+              >
                 <option value="">Select subject</option>
                 {filteredSubjects.map((item) => (
                   <option key={item._id} value={item._id}>
@@ -358,7 +492,9 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
             )}
           </div>
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Date (BS)</label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">
+              Date (BS)
+            </label>
             <NepaliDateField value={dateBs} onChange={setDateBs} />
           </div>
         </CardContent>
@@ -369,16 +505,43 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
           {isAdminViewer ? (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               {[
-                { label: "Present", value: summary.present, className: "text-brand-700" },
-                { label: "Absent", value: summary.absent, className: "text-rose-600" },
-                { label: "Late", value: summary.late, className: "text-amber-600" },
-                { label: "Leave", value: summary.leave, className: "text-sky-700" },
-                { label: "Not marked", value: summary.notMarked, className: "text-slate-600" }
+                {
+                  label: "Present",
+                  value: summary.present,
+                  className: "text-brand-700",
+                },
+                {
+                  label: "Absent",
+                  value: summary.absent,
+                  className: "text-rose-600",
+                },
+                {
+                  label: "Late",
+                  value: summary.late,
+                  className: "text-amber-600",
+                },
+                {
+                  label: "Leave",
+                  value: summary.leave,
+                  className: "text-sky-700",
+                },
+                {
+                  label: "Not marked",
+                  value: summary.notMarked,
+                  className: "text-slate-600",
+                },
               ].map((stat) => (
-                <Card key={stat.label} className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
+                <Card
+                  key={stat.label}
+                  className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]"
+                >
                   <CardContent className="py-5">
                     <p className="text-sm text-slate-500">{stat.label}</p>
-                    <p className={`mt-1 text-3xl font-semibold ${stat.className}`}>{stat.value}</p>
+                    <p
+                      className={`mt-1 text-3xl font-semibold ${stat.className}`}
+                    >
+                      {stat.value}
+                    </p>
                   </CardContent>
                 </Card>
               ))}
@@ -387,14 +550,19 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
 
           {isSyncedFromDaily ? (
             <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-              <Badge className="mr-2 bg-sky-100 text-sky-800">Auto Generated from Daily Attendance</Badge>
-              First-period subject attendance was synchronized automatically from the daily register.
+              <Badge className="mr-2 bg-sky-100 text-sky-800">
+                Auto Generated from Daily Attendance
+              </Badge>
+              First-period subject attendance was synchronized automatically
+              from the daily register.
             </div>
           ) : null}
 
           <Card>
             <CardHeader>
-              <CardTitle>{canMark ? "Subject Attendance Register" : "Attendance Results"}</CardTitle>
+              <CardTitle>
+                {canMark ? "Subject Attendance Register" : "Attendance Results"}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {attendanceQuery.isLoading ? (
@@ -421,7 +589,10 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
                           return (
                             <tr key={student._id}>
                               <Td>
-                                <StudentNameLink studentId={student._id} name={student.user.fullName} />
+                                <StudentNameLink
+                                  studentId={student._id}
+                                  name={student.user.fullName}
+                                />
                               </Td>
                               <Td>{student.rollNumber}</Td>
                               <Td>
@@ -431,7 +602,8 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
                                     onChange={(event) =>
                                       setStatusMap((current) => ({
                                         ...current,
-                                        [student._id]: event.target.value as AttendanceStatus
+                                        [student._id]: event.target
+                                          .value as AttendanceStatus,
                                       }))
                                     }
                                   >
@@ -442,7 +614,9 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
                                     ))}
                                   </Select>
                                 ) : (
-                                  <StatusBadge status={status ?? "NOT_MARKED"} />
+                                  <StatusBadge
+                                    status={status ?? "NOT_MARKED"}
+                                  />
                                 )}
                               </Td>
                             </tr>
@@ -454,7 +628,10 @@ export const AttendanceManager = ({ embedded = false }: AttendanceManagerProps) 
 
                   {canMark ? (
                     <div className="mt-4 flex justify-end">
-                      <Button disabled={saveAttendance.isPending} onClick={() => void handleSave()}>
+                      <Button
+                        disabled={saveAttendance.isPending}
+                        onClick={() => void handleSave()}
+                      >
                         Save Attendance
                       </Button>
                     </div>

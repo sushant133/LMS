@@ -34,9 +34,12 @@ export const toastCredentialCreateResult = (
   }
 
   if (emailResult) {
+    const passwordHint = data.defaultPassword
+      ? `\nLogin ID: ${data.loginEmail ?? email}\nPassword: ${data.defaultPassword}`
+      : "";
     toast.warning(options?.fallbackTitle ?? "User created successfully", {
-      description: `Credential email could not be delivered.\nReason: ${emailResult.error ?? "Unknown error"}`,
-      duration: 10_000
+      description: `Credential email could not be delivered.\nReason: ${emailResult.error ?? "Unknown error"}${passwordHint}`,
+      duration: 15_000
     });
     return;
   }
@@ -82,4 +85,44 @@ export const toastResendCredentials = async (userId: string, password?: string):
     toast.error(parseErrorMessage(error));
     return false;
   }
+};
+
+/**
+ * Feedback after Super Admin updates an Administrator login ID and/or password.
+ */
+export const toastAdminCredentialsUpdated = (
+  data: CredentialCreatePayload,
+  options?: { successTitle?: string }
+): void => {
+  const emailResult = data.credentialsEmail;
+  const email = emailResult?.email ?? data.loginEmail;
+  const title = options?.successTitle ?? "Administrator credentials updated";
+
+  if (emailResult?.sent) {
+    toast.success(title, {
+      description: `New login details have been emailed to: ${email}`
+    });
+    return;
+  }
+
+  if (emailResult) {
+    const passwordHint = data.defaultPassword
+      ? `\nLogin ID: ${data.loginEmail ?? email}\nPassword: ${data.defaultPassword}`
+      : data.loginEmail
+        ? `\nLogin ID: ${data.loginEmail}`
+        : "";
+    toast.warning(title, {
+      description: `Notification email could not be delivered.\nReason: ${emailResult.error ?? "Unknown error"}${passwordHint}`,
+      duration: 15_000
+    });
+    return;
+  }
+
+  toast.success(title, {
+    description: data.loginEmail
+      ? data.defaultPassword
+        ? `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
+        : `Login ID: ${data.loginEmail}`
+      : undefined
+  });
 };

@@ -57,7 +57,9 @@ const envSchema = z.object({
     .optional()
     .transform((value) => value?.replace(/\s+/g, "") || undefined),
   SMTP_FROM_EMAIL: z.string().optional(),
-  SMTP_FROM_NAME: z.string().default("Public Himal Institute of Technology")
+  SMTP_FROM_NAME: z.string().default("Public Himal Institute of Technology"),
+  /** Optional Reply-To (defaults to From). Use a monitored institution inbox when possible. */
+  SMTP_REPLY_TO: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

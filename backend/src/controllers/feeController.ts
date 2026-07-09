@@ -1,14 +1,10 @@
 import type { Request, Response } from "express";
-import { feeCollectionSchema, feeStructureSchema } from "@phit-erp/shared";
+import { feeStructureSchema } from "@phit-erp/shared";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeStructure } from "../models/FeeStructure.js";
-import { Student } from "../models/Student.js";
-import { User } from "../models/User.js";
-import { calculateFeeTotals } from "../utils/accountingCalculations.js";
 import { recordAudit } from "../utils/audit.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
-import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -38,83 +34,49 @@ export const updateFeeStructure = asyncHandler(async (req: Request, res: Respons
 });
 
 export const deleteFeeStructure = asyncHandler(async (req: Request, res: Response) => {
-  const structure = await FeeStructure.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
-
+  const structure = await FeeStructure.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!structure) {
     throw new ApiError(404, "Fee structure not found");
   }
 
+  const linkedCollections = await FeeCollection.countDocuments({
+    schoolId: structure.schoolId,
+    feeStructureId: structure._id,
+    isDeleted: false
+  });
+  if (linkedCollections > 0) {
+    throw new ApiError(
+      400,
+      `Cannot delete fee structure with ${linkedCollections} active collection(s). Archive it instead (set inactive via update).`
+    );
+  }
+
+  await structure.deleteOne();
+  await recordAudit(req, {
+    action: "fee.structure.delete",
+    entity: "FeeStructure",
+    entityId: structure._id.toString()
+  });
   return sendSuccess(res, "Fee structure deleted successfully");
 });
 
 export const listFeeCollections = asyncHandler(async (req: Request, res: Response) => {
-  const collections = await FeeCollection.find(withTenantScope(req)).sort({ paidDateBs: -1 });
+  const collections = await FeeCollection.find(withTenantScope(req, { isDeleted: false })).sort({ paidDateBs: -1 });
   return sendSuccess(res, "Fee collections fetched", collections);
 });
 
-export const collectFee = asyncHandler(async (req: Request, res: Response) => {
-  const payload = feeCollectionSchema.parse(req.body);
-  ensureValidBsDate(payload.paidDateBs);
-
-  const schoolId = tenantObjectId(req);
-  const [student, structure] = await Promise.all([
-    Student.findOne({ _id: payload.studentId, schoolId }),
-    FeeStructure.findOne({ _id: payload.feeStructureId, schoolId })
-  ]);
-
-  if (!student) {
-    throw new ApiError(404, "Student not found in this college");
-  }
-
-  if (!structure) {
-    throw new ApiError(404, "Fee structure not found in this college");
-  }
-
-  const previousDueNpr = student.feesDueNpr ?? 0;
-  const currentChargesNpr = structure.amountNpr;
-  const totals = calculateFeeTotals({
-    previousDueNpr,
-    currentChargesNpr,
-    amountPaidNpr: payload.amountPaidNpr,
-    discountNpr: payload.discountNpr,
-    scholarshipNpr: payload.scholarshipNpr,
-    lateFeeNpr: payload.lateFeeNpr
-  });
-
-  const actor = req.user?.userId ? await User.findById(req.user.userId).select("fullName").lean() : null;
-
-  const collection = await FeeCollection.create({
-    ...payload,
-    schoolId,
-    previousDueNpr,
-    currentChargesNpr,
-    remainingDueNpr: totals.remainingDueNpr,
-    advancePaymentNpr: totals.advancePaymentNpr,
-    paymentMethod: "CASH",
-    feeBreakdown: [{ feeType: structure.feeType, title: structure.title, amountNpr: currentChargesNpr }],
-    accountantName: actor?.fullName ?? "",
-    createdBy: req.user!.userId
-  });
-
-  student.feesDueNpr = totals.remainingDueNpr;
-  await student.save();
-
-  await recordAudit(req, {
-    action: "fee.collect",
-    entity: "FeeCollection",
-    entityId: collection._id.toString(),
-    after: collection
-  });
-
-  return sendSuccess(res, "Fee collected successfully", collection, 201);
+export const collectFee = asyncHandler(async (_req: Request, _res: Response) => {
+  // Legacy endpoint: redirect clients to accounting fee collection (posts GL + cash book)
+  throw new ApiError(
+    410,
+    "Legacy fee collection is disabled. Use POST /accounting/collections so cash book and journal stay in sync."
+  );
 });
 
-export const deleteFeeCollection = asyncHandler(async (req: Request, res: Response) => {
-  const collection = await FeeCollection.findOneAndDelete(withTenantScope(req, { _id: req.params.id }));
-
-  if (!collection) {
-    throw new ApiError(404, "Fee collection not found");
-  }
-
-  return sendSuccess(res, "Fee collection deleted successfully");
+export const deleteFeeCollection = asyncHandler(async (_req: Request, _res: Response) => {
+  // Never hard-delete financial documents
+  throw new ApiError(
+    410,
+    "Hard delete of fee collections is disabled. Use POST /accounting/collections/:id/reverse to void with audit trail."
+  );
 });

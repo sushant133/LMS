@@ -21,8 +21,10 @@ import {
 } from "../utils/adminAccount.js";
 import { recordAudit } from "../utils/audit.js";
 import {
+  buildAdminCredentialsUpdatedMessage,
   buildCredentialsAdminMessage,
   notifyAccountCredentials,
+  notifyAdminCredentialsUpdated,
   resolvePortalPassword
 } from "../utils/credentialEmail.js";
 import { resolveInstitutionSchoolId } from "../utils/institutionSchool.js";
@@ -182,6 +184,10 @@ export const updateAdmin = asyncHandler(async (req: Request, res: Response) => {
   ensureNotDeleted(admin);
 
   const before = serializeAdmin(admin as UserLean);
+  const previousLoginId = fromDeletedAdminEmail(admin.email);
+  let loginIdChanged = false;
+  let passwordChanged = false;
+  let plainPassword: string | undefined;
 
   if (payload.email) {
     const nextEmail = payload.email.toLowerCase().trim();
@@ -189,7 +195,10 @@ export const updateAdmin = asyncHandler(async (req: Request, res: Response) => {
     if (duplicate) {
       throw new ApiError(409, "An account with this login ID already exists");
     }
-    admin.email = nextEmail;
+    if (nextEmail !== previousLoginId) {
+      loginIdChanged = true;
+      admin.email = nextEmail;
+    }
   }
 
   if (payload.fullName) {
@@ -201,8 +210,10 @@ export const updateAdmin = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (payload.password) {
+    plainPassword = payload.password;
     admin.password = payload.password;
-    admin.mustChangePassword = false;
+    admin.mustChangePassword = true;
+    passwordChanged = true;
   }
 
   await admin.save();
@@ -213,10 +224,35 @@ export const updateAdmin = asyncHandler(async (req: Request, res: Response) => {
     entity: "User",
     entityId: admin._id.toString(),
     before,
-    after
+    after: passwordChanged ? { ...after, password: "[redacted]" } : after
   });
 
-  return sendSuccess(res, "Administrator account updated", after);
+  let credentialsEmail: Awaited<ReturnType<typeof notifyAdminCredentialsUpdated>> | undefined;
+  if (loginIdChanged || passwordChanged) {
+    credentialsEmail = await notifyAdminCredentialsUpdated({
+      userId: admin._id.toString(),
+      fullName: after.fullName,
+      email: after.email,
+      loginId: after.email,
+      password: plainPassword,
+      loginIdChanged,
+      passwordChanged,
+      schoolId: admin.schoolId?.toString() ?? null,
+      req
+    });
+  }
+
+  const message =
+    credentialsEmail != null
+      ? buildAdminCredentialsUpdatedMessage(credentialsEmail)
+      : "Administrator account updated";
+
+  return sendSuccess(res, message, {
+    admin: after,
+    loginEmail: after.email,
+    defaultPassword: plainPassword,
+    credentialsEmail
+  });
 });
 
 export const activateAdmin = asyncHandler(async (req: Request, res: Response) => {
@@ -318,9 +354,23 @@ export const resetAdminPassword = asyncHandler(async (req: Request, res: Respons
     after: { ...after, password: "[redacted]" }
   });
 
-  return sendSuccess(res, "Administrator password reset", {
+  const credentialsEmail = await notifyAdminCredentialsUpdated({
+    userId: admin._id.toString(),
+    fullName: after.fullName,
+    email: after.email,
+    loginId: after.email,
+    password: payload.password,
+    loginIdChanged: false,
+    passwordChanged: true,
+    schoolId: admin.schoolId?.toString() ?? null,
+    req
+  });
+
+  return sendSuccess(res, buildAdminCredentialsUpdatedMessage(credentialsEmail), {
     admin: after,
-    loginEmail: after.email
+    loginEmail: after.email,
+    defaultPassword: payload.password,
+    credentialsEmail
   });
 });
 

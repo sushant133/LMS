@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { canManageInstitution, noticeSchema, USER_ROLES, type NoticeInput, type NoticeRecord } from "@phit-erp/shared";
+import {
+  canManageInstitution,
+  noticeSchema,
+  USER_ROLES,
+  type NoticeInput,
+  type NoticeRecord,
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherScope } from "hooks/useTeacherScope";
@@ -14,13 +20,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
-import { StudentNoticeBoard, type EnrichedNoticeRecord } from "features/notices/StudentNoticeBoard";
+import {
+  StudentNoticeBoard,
+  type EnrichedNoticeRecord,
+} from "features/notices/StudentNoticeBoard";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import {
   filterSectionsByClass,
   filterSubjectsByClass,
-  hasSingleOption
+  hasSingleOption,
 } from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
 
@@ -29,7 +38,7 @@ const adminDefaultNoticeValue: NoticeInput = {
   content: "",
   visibleTo: ["COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT"],
   publishDateBs: "",
-  expiresAtBs: ""
+  expiresAtBs: "",
 };
 
 const teacherDefaultNoticeValue: NoticeInput = {
@@ -37,7 +46,7 @@ const teacherDefaultNoticeValue: NoticeInput = {
   content: "",
   visibleTo: ["STUDENT"],
   publishDateBs: "",
-  expiresAtBs: ""
+  expiresAtBs: "",
 };
 
 interface NoticeManagerProps {
@@ -64,18 +73,28 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
       return;
     }
 
-    const { classes: scopedClasses, sections: scopedSectionsList, subjects: scopedSubjectsList } = teacherScopeQuery.data;
+    const {
+      classes: scopedClasses,
+      sections: scopedSectionsList,
+      subjects: scopedSubjectsList,
+    } = teacherScopeQuery.data;
 
     setForm((current) => {
       const next = { ...current };
       if (hasSingleOption(scopedClasses)) {
         next.classId = scopedClasses[0]!._id;
       }
-      const classSections = filterSectionsByClass(scopedSectionsList, next.classId ?? "");
+      const classSections = filterSectionsByClass(
+        scopedSectionsList,
+        next.classId ?? "",
+      );
       if (hasSingleOption(classSections)) {
         next.sectionId = classSections[0]!._id;
       }
-      const classSubjects = filterSubjectsByClass(scopedSubjectsList, next.classId ?? "");
+      const classSubjects = filterSubjectsByClass(
+        scopedSubjectsList,
+        next.classId ?? "",
+      );
       if (hasSingleOption(classSubjects)) {
         next.subjectId = classSubjects[0]!._id;
       }
@@ -85,19 +104,21 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
 
   const noticesQuery = useQuery({
     queryKey: ["notices"],
-    queryFn: () => unwrap<NoticeRecord[]>(api.get("/notices"))
+    queryFn: () => unwrap<NoticeRecord[]>(api.get("/notices")),
   });
 
   const noticeMutation = useMutation({
     mutationFn: async (payload: NoticeInput) =>
-      editingId ? unwrap<NoticeRecord>(api.put(`/notices/${editingId}`, payload)) : unwrap<NoticeRecord>(api.post("/notices", payload)),
+      editingId
+        ? unwrap<NoticeRecord>(api.put(`/notices/${editingId}`, payload))
+        : unwrap<NoticeRecord>(api.post("/notices", payload)),
     onSuccess: async () => {
       toast.success(editingId ? "Notice updated" : "Notice published");
       setForm(isTeacher ? teacherDefaultNoticeValue : adminDefaultNoticeValue);
       setEditingId(null);
       await queryClient.invalidateQueries({ queryKey: ["notices"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const deleteMutation = useMutation({
@@ -110,23 +131,41 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
       setForm(isTeacher ? teacherDefaultNoticeValue : adminDefaultNoticeValue);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["notices"] }),
-        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const teacherClassMap = useMemo(
-    () => new Map((teacherScopeQuery.data?.classes ?? []).map((item) => [item._id, item.name])),
-    [teacherScopeQuery.data?.classes]
+    () =>
+      new Map(
+        (teacherScopeQuery.data?.classes ?? []).map((item) => [
+          item._id,
+          item.name,
+        ]),
+      ),
+    [teacherScopeQuery.data?.classes],
   );
   const teacherSectionMap = useMemo(
-    () => new Map((teacherScopeQuery.data?.sections ?? []).map((item) => [item._id, item.name])),
-    [teacherScopeQuery.data?.sections]
+    () =>
+      new Map(
+        (teacherScopeQuery.data?.sections ?? []).map((item) => [
+          item._id,
+          item.name,
+        ]),
+      ),
+    [teacherScopeQuery.data?.sections],
   );
   const teacherSubjectMap = useMemo(
-    () => new Map((teacherScopeQuery.data?.subjects ?? []).map((item) => [item._id, item.name])),
-    [teacherScopeQuery.data?.subjects]
+    () =>
+      new Map(
+        (teacherScopeQuery.data?.subjects ?? []).map((item) => [
+          item._id,
+          item.name,
+        ]),
+      ),
+    [teacherScopeQuery.data?.subjects],
   );
 
   const announcements = useMemo(() => {
@@ -136,7 +175,10 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
     }
 
     const teacherId = teacherScopeQuery.data?.scope.teacherId;
-    return notices.filter((notice) => notice.teacherId === teacherId && notice.visibleTo.includes("STUDENT"));
+    return notices.filter(
+      (notice) =>
+        notice.teacherId === teacherId && notice.visibleTo.includes("STUDENT"),
+    );
   }, [isTeacher, noticesQuery.data, teacherScopeQuery.data?.scope.teacherId]);
 
   const formatTeacherAudience = (notice: NoticeRecord) => {
@@ -182,10 +224,17 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
               className="space-y-4"
               onSubmit={(event) => {
                 event.preventDefault();
-                const payload = isTeacher ? { ...form, visibleTo: ["STUDENT"] as NoticeInput["visibleTo"] } : form;
+                const payload = isTeacher
+                  ? {
+                      ...form,
+                      visibleTo: ["STUDENT"] as NoticeInput["visibleTo"],
+                    }
+                  : form;
                 const parsed = noticeSchema.safeParse(payload);
                 if (!parsed.success) {
-                  toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                  toast.error(
+                    parsed.error.issues[0]?.message ?? "Validation failed",
+                  );
                   return;
                 }
                 void noticeMutation.mutateAsync(parsed.data);
@@ -193,7 +242,15 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
             >
               <div className="grid gap-4 md:grid-cols-2">
                 <FormField label="Title">
-                  <Input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
+                  <Input
+                    value={form.title}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        title: event.target.value,
+                      }))
+                    }
+                  />
                 </FormField>
                 {isTeacher ? (
                   <FormField label="Visible To">
@@ -203,7 +260,10 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                   <FormField label="Visible To">
                     <div className="grid grid-cols-2 gap-2">
                       {USER_ROLES.map((role) => (
-                        <label key={role} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                        <label
+                          key={role}
+                          className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                        >
                           <input
                             checked={form.visibleTo.includes(role)}
                             type="checkbox"
@@ -212,7 +272,9 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                                 ...current,
                                 visibleTo: event.target.checked
                                   ? [...current.visibleTo, role]
-                                  : current.visibleTo.filter((item) => item !== role)
+                                  : current.visibleTo.filter(
+                                      (item) => item !== role,
+                                    ),
                               }))
                             }
                           />
@@ -223,23 +285,47 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                   </FormField>
                 )}
                 <FormField label="Publish Date (BS)">
-                  <NepaliDateField value={form.publishDateBs} onChange={(value) => setForm((current) => ({ ...current, publishDateBs: value }))} />
+                  <NepaliDateField
+                    value={form.publishDateBs}
+                    onChange={(value) =>
+                      setForm((current) => ({
+                        ...current,
+                        publishDateBs: value,
+                      }))
+                    }
+                  />
                 </FormField>
                 <FormField label="Expiry Date (BS)">
-                  <NepaliDateField value={form.expiresAtBs ?? ""} onChange={(value) => setForm((current) => ({ ...current, expiresAtBs: value }))} />
+                  <NepaliDateField
+                    value={form.expiresAtBs ?? ""}
+                    onChange={(value) =>
+                      setForm((current) => ({ ...current, expiresAtBs: value }))
+                    }
+                  />
                 </FormField>
                 {isTeacher ? (
                   <>
                     {(() => {
-                      const scopedClasses = teacherScopeQuery.data?.classes ?? [];
-                      const scopedSections = filterSectionsByClass(teacherScopeQuery.data?.sections ?? [], form.classId ?? "");
-                      const scopedSubjects = filterSubjectsByClass(teacherScopeQuery.data?.subjects ?? [], form.classId ?? "");
+                      const scopedClasses =
+                        teacherScopeQuery.data?.classes ?? [];
+                      const scopedSections = filterSectionsByClass(
+                        teacherScopeQuery.data?.sections ?? [],
+                        form.classId ?? "",
+                      );
+                      const scopedSubjects = filterSubjectsByClass(
+                        teacherScopeQuery.data?.subjects ?? [],
+                        form.classId ?? "",
+                      );
 
                       return (
                         <>
                           {hasSingleOption(scopedClasses) ? (
                             <FormField label="Class">
-                              <Input value={scopedClasses[0]!.name} readOnly disabled />
+                              <Input
+                                value={scopedClasses[0]!.name}
+                                readOnly
+                                disabled
+                              />
                             </FormField>
                           ) : (
                             <FormField label="Class (optional)">
@@ -251,13 +337,16 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                                     ...current,
                                     classId: event.target.value || undefined,
                                     sectionId: undefined,
-                                    subjectId: undefined
+                                    subjectId: undefined,
                                   }))
                                 }
                               >
                                 <option value="">All assigned classes</option>
                                 {scopedClasses.map((schoolClass) => (
-                                  <option key={schoolClass._id} value={schoolClass._id}>
+                                  <option
+                                    key={schoolClass._id}
+                                    value={schoolClass._id}
+                                  >
                                     {schoolClass.name}
                                   </option>
                                 ))}
@@ -266,7 +355,11 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                           )}
                           {hasSingleOption(scopedSections) ? (
                             <FormField label="Section">
-                              <Input value={scopedSections[0]!.name} readOnly disabled />
+                              <Input
+                                value={scopedSections[0]!.name}
+                                readOnly
+                                disabled
+                              />
                             </FormField>
                           ) : (
                             <FormField label="Section (optional)">
@@ -274,7 +367,10 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                 value={form.sectionId ?? ""}
                                 onChange={(event) =>
-                                  setForm((current) => ({ ...current, sectionId: event.target.value || undefined }))
+                                  setForm((current) => ({
+                                    ...current,
+                                    sectionId: event.target.value || undefined,
+                                  }))
                                 }
                                 disabled={!form.classId}
                               >
@@ -289,7 +385,11 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                           )}
                           {hasSingleOption(scopedSubjects) ? (
                             <FormField label="Subject">
-                              <Input value={scopedSubjects[0]!.name} readOnly disabled />
+                              <Input
+                                value={scopedSubjects[0]!.name}
+                                readOnly
+                                disabled
+                              />
                             </FormField>
                           ) : (
                             <FormField label="Subject (optional)">
@@ -297,7 +397,10 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                 value={form.subjectId ?? ""}
                                 onChange={(event) =>
-                                  setForm((current) => ({ ...current, subjectId: event.target.value || undefined }))
+                                  setForm((current) => ({
+                                    ...current,
+                                    subjectId: event.target.value || undefined,
+                                  }))
                                 }
                                 disabled={!form.classId}
                               >
@@ -317,7 +420,15 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                 ) : null}
               </div>
               <FormField label="Content">
-                <Textarea value={form.content} onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))} />
+                <Textarea
+                  value={form.content}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      content: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <div className="flex justify-end gap-2">
                 {editingId ? (
@@ -326,13 +437,19 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                     variant="outline"
                     onClick={() => {
                       setEditingId(null);
-                      setForm(isTeacher ? teacherDefaultNoticeValue : adminDefaultNoticeValue);
+                      setForm(
+                        isTeacher
+                          ? teacherDefaultNoticeValue
+                          : adminDefaultNoticeValue,
+                      );
                     }}
                   >
                     Cancel
                   </Button>
                 ) : null}
-                <Button type="submit">{editingId ? "Update Notice" : "Publish Notice"}</Button>
+                <Button type="submit">
+                  {editingId ? "Update Notice" : "Publish Notice"}
+                </Button>
               </div>
             </form>
           </CardContent>
@@ -341,11 +458,15 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
 
       <Card>
         <CardHeader>
-          <CardTitle>{isTeacher ? "My Student Announcements" : "Announcements"}</CardTitle>
+          <CardTitle>
+            {isTeacher ? "My Student Announcements" : "Announcements"}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {isReadOnlyViewer ? (
-            <StudentNoticeBoard notices={(noticesQuery.data ?? []) as EnrichedNoticeRecord[]} />
+            <StudentNoticeBoard
+              notices={(noticesQuery.data ?? []) as EnrichedNoticeRecord[]}
+            />
           ) : announcements.length === 0 ? (
             <EmptyState
               title="No notices yet"
@@ -370,10 +491,18 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                   {announcements.map((notice) => (
                     <tr key={notice._id}>
                       <Td>
-                        <div className="font-medium text-slate-900">{notice.title}</div>
-                        <div className="text-xs text-slate-500">{notice.content}</div>
+                        <div className="font-medium text-slate-900">
+                          {notice.title}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {notice.content}
+                        </div>
                       </Td>
-                      <Td>{isTeacher ? formatTeacherAudience(notice) : notice.visibleTo.join(", ")}</Td>
+                      <Td>
+                        {isTeacher
+                          ? formatTeacherAudience(notice)
+                          : notice.visibleTo.join(", ")}
+                      </Td>
                       <Td>{notice.publishDateBs}</Td>
                       <Td className="text-right">
                         {canManageNotices ? (
@@ -386,12 +515,14 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                                 setForm({
                                   title: notice.title,
                                   content: notice.content,
-                                  visibleTo: isTeacher ? ["STUDENT"] : notice.visibleTo,
+                                  visibleTo: isTeacher
+                                    ? ["STUDENT"]
+                                    : notice.visibleTo,
                                   publishDateBs: notice.publishDateBs,
                                   expiresAtBs: notice.expiresAtBs ?? "",
                                   classId: notice.classId,
                                   sectionId: notice.sectionId,
-                                  subjectId: notice.subjectId
+                                  subjectId: notice.subjectId,
                                 });
                               }}
                             >
@@ -403,7 +534,7 @@ export const NoticeManager = ({ embedded = false }: NoticeManagerProps) => {
                               disabled={deleteMutation.isPending}
                               onClick={() => {
                                 const confirmed = window.confirm(
-                                  `Delete "${notice.title}"? This announcement will be removed permanently.`
+                                  `Delete "${notice.title}"? This announcement will be removed permanently.`,
                                 );
                                 if (!confirmed) {
                                   return;

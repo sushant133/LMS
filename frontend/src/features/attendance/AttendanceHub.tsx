@@ -14,15 +14,25 @@ export const AttendanceHub = () => {
   const hasInstitutionRead = hasInstitutionAccess(user?.role ?? "");
   const canWriteAdmin = canManageInstitution(user?.role ?? "");
   const isTeacher = user?.role === "TEACHER";
-  const [activeTab, setActiveTab] = useState<AttendanceTab>(isTeacher ? "daily" : "daily");
+  const [activeTab, setActiveTab] = useState<AttendanceTab>(
+    isTeacher ? "daily" : "daily",
+  );
 
   const tabs = useMemo(
     () =>
       [
-        { id: "daily" as const, label: "Daily Attendance", icon: CalendarCheck },
-        { id: "subject" as const, label: "Subject-wise Attendance", icon: ClipboardList }
+        {
+          id: "daily" as const,
+          label: "Daily Attendance",
+          icon: CalendarCheck,
+        },
+        {
+          id: "subject" as const,
+          label: "Subject-wise Attendance",
+          icon: ClipboardList,
+        },
       ] as const,
-    []
+    [],
   );
 
   return (

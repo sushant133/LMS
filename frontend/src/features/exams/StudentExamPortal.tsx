@@ -1,6 +1,12 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ExamRecord, ExamRoutineRecord, MarksheetViewResponse, ResultRecord, SubjectRecord } from "@phit-erp/shared";
+import type {
+  ExamRecord,
+  ExamRoutineRecord,
+  MarksheetViewResponse,
+  ResultRecord,
+  SubjectRecord,
+} from "@phit-erp/shared";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -20,10 +26,19 @@ interface StudentExamPortalProps {
   isLoading?: boolean;
 }
 
-const StudentResultMarksheet = ({ examId, studentId }: { examId: string; studentId: string }) => {
+const StudentResultMarksheet = ({
+  examId,
+  studentId,
+}: {
+  examId: string;
+  studentId: string;
+}) => {
   const marksheetQuery = useQuery({
     queryKey: ["marksheet", "portal", examId, studentId],
-    queryFn: () => unwrap<MarksheetViewResponse>(api.get(`/exams/results/${examId}/${studentId}/marksheet`))
+    queryFn: () =>
+      unwrap<MarksheetViewResponse>(
+        api.get(`/exams/results/${examId}/${studentId}/marksheet`),
+      ),
   });
 
   if (marksheetQuery.isLoading) {
@@ -31,44 +46,66 @@ const StudentResultMarksheet = ({ examId, studentId }: { examId: string; student
   }
 
   if (!marksheetQuery.data) {
-    return <EmptyState title="Marksheet unavailable" description="Could not load your marksheet. Contact the college office if this persists." />;
+    return (
+      <EmptyState
+        title="Marksheet unavailable"
+        description="Could not load your marksheet. Contact the college office if this persists."
+      />
+    );
   }
 
   return <ResultMarksheetView data={marksheetQuery.data} />;
 };
 
-export const StudentExamPortal = ({ exams, results, isLoading }: StudentExamPortalProps) => {
+export const StudentExamPortal = ({
+  exams,
+  results,
+  isLoading,
+}: StudentExamPortalProps) => {
   const routinesQuery = useQuery({
     queryKey: ["exam-routines", "student"],
     queryFn: async () => {
       const all = await Promise.all(
         exams.map((exam) =>
-          unwrap<EnrichedRoutine[]>(api.get("/exams/routines", { params: { examId: exam._id } })).catch(() => [])
-        )
+          unwrap<EnrichedRoutine[]>(
+            api.get("/exams/routines", { params: { examId: exam._id } }),
+          ).catch(() => []),
+        ),
       );
       return all.flat();
     },
-    enabled: exams.length > 0
+    enabled: exams.length > 0,
   });
 
   const subjectsQuery = useQuery({
     queryKey: ["student-subjects"],
     queryFn: () => unwrap<SubjectRecord[]>(api.get("/student/subjects")),
-    staleTime: 60_000
+    staleTime: 60_000,
   });
 
   const subjectMap = useMemo(
-    () => new Map((subjectsQuery.data ?? []).map((subject) => [subject._id, subject])),
-    [subjectsQuery.data]
+    () =>
+      new Map(
+        (subjectsQuery.data ?? []).map((subject) => [subject._id, subject]),
+      ),
+    [subjectsQuery.data],
   );
 
-  const examById = useMemo(() => new Map(exams.map((exam) => [exam._id, exam])), [exams]);
+  const examById = useMemo(
+    () => new Map(exams.map((exam) => [exam._id, exam])),
+    [exams],
+  );
 
-  const publishedExams = useMemo(() => exams.filter((exam) => exam.routinePublished), [exams]);
+  const publishedExams = useMemo(
+    () => exams.filter((exam) => exam.routinePublished),
+    [exams],
+  );
 
   const upcomingRoutines = useMemo(() => {
     const routines = routinesQuery.data ?? [];
-    return [...routines].sort((left, right) => left.examDateBs.localeCompare(right.examDateBs));
+    return [...routines].sort((left, right) =>
+      left.examDateBs.localeCompare(right.examDateBs),
+    );
   }, [routinesQuery.data]);
 
   const sortedResults = useMemo(
@@ -78,7 +115,7 @@ export const StudentExamPortal = ({ exams, results, isLoading }: StudentExamPort
         const rightDate = examById.get(right.examId)?.startDateBs ?? "";
         return rightDate.localeCompare(leftDate);
       }),
-    [results, examById]
+    [results, examById],
   );
 
   if (isLoading || routinesQuery.isLoading) {
@@ -93,7 +130,10 @@ export const StudentExamPortal = ({ exams, results, isLoading }: StudentExamPort
         </CardHeader>
         <CardContent>
           {upcomingRoutines.length === 0 ? (
-            <EmptyState title="No published routines" description="Your exam schedule will appear here once the college admin publishes the routine." />
+            <EmptyState
+              title="No published routines"
+              description="Your exam schedule will appear here once the college admin publishes the routine."
+            />
           ) : (
             <div className="overflow-x-auto">
               <Table>
@@ -114,7 +154,11 @@ export const StudentExamPortal = ({ exams, results, isLoading }: StudentExamPort
                     return (
                       <tr key={routine._id}>
                         <Td>{exam?.name ?? "Exam"}</Td>
-                        <Td>{routine.subjectName ?? subjectMap.get(routine.subjectId)?.name ?? "Subject"}</Td>
+                        <Td>
+                          {routine.subjectName ??
+                            subjectMap.get(routine.subjectId)?.name ??
+                            "Subject"}
+                        </Td>
                         <Td>{routine.examDateBs}</Td>
                         <Td>{routine.day}</Td>
                         <Td>
@@ -139,7 +183,10 @@ export const StudentExamPortal = ({ exams, results, isLoading }: StudentExamPort
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
             {publishedExams.map((exam) => (
-              <div key={exam._id} className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
+              <div
+                key={exam._id}
+                className="rounded-2xl border border-brand-100 bg-brand-50/40 p-4"
+              >
                 <p className="font-semibold text-slate-900">{exam.name}</p>
                 <p className="mt-1 text-sm text-slate-600">
                   {exam.startDateBs} to {exam.endDateBs} · {exam.academicYearBs}
@@ -151,14 +198,22 @@ export const StudentExamPortal = ({ exams, results, isLoading }: StudentExamPort
       ) : null}
 
       {sortedResults.length === 0 ? (
-        <EmptyState title="No published results yet" description="Your exam results will appear here after the college admin publishes them." />
+        <EmptyState
+          title="No published results yet"
+          description="Your exam results will appear here after the college admin publishes them."
+        />
       ) : (
         sortedResults.map((result) => {
           const exam = examById.get(result.examId);
           return (
             <div key={result._id} className="space-y-2">
-              <p className="text-sm font-medium text-slate-600">{exam?.name ?? "Exam"}</p>
-              <StudentResultMarksheet examId={result.examId} studentId={result.studentId} />
+              <p className="text-sm font-medium text-slate-600">
+                {exam?.name ?? "Exam"}
+              </p>
+              <StudentResultMarksheet
+                examId={result.examId}
+                studentId={result.studentId}
+              />
             </div>
           );
         })

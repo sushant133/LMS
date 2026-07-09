@@ -11,7 +11,7 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
     "inline-flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition-all",
     isActive
       ? "border-brand-300 bg-brand-200 text-brand-900 shadow-sm"
-      : "border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-200 hover:bg-brand-100"
+      : "border-brand-100 bg-brand-50 text-brand-700 hover:border-brand-200 hover:bg-brand-100",
   );
 
 export const StudentsLayout = () => {
@@ -48,4 +48,6 @@ export const StudentsLayout = () => {
   );
 };
 
-export const StudentsIndexRedirect = () => <Navigate to="/students/list" replace />;
+export const StudentsIndexRedirect = () => (
+  <Navigate to="/students/list" replace />
+);

@@ -43,6 +43,8 @@ const journalEntrySchema = new Schema(
     studentId: { type: Schema.Types.ObjectId, ref: "Student" },
     bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount" },
     isReversal: { type: Boolean, default: false },
+    /** True when a reversal entry has been posted against this original. */
+    isReversed: { type: Boolean, default: false },
     reversedEntryId: { type: Schema.Types.ObjectId, ref: "JournalEntry" },
     isPosted: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },

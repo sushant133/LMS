@@ -2,7 +2,10 @@ import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
-import type { AttendanceExportPeriod, AttendancePeriodSelection } from "lib/attendancePeriodUtils";
+import type {
+  AttendanceExportPeriod,
+  AttendancePeriodSelection,
+} from "lib/attendancePeriodUtils";
 
 interface AttendancePeriodFilterProps {
   value: AttendancePeriodSelection;
@@ -13,18 +16,24 @@ const periodLabels: Record<AttendanceExportPeriod, string> = {
   weekly: "Weekly",
   monthly: "Monthly",
   yearly: "Yearly",
-  custom: "Custom range"
+  custom: "Custom range",
 };
 
-export const AttendancePeriodFilter = ({ value, onChange }: AttendancePeriodFilterProps) => {
-  const update = (patch: Partial<AttendancePeriodSelection>) => onChange({ ...value, ...patch });
+export const AttendancePeriodFilter = ({
+  value,
+  onChange,
+}: AttendancePeriodFilterProps) => {
+  const update = (patch: Partial<AttendancePeriodSelection>) =>
+    onChange({ ...value, ...patch });
 
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <FormField label="Period">
         <Select
           value={value.period}
-          onChange={(event) => update({ period: event.target.value as AttendanceExportPeriod })}
+          onChange={(event) =>
+            update({ period: event.target.value as AttendanceExportPeriod })
+          }
         >
           {Object.entries(periodLabels).map(([key, label]) => (
             <option key={key} value={key}>
@@ -67,10 +76,16 @@ export const AttendancePeriodFilter = ({ value, onChange }: AttendancePeriodFilt
       {value.period === "custom" ? (
         <>
           <FormField label="From (BS)">
-            <NepaliDateField value={value.fromDateBs} onChange={(next) => update({ fromDateBs: next })} />
+            <NepaliDateField
+              value={value.fromDateBs}
+              onChange={(next) => update({ fromDateBs: next })}
+            />
           </FormField>
           <FormField label="To (BS)">
-            <NepaliDateField value={value.toDateBs} onChange={(next) => update({ toDateBs: next })} />
+            <NepaliDateField
+              value={value.toDateBs}
+              onChange={(next) => update({ toDateBs: next })}
+            />
           </FormField>
         </>
       ) : null}

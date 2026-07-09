@@ -2,25 +2,38 @@ import {
   BLOOD_GROUPS,
   DISABILITY_CATEGORIES,
   ETHNICITY_CATEGORIES,
+  STUDENT_ACADEMIC_STATUSES,
+  STUDENT_ACADEMIC_STATUS_LABELS,
   studentSchema,
   type BatchRecord,
   type ClassRecord,
   type SectionRecord,
   type StudentDocument,
   type StudentInput,
-  type YearRecord
+  type YearRecord,
 } from "@phit-erp/shared";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { FormField } from "components/shared/FormField";
-import { NepaliDateField, studentBirthMaxDate, studentBirthMinDate } from "components/shared/NepaliDateField";
-import { PortalLoginFields, validatePortalPassword } from "components/shared/PortalLoginFields";
+import {
+  NepaliDateField,
+  studentBirthMaxDate,
+  studentBirthMinDate,
+} from "components/shared/NepaliDateField";
+import {
+  PortalLoginFields,
+  validatePortalPassword,
+} from "components/shared/PortalLoginFields";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { filterSectionsByClass, filterYearsByBatch } from "lib/academicStructureUtils";
+import {
+  filterSectionsByClass,
+  filterYearsByBatch,
+} from "lib/academicStructureUtils";
 import { StudentDocumentsSection } from "./StudentDocumentsSection";
 import type { PendingStudentDocument } from "./studentDocumentUtils";
 
@@ -45,7 +58,7 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
     district: "",
     municipality: "",
     ward: "",
-    streetAddress: ""
+    streetAddress: "",
   },
   fatherName: "",
   fatherPhone: "",
@@ -55,7 +68,7 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   guardianPhone: "",
   feesDueNpr: 0,
   remarks: "",
-  academicStatus: "ACTIVE"
+  academicStatus: "ACTIVE",
 });
 
 interface StudentFormProps {
@@ -91,20 +104,24 @@ export const StudentForm = ({
   onSubmit,
   onCancel,
   onPendingDocumentsChange,
-  pendingDocuments = []
+  pendingDocuments = [],
 }: StudentFormProps) => {
   const isCollege = useIsCollege();
-  const [form, setForm] = useState<StudentInput>(initialValue ?? createDefaultValue(isCollege));
-  const [documents, setDocuments] = useState<StudentDocument[]>(initialValue?.documents ?? []);
+  const [form, setForm] = useState<StudentInput>(
+    initialValue ?? createDefaultValue(isCollege),
+  );
+  const [documents, setDocuments] = useState<StudentDocument[]>(
+    initialValue?.documents ?? [],
+  );
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const filteredSections = useMemo(
     () => filterSectionsByClass(sections, form.classId ?? ""),
-    [form.classId, sections]
+    [form.classId, sections],
   );
   const filteredYears = useMemo(
     () => filterYearsByBatch(years, form.batchId ?? ""),
-    [form.batchId, years]
+    [form.batchId, years],
   );
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -121,7 +138,9 @@ export const StudentForm = ({
       email: form.email.trim(),
       password: password.trim() || undefined,
       documents,
-      photoUrl: documents.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ?? form.photoUrl
+      photoUrl:
+        documents.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ??
+        form.photoUrl,
     });
 
     if (!parsed.success) {
@@ -151,7 +170,9 @@ export const StudentForm = ({
     setForm((current) => ({
       ...current,
       documents: nextDocuments,
-      photoUrl: nextDocuments.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ?? current.photoUrl
+      photoUrl:
+        nextDocuments.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ??
+        current.photoUrl,
     }));
   };
 
@@ -159,16 +180,45 @@ export const StudentForm = ({
     <form className="space-y-4" onSubmit={handleSubmit}>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <FormField label="Full Name">
-          <Input value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
+          <Input
+            value={form.fullName}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                fullName: event.target.value,
+              }))
+            }
+          />
         </FormField>
         <FormField label="Phone">
-          <Input value={form.phone ?? ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+          <Input
+            value={form.phone ?? ""}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, phone: event.target.value }))
+            }
+          />
         </FormField>
         <FormField label="Admission No.">
-          <Input value={form.admissionNumber} onChange={(event) => setForm((current) => ({ ...current, admissionNumber: event.target.value }))} />
+          <Input
+            value={form.admissionNumber}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                admissionNumber: event.target.value,
+              }))
+            }
+          />
         </FormField>
         <FormField label="Roll No.">
-          <Input type="number" value={form.rollNumber} onChange={(event) => setForm((current) => ({ ...current, rollNumber: event.target.valueAsNumber }))} />
+          <NumberInput
+            value={form.rollNumber}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                rollNumber: event.target.valueAsNumber,
+              }))
+            }
+          />
         </FormField>
 
         {isCollege ? (
@@ -176,7 +226,13 @@ export const StudentForm = ({
             <FormField label="Batch">
               <Select
                 value={form.batchId ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, batchId: event.target.value, yearId: "" }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    batchId: event.target.value,
+                    yearId: "",
+                  }))
+                }
               >
                 <option value="">Select batch</option>
                 {batches.map((item) => (
@@ -187,7 +243,15 @@ export const StudentForm = ({
               </Select>
             </FormField>
             <FormField label="Year">
-              <Select value={form.yearId ?? ""} onChange={(event) => setForm((current) => ({ ...current, yearId: event.target.value }))}>
+              <Select
+                value={form.yearId ?? ""}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    yearId: event.target.value,
+                  }))
+                }
+              >
                 <option value="">Select year</option>
                 {filteredYears.map((item) => (
                   <option key={item._id} value={item._id}>
@@ -202,7 +266,13 @@ export const StudentForm = ({
             <FormField label="Class">
               <Select
                 value={form.classId ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, classId: event.target.value, sectionId: "" }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    classId: event.target.value,
+                    sectionId: "",
+                  }))
+                }
               >
                 <option value="">Select class</option>
                 {classes.map((item) => (
@@ -213,7 +283,15 @@ export const StudentForm = ({
               </Select>
             </FormField>
             <FormField label="Section">
-              <Select value={form.sectionId ?? ""} onChange={(event) => setForm((current) => ({ ...current, sectionId: event.target.value }))}>
+              <Select
+                value={form.sectionId ?? ""}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    sectionId: event.target.value,
+                  }))
+                }
+              >
                 <option value="">Select section</option>
                 {filteredSections.map((item) => (
                   <option key={item._id} value={item._id}>
@@ -226,25 +304,45 @@ export const StudentForm = ({
         )}
 
         <FormField label="Admission Date (BS)">
-          <NepaliDateField value={form.admissionDateBs} onChange={(value) => setForm((current) => ({ ...current, admissionDateBs: value }))} />
+          <NepaliDateField
+            value={form.admissionDateBs}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, admissionDateBs: value }))
+            }
+          />
         </FormField>
         <FormField label="Date of Birth (BS)">
           <NepaliDateField
             value={form.dateOfBirthBs}
-            onChange={(value) => setForm((current) => ({ ...current, dateOfBirthBs: value }))}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, dateOfBirthBs: value }))
+            }
             minDate={studentBirthMinDate()}
             maxDate={studentBirthMaxDate()}
           />
         </FormField>
         <FormField label="Gender">
-          <Select value={form.gender} onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))}>
+          <Select
+            value={form.gender}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, gender: event.target.value }))
+            }
+          >
             <option value="Male">Male</option>
             <option value="Female">Female</option>
             <option value="Other">Other</option>
           </Select>
         </FormField>
         <FormField label="Blood Group">
-          <Select value={form.bloodGroup ?? "A+"} onChange={(event) => setForm((current) => ({ ...current, bloodGroup: event.target.value as StudentInput["bloodGroup"] }))}>
+          <Select
+            value={form.bloodGroup ?? "A+"}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                bloodGroup: event.target.value as StudentInput["bloodGroup"],
+              }))
+            }
+          >
             {BLOOD_GROUPS.map((group) => (
               <option key={group} value={group}>
                 {group}
@@ -255,7 +353,13 @@ export const StudentForm = ({
         <FormField label="Disability Category">
           <Select
             value={form.disabilityCategory ?? "None"}
-            onChange={(event) => setForm((current) => ({ ...current, disabilityCategory: event.target.value as StudentInput["disabilityCategory"] }))}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                disabilityCategory: event.target
+                  .value as StudentInput["disabilityCategory"],
+              }))
+            }
           >
             {DISABILITY_CATEGORIES.map((category) => (
               <option key={category} value={category}>
@@ -267,7 +371,13 @@ export const StudentForm = ({
         <FormField label="Ethnicity">
           <Select
             value={form.ethnicityCategory ?? "Other"}
-            onChange={(event) => setForm((current) => ({ ...current, ethnicityCategory: event.target.value as StudentInput["ethnicityCategory"] }))}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                ethnicityCategory: event.target
+                  .value as StudentInput["ethnicityCategory"],
+              }))
+            }
           >
             {ETHNICITY_CATEGORIES.map((category) => (
               <option key={category} value={category}>
@@ -277,43 +387,119 @@ export const StudentForm = ({
           </Select>
         </FormField>
         <FormField label="Fees Due (NPR)">
-          <Input type="number" value={form.feesDueNpr} onChange={(event) => setForm((current) => ({ ...current, feesDueNpr: event.target.valueAsNumber }))} />
+          <NumberInput
+            value={form.feesDueNpr}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                feesDueNpr: event.target.valueAsNumber,
+              }))
+            }
+          />
+        </FormField>
+        <FormField label="Academic Status">
+          <Select
+            value={form.academicStatus ?? "ACTIVE"}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                academicStatus: event.target
+                  .value as StudentInput["academicStatus"],
+              }))
+            }
+          >
+            {STUDENT_ACADEMIC_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {STUDENT_ACADEMIC_STATUS_LABELS[status]}
+              </option>
+            ))}
+          </Select>
         </FormField>
       </div>
 
-      <AddressFields value={form.address} onChange={(address) => setForm((current) => ({ ...current, address }))} />
+      <AddressFields
+        value={form.address}
+        onChange={(address) => setForm((current) => ({ ...current, address }))}
+      />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <FormField label="Father Name">
-          <Input value={form.fatherName} onChange={(event) => setForm((current) => ({ ...current, fatherName: event.target.value }))} />
+          <Input
+            value={form.fatherName}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                fatherName: event.target.value,
+              }))
+            }
+          />
         </FormField>
         <FormField label="Father Phone">
           <Input
             placeholder="e.g. 9801234567"
             value={form.fatherPhone ?? ""}
-            onChange={(event) => setForm((current) => ({ ...current, fatherPhone: event.target.value }))}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                fatherPhone: event.target.value,
+              }))
+            }
           />
         </FormField>
         <FormField label="Mother Name">
-          <Input value={form.motherName} onChange={(event) => setForm((current) => ({ ...current, motherName: event.target.value }))} />
+          <Input
+            value={form.motherName}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                motherName: event.target.value,
+              }))
+            }
+          />
         </FormField>
         <FormField label="Mother Phone">
           <Input
             placeholder="e.g. 9801234567"
             value={form.motherPhone ?? ""}
-            onChange={(event) => setForm((current) => ({ ...current, motherPhone: event.target.value }))}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                motherPhone: event.target.value,
+              }))
+            }
           />
         </FormField>
         <FormField label="Guardian Name">
-          <Input value={form.guardianName} onChange={(event) => setForm((current) => ({ ...current, guardianName: event.target.value }))} />
+          <Input
+            value={form.guardianName}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                guardianName: event.target.value,
+              }))
+            }
+          />
         </FormField>
         <FormField label="Guardian Phone">
-          <Input value={form.guardianPhone} onChange={(event) => setForm((current) => ({ ...current, guardianPhone: event.target.value }))} />
+          <Input
+            value={form.guardianPhone}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                guardianPhone: event.target.value,
+              }))
+            }
+          />
         </FormField>
       </div>
 
       <FormField label="Remarks">
-        <Input value={form.remarks ?? ""} onChange={(event) => setForm((current) => ({ ...current, remarks: event.target.value }))} />
+        <Input
+          value={form.remarks ?? ""}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, remarks: event.target.value }))
+          }
+        />
       </FormField>
 
       {canManageDocuments ? (

@@ -13,7 +13,7 @@ import {
   type SectionInput,
   type SectionRecord,
   type SubjectRecord,
-  type TeacherRecord
+  type TeacherRecord,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -22,6 +22,7 @@ import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
@@ -33,7 +34,7 @@ const defaultClassValue: ClassInput = {
   level: "ECD",
   academicYearBs: "2083/2084",
   coordinatorId: "",
-  isActive: true
+  isActive: true,
 };
 
 const defaultSectionValue: SectionInput = {
@@ -41,83 +42,97 @@ const defaultSectionValue: SectionInput = {
   classId: "",
   room: "",
   capacity: 40,
-  classTeacherId: ""
+  classTeacherId: "",
 };
 
 const defaultSubjectValue: AcademicSubjectInput = {
   name: "",
   code: "",
   classIds: [],
-  yearIds: []
+  yearIds: [],
 };
 
 const SchoolAcademicManager = () => {
   const [classForm, setClassForm] = useState<ClassInput>(defaultClassValue);
-  const [sectionForm, setSectionForm] = useState<SectionInput>(defaultSectionValue);
-  const [subjectForm, setSubjectForm] = useState<AcademicSubjectInput>(defaultSubjectValue);
+  const [sectionForm, setSectionForm] =
+    useState<SectionInput>(defaultSectionValue);
+  const [subjectForm, setSubjectForm] =
+    useState<AcademicSubjectInput>(defaultSubjectValue);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
 
   const classesQuery = useQuery({
     queryKey: ["classes"],
-    queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes"))
+    queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes")),
   });
   const sectionsQuery = useQuery({
     queryKey: ["sections"],
-    queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections"))
+    queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections")),
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
-    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects"))
+    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects")),
   });
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
-    queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers"))
+    queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers")),
   });
 
   const refreshAcademicQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["classes"] }),
       queryClient.invalidateQueries({ queryKey: ["sections"] }),
-      queryClient.invalidateQueries({ queryKey: ["subjects"] })
+      queryClient.invalidateQueries({ queryKey: ["subjects"] }),
     ]);
   };
 
   const classMutation = useMutation({
     mutationFn: async (payload: ClassInput) =>
-      editingClassId ? unwrap<ClassRecord>(api.put(`/academics/classes/${editingClassId}`, payload)) : unwrap<ClassRecord>(api.post("/academics/classes", payload)),
+      editingClassId
+        ? unwrap<ClassRecord>(
+            api.put(`/academics/classes/${editingClassId}`, payload),
+          )
+        : unwrap<ClassRecord>(api.post("/academics/classes", payload)),
     onSuccess: async () => {
       toast.success(editingClassId ? "Class updated" : "Class created");
       setClassForm(defaultClassValue);
       setEditingClassId(null);
       await refreshAcademicQueries();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const sectionMutation = useMutation({
     mutationFn: async (payload: SectionInput) =>
-      editingSectionId ? unwrap<SectionRecord>(api.put(`/academics/sections/${editingSectionId}`, payload)) : unwrap<SectionRecord>(api.post("/academics/sections", payload)),
+      editingSectionId
+        ? unwrap<SectionRecord>(
+            api.put(`/academics/sections/${editingSectionId}`, payload),
+          )
+        : unwrap<SectionRecord>(api.post("/academics/sections", payload)),
     onSuccess: async () => {
       toast.success(editingSectionId ? "Section updated" : "Section created");
       setSectionForm(defaultSectionValue);
       setEditingSectionId(null);
       await refreshAcademicQueries();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const subjectMutation = useMutation({
     mutationFn: async (payload: AcademicSubjectInput) =>
-      editingSubjectId ? unwrap<SubjectRecord>(api.put(`/academics/subjects/${editingSubjectId}`, payload)) : unwrap<SubjectRecord>(api.post("/academics/subjects", payload)),
+      editingSubjectId
+        ? unwrap<SubjectRecord>(
+            api.put(`/academics/subjects/${editingSubjectId}`, payload),
+          )
+        : unwrap<SubjectRecord>(api.post("/academics/subjects", payload)),
     onSuccess: async () => {
       toast.success(editingSubjectId ? "Subject updated" : "Subject created");
       setSubjectForm(defaultSubjectValue);
       setEditingSubjectId(null);
       await refreshAcademicQueries();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const deleteEntity = async (path: string, queryKey: string) => {
@@ -137,7 +152,10 @@ const SchoolAcademicManager = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Academic Setup" description="Configure classes, sections, and subjects for BS academic years starting from Baisakh." />
+      <PageHeader
+        title="Academic Setup"
+        description="Configure classes, sections, and subjects for BS academic years starting from Baisakh."
+      />
 
       <div className="grid gap-6 xl:grid-cols-3">
         <Card>
@@ -151,17 +169,35 @@ const SchoolAcademicManager = () => {
                 event.preventDefault();
                 const parsed = classSchema.safeParse(classForm);
                 if (!parsed.success) {
-                  toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                  toast.error(
+                    parsed.error.issues[0]?.message ?? "Validation failed",
+                  );
                   return;
                 }
                 void classMutation.mutateAsync(parsed.data);
               }}
             >
               <FormField label="Class Name">
-                <Input value={classForm.name} onChange={(event) => setClassForm((current) => ({ ...current, name: event.target.value }))} />
+                <Input
+                  value={classForm.name}
+                  onChange={(event) =>
+                    setClassForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Level">
-                <Select value={classForm.level} onChange={(event) => setClassForm((current) => ({ ...current, level: event.target.value as ClassInput["level"] }))}>
+                <Select
+                  value={classForm.level}
+                  onChange={(event) =>
+                    setClassForm((current) => ({
+                      ...current,
+                      level: event.target.value as ClassInput["level"],
+                    }))
+                  }
+                >
                   {CLASS_LEVELS.map((level) => (
                     <option key={level} value={level}>
                       {level}
@@ -170,10 +206,26 @@ const SchoolAcademicManager = () => {
                 </Select>
               </FormField>
               <FormField label="Academic Year (BS)">
-                <Input value={classForm.academicYearBs} onChange={(event) => setClassForm((current) => ({ ...current, academicYearBs: event.target.value }))} />
+                <Input
+                  value={classForm.academicYearBs}
+                  onChange={(event) =>
+                    setClassForm((current) => ({
+                      ...current,
+                      academicYearBs: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Coordinator">
-                <Select value={classForm.coordinatorId ?? ""} onChange={(event) => setClassForm((current) => ({ ...current, coordinatorId: event.target.value }))}>
+                <Select
+                  value={classForm.coordinatorId ?? ""}
+                  onChange={(event) =>
+                    setClassForm((current) => ({
+                      ...current,
+                      coordinatorId: event.target.value,
+                    }))
+                  }
+                >
                   <option value="">Select teacher</option>
                   {teachers.map((teacher) => (
                     <option key={teacher._id} value={teacher._id}>
@@ -188,15 +240,25 @@ const SchoolAcademicManager = () => {
             </form>
 
             {classes.length === 0 ? (
-              <EmptyState title="No classes" description="Create ECD through Class 12 records for the active academic year." />
+              <EmptyState
+                title="No classes"
+                description="Create ECD through Class 12 records for the active academic year."
+              />
             ) : (
               <div className="space-y-3">
                 {classes.map((item) => (
-                  <div key={item._id} className="rounded-2xl border border-slate-200 p-4">
+                  <div
+                    key={item._id}
+                    className="rounded-2xl border border-slate-200 p-4"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="font-semibold text-slate-900">{item.name}</h3>
-                        <p className="text-sm text-slate-500">{item.academicYearBs}</p>
+                        <h3 className="font-semibold text-slate-900">
+                          {item.name}
+                        </h3>
+                        <p className="text-sm text-slate-500">
+                          {item.academicYearBs}
+                        </p>
                       </div>
                       <div className="flex gap-2">
                         <Button
@@ -209,13 +271,22 @@ const SchoolAcademicManager = () => {
                               level: item.level as ClassInput["level"],
                               academicYearBs: item.academicYearBs,
                               coordinatorId: item.coordinatorId ?? "",
-                              isActive: item.isActive
+                              isActive: item.isActive,
                             });
                           }}
                         >
                           Edit
                         </Button>
-                        <Button size="sm" variant="destructive" onClick={() => void deleteEntity(`/academics/classes/${item._id}`, "classes")}>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() =>
+                            void deleteEntity(
+                              `/academics/classes/${item._id}`,
+                              "classes",
+                            )
+                          }
+                        >
                           Delete
                         </Button>
                       </div>
@@ -238,17 +309,35 @@ const SchoolAcademicManager = () => {
                 event.preventDefault();
                 const parsed = sectionSchema.safeParse(sectionForm);
                 if (!parsed.success) {
-                  toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                  toast.error(
+                    parsed.error.issues[0]?.message ?? "Validation failed",
+                  );
                   return;
                 }
                 void sectionMutation.mutateAsync(parsed.data);
               }}
             >
               <FormField label="Section Name">
-                <Input value={sectionForm.name} onChange={(event) => setSectionForm((current) => ({ ...current, name: event.target.value }))} />
+                <Input
+                  value={sectionForm.name}
+                  onChange={(event) =>
+                    setSectionForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Class">
-                <Select value={sectionForm.classId} onChange={(event) => setSectionForm((current) => ({ ...current, classId: event.target.value }))}>
+                <Select
+                  value={sectionForm.classId}
+                  onChange={(event) =>
+                    setSectionForm((current) => ({
+                      ...current,
+                      classId: event.target.value,
+                    }))
+                  }
+                >
                   <option value="">Select class</option>
                   {classes.map((item) => (
                     <option key={item._id} value={item._id}>
@@ -258,13 +347,37 @@ const SchoolAcademicManager = () => {
                 </Select>
               </FormField>
               <FormField label="Room">
-                <Input value={sectionForm.room ?? ""} onChange={(event) => setSectionForm((current) => ({ ...current, room: event.target.value }))} />
+                <Input
+                  value={sectionForm.room ?? ""}
+                  onChange={(event) =>
+                    setSectionForm((current) => ({
+                      ...current,
+                      room: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Capacity">
-                <Input type="number" value={sectionForm.capacity} onChange={(event) => setSectionForm((current) => ({ ...current, capacity: event.target.valueAsNumber }))} />
+                <NumberInput
+                  value={sectionForm.capacity}
+                  onChange={(event) =>
+                    setSectionForm((current) => ({
+                      ...current,
+                      capacity: event.target.valueAsNumber,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Class Teacher">
-                <Select value={sectionForm.classTeacherId ?? ""} onChange={(event) => setSectionForm((current) => ({ ...current, classTeacherId: event.target.value }))}>
+                <Select
+                  value={sectionForm.classTeacherId ?? ""}
+                  onChange={(event) =>
+                    setSectionForm((current) => ({
+                      ...current,
+                      classTeacherId: event.target.value,
+                    }))
+                  }
+                >
                   <option value="">Select teacher</option>
                   {teachers.map((teacher) => (
                     <option key={teacher._id} value={teacher._id}>
@@ -280,12 +393,19 @@ const SchoolAcademicManager = () => {
 
             <div className="space-y-3">
               {sections.map((section) => (
-                <div key={section._id} className="rounded-2xl border border-slate-200 p-4">
+                <div
+                  key={section._id}
+                  className="rounded-2xl border border-slate-200 p-4"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-semibold text-slate-900">{section.name}</h3>
+                      <h3 className="font-semibold text-slate-900">
+                        {section.name}
+                      </h3>
                       <p className="text-sm text-slate-500">
-                        {classes.find((item) => item._id === section.classId)?.name ?? section.classId} / {section.room || "No room"}
+                        {classes.find((item) => item._id === section.classId)
+                          ?.name ?? section.classId}{" "}
+                        / {section.room || "No room"}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -299,13 +419,22 @@ const SchoolAcademicManager = () => {
                             classId: section.classId,
                             room: section.room ?? "",
                             capacity: section.capacity,
-                            classTeacherId: section.classTeacherId ?? ""
+                            classTeacherId: section.classTeacherId ?? "",
                           });
                         }}
                       >
                         Edit
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => void deleteEntity(`/academics/sections/${section._id}`, "sections")}>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() =>
+                          void deleteEntity(
+                            `/academics/sections/${section._id}`,
+                            "sections",
+                          )
+                        }
+                      >
                         Delete
                       </Button>
                     </div>
@@ -327,17 +456,35 @@ const SchoolAcademicManager = () => {
                 event.preventDefault();
                 const parsed = academicSubjectSchema.safeParse(subjectForm);
                 if (!parsed.success) {
-                  toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                  toast.error(
+                    parsed.error.issues[0]?.message ?? "Validation failed",
+                  );
                   return;
                 }
                 void subjectMutation.mutateAsync(parsed.data);
               }}
             >
               <FormField label="Subject Name">
-                <Input value={subjectForm.name} onChange={(event) => setSubjectForm((current) => ({ ...current, name: event.target.value }))} />
+                <Input
+                  value={subjectForm.name}
+                  onChange={(event) =>
+                    setSubjectForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Code">
-                <Input value={subjectForm.code} onChange={(event) => setSubjectForm((current) => ({ ...current, code: event.target.value }))} />
+                <Input
+                  value={subjectForm.code}
+                  onChange={(event) =>
+                    setSubjectForm((current) => ({
+                      ...current,
+                      code: event.target.value,
+                    }))
+                  }
+                />
               </FormField>
               <FormField label="Class">
                 <Select
@@ -345,8 +492,13 @@ const SchoolAcademicManager = () => {
                   className="h-28"
                   value={subjectForm.classIds}
                   onChange={(event) => {
-                    const selected = Array.from(event.target.selectedOptions).map((option) => option.value);
-                    setSubjectForm((current) => ({ ...current, classIds: selected }));
+                    const selected = Array.from(
+                      event.target.selectedOptions,
+                    ).map((option) => option.value);
+                    setSubjectForm((current) => ({
+                      ...current,
+                      classIds: selected,
+                    }));
                   }}
                 >
                   {classes.map((item) => (
@@ -375,11 +527,17 @@ const SchoolAcademicManager = () => {
                     <tr key={subject._id}>
                       <Td>
                         <div className="font-medium">{subject.name}</div>
-                        <div className="text-xs text-slate-500">{subject.code}</div>
+                        <div className="text-xs text-slate-500">
+                          {subject.code}
+                        </div>
                       </Td>
                       <Td>
                         {subject.classIds
-                          .map((classId) => classes.find((item) => item._id === classId)?.name ?? classId)
+                          .map(
+                            (classId) =>
+                              classes.find((item) => item._id === classId)
+                                ?.name ?? classId,
+                          )
                           .join(", ")}
                       </Td>
                       <Td className="text-right">
@@ -393,13 +551,22 @@ const SchoolAcademicManager = () => {
                                 name: subject.name,
                                 code: subject.code,
                                 classIds: subject.classIds,
-                                yearIds: subject.yearIds ?? []
+                                yearIds: subject.yearIds ?? [],
                               });
                             }}
                           >
                             Edit
                           </Button>
-                          <Button size="sm" variant="destructive" onClick={() => void deleteEntity(`/academics/subjects/${subject._id}`, "subjects")}>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() =>
+                              void deleteEntity(
+                                `/academics/subjects/${subject._id}`,
+                                "subjects",
+                              )
+                            }
+                          >
                             Delete
                           </Button>
                         </div>
@@ -420,4 +587,3 @@ export const AcademicManager = () => {
   const isCollege = useIsCollege();
   return isCollege ? <CollegeAcademicManager /> : <SchoolAcademicManager />;
 };
-

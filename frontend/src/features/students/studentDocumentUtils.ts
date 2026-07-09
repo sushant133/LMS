@@ -1,7 +1,7 @@
 import {
   STUDENT_DOCUMENT_CATEGORIES,
   STUDENT_DOCUMENT_MAX_SIZE_BYTES,
-  type StudentDocument
+  type StudentDocument,
 } from "@phit-erp/shared";
 
 export const formatFileSize = (bytes: number): string => {
@@ -37,9 +37,14 @@ export interface PendingStudentDocument {
 
 export const pendingToStudentDocument = (
   pending: PendingStudentDocument,
-  uploaded: { url: string; originalName: string; size: number; mimeType?: string },
+  uploaded: {
+    url: string;
+    originalName: string;
+    size: number;
+    mimeType?: string;
+  },
   uploadedBy: string,
-  uploadedByName: string
+  uploadedByName: string,
 ): StudentDocument => ({
   type: pending.type,
   name: pending.name,
@@ -50,5 +55,5 @@ export const pendingToStudentDocument = (
   status: "UPLOADED",
   uploadedAt: new Date().toISOString(),
   uploadedBy,
-  uploadedByName
+  uploadedByName,
 });

@@ -6,7 +6,7 @@ import type {
   MarksheetViewResponse,
   PrintResultsGridResponse,
   SectionRecord,
-  StudentRecord
+  StudentRecord,
 } from "@phit-erp/shared";
 import { Download, FileSpreadsheet, Printer } from "lucide-react";
 import { toast } from "sonner";
@@ -27,7 +27,12 @@ import { parseErrorMessage } from "lib/utils";
 
 interface PrintResultsPanelProps {
   isCollege: boolean;
-  labels: { primary: string; secondary: string; primaryPlural: string; secondaryPlural: string };
+  labels: {
+    primary: string;
+    secondary: string;
+    primaryPlural: string;
+    secondaryPlural: string;
+  };
   batches: Array<{ _id: string; name: string }>;
   years: Array<{ _id: string; name: string; batchId: string }>;
   classes: ClassRecord[];
@@ -44,7 +49,7 @@ export const PrintResultsPanel = ({
   classes,
   sections,
   students,
-  fallbackPublishedExams = []
+  fallbackPublishedExams = [],
 }: PrintResultsPanelProps) => {
   const [academicYearBs, setAcademicYearBs] = useState("");
   const [batchId, setBatchId] = useState("");
@@ -62,10 +67,10 @@ export const PrintResultsPanel = ({
     queryFn: () =>
       unwrap<ExamRecord[]>(
         api.get("/exams/results/published/exams", {
-          params: academicYearBs ? { academicYearBs } : undefined
-        })
+          params: academicYearBs ? { academicYearBs } : undefined,
+        }),
       ),
-    retry: 1
+    retry: 1,
   });
 
   const publishedExams = useMemo(() => {
@@ -76,19 +81,26 @@ export const PrintResultsPanel = ({
   }, [fallbackPublishedExams, publishedExamsQuery.data]);
 
   const academicSessions = useMemo(() => {
-    const sessions = new Set(publishedExams.map((exam) => exam.academicYearBs).filter(Boolean));
+    const sessions = new Set(
+      publishedExams.map((exam) => exam.academicYearBs).filter(Boolean),
+    );
     return [...sessions].sort((left, right) => right.localeCompare(left));
   }, [publishedExams]);
 
   const filteredExams = useMemo(() => {
     if (!academicYearBs) return publishedExams;
-    return publishedExams.filter((exam) => exam.academicYearBs === academicYearBs);
+    return publishedExams.filter(
+      (exam) => exam.academicYearBs === academicYearBs,
+    );
   }, [academicYearBs, publishedExams]);
 
-  const filteredYears = useMemo(() => filterYearsByBatch(years, batchId), [batchId, years]);
+  const filteredYears = useMemo(
+    () => filterYearsByBatch(years, batchId),
+    [batchId, years],
+  );
   const filteredSections = useMemo(
     () => sections.filter((section) => section.classId === classId),
-    [classId, sections]
+    [classId, sections],
   );
 
   const scopeStudents = useMemo(
@@ -96,9 +108,9 @@ export const PrintResultsPanel = ({
       students.filter((student) =>
         isCollege
           ? student.batchId === batchId && student.yearId === yearId
-          : student.classId === classId && student.sectionId === sectionId
+          : student.classId === classId && student.sectionId === sectionId,
       ),
-    [batchId, classId, isCollege, sectionId, students, yearId]
+    [batchId, classId, isCollege, sectionId, students, yearId],
   );
 
   const filtersComplete = isCollege
@@ -106,7 +118,16 @@ export const PrintResultsPanel = ({
     : Boolean(examId && classId && sectionId);
 
   const gridQuery = useQuery({
-    queryKey: ["print-results", "grid", examId, batchId, yearId, classId, sectionId, studentId],
+    queryKey: [
+      "print-results",
+      "grid",
+      examId,
+      batchId,
+      yearId,
+      classId,
+      sectionId,
+      studentId,
+    ],
     queryFn: () =>
       unwrap<PrintResultsGridResponse>(
         api.get("/exams/results/published/grid", {
@@ -115,24 +136,26 @@ export const PrintResultsPanel = ({
                 examId,
                 batchId,
                 yearId,
-                studentId: studentId || undefined
+                studentId: studentId || undefined,
               }
             : {
                 examId,
                 classId,
                 sectionId,
-                studentId: studentId || undefined
-              }
-        })
+                studentId: studentId || undefined,
+              },
+        }),
       ),
-    enabled: filtersComplete
+    enabled: filtersComplete,
   });
 
   const marksheetQuery = useQuery({
     queryKey: ["print-results", "marksheet", examId, studentId],
     queryFn: () =>
-      unwrap<MarksheetViewResponse>(api.get(`/exams/results/${examId}/${studentId}/marksheet`)),
-    enabled: Boolean(examId && studentId)
+      unwrap<MarksheetViewResponse>(
+        api.get(`/exams/results/${examId}/${studentId}/marksheet`),
+      ),
+    enabled: Boolean(examId && studentId),
   });
 
   const selectedExam = filteredExams.find((exam) => exam._id === examId);
@@ -152,7 +175,7 @@ export const PrintResultsPanel = ({
     try {
       const response = await api.get("/exams/results/published/export", {
         params: exportParams,
-        responseType: "blob"
+        responseType: "blob",
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
@@ -195,8 +218,11 @@ export const PrintResultsPanel = ({
     <div className="space-y-6">
       {publishedExamsQuery.isError ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Could not refresh the published-exams list from the server. Showing exams marked as published from your session.
-          {publishedExams.length === 0 ? " Restart the backend server if filters stay empty." : ""}
+          Could not refresh the published-exams list from the server. Showing
+          exams marked as published from your session.
+          {publishedExams.length === 0
+            ? " Restart the backend server if filters stay empty."
+            : ""}
         </div>
       ) : null}
 
@@ -206,106 +232,109 @@ export const PrintResultsPanel = ({
           description="Publish results from Exam Sessions first. After publishing, exams will appear here for printing."
         />
       ) : (
-      <Card>
-        <CardHeader>
-          <CardTitle>Print Results</CardTitle>
-          <p className="text-sm text-slate-600">
-            View and print published exam results only. Results appear here after admin review and publishing.
-          </p>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <FormField label="Academic Session">
-            <Select
-              value={academicYearBs}
-              onChange={(event) => {
-                setAcademicYearBs(event.target.value);
-                setExamId("");
-                setStudentId("");
-              }}
-            >
-              <option value="">All sessions</option>
-              {academicSessions.map((session) => (
-                <option key={session} value={session}>
-                  {session}
+        <Card>
+          <CardHeader>
+            <CardTitle>Print Results</CardTitle>
+            <p className="text-sm text-slate-600">
+              View and print published exam results only. Results appear here
+              after admin review and publishing.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <FormField label="Academic Session">
+              <Select
+                value={academicYearBs}
+                onChange={(event) => {
+                  setAcademicYearBs(event.target.value);
+                  setExamId("");
+                  setStudentId("");
+                }}
+              >
+                <option value="">All sessions</option>
+                {academicSessions.map((session) => (
+                  <option key={session} value={session}>
+                    {session}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Exam">
+              <Select
+                value={examId}
+                onChange={(event) => {
+                  setExamId(event.target.value);
+                  setStudentId("");
+                }}
+              >
+                <option value="">Select published exam</option>
+                {filteredExams.map((exam) => (
+                  <option key={exam._id} value={exam._id}>
+                    {exam.name} ({exam.academicYearBs})
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label={labels.primary}>
+              <Select
+                value={isCollege ? batchId : classId}
+                onChange={(event) => {
+                  if (isCollege) {
+                    setBatchId(event.target.value);
+                    setYearId("");
+                  } else {
+                    setClassId(event.target.value);
+                    setSectionId("");
+                  }
+                  setStudentId("");
+                }}
+              >
+                <option value="">Select {labels.primary.toLowerCase()}</option>
+                {(isCollege ? batches : classes).map((item) => (
+                  <option key={item._id} value={item._id}>
+                    {item.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label={labels.secondary}>
+              <Select
+                value={isCollege ? yearId : sectionId}
+                onChange={(event) => {
+                  if (isCollege) {
+                    setYearId(event.target.value);
+                  } else {
+                    setSectionId(event.target.value);
+                  }
+                  setStudentId("");
+                }}
+                disabled={isCollege ? !batchId : !classId}
+              >
+                <option value="">
+                  Select {labels.secondary.toLowerCase()}
                 </option>
-              ))}
-            </Select>
-          </FormField>
-          <FormField label="Exam">
-            <Select
-              value={examId}
-              onChange={(event) => {
-                setExamId(event.target.value);
-                setStudentId("");
-              }}
-            >
-              <option value="">Select published exam</option>
-              {filteredExams.map((exam) => (
-                <option key={exam._id} value={exam._id}>
-                  {exam.name} ({exam.academicYearBs})
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          <FormField label={labels.primary}>
-            <Select
-              value={isCollege ? batchId : classId}
-              onChange={(event) => {
-                if (isCollege) {
-                  setBatchId(event.target.value);
-                  setYearId("");
-                } else {
-                  setClassId(event.target.value);
-                  setSectionId("");
-                }
-                setStudentId("");
-              }}
-            >
-              <option value="">Select {labels.primary.toLowerCase()}</option>
-              {(isCollege ? batches : classes).map((item) => (
-                <option key={item._id} value={item._id}>
-                  {item.name}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          <FormField label={labels.secondary}>
-            <Select
-              value={isCollege ? yearId : sectionId}
-              onChange={(event) => {
-                if (isCollege) {
-                  setYearId(event.target.value);
-                } else {
-                  setSectionId(event.target.value);
-                }
-                setStudentId("");
-              }}
-              disabled={isCollege ? !batchId : !classId}
-            >
-              <option value="">Select {labels.secondary.toLowerCase()}</option>
-              {(isCollege ? filteredYears : filteredSections).map((item) => (
-                <option key={item._id} value={item._id}>
-                  {item.name}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          <FormField label="Student (optional)">
-            <Select
-              value={studentId}
-              onChange={(event) => setStudentId(event.target.value)}
-              disabled={!filtersComplete}
-            >
-              <option value="">All students in scope</option>
-              {scopeStudents.map((student) => (
-                <option key={student._id} value={student._id}>
-                  {student.user.fullName} (Roll {student.rollNumber})
-                </option>
-              ))}
-            </Select>
-          </FormField>
-        </CardContent>
-      </Card>
+                {(isCollege ? filteredYears : filteredSections).map((item) => (
+                  <option key={item._id} value={item._id}>
+                    {item.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Student (optional)">
+              <Select
+                value={studentId}
+                onChange={(event) => setStudentId(event.target.value)}
+                disabled={!filtersComplete}
+              >
+                <option value="">All students in scope</option>
+                {scopeStudents.map((student) => (
+                  <option key={student._id} value={student._id}>
+                    {student.user.fullName} (Roll {student.rollNumber})
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </CardContent>
+        </Card>
       )}
 
       {publishedExams.length > 0 && !filtersComplete ? (
@@ -334,17 +363,30 @@ export const PrintResultsPanel = ({
                   <CardTitle>{selectedExam?.name ?? "Results"}</CardTitle>
                   <p className="mt-1 text-sm text-slate-600">
                     {scopeLabel}
-                    {grid.academicYearBs ? ` · Session ${grid.academicYearBs}` : ""}
+                    {grid.academicYearBs
+                      ? ` · Session ${grid.academicYearBs}`
+                      : ""}
                     {" · "}
-                    {grid.rows.length} student{grid.rows.length === 1 ? "" : "s"}
+                    {grid.rows.length} student
+                    {grid.rows.length === 1 ? "" : "s"}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" disabled={bulkPrintLoading} onClick={() => void printBulk()}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={bulkPrintLoading}
+                    onClick={() => void printBulk()}
+                  >
                     <Printer className="mr-2 h-4 w-4" />
                     {bulkPrintLoading ? "Preparing..." : "Print Bulk"}
                   </Button>
-                  <Button size="sm" variant="outline" disabled={exporting} onClick={() => void downloadExport()}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={exporting}
+                    onClick={() => void downloadExport()}
+                  >
                     <FileSpreadsheet className="mr-2 h-4 w-4" />
                     {exporting ? "Exporting..." : "Export Excel"}
                   </Button>
@@ -379,7 +421,9 @@ export const PrintResultsPanel = ({
                         <Td>{row.rollNumber}</Td>
                         <Td>{row.registrationNumber}</Td>
                         {grid.subjects.map((subject) => (
-                          <Td key={subject.subjectId}>{row.subjectMarks[subject.subjectId] ?? "—"}</Td>
+                          <Td key={subject.subjectId}>
+                            {row.subjectMarks[subject.subjectId] ?? "—"}
+                          </Td>
                         ))}
                         <Td>
                           {row.totalMarks}/{row.totalFullMarks}
@@ -390,7 +434,13 @@ export const PrintResultsPanel = ({
                         </Td>
                         <Td>{row.gpa.toFixed(2)}</Td>
                         <Td>
-                          <Badge className={row.passFailStatus === "PASS" ? "bg-brand-100 text-brand-700" : "bg-red-100 text-red-700"}>
+                          <Badge
+                            className={
+                              row.passFailStatus === "PASS"
+                                ? "bg-brand-100 text-brand-700"
+                                : "bg-red-100 text-red-700"
+                            }
+                          >
                             {row.passFailStatus}
                           </Badge>
                         </Td>
@@ -431,55 +481,111 @@ export const PrintResultsPanel = ({
                 />
               </div>
               <div className="print-results-bulk-heading">
-                <h1 className="print-results-bulk-college">{grid.collegeName ?? "College"}</h1>
-                {grid.collegeNameNp ? <p className="print-results-bulk-college-np">{grid.collegeNameNp}</p> : null}
-                {grid.collegeAddress ? <p className="print-results-bulk-address">{grid.collegeAddress}</p> : null}
-                <h2 className="print-results-bulk-exam">{selectedExam?.name}</h2>
+                <h1 className="print-results-bulk-college">
+                  {grid.collegeName ?? "College"}
+                </h1>
+                {grid.collegeNameNp ? (
+                  <p className="print-results-bulk-college-np">
+                    {grid.collegeNameNp}
+                  </p>
+                ) : null}
+                {grid.collegeAddress ? (
+                  <p className="print-results-bulk-address">
+                    {grid.collegeAddress}
+                  </p>
+                ) : null}
+                <h2 className="print-results-bulk-exam">
+                  {selectedExam?.name}
+                </h2>
                 <p className="print-results-bulk-meta">
                   {scopeLabel}
-                  {grid.academicYearBs ? ` · Academic Session: ${grid.academicYearBs}` : ""}
+                  {grid.academicYearBs
+                    ? ` · Academic Session: ${grid.academicYearBs}`
+                    : ""}
                 </p>
-                <p className="print-results-bulk-count">Published Results · {grid.rows.length} students</p>
+                <p className="print-results-bulk-count">
+                  Published Results · {grid.rows.length} students
+                </p>
               </div>
             </header>
             <table className="w-full border-collapse border border-slate-300 text-[10px]">
               <thead>
                 <tr className="bg-slate-100">
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">S.N.</th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">Student</th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">Roll</th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">Reg. No.</th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    S.N.
+                  </th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    Student
+                  </th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    Roll
+                  </th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    Reg. No.
+                  </th>
                   {grid.subjects.map((subject) => (
-                    <th key={subject.subjectId} className="border border-slate-300 px-1.5 py-1 text-left">
+                    <th
+                      key={subject.subjectId}
+                      className="border border-slate-300 px-1.5 py-1 text-left"
+                    >
                       {subject.subjectName}
                     </th>
                   ))}
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">Total</th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">%</th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">Grade</th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">GPA</th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">Status</th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    Total
+                  </th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    %
+                  </th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    Grade
+                  </th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    GPA
+                  </th>
+                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {grid.rows.map((row) => (
                   <tr key={row.resultId}>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.sn}</td>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.studentName}</td>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.rollNumber}</td>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.registrationNumber}</td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.sn}
+                    </td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.studentName}
+                    </td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.rollNumber}
+                    </td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.registrationNumber}
+                    </td>
                     {grid.subjects.map((subject) => (
-                      <td key={subject.subjectId} className="border border-slate-300 px-1.5 py-1">
+                      <td
+                        key={subject.subjectId}
+                        className="border border-slate-300 px-1.5 py-1"
+                      >
                         {row.subjectMarks[subject.subjectId] ?? "—"}
                       </td>
                     ))}
                     <td className="border border-slate-300 px-1.5 py-1">
                       {row.totalMarks}/{row.totalFullMarks}
                     </td>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.percentage}%</td>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.grade}</td>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.gpa.toFixed(2)}</td>
-                    <td className="border border-slate-300 px-1.5 py-1">{row.passFailStatus}</td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.percentage}%
+                    </td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.grade}
+                    </td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.gpa.toFixed(2)}
+                    </td>
+                    <td className="border border-slate-300 px-1.5 py-1">
+                      {row.passFailStatus}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -489,7 +595,11 @@ export const PrintResultsPanel = ({
           {studentId ? (
             <div className="print:hidden space-y-3">
               <div className="flex justify-end">
-                <Button size="sm" variant="outline" onClick={() => setStudentId("")}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setStudentId("")}
+                >
                   Back to bulk view
                 </Button>
               </div>
@@ -498,7 +608,10 @@ export const PrintResultsPanel = ({
               ) : marksheetQuery.data ? (
                 <ResultMarksheetView data={marksheetQuery.data} />
               ) : (
-                <EmptyState title="Marksheet unavailable" description="Could not load the marksheet for this student." />
+                <EmptyState
+                  title="Marksheet unavailable"
+                  description="Could not load the marksheet for this student."
+                />
               )}
             </div>
           ) : null}

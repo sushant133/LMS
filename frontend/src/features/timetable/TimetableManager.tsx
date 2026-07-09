@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { canManageInstitution, DAYS_OF_WEEK, timetableSlotSchema, type TimetableSlotInput } from "@phit-erp/shared";
+import {
+  canManageInstitution,
+  DAYS_OF_WEEK,
+  timetableSlotSchema,
+  type TimetableSlotInput,
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { FormField } from "components/shared/FormField";
@@ -8,6 +13,7 @@ import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useIsCollege } from "hooks/useInstitutionType";
@@ -21,7 +27,7 @@ import {
   filterSubjectsByYear,
   filterYearsByBatch,
   hasSingleOption,
-  type ScopeOption
+  type ScopeOption,
 } from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
 
@@ -37,7 +43,7 @@ const defaultSlot: TimetableSlotInput = {
   room: "",
   startTime: "10:00",
   endTime: "10:45",
-  academicYearBs: "2083/2084"
+  academicYearBs: "2083/2084",
 };
 
 export const TimetableManager = () => {
@@ -53,32 +59,41 @@ export const TimetableManager = () => {
   const classesQuery = useQuery({
     queryKey: ["classes"],
     queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/classes")),
-    enabled: isAdmin && !isCollege
+    enabled: isAdmin && !isCollege,
   });
   const sectionsQuery = useQuery({
     queryKey: ["sections", form.classId],
-    queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/sections", { params: { classId: form.classId } })),
-    enabled: isAdmin && !isCollege && Boolean(form.classId)
+    queryFn: () =>
+      unwrap<ScopeOption[]>(
+        api.get("/academics/sections", { params: { classId: form.classId } }),
+      ),
+    enabled: isAdmin && !isCollege && Boolean(form.classId),
   });
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/batches")),
-    enabled: isAdmin && isCollege
+    enabled: isAdmin && isCollege,
   });
   const yearsQuery = useQuery({
     queryKey: ["years", form.batchId],
-    queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/years", { params: { batchId: form.batchId } })),
-    enabled: isAdmin && isCollege && Boolean(form.batchId)
+    queryFn: () =>
+      unwrap<ScopeOption[]>(
+        api.get("/academics/years", { params: { batchId: form.batchId } }),
+      ),
+    enabled: isAdmin && isCollege && Boolean(form.batchId),
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
     queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/subjects")),
-    enabled: isAdmin
+    enabled: isAdmin,
   });
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
-    queryFn: () => unwrap<Array<{ _id: string; user: { fullName: string } }>>(api.get("/teachers")),
-    enabled: isAdmin
+    queryFn: () =>
+      unwrap<Array<{ _id: string; user: { fullName: string } }>>(
+        api.get("/teachers"),
+      ),
+    enabled: isAdmin,
   });
 
   const primaryOptions: ScopeOption[] = isCollege
@@ -97,22 +112,38 @@ export const TimetableManager = () => {
       ? (teacherScopeQuery.data?.sections ?? [])
       : (sectionsQuery.data ?? []);
 
-  const subjects = isTeacher ? (teacherScopeQuery.data?.subjects ?? []) : (subjectsQuery.data ?? []);
-  const teacherId = isTeacher ? (teacherScopeQuery.data?.scope.teacherId ?? "") : form.teacherId;
+  const subjects = isTeacher
+    ? (teacherScopeQuery.data?.subjects ?? [])
+    : (subjectsQuery.data ?? []);
+  const teacherId = isTeacher
+    ? (teacherScopeQuery.data?.scope.teacherId ?? "")
+    : form.teacherId;
 
-  const primaryId = isCollege ? form.batchId ?? "" : form.classId ?? "";
-  const secondaryId = isCollege ? form.yearId ?? "" : form.sectionId ?? "";
+  const primaryId = isCollege ? (form.batchId ?? "") : (form.classId ?? "");
+  const secondaryId = isCollege ? (form.yearId ?? "") : (form.sectionId ?? "");
 
-  const filteredSections = useMemo(() => filterSectionsByClass(secondaryOptions, form.classId ?? ""), [form.classId, secondaryOptions]);
-  const filteredYears = useMemo(() => filterYearsByBatch(secondaryOptions, form.batchId ?? ""), [form.batchId, secondaryOptions]);
+  const filteredSections = useMemo(
+    () => filterSectionsByClass(secondaryOptions, form.classId ?? ""),
+    [form.classId, secondaryOptions],
+  );
+  const filteredYears = useMemo(
+    () => filterYearsByBatch(secondaryOptions, form.batchId ?? ""),
+    [form.batchId, secondaryOptions],
+  );
   const filteredSubjects = useMemo(
-    () => (isCollege ? filterSubjectsByYear(subjects, form.yearId ?? "") : filterSubjectsByClass(subjects, form.classId ?? "")),
-    [form.classId, form.yearId, isCollege, subjects]
+    () =>
+      isCollege
+        ? filterSubjectsByYear(subjects, form.yearId ?? "")
+        : filterSubjectsByClass(subjects, form.classId ?? ""),
+    [form.classId, form.yearId, isCollege, subjects],
   );
 
   useEffect(() => {
     if (!isTeacher || !teacherScopeQuery.data) return;
-    setForm((current) => ({ ...current, teacherId: teacherScopeQuery.data!.scope.teacherId }));
+    setForm((current) => ({
+      ...current,
+      teacherId: teacherScopeQuery.data!.scope.teacherId,
+    }));
   }, [isTeacher, teacherScopeQuery.data]);
 
   useEffect(() => {
@@ -120,10 +151,20 @@ export const TimetableManager = () => {
     const nextId = primaryOptions[0]!._id;
     if (isCollege) {
       if (form.batchId !== nextId) {
-        setForm((current) => ({ ...current, batchId: nextId, yearId: "", subjectId: "" }));
+        setForm((current) => ({
+          ...current,
+          batchId: nextId,
+          yearId: "",
+          subjectId: "",
+        }));
       }
     } else if (form.classId !== nextId) {
-      setForm((current) => ({ ...current, classId: nextId, sectionId: "", subjectId: "" }));
+      setForm((current) => ({
+        ...current,
+        classId: nextId,
+        sectionId: "",
+        subjectId: "",
+      }));
     }
   }, [form.batchId, form.classId, isCollege, isTeacher, primaryOptions]);
 
@@ -133,22 +174,44 @@ export const TimetableManager = () => {
     if (scopedSecondary.length === 1) {
       const nextId = scopedSecondary[0]!._id;
       if (isCollege) {
-        if (form.yearId !== nextId) setForm((current) => ({ ...current, yearId: nextId, subjectId: "" }));
+        if (form.yearId !== nextId)
+          setForm((current) => ({ ...current, yearId: nextId, subjectId: "" }));
       } else if (form.sectionId !== nextId) {
-        setForm((current) => ({ ...current, sectionId: nextId, subjectId: "" }));
+        setForm((current) => ({
+          ...current,
+          sectionId: nextId,
+          subjectId: "",
+        }));
       }
     }
-  }, [filteredSections, filteredYears, form.sectionId, form.yearId, isCollege, isTeacher, primaryId]);
+  }, [
+    filteredSections,
+    filteredYears,
+    form.sectionId,
+    form.yearId,
+    isCollege,
+    isTeacher,
+    primaryId,
+  ]);
 
   useEffect(() => {
     if (!isTeacher || !primaryId || filteredSubjects.length !== 1) return;
     if (form.subjectId !== filteredSubjects[0]!._id) {
-      setForm((current) => ({ ...current, subjectId: filteredSubjects[0]!._id }));
+      setForm((current) => ({
+        ...current,
+        subjectId: filteredSubjects[0]!._id,
+      }));
     }
   }, [filteredSubjects, form.subjectId, isTeacher, primaryId]);
 
   const timetableQuery = useQuery({
-    queryKey: ["timetable", form.classId, form.sectionId, form.batchId, form.yearId],
+    queryKey: [
+      "timetable",
+      form.classId,
+      form.sectionId,
+      form.batchId,
+      form.yearId,
+    ],
     queryFn: () =>
       unwrap<
         Array<{
@@ -166,19 +229,20 @@ export const TimetableManager = () => {
           "/timetable",
           isCollege
             ? { params: { batchId: form.batchId, yearId: form.yearId } }
-            : { params: { classId: form.classId, sectionId: form.sectionId } }
-        )
+            : { params: { classId: form.classId, sectionId: form.sectionId } },
+        ),
       ),
-    enabled: Boolean(primaryId && secondaryId)
+    enabled: Boolean(primaryId && secondaryId),
   });
 
   const saveMutation = useMutation({
-    mutationFn: (payload: TimetableSlotInput) => unwrap(api.post("/timetable", payload)),
+    mutationFn: (payload: TimetableSlotInput) =>
+      unwrap(api.post("/timetable", payload)),
     onSuccess: async () => {
       toast.success("Timetable slot saved");
       await queryClient.invalidateQueries({ queryKey: ["timetable"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const buildPayload = (): TimetableSlotInput => {
@@ -190,7 +254,7 @@ export const TimetableManager = () => {
       room: form.room?.trim() ? form.room : undefined,
       startTime: form.startTime,
       endTime: form.endTime,
-      academicYearBs: form.academicYearBs
+      academicYearBs: form.academicYearBs,
     };
 
     if (isCollege) {
@@ -228,7 +292,12 @@ export const TimetableManager = () => {
             setForm((c) =>
               isCollege
                 ? { ...c, batchId: e.target.value, yearId: "", subjectId: "" }
-                : { ...c, classId: e.target.value, sectionId: "", subjectId: "" }
+                : {
+                    ...c,
+                    classId: e.target.value,
+                    sectionId: "",
+                    subjectId: "",
+                  },
             )
           }
         >
@@ -260,7 +329,9 @@ export const TimetableManager = () => {
           value={secondaryId}
           onChange={(e) =>
             setForm((c) =>
-              isCollege ? { ...c, yearId: e.target.value, subjectId: "" } : { ...c, sectionId: e.target.value, subjectId: "" }
+              isCollege
+                ? { ...c, yearId: e.target.value, subjectId: "" }
+                : { ...c, sectionId: e.target.value, subjectId: "" },
             )
           }
           disabled={!primaryId}
@@ -288,13 +359,18 @@ export const TimetableManager = () => {
           <CardTitle>Add Timetable Slot</CardTitle>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" onSubmit={handleSubmit}>
+          <form
+            className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+            onSubmit={handleSubmit}
+          >
             {renderPrimaryField()}
             {renderSecondaryField()}
             <FormField label="Subject">
               <Select
                 value={form.subjectId}
-                onChange={(e) => setForm((c) => ({ ...c, subjectId: e.target.value }))}
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, subjectId: e.target.value }))
+                }
                 disabled={!primaryId}
               >
                 <option value="">Select subject</option>
@@ -307,7 +383,12 @@ export const TimetableManager = () => {
             </FormField>
             {isAdmin ? (
               <FormField label="Teacher">
-                <Select value={form.teacherId} onChange={(e) => setForm((c) => ({ ...c, teacherId: e.target.value }))}>
+                <Select
+                  value={form.teacherId}
+                  onChange={(e) =>
+                    setForm((c) => ({ ...c, teacherId: e.target.value }))
+                  }
+                >
                   <option value="">Select teacher</option>
                   {(teachersQuery.data ?? []).map((teacher) => (
                     <option key={teacher._id} value={teacher._id}>
@@ -318,7 +399,12 @@ export const TimetableManager = () => {
               </FormField>
             ) : null}
             <FormField label="Day">
-              <Select value={form.dayOfWeek} onChange={(e) => setForm((c) => ({ ...c, dayOfWeek: Number(e.target.value) }))}>
+              <Select
+                value={form.dayOfWeek}
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, dayOfWeek: Number(e.target.value) }))
+                }
+              >
                 {DAYS_OF_WEEK.map((day, index) => (
                   <option key={day} value={index}>
                     {day}
@@ -327,19 +413,47 @@ export const TimetableManager = () => {
               </Select>
             </FormField>
             <FormField label="Period">
-              <Input type="number" value={form.periodNumber} onChange={(e) => setForm((c) => ({ ...c, periodNumber: e.target.valueAsNumber }))} />
+              <NumberInput
+                value={form.periodNumber}
+                onChange={(e) =>
+                  setForm((c) => ({
+                    ...c,
+                    periodNumber: e.target.valueAsNumber,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Start Time">
-              <Input value={form.startTime} onChange={(e) => setForm((c) => ({ ...c, startTime: e.target.value }))} />
+              <Input
+                value={form.startTime}
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, startTime: e.target.value }))
+                }
+              />
             </FormField>
             <FormField label="End Time">
-              <Input value={form.endTime} onChange={(e) => setForm((c) => ({ ...c, endTime: e.target.value }))} />
+              <Input
+                value={form.endTime}
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, endTime: e.target.value }))
+                }
+              />
             </FormField>
             <FormField label="Room">
-              <Input value={form.room ?? ""} onChange={(e) => setForm((c) => ({ ...c, room: e.target.value }))} />
+              <Input
+                value={form.room ?? ""}
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, room: e.target.value }))
+                }
+              />
             </FormField>
             <FormField label="Academic Year (BS)">
-              <Input value={form.academicYearBs} onChange={(e) => setForm((c) => ({ ...c, academicYearBs: e.target.value }))} />
+              <Input
+                value={form.academicYearBs}
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, academicYearBs: e.target.value }))
+                }
+              />
             </FormField>
             <div className="md:col-span-2 xl:col-span-4 flex justify-end">
               <Button type="submit" disabled={saveMutation.isPending}>
@@ -356,7 +470,10 @@ export const TimetableManager = () => {
         </CardHeader>
         <CardContent>
           {!primaryId || !secondaryId ? (
-            <p className="text-sm text-slate-500">Select {labels.primary.toLowerCase()} and {labels.secondary.toLowerCase()} to view the timetable.</p>
+            <p className="text-sm text-slate-500">
+              Select {labels.primary.toLowerCase()} and{" "}
+              {labels.secondary.toLowerCase()} to view the timetable.
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <Table>

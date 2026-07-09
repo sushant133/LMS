@@ -2,7 +2,7 @@ import type {
   AcademicLessonPlanRecord,
   AcademicLogBookEntryRecord,
   AcademicManagementFilters,
-  AcademicSessionPlanRecord
+  AcademicSessionPlanRecord,
 } from "@phit-erp/shared";
 import * as XLSX from "xlsx";
 
@@ -21,10 +21,12 @@ export const defaultAcademicFilters = (): AcademicManagementFilters => ({
   dateFrom: "",
   dateTo: "",
   status: undefined,
-  keyword: ""
+  keyword: "",
 });
 
-export const filtersToParams = (filters: AcademicManagementFilters): Record<string, string> => {
+export const filtersToParams = (
+  filters: AcademicManagementFilters,
+): Record<string, string> => {
   const params: Record<string, string> = {};
   Object.entries(filters).forEach(([key, value]) => {
     if (value) params[key] = String(value);
@@ -35,20 +37,29 @@ export const filtersToParams = (filters: AcademicManagementFilters): Record<stri
 export const statusBadgeClass = (status: string): string => {
   switch (status) {
     case "APPROVED":
+    case "COMPLETED":
       return "bg-emerald-100 text-emerald-800";
     case "REJECTED":
     case "NEEDS_IMPROVEMENT":
+    case "DELAYED":
       return "bg-rose-100 text-rose-800";
     case "SUBMITTED":
     case "PENDING_APPROVAL":
     case "PENDING":
+    case "IN_PROGRESS":
       return "bg-amber-100 text-amber-800";
     default:
       return "bg-slate-100 text-slate-700";
   }
 };
 
-export const exportSessionPlansExcel = (plans: AcademicSessionPlanRecord[], filename: string) => {
+export const remainingPercentOf = (completedPercent: number): number =>
+  Math.max(0, 100 - Math.min(100, completedPercent));
+
+export const exportSessionPlansExcel = (
+  plans: AcademicSessionPlanRecord[],
+  filename: string,
+) => {
   const rows = plans.flatMap((plan) =>
     plan.units.map((unit) => ({
       Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
@@ -58,8 +69,8 @@ export const exportSessionPlansExcel = (plans: AcademicSessionPlanRecord[], file
       Chapter: unit.chapterName,
       Hours: unit.estimatedTeachingHours,
       Status: plan.status,
-      "Unit Status": unit.status
-    }))
+      "Unit Status": unit.status,
+    })),
   );
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
@@ -67,7 +78,10 @@ export const exportSessionPlansExcel = (plans: AcademicSessionPlanRecord[], file
   XLSX.writeFile(workbook, filename);
 };
 
-export const exportLessonPlansExcel = (plans: AcademicLessonPlanRecord[], filename: string) => {
+export const exportLessonPlansExcel = (
+  plans: AcademicLessonPlanRecord[],
+  filename: string,
+) => {
   const rows = plans.flatMap((plan) =>
     plan.items.map((item) => ({
       Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
@@ -76,9 +90,13 @@ export const exportLessonPlansExcel = (plans: AcademicLessonPlanRecord[], filena
       Topic: item.plannedTopic,
       "Est. Classes": item.estimatedClasses,
       Completed: item.completedClasses,
+      "Completed %": item.completedPercent,
+      "Remaining %":
+        item.remainingPercent ?? remainingPercentOf(item.completedPercent),
+      Deadline: item.deadline || "",
       Status: plan.status,
-      "Item Status": item.completionStatus
-    }))
+      "Item Status": item.completionStatus,
+    })),
   );
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
@@ -86,7 +104,10 @@ export const exportLessonPlansExcel = (plans: AcademicLessonPlanRecord[], filena
   XLSX.writeFile(workbook, filename);
 };
 
-export const exportLogBookExcel = (entries: AcademicLogBookEntryRecord[], filename: string) => {
+export const exportLogBookExcel = (
+  entries: AcademicLogBookEntryRecord[],
+  filename: string,
+) => {
   const rows = entries.map((entry) => ({
     Date: entry.dateBs,
     Teacher: entry.teacher?.user?.fullName ?? entry.teacherId,
@@ -94,7 +115,7 @@ export const exportLogBookExcel = (entries: AcademicLogBookEntryRecord[], filena
     Topic: entry.topicCovered,
     Period: entry.periodNumber,
     Attendance: `${entry.attendancePercent}%`,
-    Review: entry.reviewStatus
+    Review: entry.reviewStatus,
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
@@ -114,5 +135,5 @@ export const NEPALI_MONTHS = [
   "Poush",
   "Magh",
   "Falgun",
-  "Chaitra"
+  "Chaitra",
 ];

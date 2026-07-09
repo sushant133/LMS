@@ -45,7 +45,7 @@ router.get("/session-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLL
 router.post("/session-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), createSessionPlan);
 router.put("/session-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), updateSessionPlan);
 router.delete("/session-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), deleteSessionPlan);
-router.post("/session-plans/:id/submit", authorize("TEACHER"), submitSessionPlan);
+router.post("/session-plans/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), submitSessionPlan);
 router.post("/session-plans/:id/approve", authorizeInstitutionAdmin, approveSessionPlan);
 router.post("/session-plans/:id/reject", authorizeInstitutionAdmin, rejectSessionPlan);
 router.post("/session-plans/:id/unlock", authorizeInstitutionAdmin, unlockSessionPlan);
@@ -55,7 +55,7 @@ router.get("/lesson-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_V
 router.post("/lesson-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), createLessonPlan);
 router.put("/lesson-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), updateLessonPlan);
 router.delete("/lesson-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), deleteLessonPlan);
-router.post("/lesson-plans/:id/submit", authorize("TEACHER"), submitLessonPlan);
+router.post("/lesson-plans/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), submitLessonPlan);
 router.post("/lesson-plans/:id/approve", authorizeInstitutionAdmin, approveLessonPlan);
 router.post("/lesson-plans/:id/reject", authorizeInstitutionAdmin, rejectLessonPlan);
 

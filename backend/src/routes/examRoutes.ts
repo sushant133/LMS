@@ -43,14 +43,19 @@ import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
+/** COLLEGE_VIEWER inherits GET when COLLEGE_ADMIN is listed. */
+const examReaders = authorize("COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT");
+const resultReaders = authorize("COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT");
+const submissionReaders = authorize("COLLEGE_ADMIN", "TEACHER");
+
 router.use(protect, tenantGuard);
 
-router.get("/", listExams);
+router.get("/", examReaders, listExams);
 router.post("/", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createExam);
 router.put("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), updateExam);
 router.delete("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteExam);
 
-router.get("/routines", listExamRoutines);
+router.get("/routines", examReaders, listExamRoutines);
 router.post("/:examId/routines", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createExamRoutine);
 router.put("/:examId/routines/:routineId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), updateExamRoutine);
 router.delete("/:examId/routines/:routineId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteExamRoutine);
@@ -61,14 +66,14 @@ router.get("/results/published/exams", authorize("COLLEGE_ADMIN", "SUPER_ADMIN")
 router.get("/results/published/grid", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getPrintResultsGrid);
 router.get("/results/published/export", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), exportPrintResultsCsv);
 
-router.get("/results/all", listResults);
+router.get("/results/all", resultReaders, listResults);
 router.post("/results", authorize("TEACHER"), upsertResult);
 router.post("/results/admin", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), adminUpsertResult);
 router.delete("/results/:resultId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteResult);
 router.delete("/results/:examId/:studentId/marks/:subjectId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER"), deleteResultMark);
 
-router.get("/result-submissions", listResultSubmissions);
-router.get("/result-submissions/scope", getSubmissionByScope);
+router.get("/result-submissions", submissionReaders, listResultSubmissions);
+router.get("/result-submissions/scope", submissionReaders, getSubmissionByScope);
 router.get("/result-submissions/audit-log", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getResultAuditLog);
 router.post("/result-submissions/submit", authorize("TEACHER"), submitResultForReview);
 router.post("/result-submissions/:submissionId/approve", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), approveResultSubmission);
@@ -81,7 +86,7 @@ router.post("/:examId/results/lock", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), 
 router.post("/:examId/results/unlock", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), unlockExamResults);
 router.get("/:examId/analytics", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getExamAnalytics);
 
-router.get("/results/:examId/:studentId/marksheet", getMarksheet);
-router.get("/results/:examId/:studentId/marksheet/pdf", downloadMarksheetPdf);
+router.get("/results/:examId/:studentId/marksheet", resultReaders, getMarksheet);
+router.get("/results/:examId/:studentId/marksheet/pdf", resultReaders, downloadMarksheetPdf);
 
 export default router;

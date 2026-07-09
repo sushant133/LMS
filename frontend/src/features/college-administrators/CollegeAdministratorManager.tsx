@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   collegeAdministratorSchema,
   type CollegeAdministratorInput,
-  type CollegeAdministratorRecord
+  type CollegeAdministratorRecord,
 } from "@phit-erp/shared";
 import type { AdminActivityLogEntry } from "@phit-erp/shared";
 import { Eye, KeyRound, Trash2, UserCog } from "lucide-react";
@@ -21,7 +21,7 @@ import { api, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
   toastResendCredentials,
-  type CredentialsEmailResult
+  type CredentialsEmailResult,
 } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -34,7 +34,7 @@ const defaultForm: CollegeAdministratorInput = {
   phone: "",
   email: "",
   password: "",
-  profilePhotoUrl: ""
+  profilePhotoUrl: "",
 };
 
 const statusBadge = (admin: CollegeAdministratorRecord) => {
@@ -49,7 +49,9 @@ const statusBadge = (admin: CollegeAdministratorRecord) => {
 
 export const CollegeAdministratorManager = () => {
   const [form, setForm] = useState<CollegeAdministratorInput>(defaultForm);
-  const [editing, setEditing] = useState<CollegeAdministratorRecord | null>(null);
+  const [editing, setEditing] = useState<CollegeAdministratorRecord | null>(
+    null,
+  );
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
@@ -57,18 +59,24 @@ export const CollegeAdministratorManager = () => {
   const adminsQuery = useQuery({
     queryKey: ["college-administrators", includeDeleted],
     queryFn: () =>
-      unwrap<CollegeAdministratorRecord[]>(api.get("/college-administrators", { params: { includeDeleted } }))
+      unwrap<CollegeAdministratorRecord[]>(
+        api.get("/college-administrators", { params: { includeDeleted } }),
+      ),
   });
 
   const activityQuery = useQuery({
     queryKey: ["college-administrators", selectedAdminId, "activity"],
     queryFn: () =>
-      unwrap<AdminActivityLogEntry[]>(api.get(`/college-administrators/${selectedAdminId}/activity`)),
-    enabled: Boolean(selectedAdminId)
+      unwrap<AdminActivityLogEntry[]>(
+        api.get(`/college-administrators/${selectedAdminId}/activity`),
+      ),
+    enabled: Boolean(selectedAdminId),
   });
 
   const invalidateAdmins = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["college-administrators"] });
+    await queryClient.invalidateQueries({
+      queryKey: ["college-administrators"],
+    });
   };
 
   const createMutation = useMutation({
@@ -80,63 +88,83 @@ export const CollegeAdministratorManager = () => {
         credentialsEmail?: CredentialsEmailResult;
       }>(api.post("/college-administrators", payload)),
     onSuccess: async (data) => {
-      toastCredentialCreateResult(data, { successTitle: "College Administrator created successfully" });
+      toastCredentialCreateResult(data, {
+        successTitle: "College Administrator created successfully",
+      });
       setForm(defaultForm);
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const resendCredentialsMutation = useMutation({
     mutationFn: async (userId: string) => toastResendCredentials(userId),
     onSuccess: async () => {
       await invalidateAdmins();
-    }
+    },
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, payload }: { id: string; payload: CollegeAdministratorInput }) =>
-      unwrap<CollegeAdministratorRecord>(api.put(`/college-administrators/${id}`, payload)),
+    mutationFn: async ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: CollegeAdministratorInput;
+    }) =>
+      unwrap<CollegeAdministratorRecord>(
+        api.put(`/college-administrators/${id}`, payload),
+      ),
     onSuccess: async () => {
       toast.success("College Administrator updated");
       setEditing(null);
       setForm(defaultForm);
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const actionMutation = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: string }) => {
       if (action === "delete") {
-        return unwrap<CollegeAdministratorRecord>(api.delete(`/college-administrators/${id}`));
+        return unwrap<CollegeAdministratorRecord>(
+          api.delete(`/college-administrators/${id}`),
+        );
       }
-      return unwrap<CollegeAdministratorRecord>(api.post(`/college-administrators/${id}/${action}`));
+      return unwrap<CollegeAdministratorRecord>(
+        api.post(`/college-administrators/${id}/${action}`),
+      );
     },
     onSuccess: async (_data, variables) => {
-      toast.success(`College Administrator ${variables.action.replace("-", " ")} successful`);
+      toast.success(
+        `College Administrator ${variables.action.replace("-", " ")} successful`,
+      );
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const resetPasswordMutation = useMutation({
     mutationFn: async ({ id, password }: { id: string; password: string }) =>
       unwrap<{ admin: CollegeAdministratorRecord; loginEmail: string }>(
-        api.post(`/college-administrators/${id}/reset-password`, { password })
+        api.post(`/college-administrators/${id}/reset-password`, { password }),
       ),
     onSuccess: async (data) => {
-      toast.success("Password reset", { description: `Login ID: ${data.loginEmail}` });
+      toast.success("Password reset", {
+        description: `Login ID: ${data.loginEmail}`,
+      });
       setResetPassword("");
       setSelectedAdminId(null);
       await invalidateAdmins();
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const selectedAdmin = useMemo(
-    () => (adminsQuery.data ?? []).find((admin) => admin._id === selectedAdminId) ?? null,
-    [adminsQuery.data, selectedAdminId]
+    () =>
+      (adminsQuery.data ?? []).find((admin) => admin._id === selectedAdminId) ??
+      null,
+    [adminsQuery.data, selectedAdminId],
   );
 
   if (adminsQuery.isLoading) {
@@ -154,7 +182,9 @@ export const CollegeAdministratorManager = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <UserCog className="h-5 w-5 text-brand-700" />
-            {editing ? "Edit College Administrator" : "Create College Administrator"}
+            {editing
+              ? "Edit College Administrator"
+              : "Create College Administrator"}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -164,12 +194,17 @@ export const CollegeAdministratorManager = () => {
               event.preventDefault();
               const parsed = collegeAdministratorSchema.safeParse(form);
               if (!parsed.success) {
-                toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
+                toast.error(
+                  parsed.error.issues[0]?.message ?? "Validation failed",
+                );
                 return;
               }
 
               if (editing) {
-                void updateMutation.mutateAsync({ id: editing._id, payload: parsed.data });
+                void updateMutation.mutateAsync({
+                  id: editing._id,
+                  payload: parsed.data,
+                });
                 return;
               }
 
@@ -177,36 +212,104 @@ export const CollegeAdministratorManager = () => {
             }}
           >
             <FormField label="Full Name">
-              <Input value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
+              <Input
+                value={form.fullName}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    fullName: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Employee ID">
-              <Input value={form.employeeId} onChange={(event) => setForm((current) => ({ ...current, employeeId: event.target.value }))} />
+              <Input
+                value={form.employeeId}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    employeeId: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Designation">
-              <Input value={form.designation} onChange={(event) => setForm((current) => ({ ...current, designation: event.target.value }))} />
+              <Input
+                value={form.designation}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    designation: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Department">
-              <Input value={form.department} onChange={(event) => setForm((current) => ({ ...current, department: event.target.value }))} />
+              <Input
+                value={form.department}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    department: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Mobile Number">
-              <Input value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+              <Input
+                value={form.phone}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Email Address / Username">
-              <Input value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+              <Input
+                value={form.email}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    email: event.target.value,
+                  }))
+                }
+              />
             </FormField>
             <FormField label="Profile Photo URL">
               <Input
                 value={form.profilePhotoUrl ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, profilePhotoUrl: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    profilePhotoUrl: event.target.value,
+                  }))
+                }
                 placeholder="https://..."
               />
             </FormField>
-            <FormField label={editing ? "New Password (optional)" : "Initial Password (optional)"}>
+            <FormField
+              label={
+                editing
+                  ? "New Password (optional)"
+                  : "Initial Password (optional)"
+              }
+            >
               <Input
                 type="password"
                 value={form.password ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                placeholder={editing ? "Leave blank to keep current password" : "Uses system default if blank"}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    password: event.target.value,
+                  }))
+                }
+                placeholder={
+                  editing
+                    ? "Leave blank to keep current password"
+                    : "Uses system default if blank"
+                }
               />
             </FormField>
             <div className="md:col-span-2 flex flex-wrap justify-end gap-2">
@@ -222,7 +325,10 @@ export const CollegeAdministratorManager = () => {
                   Cancel
                 </Button>
               ) : null}
-              <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
+              <Button
+                type="submit"
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
                 {editing
                   ? updateMutation.isPending
                     ? "Saving..."
@@ -243,7 +349,11 @@ export const CollegeAdministratorManager = () => {
             College Administrators
           </CardTitle>
           <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={includeDeleted} onChange={(event) => setIncludeDeleted(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={includeDeleted}
+              onChange={(event) => setIncludeDeleted(event.target.checked)}
+            />
             Show deleted accounts
           </label>
         </CardHeader>
@@ -270,8 +380,14 @@ export const CollegeAdministratorManager = () => {
                 {(adminsQuery.data ?? []).map((admin) => (
                   <tr key={admin._id}>
                     <Td>
-                      <div className="font-medium text-slate-900">{admin.fullName}</div>
-                      {admin.mustChangePassword ? <div className="text-xs text-amber-700">Must change password</div> : null}
+                      <div className="font-medium text-slate-900">
+                        {admin.fullName}
+                      </div>
+                      {admin.mustChangePassword ? (
+                        <div className="text-xs text-amber-700">
+                          Must change password
+                        </div>
+                      ) : null}
                     </Td>
                     <Td>{admin.employeeId || "—"}</Td>
                     <Td>{admin.designation || "—"}</Td>
@@ -294,13 +410,18 @@ export const CollegeAdministratorManager = () => {
                               phone: admin.phone ?? "",
                               email: admin.email,
                               password: "",
-                              profilePhotoUrl: admin.profilePhotoUrl ?? ""
+                              profilePhotoUrl: admin.profilePhotoUrl ?? "",
                             });
                           }}
                         >
                           Edit
                         </Button>
-                        <Button size="sm" variant="outline" disabled={admin.isDeleted} onClick={() => setSelectedAdminId(admin._id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={admin.isDeleted}
+                          onClick={() => setSelectedAdminId(admin._id)}
+                        >
                           Activity
                         </Button>
                         {admin.isActive && !admin.isDeleted ? (
@@ -308,7 +429,12 @@ export const CollegeAdministratorManager = () => {
                             size="sm"
                             variant="outline"
                             disabled={actionMutation.isPending}
-                            onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "deactivate" })}
+                            onClick={() =>
+                              void actionMutation.mutateAsync({
+                                id: admin._id,
+                                action: "deactivate",
+                              })
+                            }
                           >
                             Deactivate
                           </Button>
@@ -317,7 +443,12 @@ export const CollegeAdministratorManager = () => {
                             size="sm"
                             variant="outline"
                             disabled={actionMutation.isPending}
-                            onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "activate" })}
+                            onClick={() =>
+                              void actionMutation.mutateAsync({
+                                id: admin._id,
+                                action: "activate",
+                              })
+                            }
                           >
                             Activate
                           </Button>
@@ -327,7 +458,12 @@ export const CollegeAdministratorManager = () => {
                             size="sm"
                             variant="outline"
                             disabled={actionMutation.isPending}
-                            onClick={() => void actionMutation.mutateAsync({ id: admin._id, action: "restore" })}
+                            onClick={() =>
+                              void actionMutation.mutateAsync({
+                                id: admin._id,
+                                action: "restore",
+                              })
+                            }
                           >
                             Restore
                           </Button>
@@ -337,8 +473,15 @@ export const CollegeAdministratorManager = () => {
                             variant="destructive"
                             disabled={actionMutation.isPending}
                             onClick={() => {
-                              if (window.confirm(`Delete ${admin.fullName}? This is a soft delete and preserves audit history.`)) {
-                                void actionMutation.mutateAsync({ id: admin._id, action: "delete" });
+                              if (
+                                window.confirm(
+                                  `Delete ${admin.fullName}? This is a soft delete and preserves audit history.`,
+                                )
+                              ) {
+                                void actionMutation.mutateAsync({
+                                  id: admin._id,
+                                  action: "delete",
+                                });
                               }
                             }}
                           >
@@ -363,7 +506,11 @@ export const CollegeAdministratorManager = () => {
               <KeyRound className="h-5 w-5 text-brand-700" />
               {selectedAdmin.fullName} — Credentials & Activity
             </CardTitle>
-            <Button size="sm" variant="outline" onClick={() => setSelectedAdminId(null)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSelectedAdminId(null)}
+            >
               Close
             </Button>
           </CardHeader>
@@ -378,33 +525,59 @@ export const CollegeAdministratorManager = () => {
                 />
               </FormField>
               <Button
-                disabled={resetPasswordMutation.isPending || resetPassword.length < 6 || selectedAdmin.isDeleted}
-                onClick={() => void resetPasswordMutation.mutateAsync({ id: selectedAdmin._id, password: resetPassword })}
+                disabled={
+                  resetPasswordMutation.isPending ||
+                  resetPassword.length < 6 ||
+                  selectedAdmin.isDeleted
+                }
+                onClick={() =>
+                  void resetPasswordMutation.mutateAsync({
+                    id: selectedAdmin._id,
+                    password: resetPassword,
+                  })
+                }
               >
                 Reset Password
               </Button>
               <Button
                 variant="outline"
-                disabled={resendCredentialsMutation.isPending || selectedAdmin.isDeleted || !selectedAdmin.isActive}
-                onClick={() => void resendCredentialsMutation.mutateAsync(selectedAdmin._id)}
+                disabled={
+                  resendCredentialsMutation.isPending ||
+                  selectedAdmin.isDeleted ||
+                  !selectedAdmin.isActive
+                }
+                onClick={() =>
+                  void resendCredentialsMutation.mutateAsync(selectedAdmin._id)
+                }
               >
                 Resend Credentials
               </Button>
             </div>
 
             <div>
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-slate-500">Login History & Activity</h3>
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-slate-500">
+                Login History & Activity
+              </h3>
               {activityQuery.isLoading ? (
                 <LoadingState />
               ) : (activityQuery.data ?? []).length === 0 ? (
-                <p className="text-sm text-slate-600">No activity recorded for this College Administrator yet.</p>
+                <p className="text-sm text-slate-600">
+                  No activity recorded for this College Administrator yet.
+                </p>
               ) : (
                 <div className="space-y-3">
                   {(activityQuery.data ?? []).map((entry) => (
-                    <div key={entry._id} className="rounded-xl border border-slate-200 px-4 py-3 text-sm">
+                    <div
+                      key={entry._id}
+                      className="rounded-xl border border-slate-200 px-4 py-3 text-sm"
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-medium text-slate-900">{entry.action}</span>
-                        <span className="text-xs text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span>
+                        <span className="font-medium text-slate-900">
+                          {entry.action}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {new Date(entry.createdAt).toLocaleString()}
+                        </span>
                       </div>
                       <p className="mt-1 text-slate-600">
                         {entry.entity} · {entry.entityId}

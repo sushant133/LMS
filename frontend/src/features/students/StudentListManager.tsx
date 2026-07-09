@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import type { BatchRecord, ClassRecord, SectionRecord, StudentRecord, YearRecord } from "@phit-erp/shared";
+import type {
+  BatchRecord,
+  ClassRecord,
+  SectionRecord,
+  StudentRecord,
+  YearRecord,
+} from "@phit-erp/shared";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
@@ -15,9 +21,17 @@ import { Label } from "components/ui/label";
 import { Select } from "components/ui/select";
 import { cn } from "lib/utils";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useIsTenantAdmin, useNormalizedRole } from "hooks/useNormalizedRole";
+import {
+  useHasInstitutionAccess,
+  useIsTenantAdmin,
+  useNormalizedRole,
+} from "hooks/useNormalizedRole";
 import { useTeacherScope } from "hooks/useTeacherScope";
-import { filterSectionsByClass, filterYearsByBatch, getAcademicLabels } from "lib/academicStructureUtils";
+import {
+  filterSectionsByClass,
+  filterYearsByBatch,
+  getAcademicLabels,
+} from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
@@ -29,8 +43,10 @@ export const StudentListManager = () => {
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const isAdmin = useIsTenantAdmin();
+  const hasInstitutionRead = useHasInstitutionAccess();
   const isTeacher = role === "TEACHER";
   const canManage = isAdmin;
+  const canReadList = hasInstitutionRead || isTeacher;
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -42,27 +58,27 @@ export const StudentListManager = () => {
   const studentsQuery = useQuery({
     queryKey: ["students"],
     queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
-    enabled: isAdmin
+    enabled: hasInstitutionRead,
   });
   const classesQuery = useQuery({
     queryKey: ["classes"],
     queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes")),
-    enabled: isAdmin && !isCollege
+    enabled: hasInstitutionRead && !isCollege,
   });
   const sectionsQuery = useQuery({
     queryKey: ["sections"],
     queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections")),
-    enabled: isAdmin && !isCollege
+    enabled: hasInstitutionRead && !isCollege,
   });
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
-    enabled: isAdmin && isCollege
+    enabled: hasInstitutionRead && isCollege,
   });
   const yearsQuery = useQuery({
     queryKey: ["years"],
     queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
-    enabled: isAdmin && isCollege
+    enabled: hasInstitutionRead && isCollege,
   });
 
   const deleteMutation = useMutation({
@@ -70,31 +86,59 @@ export const StudentListManager = () => {
       await api.delete(`/students/${id}`);
     },
     onSuccess: async () => {
-      toast.success("Student deleted");
+      toast.success("Student permanently deleted");
       await queryClient.invalidateQueries({ queryKey: ["students"] });
     },
-    onError: (error) => toast.error(parseErrorMessage(error))
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const classes = isTeacher ? (teacherScopeQuery.data?.classes ?? []) : (classesQuery.data ?? []);
-  const sections = isTeacher ? (teacherScopeQuery.data?.sections ?? []) : (sectionsQuery.data ?? []);
-  const batches = isTeacher ? (teacherScopeQuery.data?.batches ?? []) : (batchesQuery.data ?? []);
-  const years = isTeacher ? (teacherScopeQuery.data?.years ?? []) : (yearsQuery.data ?? []);
-  const students = isTeacher ? (teacherScopeQuery.data?.students ?? []) : (studentsQuery.data ?? []);
+  const classes = isTeacher
+    ? (teacherScopeQuery.data?.classes ?? [])
+    : (classesQuery.data ?? []);
+  const sections = isTeacher
+    ? (teacherScopeQuery.data?.sections ?? [])
+    : (sectionsQuery.data ?? []);
+  const batches = isTeacher
+    ? (teacherScopeQuery.data?.batches ?? [])
+    : (batchesQuery.data ?? []);
+  const years = isTeacher
+    ? (teacherScopeQuery.data?.years ?? [])
+    : (yearsQuery.data ?? []);
+  const students = isTeacher
+    ? (teacherScopeQuery.data?.students ?? [])
+    : (studentsQuery.data ?? []);
 
   const primaryMap = useMemo(
-    () => new Map((isCollege ? batches : classes).map((item) => [item._id, item.name])),
-    [batches, classes, isCollege]
+    () =>
+      new Map(
+        (isCollege ? batches : classes).map((item) => [item._id, item.name]),
+      ),
+    [batches, classes, isCollege],
   );
   const secondaryMap = useMemo(
-    () => new Map((isCollege ? years : sections).map((item) => [item._id, item.name])),
-    [isCollege, sections, years]
+    () =>
+      new Map(
+        (isCollege ? years : sections).map((item) => [item._id, item.name]),
+      ),
+    [isCollege, sections, years],
   );
 
-  const filteredYearOptions = useMemo(() => filterYearsByBatch(years, batchFilter), [batchFilter, years]);
-  const filteredSectionOptions = useMemo(() => filterSectionsByClass(sections, classFilter), [classFilter, sections]);
+  const filteredYearOptions = useMemo(
+    () => filterYearsByBatch(years, batchFilter),
+    [batchFilter, years],
+  );
+  const filteredSectionOptions = useMemo(
+    () => filterSectionsByClass(sections, classFilter),
+    [classFilter, sections],
+  );
 
-  const hasActiveFilters = Boolean(searchQuery.trim() || batchFilter || yearFilter || classFilter || sectionFilter);
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+    batchFilter ||
+    yearFilter ||
+    classFilter ||
+    sectionFilter,
+  );
 
   const filteredStudents = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -126,7 +170,15 @@ export const StudentListManager = () => {
         motherPhone.includes(query)
       );
     });
-  }, [batchFilter, classFilter, isCollege, searchQuery, sectionFilter, students, yearFilter]);
+  }, [
+    batchFilter,
+    classFilter,
+    isCollege,
+    searchQuery,
+    sectionFilter,
+    students,
+    yearFilter,
+  ]);
 
   const clearFilters = () => {
     setSearchQuery("");
@@ -147,7 +199,7 @@ export const StudentListManager = () => {
         className={cn(
           "h-10 w-full border-slate-300 bg-white transition-colors",
           "hover:border-brand-300 hover:bg-brand-100 hover:text-brand-800",
-          "disabled:hover:border-slate-300 disabled:hover:bg-white disabled:hover:text-slate-900"
+          "disabled:hover:border-slate-300 disabled:hover:bg-white disabled:hover:text-slate-900",
         )}
         disabled={!hasActiveFilters}
         onClick={clearFilters}
@@ -164,7 +216,9 @@ export const StudentListManager = () => {
   const isLoading = isTeacher
     ? teacherScopeQuery.isLoading
     : studentsQuery.isLoading ||
-      (isCollege ? batchesQuery.isLoading || yearsQuery.isLoading : classesQuery.isLoading || sectionsQuery.isLoading);
+      (isCollege
+        ? batchesQuery.isLoading || yearsQuery.isLoading
+        : classesQuery.isLoading || sectionsQuery.isLoading);
 
   if (isLoading) {
     return <LoadingState />;
@@ -174,9 +228,12 @@ export const StudentListManager = () => {
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>{canManage ? "All Students" : "Assigned Students"}</CardTitle>
+          <CardTitle>
+            {canManage ? "All Students" : "Assigned Students"}
+          </CardTitle>
           <p className="mt-1 text-sm text-slate-500">
-            Showing {filteredStudents.length} of {students.length} student{students.length === 1 ? "" : "s"}
+            Showing {filteredStudents.length} of {students.length} student
+            {students.length === 1 ? "" : "s"}
           </p>
         </div>
         <Button
@@ -189,7 +246,7 @@ export const StudentListManager = () => {
               secondaryLabel: labels.secondary,
               primaryMap,
               secondaryMap,
-              includeFees: canManage
+              includeFees: canManage,
             });
             toast.success("Student data exported to Excel");
           }}
@@ -217,7 +274,9 @@ export const StudentListManager = () => {
                     setYearFilter("");
                   }}
                 >
-                  <option value="">All {labels.primaryPlural.toLowerCase()}</option>
+                  <option value="">
+                    All {labels.primaryPlural.toLowerCase()}
+                  </option>
                   {batches.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
@@ -226,8 +285,13 @@ export const StudentListManager = () => {
                 </Select>
               </FormField>
               <FormField label={labels.secondary}>
-                <Select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)}>
-                  <option value="">All {labels.secondaryPlural.toLowerCase()}</option>
+                <Select
+                  value={yearFilter}
+                  onChange={(event) => setYearFilter(event.target.value)}
+                >
+                  <option value="">
+                    All {labels.secondaryPlural.toLowerCase()}
+                  </option>
                   {filteredYearOptions.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
@@ -247,7 +311,9 @@ export const StudentListManager = () => {
                     setSectionFilter("");
                   }}
                 >
-                  <option value="">All {labels.primaryPlural.toLowerCase()}</option>
+                  <option value="">
+                    All {labels.primaryPlural.toLowerCase()}
+                  </option>
                   {classes.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
@@ -256,8 +322,13 @@ export const StudentListManager = () => {
                 </Select>
               </FormField>
               <FormField label={labels.secondary}>
-                <Select value={sectionFilter} onChange={(event) => setSectionFilter(event.target.value)}>
-                  <option value="">All {labels.secondaryPlural.toLowerCase()}</option>
+                <Select
+                  value={sectionFilter}
+                  onChange={(event) => setSectionFilter(event.target.value)}
+                >
+                  <option value="">
+                    All {labels.secondaryPlural.toLowerCase()}
+                  </option>
                   {filteredSectionOptions.map((item) => (
                     <option key={item._id} value={item._id}>
                       {item.name}
@@ -314,44 +385,73 @@ export const StudentListManager = () => {
                     <Td>{student.user.phone || "—"}</Td>
                     <Td>{student.rollNumber}</Td>
                     <Td>{student.admissionNumber}</Td>
-                    <Td>{primaryMap.get((isCollege ? student.batchId : student.classId) ?? "") ?? "—"}</Td>
-                    <Td>{secondaryMap.get((isCollege ? student.yearId : student.sectionId) ?? "") ?? "—"}</Td>
+                    <Td>
+                      {primaryMap.get(
+                        (isCollege ? student.batchId : student.classId) ?? "",
+                      ) ?? "—"}
+                    </Td>
+                    <Td>
+                      {secondaryMap.get(
+                        (isCollege ? student.yearId : student.sectionId) ?? "",
+                      ) ?? "—"}
+                    </Td>
                     {isCollege ? (
                       <Td>
                         <span
                           className={
                             (student.academicStatus ?? "ACTIVE") === "ACTIVE"
                               ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800"
-                              : (student.academicStatus ?? "") === "PASSED_OUT" ||
+                              : (student.academicStatus ?? "") ===
+                                    "PASSED_OUT" ||
                                   (student.academicStatus ?? "") === "ALUMNI"
                                 ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
                                 : "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
                           }
                         >
-                          {(student.academicStatus ?? "ACTIVE").replace("_", " ")}
+                          {(student.academicStatus ?? "ACTIVE").replace(
+                            "_",
+                            " ",
+                          )}
                         </span>
                       </Td>
                     ) : null}
                     <Td>{student.guardianName}</Td>
-                    {canManage ? <Td>{formatCurrencyNpr(student.feesDueNpr)}</Td> : null}
+                    {canManage ? (
+                      <Td>{formatCurrencyNpr(student.feesDueNpr)}</Td>
+                    ) : null}
                     <Td className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => navigate(`/students/${student._id}/profile`)}
+                          onClick={() =>
+                            navigate(`/students/${student._id}/profile`)
+                          }
                         >
                           View Profile
                         </Button>
                         {canManage ? (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => handleEdit(student)}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEdit(student)}
+                            >
                               Edit
                             </Button>
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => void deleteMutation.mutateAsync(student._id)}
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    `Permanently delete ${student.user.fullName} (${student.admissionNumber})?\n\nThis removes the student record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
+                                  )
+                                ) {
+                                  return;
+                                }
+                                void deleteMutation.mutateAsync(student._id);
+                              }}
                             >
                               Delete
                             </Button>

@@ -1,5 +1,9 @@
 import { getTodayBs } from "@munatech/nepali-datepicker";
-import type { ExamInput, ExamRoutineInput, ResultInput } from "@phit-erp/shared";
+import type {
+  ExamInput,
+  ExamRoutineInput,
+  ResultInput,
+} from "@phit-erp/shared";
 
 const todayBs = getTodayBs();
 const todayBsValue = `${todayBs.year}-${String(todayBs.month).padStart(2, "0")}-${String(todayBs.day).padStart(2, "0")}`;
@@ -13,7 +17,7 @@ export const defaultExamValue: ExamInput = {
   status: "DRAFT",
   classIds: [],
   batchIds: [],
-  yearIds: []
+  yearIds: [],
 };
 
 export const defaultRoutineValue: ExamRoutineInput = {
@@ -25,7 +29,7 @@ export const defaultRoutineValue: ExamRoutineInput = {
   durationMinutes: 120,
   examHall: "",
   invigilator: "",
-  remarks: ""
+  remarks: "",
 };
 
 export const defaultResultValue: ResultInput = {
@@ -35,7 +39,7 @@ export const defaultResultValue: ResultInput = {
   sectionId: "",
   batchId: "",
   yearId: "",
-  marks: []
+  marks: [],
 };
 
 export const EXAM_STATUS_LABELS: Record<string, string> = {
@@ -43,7 +47,7 @@ export const EXAM_STATUS_LABELS: Record<string, string> = {
   SCHEDULED: "Scheduled",
   ONGOING: "Ongoing",
   COMPLETED: "Completed",
-  PUBLISHED: "Published"
+  PUBLISHED: "Published",
 };
 
 export const RESULT_SUBMISSION_STATUS_LABELS: Record<string, string> = {
@@ -52,7 +56,7 @@ export const RESULT_SUBMISSION_STATUS_LABELS: Record<string, string> = {
   PENDING_ADMIN_REVIEW: "Pending Admin Review",
   RETURNED_FOR_CORRECTION: "Returned for Correction",
   APPROVED: "Approved",
-  PUBLISHED: "Published"
+  PUBLISHED: "Published",
 };
 
 export const RESULT_SUBMISSION_STATUS_COLORS: Record<string, string> = {
@@ -61,5 +65,5 @@ export const RESULT_SUBMISSION_STATUS_COLORS: Record<string, string> = {
   PENDING_ADMIN_REVIEW: "bg-amber-100 text-amber-800",
   RETURNED_FOR_CORRECTION: "bg-orange-100 text-orange-800",
   APPROVED: "bg-brand-100 text-brand-700",
-  PUBLISHED: "bg-violet-100 text-violet-700"
+  PUBLISHED: "bg-violet-100 text-violet-700",
 };

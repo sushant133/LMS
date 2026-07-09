@@ -27,6 +27,7 @@ import {
   endSession,
   getSessionOption
 } from "../utils/transaction.js";
+import { hardDeleteTeacherAccount } from "../utils/deletePersonCascade.js";
 
 const validateCollegeTeacherSubjects = async (
   schoolId: mongoose.Types.ObjectId,
@@ -188,8 +189,17 @@ const buildTeacherAssignmentFields = (
 });
 
 export const listTeachers = asyncHandler(async (req: Request, res: Response) => {
+  const includeInactive = req.query.includeInactive === "true";
   const teachers = await Teacher.find(withTenantScope(req)).populate("user", "-password").sort({ createdAt: -1 });
-  return sendSuccess(res, "Teachers fetched", teachers);
+  const rows = includeInactive
+    ? teachers
+    : teachers.filter((teacher) => {
+        const user = teacher.user as { isActive?: boolean } | null;
+        if (user && user.isActive === false) return false;
+        if (String(teacher.teacherCode).includes("__deleted__")) return false;
+        return true;
+      });
+  return sendSuccess(res, "Teachers fetched", rows);
 });
 
 export const getTeacherById = asyncHandler(async (req: Request, res: Response) => {
@@ -330,6 +340,10 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
   return sendSuccess(res, "Teacher updated successfully", teacher);
 });
 
+/**
+ * Hard-delete teacher: removes Teacher + User (email, phone, password) and linked records
+ * (subjects, timetable, academic plans/logs, attendance marked by teacher, library/lab issues).
+ */
 export const deleteTeacher = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
   const teacher = await Teacher.findOne(withTenantScope(req, { _id: req.params.id }));
@@ -338,9 +352,27 @@ export const deleteTeacher = asyncHandler(async (req: Request, res: Response) =>
     throw new ApiError(404, "Teacher not found");
   }
 
-  await removeTeacherFromSubjects(schoolId, teacher._id);
-  await User.findOneAndDelete({ _id: teacher.user, schoolId });
-  await teacher.deleteOne();
+  const session = await createSession();
+  try {
+    const deleted = await hardDeleteTeacherAccount({
+      schoolId,
+      teacherId: teacher._id,
+      session
+    });
 
-  return sendSuccess(res, "Teacher deleted successfully");
+    await commitTransaction(session);
+
+    return sendSuccess(res, "Teacher and login account permanently deleted", {
+      teacherId: deleted.teacherId,
+      teacherCode: deleted.teacherCode
+    });
+  } catch (error) {
+    await abortTransaction(session);
+    if (error instanceof Error && error.message === "TEACHER_NOT_FOUND") {
+      throw new ApiError(404, "Teacher not found");
+    }
+    throw error;
+  } finally {
+    await endSession(session);
+  }
 });

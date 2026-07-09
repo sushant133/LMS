@@ -1,5 +1,8 @@
 import { useMemo, useRef, useState } from "react";
-import { computeSubjectMark, type MarksheetViewResponse } from "@phit-erp/shared";
+import {
+  computeSubjectMark,
+  type MarksheetViewResponse,
+} from "@phit-erp/shared";
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
@@ -7,7 +10,7 @@ import { Download, Printer } from "lucide-react";
 import {
   downloadMarksheetPdfFromElement,
   getPdfErrorMessage,
-  printMarksheetElement
+  printMarksheetElement,
 } from "lib/printUtils";
 
 interface ResultMarksheetViewProps {
@@ -15,17 +18,21 @@ interface ResultMarksheetViewProps {
   showActions?: boolean;
 }
 
-export const ResultMarksheetView = ({ data, showActions = true }: ResultMarksheetViewProps) => {
+export const ResultMarksheetView = ({
+  data,
+  showActions = true,
+}: ResultMarksheetViewProps) => {
   const marksheetRef = useRef<HTMLElement | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [printLoading, setPrintLoading] = useState(false);
 
   const subjectMap = useMemo(
     () => new Map(data.subjects.map((subject) => [subject._id, subject])),
-    [data.subjects]
+    [data.subjects],
   );
 
-  const publishedDate = data.result.publishedAtBs ?? data.exam.resultPublishDateBs ?? "—";
+  const publishedDate =
+    data.result.publishedAtBs ?? data.exam.resultPublishDateBs ?? "—";
   const pdfFilename = `marksheet-${data.student.user.fullName.replace(/\s+/g, "-")}-${data.exam.name.replace(/\s+/g, "-")}.pdf`;
 
   const rows = useMemo(
@@ -36,7 +43,7 @@ export const ResultMarksheetView = ({ data, showActions = true }: ResultMarkshee
           ...mark,
           fullMarks: mark.fullMarks ?? subject?.fullMarks ?? 100,
           passMarks: mark.passMarks ?? subject?.passMarks ?? 35,
-          obtainedMarks: 0
+          obtainedMarks: 0,
         });
         return {
           sn: index + 1,
@@ -48,10 +55,10 @@ export const ResultMarksheetView = ({ data, showActions = true }: ResultMarkshee
           fullMarks: computed.fullMarks,
           grade: computed.grade,
           status: computed.passFail,
-          remarks: mark.teacherRemarks || "—"
+          remarks: mark.teacherRemarks || "—",
         };
       }),
-    [data.result.marks, subjectMap]
+    [data.result.marks, subjectMap],
   );
 
   const handlePdf = async () => {
@@ -77,14 +84,27 @@ export const ResultMarksheetView = ({ data, showActions = true }: ResultMarkshee
   };
 
   return (
-    <article ref={marksheetRef} className="official-marksheet print-results-marksheet">
+    <article
+      ref={marksheetRef}
+      className="official-marksheet print-results-marksheet"
+    >
       {showActions ? (
         <div className="om-actions no-print">
-          <Button size="sm" variant="outline" disabled={pdfLoading} onClick={() => void handlePdf()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pdfLoading}
+            onClick={() => void handlePdf()}
+          >
             <Download className="mr-2 h-4 w-4" />
             {pdfLoading ? "Preparing PDF..." : "Download PDF"}
           </Button>
-          <Button size="sm" variant="outline" disabled={printLoading} onClick={() => void handlePrint()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={printLoading}
+            onClick={() => void handlePrint()}
+          >
             <Printer className="mr-2 h-4 w-4" />
             {printLoading ? "Preparing Print..." : "Print"}
           </Button>
@@ -93,14 +113,23 @@ export const ResultMarksheetView = ({ data, showActions = true }: ResultMarkshee
 
       <header className="om-header">
         <div className="om-logo">
-          <CollegeLogo src={data.collegeLogoUrl} alt={`${data.collegeName} logo`} />
+          <CollegeLogo
+            src={data.collegeLogoUrl}
+            alt={`${data.collegeName} logo`}
+          />
         </div>
         <h1 className="om-college-name">{data.collegeName}</h1>
-        {data.collegeNameNp ? <p className="om-college-name-np">{data.collegeNameNp}</p> : null}
-        {data.collegeAddress ? <p className="om-college-address">{data.collegeAddress}</p> : null}
+        {data.collegeNameNp ? (
+          <p className="om-college-name-np">{data.collegeNameNp}</p>
+        ) : null}
+        {data.collegeAddress ? (
+          <p className="om-college-address">{data.collegeAddress}</p>
+        ) : null}
         <p className="om-doc-title">OFFICIAL MARKSHEET</p>
         <p className="om-exam-name">{data.exam.name}</p>
-        <p className="om-session">Academic Session: {data.exam.academicYearBs}</p>
+        <p className="om-session">
+          Academic Session: {data.exam.academicYearBs}
+        </p>
       </header>
 
       <section className="om-student-grid">
@@ -236,18 +265,26 @@ export const ResultMarksheetView = ({ data, showActions = true }: ResultMarkshee
 
       <footer className="om-footer">
         <div className="om-footer-block">
-          {data.principalName ? <p className="om-footer-name">{data.principalName}</p> : null}
+          {data.principalName ? (
+            <p className="om-footer-name">{data.principalName}</p>
+          ) : null}
           <div className="om-footer-line">Principal Signature</div>
         </div>
         <div className="om-footer-block">
-          <div className="om-footer-line">{data.controllerOfExamination ?? "Controller of Examination"}</div>
+          <div className="om-footer-line">
+            {data.controllerOfExamination ?? "Controller of Examination"}
+          </div>
         </div>
       </footer>
 
       <div className="om-meta">
         <div className="om-meta-lines">
-          {data.printedDateBs ? <p>Printed Date: {data.printedDateBs}</p> : null}
-          {data.verificationNumber ? <p>Verification No.: {data.verificationNumber}</p> : null}
+          {data.printedDateBs ? (
+            <p>Printed Date: {data.printedDateBs}</p>
+          ) : null}
+          {data.verificationNumber ? (
+            <p>Verification No.: {data.verificationNumber}</p>
+          ) : null}
         </div>
       </div>
     </article>

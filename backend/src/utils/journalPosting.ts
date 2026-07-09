@@ -111,6 +111,10 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
   });
 };
 
+/**
+ * Reverse a journal entry by domain reference (FeeCollection, AccountingExpense, etc.).
+ * Keeps the original posted (not soft-deleted) so original + reversal net to zero in GL reports.
+ */
 export const reverseJournalEntry = async (
   schoolId: Types.ObjectId,
   userId: Types.ObjectId,
@@ -126,6 +130,15 @@ export const reverseJournalEntry = async (
   });
 
   if (!original) return;
+
+  // Already reversed
+  const existingReversal = await JournalEntry.findOne({
+    schoolId,
+    reversedEntryId: original._id,
+    isReversal: true,
+    isDeleted: false
+  }).lean();
+  if (existingReversal) return;
 
   const reversalLines = original.lines.map((line) => ({
     accountCode: line.accountCode,
@@ -150,10 +163,69 @@ export const reverseJournalEntry = async (
     reversedEntryId: original._id
   });
 
-  original.isDeleted = true;
+  // Do NOT soft-delete original — both stay posted so reports net correctly.
+  original.isReversed = true;
   await original.save();
 };
 
+/** Reverse a journal entry by its own Mongo id (manual journals, etc.). */
+export const reverseJournalEntryById = async (
+  schoolId: Types.ObjectId,
+  userId: Types.ObjectId,
+  journalEntryId: Types.ObjectId | string
+): Promise<void> => {
+  const original = await JournalEntry.findOne({
+    _id: journalEntryId,
+    schoolId,
+    isReversal: false,
+    isDeleted: false
+  });
+  if (!original) {
+    throw new Error("Journal entry not found or already reversed");
+  }
+
+  const existingReversal = await JournalEntry.findOne({
+    schoolId,
+    reversedEntryId: original._id,
+    isReversal: true,
+    isDeleted: false
+  }).lean();
+  if (existingReversal) return;
+
+  const reversalLines = original.lines.map((line) => ({
+    accountCode: line.accountCode,
+    accountName: line.accountName,
+    debitNpr: line.creditNpr,
+    creditNpr: line.debitNpr,
+    description: `Reversal: ${line.description ?? ""}`
+  }));
+
+  await postJournalEntry({
+    schoolId,
+    userId,
+    dateBs: original.dateBs,
+    narration: `Reversal of ${original.voucherNumber}`,
+    lines: reversalLines,
+    voucherType: original.voucherType as VoucherType,
+    referenceType: original.referenceType ?? "Manual",
+    referenceId: original.referenceId ?? original._id,
+    studentId: original.studentId ?? undefined,
+    bankAccountId: original.bankAccountId ?? undefined,
+    isReversal: true,
+    reversedEntryId: original._id
+  });
+
+  original.isReversed = true;
+  await original.save();
+};
+
+/**
+ * Cash-basis fee collection journal:
+ * Dr Cash/Bank = amountPaidNpr
+ * Dr Discount / Scholarship expenses
+ * Cr Fee income (scaled) + Fine income
+ * So cash book amount and GL cash debit always match amountPaidNpr.
+ */
 export const postFeeCollectionJournal = async (params: {
   schoolId: Types.ObjectId;
   userId: Types.ObjectId;
@@ -172,66 +244,106 @@ export const postFeeCollectionJournal = async (params: {
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
   const paymentName = await getAccountName(params.schoolId, paymentAccount);
 
-  const incomeLines: JournalLineInput[] = [];
+  const discountNpr = Math.max(0, params.discountNpr);
+  const scholarshipNpr = Math.max(0, params.scholarshipNpr);
+  const lateFeeNpr = Math.max(0, params.lateFeeNpr);
+  const amountPaidNpr = Math.max(0, params.amountPaidNpr);
+
+  // Fee income credit so entry balances: Cash + discount + scholarship = fee income + late fee
+  const feeIncomeCredit = Math.max(0, amountPaidNpr + discountNpr + scholarshipNpr - lateFeeNpr);
+
   const breakdown = params.feeBreakdown.length > 0
     ? params.feeBreakdown
-    : [{ feeType: "OTHER", title: "Fee Collection", amountNpr: params.amountPaidNpr }];
+    : [{ feeType: "OTHER", title: "Fee Collection", amountNpr: feeIncomeCredit }];
 
-  for (const item of breakdown) {
-    const incomeCode = FEE_TYPE_ACCOUNT_MAP[item.feeType as FeeType] ?? SYSTEM_ACCOUNT_CODES.OTHER_INCOME;
-    incomeLines.push({
-      accountCode: incomeCode,
-      accountName: await getAccountName(params.schoolId, incomeCode),
-      debitNpr: 0,
-      creditNpr: item.amountNpr,
-      description: item.title
-    });
+  const breakdownTotal = breakdown.reduce((sum, item) => sum + item.amountNpr, 0);
+  const incomeLines: JournalLineInput[] = [];
+
+  if (feeIncomeCredit > 0) {
+    if (breakdownTotal > 0) {
+      let allocated = 0;
+      breakdown.forEach((item, index) => {
+        const isLast = index === breakdown.length - 1;
+        const share = isLast
+          ? Number((feeIncomeCredit - allocated).toFixed(2))
+          : Number(((item.amountNpr / breakdownTotal) * feeIncomeCredit).toFixed(2));
+        allocated += share;
+        if (share <= 0) return;
+        const incomeCode = FEE_TYPE_ACCOUNT_MAP[item.feeType as FeeType] ?? SYSTEM_ACCOUNT_CODES.OTHER_INCOME;
+        incomeLines.push({
+          accountCode: incomeCode,
+          accountName: "",
+          debitNpr: 0,
+          creditNpr: share,
+          description: item.title
+        });
+      });
+    } else {
+      incomeLines.push({
+        accountCode: SYSTEM_ACCOUNT_CODES.FEE_INCOME,
+        accountName: "",
+        debitNpr: 0,
+        creditNpr: feeIncomeCredit,
+        description: "Fee Collection"
+      });
+    }
   }
 
-  if (params.lateFeeNpr > 0) {
+  if (lateFeeNpr > 0) {
     incomeLines.push({
       accountCode: SYSTEM_ACCOUNT_CODES.FINE_INCOME,
-      accountName: await getAccountName(params.schoolId, SYSTEM_ACCOUNT_CODES.FINE_INCOME),
+      accountName: "",
       debitNpr: 0,
-      creditNpr: params.lateFeeNpr,
+      creditNpr: lateFeeNpr,
       description: "Late fine"
     });
   }
 
-  if (params.discountNpr > 0) {
+  if (discountNpr > 0) {
     incomeLines.push({
       accountCode: SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE,
-      accountName: await getAccountName(params.schoolId, SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE),
-      debitNpr: params.discountNpr,
+      accountName: "",
+      debitNpr: discountNpr,
       creditNpr: 0,
       description: "Fee discount"
     });
   }
 
-  if (params.scholarshipNpr > 0) {
+  if (scholarshipNpr > 0) {
     incomeLines.push({
       accountCode: SYSTEM_ACCOUNT_CODES.SCHOLARSHIP_EXPENSE,
-      accountName: await getAccountName(params.schoolId, SYSTEM_ACCOUNT_CODES.SCHOLARSHIP_EXPENSE),
-      debitNpr: params.scholarshipNpr,
+      accountName: "",
+      debitNpr: scholarshipNpr,
       creditNpr: 0,
       description: "Scholarship"
     });
   }
 
-  const totalCredit = incomeLines.reduce((sum, line) => sum + line.creditNpr, 0);
-  const totalDebit = incomeLines.reduce((sum, line) => sum + line.debitNpr, 0);
-  const netAmount = totalCredit - totalDebit;
+  // Resolve account names
+  for (const line of incomeLines) {
+    line.accountName = await getAccountName(params.schoolId, line.accountCode);
+  }
 
   const lines: JournalLineInput[] = [
     {
       accountCode: paymentAccount,
       accountName: paymentName,
-      debitNpr: netAmount,
+      debitNpr: amountPaidNpr,
       creditNpr: 0,
       description: `Receipt ${params.receiptNumber}`
     },
     ...incomeLines
   ];
+
+  // Ensure balance (floating point safety)
+  const totalDebit = lines.reduce((sum, line) => sum + line.debitNpr, 0);
+  const totalCredit = lines.reduce((sum, line) => sum + line.creditNpr, 0);
+  const drift = Number((totalDebit - totalCredit).toFixed(2));
+  if (Math.abs(drift) > 0 && Math.abs(drift) <= 0.05 && incomeLines.length > 0) {
+    const lastIncome = incomeLines[incomeLines.length - 1]!;
+    if (lastIncome.creditNpr > 0) lastIncome.creditNpr = Number((lastIncome.creditNpr + drift).toFixed(2));
+    else lastIncome.debitNpr = Number((lastIncome.debitNpr - drift).toFixed(2));
+  }
 
   await postJournalEntry({
     schoolId: params.schoolId,

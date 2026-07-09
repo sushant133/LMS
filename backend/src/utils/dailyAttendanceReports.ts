@@ -347,10 +347,14 @@ export const buildStudentWiseReport = async (
   return rows.sort((left, right) => left.percentage - right.percentage);
 };
 
-export const buildStatusReport = (records: ReportAttendanceRecord[], status: DailyAttendanceStatus) => {
+export const buildStatusReport = async (
+  records: ReportAttendanceRecord[],
+  status: DailyAttendanceStatus
+) => {
   const rows: Array<{
     dateBs: string;
     studentId: string;
+    studentName?: string;
     status: DailyAttendanceStatus;
     remarks?: string;
     recordId: string;
@@ -369,6 +373,23 @@ export const buildStatusReport = (records: ReportAttendanceRecord[], status: Dai
         });
       });
   });
+
+  const studentIds = [...new Set(rows.map((row) => row.studentId))];
+  if (studentIds.length > 0) {
+    const students = await Student.find({ _id: { $in: studentIds } })
+      .populate("user", "fullName")
+      .select("user")
+      .lean();
+    const nameMap = new Map(
+      students.map((student) => [
+        student._id.toString(),
+        (student.user as { fullName?: string } | undefined)?.fullName ?? "Student"
+      ])
+    );
+    rows.forEach((row) => {
+      row.studentName = nameMap.get(row.studentId) ?? row.studentId;
+    });
+  }
 
   return rows;
 };

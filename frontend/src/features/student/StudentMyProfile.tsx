@@ -25,17 +25,27 @@ export interface StudentSelfProfile {
   academicStatus?: string;
 }
 
-const ProfileField = ({ label, value }: { label: string; value: string | number }) => (
+const ProfileField = ({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) => (
   <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
-    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-    <div className="mt-1 text-base font-semibold text-slate-900">{value || "—"}</div>
+    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+      {label}
+    </div>
+    <div className="mt-1 text-base font-semibold text-slate-900">
+      {value || "—"}
+    </div>
   </div>
 );
 
 export const StudentMyProfile = () => {
   const profileQuery = useQuery({
     queryKey: ["student-my-profile"],
-    queryFn: () => unwrap<StudentSelfProfile>(api.get("/student/profile"))
+    queryFn: () => unwrap<StudentSelfProfile>(api.get("/student/profile")),
   });
 
   if (profileQuery.isLoading) {
@@ -73,7 +83,9 @@ export const StudentMyProfile = () => {
             </div>
           )}
           <div className="mt-4 sm:mt-0">
-            <h2 className="text-2xl font-bold text-slate-900">{profile.fullName}</h2>
+            <h2 className="text-2xl font-bold text-slate-900">
+              {profile.fullName}
+            </h2>
             <div className="mt-2 flex flex-wrap justify-center gap-2 sm:justify-start">
               <Badge className="bg-white text-slate-700 ring-1 ring-slate-200">
                 Reg / Admission: {profile.admissionNumber}
@@ -96,7 +108,10 @@ export const StudentMyProfile = () => {
             </h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <ProfileField label="Full Name" value={profile.fullName} />
-              <ProfileField label="Registration / Admission No." value={profile.admissionNumber} />
+              <ProfileField
+                label="Registration / Admission No."
+                value={profile.admissionNumber}
+              />
               <ProfileField label="Roll Number" value={profile.rollNumber} />
               <ProfileField label="Mobile Number" value={profile.phone} />
               <ProfileField label="Email" value={profile.email} />
@@ -122,7 +137,9 @@ export const StudentMyProfile = () => {
               Address
             </h3>
             <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
-              <div className="text-base font-medium text-slate-900">{profile.address}</div>
+              <div className="text-base font-medium text-slate-900">
+                {profile.address}
+              </div>
             </div>
           </section>
 
@@ -135,15 +152,23 @@ export const StudentMyProfile = () => {
               <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
                 <Phone className="h-4 w-4 shrink-0 text-slate-500" />
                 <div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Mobile Number</div>
-                  <div className="font-semibold text-slate-900">{profile.phone || "—"}</div>
+                  <div className="text-xs uppercase tracking-wide text-slate-500">
+                    Mobile Number
+                  </div>
+                  <div className="font-semibold text-slate-900">
+                    {profile.phone || "—"}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
                 <Mail className="h-4 w-4 shrink-0 text-slate-500" />
                 <div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Email</div>
-                  <div className="font-semibold text-slate-900 break-all">{profile.email || "—"}</div>
+                  <div className="text-xs uppercase tracking-wide text-slate-500">
+                    Email
+                  </div>
+                  <div className="font-semibold text-slate-900 break-all">
+                    {profile.email || "—"}
+                  </div>
                 </div>
               </div>
             </div>

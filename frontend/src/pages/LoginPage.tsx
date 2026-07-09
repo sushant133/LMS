@@ -73,16 +73,14 @@ export const LoginPage = () => {
     // Ensure we remount this page layout after logout-induced auth changes.
     setLogoutEpoch((e) => e + 1);
 
-
     void logout();
   }, [loading, logout, redirectTarget, user]);
-
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsed = loginSchema.safeParse({
       email: form.email.trim(),
-      password: form.password.trim()
+      password: form.password.trim(),
     });
 
     if (!parsed.success) {
@@ -112,7 +110,10 @@ export const LoginPage = () => {
     >
       <LoginHero isDesktop={isDesktop} />
 
-      <div className="flex items-center justify-center p-6" style={isDesktop ? { gridColumnStart: 2 } : undefined}>
+      <div
+        className="flex items-center justify-center p-6"
+        style={isDesktop ? { gridColumnStart: 2 } : undefined}
+      >
         <Card className="w-full max-w-md border-white/60 bg-white/95 shadow-2xl">
           <CardHeader>
             <CardTitle>{t("login")}</CardTitle>
@@ -124,7 +125,12 @@ export const LoginPage = () => {
                   autoComplete="username"
                   type="text"
                   value={form.email}
-                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
                 />
               </FormField>
               <FormField label={t("password")}>
@@ -134,15 +140,26 @@ export const LoginPage = () => {
                     className="pr-10"
                     type={showPassword ? "text" : "password"}
                     value={form.password}
-                    onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
                   />
                   <button
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 hover:text-slate-700"
                     type="button"
                     onClick={() => setShowPassword((current) => !current)}
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
                   </button>
                 </div>
               </FormField>
@@ -152,10 +169,14 @@ export const LoginPage = () => {
             </form>
 
             <div className="mt-4 space-y-2 rounded-xl border border-brand-100 bg-brand-50/80 px-3 py-2 text-xs text-brand-900">
-              <p className="font-semibold text-brand-950">Demo login credentials</p>
+              <p className="font-semibold text-brand-950">
+                Demo login credentials
+              </p>
               {getDemoLoginEntries().map((entry) => (
                 <p key={entry.email}>
-                  {entry.label}: <span className="font-medium">{entry.email}</span> / <span className="font-medium">{entry.password}</span>
+                  {entry.label}:{" "}
+                  <span className="font-medium">{entry.email}</span> /{" "}
+                  <span className="font-medium">{entry.password}</span>
                 </p>
               ))}
             </div>

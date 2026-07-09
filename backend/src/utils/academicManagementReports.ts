@@ -11,11 +11,14 @@ import { ApiError } from "./apiError.js";
 import {
   applyTeacherScopeToFilter,
   buildAcademicFilter,
+  computeItemStatus,
   serializeLessonPlan,
   serializeLogBookEntry,
   serializeSessionPlan
 } from "./academicManagementService.js";
+import { getDayOfWeekFromBs, getTodayBs } from "./nepaliDate.js";
 import { tenantObjectId } from "./tenant.js";
+import { TimetableSlot } from "../models/TimetableSlot.js";
 
 export type AcademicReportType =
   | "session-plan"
@@ -72,6 +75,21 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
   const filters = parseFilters(req.query as Record<string, unknown>);
   const baseFilter = buildAcademicFilter(req, filters);
   await applyTeacherScopeToFilter(req, baseFilter);
+  const schoolId = tenantObjectId(req);
+
+  /** Progress rows only for non-deleted session plans, respecting teacher scope / filters. */
+  const liveSessionFilter: Record<string, unknown> = { schoolId, isDeleted: false };
+  if (baseFilter.teacherId) liveSessionFilter.teacherId = baseFilter.teacherId;
+  if (filters.academicYearBs) liveSessionFilter.academicYearBs = filters.academicYearBs;
+  if (filters.subjectId) liveSessionFilter.subjectId = filters.subjectId;
+  const liveSessionIds = (await AcademicSessionPlan.find(liveSessionFilter).select("_id").lean()).map((p) => p._id);
+  const progressFilter: Record<string, unknown> = {
+    schoolId,
+    sessionPlanId: { $in: liveSessionIds }
+  };
+  if (baseFilter.teacherId) progressFilter.teacherId = baseFilter.teacherId;
+  if (filters.academicYearBs) progressFilter.academicYearBs = filters.academicYearBs;
+  if (filters.subjectId) progressFilter.subjectId = filters.subjectId;
 
   switch (reportType) {
     case "session-plan": {
@@ -115,13 +133,14 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
       return { title: "Monthly Teaching Report", rows: rows.filter(Boolean) };
     }
     case "subject-progress": {
-      const progress = await AcademicProgress.find({ schoolId: tenantObjectId(req) }).lean();
+      const progress = await AcademicProgress.find(progressFilter).lean();
       const names = await subjectNameMap(progress.map((row) => row.subjectId.toString()));
       return {
         title: "Subject Progress Report",
         rows: progress.map((row) => ({
           subjectName: names.get(row.subjectId.toString()) ?? "Subject",
           completedPercent: row.completedPercent,
+          remainingPercent: row.remainingPercent,
           completedUnits: row.completedUnits,
           remainingUnits: row.remainingUnits,
           delayedUnits: row.delayedUnits
@@ -129,19 +148,23 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
       };
     }
     case "syllabus-completion": {
-      const progress = await AcademicProgress.find({ schoolId: tenantObjectId(req) }).lean();
+      const progress = await AcademicProgress.find(progressFilter).lean();
       const names = await subjectNameMap(progress.map((row) => row.subjectId.toString()));
       return {
         title: "Syllabus Completion Report",
         rows: progress.map((row) => ({
           subjectName: names.get(row.subjectId.toString()) ?? "Subject",
-          percent: row.completedPercent
+          percent: row.completedPercent,
+          remainingPercent: row.remainingPercent
         }))
       };
     }
     case "faculty-wise": {
-      const plans = await AcademicSessionPlan.find({ schoolId: tenantObjectId(req), isDeleted: false, faculty: { $exists: true, $ne: "" } }).lean();
-      const progress = await AcademicProgress.find({ schoolId: tenantObjectId(req) }).lean();
+      const plans = await AcademicSessionPlan.find({
+        ...liveSessionFilter,
+        faculty: { $exists: true, $ne: "" }
+      }).lean();
+      const progress = await AcademicProgress.find(progressFilter).lean();
       const planFacultyMap = new Map(plans.map((plan) => [plan._id.toString(), plan.faculty ?? "General"]));
       const facultyTotals = new Map<string, { total: number; sum: number }>();
 
@@ -155,7 +178,8 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
         title: "Faculty-wise Report",
         rows: Array.from(facultyTotals.entries()).map(([faculty, stats]) => ({
           faculty,
-          completionPercent: stats.total > 0 ? Math.round(stats.sum / stats.total) : 0
+          completionPercent: stats.total > 0 ? Math.round(stats.sum / stats.total) : 0,
+          remainingPercent: stats.total > 0 ? Math.max(0, 100 - Math.round(stats.sum / stats.total)) : 100
         }))
       };
     }
@@ -172,7 +196,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
       };
     }
     case "teacher-performance": {
-      const progress = await AcademicProgress.find({ schoolId: tenantObjectId(req) }).lean();
+      const progress = await AcademicProgress.find(progressFilter).lean();
       const names = await teacherNameMap(progress.map((row) => row.teacherId.toString()));
       const grouped = new Map<string, { total: number; sum: number }>();
       progress.forEach((row) => {
@@ -185,7 +209,8 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
         rows: Array.from(grouped.entries()).map(([teacherId, stats]) => ({
           teacherId,
           teacherName: names.get(teacherId) ?? "Teacher",
-          completionPercent: stats.total > 0 ? Math.round(stats.sum / stats.total) : 0
+          completionPercent: stats.total > 0 ? Math.round(stats.sum / stats.total) : 0,
+          remainingPercent: stats.total > 0 ? Math.max(0, 100 - Math.round(stats.sum / stats.total)) : 100
         }))
       };
     }
@@ -198,32 +223,39 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
       return { title: "Daily Teaching Report", rows: rows.filter(Boolean) };
     }
     case "pending-log-book": {
-      const teachers = await Teacher.find({ schoolId: tenantObjectId(req) }).select("_id").lean();
-      const today = filters.dateFrom ?? new Date().toISOString().slice(0, 10);
+      const today = filters.dateFrom || getTodayBs();
+      const dayOfWeek = getDayOfWeekFromBs(today);
+      const slotFilter: Record<string, unknown> = { schoolId, dayOfWeek };
+      if (baseFilter.teacherId) slotFilter.teacherId = baseFilter.teacherId;
+      const scheduledTeacherIds = await TimetableSlot.distinct("teacherId", slotFilter);
       const submitted = await AcademicLogBookEntry.distinct("teacherId", {
-        schoolId: tenantObjectId(req),
+        schoolId,
         dateBs: today,
-        isDeleted: false
+        isDeleted: false,
+        ...(baseFilter.teacherId ? { teacherId: baseFilter.teacherId } : {})
       });
       const submittedSet = new Set(submitted.map((id) => id.toString()));
-      const names = await teacherNameMap(teachers.map((teacher) => teacher._id.toString()));
+      const pendingIds = scheduledTeacherIds.map((id) => id.toString()).filter((id) => !submittedSet.has(id));
+      const names = await teacherNameMap(pendingIds);
       return {
         title: "Pending Log Book Report",
-        rows: teachers
-          .filter((teacher) => !submittedSet.has(teacher._id.toString()))
-          .map((teacher) => ({
-            teacherId: teacher._id.toString(),
-            teacherName: names.get(teacher._id.toString()) ?? "Teacher",
-            dateBs: today,
-            status: "MISSING"
-          }))
+        rows: pendingIds.map((teacherId) => ({
+          teacherId,
+          teacherName: names.get(teacherId) ?? "Teacher",
+          dateBs: today,
+          status: "MISSING"
+        }))
       };
     }
     case "late-submission": {
-      const items = await AcademicLessonPlanItem.find({
+      const todayBs = getTodayBs();
+      const candidates = await AcademicLessonPlanItem.find({
         schoolId: tenantObjectId(req),
-        completionStatus: "DELAYED"
+        completionStatus: { $ne: "COMPLETED" }
       }).lean();
+      const items = candidates.filter(
+        (item) => computeItemStatus(item.estimatedClasses, item.completedClasses, item.deadline, todayBs) === "DELAYED"
+      );
       const planIds = [...new Set(items.map((item) => item.lessonPlanId.toString()))];
       const plans = await AcademicLessonPlan.find({ _id: { $in: planIds } }).lean();
       const planMap = new Map(plans.map((plan) => [plan._id.toString(), plan]));
@@ -237,7 +269,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
             month: plan?.month,
             topic: item.plannedTopic,
             deadline: item.deadline,
-            status: item.completionStatus
+            status: "DELAYED"
           };
         })
       };

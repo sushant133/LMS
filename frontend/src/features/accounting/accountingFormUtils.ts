@@ -1,5 +1,8 @@
 /** Normalizes empty form strings to undefined so optional MongoDB refs pass validation. */
-export const emptyIdsToUndefined = <T extends Record<string, unknown>>(payload: T, keys: string[]): T => {
+export const emptyIdsToUndefined = <T extends Record<string, unknown>>(
+  payload: T,
+  keys: string[],
+): T => {
   const next = { ...payload };
   for (const key of keys) {
     if (next[key] === "") {
@@ -14,4 +17,7 @@ export const getSalaryEmployeeLabel = (row: {
   collegeStaff?: { fullName?: string };
   staffName?: string;
 }): string =>
-  row.teacher?.user?.fullName ?? row.collegeStaff?.fullName ?? row.staffName ?? "—";
+  row.teacher?.user?.fullName ??
+  row.collegeStaff?.fullName ??
+  row.staffName ??
+  "—";

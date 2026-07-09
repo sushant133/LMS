@@ -4,7 +4,13 @@ import { formatCurrencyNpr } from "lib/utils";
 import * as XLSX from "xlsx";
 
 const formatAddress = (address: StudentRecord["address"]): string =>
-  [address.streetAddress, `Ward ${address.ward}`, address.municipality, address.district, address.province]
+  [
+    address.streetAddress,
+    `Ward ${address.ward}`,
+    address.municipality,
+    address.district,
+    address.province,
+  ]
     .filter(Boolean)
     .join(", ");
 
@@ -20,7 +26,7 @@ interface StudentExportOptions {
 export const downloadStudentsExcel = (
   students: StudentRecord[],
   options: StudentExportOptions,
-  filename = "students.xlsx"
+  filename = "students.xlsx",
 ): void => {
   const headers = [
     "Full Name",
@@ -41,7 +47,7 @@ export const downloadStudentsExcel = (
     "Guardian Phone",
     "Address",
     ...(options.includeFees ? ["Fees Due (NPR)"] : []),
-    "Remarks"
+    "Remarks",
   ];
 
   const rows = students.map((student) => [
@@ -50,8 +56,12 @@ export const downloadStudentsExcel = (
     student.user.phone ?? "",
     student.rollNumber,
     student.admissionNumber,
-    options.primaryMap.get((options.isCollege ? student.batchId : student.classId) ?? "") ?? "",
-    options.secondaryMap.get((options.isCollege ? student.yearId : student.sectionId) ?? "") ?? "",
+    options.primaryMap.get(
+      (options.isCollege ? student.batchId : student.classId) ?? "",
+    ) ?? "",
+    options.secondaryMap.get(
+      (options.isCollege ? student.yearId : student.sectionId) ?? "",
+    ) ?? "",
     student.gender,
     student.dateOfBirthBs,
     student.admissionDateBs,
@@ -63,7 +73,7 @@ export const downloadStudentsExcel = (
     student.guardianPhone,
     formatAddress(student.address),
     ...(options.includeFees ? [formatCurrencyNpr(student.feesDueNpr)] : []),
-    student.remarks ?? ""
+    student.remarks ?? "",
   ]);
 
   const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
@@ -72,7 +82,7 @@ export const downloadStudentsExcel = (
 
   const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
   const blob = new Blob([buffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   saveAs(blob, filename);
 };
