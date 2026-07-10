@@ -266,8 +266,8 @@ export const assertTeacherSubjectClassSection = async (
 ): Promise<TeacherScope> => {
   const scope = await requireTeacherScope(req);
 
-  // Matrix path when assignment-sourced
-  if (scope.scopeSource === "assignment" && scope.assignments.length > 0) {
+  // Matrix path when assignment-sourced (even if empty — do not fall back to legacy arrays)
+  if (scope.scopeSource === "assignment") {
     const match = scope.assignments.find(
       (pair) =>
         pair.subjectId === subjectId && pair.classId === classId && pair.sectionId === sectionId
@@ -315,7 +315,7 @@ export const assertTeacherSubjectBatchYear = async (
 ): Promise<TeacherScope> => {
   const scope = await requireTeacherScope(req);
 
-  if (scope.scopeSource === "assignment" && scope.assignments.length > 0) {
+  if (scope.scopeSource === "assignment") {
     const match = scope.assignments.find(
       (pair) => pair.subjectId === subjectId && pair.batchId === batchId && pair.yearId === yearId
     );
