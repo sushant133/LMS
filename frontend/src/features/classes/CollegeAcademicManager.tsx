@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   COLLEGE_YEAR_NAMES,
@@ -157,6 +158,23 @@ export const CollegeAcademicManager = () => {
         title="Academic Setup"
         description="Manage the fixed HA curriculum once, then create batches that automatically inherit year-wise subjects. Use Academic Promotion at the bottom for one-click yearly progression."
       />
+
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+          <div>
+            <p className="font-medium text-slate-900">Subject Assignment</p>
+            <p className="text-sm text-slate-600">
+              Assign teachers to subjects for batch/year with FULL, UNIT, or PERCENTAGE coverage.
+            </p>
+          </div>
+          <Link
+            to="/academics/subject-assignments"
+            className="inline-flex h-9 items-center rounded-md bg-[var(--brand-primary,#0c2d6b)] px-4 text-sm font-medium text-white hover:opacity-90"
+          >
+            Open Subject Assignment
+          </Link>
+        </CardContent>
+      </Card>
 
       <MasterSubjectManager
         canManage={canManage}

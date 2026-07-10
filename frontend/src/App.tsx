@@ -15,6 +15,9 @@ const StudentListPage = lazy(() => import("pages/StudentListPage").then((module)
 const TeachersPage = lazy(() => import("pages/TeachersPage").then((module) => ({ default: module.TeachersPage })));
 const CollegeStaffPage = lazy(() => import("pages/CollegeStaffPage").then((module) => ({ default: module.CollegeStaffPage })));
 const AcademicsPage = lazy(() => import("pages/AcademicsPage").then((module) => ({ default: module.AcademicsPage })));
+const SubjectAssignmentsPage = lazy(() =>
+  import("pages/SubjectAssignmentsPage").then((module) => ({ default: module.SubjectAssignmentsPage }))
+);
 const AcademicManagementPage = lazy(() =>
   import("pages/AcademicManagementPage").then((module) => ({ default: module.AcademicManagementPage }))
 );
@@ -185,6 +188,14 @@ export default function App() {
               <Route path="/college-staff" element={<CollegeStaffPage />} />
               <Route path="/teachers" element={<TeachersPage />} />
               <Route path="/academics" element={<AcademicsPage />} />
+              <Route
+                path="/academics/subject-assignments"
+                element={
+                  <LazyRoute>
+                    <SubjectAssignmentsPage />
+                  </LazyRoute>
+                }
+              />
               <Route path="/fees" element={<Navigate to="/accounting" replace />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/reports" element={<ReportsPage />} />

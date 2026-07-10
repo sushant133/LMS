@@ -69,7 +69,18 @@ const settingSchema = new Schema(
     holidays: { type: [holidaySchema], default: [] },
     infrastructure: { type: infrastructureSchema, default: () => ({}) },
     dailyAttendance: { type: dailyAttendanceConfigSchema, default: () => ({}) },
-    libraryInventoryAccess: { type: libraryInventoryAccessSchema, default: () => ({}) }
+    libraryInventoryAccess: { type: libraryInventoryAccessSchema, default: () => ({}) },
+    /** Per-school override for subject-assignment scope mode (unset → env default) */
+    subjectAssignmentScopeMode: {
+      type: String,
+      enum: ["legacy", "dual", "assignment"],
+      required: false
+    },
+    /** When true, new timetable slots must link subjectAssignmentId */
+    subjectAssignmentTimetableRequired: {
+      type: Boolean,
+      default: false
+    }
   },
   { timestamps: true }
 );

@@ -1,5 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import type { BatchRecord, ClassRecord, SectionRecord, StudentRecord, SubjectRecord, YearRecord } from "@phit-erp/shared";
+import type {
+  BatchRecord,
+  ClassRecord,
+  SectionRecord,
+  StudentRecord,
+  SubjectRecord,
+  TeacherAssignmentPair,
+  YearRecord
+} from "@phit-erp/shared";
 import { api, unwrap } from "lib/api";
 
 export interface TeacherScopeData {
@@ -10,6 +18,9 @@ export interface TeacherScopeData {
     sectionIds: string[];
     batchIds: string[];
     yearIds: string[];
+    assignments: TeacherAssignmentPair[];
+    academicYearBs: string;
+    scopeSource: "legacy" | "assignment";
   };
   subjects: SubjectRecord[];
   classes: ClassRecord[];

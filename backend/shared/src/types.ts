@@ -267,12 +267,16 @@ export interface StudentDocument {
   _id?: string;
   type: DocumentType | string;
   name: string;
+  /** Empty string when status is PENDING (not yet submitted). */
   url: string;
+  /** Empty string when status is PENDING (not yet submitted). */
   originalName: string;
   mimeType?: string;
   size: number;
   status: StudentDocumentStatus;
+  /** Empty string when status is PENDING (not yet submitted). */
   uploadedAt: string;
+  /** Empty string when status is PENDING (not yet submitted). */
   uploadedBy: string;
   uploadedByName?: string;
   notes?: string;
@@ -335,6 +339,8 @@ export interface TeacherRecord {
   assignedSectionIds: string[];
   assignedBatchIds: string[];
   assignedYearIds: string[];
+  /** Dual-read migration marker — NA | PENDING | NEEDS_REVIEW | ACCEPTED */
+  assignmentMigrationStatus?: "NA" | "PENDING" | "NEEDS_REVIEW" | "ACCEPTED";
   basicSalaryNpr: number;
   createdAt?: string;
   updatedAt?: string;
@@ -899,6 +905,10 @@ export interface SchoolSettingsRecord {
   holidays: HolidayRecord[];
   dailyAttendance?: DailyAttendanceConfig;
   libraryInventoryAccess?: LibraryInventoryAccessConfig;
+  /** Per-school subject-assignment scope mode override (unset → env default) */
+  subjectAssignmentScopeMode?: "legacy" | "dual" | "assignment";
+  /** When true, new timetable slots must link subjectAssignmentId */
+  subjectAssignmentTimetableRequired?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -159,9 +159,9 @@ export const listSubjects = asyncHandler(async (req: Request, res: Response) => 
   const filter: Record<string, unknown> = withTenantScope(req);
   const teacherScope = await getTeacherScope(req);
 
+  // Scope.subjectIds is authoritative — do not require Subject.teacherIds membership
   if (teacherScope) {
     filter._id = { $in: teacherScope.subjectIds };
-    filter.teacherIds = teacherScope.teacherId;
   }
 
   const studentProfile = await getStudentProfile(req);

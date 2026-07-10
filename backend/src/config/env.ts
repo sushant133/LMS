@@ -59,7 +59,22 @@ const envSchema = z.object({
   SMTP_FROM_EMAIL: z.string().optional(),
   SMTP_FROM_NAME: z.string().default("Public Himal Institute of Technology"),
   /** Optional Reply-To (defaults to From). Use a monitored institution inbox when possible. */
-  SMTP_REPLY_TO: z.string().optional()
+  SMTP_REPLY_TO: z.string().optional(),
+  /**
+   * Process-wide default for subject-assignment scope mode when Setting has no override.
+   * Keep `legacy` until migration + dual soak complete.
+   */
+  SUBJECT_ASSIGNMENT_SCOPE_DEFAULT: z.enum(["legacy", "dual", "assignment"]).default("legacy"),
+  /**
+   * When true (and Setting does not override), new timetable slots require subjectAssignmentId.
+   * Enable only after backfill is clean for the school.
+   */
+  SUBJECT_ASSIGNMENT_TIMETABLE_REQUIRE_LINK: z
+    .string()
+    .optional()
+    .transform((value) => value === "true")
+    .pipe(z.boolean())
+    .default(false)
 });
 
 export const env = envSchema.parse(process.env);

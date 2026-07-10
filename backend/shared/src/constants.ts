@@ -437,6 +437,23 @@ export const GRADE_SCALE: Array<{
 
 export const DEFAULT_ACADEMIC_YEAR_BS = "2083/2084";
 
+/**
+ * Subject Assignment coverage types (who teaches what coverage).
+ * Named SUBJECT_ASSIGNMENT_* to avoid clash with classroom ASSIGNMENT_TYPES (HOMEWORK/CAS/NOTE).
+ */
+export const SUBJECT_ASSIGNMENT_TYPES = ["FULL", "UNIT", "PERCENTAGE"] as const;
+/** @deprecated Use SUBJECT_ASSIGNMENT_TYPES — alias for design-doc naming */
+export const SA_ASSIGNMENT_TYPES = SUBJECT_ASSIGNMENT_TYPES;
+
+/** Lifecycle of a SubjectAssignment row (scope uses ACTIVE only) */
+export const SUBJECT_ASSIGNMENT_STATUSES = ["ACTIVE", "ENDED", "SUPERSEDED"] as const;
+
+/** Per-teacher migration marker for dual-read scope resolution */
+export const TEACHER_MIGRATION_STATUSES = ["NA", "PENDING", "NEEDS_REVIEW", "ACCEPTED"] as const;
+
+/** Per-school (or env default) scope data source mode */
+export const SCOPE_MODES = ["legacy", "dual", "assignment"] as const;
+
 // Nepal IEMIS / Inclusive Education - Official 8 disability categories (approximate from CEHRD guidelines)
 export const DISABILITY_CATEGORIES = [
   "None",
@@ -527,3 +544,67 @@ export const STUDENT_DOCUMENT_MIME_TYPES = [
 ] as const;
 
 export const STUDENT_DOCUMENT_MAX_SIZE_BYTES = 500 * 1024;
+
+/** Required document categories for admissions (must be submitted or left PENDING). */
+export const getRequiredStudentDocumentCategories = () =>
+  STUDENT_DOCUMENT_CATEGORIES.filter((item) => item.required);
+
+export type PendingRequiredDocumentPlaceholder = {
+  type: string;
+  name: string;
+  url: string;
+  originalName: string;
+  size: number;
+  status: "PENDING";
+  uploadedAt: string;
+  uploadedBy: string;
+};
+
+/**
+ * Merge existing student documents with PENDING placeholders for any required
+ * categories that are missing. Student creation is allowed without files;
+ * missing required docs stay PENDING until uploaded later.
+ */
+export const ensurePendingRequiredDocuments = <
+  T extends { type: string; status?: string; url?: string }
+>(
+  documents: T[] = []
+): Array<T | PendingRequiredDocumentPlaceholder> => {
+  const result: Array<T | PendingRequiredDocumentPlaceholder> = [...documents];
+  const presentTypes = new Set(result.map((doc) => doc.type));
+
+  for (const category of getRequiredStudentDocumentCategories()) {
+    if (presentTypes.has(category.key)) continue;
+    const placeholder: PendingRequiredDocumentPlaceholder = {
+      type: category.key,
+      name: category.label,
+      url: "",
+      originalName: "",
+      size: 0,
+      status: "PENDING",
+      uploadedAt: "",
+      uploadedBy: ""
+    };
+    result.push(placeholder);
+    presentTypes.add(category.key);
+  }
+
+  return result;
+};
+
+/** True when a document entry represents an unsubmitted required file. */
+export const isPendingStudentDocument = (doc: {
+  status?: string;
+  url?: string;
+}): boolean => doc.status === "PENDING" || !doc.url;
+
+/** Count of required document categories still missing a real file. */
+export const countPendingRequiredDocuments = (
+  documents: Array<{ type: string; status?: string; url?: string }> = []
+): number => {
+  return getRequiredStudentDocumentCategories().filter((category) => {
+    const ofType = documents.filter((doc) => doc.type === category.key);
+    if (ofType.length === 0) return true;
+    return ofType.every((doc) => isPendingStudentDocument(doc));
+  }).length;
+};

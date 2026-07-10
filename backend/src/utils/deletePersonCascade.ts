@@ -32,6 +32,7 @@ import { TransportAssignment } from "../models/TransportRoute.js";
 import { User } from "../models/User.js";
 import { Notice } from "../models/Notice.js";
 import { JournalEntry } from "../models/JournalEntry.js";
+import { SubjectAssignment } from "../models/SubjectAssignment.js";
 
 type ObjectIdLike = Types.ObjectId | string;
 
@@ -141,6 +142,9 @@ export const hardDeleteTeacherAccount = async (params: {
   const email = user?.email ?? "";
   const fullName = user?.fullName ?? "";
   const teacherCode = teacher.teacherCode;
+
+  // Hard-delete all subject assignment history with the teacher account
+  await SubjectAssignment.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt);
 
   // Detach from subjects / class coordinator roles
   await Subject.updateMany(

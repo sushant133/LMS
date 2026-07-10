@@ -21,6 +21,8 @@ export const timetableSlotSchema = z.object({
   periodNumber: z.coerce.number().int().min(1).max(12),
   subjectId: objectIdSchema,
   teacherId: objectIdSchema,
+  /** Optional link to SubjectAssignment for multi-teacher subjects */
+  subjectAssignmentId: optionalObjectIdSchema,
   room: z.string().optional().or(z.literal("")),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   endTime: z.string().regex(/^\d{2}:\d{2}$/),

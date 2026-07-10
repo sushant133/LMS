@@ -162,13 +162,14 @@ export const studentSchema = z.object({
         _id: z.string().optional(),
         type: z.string(),
         name: z.string(),
-        url: z.string(),
-        originalName: z.string(),
+        // File fields optional so PENDING placeholders can be stored without a file
+        url: z.string().optional().default(""),
+        originalName: z.string().optional().default(""),
         mimeType: z.string().optional(),
-        size: z.number().min(0),
+        size: z.number().min(0).optional().default(0),
         status: z.enum(["UPLOADED", "VERIFIED", "REJECTED", "PENDING"]).default("UPLOADED"),
-        uploadedAt: z.string(),
-        uploadedBy: z.string(),
+        uploadedAt: z.string().optional().default(""),
+        uploadedBy: z.string().optional().default(""),
         uploadedByName: z.string().optional(),
         notes: z.string().optional()
       })
@@ -176,6 +177,12 @@ export const studentSchema = z.object({
     .optional()
 });
 
+/**
+ * Teacher create/update schema (HR fields primary).
+ * Assignment multi-selects remain optional/empty-default for migration-period
+ * PENDING teachers and backwards-compatible clients. Subject Assignment is
+ * the source of truth once teachers are ACCEPTED/NA.
+ */
 export const teacherSchema = z.object({
   fullName: z.string().min(2),
   email: portalLoginIdSchema,
@@ -653,3 +660,4 @@ export type CollegeAdministratorUpdateInput = z.infer<typeof collegeAdministrato
 export type SelfProfileUpdateInput = z.infer<typeof selfProfileUpdateSchema>;
 export type SelfPasswordChangeInput = z.infer<typeof selfPasswordChangeSchema>;
 export type AdminPasswordResetInput = z.infer<typeof adminPasswordResetSchema>;
+// Subject assignment input types are exported from subject-assignment-schemas.ts

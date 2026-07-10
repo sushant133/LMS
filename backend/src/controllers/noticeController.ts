@@ -13,6 +13,7 @@ import { getStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherClassSection,
   assertTeacherSubject,
+  assertTeacherSubjectAcademicScope,
   getTeacherScope,
   requireTeacherScope
 } from "../utils/teacherScope.js";
@@ -212,11 +213,19 @@ export const createNotice = asyncHandler(async (req: Request, res: Response) => 
     teacherId = scope.teacherId;
     payload.visibleTo = ["STUDENT"];
 
-    if (payload.subjectId) {
-      await assertTeacherSubject(req, payload.subjectId);
-    }
-    if (payload.classId && payload.sectionId) {
-      await assertTeacherClassSection(req, payload.classId, payload.sectionId);
+    // Matrix assert when subject + full group present; otherwise independent helpers
+    if (payload.subjectId && payload.classId && payload.sectionId) {
+      await assertTeacherSubjectAcademicScope(req, payload.subjectId, {
+        classId: payload.classId,
+        sectionId: payload.sectionId
+      });
+    } else {
+      if (payload.subjectId) {
+        await assertTeacherSubject(req, payload.subjectId);
+      }
+      if (payload.classId && payload.sectionId) {
+        await assertTeacherClassSection(req, payload.classId, payload.sectionId);
+      }
     }
   }
 
@@ -246,8 +255,17 @@ export const updateNotice = asyncHandler(async (req: Request, res: Response) => 
 
   if (req.user?.role === "TEACHER") {
     payload.visibleTo = ["STUDENT"];
-    if (payload.subjectId) await assertTeacherSubject(req, payload.subjectId);
-    if (payload.classId && payload.sectionId) await assertTeacherClassSection(req, payload.classId, payload.sectionId);
+    if (payload.subjectId && payload.classId && payload.sectionId) {
+      await assertTeacherSubjectAcademicScope(req, payload.subjectId, {
+        classId: payload.classId,
+        sectionId: payload.sectionId
+      });
+    } else {
+      if (payload.subjectId) await assertTeacherSubject(req, payload.subjectId);
+      if (payload.classId && payload.sectionId) {
+        await assertTeacherClassSection(req, payload.classId, payload.sectionId);
+      }
+    }
   }
 
   const notice = await Notice.findOneAndUpdate(

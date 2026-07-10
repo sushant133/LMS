@@ -11,6 +11,8 @@ const timetableSlotSchema = new Schema(
     periodNumber: { type: Number, required: true, min: 1 },
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject", required: true },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true },
+    /** Optional link to SubjectAssignment (multi-teacher / unit / % splits) */
+    subjectAssignmentId: { type: Schema.Types.ObjectId, ref: "SubjectAssignment", default: null },
     room: { type: String },
     startTime: { type: String, required: true },
     endTime: { type: String, required: true },

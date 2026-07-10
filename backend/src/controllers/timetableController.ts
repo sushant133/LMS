@@ -8,13 +8,18 @@ import { buildStudentAcademicFilter } from "../utils/academicScope.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import {
+  assertPercentageCompleteForTimetable,
+  findMatchingAssignment,
+  isTimetableAssignmentLinkRequired
+} from "../utils/subjectAssignmentService.js";
+import {
   assertTeacherQueryScope,
   assertTeacherSubjectAcademicScope,
   getTeacherScope,
   requireTeacherScope
 } from "../utils/teacherScope.js";
 import { sendSuccess } from "../utils/response.js";
-import { withTenantScope } from "../utils/tenant.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 export const listTimetable = asyncHandler(async (req: Request, res: Response) => {
   const filter: Record<string, unknown> = withTenantScope(req);
@@ -55,7 +60,9 @@ export const listTimetable = asyncHandler(async (req: Request, res: Response) =>
 export const createTimetableSlot = asyncHandler(async (req: Request, res: Response) => {
   const payload = timetableSlotSchema.parse(req.body);
   const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
   validateTimetableScope(institutionType, payload);
+  const schoolId = tenantObjectId(req);
 
   if (req.user?.role === "TEACHER") {
     const scope = await assertTeacherSubjectAcademicScope(req, payload.subjectId, payload);
@@ -64,18 +71,64 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
     }
   }
 
-  const slot = await TimetableSlot.create({ ...payload, schoolId: req.tenantSchoolId });
+  const group = {
+    classId: payload.classId,
+    sectionId: payload.sectionId,
+    batchId: payload.batchId,
+    yearId: payload.yearId
+  };
+
+  await assertPercentageCompleteForTimetable(
+    schoolId,
+    payload.academicYearBs,
+    payload.subjectId,
+    group,
+    college
+  );
+
+  let subjectAssignmentId = payload.subjectAssignmentId;
+  if (!subjectAssignmentId) {
+    const match = await findMatchingAssignment(
+      schoolId,
+      payload.academicYearBs,
+      payload.teacherId,
+      payload.subjectId,
+      group,
+      college
+    );
+    if (match) {
+      subjectAssignmentId = match._id.toString();
+    }
+  }
+
+  const requireLink = await isTimetableAssignmentLinkRequired(schoolId);
+  if (requireLink && !subjectAssignmentId) {
+    throw new ApiError(
+      400,
+      "subjectAssignmentId is required: no active Subject Assignment found for this teacher, subject, and group"
+    );
+  }
+
+  const slot = await TimetableSlot.create({
+    ...payload,
+    subjectAssignmentId: subjectAssignmentId || null,
+    schoolId: req.tenantSchoolId
+  });
   return sendSuccess(res, "Timetable slot created", slot, 201);
 });
 
 export const updateTimetableSlot = asyncHandler(async (req: Request, res: Response) => {
   const payload = timetableSlotSchema.partial().parse(req.body);
   const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+  const schoolId = tenantObjectId(req);
+
+  const existing = await TimetableSlot.findOne(withTenantScope(req, { _id: req.params.id })).lean();
+  if (!existing) throw new ApiError(404, "Timetable slot not found");
 
   if (req.user?.role === "TEACHER") {
     const scope = await requireTeacherScope(req);
-    const existing = await TimetableSlot.findOne(withTenantScope(req, { _id: req.params.id })).lean();
-    if (!existing || existing.teacherId?.toString() !== scope.teacherId) {
+    if (existing.teacherId?.toString() !== scope.teacherId) {
       throw new ApiError(403, "You can only update your own timetable slots");
     }
     if (payload.subjectId) {
@@ -94,7 +147,22 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
     });
   }
 
-  const slot = await TimetableSlot.findOneAndUpdate(withTenantScope(req, { _id: req.params.id }), payload, { new: true });
+  const subjectId = payload.subjectId ?? existing.subjectId?.toString();
+  const academicYearBs = payload.academicYearBs ?? existing.academicYearBs;
+  const group = {
+    classId: payload.classId ?? existing.classId?.toString(),
+    sectionId: payload.sectionId ?? existing.sectionId?.toString(),
+    batchId: payload.batchId ?? existing.batchId?.toString(),
+    yearId: payload.yearId ?? existing.yearId?.toString()
+  };
+
+  if (subjectId && academicYearBs) {
+    await assertPercentageCompleteForTimetable(schoolId, academicYearBs, subjectId, group, college);
+  }
+
+  const slot = await TimetableSlot.findOneAndUpdate(withTenantScope(req, { _id: req.params.id }), payload, {
+    new: true
+  });
   if (!slot) throw new ApiError(404, "Timetable slot not found");
   return sendSuccess(res, "Timetable slot updated", slot);
 });

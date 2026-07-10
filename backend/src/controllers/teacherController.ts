@@ -212,13 +212,31 @@ export const getTeacherById = asyncHandler(async (req: Request, res: Response) =
   return sendSuccess(res, "Teacher fetched", teacher);
 });
 
+/** True when payload includes any teaching-load assignment fields. */
+const hasAssignmentFieldChanges = (payload: {
+  subjects: string[];
+  assignedClassIds: string[];
+  assignedSectionIds: string[];
+  assignedBatchIds: string[];
+  assignedYearIds: string[];
+}): boolean =>
+  payload.subjects.length > 0 ||
+  payload.assignedClassIds.length > 0 ||
+  payload.assignedSectionIds.length > 0 ||
+  payload.assignedBatchIds.length > 0 ||
+  payload.assignedYearIds.length > 0;
+
 export const createTeacher = asyncHandler(async (req: Request, res: Response) => {
   const payload = teacherSchema.parse(req.body);
   ensureValidBsDate(payload.joinedDateBs);
 
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
-  await validateTeacherScope(req, schoolId, payload);
+
+  // HR-only create: empty assignment arrays preferred; still validate if client sends them (migration window).
+  if (hasAssignmentFieldChanges(payload)) {
+    await validateTeacherScope(req, schoolId, payload);
+  }
 
   const loginEmail = payload.email;
   const existingUser = await User.findOne({ email: loginEmail });
@@ -246,19 +264,24 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
     );
     const user = createdUsers[0]!;
 
+    // PR5: HR-only create → NA (teaching load managed via Subject Assignment).
+    // Empty legacy arrays; optional non-empty still written for migration clients.
     const createdTeachers = await Teacher.create(
       [
         {
           schoolId,
           user: user._id,
-          ...buildTeacherAssignmentFields(institutionType, payload)
+          ...buildTeacherAssignmentFields(institutionType, payload),
+          assignmentMigrationStatus: "NA"
         }
       ],
       getSessionOption(session)
     );
     const teacher = createdTeachers[0]!;
 
-    await syncSubjectTeacherIds(schoolId, teacher._id, payload.subjects, session);
+    if (payload.subjects.length > 0) {
+      await syncSubjectTeacherIds(schoolId, teacher._id, payload.subjects, session);
+    }
 
     await commitTransaction(session);
     await teacher.populate("user", "-password");
@@ -298,11 +321,29 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
 
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
-  await validateTeacherScope(req, schoolId, payload);
 
   const teacher = await Teacher.findOne(withTenantScope(req, { _id: req.params.id }));
   if (!teacher) {
     throw new ApiError(404, "Teacher not found");
+  }
+
+  const migrationStatus = teacher.assignmentMigrationStatus ?? "PENDING";
+  const assignmentChangesRequested = hasAssignmentFieldChanges(payload);
+
+  // ACCEPTED / NA: teaching load managed in Subject Assignment — reject assignment field writes
+  if (
+    (migrationStatus === "ACCEPTED" || migrationStatus === "NA") &&
+    assignmentChangesRequested
+  ) {
+    throw new ApiError(
+      400,
+      "Teaching load is managed in Subject Assignment. Update subjects and groups under Academics → Subject Assignment."
+    );
+  }
+
+  // PENDING / NEEDS_REVIEW may still write legacy arrays during migration
+  if (assignmentChangesRequested) {
+    await validateTeacherScope(req, schoolId, payload);
   }
 
   const loginEmail = payload.email;
@@ -322,18 +363,35 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
     password: payload.password
   });
 
-  const previousSubjectIds = (teacher.subjects ?? []).map((id) => id.toString());
-  const nextSubjectIds = payload.subjects;
-  const addedSubjectIds = nextSubjectIds.filter((id) => !previousSubjectIds.includes(id));
-  const removedSubjectIds = previousSubjectIds.filter((id) => !nextSubjectIds.includes(id));
+  // HR fields always; assignment arrays only when PENDING/NEEDS_REVIEW and payload has them
+  // Empty/omitted assignment fields for ACCEPTED/NA: leave existing arrays untouched
+  teacher.teacherCode = payload.teacherCode;
+  teacher.qualification = payload.qualification;
+  teacher.joinedDateBs = payload.joinedDateBs;
+  teacher.address = payload.address;
+  teacher.basicSalaryNpr = payload.basicSalaryNpr;
 
-  Object.assign(teacher, buildTeacherAssignmentFields(institutionType, payload));
-  await teacher.save();
+  // Only rewrite legacy assignment arrays when the client intentionally sent them.
+  // HR-only UI always sends empty arrays — must not wipe PENDING/NEEDS_REVIEW loads.
+  if (
+    (migrationStatus === "PENDING" || migrationStatus === "NEEDS_REVIEW") &&
+    assignmentChangesRequested
+  ) {
+    const previousSubjectIds = (teacher.subjects ?? []).map((id) => id.toString());
+    const nextSubjectIds = payload.subjects;
+    const addedSubjectIds = nextSubjectIds.filter((id) => !previousSubjectIds.includes(id));
+    const removedSubjectIds = previousSubjectIds.filter((id) => !nextSubjectIds.includes(id));
 
-  await Promise.all([
-    syncSubjectTeacherIds(schoolId, teacher._id, addedSubjectIds),
-    removeTeacherFromSubjects(schoolId, teacher._id, removedSubjectIds)
-  ]);
+    Object.assign(teacher, buildTeacherAssignmentFields(institutionType, payload));
+    await teacher.save();
+
+    await Promise.all([
+      syncSubjectTeacherIds(schoolId, teacher._id, addedSubjectIds),
+      removeTeacherFromSubjects(schoolId, teacher._id, removedSubjectIds)
+    ]);
+  } else {
+    await teacher.save();
+  }
 
   await teacher.populate("user", "-password");
 

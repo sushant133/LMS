@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { CollegeAcademicManager } from "./CollegeAcademicManager";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -156,6 +157,23 @@ const SchoolAcademicManager = () => {
         title="Academic Setup"
         description="Configure classes, sections, and subjects for BS academic years starting from Baisakh."
       />
+
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+          <div>
+            <p className="font-medium text-slate-900">Subject Assignment</p>
+            <p className="text-sm text-slate-600">
+              Assign teachers to subjects for class/section with FULL, UNIT, or PERCENTAGE coverage.
+            </p>
+          </div>
+          <Link
+            to="/academics/subject-assignments"
+            className="inline-flex h-9 items-center rounded-md bg-[var(--brand-primary,#0c2d6b)] px-4 text-sm font-medium text-white hover:opacity-90"
+          >
+            Open Subject Assignment
+          </Link>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-3">
         <Card>

@@ -24,6 +24,17 @@ const teacherSchema = new Schema(
     assignedSectionIds: [{ type: Schema.Types.ObjectId, ref: "Section" }],
     assignedBatchIds: [{ type: Schema.Types.ObjectId, ref: "Batch" }],
     assignedYearIds: [{ type: Schema.Types.ObjectId, ref: "Year" }],
+    /**
+     * Dual-read migration marker.
+     * Default PENDING (never NA) so pre-existing docs and dual mode stay on legacy arrays.
+     * Missing/undefined on old docs treated as PENDING by getTeacherScope.
+     */
+    assignmentMigrationStatus: {
+      type: String,
+      enum: ["NA", "PENDING", "NEEDS_REVIEW", "ACCEPTED"],
+      default: "PENDING",
+      index: true
+    },
     basicSalaryNpr: { type: Number, default: 0 }
   },
   { timestamps: true }

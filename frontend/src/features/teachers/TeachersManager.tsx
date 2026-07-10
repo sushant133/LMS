@@ -1,14 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type {
-  BatchRecord,
-  ClassRecord,
-  SectionRecord,
-  SubjectRecord,
-  TeacherInput,
-  TeacherRecord,
-  YearRecord,
-} from "@phit-erp/shared";
+import type { TeacherInput, TeacherRecord } from "@phit-erp/shared";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
@@ -16,8 +9,6 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
-import { useIsCollege } from "hooks/useInstitutionType";
-import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
@@ -36,11 +27,11 @@ const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   qualification: teacher.qualification,
   joinedDateBs: teacher.joinedDateBs,
   address: teacher.address,
-  subjects: teacher.subjects,
-  assignedClassIds: teacher.assignedClassIds,
-  assignedSectionIds: teacher.assignedSectionIds,
-  assignedBatchIds: teacher.assignedBatchIds ?? [],
-  assignedYearIds: teacher.assignedYearIds ?? [],
+  subjects: [],
+  assignedClassIds: [],
+  assignedSectionIds: [],
+  assignedBatchIds: [],
+  assignedYearIds: [],
   basicSalaryNpr: teacher.basicSalaryNpr,
 });
 
@@ -50,35 +41,10 @@ interface TeachersManagerProps {
 
 export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const canManage = useIsTenantAdmin();
-  const isCollege = useIsCollege();
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
     queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers")),
-  });
-  const classesQuery = useQuery({
-    queryKey: ["classes"],
-    queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes")),
-    enabled: !isCollege,
-  });
-  const sectionsQuery = useQuery({
-    queryKey: ["sections"],
-    queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections")),
-    enabled: !isCollege,
-  });
-  const batchesQuery = useQuery({
-    queryKey: ["batches"],
-    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
-    enabled: isCollege,
-  });
-  const yearsQuery = useQuery({
-    queryKey: ["years"],
-    queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
-    enabled: isCollege,
-  });
-  const subjectsQuery = useQuery({
-    queryKey: ["subjects"],
-    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects")),
   });
 
   const teacherMutation = useMutation({
@@ -116,34 +82,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
-  const classMap = useMemo(
-    () =>
-      new Map((classesQuery.data ?? []).map((item) => [item._id, item.name])),
-    [classesQuery.data],
-  );
-  const batchMap = useMemo(
-    () =>
-      new Map((batchesQuery.data ?? []).map((item) => [item._id, item.name])),
-    [batchesQuery.data],
-  );
-  const yearMap = useMemo(
-    () => new Map((yearsQuery.data ?? []).map((item) => [item._id, item.name])),
-    [yearsQuery.data],
-  );
-  const subjectMap = useMemo(
-    () =>
-      new Map((subjectsQuery.data ?? []).map((item) => [item._id, item.name])),
-    [subjectsQuery.data],
-  );
-
-  if (
-    teachersQuery.isLoading ||
-    subjectsQuery.isLoading ||
-    (isCollege
-      ? batchesQuery.isLoading || yearsQuery.isLoading
-      : classesQuery.isLoading || sectionsQuery.isLoading)
-  ) {
+  if (teachersQuery.isLoading) {
     return <LoadingState />;
   }
 
@@ -154,7 +93,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       {!embedded ? (
         <PageHeader
           title="Teacher Management"
-          description="Manage teacher accounts, qualifications, BS joining dates, classes, and subject assignments."
+          description="Manage teacher accounts and HR fields. Teaching load is configured under Academics → Subject Assignment."
         />
       ) : null}
 
@@ -167,12 +106,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
             <TeacherForm
               key={editing?._id ?? "new-teacher"}
               isEditing={Boolean(editing)}
+              teacherId={editing?._id}
               initialValue={editing ? mapTeacherToInput(editing) : undefined}
-              classes={classesQuery.data ?? []}
-              sections={sectionsQuery.data ?? []}
-              batches={batchesQuery.data ?? []}
-              years={yearsQuery.data ?? []}
-              subjects={subjectsQuery.data ?? []}
               submitting={teacherMutation.isPending}
               onCancel={editing ? () => setEditing(null) : undefined}
               onSubmit={async (value) => {
@@ -191,7 +126,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
           {teachers.length === 0 ? (
             <EmptyState
               title="No teachers yet"
-              description="Create teacher profiles and link them with subjects and class responsibilities."
+              description="Create teacher profiles (HR only), then assign subjects under Academics → Subject Assignment."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -201,9 +136,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     <Th>Name</Th>
                     <Th>Code</Th>
                     <Th>Qualification</Th>
-                    <Th>{isCollege ? labels.primary : "Classes"}</Th>
-                    {isCollege ? <Th>{labels.secondary}</Th> : null}
-                    <Th>Subjects</Th>
+                    <Th>Migration</Th>
                     <Th>Salary</Th>
                     <Th />
                   </tr>
@@ -223,31 +156,19 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                       </Td>
                       <Td>{teacher.teacherCode}</Td>
                       <Td>{teacher.qualification}</Td>
-                      <Td>
-                        {isCollege
-                          ? (teacher.assignedBatchIds ?? [])
-                              .map((id) => batchMap.get(id) ?? id)
-                              .join(", ") || "—"
-                          : teacher.assignedClassIds
-                              .map((id) => classMap.get(id) ?? id)
-                              .join(", ") || "—"}
-                      </Td>
-                      {isCollege ? (
-                        <Td>
-                          {(teacher.assignedYearIds ?? [])
-                            .map((id) => yearMap.get(id) ?? id)
-                            .join(", ") || "—"}
-                        </Td>
-                      ) : null}
-                      <Td>
-                        {teacher.subjects
-                          .map((id) => subjectMap.get(id) ?? id)
-                          .join(", ")}
+                      <Td className="text-xs">
+                        {teacher.assignmentMigrationStatus ?? "PENDING"}
                       </Td>
                       <Td>{formatCurrencyNpr(teacher.basicSalaryNpr)}</Td>
                       {canManage ? (
                         <Td className="text-right">
                           <div className="flex justify-end gap-2">
+                            <Link
+                              to={`/academics/subject-assignments?teacherId=${teacher._id}`}
+                              className="inline-flex h-8 items-center rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-50"
+                            >
+                              Assignments
+                            </Link>
                             <Button
                               variant="outline"
                               size="sm"

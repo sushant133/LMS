@@ -24,6 +24,7 @@ const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
   { labelKey: "students", path: "/students", roles: [...institutionRoles, "TEACHER"] },
   { labelKey: "collegeStaff", path: "/college-staff", roles: institutionRoles },
   { labelKey: "academics", path: "/academics", roles: institutionRoles },
+  { labelKey: "subjectAssignment", path: "/academics/subject-assignments", roles: institutionRoles },
   { labelKey: "academicManagement", path: "/academic-management", roles: [...institutionRoles, "TEACHER"] },
   {
     labelKey: "academicCalendar",

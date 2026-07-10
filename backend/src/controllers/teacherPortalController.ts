@@ -8,6 +8,7 @@ import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
+import { getScopeMode } from "../utils/subjectAssignmentService.js";
 import { sendSuccess } from "../utils/response.js";
 import { requireTeacherScope } from "../utils/teacherScope.js";
 import { tenantObjectId } from "../utils/tenant.js";
@@ -21,24 +22,29 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
+  const scopeMode = await getScopeMode(schoolId);
 
-  if (scope.subjectIds.length > 0) {
-    await Subject.updateMany({ _id: { $in: scope.subjectIds }, schoolId }, { $addToSet: { teacherIds: scope.teacherId } });
+  // Opportunistic teacherIds cache repair while any school is legacy/dual
+  if (scope.subjectIds.length > 0 && scopeMode !== "assignment") {
+    await Subject.updateMany(
+      { _id: { $in: scope.subjectIds }, schoolId },
+      { $addToSet: { teacherIds: scope.teacherId } }
+    );
   }
 
+  // Subjects from scope.subjectIds — do not require teacherIds membership for auth
   if (college) {
     const [subjects, batches, years, students] = await Promise.all([
       Subject.find({
         _id: { $in: scope.subjectIds },
         schoolId,
-        teacherIds: scope.teacherId,
-        yearIds: { $in: scope.yearIds }
+        ...(scope.yearIds.length ? { yearIds: { $in: scope.yearIds } } : {})
       }).sort({ name: 1 }),
       Batch.find({ _id: { $in: scope.batchIds }, schoolId }).sort({ name: 1 }),
       Year.find({
         _id: { $in: scope.yearIds },
         schoolId,
-        batchId: { $in: scope.batchIds }
+        ...(scope.batchIds.length ? { batchId: { $in: scope.batchIds } } : {})
       }).sort({ level: 1 }),
       Student.find({
         schoolId,
@@ -54,7 +60,7 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
       subjects,
       batches,
       years,
-      students,
+      students: students.filter((student) => Boolean(student.user)),
       classes: [],
       sections: []
     });
@@ -64,14 +70,13 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
     Subject.find({
       _id: { $in: scope.subjectIds },
       schoolId,
-      teacherIds: scope.teacherId,
-      classIds: { $in: scope.classIds }
+      ...(scope.classIds.length ? { classIds: { $in: scope.classIds } } : {})
     }).sort({ name: 1 }),
     SchoolClass.find({ _id: { $in: scope.classIds }, schoolId }).sort({ name: 1 }),
     Section.find({
       _id: { $in: scope.sectionIds },
       schoolId,
-      classId: { $in: scope.classIds }
+      ...(scope.classIds.length ? { classId: { $in: scope.classIds } } : {})
     }).sort({ name: 1 }),
     Student.find({
       schoolId,
@@ -89,6 +94,6 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
     sections,
     batches: [],
     years: [],
-    students
+    students: students.filter((student) => Boolean(student.user))
   });
 });

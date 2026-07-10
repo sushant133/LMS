@@ -19,5 +19,7 @@ export * from "./academic-calendar-types.js";
 export * from "./academic-calendar-schemas.js";
 export * from "./academic-promotion-types.js";
 export * from "./academic-promotion-schemas.js";
+export * from "./subject-assignment-types.js";
+export * from "./subject-assignment-schemas.js";
 export * from "./schemas.js";
 export * from "./types.js";
