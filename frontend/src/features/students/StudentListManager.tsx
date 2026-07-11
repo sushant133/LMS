@@ -35,7 +35,9 @@ import {
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { Badge } from "components/ui/badge";
 import { downloadStudentsExcel } from "./studentExportUtils";
+import { countPendingRequiredDocuments } from "./studentDocumentUtils";
 
 export const StudentListManager = () => {
   const navigate = useNavigate();
@@ -144,6 +146,9 @@ export const StudentListManager = () => {
     const query = searchQuery.trim().toLowerCase();
 
     return students.filter((student) => {
+      // Skip orphaned student records (user account missing)
+      if (!student.user) return false;
+
       if (isCollege) {
         if (batchFilter && student.batchId !== batchFilter) return false;
         if (yearFilter && student.yearId !== yearFilter) return false;
@@ -154,10 +159,10 @@ export const StudentListManager = () => {
 
       if (!query) return true;
 
-      const name = student.user.fullName.toLowerCase();
-      const email = student.user.email.toLowerCase();
+      const name = (student.user.fullName ?? "").toLowerCase();
+      const email = (student.user.email ?? "").toLowerCase();
       const phone = (student.user.phone ?? "").toLowerCase();
-      const guardianPhone = student.guardianPhone.toLowerCase();
+      const guardianPhone = (student.guardianPhone ?? "").toLowerCase();
       const fatherPhone = (student.fatherPhone ?? "").toLowerCase();
       const motherPhone = (student.motherPhone ?? "").toLowerCase();
 
@@ -373,16 +378,32 @@ export const StudentListManager = () => {
                 </tr>
               </TableHead>
               <TableBody>
-                {filteredStudents.map((student) => (
+                {filteredStudents.map((student) => {
+                  const pendingDocs = countPendingRequiredDocuments(
+                    student.documents ?? [],
+                  );
+                  const displayName =
+                    student.user?.fullName ?? "Unknown student";
+                  const displayEmail = student.user?.email ?? "—";
+                  const displayPhone = student.user?.phone || "—";
+                  return (
                   <tr key={student._id}>
                     <Td>
-                      <StudentNameLink
-                        studentId={student._id}
-                        name={student.user.fullName}
-                        subtitle={student.user.email}
-                      />
+                      <div className="space-y-1">
+                        <StudentNameLink
+                          studentId={student._id}
+                          name={displayName}
+                          subtitle={displayEmail}
+                        />
+                        {pendingDocs > 0 ? (
+                          <Badge className="bg-amber-100 text-amber-900">
+                            {pendingDocs} doc{pendingDocs === 1 ? "" : "s"}{" "}
+                            pending
+                          </Badge>
+                        ) : null}
+                      </div>
                     </Td>
-                    <Td>{student.user.phone || "—"}</Td>
+                    <Td>{displayPhone}</Td>
                     <Td>{student.rollNumber}</Td>
                     <Td>{student.admissionNumber}</Td>
                     <Td>
@@ -445,7 +466,7 @@ export const StudentListManager = () => {
                               onClick={() => {
                                 if (
                                   !window.confirm(
-                                    `Permanently delete ${student.user.fullName} (${student.admissionNumber})?\n\nThis removes the student record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
+                                    `Permanently delete ${displayName} (${student.admissionNumber})?\n\nThis removes the student record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
                                   )
                                 ) {
                                   return;
@@ -460,7 +481,8 @@ export const StudentListManager = () => {
                       </div>
                     </Td>
                   </tr>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

@@ -12,6 +12,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { AttachmentViewer } from "components/shared/AttachmentViewer";
 import type { AssignmentAttachment } from "@phit-erp/shared";
 import { PageContent } from "components/layout/PageContent";
+import { FieldDutyPortalPanel } from "features/attendance/FieldDutyPortalPanel";
 import { api, unwrap } from "lib/api";
 
 interface EnrolledSubject {
@@ -256,6 +257,8 @@ export const StudentSubjects = () => {
         title="My Subjects"
         description="View all subjects you are enrolled in. Open a subject to see attendance, marks, assignments, notes, and announcements."
       />
+
+      <FieldDutyPortalPanel title="Field / Hospital Duty Attendance" />
 
       {subjects.length === 0 ? (
         <EmptyState

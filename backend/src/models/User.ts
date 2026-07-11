@@ -15,6 +15,12 @@ export interface UserDocument {
   role: UserRole;
   isActive: boolean;
   mustChangePassword: boolean;
+  /**
+   * Per-module access control.
+   * Keys: ERP module keys (academic-management, library, …).
+   * Values: "WRITE" | "READ_ONLY". Missing key = WRITE (enabled).
+   */
+  moduleAccess?: Record<string, "WRITE" | "READ_ONLY">;
   comparePassword(candidate: string): Promise<boolean>;
 }
 
@@ -33,7 +39,12 @@ const userSchema = new Schema<UserDocument, UserModel>(
     profilePhotoUrl: { type: String, trim: true },
     role: { type: String, enum: USER_ROLES, required: true },
     isActive: { type: Boolean, default: true },
-    mustChangePassword: { type: Boolean, default: false }
+    mustChangePassword: { type: Boolean, default: false },
+    moduleAccess: {
+      type: Map,
+      of: { type: String, enum: ["WRITE", "READ_ONLY"] },
+      default: undefined
+    }
   },
   { timestamps: true }
 );
@@ -59,7 +70,8 @@ userSchema.pre("save", async function hashPassword(next) {
     return next();
   }
 
-  user.password = await bcrypt.hash(user.password, 10);
+  // Cost 12 is a solid default for interactive logins (balance security vs latency)
+  user.password = await bcrypt.hash(user.password, 12);
   next();
 });
 

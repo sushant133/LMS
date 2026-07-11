@@ -14,6 +14,7 @@ import {
   getAcademicReport,
   getSessionAttendance,
   getSessionPlan,
+  getSyllabusCoverage,
   getTodayTimetableSlots,
   listComments,
   listLessonPlans,
@@ -50,6 +51,12 @@ router.post("/session-plans/:id/approve", authorizeInstitutionAdmin, approveSess
 router.post("/session-plans/:id/reject", authorizeInstitutionAdmin, rejectSessionPlan);
 router.post("/session-plans/:id/unlock", authorizeInstitutionAdmin, unlockSessionPlan);
 router.get("/session-plan-units", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listSessionPlanUnits);
+router.get("/syllabus-coverage", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getSyllabusCoverage);
+router.get(
+  "/session-plans/:sessionPlanId/coverage",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"),
+  getSyllabusCoverage
+);
 
 router.get("/lesson-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listLessonPlans);
 router.post("/lesson-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), createLessonPlan);

@@ -4,6 +4,7 @@ import { PageHeader } from "components/shared/PageHeader";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Badge } from "components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
+import { FieldDutyPortalPanel } from "features/attendance/FieldDutyPortalPanel";
 import { api, unwrap } from "lib/api";
 import { formatCurrencyNpr } from "lib/utils";
 
@@ -23,7 +24,7 @@ export const ParentPortal = () => {
     <div className="space-y-6">
       <PageHeader
         title="Parent Portal"
-        description="View your children's attendance, fees, assignments, and college alerts."
+        description="View your children's attendance (including hospital/field duty), fees, assignments, and college alerts."
       />
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -64,6 +65,14 @@ export const ParentPortal = () => {
           </Card>
         ))}
       </div>
+
+      {(data?.children ?? []).map((child) => (
+        <FieldDutyPortalPanel
+          key={`field-${child.studentId}`}
+          studentId={child.studentId}
+          title={`Field / Hospital Duty · ${child.fullName}`}
+        />
+      ))}
 
       <Card>
         <CardHeader>

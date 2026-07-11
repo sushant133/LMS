@@ -12,6 +12,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
 import {
@@ -41,6 +42,7 @@ export const ModuleStaffPanel = ({
 }: ModuleStaffPanelProps) => {
   const canManage = useIsTenantAdmin();
   const [form, setForm] = useState<ModuleStaffInput>(defaultStaff);
+  const [accessUser, setAccessUser] = useState<UserProfile | null>(null);
 
   const staffQuery = useQuery({
     queryKey: [queryKey],
@@ -181,6 +183,13 @@ export const ModuleStaffPanel = ({
                             <Button
                               size="sm"
                               variant="outline"
+                              onClick={() => setAccessUser(member)}
+                            >
+                              Module Access
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
                               disabled={
                                 !member.isActive || resendCredentials.isPending
                               }
@@ -211,6 +220,24 @@ export const ModuleStaffPanel = ({
           )}
         </CardContent>
       </Card>
+
+      {canManage && accessUser ? (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAccessUser(null)}
+            >
+              Close access panel
+            </Button>
+          </div>
+          <ModuleAccessControlPanel
+            userId={accessUser._id}
+            userName={accessUser.fullName}
+          />
+        </div>
+      ) : null}
     </div>
   );
 };

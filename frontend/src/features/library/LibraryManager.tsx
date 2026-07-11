@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { NepaliDateField } from "components/shared/NepaliDateField";
+import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { LibraryReturnsPanel } from "features/library/LibraryReturnsPanel";
@@ -118,7 +119,14 @@ export const LibraryManager = () => {
   });
 
   const inventoryAccessEnabled = inventoryAccessQuery.data?.enabled ?? false;
-  const canManageInventory = isAdmin || inventoryAccessEnabled;
+  // School inventory toggle AND per-user module access (library / inventory)
+  const libraryModuleWrite =
+    isAdmin ||
+    ((user?.moduleAccess?.library ?? "WRITE") !== "READ_ONLY" &&
+      (user?.moduleAccess?.inventory ?? "WRITE") !== "READ_ONLY");
+  const canManageInventory =
+    isAdmin || (inventoryAccessEnabled && libraryModuleWrite);
+  const libraryReadOnly = !libraryModuleWrite;
 
   const studentsQuery = useQuery({
     queryKey: ["students"],
@@ -231,6 +239,8 @@ export const LibraryManager = () => {
         title="Library"
         description="Manage catalog, inventory, issue books, process returns, and track borrowing activity."
       />
+
+      <ModuleReadOnlyBanner show={libraryReadOnly} />
 
       <div className="flex flex-wrap gap-2">
         {visibleTabs.map((item) => {

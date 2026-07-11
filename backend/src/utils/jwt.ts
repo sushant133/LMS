@@ -1,4 +1,4 @@
-import type { Response } from "express";
+import type { CookieOptions, Response } from "express";
 import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
 import { env } from "../config/env.js";
 import type { UserRole } from "@phit-erp/shared";
@@ -15,36 +15,57 @@ export const signJwt = (payload: SignPayload): string =>
     expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"]
   });
 
-const cookieSecure = env.COOKIE_SAME_SITE === "none" || env.NODE_ENV === "production" || env.COOKIE_SECURE;
+const cookieSecure =
+  env.COOKIE_SECURE || env.COOKIE_SAME_SITE === "none" || env.NODE_ENV === "production";
 
-const cookieOptions = {
+const baseCookieOptions = (): CookieOptions => ({
   httpOnly: true,
   secure: cookieSecure,
   sameSite: env.COOKIE_SAME_SITE,
   path: "/",
-  maxAge: 7 * 24 * 60 * 60 * 1000
-} as const;
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {})
+});
 
 export const setAuthCookie = (res: Response, token: string): void => {
-  res.cookie(env.COOKIE_NAME, token, cookieOptions);
+  res.cookie(env.COOKIE_NAME, token, baseCookieOptions());
 };
 
 export const setActiveSchoolCookie = (res: Response, schoolId: string): void => {
-  res.cookie(env.ACTIVE_SCHOOL_COOKIE_NAME, schoolId, cookieOptions);
+  res.cookie(env.ACTIVE_SCHOOL_COOKIE_NAME, schoolId, baseCookieOptions());
+};
+
+/**
+ * Clear cookies using the same attributes as setCookie.
+ * Also try the opposite `secure` flag so a cookie set under a previous config still clears.
+ */
+const clearCookieBothSecureModes = (
+  res: Response,
+  name: string,
+  options: CookieOptions
+): void => {
+  res.clearCookie(name, options);
+  res.clearCookie(name, { ...options, secure: !options.secure });
 };
 
 export const clearAuthCookie = (res: Response): void => {
-  res.clearCookie(env.COOKIE_NAME, {
+  const options: CookieOptions = {
     httpOnly: true,
     sameSite: env.COOKIE_SAME_SITE,
-    secure: cookieSecure
-  });
+    secure: cookieSecure,
+    path: "/",
+    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {})
+  };
+  clearCookieBothSecureModes(res, env.COOKIE_NAME, options);
 };
 
 export const clearActiveSchoolCookie = (res: Response): void => {
-  res.clearCookie(env.ACTIVE_SCHOOL_COOKIE_NAME, {
+  const options: CookieOptions = {
     httpOnly: true,
     sameSite: env.COOKIE_SAME_SITE,
-    secure: cookieSecure
-  });
+    secure: cookieSecure,
+    path: "/",
+    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {})
+  };
+  clearCookieBothSecureModes(res, env.ACTIVE_SCHOOL_COOKIE_NAME, options);
 };

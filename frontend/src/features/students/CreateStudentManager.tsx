@@ -28,7 +28,10 @@ import {
   mapStudentToInput,
   type StudentEditLocationState,
 } from "./studentFormUtils";
-import type { PendingStudentDocument } from "./studentDocumentUtils";
+import {
+  countPendingRequiredDocuments,
+  type PendingStudentDocument,
+} from "./studentDocumentUtils";
 
 export const CreateStudentManager = () => {
   const { user } = useAuth();
@@ -146,15 +149,16 @@ export const CreateStudentManager = () => {
           }
           onSubmit={async (value) => {
             const wasEditing = Boolean(editing);
+            const queuedDocs = pendingDocuments;
             const result = await studentMutation.mutateAsync(value);
             if (
               !wasEditing &&
-              pendingDocuments.length > 0 &&
+              queuedDocs.length > 0 &&
               "student" in result
             ) {
               await uploadPendingDocuments(
                 result.student._id,
-                pendingDocuments,
+                queuedDocs,
                 user?._id ?? "",
                 user?.fullName ?? "Admin",
               );
@@ -163,6 +167,27 @@ export const CreateStudentManager = () => {
               await queryClient.invalidateQueries({
                 queryKey: ["student-profile", result.student._id],
               });
+            }
+            if (!wasEditing && "student" in result) {
+              // Remaining required docs after any queued uploads stay PENDING
+              const uploadedTypes = new Set(queuedDocs.map((d) => d.type));
+              const docsAfterCreate = (result.student.documents ?? []).map(
+                (doc) =>
+                  uploadedTypes.has(doc.type)
+                    ? { ...doc, status: "UPLOADED" as const, url: "uploaded" }
+                    : doc,
+              );
+              const pendingCount =
+                countPendingRequiredDocuments(docsAfterCreate);
+              if (pendingCount > 0) {
+                toast.message(
+                  `${pendingCount} required document${pendingCount === 1 ? "" : "s"} marked as pending`,
+                  {
+                    description:
+                      "You can upload them later from the student profile.",
+                  },
+                );
+              }
             }
             navigate("/students/list", { replace: true });
           }}

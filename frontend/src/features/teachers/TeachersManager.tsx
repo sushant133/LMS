@@ -17,6 +17,7 @@ import {
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import { TeacherForm } from "./TeacherForm";
 
 const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
@@ -42,6 +43,7 @@ interface TeachersManagerProps {
 export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const canManage = useIsTenantAdmin();
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
+  const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
     queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers")),
@@ -114,8 +116,34 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                 await teacherMutation.mutateAsync(value);
               }}
             />
+            {editing?.user?._id ? (
+              <div className="mt-6 border-t border-slate-100 pt-6">
+                <ModuleAccessControlPanel
+                  userId={editing.user._id}
+                  userName={editing.user.fullName}
+                />
+              </div>
+            ) : null}
           </CardContent>
         </Card>
+      ) : null}
+
+      {canManage && accessTeacher?.user?._id && !editing ? (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAccessTeacher(null)}
+            >
+              Close module access
+            </Button>
+          </div>
+          <ModuleAccessControlPanel
+            userId={accessTeacher.user._id}
+            userName={accessTeacher.user.fullName}
+          />
+        </div>
       ) : null}
 
       <Card>
@@ -172,9 +200,24 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => setEditing(teacher)}
+                              onClick={() => {
+                                setAccessTeacher(null);
+                                setEditing(teacher);
+                              }}
                             >
                               Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={!teacher.user?._id}
+                              onClick={() => {
+                                setEditing(null);
+                                setAccessTeacher(teacher);
+                                window.scrollTo({ top: 0, behavior: "smooth" });
+                              }}
+                            >
+                              Module Access
                             </Button>
                             <Button
                               variant="destructive"

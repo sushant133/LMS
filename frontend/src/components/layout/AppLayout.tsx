@@ -17,11 +17,28 @@ import { resetAppShell } from "lib/resetAppShell";
 const institutionRoles: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"];
 
 const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
-  { labelKey: "dashboard", path: "/dashboard", roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT"] },
+  {
+    labelKey: "dashboard",
+    path: "/dashboard",
+    roles: [
+      ...institutionRoles,
+      "TEACHER",
+      "STUDENT",
+      "PARENT",
+      "COLLEGE_STAFF",
+      "ACCOUNTANT",
+      "LIBRARY_STAFF",
+      "LABORATORY_STAFF",
+      "CASHIER",
+      "AUDITOR",
+      "PRINCIPAL"
+    ]
+  },
   { labelKey: "myProfile", path: "/my-profile", roles: ["STUDENT"] },
   { labelKey: "mySubjects", path: "/my-subjects", roles: ["STUDENT"] },
   { labelKey: "parentPortal", path: "/parent-portal", roles: ["PARENT"] },
   { labelKey: "students", path: "/students", roles: [...institutionRoles, "TEACHER"] },
+  // Teachers are managed under College Staff → Teachers tab (no separate sidebar item)
   { labelKey: "collegeStaff", path: "/college-staff", roles: institutionRoles },
   { labelKey: "academics", path: "/academics", roles: institutionRoles },
   { labelKey: "subjectAssignment", path: "/academics/subject-assignments", roles: institutionRoles },
@@ -54,12 +71,32 @@ const navItems: Array<{ labelKey: string; path: string; roles: UserRole[] }> = [
   { labelKey: "myFees", path: "/my-fees", roles: ["STUDENT"] },
   { labelKey: "library", path: "/library", roles: [...institutionRoles, "LIBRARY_STAFF"] },
   { labelKey: "myLibrary", path: "/my-library", roles: ["STUDENT", "TEACHER"] },
-  { labelKey: "laboratory", path: "/laboratory", roles: [...institutionRoles, "LABORATORY_STAFF"] },
-  { labelKey: "transport", path: "/transport", roles: institutionRoles },
+  { labelKey: "laboratory", path: "/laboratory", roles: [...institutionRoles, "LABORATORY_STAFF", "TEACHER"] },
+  { labelKey: "transport", path: "/transport", roles: [...institutionRoles, "COLLEGE_STAFF"] },
   { labelKey: "hr", path: "/hr", roles: institutionRoles },
   { labelKey: "parentLinks", path: "/parent-links", roles: institutionRoles },
-  { labelKey: "notifications", path: "/notifications", roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT"] },
-  { labelKey: "notices", path: "/notices", roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT"] },
+  {
+    labelKey: "notifications",
+    path: "/notifications",
+    roles: [
+      ...institutionRoles,
+      "TEACHER",
+      "STUDENT",
+      "PARENT",
+      "COLLEGE_STAFF",
+      "ACCOUNTANT",
+      "LIBRARY_STAFF",
+      "LABORATORY_STAFF",
+      "CASHIER",
+      "AUDITOR",
+      "PRINCIPAL"
+    ]
+  },
+  {
+    labelKey: "notices",
+    path: "/notices",
+    roles: [...institutionRoles, "TEACHER", "STUDENT", "PARENT", "COLLEGE_STAFF"]
+  },
   {
     labelKey: "complains",
     path: "/complains",
@@ -129,7 +166,15 @@ export const AppLayout = () => {
   const institutionAccess = hasInstitutionAccess(normalizedRole);
   const visibleAdministrationItems = administrationItems.filter((item) => item.roles.includes(normalizedRole));
   const showAdministrationSection = visibleAdministrationItems.length > 0;
-  const moduleOnlyRoles: UserRole[] = ["LIBRARY_STAFF", "LABORATORY_STAFF", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"];
+  const moduleOnlyRoles: UserRole[] = [
+    "LIBRARY_STAFF",
+    "LABORATORY_STAFF",
+    "ACCOUNTANT",
+    "CASHIER",
+    "AUDITOR",
+    "PRINCIPAL",
+    "COLLEGE_STAFF"
+  ];
   const isModuleOnlyUser = moduleOnlyRoles.includes(normalizedRole);
   const collegeName = getCollegeDisplayName(availableSchools, user);
   const showCollegeContext = !institutionAccess;
@@ -139,9 +184,42 @@ export const AppLayout = () => {
     .filter((item) => {
       if (isModuleOnlyUser) {
         if (normalizedRole === "ACCOUNTANT" || normalizedRole === "CASHIER" || normalizedRole === "AUDITOR" || normalizedRole === "PRINCIPAL") {
-          return item.path === "/accounting" || item.path === "/notifications" || item.path === "/complains";
+          return (
+            item.path === "/dashboard" ||
+            item.path === "/accounting" ||
+            item.path === "/notifications" ||
+            item.path === "/complains" ||
+            item.path === "/academic-calendar"
+          );
         }
-        return item.path === "/library" || item.path === "/laboratory" || item.path === "/notifications" || item.path === "/complains";
+        if (normalizedRole === "LABORATORY_STAFF") {
+          return (
+            item.path === "/dashboard" ||
+            item.path === "/laboratory" ||
+            item.path === "/notifications" ||
+            item.path === "/complains" ||
+            item.path === "/academic-calendar"
+          );
+        }
+        if (normalizedRole === "LIBRARY_STAFF") {
+          return (
+            item.path === "/dashboard" ||
+            item.path === "/library" ||
+            item.path === "/notifications" ||
+            item.path === "/complains" ||
+            item.path === "/academic-calendar"
+          );
+        }
+        if (normalizedRole === "COLLEGE_STAFF") {
+          return (
+            item.path === "/dashboard" ||
+            item.path === "/notifications" ||
+            item.path === "/notices" ||
+            item.path === "/complains" ||
+            item.path === "/academic-calendar" ||
+            item.path === "/transport"
+          );
+        }
       }
       return true;
     })

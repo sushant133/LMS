@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { isCollegeViewer, normalizeUserRole, type UserRole } from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { enforceInstitutionReadOnly } from "./readOnlyGuard.js";
+import { enforceModuleAccess } from "./moduleAccessGuard.js";
 import { ApiError } from "../utils/apiError.js";
 
 interface JwtPayload {
@@ -22,7 +23,11 @@ export const protect = (req: Request, _res: Response, next: NextFunction): void 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
     req.user = { ...decoded, role: normalizeUserRole(decoded.role) };
-    return enforceInstitutionReadOnly(req, _res, next);
+    // Institution viewer read-only, then per-user module access on writes
+    return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
+      if (err) return next(err);
+      void enforceModuleAccess(req, _res, next);
+    });
   } catch {
     next(new ApiError(401, "Invalid or expired session"));
   }

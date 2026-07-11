@@ -54,11 +54,9 @@ export interface ComplaintRecord {
   updatedAt?: string;
 }
 
-export type InventoryStockStatus = "AVAILABLE" | "LOW_STOCK" | "OUT_OF_STOCK";
+export type InventoryStockStatus = "AVAILABLE" | "LOW_STOCK" | "CRITICAL_STOCK" | "OUT_OF_STOCK";
 
 export type LibraryBorrowerType = "STUDENT" | "TEACHER";
-
-export type LaboratoryType = "COMPUTER" | "PHYSICS" | "CHEMISTRY" | "BIOLOGY" | "OTHER";
 
 export type SmsDeliveryStatus = "PENDING" | "SENT" | "FAILED" | "SKIPPED";
 
@@ -255,68 +253,25 @@ export interface LibraryDashboardResponse {
   inventoryAccessEnabled: boolean;
 }
 
-export interface LaboratoryRecord {
-  _id: string;
-  schoolId: string;
-  name: string;
-  type: LaboratoryType;
-  customName?: string;
-  isActive: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface LaboratoryCategoryRecord {
-  _id: string;
-  schoolId: string;
-  laboratoryId: string;
-  name: string;
-  isDefault: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface LaboratoryEquipmentRecord {
-  _id: string;
-  schoolId: string;
-  laboratoryId: string;
-  categoryId: string;
-  categoryName?: string;
-  laboratoryName?: string;
-  name: string;
-  itemCode: string;
-  quantity: number;
-  availableQuantity: number;
-  issuedQuantity: number;
-  status: InventoryStockStatus;
-  description?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface LaboratoryIssueRecord {
-  _id: string;
-  schoolId: string;
-  equipmentId: string;
-  equipmentName?: string;
-  teacherId: string;
-  teacherName?: string;
-  quantity: number;
-  issuedDateBs: string;
-  dueDateBs: string;
-  returnedDateBs?: string;
-  status: LibraryIssueStatus;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface LaboratoryDashboardResponse {
-  totalEquipment: number;
-  availableEquipment: number;
-  issuedEquipment: number;
-  remainingStock: number;
-  lowStockItems: LaboratoryEquipmentRecord[];
-}
+export type {
+  LaboratoryType,
+  LaboratoryItemKind,
+  LaboratoryEquipmentCondition,
+  LaboratoryEquipmentStatus,
+  LaboratoryStockMovementType,
+  LaboratoryStockRequestStatus,
+  LaboratoryStockPriority,
+  LaboratoryInventoryStockStatus,
+  LaboratoryReportType,
+  LaboratoryRecord,
+  LaboratoryCategoryRecord,
+  LaboratoryEquipmentRecord,
+  LaboratoryIssueRecord,
+  LaboratoryStockMovementRecord,
+  LaboratoryStockRequestRecord,
+  LaboratoryDashboardResponse,
+  LaboratoryReportResponse
+} from "./laboratory-types.js";
 
 export interface TransportStop {
   name: string;

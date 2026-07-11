@@ -10,6 +10,9 @@ import { NEPALI_MONTHS } from "./academicManagementUtils";
 interface Option {
   _id: string;
   name: string;
+  level?: number;
+  batchId?: string;
+  classId?: string;
 }
 
 interface TeacherOption {
@@ -89,45 +92,36 @@ export const AcademicManagementFilterBar = ({
         </label>
         {isCollege ? (
           <>
+            {/*
+              Academic Management uses year *level* (1st/2nd/3rd), not student batches.
+              Batch filter is intentionally omitted — syllabus is shared across batches.
+              Year options are deduplicated by name/level so each program year appears once.
+            */}
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-slate-700">
-                {labels.primary}
-              </span>
-              <Select
-                value={filters.batchId ?? ""}
-                onChange={(event) =>
-                  update({ batchId: event.target.value, yearId: "" })
-                }
-              >
-                <option value="">All</option>
-                {batches.map((batch) => (
-                  <option key={batch._id} value={batch._id}>
-                    {batch.name}
-                  </option>
-                ))}
-              </Select>
-            </label>
-            <label className="space-y-1 text-sm">
-              <span className="font-medium text-slate-700">
-                {labels.secondary}
-              </span>
+              <span className="font-medium text-slate-700">Year</span>
               <Select
                 value={filters.yearId ?? ""}
                 onChange={(event) => update({ yearId: event.target.value })}
               >
-                <option value="">All</option>
-                {years
-                  .filter(
-                    (year) =>
-                      !filters.batchId ||
-                      (year as Option & { batchId?: string }).batchId ===
-                        filters.batchId,
-                  )
-                  .map((year) => (
+                <option value="">All years</option>
+                {(() => {
+                  const seen = new Set<string>();
+                  const unique: Option[] = [];
+                  for (const year of years) {
+                    const levelKey =
+                      (year as Option & { level?: number }).level != null
+                        ? `level:${(year as Option & { level?: number }).level}`
+                        : year.name;
+                    if (seen.has(levelKey)) continue;
+                    seen.add(levelKey);
+                    unique.push(year);
+                  }
+                  return unique.map((year) => (
                     <option key={year._id} value={year._id}>
                       {year.name}
                     </option>
-                  ))}
+                  ));
+                })()}
               </Select>
             </label>
             <label className="space-y-1 text-sm">
@@ -281,11 +275,11 @@ export const AcademicManagementFilterBar = ({
           </Select>
         </label>
         <label className="space-y-1 text-sm md:col-span-2">
-          <span className="font-medium text-slate-700">Keyword</span>
+          <span className="font-medium text-slate-700">Search</span>
           <Input
             value={filters.keyword}
             onChange={(event) => update({ keyword: event.target.value })}
-            placeholder="Search topic, unit, status..."
+            placeholder="Search subject, teacher, unit, topic, month…"
           />
         </label>
       </div>

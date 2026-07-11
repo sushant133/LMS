@@ -35,7 +35,10 @@ import {
   filterYearsByBatch,
 } from "lib/academicStructureUtils";
 import { StudentDocumentsSection } from "./StudentDocumentsSection";
-import type { PendingStudentDocument } from "./studentDocumentUtils";
+import {
+  isPendingStudentDocument,
+  type PendingStudentDocument,
+} from "./studentDocumentUtils";
 
 const createDefaultValue = (isCollege: boolean): StudentInput => ({
   fullName: "",
@@ -139,8 +142,12 @@ export const StudentForm = ({
       password: password.trim() || undefined,
       documents,
       photoUrl:
-        documents.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ??
-        form.photoUrl,
+        documents.find(
+          (doc) =>
+            doc.type === "STUDENT_PHOTOGRAPH" &&
+            !isPendingStudentDocument(doc) &&
+            doc.url,
+        )?.url ?? form.photoUrl,
     });
 
     if (!parsed.success) {
@@ -171,8 +178,12 @@ export const StudentForm = ({
       ...current,
       documents: nextDocuments,
       photoUrl:
-        nextDocuments.find((doc) => doc.type === "STUDENT_PHOTOGRAPH")?.url ??
-        current.photoUrl,
+        nextDocuments.find(
+          (doc) =>
+            doc.type === "STUDENT_PHOTOGRAPH" &&
+            !isPendingStudentDocument(doc) &&
+            doc.url,
+        )?.url ?? current.photoUrl,
     }));
   };
 
@@ -512,6 +523,7 @@ export const StudentForm = ({
           onPendingChange={onPendingDocumentsChange}
           uploadedBy={uploadedBy}
           uploadedByName={uploadedByName}
+          showPendingSummary={false}
         />
       ) : null}
 

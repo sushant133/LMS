@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COMPLAINT_CATEGORIES, COMPLAINT_STATUSES, LABORATORY_TYPES, USER_ROLES } from "./constants.js";
+import { COMPLAINT_CATEGORIES, COMPLAINT_STATUSES, USER_ROLES } from "./constants.js";
 import {
   academicYearSchema,
   bsDateSchema,
@@ -101,7 +101,22 @@ export const sendNotificationSchema = z.object({
   message: z.string().min(2),
   channel: z.enum(["IN_APP", "SMS", "BOTH"]).default("IN_APP"),
   type: z
-    .enum(["ATTENDANCE", "HOMEWORK", "FEE", "NOTICE", "TRANSPORT", "LIBRARY", "LABORATORY", "PAYROLL", "GENERAL"])
+    .enum([
+      "ATTENDANCE",
+      "HOMEWORK",
+      "FEE",
+      "NOTICE",
+      "TRANSPORT",
+      "LIBRARY",
+      "LABORATORY",
+      "PAYROLL",
+      "EXAM",
+      "COMPLAINT",
+      "ACADEMIC_MANAGEMENT",
+      "ACADEMIC_CALENDAR",
+      "ACADEMIC_PROMOTION",
+      "GENERAL"
+    ])
     .default("GENERAL")
 });
 
@@ -179,43 +194,31 @@ export const leaveStatusSchema = z.object({
   status: z.enum(["APPROVED", "REJECTED"])
 });
 
-export const laboratorySchema = z
-  .object({
-    type: z.enum(LABORATORY_TYPES),
-    customName: z.string().optional().or(z.literal("")),
-    isActive: z.boolean().default(true)
-  })
-  .superRefine((value, ctx) => {
-    if (value.type === "OTHER" && !value.customName?.trim()) {
-      ctx.addIssue({ code: "custom", message: "Custom laboratory name is required", path: ["customName"] });
-    }
-  });
+export {
+  laboratorySchema,
+  laboratoryCategorySchema,
+  laboratoryEquipmentSchema,
+  laboratoryEquipmentUpdateSchema,
+  laboratoryStockAdjustSchema,
+  laboratoryIssueSchema,
+  laboratoryReturnSchema,
+  laboratoryStockRequestSchema,
+  laboratoryStockRequestStatusSchema,
+  laboratoryReportQuerySchema
+} from "./laboratory-schemas.js";
 
-export const laboratoryCategorySchema = z.object({
-  name: z.string().min(1)
-});
-
-export const laboratoryEquipmentSchema = z.object({
-  laboratoryId: objectIdSchema,
-  categoryId: objectIdSchema,
-  name: z.string().min(2),
-  itemCode: z.string().min(1),
-  quantity: z.coerce.number().int().min(1),
-  description: z.string().optional().or(z.literal(""))
-});
-
-export const laboratoryIssueSchema = z.object({
-  equipmentId: objectIdSchema,
-  teacherId: objectIdSchema,
-  quantity: z.coerce.number().int().min(1).default(1),
-  issuedDateBs: bsDateSchema,
-  dueDateBs: bsDateSchema
-});
-
-export const laboratoryReturnSchema = z.object({
-  returnedDateBs: bsDateSchema,
-  quantity: z.coerce.number().int().min(1).optional()
-});
+export type {
+  LaboratoryInput,
+  LaboratoryCategoryInput,
+  LaboratoryEquipmentInput,
+  LaboratoryEquipmentUpdateInput,
+  LaboratoryStockAdjustInput,
+  LaboratoryIssueInput,
+  LaboratoryReturnInput,
+  LaboratoryStockRequestInput,
+  LaboratoryStockRequestStatusInput,
+  LaboratoryReportQueryInput
+} from "./laboratory-schemas.js";
 
 export const payrollSchema = z.object({
   teacherId: objectIdSchema,
@@ -237,10 +240,6 @@ export type SendNotificationInput = z.infer<typeof sendNotificationSchema>;
 export type LibraryBookInput = z.infer<typeof libraryBookSchema>;
 export type LibraryIssueInput = z.infer<typeof libraryIssueSchema>;
 export type ModuleStaffInput = z.infer<typeof moduleStaffSchema>;
-export type LaboratoryInput = z.infer<typeof laboratorySchema>;
-export type LaboratoryCategoryInput = z.infer<typeof laboratoryCategorySchema>;
-export type LaboratoryEquipmentInput = z.infer<typeof laboratoryEquipmentSchema>;
-export type LaboratoryIssueInput = z.infer<typeof laboratoryIssueSchema>;
 export type TransportRouteInput = z.infer<typeof transportRouteSchema>;
 export type TransportAssignmentInput = z.infer<typeof transportAssignmentSchema>;
 export type LeaveRequestInput = z.infer<typeof leaveRequestSchema>;

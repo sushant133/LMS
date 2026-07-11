@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, EyeOff } from "lucide-react";
-import { getDemoLoginEntries, loginSchema } from "@phit-erp/shared";
+import { loginSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { Button } from "components/ui/button";
@@ -49,35 +49,25 @@ const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
   );
 };
 
+/**
+ * Login page always shows the form.
+ * Does NOT auto-redirect from a leftover cookie (that blocked switching accounts).
+ * Does NOT auto-logout on mount (that raced with login and cleared the new session cookie).
+ * A successful login overwrites any previous session cookie.
+ */
 export const LoginPage = () => {
   const [form, setForm] = useState({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const { t } = useTranslation();
   const isDesktop = useIsDesktopViewport();
-  const { login, logout, user, loading } = useAuth();
-  const [logoutEpoch, setLogoutEpoch] = useState(0);
-  const clearedInvalidSession = useRef(false);
-
-  const redirectTarget = user ? getRoleRedirectPath(user.role) : null;
-
-  useEffect(() => {
-    // If we hit /login while still holding an authenticated user (common during logout redirect),
-    // clear auth state here so the login layout renders in a clean unauthenticated state.
-    if (loading || !user || redirectTarget || clearedInvalidSession.current) {
-      return;
-    }
-
-    clearedInvalidSession.current = true;
-
-    // Ensure we remount this page layout after logout-induced auth changes.
-    setLogoutEpoch((e) => e + 1);
-
-    void logout();
-  }, [loading, logout, redirectTarget, user]);
+  const { login } = useAuth();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting) return;
+
     const parsed = loginSchema.safeParse({
       email: form.email.trim(),
       password: form.password.trim(),
@@ -88,23 +78,20 @@ export const LoginPage = () => {
       return;
     }
 
+    setSubmitting(true);
     try {
       const result = await login(parsed.data);
-      toast.success(t("login"));
       const target = getRoleRedirectPath(result.user.role);
+      toast.success(t("login"));
       navigate(target ?? "/dashboard/college_admin", { replace: true });
     } catch (error) {
       toast.error(parseErrorMessage(error));
+      setSubmitting(false);
     }
   };
 
-  if (user && redirectTarget) {
-    return <Navigate to={redirectTarget} replace />;
-  }
-
   return (
     <div
-      key={logoutEpoch}
       className="grid min-h-screen w-full bg-[linear-gradient(135deg,_#0f172a_0%,_#061535_45%,_#d6e2f5_100%)]"
       style={isDesktop ? { gridTemplateColumns: "1.2fr 0.8fr" } : undefined}
     >
@@ -125,6 +112,7 @@ export const LoginPage = () => {
                   autoComplete="username"
                   type="text"
                   value={form.email}
+                  disabled={submitting}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
@@ -140,6 +128,7 @@ export const LoginPage = () => {
                     className="pr-10"
                     type={showPassword ? "text" : "password"}
                     value={form.password}
+                    disabled={submitting}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -153,6 +142,7 @@ export const LoginPage = () => {
                     }
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 hover:text-slate-700"
                     type="button"
+                    disabled={submitting}
                     onClick={() => setShowPassword((current) => !current)}
                   >
                     {showPassword ? (
@@ -163,23 +153,11 @@ export const LoginPage = () => {
                   </button>
                 </div>
               </FormField>
-              <Button className="w-full" type="submit">
-                {t("login")}
+              <Button className="w-full" type="submit" disabled={submitting}>
+                {submitting ? "Signing in…" : t("login")}
               </Button>
             </form>
 
-            <div className="mt-4 space-y-2 rounded-xl border border-brand-100 bg-brand-50/80 px-3 py-2 text-xs text-brand-900">
-              <p className="font-semibold text-brand-950">
-                Demo login credentials
-              </p>
-              {getDemoLoginEntries().map((entry) => (
-                <p key={entry.email}>
-                  {entry.label}:{" "}
-                  <span className="font-medium">{entry.email}</span> /{" "}
-                  <span className="font-medium">{entry.password}</span>
-                </p>
-              ))}
-            </div>
             <p className="mt-4 text-sm text-slate-600">
               Parent without an account?{" "}
               <Link className="font-semibold text-brand-700" to="/register">

@@ -1,6 +1,9 @@
 import type { InventoryStockStatus } from "@phit-erp/shared";
-
-export const getIssuedQuantity = (total: number, available: number): number => Math.max(0, total - available);
+export {
+  enrichEquipmentInventory,
+  getIssuedQuantity,
+  getLabStockStatus
+} from "./laboratoryInventory.js";
 
 export const getStockStatus = (available: number, total: number): InventoryStockStatus => {
   if (available <= 0) {
@@ -8,6 +11,9 @@ export const getStockStatus = (available: number, total: number): InventoryStock
   }
 
   const lowThreshold = Math.max(1, Math.floor(total * 0.2));
+  if (available <= Math.max(1, Math.floor(lowThreshold * 0.5))) {
+    return "CRITICAL_STOCK";
+  }
   if (available <= lowThreshold) {
     return "LOW_STOCK";
   }
@@ -17,12 +23,6 @@ export const getStockStatus = (available: number, total: number): InventoryStock
 
 export const enrichBookInventory = <T extends { totalCopies: number; availableCopies: number }>(book: T) => ({
   ...book,
-  issuedCopies: getIssuedQuantity(book.totalCopies, book.availableCopies),
+  issuedCopies: Math.max(0, book.totalCopies - book.availableCopies),
   status: getStockStatus(book.availableCopies, book.totalCopies)
-});
-
-export const enrichEquipmentInventory = <T extends { quantity: number; availableQuantity: number }>(item: T) => ({
-  ...item,
-  issuedQuantity: getIssuedQuantity(item.quantity, item.availableQuantity),
-  status: getStockStatus(item.availableQuantity, item.quantity)
 });

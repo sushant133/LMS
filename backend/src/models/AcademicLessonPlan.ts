@@ -30,6 +30,7 @@ const lessonPlanSchema = new Schema(
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject", required: true, index: true },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true, index: true },
     month: { type: String, required: true, index: true },
+    monthlyDescription: { type: String, default: "" },
     status: {
       type: String,
       enum: ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "APPROVED", "REJECTED"],

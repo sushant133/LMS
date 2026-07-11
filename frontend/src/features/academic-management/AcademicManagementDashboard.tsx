@@ -23,7 +23,7 @@ interface AcademicManagementDashboardPanelProps {
 }
 
 const statCards = [
-  { key: "totalSubjects", label: "Total Subjects" },
+  { key: "totalSubjects", label: "Curriculum Subjects" },
   { key: "totalSessionPlans", label: "Session Plans" },
   { key: "totalLessonPlans", label: "Lesson Plans" },
   { key: "todaysLogBooks", label: "Today's Log Books" },

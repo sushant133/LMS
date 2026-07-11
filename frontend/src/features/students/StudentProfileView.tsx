@@ -34,6 +34,11 @@ import {
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr } from "lib/utils";
 import { StudentDocumentsSection } from "./StudentDocumentsSection";
+import {
+  countPendingRequiredDocuments,
+  getCategoryLabel,
+  isPendingStudentDocument,
+} from "./studentDocumentUtils";
 
 type ProfileTab =
   | "overview"
@@ -118,13 +123,34 @@ export const StudentProfileView = () => {
   const student = profile?.student;
   const permissions = profile?.permissions;
 
+  const pendingRequiredCount = useMemo(
+    () => countPendingRequiredDocuments(documents),
+    [documents],
+  );
+
+  const pendingDocumentNames = useMemo(
+    () =>
+      documents
+        .filter((doc) => isPendingStudentDocument(doc))
+        .map((doc) => doc.name || getCategoryLabel(doc.type)),
+    [documents],
+  );
+
   const visibleTabs = useMemo(() => {
     return tabs.filter((item) => {
       if (item.id === "fees" && !permissions?.canViewFinancial) return false;
       if (item.id === "activity" && !permissions?.canViewActivity) return false;
+      if (item.id === "library" && permissions?.canViewLibrary === false)
+        return false;
+      if (item.id === "transport" && permissions?.canViewTransport === false)
+        return false;
+      if (item.id === "documents" && permissions?.canViewDocuments === false)
+        return false;
       return true;
     });
   }, [permissions]);
+
+  const isTeacherLimited = permissions?.canViewFullPersonal === false;
 
   if (profileQuery.isLoading) return <LoadingState />;
   if (!student || !profile) {
@@ -139,8 +165,12 @@ export const StudentProfileView = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Student Profile"
-        description={`Complete profile for ${student.user.fullName}`}
+        title={isTeacherLimited ? "Student academic view" : "Student Profile"}
+        description={
+          isTeacherLimited
+            ? `Academic details for ${student.user?.fullName ?? "student"} — your assigned subjects only`
+            : `Complete profile for ${student.user?.fullName ?? "student"}`
+        }
         action={
           <Button variant="outline" asChild>
             <Link to={getStudentProfileBackPath(role)}>
@@ -164,7 +194,7 @@ export const StudentProfileView = () => {
             </div>
           )}
           <h2 className="mt-4 text-2xl font-bold text-slate-900">
-            {student.user.fullName}
+            {student.user?.fullName ?? "Student"}
           </h2>
           <div className="mt-3 flex flex-wrap justify-center gap-2 text-sm text-slate-600">
             <Badge className="bg-white text-slate-700 ring-1 ring-slate-200">
@@ -179,9 +209,21 @@ export const StudentProfileView = () => {
             <Badge className="bg-white text-slate-700 ring-1 ring-slate-200">
               {profile.secondaryLabel}: {profile.secondaryName}
             </Badge>
-            <Badge className="bg-brand-100 text-brand-800 ring-1 ring-brand-200">
-              Faculty: HA
-            </Badge>
+            {isTeacherLimited ? (
+              <Badge className="bg-amber-100 text-amber-900 ring-1 ring-amber-200">
+                Teacher view · assigned subjects only
+              </Badge>
+            ) : (
+              <Badge className="bg-brand-100 text-brand-800 ring-1 ring-brand-200">
+                Faculty: HA
+              </Badge>
+            )}
+            {!isTeacherLimited && pendingRequiredCount > 0 ? (
+              <Badge className="bg-amber-100 text-amber-900 ring-1 ring-amber-200">
+                {pendingRequiredCount} document
+                {pendingRequiredCount === 1 ? "" : "s"} pending
+              </Badge>
+            ) : null}
           </div>
         </div>
 
@@ -202,6 +244,18 @@ export const StudentProfileView = () => {
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
+                {item.id === "documents" && pendingRequiredCount > 0 ? (
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.5 text-xs font-semibold",
+                      tab === item.id
+                        ? "bg-amber-400 text-amber-950"
+                        : "bg-amber-100 text-amber-900",
+                    )}
+                  >
+                    {pendingRequiredCount}
+                  </span>
+                ) : null}
               </button>
             );
           })}
@@ -210,78 +264,190 @@ export const StudentProfileView = () => {
         <CardContent className="p-6">
           {tab === "overview" ? (
             <div className="space-y-6">
+              {isTeacherLimited ? (
+                <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+                  You can only view students in your assigned batch/year (or
+                  class/section) and data related to your subjects (attendance
+                  and exam marks). Personal contact details, fees, library,
+                  transport, and documents are not available to teachers.
+                </div>
+              ) : null}
               <section>
                 <h3 className="mb-3 text-lg font-semibold">
-                  Personal Information
+                  {isTeacherLimited ? "Student identity" : "Personal Information"}
                 </h3>
                 <InfoGrid
-                  items={[
-                    { label: "Full Name", value: student.user.fullName },
-                    {
-                      label: "Registration / Admission No.",
-                      value: student.admissionNumber,
-                    },
-                    { label: "Roll Number", value: student.rollNumber },
-                    { label: profile.primaryLabel, value: profile.primaryName },
-                    {
-                      label: profile.secondaryLabel,
-                      value: profile.secondaryName,
-                    },
-                    { label: "Faculty", value: "HA" },
-                    {
-                      label: "Mobile Number",
-                      value: student.user.phone ?? "—",
-                    },
-                    { label: "Email", value: student.user.email },
-                    {
-                      label: "Admission Date (BS)",
-                      value: student.admissionDateBs,
-                    },
-                    {
-                      label: "Date of Birth (BS)",
-                      value: student.dateOfBirthBs,
-                    },
-                    { label: "Gender", value: student.gender },
-                    { label: "Blood Group", value: student.bloodGroup ?? "—" },
-                    {
-                      label: "Fees Due",
-                      value: formatCurrencyNpr(student.feesDueNpr),
-                    },
-                  ]}
+                  items={
+                    isTeacherLimited
+                      ? [
+                          {
+                            label: "Full Name",
+                            value: student.user?.fullName ?? "—",
+                          },
+                          {
+                            label: "Registration / Admission No.",
+                            value: student.admissionNumber,
+                          },
+                          { label: "Roll Number", value: student.rollNumber },
+                          {
+                            label: profile.primaryLabel,
+                            value: profile.primaryName,
+                          },
+                          {
+                            label: profile.secondaryLabel,
+                            value: profile.secondaryName,
+                          },
+                          { label: "Gender", value: student.gender },
+                        ]
+                      : [
+                          {
+                            label: "Full Name",
+                            value: student.user?.fullName ?? "—",
+                          },
+                          {
+                            label: "Registration / Admission No.",
+                            value: student.admissionNumber,
+                          },
+                          { label: "Roll Number", value: student.rollNumber },
+                          {
+                            label: profile.primaryLabel,
+                            value: profile.primaryName,
+                          },
+                          {
+                            label: profile.secondaryLabel,
+                            value: profile.secondaryName,
+                          },
+                          { label: "Faculty", value: "HA" },
+                          {
+                            label: "Mobile Number",
+                            value: student.user?.phone ?? "—",
+                          },
+                          {
+                            label: "Email",
+                            value: student.user?.email ?? "—",
+                          },
+                          {
+                            label: "Admission Date (BS)",
+                            value: student.admissionDateBs ?? "—",
+                          },
+                          {
+                            label: "Date of Birth (BS)",
+                            value: student.dateOfBirthBs ?? "—",
+                          },
+                          { label: "Gender", value: student.gender },
+                          {
+                            label: "Blood Group",
+                            value: student.bloodGroup ?? "—",
+                          },
+                          {
+                            label: "Fees Due",
+                            value: formatCurrencyNpr(student.feesDueNpr ?? 0),
+                          },
+                        ]
+                  }
                 />
               </section>
-              <section>
-                <h3 className="mb-3 text-lg font-semibold">Address</h3>
-                <InfoGrid
-                  items={[
-                    {
-                      label: "Permanent Address",
-                      value: formatAddress(student.address),
-                    },
-                  ]}
-                />
-              </section>
-              <section>
-                <h3 className="mb-3 text-lg font-semibold">
-                  Parent / Guardian
-                </h3>
-                <InfoGrid
-                  items={[
-                    {
-                      label: "Father",
-                      value: `${student.fatherName}${student.fatherPhone ? ` (${student.fatherPhone})` : ""}`,
-                    },
-                    {
-                      label: "Mother",
-                      value: `${student.motherName}${student.motherPhone ? ` (${student.motherPhone})` : ""}`,
-                    },
-                    {
-                      label: "Guardian",
-                      value: `${student.guardianName} (${student.guardianPhone})`,
-                    },
-                  ]}
-                />
-              </section>
+              {!isTeacherLimited ? (
+                <>
+                  <section>
+                    <h3 className="mb-3 text-lg font-semibold">Address</h3>
+                    <InfoGrid
+                      items={[
+                        {
+                          label: "Permanent Address",
+                          value: student.address
+                            ? formatAddress(student.address)
+                            : "—",
+                        },
+                      ]}
+                    />
+                  </section>
+                  <section>
+                    <h3 className="mb-3 text-lg font-semibold">
+                      Parent / Guardian
+                    </h3>
+                    <InfoGrid
+                      items={[
+                        {
+                          label: "Father",
+                          value: `${student.fatherName ?? "—"}${
+                            student.fatherPhone
+                              ? ` (${student.fatherPhone})`
+                              : ""
+                          }`,
+                        },
+                        {
+                          label: "Mother",
+                          value: `${student.motherName ?? "—"}${
+                            student.motherPhone
+                              ? ` (${student.motherPhone})`
+                              : ""
+                          }`,
+                        },
+                        {
+                          label: "Guardian",
+                          value: `${student.guardianName ?? "—"} (${
+                            student.guardianPhone ?? "—"
+                          })`,
+                        },
+                      ]}
+                    />
+                  </section>
+                </>
+              ) : (
+                <section>
+                  <h3 className="mb-3 text-lg font-semibold">
+                    Your subjects for this student
+                  </h3>
+                  {profile.subjects.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No subjects assigned to you for this student&apos;s
+                      group.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {profile.subjects.map((s) => (
+                        <Badge
+                          key={s._id}
+                          className="bg-brand-50 text-brand-900 ring-1 ring-brand-200"
+                        >
+                          {s.name}
+                          {s.code ? ` (${s.code})` : ""}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+              {!isTeacherLimited && pendingRequiredCount > 0 ? (
+                <section>
+                  <h3 className="mb-3 text-lg font-semibold">
+                    Pending Documents
+                  </h3>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <p className="text-sm text-amber-900">
+                      {pendingRequiredCount} required document
+                      {pendingRequiredCount === 1 ? "" : "s"} not yet
+                      submitted. The student account is active — upload the
+                      files from the Documents tab when available.
+                    </p>
+                    <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-amber-900">
+                      {pendingDocumentNames.map((name) => (
+                        <li key={name}>{name}</li>
+                      ))}
+                    </ul>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => setTab("documents")}
+                    >
+                      Go to Documents
+                    </Button>
+                  </div>
+                </section>
+              ) : null}
             </div>
           ) : null}
 
@@ -688,6 +854,7 @@ export const StudentProfileView = () => {
               canManage={Boolean(permissions?.canManageDocuments)}
               uploadedBy={user?._id}
               uploadedByName={user?.fullName}
+              showPendingSummary
             />
           ) : null}
 

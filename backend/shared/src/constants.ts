@@ -112,7 +112,13 @@ export const USER_ROLES: UserRole[] = [
   "COLLEGE_STAFF"
 ];
 
+/**
+ * Non-teaching staff categories only. Teachers are managed exclusively via the Teacher module.
+ */
 export const COLLEGE_STAFF_CATEGORIES = [
+  "ACCOUNTANT",
+  "LIBRARIAN",
+  "LABORATORY_STAFF",
   "SECURITY_GUARD",
   "HOUSEKEEPING",
   "RECEPTIONIST",
@@ -123,6 +129,9 @@ export const COLLEGE_STAFF_CATEGORIES = [
 ] as const;
 
 export const COLLEGE_STAFF_CATEGORY_LABELS: Record<(typeof COLLEGE_STAFF_CATEGORIES)[number], string> = {
+  ACCOUNTANT: "Accountants / Finance Staff",
+  LIBRARIAN: "Librarians / Library Staff",
+  LABORATORY_STAFF: "Laboratory Staff / Lab In-Charge",
   SECURITY_GUARD: "Security Guards",
   HOUSEKEEPING: "Sweepers / Housekeeping",
   RECEPTIONIST: "Receptionists",
@@ -131,6 +140,30 @@ export const COLLEGE_STAFF_CATEGORY_LABELS: Record<(typeof COLLEGE_STAFF_CATEGOR
   IT_STAFF: "IT Staff",
   OTHER: "Other Staff"
 };
+
+/** Maps college staff category → ERP UserRole for login / RBAC. Never TEACHER. */
+export const COLLEGE_STAFF_CATEGORY_ROLES: Record<(typeof COLLEGE_STAFF_CATEGORIES)[number], UserRole> = {
+  ACCOUNTANT: "ACCOUNTANT",
+  LIBRARIAN: "LIBRARY_STAFF",
+  LABORATORY_STAFF: "LABORATORY_STAFF",
+  SECURITY_GUARD: "COLLEGE_STAFF",
+  HOUSEKEEPING: "COLLEGE_STAFF",
+  RECEPTIONIST: "COLLEGE_STAFF",
+  OFFICE_ASSISTANT: "COLLEGE_STAFF",
+  TRANSPORT: "COLLEGE_STAFF",
+  IT_STAFF: "COLLEGE_STAFF",
+  OTHER: "COLLEGE_STAFF"
+};
+
+export const COLLEGE_STAFF_REPORT_TYPES = [
+  "DIRECTORY",
+  "ROLE_WISE",
+  "DEPARTMENT_WISE",
+  "ACTIVE",
+  "INACTIVE",
+  "LOGIN_ACCOUNTS",
+  "EMAIL_DELIVERY"
+] as const;
 
 export const EMPLOYMENT_TYPES = ["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN"] as const;
 
@@ -194,7 +227,13 @@ export const TENANT_STAFF_ROLES: UserRole[] = [
 
 export const LIBRARY_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LIBRARY_STAFF"];
 
-export const LABORATORY_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LABORATORY_STAFF"];
+export const LABORATORY_MANAGER_ROLES: UserRole[] = [
+  "SUPER_ADMIN",
+  "COLLEGE_ADMIN",
+  "COLLEGE_VIEWER",
+  "LABORATORY_STAFF",
+  "TEACHER"
+];
 
 export const ACCOUNTING_MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT"];
 
@@ -321,49 +360,21 @@ export const INCOME_CATEGORIES = [
 
 export const PAYMENT_STATUSES = ["PENDING", "PARTIAL", "PAID"] as const;
 
-export const LABORATORY_TYPES = ["COMPUTER", "PHYSICS", "CHEMISTRY", "BIOLOGY", "OTHER"] as const;
-
-export const DEFAULT_LAB_CATEGORIES: Record<(typeof LABORATORY_TYPES)[number], string[]> = {
-  COMPUTER: [
-    "Computers",
-    "Laptops",
-    "Monitors",
-    "Keyboards",
-    "Mouse",
-    "Printers",
-    "UPS",
-    "Projectors",
-    "Networking Devices",
-    "Software/Licenses",
-    "Other Equipment"
-  ],
-  PHYSICS: [
-    "Measuring Instruments",
-    "Electrical Equipment",
-    "Optical Equipment",
-    "Mechanical Equipment",
-    "Safety Equipment",
-    "Other Equipment"
-  ],
-  CHEMISTRY: [
-    "Chemicals",
-    "Glassware",
-    "Laboratory Instruments",
-    "Measuring Equipment",
-    "Safety Equipment",
-    "Other Equipment"
-  ],
-  BIOLOGY: [
-    "Microscopes",
-    "Slides",
-    "Models & Specimens",
-    "Dissection Kits",
-    "Laboratory Instruments",
-    "Safety Equipment",
-    "Other Equipment"
-  ],
-  OTHER: ["Other Equipment"]
-};
+export {
+  LABORATORY_TYPES,
+  DEFAULT_LAB_CATEGORIES,
+  LABORATORY_ITEM_KINDS,
+  LABORATORY_ITEM_KIND_LABELS,
+  LABORATORY_EQUIPMENT_CONDITIONS,
+  LABORATORY_EQUIPMENT_STATUSES,
+  LABORATORY_STOCK_MOVEMENT_TYPES,
+  LABORATORY_STOCK_REQUEST_STATUSES,
+  LABORATORY_STOCK_PRIORITIES,
+  LABORATORY_INVENTORY_STOCK_STATUSES,
+  LABORATORY_REPORT_TYPES,
+  LABORATORY_GLOBAL_MANAGER_ROLES,
+  LABORATORY_ACCESS_ROLES
+} from "./laboratory-constants.js";
 
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
 

@@ -5,7 +5,9 @@ import {
   type AcademicManagementDashboard,
   type AcademicManagementFilters,
   type AcademicPlanStatus,
-  type LessonPlanItemStatus
+  type LessonPlanItemStatus,
+  type SessionPlanSyllabusCoverage,
+  type SyllabusUnitPlanningStatus
 } from "@phit-erp/shared";
 import { AcademicApproval } from "../models/AcademicApproval.js";
 import { AcademicComment } from "../models/AcademicComment.js";
@@ -36,7 +38,36 @@ import { tenantObjectId } from "./tenant.js";
 /** BS date pattern YYYY-MM-DD (used for lesson plan item deadlines). */
 const BS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Nepali month names aligned with BS month index 1–12 (Baisakh=1 … Chaitra=12). */
+export const NEPALI_MONTH_NAMES = [
+  "Baisakh",
+  "Jestha",
+  "Ashadh",
+  "Shrawan",
+  "Bhadra",
+  "Ashwin",
+  "Kartik",
+  "Mangsir",
+  "Poush",
+  "Magh",
+  "Falgun",
+  "Chaitra"
+] as const;
+
 export const isBsDateString = (value?: string | null): value is string => Boolean(value && BS_DATE_RE.test(value.trim()));
+
+/**
+ * Map a BS date (YYYY-MM-DD) to the Nepali month name used by Lesson Plans / Log Books.
+ * Falls back to the raw YYYY-MM fragment only if the month number is out of range.
+ */
+export const getNepaliMonthNameFromBsDate = (dateBs: string): string => {
+  const parts = dateBs.trim().split("-");
+  const monthNum = Number(parts[1] ?? 0);
+  if (monthNum >= 1 && monthNum <= 12) {
+    return NEPALI_MONTH_NAMES[monthNum - 1] ?? parts[1] ?? "";
+  }
+  return dateBs.slice(0, 7);
+};
 
 /**
  * Compute lesson-plan item status from completed classes and optional BS deadline.
@@ -238,6 +269,273 @@ export const notifyAdmins = async (req: Request, title: string, message: string,
       })
     )
   );
+};
+
+/** Session Plan statuses that may feed Lesson Plans for the owning teacher. */
+const SESSION_PLAN_USABLE_FOR_LESSON: AcademicPlanStatus[] = [
+  "DRAFT",
+  "SUBMITTED",
+  "PENDING_APPROVAL",
+  "APPROVED"
+];
+
+/**
+ * Resolve and validate a Session Plan for Lesson Plan creation.
+ * Teachers may use their own non-rejected plans (including DRAFT) so they can
+ * complete yearly Session Plans and monthly Lesson Plans without waiting for admin approval.
+ * REJECTED plans cannot be used. Subject/teacher/year must still match.
+ */
+export const assertApprovedSessionPlanForLesson = async (
+  req: Request,
+  sessionPlanId: string,
+  payload: { subjectId: string; teacherId: string; academicYearBs?: string }
+): Promise<{ _id: mongoose.Types.ObjectId; status: AcademicPlanStatus }> => {
+  const plan = await AcademicSessionPlan.findOne({
+    _id: sessionPlanId,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  }).lean();
+
+  if (!plan) {
+    throw new ApiError(400, "Session Plan not found. Create a yearly Session Plan first.");
+  }
+  if (!SESSION_PLAN_USABLE_FOR_LESSON.includes(plan.status as AcademicPlanStatus)) {
+    throw new ApiError(
+      400,
+      `Cannot create a Lesson Plan from a Session Plan with status ${plan.status}. Use a draft, submitted, or approved Session Plan (not rejected).`
+    );
+  }
+  if (plan.subjectId.toString() !== payload.subjectId) {
+    throw new ApiError(400, "Session Plan subject does not match the Lesson Plan subject.");
+  }
+  if (plan.teacherId.toString() !== payload.teacherId) {
+    throw new ApiError(400, "Session Plan teacher does not match the Lesson Plan teacher.");
+  }
+  if (payload.academicYearBs && plan.academicYearBs !== payload.academicYearBs) {
+    throw new ApiError(400, "Session Plan academic year does not match the Lesson Plan academic year.");
+  }
+
+  return { _id: plan._id, status: plan.status as AcademicPlanStatus };
+};
+
+/**
+ * Ensure every lesson-plan item maps to a real unit on the given Session Plan,
+ * and reject free-typed units that do not exist in the yearly syllabus.
+ */
+export const assertLessonPlanItemsBelongToSessionPlan = async (
+  req: Request,
+  sessionPlanId: string,
+  items: Array<{ sessionPlanUnitId: string; plannedTopic: string; serialNo: number }>
+): Promise<void> => {
+  const unitIds = items.map((item) => item.sessionPlanUnitId).filter(Boolean);
+  if (unitIds.length !== items.length) {
+    throw new ApiError(400, "Every Lesson Plan topic must be selected from the Session Plan units.");
+  }
+
+  const uniqueIds = [...new Set(unitIds)];
+  const units = await AcademicSessionPlanUnit.find({
+    _id: { $in: uniqueIds },
+    schoolId: tenantObjectId(req),
+    sessionPlanId
+  })
+    .select("_id unitNo chapterName")
+    .lean();
+
+  if (units.length !== uniqueIds.length) {
+    throw new ApiError(400, "One or more selected units do not belong to the Session Plan.");
+  }
+};
+
+/**
+ * Prevent the same Session Plan unit from appearing twice in the same month
+ * for the same teacher/subject (within this plan or another plan for that month).
+ */
+export const assertNoDuplicateLessonPlanUnitsInMonth = async (
+  req: Request,
+  params: {
+    sessionPlanId: string;
+    teacherId: string;
+    subjectId: string;
+    month: string;
+    academicYearBs: string;
+    unitIds: string[];
+    excludeLessonPlanId?: string;
+  }
+): Promise<void> => {
+  const seen = new Set<string>();
+  for (const unitId of params.unitIds) {
+    if (seen.has(unitId)) {
+      throw new ApiError(400, "Duplicate unit selected in this Lesson Plan. Each unit can only appear once per month.");
+    }
+    seen.add(unitId);
+  }
+
+  const otherPlans = await AcademicLessonPlan.find({
+    schoolId: tenantObjectId(req),
+    sessionPlanId: params.sessionPlanId,
+    teacherId: params.teacherId,
+    subjectId: params.subjectId,
+    month: params.month,
+    academicYearBs: params.academicYearBs,
+    isDeleted: false,
+    ...(params.excludeLessonPlanId ? { _id: { $ne: params.excludeLessonPlanId } } : {})
+  })
+    .select("_id")
+    .lean();
+
+  if (otherPlans.length === 0) return;
+
+  const existingItems = await AcademicLessonPlanItem.find({
+    lessonPlanId: { $in: otherPlans.map((plan) => plan._id) },
+    sessionPlanUnitId: { $in: params.unitIds }
+  })
+    .select("sessionPlanUnitId plannedTopic")
+    .lean();
+
+  if (existingItems.length > 0) {
+    const first = existingItems[0];
+    throw new ApiError(
+      400,
+      `Unit/topic "${first?.plannedTopic ?? "selected"}" is already planned for ${params.month}. Duplicate Lesson Plan entries for the same unit in the same month are not allowed.`
+    );
+  }
+};
+
+/**
+ * Prevent two Log Book entries for the same Lesson Plan topic on the same BS date.
+ */
+export const assertNoDuplicateLogBookForItemDate = async (
+  req: Request,
+  lessonPlanItemId: string,
+  dateBs: string,
+  excludeEntryId?: string
+): Promise<void> => {
+  const existing = await AcademicLogBookEntry.findOne({
+    schoolId: tenantObjectId(req),
+    lessonPlanItemId,
+    dateBs,
+    isDeleted: false,
+    ...(excludeEntryId ? { _id: { $ne: excludeEntryId } } : {})
+  })
+    .select("_id")
+    .lean();
+
+  if (existing) {
+    throw new ApiError(400, "A Log Book entry already exists for this Lesson Plan topic on the selected date.");
+  }
+};
+
+/**
+ * Build hierarchical syllabus coverage for a Session Plan:
+ * planned (in any Lesson Plan), remaining (not yet planned), completed (via Log Book progress).
+ */
+export const getSessionPlanSyllabusCoverage = async (
+  req: Request,
+  sessionPlanId: string
+): Promise<SessionPlanSyllabusCoverage> => {
+  const plan = await AcademicSessionPlan.findOne({
+    _id: sessionPlanId,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  }).lean();
+
+  if (!plan) throw new ApiError(404, "Session plan not found");
+  await assertTeacherOwnership(req, plan.teacherId.toString());
+
+  const units = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id }).sort({ unitNo: 1 }).lean();
+  const lessonPlans = await AcademicLessonPlan.find({
+    schoolId: tenantObjectId(req),
+    sessionPlanId: plan._id,
+    isDeleted: false
+  })
+    .select("_id month")
+    .lean();
+
+  const planMonthMap = new Map(lessonPlans.map((lp) => [lp._id.toString(), lp.month]));
+  const lessonPlanIds = lessonPlans.map((lp) => lp._id);
+
+  const items =
+    lessonPlanIds.length > 0
+      ? await AcademicLessonPlanItem.find({ lessonPlanId: { $in: lessonPlanIds } }).lean()
+      : [];
+
+  const itemsByUnit = new Map<string, typeof items>();
+  for (const item of items) {
+    if (!item.sessionPlanUnitId) continue;
+    const key = item.sessionPlanUnitId.toString();
+    const list = itemsByUnit.get(key) ?? [];
+    list.push(item);
+    itemsByUnit.set(key, list);
+  }
+
+  const enriched = units.map((unit) => {
+    const unitItems = itemsByUnit.get(unit._id.toString()) ?? [];
+    const plannedInMonths = [
+      ...new Set(
+        unitItems
+          .map((item) => planMonthMap.get(item.lessonPlanId.toString()))
+          .filter((month): month is string => Boolean(month))
+      )
+    ];
+    const estimatedClasses = unitItems.reduce((sum, item) => sum + (item.estimatedClasses || 0), 0);
+    const completedClasses = unitItems.reduce((sum, item) => sum + (item.completedClasses || 0), 0);
+
+    let planningStatus: SyllabusUnitPlanningStatus = "UNPLANNED";
+    if (unit.status === "COMPLETED") planningStatus = "COMPLETED";
+    else if (unit.status === "DELAYED") planningStatus = "DELAYED";
+    else if (unit.status === "IN_PROGRESS" || completedClasses > 0) planningStatus = "IN_PROGRESS";
+    else if (unitItems.length > 0) planningStatus = "PLANNED";
+
+    return {
+      _id: unit._id.toString(),
+      sessionPlanId: unit.sessionPlanId.toString(),
+      unitNo: unit.unitNo,
+      chapterName: unit.chapterName,
+      estimatedTeachingHours: unit.estimatedTeachingHours,
+      learningOutcomes: unit.learningOutcomes,
+      topicsCovered: unit.topicsCovered,
+      references: unit.references,
+      practicalRequired: unit.practicalRequired,
+      internalAssessment: unit.internalAssessment,
+      tentativeCompletionMonth: unit.tentativeCompletionMonth,
+      status: unit.status as LessonPlanItemStatus,
+      attachmentUrl: unit.attachmentUrl ?? undefined,
+      plannedInMonths,
+      planningStatus,
+      lessonPlanItemCount: unitItems.length,
+      completedClasses,
+      estimatedClasses
+    };
+  });
+
+  const planned = enriched.filter((u) => u.planningStatus !== "UNPLANNED");
+  const remaining = enriched.filter((u) => u.planningStatus === "UNPLANNED");
+  const completed = enriched.filter((u) => u.planningStatus === "COMPLETED");
+  const inProgress = enriched.filter((u) => u.planningStatus === "IN_PROGRESS" || u.planningStatus === "PLANNED");
+  const delayed = enriched.filter((u) => u.planningStatus === "DELAYED");
+  const total = enriched.length;
+  const completedCount = completed.length;
+  const completedPercent = total > 0 ? Math.round((completedCount / total) * 100) : 0;
+
+  return {
+    sessionPlanId: plan._id.toString(),
+    subjectId: plan.subjectId.toString(),
+    teacherId: plan.teacherId.toString(),
+    academicYearBs: plan.academicYearBs,
+    status: plan.status,
+    totalUnits: total,
+    plannedUnits: planned.length,
+    remainingUnits: remaining.length,
+    completedUnits: completedCount,
+    inProgressUnits: inProgress.length,
+    delayedUnits: delayed.length,
+    completedPercent,
+    remainingPercent: 100 - completedPercent,
+    units: enriched,
+    planned: planned.map(({ lessonPlanItemCount: _c, completedClasses: _cc, estimatedClasses: _ec, ...unit }) => unit),
+    remaining: remaining.map(({ lessonPlanItemCount: _c, completedClasses: _cc, estimatedClasses: _ec, ...unit }) => unit),
+    completed: completed.map(({ lessonPlanItemCount: _c, completedClasses: _cc, estimatedClasses: _ec, ...unit }) => unit)
+  };
 };
 
 export const syncLessonPlanItemProgress = async (lessonPlanItemId: string): Promise<void> => {
@@ -553,6 +851,9 @@ export const serializeLessonPlan = async (planId: string) => {
 
   const totalClasses = enrichedItems.reduce((sum, item) => sum + item.estimatedClasses, 0);
   const completedClasses = enrichedItems.reduce((sum, item) => sum + item.completedClasses, 0);
+  const plannedTopics = enrichedItems.length;
+  const completedTopics = enrichedItems.filter((item) => item.completionStatus === "COMPLETED").length;
+  const pendingTopics = plannedTopics - completedTopics;
   const pendingUnits = enrichedItems.filter((item) => item.completionStatus === "PENDING").length;
   const delayedUnits = enrichedItems.filter((item) => item.completionStatus === "DELAYED").length;
   const completedPercent = calcCompletedPercent(totalClasses, completedClasses);
@@ -573,6 +874,7 @@ export const serializeLessonPlan = async (planId: string) => {
     subjectId: plan.subjectId?._id?.toString() ?? plan.subjectId?.toString(),
     teacherId: plan.teacherId?._id?.toString() ?? plan.teacherId?.toString(),
     month: plan.month,
+    monthlyDescription: (plan as { monthlyDescription?: string }).monthlyDescription ?? "",
     status: plan.status,
     preparedBy: plan.preparedBy,
     checkedBy: plan.checkedBy,
@@ -582,6 +884,9 @@ export const serializeLessonPlan = async (planId: string) => {
     items: enrichedItems,
     completedPercent,
     remainingPercent,
+    plannedTopics,
+    completedTopics,
+    pendingTopics,
     pendingUnits,
     delayedUnits,
     audit: formatAudit(plan),
@@ -646,6 +951,49 @@ export const serializeLogBookEntry = async (entryId: string) => {
   };
 };
 
+/**
+ * Count curriculum subjects for Academic Management dashboard.
+ * College provisions one Subject document per master × batch-year, so raw
+ * Subject.countDocuments inflates the total (e.g. 20 masters × years × batches ≈ 200+).
+ * Prefer distinct masterSubjectId; fall back to unique code for non-master subjects.
+ */
+const countCurriculumSubjects = async (
+  schoolId: mongoose.Types.ObjectId,
+  options?: { subjectIds?: string[] }
+): Promise<number> => {
+  const match: Record<string, unknown> = {
+    schoolId,
+    isActive: { $ne: false }
+  };
+  if (options?.subjectIds?.length) {
+    match._id = { $in: options.subjectIds };
+  }
+
+  const rows = await Subject.aggregate<{ _id: string }>([
+    { $match: match },
+    {
+      $group: {
+        _id: {
+          $cond: [
+            { $ifNull: ["$masterSubjectId", false] },
+            { $concat: ["master:", { $toString: "$masterSubjectId" }] },
+            {
+              $concat: [
+                "code:",
+                { $toLower: { $ifNull: ["$code", ""] } },
+                "|name:",
+                { $toLower: { $ifNull: ["$name", ""] } }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]);
+
+  return rows.length;
+};
+
 export const buildDashboard = async (req: Request, filters: AcademicManagementFilters): Promise<AcademicManagementDashboard> => {
   const baseFilter = buildAcademicFilter(req, filters);
   await applyTeacherScopeToFilter(req, baseFilter);
@@ -676,7 +1024,9 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
       dateBs: filters.dateFrom || todayBs
     }),
     AcademicProgress.find(progressQuery).lean(),
-    Subject.countDocuments({ schoolId, isActive: { $ne: false } })
+    countCurriculumSubjects(schoolId, {
+      subjectIds: teacherScope?.subjectIds
+    })
   ]);
 
   const [pendingLessonApprovals, pendingSessionApprovals] = await Promise.all([

@@ -15,6 +15,7 @@ export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
   const { user, loading, loggingOut } = useAuth();
   const location = useLocation();
 
+  // Only hard-redirect when we know there is no session (not while bootstrapping or logging out).
   const shouldRedirectToLogin = !loading && !loggingOut && !user;
 
   useEffect(() => {
@@ -22,11 +23,21 @@ export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
       return;
     }
 
-    redirectToLogin();
+    // Small delay avoids fighting an in-flight login that just set the session.
+    const timer = window.setTimeout(() => {
+      redirectToLogin();
+    }, 50);
+
+    return () => window.clearTimeout(timer);
   }, [location.pathname, shouldRedirectToLogin]);
 
+  if (loading || loggingOut) {
+    return <PageLoadingState />;
+  }
+
   if (!user) {
-    return loading || loggingOut ? <PageLoadingState /> : null;
+    // Effect will send the user to /login; keep layout blank to avoid flash.
+    return <PageLoadingState />;
   }
 
   const normalizedRole = normalizeUserRole(user.role);

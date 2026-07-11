@@ -3,14 +3,15 @@ import { useSearchParams } from "react-router-dom";
 import { PageContent } from "components/layout/PageContent";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
-import { AccountantsStaffPanel } from "features/college-staff/AccountantsStaffPanel";
 import { CollegeStaffManager } from "features/college-staff/CollegeStaffManager";
-import { ModuleStaffPanel } from "features/college-staff/ModuleStaffPanel";
-import { COLLEGE_STAFF_TABS, type CollegeStaffTabId, isGenericStaffTab } from "features/college-staff/collegeStaffTabs";
+import {
+  COLLEGE_STAFF_TABS,
+  type CollegeStaffTabId,
+} from "features/college-staff/collegeStaffTabs";
 import { TeachersManager } from "features/teachers/TeachersManager";
 import { cn } from "lib/utils";
 
-const DEFAULT_TAB: CollegeStaffTabId = "teachers";
+const DEFAULT_TAB: CollegeStaffTabId = "all";
 
 export const CollegeStaffPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -27,7 +28,7 @@ export const CollegeStaffPage = () => {
     <PageContent className="space-y-6">
       <PageHeader
         title="College Staff"
-        description="Manage teaching and non-teaching employees from one place. Teachers continue to use the existing teacher system unchanged."
+        description="Teachers use the Teacher system. Non-teaching staff can be created on any role tab (or All Non-Teaching Staff). Each tab lists only that role. Edit a person or use Module Access to set read/write permissions. Login credentials are emailed on create."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -46,17 +47,18 @@ export const CollegeStaffPage = () => {
         ))}
       </div>
 
-      {tab === "teachers" ? <TeachersManager embedded /> : null}
-      {tab === "accountants" ? <AccountantsStaffPanel /> : null}
-      {tab === "librarians" ? (
-        <ModuleStaffPanel title="Librarian" apiBase="/library/staff" queryKey="library-staff" />
-      ) : null}
-      {tab === "laboratory" ? (
-        <ModuleStaffPanel title="Laboratory Staff" apiBase="/laboratory/staff" queryKey="laboratory-staff" />
-      ) : null}
-      {isGenericStaffTab(tab) && activeTabMeta.category ? (
-        <CollegeStaffManager category={activeTabMeta.category} title={activeTabMeta.label} />
-      ) : null}
+      {tab === "teachers" ? (
+        <TeachersManager embedded />
+      ) : tab === "reports" ? (
+        <CollegeStaffManager title="Staff Reports" showReports />
+      ) : (
+        <CollegeStaffManager
+          listCategory={activeTabMeta.category}
+          title={activeTabMeta.label}
+          /** Create on every role tab so staff appear in their section after save. */
+          showCreateForm
+        />
+      )}
     </PageContent>
   );
 };

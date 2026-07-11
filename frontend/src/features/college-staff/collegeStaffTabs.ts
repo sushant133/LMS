@@ -1,7 +1,13 @@
 import type { CollegeStaffCategory } from "@phit-erp/shared";
 
+/**
+ * College Staff hub tabs.
+ * - Teachers: existing Teacher module (embedded, unchanged APIs)
+ * - Other tabs: non-teaching staff only
+ */
 export type CollegeStaffTabId =
   | "teachers"
+  | "all"
   | "accountants"
   | "librarians"
   | "laboratory"
@@ -11,41 +17,27 @@ export type CollegeStaffTabId =
   | "office-assistants"
   | "transport"
   | "it"
-  | "other";
+  | "other"
+  | "reports";
 
 export const COLLEGE_STAFF_TABS: Array<{
   id: CollegeStaffTabId;
   label: string;
   category?: CollegeStaffCategory;
+  isTeachers?: boolean;
+  isReports?: boolean;
 }> = [
-  { id: "teachers", label: "Teachers" },
-  { id: "accountants", label: "Accountants" },
-  { id: "librarians", label: "Librarians" },
-  { id: "laboratory", label: "Laboratory Staff" },
+  { id: "teachers", label: "Teachers", isTeachers: true },
+  { id: "all", label: "All Non-Teaching Staff" },
+  { id: "accountants", label: "Accountants", category: "ACCOUNTANT" },
+  { id: "librarians", label: "Librarians", category: "LIBRARIAN" },
+  { id: "laboratory", label: "Laboratory Staff", category: "LABORATORY_STAFF" },
   { id: "security", label: "Security Guards", category: "SECURITY_GUARD" },
-  {
-    id: "housekeeping",
-    label: "Sweepers / Housekeeping",
-    category: "HOUSEKEEPING",
-  },
+  { id: "housekeeping", label: "Sweepers / Housekeeping", category: "HOUSEKEEPING" },
   { id: "receptionists", label: "Receptionists", category: "RECEPTIONIST" },
-  {
-    id: "office-assistants",
-    label: "Office Assistants",
-    category: "OFFICE_ASSISTANT",
-  },
-  {
-    id: "transport",
-    label: "Drivers / Transport Staff",
-    category: "TRANSPORT",
-  },
+  { id: "office-assistants", label: "Office Assistants", category: "OFFICE_ASSISTANT" },
+  { id: "transport", label: "Drivers / Transport", category: "TRANSPORT" },
   { id: "it", label: "IT Staff", category: "IT_STAFF" },
   { id: "other", label: "Other Staff", category: "OTHER" },
+  { id: "reports", label: "Reports", isReports: true },
 ];
-
-export const isGenericStaffTab = (
-  tab: CollegeStaffTabId,
-): tab is Exclude<
-  CollegeStaffTabId,
-  "teachers" | "accountants" | "librarians" | "laboratory"
-> => !["teachers", "accountants", "librarians", "laboratory"].includes(tab);

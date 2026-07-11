@@ -1,8 +1,17 @@
 import {
+  countPendingRequiredDocuments,
+  getRequiredStudentDocumentCategories,
+  isPendingStudentDocument,
   STUDENT_DOCUMENT_CATEGORIES,
   STUDENT_DOCUMENT_MAX_SIZE_BYTES,
   type StudentDocument,
 } from "@phit-erp/shared";
+
+export {
+  countPendingRequiredDocuments,
+  getRequiredStudentDocumentCategories,
+  isPendingStudentDocument,
+};
 
 export const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
@@ -57,3 +66,31 @@ export const pendingToStudentDocument = (
   uploadedBy,
   uploadedByName,
 });
+
+export const getDocumentStatusBadgeClass = (status: string): string => {
+  switch (status) {
+    case "PENDING":
+      return "bg-amber-100 text-amber-900";
+    case "VERIFIED":
+      return "bg-emerald-100 text-emerald-800";
+    case "REJECTED":
+      return "bg-red-100 text-red-800";
+    case "UPLOADED":
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+};
+
+export const getDocumentStatusLabel = (status: string): string => {
+  switch (status) {
+    case "PENDING":
+      return "Pending";
+    case "VERIFIED":
+      return "Verified";
+    case "REJECTED":
+      return "Rejected";
+    case "UPLOADED":
+    default:
+      return "Uploaded";
+  }
+};

@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
-import { studentSchema } from "@phit-erp/shared";
+import { ensurePendingRequiredDocuments, studentSchema } from "@phit-erp/shared";
 import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -36,18 +36,85 @@ const getReadableStudentFilter = async (req: Request): Promise<Record<string, un
   return getStudentScopeFilter(req);
 };
 
+/** Teachers only need roster fields — not full personal / guardian / fee data. */
+const sanitizeStudentForTeacherList = (student: {
+  toObject?: () => Record<string, unknown>;
+  _id: { toString(): string };
+  admissionNumber: string;
+  rollNumber: number;
+  classId?: { toString(): string };
+  sectionId?: { toString(): string };
+  batchId?: { toString(): string };
+  yearId?: { toString(): string };
+  academicStatus?: string;
+  gender: string;
+  photoUrl?: string;
+  user?: { _id?: { toString(): string }; fullName?: string; role?: string } | null;
+}) => {
+  const plain = typeof student.toObject === "function" ? student.toObject() : (student as unknown as Record<string, unknown>);
+  const user = plain.user as { _id?: unknown; fullName?: string; role?: string } | null | undefined;
+  return {
+    _id: student._id,
+    schoolId: plain.schoolId,
+    admissionNumber: student.admissionNumber,
+    rollNumber: student.rollNumber,
+    classId: student.classId,
+    sectionId: student.sectionId,
+    batchId: student.batchId,
+    yearId: student.yearId,
+    academicStatus: student.academicStatus,
+    gender: student.gender,
+    photoUrl: student.photoUrl,
+    user: user
+      ? {
+          _id: user._id,
+          fullName: user.fullName,
+          role: user.role
+        }
+      : null
+  };
+};
+
 export const listStudents = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
-  const students = await Student.find(filter).populate("user", "-password").sort({ createdAt: -1 });
-  return sendSuccess(res, "Students fetched", students);
+  const isTeacher = req.user?.role === "TEACHER";
+
+  // Teachers: only active students in their assigned batch/year (or class/section)
+  if (isTeacher) {
+    filter.academicStatus = "ACTIVE";
+  }
+
+  const students = await Student.find(filter)
+    .populate("user", isTeacher ? "fullName role" : "-password")
+    .sort(isTeacher ? { rollNumber: 1, createdAt: -1 } : { createdAt: -1 });
+
+  // Drop orphaned rows where the linked User was deleted (populate returns null)
+  const linked = students.filter((student) => Boolean(student.user));
+
+  if (isTeacher) {
+    return sendSuccess(
+      res,
+      "Students fetched",
+      linked.map((s) => sanitizeStudentForTeacherList(s as never))
+    );
+  }
+
+  return sendSuccess(res, "Students fetched", linked);
 });
 
 export const getStudentById = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
-  const student = await Student.findOne({ ...filter, _id: req.params.id }).populate("user", "-password");
+  const student = await Student.findOne({ ...filter, _id: req.params.id }).populate(
+    "user",
+    req.user?.role === "TEACHER" ? "fullName role" : "-password"
+  );
 
   if (!student) {
     throw new ApiError(404, "Student not found");
+  }
+
+  if (req.user?.role === "TEACHER") {
+    return sendSuccess(res, "Student fetched", sanitizeStudentForTeacherList(student as never));
   }
 
   return sendSuccess(res, "Student fetched", student);
@@ -116,7 +183,9 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           feesDueNpr: payload.feesDueNpr,
           remarks: payload.remarks,
           photoUrl: payload.photoUrl || undefined,
-          documents: payload.documents ?? []
+          // Missing required categories are stored as PENDING so the student
+          // can be created without documents and complete them later.
+          documents: ensurePendingRequiredDocuments(payload.documents ?? [])
         }
       ],
       getSessionOption(session)

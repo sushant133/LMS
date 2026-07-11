@@ -55,23 +55,11 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
   const loginMutation = useMutation({
     mutationFn: async (payload: LoginInput) =>
       unwrap<AuthResponse>(api.post("/auth/login", payload)),
-    onSuccess: async (data) => {
-      queryClient.setQueryData<MeResponse>(["auth", "me"], data);
-      await queryClient.invalidateQueries({
-        predicate: (query) => !keepAuthMeQuery(query.queryKey),
-      });
-    },
   });
 
   const registerMutation = useMutation({
     mutationFn: async (payload: RegisterInput) =>
       unwrap<AuthResponse>(api.post("/auth/register", payload)),
-    onSuccess: async (data) => {
-      queryClient.setQueryData<MeResponse>(["auth", "me"], data);
-      await queryClient.invalidateQueries({
-        predicate: (query) => !keepAuthMeQuery(query.queryKey),
-      });
-    },
   });
 
   const switchSchoolMutation = useMutation({
@@ -85,7 +73,11 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      await api.post("/auth/logout");
+      try {
+        await api.post("/auth/logout");
+      } catch {
+        // Ignore — still clear client session below.
+      }
     },
     onMutate: async () => {
       flushSync(() => {
@@ -98,6 +90,7 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       });
     },
     onSettled: async () => {
+      // Keep auth/me as null — do not removeQueries (avoids accidental refetch).
       queryClient.setQueryData<MeResponse | null>(["auth", "me"], null);
       queryClient.removeQueries({
         predicate: (query) => !keepAuthMeQuery(query.queryKey),
@@ -115,14 +108,32 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       user: meQuery.data?.user ?? null,
       availableSchools: meQuery.data?.availableSchools ?? [],
       activeSchoolId: meQuery.data?.activeSchoolId ?? null,
-      loading:
-        isBootstrapping ||
-        loginMutation.isPending ||
-        registerMutation.isPending,
+      // Do not treat login/register pending as global "loading" — that unmounted the login form.
+      loading: isBootstrapping,
       loggingOut,
       authEpoch,
-      login: loginMutation.mutateAsync,
-      register: registerMutation.mutateAsync,
+      login: async (payload: LoginInput) => {
+        const data = await loginMutation.mutateAsync(payload);
+        // flushSync so ProtectedRoute sees `user` before navigate() runs
+        // (otherwise it can bounce back to /login thinking the session is empty).
+        flushSync(() => {
+          queryClient.setQueryData<MeResponse>(["auth", "me"], data);
+        });
+        void queryClient.invalidateQueries({
+          predicate: (query) => !keepAuthMeQuery(query.queryKey),
+        });
+        return data;
+      },
+      register: async (payload: RegisterInput) => {
+        const data = await registerMutation.mutateAsync(payload);
+        flushSync(() => {
+          queryClient.setQueryData<MeResponse>(["auth", "me"], data);
+        });
+        void queryClient.invalidateQueries({
+          predicate: (query) => !keepAuthMeQuery(query.queryKey),
+        });
+        return data;
+      },
       logout: logoutMutation.mutateAsync,
       setActiveSchool: switchSchoolMutation.mutateAsync,
     }),
@@ -135,8 +146,6 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       meQuery.data?.activeSchoolId,
       meQuery.data?.availableSchools,
       meQuery.data?.user,
-      loginMutation.isPending,
-      registerMutation.isPending,
       registerMutation.mutateAsync,
       switchSchoolMutation.mutateAsync,
     ],

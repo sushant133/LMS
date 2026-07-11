@@ -37,8 +37,16 @@ const syncIndexesWithRetry = async (
 };
 
 export const connectDatabase = async (): Promise<void> => {
+  // Works with MongoDB Atlas, local replica set, or any standard MongoDB URI (VPS).
   await mongoose.connect(env.MONGODB_URI);
   await syncIndexesWithRetry(MasterSubject, "MasterSubject");
   await syncIndexesWithRetry(Subject, "Subject");
-  console.log(`MongoDB connected: ${mongoose.connection.host}`);
+  // Never log full connection string (may contain credentials)
+  console.log(`MongoDB connected: ${mongoose.connection.host}/${mongoose.connection.name}`);
+};
+
+export const disconnectDatabase = async (): Promise<void> => {
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
 };

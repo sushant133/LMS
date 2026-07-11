@@ -22,15 +22,29 @@ const collegeStaffSchema = new Schema(
     gender: { type: String, required: true },
     dateOfBirthBs: { type: String },
     phone: { type: String, required: true },
-    email: { type: String },
+    email: { type: String, trim: true, lowercase: true },
     address: { type: addressSchema, required: true },
+    emergencyContactName: { type: String, trim: true },
+    emergencyContactPhone: { type: String, trim: true },
     joinedDateBs: { type: String, required: true },
     designation: { type: String, required: true },
+    department: { type: String, trim: true },
     category: { type: String, enum: COLLEGE_STAFF_CATEGORIES, required: true, index: true },
+    customRoleLabel: { type: String, trim: true },
+    qualification: { type: String, trim: true },
+    experienceYears: { type: Number, min: 0, default: 0 },
     employmentType: { type: String, enum: EMPLOYMENT_TYPES, default: "FULL_TIME" },
     basicSalaryNpr: { type: Number, default: 0 },
+    remarks: { type: String, trim: true },
     status: { type: String, enum: ["ACTIVE", "INACTIVE"], default: "ACTIVE" },
-    enableLogin: { type: Boolean, default: false },
+    enableLogin: { type: Boolean, default: true },
+    credentialsEmailStatus: {
+      type: String,
+      enum: ["PENDING", "SENT", "FAILED", "SKIPPED"],
+      default: "PENDING"
+    },
+    credentialsEmailError: { type: String, trim: true },
+    credentialsEmailSentAt: { type: Date },
     isDeleted: { type: Boolean, default: false }
   },
   { timestamps: true }
@@ -38,6 +52,8 @@ const collegeStaffSchema = new Schema(
 
 collegeStaffSchema.index({ schoolId: 1, staffId: 1 }, { unique: true });
 collegeStaffSchema.index({ schoolId: 1, category: 1, isDeleted: 1 });
+collegeStaffSchema.index({ schoolId: 1, email: 1 });
+collegeStaffSchema.index({ user: 1 }, { sparse: true });
 
 export type CollegeStaffDocument = InferSchemaType<typeof collegeStaffSchema>;
 export const CollegeStaff = mongoose.model("CollegeStaff", collegeStaffSchema);

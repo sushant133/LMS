@@ -62,6 +62,8 @@ export interface AcademicAuditTrail {
   deletedAt?: string;
 }
 
+export type SyllabusUnitPlanningStatus = "UNPLANNED" | "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "DELAYED";
+
 export interface AcademicSessionPlanUnitRecord {
   _id: string;
   sessionPlanId: string;
@@ -76,6 +78,38 @@ export interface AcademicSessionPlanUnitRecord {
   tentativeCompletionMonth: string;
   status: LessonPlanItemStatus;
   attachmentUrl?: string;
+  /** Months where this unit appears in a Lesson Plan (hierarchical coverage). */
+  plannedInMonths?: string[];
+  planningStatus?: SyllabusUnitPlanningStatus;
+}
+
+/** Yearly syllabus coverage: which Session Plan units are planned / remaining / completed. */
+export interface SessionPlanSyllabusCoverage {
+  sessionPlanId: string;
+  subjectId: string;
+  teacherId: string;
+  academicYearBs: string;
+  status: AcademicPlanStatus;
+  totalUnits: number;
+  plannedUnits: number;
+  remainingUnits: number;
+  completedUnits: number;
+  inProgressUnits: number;
+  delayedUnits: number;
+  completedPercent: number;
+  remainingPercent: number;
+  units: Array<
+    AcademicSessionPlanUnitRecord & {
+      plannedInMonths: string[];
+      planningStatus: SyllabusUnitPlanningStatus;
+      lessonPlanItemCount: number;
+      completedClasses: number;
+      estimatedClasses: number;
+    }
+  >;
+  planned: AcademicSessionPlanUnitRecord[];
+  remaining: AcademicSessionPlanUnitRecord[];
+  completed: AcademicSessionPlanUnitRecord[];
 }
 
 export interface AcademicSessionPlanRecord extends AcademicManagementScope {
@@ -152,6 +186,7 @@ export interface AcademicLessonPlanRecord extends AcademicManagementScope {
   subjectId: string;
   teacherId: string;
   month: string;
+  monthlyDescription?: string;
   status: AcademicPlanStatus;
   preparedBy?: string;
   checkedBy?: string;
@@ -161,6 +196,12 @@ export interface AcademicLessonPlanRecord extends AcademicManagementScope {
   items: AcademicLessonPlanItemRecord[];
   completedPercent: number;
   remainingPercent: number;
+  /** Topics planned this month. */
+  plannedTopics: number;
+  /** Topics completed via Log Book. */
+  completedTopics: number;
+  /** Topics not yet completed. */
+  pendingTopics: number;
   pendingUnits: number;
   delayedUnits: number;
   audit: AcademicAuditTrail;

@@ -34,7 +34,8 @@ export const academicSessionPlanSchema = scopeSchema.extend({
 
 export const academicLessonPlanItemSchema = z.object({
   serialNo: z.coerce.number().int().min(1),
-  sessionPlanUnitId: z.string().optional(),
+  /** Required: every lesson plan topic must map to a Session Plan unit. */
+  sessionPlanUnitId: z.string().min(1, "Select a unit from the Session Plan"),
   subjectLabel: z.string().default(""),
   plannedTopic: z.string().min(1),
   description: z.string().default(""),
@@ -48,7 +49,8 @@ export const academicLessonPlanItemSchema = z.object({
 });
 
 export const academicLessonPlanSchema = scopeSchema.extend({
-  sessionPlanId: z.string().optional(),
+  /** Required: Lesson Plans must be created from a Session Plan (draft or approved). */
+  sessionPlanId: z.string().min(1, "A Session Plan is required"),
   academicYearBs: z.string().min(1),
   session: z.string().min(1),
   faculty: z.string().optional(),
@@ -56,12 +58,15 @@ export const academicLessonPlanSchema = scopeSchema.extend({
   subjectId: z.string().min(1),
   teacherId: z.string().min(1),
   month: z.string().min(1),
+  /** Optional free-text monthly description for the whole plan. */
+  monthlyDescription: z.string().default(""),
   items: z.array(academicLessonPlanItemSchema).min(1)
 });
 
 export const academicLogBookEntrySchema = scopeSchema.extend({
   lessonPlanId: z.string().optional(),
-  lessonPlanItemId: z.string().optional(),
+  /** Required: Log Book must reference a Lesson Plan topic. */
+  lessonPlanItemId: z.string().min(1, "Select a planned topic from the monthly Lesson Plan"),
   sessionPlanUnitId: z.string().optional(),
   academicYearBs: z.string().min(1),
   session: z.string().min(1),

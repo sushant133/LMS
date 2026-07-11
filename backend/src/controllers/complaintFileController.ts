@@ -3,7 +3,7 @@ import fs from "fs-extra";
 import path from "path";
 import { hasInstitutionAccess } from "@phit-erp/shared";
 import { Complaint } from "../models/Complaint.js";
-import { env } from "../config/env.js";
+import { getUploadDir } from "../config/env.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 
@@ -37,7 +37,7 @@ export const serveComplaintAttachment = asyncHandler(async (req: Request, res: R
     }
   }
 
-  const uploadsDir = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
+  const uploadsDir = getUploadDir();
   const filePath = path.join(uploadsDir, schoolId, "complaints", filename);
 
   if (!(await fs.pathExists(filePath))) {

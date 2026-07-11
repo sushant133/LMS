@@ -2,11 +2,12 @@ import multer, { type StorageEngine } from "multer";
 import path from "path";
 import fs from "fs-extra";
 import type { Request } from "express";
-import { env } from "../config/env.js";
+import { getUploadDir } from "../config/env.js";
 import { ApiError } from "./apiError.js";
 import { tenantObjectId } from "./tenant.js";
 
-const UPLOAD_ROOT = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
+/** Configurable via UPLOAD_DIR — works for local dev and Hostinger VPS paths. */
+const UPLOAD_ROOT = getUploadDir();
 
 // Ensure base upload directory exists
 fs.ensureDirSync(UPLOAD_ROOT);
@@ -28,8 +29,23 @@ function createTenantStorage(entity: string): StorageEngine {
       }
     },
     filename: (_req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      const ext = path.extname(file.originalname);
+      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      // Sanitize extension: no path segments, lowercase, allowlist
+      const rawExt = path.extname(file.originalname || "").toLowerCase().replace(/[^a-z0-9.]/g, "");
+      const allowedExt = new Set([
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".mp4",
+        ".webm",
+        ".mov"
+      ]);
+      const ext = allowedExt.has(rawExt) ? rawExt : "";
+      // Never use original client filename (path traversal / executable names)
       cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
     }
   });

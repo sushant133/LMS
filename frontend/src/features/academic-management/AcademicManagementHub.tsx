@@ -8,6 +8,7 @@ import {
   type BatchRecord,
   type ClassRecord,
   type SectionRecord,
+  type SubjectAssignmentRecord,
   type SubjectRecord,
   type YearRecord,
   canManageInstitution,
@@ -21,11 +22,14 @@ import {
   LayoutDashboard,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { useIsCollege } from "hooks/useInstitutionType";
+import { useModuleAccess } from "hooks/useModuleAccess";
+import { getCollegeDisplayName } from "lib/auth";
 import { api, unwrap } from "lib/api";
 import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
 import { cn } from "lib/utils";
@@ -45,7 +49,11 @@ import {
 } from "./academicManagementUtils";
 
 type Tab =
-  "dashboard" | "session-plan" | "lesson-plan" | "log-book" | "reports";
+  | "dashboard"
+  | "session-plan"
+  | "lesson-plan"
+  | "log-book"
+  | "reports";
 
 const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -55,13 +63,29 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "reports", label: "Reports", icon: FileBarChart },
 ];
 
+const printAreaIdForTab = (tab: Tab): string | null => {
+  switch (tab) {
+    case "session-plan":
+      return "session-plan-print-area";
+    case "lesson-plan":
+      return "lesson-plan-print-area";
+    case "log-book":
+      return "log-book-print-area";
+    default:
+      return null;
+  }
+};
+
 export const AcademicManagementHub = () => {
-  const { user } = useAuth();
+  const { user, availableSchools } = useAuth();
   const isCollege = useIsCollege();
   const isTeacher = user?.role === "TEACHER";
   const isAdmin = canManageInstitution(user?.role ?? "");
   const hasInstitutionRead = hasInstitutionAccess(user?.role ?? "");
   const teacherScopeQuery = useTeacherScope(isTeacher);
+  const institutionName = getCollegeDisplayName(availableSchools, user);
+  const { canWrite: canWriteAcademic, isReadOnly: academicReadOnly } =
+    useModuleAccess("academic-management");
 
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [draftFilters, setDraftFilters] = useState<AcademicManagementFilters>(
@@ -72,7 +96,10 @@ export const AcademicManagementHub = () => {
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
-    queryFn: () => unwrap<{ academicYearBs: string }>(api.get("/settings")),
+    queryFn: () =>
+      unwrap<{ academicYearBs: string; schoolName?: string }>(
+        api.get("/settings"),
+      ),
   });
 
   const classesQuery = useQuery({
@@ -113,45 +140,80 @@ export const AcademicManagementHub = () => {
     enabled: hasInstitutionRead,
   });
 
+  const assignmentsQuery = useQuery({
+    queryKey: [
+      "academic-management",
+      "subject-assignments",
+      appliedFilters.academicYearBs,
+    ],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (appliedFilters.academicYearBs) {
+        params.set("academicYearBs", appliedFilters.academicYearBs);
+      }
+      params.set("status", "ACTIVE");
+      return unwrap<SubjectAssignmentRecord[]>(
+        api.get(`/academics/subject-assignments?${params.toString()}`),
+      );
+    },
+    // List endpoint is institution-admin only; teachers use own scope + their records
+    enabled: hasInstitutionRead,
+  });
+
+  /**
+   * Academic Management is curriculum-scoped, not student-batch-scoped.
+   * Do not send batchId to list APIs (batches only apply to attendance/fees/etc.).
+   * yearId is kept for client hierarchy level filtering but omitted from API so
+   * plans from every batch of the same year level are returned and merged.
+   */
+  const academicListParams = useMemo(() => {
+    const params = filtersToParams(appliedFilters);
+    delete params.batchId;
+    if (isCollege) {
+      delete params.yearId;
+    }
+    return params;
+  }, [appliedFilters, isCollege]);
+
   const dashboardQuery = useQuery({
-    queryKey: ["academic-management", "dashboard", appliedFilters],
+    queryKey: ["academic-management", "dashboard", academicListParams],
     queryFn: () =>
       unwrap<AcademicManagementDashboard>(
         api.get("/academic-management/dashboard", {
-          params: filtersToParams(appliedFilters),
+          params: academicListParams,
         }),
       ),
     enabled: activeTab === "dashboard",
   });
 
   const sessionPlansQuery = useQuery({
-    queryKey: ["academic-management", "session-plans", appliedFilters],
+    queryKey: ["academic-management", "session-plans", academicListParams],
     queryFn: () =>
       unwrap<AcademicSessionPlanRecord[]>(
         api.get("/academic-management/session-plans", {
-          params: filtersToParams(appliedFilters),
+          params: academicListParams,
         }),
       ),
     enabled: activeTab === "session-plan",
   });
 
   const lessonPlansQuery = useQuery({
-    queryKey: ["academic-management", "lesson-plans", appliedFilters],
+    queryKey: ["academic-management", "lesson-plans", academicListParams],
     queryFn: () =>
       unwrap<AcademicLessonPlanRecord[]>(
         api.get("/academic-management/lesson-plans", {
-          params: filtersToParams(appliedFilters),
+          params: academicListParams,
         }),
       ),
     enabled: activeTab === "lesson-plan",
   });
 
   const logBookQuery = useQuery({
-    queryKey: ["academic-management", "log-book", appliedFilters],
+    queryKey: ["academic-management", "log-book", academicListParams],
     queryFn: () =>
       unwrap<AcademicLogBookEntryRecord[]>(
         api.get("/academic-management/log-book-entries", {
-          params: filtersToParams(appliedFilters),
+          params: academicListParams,
         }),
       ),
     enabled: activeTab === "log-book",
@@ -180,6 +242,7 @@ export const AcademicManagementHub = () => {
   }, [settingsQuery.data?.academicYearBs]);
 
   const teacherId = teacherScopeQuery.data?.scope.teacherId;
+
   const subjects = useMemo(() => {
     const all = subjectsQuery.data ?? [];
     if (!isTeacher || !teacherScopeQuery.data) return all;
@@ -187,6 +250,31 @@ export const AcademicManagementHub = () => {
       teacherScopeQuery.data.scope.subjectIds.includes(subject._id),
     );
   }, [isTeacher, subjectsQuery.data, teacherScopeQuery.data]);
+
+  const years = useMemo(
+    () =>
+      (yearsQuery.data ?? []).map((item) => ({
+        _id: item._id,
+        name: item.name,
+        level: item.level,
+        batchId: item.batchId,
+        isActive: item.isActive,
+      })),
+    [yearsQuery.data],
+  );
+
+  const classes = useMemo(
+    () =>
+      (classesQuery.data ?? []).map((item) => ({
+        _id: item._id,
+        name: item.name,
+        isActive: item.isActive,
+      })),
+    [classesQuery.data],
+  );
+
+  const displayInstitutionName =
+    settingsQuery.data?.schoolName || institutionName || "Institution";
 
   const handleSearch = () => setAppliedFilters({ ...draftFilters });
   const handleReset = () => {
@@ -204,28 +292,73 @@ export const AcademicManagementHub = () => {
       toast.message("Use Export CSV in the Reports tab");
       return;
     }
-    if (activeTab === "session-plan" && sessionPlansQuery.data) {
-      exportSessionPlansExcel(sessionPlansQuery.data, "session-plans.xlsx");
+    if (activeTab === "session-plan") {
+      if (!sessionPlansQuery.data?.length) {
+        toast.message("No session plans to export for the current filters");
+        return;
+      }
+      exportSessionPlansExcel(
+        sessionPlansQuery.data,
+        `session-plans-${appliedFilters.academicYearBs || "export"}.xlsx`,
+      );
+      toast.success("Session Plans exported to Excel");
       return;
     }
-    if (activeTab === "lesson-plan" && lessonPlansQuery.data) {
-      exportLessonPlansExcel(lessonPlansQuery.data, "lesson-plans.xlsx");
+    if (activeTab === "lesson-plan") {
+      if (!lessonPlansQuery.data?.length) {
+        toast.message("No lesson plans to export for the current filters");
+        return;
+      }
+      exportLessonPlansExcel(
+        lessonPlansQuery.data,
+        `lesson-plans-${appliedFilters.academicYearBs || "export"}.xlsx`,
+      );
+      toast.success("Lesson Plans exported to Excel");
       return;
     }
-    if (activeTab === "log-book" && logBookQuery.data) {
-      exportLogBookExcel(logBookQuery.data, "log-book.xlsx");
+    if (activeTab === "log-book") {
+      if (!logBookQuery.data?.length) {
+        toast.message("No log book entries to export for the current filters");
+        return;
+      }
+      exportLogBookExcel(
+        logBookQuery.data,
+        `log-book-${appliedFilters.academicYearBs || "export"}.xlsx`,
+      );
+      toast.success("Log Book exported to Excel");
     }
   };
 
   const handleExportPdf = () => {
+    const printId = printAreaIdForTab(activeTab);
+    if (!printId) {
+      toast.message("Switch to Session Plan, Lesson Plan, or Log Book to export PDF");
+      return;
+    }
     void downloadPdfFromElementById(
-      "academic-print-area",
-      "academic-management-report.pdf",
+      printId,
+      `${activeTab}-${appliedFilters.academicYearBs || "export"}.pdf`,
+    ).then(
+      () => toast.success("PDF export started"),
+      (error) => toast.error(String(error?.message ?? error)),
     );
   };
 
   const handlePrint = () => {
-    void printElementById("academic-print-area", "academic-management-print");
+    const printId = printAreaIdForTab(activeTab);
+    if (!printId) {
+      toast.message("Switch to Session Plan, Lesson Plan, or Log Book to print");
+      return;
+    }
+    void printElementById(printId, `${activeTab}-print`);
+  };
+
+  const hierarchyProps = {
+    years,
+    classes,
+    assignments: assignmentsQuery.data ?? [],
+    isCollege,
+    institutionName: displayInstitutionName,
   };
 
   return (
@@ -234,6 +367,8 @@ export const AcademicManagementHub = () => {
         title="Academic Management"
         description="Unified session planning, lesson planning, and daily log books with syllabus tracking and approvals."
       />
+
+      <ModuleReadOnlyBanner show={academicReadOnly} />
 
       <div className="flex flex-wrap gap-2">
         {tabs.map((tab) => {
@@ -277,6 +412,7 @@ export const AcademicManagementHub = () => {
           _id: item._id,
           name: item.name,
           batchId: item.batchId,
+          level: item.level,
         }))}
         subjects={subjects.map((item) => ({ _id: item._id, name: item.name }))}
         teachers={teachersQuery.data ?? []}
@@ -296,6 +432,8 @@ export const AcademicManagementHub = () => {
           subjects={subjects}
           teacherId={teacherId}
           teachers={teachersQuery.data ?? []}
+          writeAccess={canWriteAcademic}
+          {...hierarchyProps}
         />
       </div>
       <div className={cn(activeTab === "lesson-plan" ? "block" : "hidden")}>
@@ -304,6 +442,8 @@ export const AcademicManagementHub = () => {
           subjects={subjects}
           teacherId={teacherId}
           teachers={teachersQuery.data ?? []}
+          writeAccess={canWriteAcademic}
+          {...hierarchyProps}
         />
       </div>
       <div className={cn(activeTab === "log-book" ? "block" : "hidden")}>
@@ -313,6 +453,8 @@ export const AcademicManagementHub = () => {
           isTeacher={isTeacher}
           subjects={subjects}
           teachers={teachersQuery.data ?? []}
+          writeAccess={canWriteAcademic}
+          {...hierarchyProps}
         />
       </div>
       <div className={cn(activeTab === "reports" ? "block" : "hidden")}>

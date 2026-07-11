@@ -128,10 +128,11 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
 
   const noticeFilter = institutionAccess ? { schoolId } : { schoolId, visibleTo: role };
 
-  const notificationFilter: Record<string, unknown> = { schoolId };
-  if (!institutionAccess && req.user?.userId) {
-    notificationFilter.recipientUserId = req.user.userId;
-  }
+  // Always personal inbox — matches /notifications list & unread-count
+  const notificationFilter: Record<string, unknown> = {
+    schoolId,
+    recipientUserId: req.user?.userId
+  };
 
   const studentProfile = await getStudentProfile(req);
   const teacherScope = role === "TEACHER" ? await getTeacherScope(req) : null;

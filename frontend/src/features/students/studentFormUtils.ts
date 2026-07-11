@@ -1,9 +1,9 @@
 import type { StudentInput, StudentRecord } from "@phit-erp/shared";
 
 export const mapStudentToInput = (student: StudentRecord): StudentInput => ({
-  fullName: student.user.fullName,
-  email: student.user.email,
-  phone: student.user.phone ?? "",
+  fullName: student.user?.fullName ?? "",
+  email: student.user?.email ?? "",
+  phone: student.user?.phone ?? "",
   admissionNumber: student.admissionNumber,
   rollNumber: student.rollNumber,
   classId: student.classId,

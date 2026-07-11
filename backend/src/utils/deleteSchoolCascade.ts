@@ -38,7 +38,14 @@ import { JournalEntry } from "../models/JournalEntry.js";
 import { Vendor } from "../models/Vendor.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
 import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
-import { Laboratory, LaboratoryCategory, LaboratoryEquipment, LaboratoryIssue } from "../models/Laboratory.js";
+import {
+  Laboratory,
+  LaboratoryCategory,
+  LaboratoryEquipment,
+  LaboratoryIssue,
+  LaboratoryStockMovement,
+  LaboratoryStockRequest
+} from "../models/Laboratory.js";
 import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
 import { Banner } from "../models/Banner.js";
 import { BannerDismissal } from "../models/BannerDismissal.js";
@@ -60,10 +67,10 @@ import { TimetableSlot } from "../models/TimetableSlot.js";
 import { TransportAssignment, TransportRoute } from "../models/TransportRoute.js";
 import { User } from "../models/User.js";
 import { Year } from "../models/Year.js";
-import { env } from "../config/env.js";
+import { getUploadDir } from "../config/env.js";
 import { getSessionOption } from "./transaction.js";
 
-const UPLOAD_ROOT = env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads");
+const UPLOAD_ROOT = getUploadDir();
 
 export const deleteSchoolCascade = async (
   schoolId: mongoose.Types.ObjectId | string,
@@ -102,6 +109,8 @@ export const deleteSchoolCascade = async (
     LibraryIssue.deleteMany(filter, options),
     LibraryBook.deleteMany(filter, options),
     LaboratoryIssue.deleteMany(filter, options),
+    LaboratoryStockRequest.deleteMany(filter, options),
+    LaboratoryStockMovement.deleteMany(filter, options),
     LaboratoryEquipment.deleteMany(filter, options),
     LaboratoryCategory.deleteMany(filter, options),
     Laboratory.deleteMany(filter, options),

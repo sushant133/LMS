@@ -18,12 +18,16 @@ import {
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useTranslation } from "react-i18next";
 import {
+  COLLEGE_STAFF_CATEGORY_LABELS,
   hasInstitutionAccess,
+  type CollegeStaffCategory,
+  type CollegeStaffRecord,
   type DashboardHighlight,
   type DashboardMetric,
   type DashboardNotificationItem,
   type DashboardResponse,
-  type NoticeRecord
+  type NoticeRecord,
+  type UserProfile
 } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
 import { Badge } from "components/ui/badge";
@@ -386,12 +390,132 @@ const NoticesPanel = ({ notices, title }: { notices: NoticeRecord[]; title?: str
 const QuickActions = ({ actions }: { actions: Array<{ label: string; href: string }> }) => (
   <div className="flex flex-wrap gap-2">
     {actions.map((action) => (
-      <Button key={action.href} asChild variant="outline" size="sm">
+      <Button key={`${action.href}-${action.label}`} asChild variant="outline" size="sm">
         <Link to={action.href}>{action.label}</Link>
       </Button>
     ))}
   </div>
 );
+
+const baseStaffActions: Array<{ label: string; href: string }> = [
+  { label: "Notifications", href: "/notifications" },
+  { label: "Academic Calendar", href: "/academic-calendar" },
+  { label: "Complains", href: "/complains" }
+];
+
+const categoryQuickActions = (
+  category?: CollegeStaffCategory | null
+): Array<{ label: string; href: string }> => {
+  switch (category) {
+    case "TRANSPORT":
+      return [{ label: "Transport / Routes", href: "/transport" }, ...baseStaffActions];
+    case "RECEPTIONIST":
+    case "OFFICE_ASSISTANT":
+      return [
+        { label: "Notices", href: "/notices" },
+        { label: "Academic Calendar", href: "/academic-calendar" },
+        ...baseStaffActions.filter((a) => a.href !== "/academic-calendar")
+      ];
+    case "SECURITY_GUARD":
+    case "HOUSEKEEPING":
+    case "IT_STAFF":
+    case "OTHER":
+    default:
+      return [{ label: "Notices", href: "/notices" }, ...baseStaffActions];
+  }
+};
+
+const StaffModuleDashboard = ({
+  user,
+  data,
+  statsWithLiveUnread,
+  roleLabel,
+  institutionName,
+  unreadCount
+}: {
+  user: UserProfile;
+  data: DashboardResponse;
+  statsWithLiveUnread: DashboardMetric[];
+  roleLabel: string;
+  institutionName?: string;
+  unreadCount: number;
+}) => {
+  const staffProfileQuery = useQuery({
+    queryKey: ["college-staff-me", user._id],
+    queryFn: () => unwrap<CollegeStaffRecord>(api.get("/college-staff/me")),
+    enabled: user.role === "COLLEGE_STAFF",
+    retry: false,
+    staleTime: 60_000
+  });
+
+  const staffCategory = staffProfileQuery.data?.category;
+  const staffQuickActions: Array<{ label: string; href: string }> =
+    user.role === "ACCOUNTANT"
+      ? [
+          { label: "Fees & Accounts", href: "/accounting" },
+          { label: "Notifications", href: "/notifications" },
+          { label: "Complains", href: "/complains" }
+        ]
+      : user.role === "LIBRARY_STAFF"
+        ? [
+            { label: "Library Management", href: "/library" },
+            { label: "Notifications", href: "/notifications" },
+            { label: "Complains", href: "/complains" }
+          ]
+        : user.role === "LABORATORY_STAFF"
+          ? [
+              { label: "Laboratory Inventory", href: "/laboratory" },
+              { label: "Stock Requests", href: "/laboratory" },
+              { label: "Notifications", href: "/notifications" },
+              { label: "Complains", href: "/complains" }
+            ]
+          : categoryQuickActions(staffCategory);
+
+  const heroTitle =
+    user.role === "ACCOUNTANT"
+      ? "Finance Dashboard"
+      : user.role === "LIBRARY_STAFF"
+        ? "Library Dashboard"
+        : user.role === "LABORATORY_STAFF"
+          ? "Laboratory Dashboard"
+          : staffCategory
+            ? `${COLLEGE_STAFF_CATEGORY_LABELS[staffCategory] ?? "Staff"} Dashboard`
+            : "Staff Dashboard";
+
+  const heroDescription =
+    user.role === "ACCOUNTANT"
+      ? "Access fees, accounts, transactions, and financial reports for your institution."
+      : user.role === "LIBRARY_STAFF"
+        ? "Manage books, issue & return, and library inventory reports."
+        : user.role === "LABORATORY_STAFF"
+          ? "Manage assigned laboratory inventory, equipment, and stock requests."
+          : staffProfileQuery.data
+            ? `${staffProfileQuery.data.designation}${
+                staffProfileQuery.data.department ? ` · ${staffProfileQuery.data.department}` : ""
+              }. Open the modules linked to your staff role below.`
+            : "Role-based operational dashboard for college staff. Teachers use a separate Teacher portal.";
+
+  return (
+    <PageContent className="space-y-6">
+      <DashboardBannerPopup banners={data.banners} />
+      <DashboardHero
+        title={heroTitle}
+        description={heroDescription}
+        userName={user.fullName}
+        roleLabel={roleLabel}
+        institutionName={institutionName}
+        unreadCount={unreadCount}
+      />
+      <StatGrid stats={statsWithLiveUnread} />
+      <QuickActions actions={staffQuickActions} />
+      <AcademicCalendarWidgets />
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <NotificationsPanel notifications={data.notifications} unreadCount={unreadCount} />
+        <NoticesPanel notices={data.notices} />
+      </div>
+    </PageContent>
+  );
+};
 
 export const DashboardPage = () => {
   const { t } = useTranslation();
@@ -456,25 +580,21 @@ export const DashboardPage = () => {
     stat.label === "Unread Alerts" ? { ...stat, value: liveUnreadCount } : stat
   );
 
-  if (user.role === "COLLEGE_STAFF") {
+  if (
+    user.role === "COLLEGE_STAFF" ||
+    user.role === "ACCOUNTANT" ||
+    user.role === "LIBRARY_STAFF" ||
+    user.role === "LABORATORY_STAFF"
+  ) {
     return (
-      <PageContent className="space-y-6">
-        <DashboardBannerPopup banners={data.banners} />
-        <DashboardHero
-          title="Staff Dashboard"
-          description="College announcements, notifications, and operational updates relevant to your role."
-          userName={user.fullName}
-          roleLabel={roleLabel}
-          institutionName={institutionName}
-          unreadCount={unreadCount}
-        />
-        <StatGrid stats={statsWithLiveUnread} />
-        <AcademicCalendarWidgets />
-        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <NotificationsPanel notifications={data.notifications} unreadCount={unreadCount} />
-          <NoticesPanel notices={data.notices} />
-        </div>
-      </PageContent>
+      <StaffModuleDashboard
+        user={user}
+        data={data}
+        statsWithLiveUnread={statsWithLiveUnread}
+        roleLabel={roleLabel}
+        institutionName={institutionName}
+        unreadCount={unreadCount}
+      />
     );
   }
 

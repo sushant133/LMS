@@ -51,9 +51,9 @@ export const downloadStudentsExcel = (
   ];
 
   const rows = students.map((student) => [
-    student.user.fullName,
-    student.user.email,
-    student.user.phone ?? "",
+    student.user?.fullName ?? "Unknown student",
+    student.user?.email ?? "",
+    student.user?.phone ?? "",
     student.rollNumber,
     student.admissionNumber,
     options.primaryMap.get(

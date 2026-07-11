@@ -14,6 +14,9 @@ export type UserRole =
   | "COLLEGE_STAFF";
 
 export type CollegeStaffCategory =
+  | "ACCOUNTANT"
+  | "LIBRARIAN"
+  | "LABORATORY_STAFF"
   | "SECURITY_GUARD"
   | "HOUSEKEEPING"
   | "RECEPTIONIST"
@@ -197,6 +200,11 @@ export interface UserProfile {
   profilePhotoUrl?: string;
   isActive: boolean;
   mustChangePassword?: boolean;
+  /**
+   * Per-module access: WRITE (enabled) or READ_ONLY (disabled modifications).
+   * Missing keys default to WRITE. Admins always have WRITE.
+   */
+  moduleAccess?: Partial<Record<string, "WRITE" | "READ_ONLY">>;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -323,6 +331,21 @@ export interface StudentProfileData {
     canManageDocuments: boolean;
     canViewFinancial: boolean;
     canViewActivity: boolean;
+    /** Library issues / fines */
+    canViewLibrary: boolean;
+    /** Transport route assignment */
+    canViewTransport: boolean;
+    /** Uploaded student documents */
+    canViewDocuments: boolean;
+    /**
+     * Full personal data (address, parent phones, email, blood group, fees due).
+     * Teachers get a limited academic view only.
+     */
+    canViewFullPersonal: boolean;
+    /**
+     * When false, subjects/attendance/results are limited to the teacher's assigned subjects.
+     */
+    canViewAllSubjects: boolean;
   };
 }
 
@@ -358,15 +381,32 @@ export interface CollegeStaffRecord {
   phone: string;
   email?: string;
   address: AddressSelection;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
   joinedDateBs: string;
   designation: string;
+  department?: string;
   category: CollegeStaffCategory;
+  customRoleLabel?: string;
+  qualification?: string;
+  experienceYears?: number;
   employmentType: EmploymentType;
   basicSalaryNpr: number;
+  remarks?: string;
   status: "ACTIVE" | "INACTIVE";
   enableLogin: boolean;
+  credentialsEmailStatus?: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
+  credentialsEmailError?: string;
+  credentialsEmailSentAt?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface CollegeStaffReportResponse {
+  reportType: string;
+  generatedAt: string;
+  rows: Record<string, unknown>[];
+  summary?: Record<string, number | string>;
 }
 
 export interface SalaryEmployeesResponse {
@@ -916,6 +956,8 @@ export interface SchoolSettingsRecord {
 export interface AuthResponse {
   user: UserProfile;
   permissions?: InstitutionPermissions;
+  /** Fully expanded module access map for the signed-in user. */
+  moduleAccess?: Partial<Record<string, "WRITE" | "READ_ONLY">>;
   redirectTo: string;
   activeSchoolId?: string | null;
   availableSchools?: SchoolRecord[];

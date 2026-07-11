@@ -4,8 +4,6 @@ import { AppLayout } from "components/layout/AppLayout";
 import { AuthLayout } from "components/layout/AuthLayout";
 import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
-import { useAuth } from "features/auth/AuthProvider";
-import { getRoleRedirectPath } from "lib/auth";
 import { LoginPage } from "pages/LoginPage";
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
@@ -54,15 +52,9 @@ const StudentMyProfilePage = lazy(() =>
 );
 const StudentProfilePage = lazy(() => import("pages/StudentProfilePage").then((module) => ({ default: module.StudentProfilePage })));
 
+/** App entry always opens the login page — no silent auto-login from a leftover cookie. */
 const RootRedirect = () => {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return <PageLoadingState />;
-  }
-
-  const redirectTarget = user ? getRoleRedirectPath(user.role) : null;
-  return <Navigate to={redirectTarget ?? "/login"} replace />;
+  return <Navigate to="/login" replace />;
 };
 
 const LazyRoute = ({ children }: { children: ReactNode }) => (
@@ -81,13 +73,50 @@ export default function App() {
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
-            {/* Shared portal layout: dashboard + all student/parent pages render in the same AppLayout shell */}
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "STUDENT", "PARENT", "COLLEGE_STAFF"]} />}>
+            {/* Dashboards for every portal role, including module staff created via College Staff */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "STUDENT",
+                    "PARENT",
+                    "COLLEGE_STAFF",
+                    "LIBRARY_STAFF",
+                    "LABORATORY_STAFF",
+                    "ACCOUNTANT",
+                    "CASHIER",
+                    "AUDITOR",
+                    "PRINCIPAL"
+                  ]}
+                />
+              }
+            >
               <Route path="/dashboard/school_admin" element={<Navigate to="/dashboard/college_admin" replace />} />
               <Route path="/dashboard/:role" element={<DashboardPage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
+            </Route>
+
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "STUDENT",
+                    "PARENT",
+                    "COLLEGE_STAFF"
+                  ]}
+                />
+              }
+            >
               <Route path="/homework-view" element={<HomeworkPage />} />
               <Route path="/exams" element={<ExamsPage />} />
-              <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/notices" element={<NoticesPage />} />
             </Route>
 
@@ -153,7 +182,14 @@ export default function App() {
               <Route path="/library" element={<LibraryPage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LABORATORY_STAFF"]} />}>
+            {/* Lab staff + teachers assigned as laboratory in-charge */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LABORATORY_STAFF", "TEACHER"]}
+                />
+              }
+            >
               <Route path="/laboratory" element={<LaboratoryPage />} />
             </Route>
 
@@ -200,8 +236,18 @@ export default function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/parent-links" element={<ParentLinksPage />} />
-              <Route path="/transport" element={<TransportPage />} />
               <Route path="/hr" element={<HrPage />} />
+            </Route>
+
+            {/* Transport: admins manage; drivers/transport staff (COLLEGE_STAFF) can open routes view */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "COLLEGE_STAFF"]}
+                />
+              }
+            >
+              <Route path="/transport" element={<TransportPage />} />
             </Route>
 
 

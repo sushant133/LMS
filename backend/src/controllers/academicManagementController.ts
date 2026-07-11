@@ -23,12 +23,18 @@ import {
   addAcademicComment,
   applyTeacherScopeToFilter,
   assertApprovableStatus,
+  assertApprovedSessionPlanForLesson,
   assertEditableStatus,
+  assertLessonPlanItemsBelongToSessionPlan,
+  assertNoDuplicateLessonPlanUnitsInMonth,
+  assertNoDuplicateLogBookForItemDate,
   assertTeacherOwnership,
   buildAcademicFilter,
   buildDashboard,
   getAttendanceForSession,
+  getNepaliMonthNameFromBsDate,
   getOrCreateLogBook,
+  getSessionPlanSyllabusCoverage,
   getTodayTimetable,
   isAcademicAdmin,
   notifyAdmins,
@@ -157,6 +163,8 @@ export const createSessionPlan = asyncHandler(async (req: Request, res: Response
     await AcademicSessionPlanUnit.insertMany(
       payload.units.map((unit) => ({
         ...unit,
+        // Progress is driven by Log Book → Lesson Plan sync only (never manual COMPLETED)
+        status: "PENDING",
         schoolId: tenantObjectId(req),
         sessionPlanId: createdPlan._id
       })),
@@ -210,7 +218,14 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
           await prev.save({ session });
         } else {
           await AcademicSessionPlanUnit.create(
-            [{ ...unit, schoolId: tenantObjectId(req), sessionPlanId: existing._id }],
+            [
+              {
+                ...unit,
+                status: "PENDING",
+                schoolId: tenantObjectId(req),
+                sessionPlanId: existing._id
+              }
+            ],
             { session }
           );
         }
@@ -376,6 +391,22 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     if (payload.teacherId !== scope.teacherId) throw new ApiError(403, "Teachers can only create lesson plans for themselves");
   }
 
+  // Hierarchical rule: Lesson Plan must come from a usable Session Plan (draft OK for owning teacher)
+  await assertApprovedSessionPlanForLesson(req, payload.sessionPlanId, {
+    subjectId: payload.subjectId,
+    teacherId: payload.teacherId,
+    academicYearBs: payload.academicYearBs
+  });
+  await assertLessonPlanItemsBelongToSessionPlan(req, payload.sessionPlanId, payload.items);
+  await assertNoDuplicateLessonPlanUnitsInMonth(req, {
+    sessionPlanId: payload.sessionPlanId,
+    teacherId: payload.teacherId,
+    subjectId: payload.subjectId,
+    month: payload.month,
+    academicYearBs: payload.academicYearBs,
+    unitIds: payload.items.map((item) => item.sessionPlanUnitId)
+  });
+
   const result = await withTransaction(async (session) => {
     const plan = await AcademicLessonPlan.create(
       [
@@ -393,18 +424,37 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     const createdPlan = plan[0];
     if (!createdPlan) throw new ApiError(500, "Failed to create lesson plan");
 
+    // Inherit unit title / topics from Session Plan when client omits free text
+    const unitIds = payload.items.map((item) => item.sessionPlanUnitId);
+    const units = await AcademicSessionPlanUnit.find({
+      _id: { $in: unitIds },
+      sessionPlanId: payload.sessionPlanId
+    })
+      .session(session)
+      .lean();
+    const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
+
     await AcademicLessonPlanItem.insertMany(
-      payload.items.map((item) => ({
-        ...item,
-        schoolId: tenantObjectId(req),
-        lessonPlanId: createdPlan._id
-      })),
+      payload.items.map((item) => {
+        const unit = unitMap.get(item.sessionPlanUnitId);
+        return {
+          ...item,
+          subjectLabel: item.subjectLabel || (unit ? `Unit ${unit.unitNo}` : ""),
+          plannedTopic:
+            item.plannedTopic ||
+            (unit ? unit.topicsCovered || unit.chapterName : item.plannedTopic),
+          learningObjectives: item.learningObjectives || unit?.learningOutcomes || "",
+          estimatedClasses:
+            item.estimatedClasses ||
+            Math.max(1, Math.round(unit?.estimatedTeachingHours || 1)),
+          schoolId: tenantObjectId(req),
+          lessonPlanId: createdPlan._id
+        };
+      }),
       { session }
     );
 
-    if (createdPlan.sessionPlanId) {
-      await syncSessionPlanProgress(createdPlan.sessionPlanId.toString());
-    }
+    await syncSessionPlanProgress(createdPlan.sessionPlanId!.toString());
 
     await recordAudit(req, { action: "academic.lesson_plan.create", entity: "LESSON_PLAN", entityId: createdPlan._id.toString(), after: createdPlan });
     return createdPlan._id.toString();
@@ -422,10 +472,42 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   await assertTeacherOwnership(req, existing.teacherId.toString());
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
+  const sessionPlanId = payload.sessionPlanId ?? existing.sessionPlanId?.toString();
+  if (!sessionPlanId) {
+    throw new ApiError(400, "Lesson Plan must be linked to a Session Plan.");
+  }
+
+  const subjectId = payload.subjectId ?? existing.subjectId.toString();
+  const teacherId = payload.teacherId ?? existing.teacherId.toString();
+  const academicYearBs = payload.academicYearBs ?? existing.academicYearBs;
+  const month = payload.month ?? existing.month;
+
+  await assertApprovedSessionPlanForLesson(req, sessionPlanId, {
+    subjectId,
+    teacherId,
+    academicYearBs
+  });
+
+  if (payload.items) {
+    await assertLessonPlanItemsBelongToSessionPlan(req, sessionPlanId, payload.items);
+    await assertNoDuplicateLessonPlanUnitsInMonth(req, {
+      sessionPlanId,
+      teacherId,
+      subjectId,
+      month,
+      academicYearBs,
+      unitIds: payload.items.map((item) => item.sessionPlanUnitId),
+      excludeLessonPlanId: existing._id.toString()
+    });
+  }
+
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
 
   await withTransaction(async (session) => {
-    Object.assign(existing, safePayload, { audit: { ...existing.audit, updatedBy: actorObjectId(req) } });
+    Object.assign(existing, safePayload, {
+      sessionPlanId,
+      audit: { ...existing.audit, updatedBy: actorObjectId(req) }
+    });
     await existing.save({ session });
 
     if (payload.items) {
@@ -437,7 +519,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
         keptSerials.add(item.serialNo);
         const prev = bySerial.get(item.serialNo);
         if (prev) {
-          // Preserve progress fields; re-sync after save if needed
+          // Preserve progress fields — never allow manual COMPLETED without Log Book
           const completedClasses = prev.completedClasses;
           const completionStatus = prev.completionStatus;
           Object.assign(prev, item, {
@@ -471,7 +553,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
       }
     }
 
-    if (existing.sessionPlanId) await syncSessionPlanProgress(existing.sessionPlanId.toString());
+    await syncSessionPlanProgress(sessionPlanId);
     await recordAudit(req, { action: "academic.lesson_plan.update", entity: "LESSON_PLAN", entityId: existing._id.toString(), after: existing });
   });
 
@@ -599,29 +681,44 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     if (payload.teacherId !== scope.teacherId) throw new ApiError(403, "Teachers can only create their own log book entries");
   }
 
-  // Validate optional lesson-plan item link belongs to school / teacher / subject
-  if (payload.lessonPlanItemId) {
-    const item = await AcademicLessonPlanItem.findById(payload.lessonPlanItemId).lean();
-    if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
-      throw new ApiError(400, "Invalid lesson plan item");
-    }
-    const plan = await AcademicLessonPlan.findOne({
-      _id: item.lessonPlanId,
-      schoolId: tenantObjectId(req),
-      isDeleted: false
-    }).lean();
-    if (!plan) throw new ApiError(400, "Lesson plan for this item was not found");
-    if (plan.teacherId.toString() !== payload.teacherId) {
-      throw new ApiError(400, "Lesson plan item does not belong to the selected teacher");
-    }
-    if (plan.subjectId.toString() !== payload.subjectId) {
-      throw new ApiError(400, "Lesson plan item subject does not match this log entry");
-    }
-    payload.lessonPlanId = plan._id.toString();
-    if (item.sessionPlanUnitId) payload.sessionPlanUnitId = item.sessionPlanUnitId.toString();
+  // Hierarchical rule: Log Book must reference a Lesson Plan topic
+  const item = await AcademicLessonPlanItem.findById(payload.lessonPlanItemId).lean();
+  if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
+    throw new ApiError(400, "Invalid lesson plan item. Select a topic from the monthly Lesson Plan.");
+  }
+  const plan = await AcademicLessonPlan.findOne({
+    _id: item.lessonPlanId,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  }).lean();
+  if (!plan) throw new ApiError(400, "Lesson plan for this item was not found");
+  if (plan.teacherId.toString() !== payload.teacherId) {
+    throw new ApiError(400, "Lesson plan item does not belong to the selected teacher");
+  }
+  if (plan.subjectId.toString() !== payload.subjectId) {
+    throw new ApiError(400, "Lesson plan item subject does not match this log entry");
   }
 
-  const month = dateBs.slice(0, 7);
+  // Auto-populate unit / topic / objectives from Lesson Plan (Session Plan hierarchy)
+  let unitLabel = payload.unit;
+  if (item.sessionPlanUnitId) {
+    const unit = await AcademicSessionPlanUnit.findById(item.sessionPlanUnitId).lean();
+    if (unit) {
+      unitLabel = unitLabel || `Unit ${unit.unitNo}: ${unit.chapterName}`;
+      payload.sessionPlanUnitId = unit._id.toString();
+    } else {
+      payload.sessionPlanUnitId = item.sessionPlanUnitId.toString();
+    }
+  }
+  payload.lessonPlanId = plan._id.toString();
+  payload.unit = unitLabel || item.subjectLabel || payload.unit;
+  payload.topicCovered = payload.topicCovered || item.plannedTopic;
+  payload.objectives = payload.objectives || item.learningObjectives || "";
+
+  await assertNoDuplicateLogBookForItemDate(req, payload.lessonPlanItemId, dateBs);
+
+  // Use Nepali month name so Log Book groups align with Lesson Plan.month
+  const month = getNepaliMonthNameFromBsDate(dateBs);
   const logBookId = await getOrCreateLogBook(req, { ...payload, month });
 
   const attendance = await getAttendanceForSession(req, {
@@ -648,9 +745,8 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     audit: { createdBy: actorObjectId(req) }
   });
 
-  if (entry.lessonPlanItemId) {
-    await syncLessonPlanItemProgress(entry.lessonPlanItemId.toString());
-  }
+  // Auto progress: Log Book → Lesson Plan item → Session Plan unit / progress
+  await syncLessonPlanItemProgress(entry.lessonPlanItemId!.toString());
 
   await recordAudit(req, { action: "academic.log_book.create", entity: "LOG_BOOK_ENTRY", entityId: entry._id.toString(), after: entry });
   const serialized = await serializeLogBookEntry(entry._id.toString());
@@ -671,10 +767,39 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     throw new ApiError(403, "Approved log book entries cannot be modified");
   }
 
+  const lessonPlanItemId = payload.lessonPlanItemId ?? existing.lessonPlanItemId?.toString();
+  if (!lessonPlanItemId) {
+    throw new ApiError(400, "Log Book entries must remain linked to a Lesson Plan topic.");
+  }
+
+  const dateBs = payload.dateBs ?? existing.dateBs;
+  await assertNoDuplicateLogBookForItemDate(req, lessonPlanItemId, dateBs, existing._id.toString());
+
+  // If topic link changed, re-validate and re-populate inherited fields
+  if (payload.lessonPlanItemId && payload.lessonPlanItemId !== existing.lessonPlanItemId?.toString()) {
+    const item = await AcademicLessonPlanItem.findById(payload.lessonPlanItemId).lean();
+    if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
+      throw new ApiError(400, "Invalid lesson plan item");
+    }
+    const plan = await AcademicLessonPlan.findOne({
+      _id: item.lessonPlanId,
+      schoolId: tenantObjectId(req),
+      isDeleted: false
+    }).lean();
+    if (!plan) throw new ApiError(400, "Lesson plan for this item was not found");
+    payload.lessonPlanId = plan._id.toString();
+    if (item.sessionPlanUnitId) payload.sessionPlanUnitId = item.sessionPlanUnitId.toString();
+    if (!payload.topicCovered) payload.topicCovered = item.plannedTopic;
+    if (!payload.objectives) payload.objectives = item.learningObjectives || "";
+  }
+
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   const previousItemId = existing.lessonPlanItemId?.toString();
 
-  Object.assign(existing, safePayload, { audit: { ...existing.audit, updatedBy: actorObjectId(req) } });
+  Object.assign(existing, safePayload, {
+    lessonPlanItemId,
+    audit: { ...existing.audit, updatedBy: actorObjectId(req) }
+  });
   await existing.save();
 
   if (previousItemId) await syncLessonPlanItemProgress(previousItemId);
@@ -730,21 +855,22 @@ export const listSessionPlanUnits = asyncHandler(async (req: Request, res: Respo
   const sessionPlanId = typeof req.query.sessionPlanId === "string" ? req.query.sessionPlanId : "";
   if (!sessionPlanId) throw new ApiError(400, "sessionPlanId is required");
 
-  const plan = await AcademicSessionPlan.findOne({
-    _id: sessionPlanId,
-    schoolId: tenantObjectId(req),
-    isDeleted: false
-  }).lean();
-  if (!plan) throw new ApiError(404, "Session plan not found");
-  await assertTeacherOwnership(req, plan.teacherId.toString());
+  const coverage = await getSessionPlanSyllabusCoverage(req, sessionPlanId);
+  // Return enriched units (with plannedInMonths / planningStatus) for Lesson Plan selectors
+  return sendSuccess(res, "Session plan units fetched", coverage.units);
+});
 
-  const units = await AcademicSessionPlanUnit.find({
-    schoolId: tenantObjectId(req),
-    sessionPlanId
-  })
-    .sort({ unitNo: 1 })
-    .lean();
-  return sendSuccess(res, "Session plan units fetched", units);
+export const getSyllabusCoverage = asyncHandler(async (req: Request, res: Response) => {
+  const sessionPlanId =
+    typeof req.query.sessionPlanId === "string"
+      ? req.query.sessionPlanId
+      : typeof req.params.sessionPlanId === "string"
+        ? req.params.sessionPlanId
+        : "";
+  if (!sessionPlanId) throw new ApiError(400, "sessionPlanId is required");
+
+  const coverage = await getSessionPlanSyllabusCoverage(req, sessionPlanId);
+  return sendSuccess(res, "Syllabus coverage fetched", coverage);
 });
 
 export const getTodayTimetableSlots = asyncHandler(async (req: Request, res: Response) => {

@@ -62,13 +62,19 @@ export const exportSessionPlansExcel = (
 ) => {
   const rows = plans.flatMap((plan) =>
     plan.units.map((unit) => ({
+      "Academic Year": plan.academicYearBs,
+      Faculty: plan.faculty ?? "",
       Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
       Subject: plan.subject?.name ?? plan.subjectId,
-      "Academic Year": plan.academicYearBs,
+      "Subject Code": plan.subject?.code ?? "",
+      "Approval Status": plan.status,
+      "Completion %": plan.completedPercent,
       "Unit No": unit.unitNo,
-      Chapter: unit.chapterName,
-      Hours: unit.estimatedTeachingHours,
-      Status: plan.status,
+      "Unit Title": unit.chapterName,
+      Topics: unit.topicsCovered,
+      "Estimated Hours": unit.estimatedTeachingHours,
+      "Learning Outcomes": unit.learningOutcomes,
+      References: unit.references,
       "Unit Status": unit.status,
     })),
   );
@@ -84,18 +90,25 @@ export const exportLessonPlansExcel = (
 ) => {
   const rows = plans.flatMap((plan) =>
     plan.items.map((item) => ({
+      "Academic Year": plan.academicYearBs,
       Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
       Subject: plan.subject?.name ?? plan.subjectId,
       Month: plan.month,
+      "Monthly Description": plan.monthlyDescription ?? "",
       Topic: item.plannedTopic,
+      Unit: item.unit
+        ? `U${item.unit.unitNo}: ${item.unit.chapterName}`
+        : item.subjectLabel,
+      Description: item.description,
+      Deadline: item.deadline || "",
       "Est. Classes": item.estimatedClasses,
       Completed: item.completedClasses,
       "Completed %": item.completedPercent,
       "Remaining %":
         item.remainingPercent ?? remainingPercentOf(item.completedPercent),
-      Deadline: item.deadline || "",
-      Status: plan.status,
-      "Item Status": item.completionStatus,
+      "Approval Status": plan.status,
+      "Topic Status": item.completionStatus,
+      Remarks: item.remarks,
     })),
   );
   const sheet = XLSX.utils.json_to_sheet(rows);
@@ -110,12 +123,20 @@ export const exportLogBookExcel = (
 ) => {
   const rows = entries.map((entry) => ({
     Date: entry.dateBs,
+    "Academic Year": entry.academicYearBs,
     Teacher: entry.teacher?.user?.fullName ?? entry.teacherId,
     Subject: entry.subject?.name ?? entry.subjectId,
+    Unit: entry.unit,
     Topic: entry.topicCovered,
+    Objectives: entry.objectives,
+    Method: entry.teachingMethod,
+    "Theory/Practical": entry.theoryPractical,
     Period: entry.periodNumber,
+    "Start Time": entry.startTime ?? "",
+    "End Time": entry.endTime ?? "",
+    Feedback: entry.feedback,
     Attendance: `${entry.attendancePercent}%`,
-    Review: entry.reviewStatus,
+    "Review Status": entry.reviewStatus,
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();

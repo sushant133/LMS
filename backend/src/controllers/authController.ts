@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import {
   activeSchoolSchema,
+  expandModuleAccessMap,
   getInstitutionPermissions,
   loginSchema,
   normalizeUserRole,
@@ -10,6 +11,7 @@ import {
   selfPasswordChangeSchema,
   selfProfileUpdateSchema,
   type AuthResponse,
+  type ModuleAccessMap,
   type SchoolRecord,
   type UserRole
 } from "@phit-erp/shared";
@@ -65,6 +67,13 @@ const getAccessibleSchools = async (user: { role: UserRole; schoolId?: unknown }
   return school ? ([school] as unknown as SchoolRecord[]) : [];
 };
 
+const mapModuleAccess = (raw: unknown): ModuleAccessMap => {
+  if (!raw) return {};
+  if (raw instanceof Map) return Object.fromEntries(raw.entries()) as ModuleAccessMap;
+  if (typeof raw === "object") return { ...(raw as ModuleAccessMap) };
+  return {};
+};
+
 const getSafeUser = async (userId: string) => {
   const user = await User.findById(userId).select("-password").populate("schoolId").lean();
 
@@ -76,6 +85,8 @@ const getSafeUser = async (userId: string) => {
     user.schoolId && typeof user.schoolId === "object" && "_id" in user.schoolId
       ? (user.schoolId as unknown as SchoolRecord)
       : null;
+
+  const moduleAccess = expandModuleAccessMap(mapModuleAccess((user as { moduleAccess?: unknown }).moduleAccess));
 
   return {
     _id: user._id.toString(),
@@ -90,7 +101,8 @@ const getSafeUser = async (userId: string) => {
     department: user.department,
     profilePhotoUrl: user.profilePhotoUrl,
     isActive: user.isActive,
-    mustChangePassword: user.mustChangePassword
+    mustChangePassword: user.mustChangePassword,
+    moduleAccess
   };
 };
 
@@ -105,6 +117,7 @@ const buildAuthResponse = async (userId: string, activeSchoolId?: string | null)
   return {
     user: safeUser,
     permissions: getInstitutionPermissions(safeUser.role),
+    moduleAccess: safeUser.moduleAccess,
     redirectTo: getRedirectPath(safeUser.role),
     activeSchoolId: resolvedActiveSchoolId,
     availableSchools
@@ -224,6 +237,13 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const user = await User.findOne({ email });
 
   if (!user || !(await user.comparePassword(payload.password))) {
+    // Constant-looking message; never reveal whether the email exists
+    await recordAudit(req, {
+      action: "auth.login_failed",
+      entity: "USER",
+      entityId: user?._id?.toString() ?? "unknown",
+      after: { email }
+    }).catch(() => undefined);
     throw new ApiError(401, "Invalid login ID or password");
   }
 

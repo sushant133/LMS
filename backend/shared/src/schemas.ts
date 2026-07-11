@@ -200,30 +200,73 @@ export const teacherSchema = z.object({
   basicSalaryNpr: moneySchema
 });
 
+const optionalNonNegNumber = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) return undefined;
+  if (typeof value === "number" && Number.isNaN(value)) return undefined;
+  return value;
+}, z.coerce.number().min(0).max(60).optional());
+
+const optionalMoney = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) return 0;
+  if (typeof value === "number" && Number.isNaN(value)) return 0;
+  return value;
+}, moneySchema.default(0));
+
 export const collegeStaffSchema = z
   .object({
     fullName: z.string().min(2),
-    email: z.string().optional().or(z.literal("")),
+    /** Login ID — always required for ERP account creation. */
+    email: z.string().email("Valid email is required as login ID"),
     phone: z.string().min(7),
     password: optionalPortalPasswordSchema,
-    enableLogin: z.boolean().default(false),
-    staffId: z.string().min(1),
+    /** Always true for new staff; kept for backward-compatible partial updates. */
+    enableLogin: z.boolean().default(true),
+    staffId: z.string().trim().min(1, "Employee ID is required"),
     photoUrl: z.string().optional().or(z.literal("")),
     gender: z.string().min(1),
     dateOfBirthBs: bsDateSchema.optional().or(z.literal("")),
     address: addressSchema,
+    emergencyContactName: z.string().trim().max(120).optional().or(z.literal("")),
+    emergencyContactPhone: z.string().trim().max(30).optional().or(z.literal("")),
     joinedDateBs: bsDateSchema,
-    designation: z.string().min(1),
+    designation: z.string().min(1, "Designation is required"),
+    department: z.string().trim().max(120).optional().or(z.literal("")),
     category: z.enum(COLLEGE_STAFF_CATEGORIES),
+    customRoleLabel: z.string().trim().max(120).optional().or(z.literal("")),
+    qualification: z.string().trim().max(200).optional().or(z.literal("")),
+    experienceYears: optionalNonNegNumber,
     employmentType: z.enum(EMPLOYMENT_TYPES).default("FULL_TIME"),
-    basicSalaryNpr: moneySchema.default(0),
+    basicSalaryNpr: optionalMoney,
+    remarks: z.string().trim().max(2000).optional().or(z.literal("")),
     status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE")
   })
   .superRefine((value, ctx) => {
-    if (value.enableLogin && !value.email?.trim()) {
-      ctx.addIssue({ code: "custom", message: "Email is required when login is enabled", path: ["email"] });
+    if (value.category === "OTHER" && !value.customRoleLabel?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Custom role label is required for Other Staff",
+        path: ["customRoleLabel"]
+      });
     }
   });
+
+export const collegeStaffPasswordResetSchema = z.object({
+  password: optionalPortalPasswordSchema
+});
+
+export const collegeStaffReportQuerySchema = z.object({
+  reportType: z.enum([
+    "DIRECTORY",
+    "ROLE_WISE",
+    "DEPARTMENT_WISE",
+    "ACTIVE",
+    "INACTIVE",
+    "LOGIN_ACCOUNTS",
+    "EMAIL_DELIVERY"
+  ]),
+  category: z.enum(COLLEGE_STAFF_CATEGORIES).optional(),
+  format: z.enum(["json", "csv"]).default("json")
+});
 
 export const classSchema = z.object({
   name: z.string().min(1),
@@ -630,6 +673,8 @@ export type UpdateSchoolInput = z.infer<typeof updateSchoolSchema>;
 export type StudentInput = z.infer<typeof studentSchema>;
 export type TeacherInput = z.infer<typeof teacherSchema>;
 export type CollegeStaffInput = z.infer<typeof collegeStaffSchema>;
+export type CollegeStaffPasswordResetInput = z.infer<typeof collegeStaffPasswordResetSchema>;
+export type CollegeStaffReportQueryInput = z.infer<typeof collegeStaffReportQuerySchema>;
 export type ClassInput = z.infer<typeof classSchema>;
 export type SectionInput = z.infer<typeof sectionSchema>;
 export type BatchInput = z.infer<typeof batchSchema>;

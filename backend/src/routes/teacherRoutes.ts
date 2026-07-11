@@ -5,8 +5,8 @@ import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
-/** COLLEGE_VIEWER inherits GET when COLLEGE_ADMIN is listed. Teachers need list for academic workflows. */
-const teacherReaders = authorize("COLLEGE_ADMIN", "TEACHER");
+/** COLLEGE_VIEWER inherits GET when COLLEGE_ADMIN is listed. Teachers/lab staff need list for issue workflows. */
+const teacherReaders = authorize("COLLEGE_ADMIN", "TEACHER", "LABORATORY_STAFF");
 
 router.use(protect, tenantGuard);
 router.get("/", teacherReaders, listTeachers);

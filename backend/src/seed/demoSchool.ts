@@ -24,7 +24,14 @@ import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeStructure } from "../models/FeeStructure.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
 import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
-import { Laboratory, LaboratoryCategory, LaboratoryEquipment, LaboratoryIssue } from "../models/Laboratory.js";
+import {
+  Laboratory,
+  LaboratoryCategory,
+  LaboratoryEquipment,
+  LaboratoryIssue,
+  LaboratoryStockMovement,
+  LaboratoryStockRequest
+} from "../models/Laboratory.js";
 import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
 import { AcademicCalendarEvent } from "../models/AcademicCalendarEvent.js";
 import { Notice } from "../models/Notice.js";
@@ -94,6 +101,8 @@ const syncSeedIndexes = async (): Promise<void> => {
     LaboratoryCategory.syncIndexes(),
     LaboratoryEquipment.syncIndexes(),
     LaboratoryIssue.syncIndexes(),
+    LaboratoryStockMovement.syncIndexes(),
+    LaboratoryStockRequest.syncIndexes(),
     LeaveRequest.syncIndexes(),
     Payroll.syncIndexes(),
     Notice.syncIndexes(),
@@ -530,11 +539,17 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
             address,
             joinedDateBs: "2080-05-01",
             designation: row.designation,
+            department: "Administration",
             category: row.category,
+            customRoleLabel: row.category === "OTHER" ? "General Staff" : undefined,
+            qualification: "As per HR record",
+            experienceYears: 2,
             employmentType: "FULL_TIME",
             basicSalaryNpr: row.credential.basicSalaryNpr,
             status: "ACTIVE",
-            enableLogin: true
+            enableLogin: true,
+            credentialsEmailStatus: "SENT",
+            credentialsEmailSentAt: new Date()
           }
         ],
         options
@@ -956,8 +971,24 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
     );
 
     const labDefs = [
-      { name: "Chemistry Lab", type: "CHEMISTRY" as const },
-      { name: "Physics Lab", type: "PHYSICS" as const }
+      {
+        name: "Chemistry Lab",
+        type: "CHEMISTRY" as const,
+        code: "CHEM-001",
+        department: "Science Faculty",
+        location: "Block A",
+        roomNumber: "A-101",
+        inChargeTeacherId: teacherByCode.ram.profile._id
+      },
+      {
+        name: "Physics Lab",
+        type: "PHYSICS" as const,
+        code: "PHYS-001",
+        department: "Science Faculty",
+        location: "Block A",
+        roomNumber: "A-102",
+        inChargeTeacherId: teacherByCode.sita.profile._id
+      }
     ];
 
     for (const labDef of labDefs) {
@@ -966,7 +997,13 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           {
             schoolId,
             name: labDef.name,
+            code: labDef.code,
             type: labDef.type,
+            department: labDef.department,
+            location: labDef.location,
+            roomNumber: labDef.roomNumber,
+            inChargeTeacherId: labDef.inChargeTeacherId,
+            description: `${labDef.name} for undergraduate practical sessions`,
             isActive: true
           }
         ],
@@ -984,6 +1021,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       );
 
       const glasswareCategory = categories.find((category) => category.name === "Glassware");
+      const chemicalsCategory = categories.find((category) => category.name === "Chemicals");
       const measuringCategory = categories.find((category) => category.name === "Measuring Instruments");
 
       if (labDef.type === "CHEMISTRY" && glasswareCategory) {
@@ -995,8 +1033,15 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
               categoryId: glasswareCategory._id,
               name: "Beaker Set (250ml)",
               itemCode: "CHEM-BKR-250",
+              itemKind: "NON_DISPOSABLE",
+              unit: "set",
               quantity: 20,
               availableQuantity: 18,
+              minimumStockLevel: 5,
+              condition: "GOOD",
+              equipmentStatus: "AVAILABLE",
+              storageLocation: "Rack A1",
+              purchaseCost: 2500,
               description: "Borosilicate glass beakers for acid-base experiments"
             }
           ],
@@ -1017,6 +1062,67 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           ],
           options
         );
+
+        await LaboratoryStockMovement.create(
+          [
+            {
+              schoolId,
+              laboratoryId: lab!._id,
+              equipmentId: equipment!._id,
+              type: "INCREASE",
+              quantity: 20,
+              previousStock: 0,
+              newStock: 20,
+              notes: "Initial stock"
+            }
+          ],
+          options
+        );
+      }
+
+      if (labDef.type === "CHEMISTRY" && chemicalsCategory) {
+        const [gloves] = await LaboratoryEquipment.create(
+          [
+            {
+              schoolId,
+              laboratoryId: lab!._id,
+              categoryId: chemicalsCategory._id,
+              name: "Nitrile Gloves (Box)",
+              itemCode: "CHEM-GLV-001",
+              itemKind: "DISPOSABLE",
+              unit: "box",
+              quantity: 8,
+              availableQuantity: 3,
+              minimumStockLevel: 5,
+              condition: "NEW",
+              equipmentStatus: "AVAILABLE",
+              storageLocation: "Shelf B2",
+              purchaseCost: 450,
+              description: "Disposable nitrile gloves for lab safety"
+            }
+          ],
+          options
+        );
+
+        await LaboratoryStockRequest.create(
+          [
+            {
+              schoolId,
+              laboratoryId: lab!._id,
+              equipmentId: gloves!._id,
+              equipmentName: gloves!.name,
+              categoryName: "Chemicals",
+              currentStock: 3,
+              minimumStock: 5,
+              requiredQuantity: 2,
+              priority: "HIGH",
+              requestDateBs: getTodayBs(),
+              status: "PENDING",
+              autoGenerated: true
+            }
+          ],
+          options
+        );
       }
 
       if (labDef.type === "PHYSICS" && measuringCategory) {
@@ -1028,8 +1134,16 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
               categoryId: measuringCategory._id,
               name: "Vernier Caliper",
               itemCode: "PHYS-VC-001",
+              itemKind: "NON_DISPOSABLE",
+              brand: "Mitutoyo",
+              unit: "pcs",
               quantity: 15,
               availableQuantity: 14,
+              minimumStockLevel: 4,
+              condition: "GOOD",
+              equipmentStatus: "AVAILABLE",
+              storageLocation: "Cabinet P1",
+              purchaseCost: 3200,
               description: "Precision measuring instrument for mechanics practicals"
             }
           ],
