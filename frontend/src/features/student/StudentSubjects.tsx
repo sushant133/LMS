@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { StudentSubjectDetail } from "@phit-erp/shared";
-import { BookOpen, ChevronLeft, ExternalLink } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, ExternalLink, Link2 } from "lucide-react";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
@@ -10,12 +10,73 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { AttachmentViewer } from "components/shared/AttachmentViewer";
-import type { AssignmentAttachment } from "@phit-erp/shared";
+import type { AssignmentAttachment, AssignmentLink } from "@phit-erp/shared";
 import { PageContent } from "components/layout/PageContent";
 import { FieldDutyPortalPanel } from "features/attendance/FieldDutyPortalPanel";
 import { PostDetailPanel } from "features/homework/PostDetailPanel";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
+
+type SubjectPost = {
+  _id: string;
+  title: string;
+  description: string;
+  type?: string;
+  dueDateBs?: string;
+  attachments?: AssignmentAttachment[];
+  links?: AssignmentLink[];
+};
+
+const PostLinksList = ({ links }: { links?: AssignmentLink[] }) => {
+  if (!links?.length) return null;
+
+  return (
+    <div className="mt-3 space-y-1.5" onClick={(event) => event.stopPropagation()}>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Links</h4>
+      <ul className="space-y-1.5">
+        {links.map((link, index) => (
+          <li key={`${link.url}-${index}`}>
+            <a
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-brand-700 transition hover:border-brand-200 hover:bg-brand-50/50"
+            >
+              <Link2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+              <span className="truncate">{link.title || link.url}</span>
+              <ExternalLink className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-400" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+const PostAttachmentsBlock = ({ post }: { post: SubjectPost }) => {
+  const hasAttachments = (post.attachments?.length ?? 0) > 0;
+  const hasLinks = (post.links?.length ?? 0) > 0;
+  if (!hasAttachments && !hasLinks) return null;
+
+  return (
+    <>
+      {hasAttachments ? (
+        <div
+          className="mt-3"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <AttachmentViewer
+            attachments={post.attachments as AssignmentAttachment[]}
+            title="Attachments"
+            mode="compact"
+          />
+        </div>
+      ) : null}
+      <PostLinksList links={post.links} />
+    </>
+  );
+};
 
 interface EnrolledSubject {
   _id: string;
@@ -175,7 +236,7 @@ export const StudentSubjects = () => {
                       <p className="font-medium text-slate-900">{item.title}</p>
                       <div className="flex items-center gap-2">
                         <Badge>{item.type}</Badge>
-                        <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                        <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
                       </div>
                     </div>
                     <p className="mt-1 line-clamp-2 text-sm text-slate-600">
@@ -186,20 +247,7 @@ export const StudentSubjects = () => {
                         Due: {item.dueDateBs}
                       </p>
                     ) : null}
-                    {(item.attachments?.length ?? 0) > 0 ? (
-                      <div
-                        className="mt-3"
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                      >
-                        <AttachmentViewer
-                          attachments={
-                            item.attachments as AssignmentAttachment[]
-                          }
-                          title="Attachments"
-                        />
-                      </div>
-                    ) : null}
+                    <PostAttachmentsBlock post={item as SubjectPost} />
                     <p className="mt-2 text-xs font-medium text-brand-700">
                       Open to view details or turn in work
                     </p>
@@ -226,25 +274,12 @@ export const StudentSubjects = () => {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-medium text-slate-900">{note.title}</p>
-                      <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                      <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
                     </div>
                     <p className="mt-1 line-clamp-2 text-sm text-slate-600">
                       {note.description}
                     </p>
-                    {(note.attachments?.length ?? 0) > 0 ? (
-                      <div
-                        className="mt-3"
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                      >
-                        <AttachmentViewer
-                          attachments={
-                            note.attachments as AssignmentAttachment[]
-                          }
-                          title="Attachments"
-                        />
-                      </div>
-                    ) : null}
+                    <PostAttachmentsBlock post={note as SubjectPost} />
                   </button>
                 ))
               )}

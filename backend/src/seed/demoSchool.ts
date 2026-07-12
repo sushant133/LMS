@@ -445,7 +445,8 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           parentUserId: parentUser!._id,
           studentId: students[0]!.profile._id,
           relationship: "FATHER",
-          isPrimary: true
+          isPrimary: true,
+          status: "APPROVED"
         }
       ],
       options

@@ -121,11 +121,13 @@ export const notifyParentsOfStudent = async (
   channel: NotificationChannel = "BOTH"
 ) => {
   const { ParentChildLink } = await import("../models/ParentChildLink.js");
-  const links = await ParentChildLink.find({
-    schoolId,
-    studentId,
-    status: "APPROVED"
-  }).lean();
+  const { approvedParentLinkFilter } = await import("./parentScope.js");
+  const links = await ParentChildLink.find(
+    approvedParentLinkFilter({
+      schoolId,
+      studentId
+    })
+  ).lean();
 
   await Promise.all(
     links.map((link) =>

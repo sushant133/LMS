@@ -230,7 +230,8 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
   const mapAssignment = (item: (typeof assignments)[number]) => ({
     ...item,
     _id: item._id.toString(),
-    attachments: normalizeAttachments(item.attachments)
+    attachments: normalizeAttachments(item.attachments),
+    links: Array.isArray(item.links) ? item.links : []
   });
 
   return sendSuccess(res, "Subject detail fetched", {

@@ -251,11 +251,13 @@ export const notifyFieldDutyAttendance = async (
     }
 
     // Notify parents
-    const links = await ParentChildLink.find({
-      schoolId,
-      studentId: entry.studentId,
-      status: "APPROVED"
-    }).lean();
+    const { approvedParentLinkFilter } = await import("./parentScope.js");
+    const links = await ParentChildLink.find(
+      approvedParentLinkFilter({
+        schoolId,
+        studentId: entry.studentId
+      })
+    ).lean();
 
     await Promise.all(
       links.map((link) =>

@@ -1,8 +1,20 @@
 import type { Request } from "express";
-import { ParentChildLink } from "../models/ParentChildLink.js";
+import type { FilterQuery } from "mongoose";
+import { ParentChildLink, type ParentChildLinkDocument } from "../models/ParentChildLink.js";
 import { Student } from "../models/Student.js";
 import { ApiError } from "./apiError.js";
 import { tenantObjectId, withTenantScope } from "./tenant.js";
+
+/**
+ * Approved parent–child links.
+ * Treats missing/null status as APPROVED for legacy documents created before status was required.
+ */
+export const approvedParentLinkFilter = (
+  extra: FilterQuery<ParentChildLinkDocument> = {}
+): FilterQuery<ParentChildLinkDocument> => ({
+  ...extra,
+  $or: [{ status: "APPROVED" }, { status: { $exists: false } }, { status: null }]
+});
 
 export const getLinkedStudentIds = async (req: Request): Promise<string[]> => {
   if (!req.user?.userId) {
@@ -10,11 +22,12 @@ export const getLinkedStudentIds = async (req: Request): Promise<string[]> => {
   }
 
   const schoolId = tenantObjectId(req);
-  const links = await ParentChildLink.find({
-    schoolId,
-    parentUserId: req.user.userId,
-    status: "APPROVED"
-  }).lean();
+  const links = await ParentChildLink.find(
+    approvedParentLinkFilter({
+      schoolId,
+      parentUserId: req.user.userId
+    })
+  ).lean();
   return links.map((link) => link.studentId.toString());
 };
 

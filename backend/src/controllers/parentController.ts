@@ -9,11 +9,13 @@ import { Assignment } from "../models/Assignment.js";
 import { AssignmentSubmission } from "../models/Assignment.js";
 import { Notification } from "../models/Notification.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
+import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
 import { Attendance } from "../models/Attendance.js";
 import { User } from "../models/User.js";
+import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import {
@@ -21,12 +23,13 @@ import {
   notifyAccountCredentials,
   resolvePortalPassword
 } from "../utils/credentialEmail.js";
+import { getInstitutionType, isCollege } from "../utils/institution.js";
 import {
   buildSuggestedParentLoginId,
   getParentContactFromStudent,
   resolveUniqueParentLoginId
 } from "../utils/parentProfile.js";
-import { getLinkedStudentIds } from "../utils/parentScope.js";
+import { approvedParentLinkFilter, getLinkedStudentIds } from "../utils/parentScope.js";
 import { sendSuccess } from "../utils/response.js";
 import {
   abortTransaction,
@@ -53,7 +56,9 @@ const buildParentCandidates = async (
     user: { fullName: string };
   }
 ): Promise<StudentParentCandidatesResponse> => {
-  const links = await ParentChildLink.find({ schoolId, studentId: student._id, status: "APPROVED" }).lean();
+  const links = await ParentChildLink.find(
+    approvedParentLinkFilter({ schoolId, studentId: student._id })
+  ).lean();
   const parentIds = links.map((link) => link.parentUserId);
   const parents = parentIds.length
     ? await User.find({ _id: { $in: parentIds } }).select("fullName email phone").lean()
@@ -313,16 +318,36 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
   }
 
   const schoolId = tenantObjectId(req);
+  const college = isCollege(await getInstitutionType(req));
   const studentIds = await getLinkedStudentIds(req);
   const students = await Student.find({ schoolId, _id: { $in: studentIds } }).populate("user", "-password").lean();
 
   const children = await Promise.all(
     students.map(async (student) => {
-      const [schoolClass, section, attendanceRecords, submissions] = await Promise.all([
-        SchoolClass.findById(student.classId).lean(),
-        Section.findById(student.sectionId).lean(),
+      const [primaryDoc, secondaryDoc, attendanceRecords, submissions, link] = await Promise.all([
+        college
+          ? student.batchId
+            ? Batch.findById(student.batchId).lean()
+            : Promise.resolve(null)
+          : student.classId
+            ? SchoolClass.findById(student.classId).lean()
+            : Promise.resolve(null),
+        college
+          ? student.yearId
+            ? Year.findById(student.yearId).lean()
+            : Promise.resolve(null)
+          : student.sectionId
+            ? Section.findById(student.sectionId).lean()
+            : Promise.resolve(null),
         Attendance.find({ schoolId, "entries.studentId": student._id }).lean(),
-        AssignmentSubmission.find({ schoolId, studentId: student._id, status: "PENDING" }).lean()
+        AssignmentSubmission.find({ schoolId, studentId: student._id, status: "PENDING" }).lean(),
+        ParentChildLink.findOne(
+          approvedParentLinkFilter({
+            schoolId,
+            parentUserId: req.user!.userId,
+            studentId: student._id
+          })
+        ).lean()
       ]);
 
       let present = 0;
@@ -335,13 +360,11 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
         }
       });
 
-      const link = await ParentChildLink.findOne({ schoolId, parentUserId: req.user!.userId, studentId: student._id }).lean();
-
       return {
         studentId: student._id.toString(),
         fullName: (student.user as unknown as { fullName: string }).fullName,
-        className: schoolClass?.name ?? "—",
-        sectionName: section?.name ?? "—",
+        className: primaryDoc?.name ?? "—",
+        sectionName: secondaryDoc?.name ?? "—",
         rollNumber: student.rollNumber,
         feesDueNpr: student.feesDueNpr,
         attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
@@ -351,16 +374,40 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
     })
   );
 
+  // Scope homework to linked children's academic groups when possible
+  const assignmentScope: Record<string, unknown> = {
+    schoolId,
+    visibleTo: "PARENT",
+    dueDateBs: { $exists: true, $ne: "" }
+  };
+  if (students.length > 0) {
+    if (college) {
+      const batchIds = students.map((s) => s.batchId).filter(Boolean);
+      const yearIds = students.map((s) => s.yearId).filter(Boolean);
+      if (batchIds.length || yearIds.length) {
+        assignmentScope.$or = [
+          ...(batchIds.length ? [{ batchId: { $in: batchIds } }] : []),
+          ...(yearIds.length ? [{ yearId: { $in: yearIds } }] : [])
+        ];
+      }
+    } else {
+      const classIds = students.map((s) => s.classId).filter(Boolean);
+      const sectionIds = students.map((s) => s.sectionId).filter(Boolean);
+      if (classIds.length || sectionIds.length) {
+        assignmentScope.$or = [
+          ...(classIds.length ? [{ classId: { $in: classIds } }] : []),
+          ...(sectionIds.length ? [{ sectionId: { $in: sectionIds } }] : [])
+        ];
+      }
+    }
+  } else {
+    // No linked children → no homework list noise
+    assignmentScope._id = { $in: [] };
+  }
+
   const [recentNotifications, upcomingHomework] = await Promise.all([
     Notification.find({ schoolId, recipientUserId: req.user.userId }).sort({ createdAt: -1 }).limit(10).lean(),
-    Assignment.find({
-      schoolId,
-      visibleTo: "PARENT",
-      dueDateBs: { $exists: true, $ne: "" }
-    })
-      .sort({ dueDateBs: 1 })
-      .limit(5)
-      .lean()
+    Assignment.find(assignmentScope).sort({ dueDateBs: 1 }).limit(5).lean()
   ]);
 
   return sendSuccess(res, "Parent portal data fetched", {
