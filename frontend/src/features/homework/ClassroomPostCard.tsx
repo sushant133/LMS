@@ -1,4 +1,4 @@
-import { MessageSquare, Paperclip, Pin } from "lucide-react";
+import { CheckSquare, MessageSquare, Paperclip, Pin } from "lucide-react";
 import type { ClassroomPost } from "@phit-erp/shared";
 import { Badge } from "components/ui/badge";
 import { cn } from "lib/utils";
@@ -18,6 +18,7 @@ interface ClassroomPostCardProps {
 export const ClassroomPostCard = ({ post, onOpen }: ClassroomPostCardProps) => {
   const status = getDisplayStatus(post);
   const attachmentCount = post.attachments.length + (post.links?.length ?? 0);
+  const submissionCount = post.submissionCount ?? 0;
 
   return (
     <button
@@ -84,6 +85,12 @@ export const ClassroomPostCard = ({ post, onOpen }: ClassroomPostCardProps) => {
           <span className="inline-flex items-center gap-1">
             <MessageSquare className="h-3.5 w-3.5" />
             {post.commentCount} comment{post.commentCount === 1 ? "" : "s"}
+          </span>
+        ) : null}
+        {submissionCount > 0 ? (
+          <span className="inline-flex items-center gap-1">
+            <CheckSquare className="h-3.5 w-3.5" />
+            {submissionCount} submission{submissionCount === 1 ? "" : "s"}
           </span>
         ) : null}
       </div>

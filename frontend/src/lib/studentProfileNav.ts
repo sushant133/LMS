@@ -7,7 +7,7 @@ export const getStudentProfileBackPath = (role: UserRole | string | null | undef
     case "ACCOUNTANT":
       return "/accounting";
     case "STUDENT":
-      return "/my-subjects";
+      return "/dashboard/student";
     case "PARENT":
       return "/parent-portal";
     case "TEACHER":
@@ -27,7 +27,7 @@ export const getStudentProfileBackLabel = (role: UserRole | string | null | unde
     case "ACCOUNTANT":
       return "Back to Accounting";
     case "STUDENT":
-      return "Back to My Subjects";
+      return "Back to Dashboard";
     case "PARENT":
       return "Back to Parent Portal";
     case "TEACHER":

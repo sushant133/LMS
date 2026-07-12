@@ -199,8 +199,23 @@ export const PostDetailPanel = ({
           </Button>
         </div>
 
-        {detailQuery.isLoading || !post ? (
+        {detailQuery.isLoading ? (
           <div className="p-6 text-sm text-slate-500">Loading...</div>
+        ) : detailQuery.isError ? (
+          <div className="space-y-3 p-6">
+            <p className="text-sm font-medium text-red-700">
+              Could not open this post
+            </p>
+            <p className="text-sm text-slate-600">
+              {parseErrorMessage(detailQuery.error) ||
+                "You may not have access, or the post is no longer available."}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        ) : !post ? (
+          <div className="p-6 text-sm text-slate-500">Post not found.</div>
         ) : (
           <div className="space-y-6 p-4 sm:p-6">
             <div className="space-y-3">

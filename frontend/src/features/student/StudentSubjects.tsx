@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { StudentSubjectDetail } from "@phit-erp/shared";
-import { BookOpen, ChevronLeft } from "lucide-react";
+import { BookOpen, ChevronLeft, ExternalLink } from "lucide-react";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
@@ -13,7 +13,9 @@ import { AttachmentViewer } from "components/shared/AttachmentViewer";
 import type { AssignmentAttachment } from "@phit-erp/shared";
 import { PageContent } from "components/layout/PageContent";
 import { FieldDutyPortalPanel } from "features/attendance/FieldDutyPortalPanel";
+import { PostDetailPanel } from "features/homework/PostDetailPanel";
 import { api, unwrap } from "lib/api";
+import { queryClient } from "lib/queryClient";
 
 interface EnrolledSubject {
   _id: string;
@@ -27,6 +29,7 @@ export const StudentSubjects = () => {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     null,
   );
+  const [openAssignmentId, setOpenAssignmentId] = useState<string | null>(null);
 
   const subjectsQuery = useQuery({
     queryKey: ["student-subjects"],
@@ -36,11 +39,21 @@ export const StudentSubjects = () => {
   const detailQuery = useQuery({
     queryKey: ["student-subject-detail", selectedSubjectId],
     queryFn: () =>
-      unwrap<StudentSubjectDetail>(
+      unwrap<StudentSubjectDetail & { studentId?: string }>(
         api.get(`/student/subjects/${selectedSubjectId}`),
       ),
     enabled: Boolean(selectedSubjectId),
   });
+
+  const profileQuery = useQuery({
+    queryKey: ["student-my-profile"],
+    queryFn: () =>
+      unwrap<{ studentId: string }>(api.get("/student/profile")),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const resolvedStudentId =
+    profileQuery.data?.studentId ?? detailQuery.data?.studentId;
 
   if (subjectsQuery.isLoading) {
     return <LoadingState />;
@@ -68,7 +81,7 @@ export const StudentSubjects = () => {
           </Button>
           <PageHeader
             title={subject.name}
-            description={`Subject code: ${subject.code} — read-only view of your attendance, marks, assignments, and notices.`}
+            description={`Subject code: ${subject.code} — attendance, marks, and assignments from your teachers. Open an assignment to view details or submit work.`}
           />
         </div>
 
@@ -152,15 +165,20 @@ export const StudentSubjects = () => {
                 </p>
               ) : (
                 detail.assignments.map((item) => (
-                  <div
+                  <button
                     key={item._id}
-                    className="rounded-xl border border-slate-100 p-3"
+                    type="button"
+                    onClick={() => setOpenAssignmentId(item._id)}
+                    className="w-full rounded-xl border border-slate-100 p-3 text-left transition hover:border-brand-200 hover:bg-brand-50/40"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium">{item.title}</p>
-                      <Badge>{item.type}</Badge>
+                      <p className="font-medium text-slate-900">{item.title}</p>
+                      <div className="flex items-center gap-2">
+                        <Badge>{item.type}</Badge>
+                        <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                      </div>
                     </div>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-600">
                       {item.description}
                     </p>
                     {item.dueDateBs ? (
@@ -169,7 +187,11 @@ export const StudentSubjects = () => {
                       </p>
                     ) : null}
                     {(item.attachments?.length ?? 0) > 0 ? (
-                      <div className="mt-3">
+                      <div
+                        className="mt-3"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
                         <AttachmentViewer
                           attachments={
                             item.attachments as AssignmentAttachment[]
@@ -178,7 +200,10 @@ export const StudentSubjects = () => {
                         />
                       </div>
                     ) : null}
-                  </div>
+                    <p className="mt-2 text-xs font-medium text-brand-700">
+                      Open to view details or turn in work
+                    </p>
+                  </button>
                 ))
               )}
             </CardContent>
@@ -193,16 +218,25 @@ export const StudentSubjects = () => {
                 <p className="text-sm text-slate-500">No notes shared yet.</p>
               ) : (
                 detail.notes.map((note) => (
-                  <div
+                  <button
                     key={note._id}
-                    className="rounded-xl border border-slate-100 p-3"
+                    type="button"
+                    onClick={() => setOpenAssignmentId(note._id)}
+                    className="w-full rounded-xl border border-slate-100 p-3 text-left transition hover:border-brand-200 hover:bg-brand-50/40"
                   >
-                    <p className="font-medium">{note.title}</p>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium text-slate-900">{note.title}</p>
+                      <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-600">
                       {note.description}
                     </p>
                     {(note.attachments?.length ?? 0) > 0 ? (
-                      <div className="mt-3">
+                      <div
+                        className="mt-3"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
                         <AttachmentViewer
                           attachments={
                             note.attachments as AssignmentAttachment[]
@@ -211,7 +245,7 @@ export const StudentSubjects = () => {
                         />
                       </div>
                     ) : null}
-                  </div>
+                  </button>
                 ))
               )}
             </CardContent>
@@ -245,6 +279,25 @@ export const StudentSubjects = () => {
             </CardContent>
           </Card>
         </div>
+
+        {openAssignmentId ? (
+          <PostDetailPanel
+            postId={openAssignmentId}
+            canManage={false}
+            studentId={resolvedStudentId}
+            onClose={() => setOpenAssignmentId(null)}
+            onEdit={() => undefined}
+            onDeleted={async () => {
+              setOpenAssignmentId(null);
+              await queryClient.invalidateQueries({
+                queryKey: ["student-subject-detail", selectedSubjectId],
+              });
+              await queryClient.invalidateQueries({
+                queryKey: ["homework-feed"],
+              });
+            }}
+          />
+        ) : null}
       </PageContent>
     );
   }

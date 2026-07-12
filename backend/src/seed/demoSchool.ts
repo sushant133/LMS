@@ -590,183 +590,6 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       }
     }
 
-    const dueTodayBs = getTodayBs();
-    const dueUpcomingBs = getOffsetBsDate(5);
-    const dueOverdueBs = getOffsetBsDate(-3);
-
-    const assignmentRows = [
-      {
-        teacher: teacherByCode.ram,
-        subject: subjectByCode.ANAT,
-        batchId: batch2082!._id,
-        yearId: year1._id,
-        type: "HOMEWORK",
-        title: "Anatomy Diagram Practice",
-        description: "Label the major organs of the human body and submit your diagram.",
-        topic: "Human Anatomy — Unit 4",
-        dueDateBs: dueUpcomingBs,
-        isPinned: true,
-        links: [{ title: "WHO Health Education", url: "https://www.who.int/health-topics/health-education" }]
-      },
-      {
-        teacher: teacherByCode.ram,
-        subject: subjectByCode.PHYS,
-        batchId: batch2082!._id,
-        yearId: year1._id,
-        type: "CAS",
-        title: "Lab Report: Vital Signs Measurement",
-        description: "Submit your lab observation report with pulse, BP, and temperature readings.",
-        topic: "Physiology Lab",
-        dueDateBs: dueTodayBs,
-        maxMarks: 20
-      },
-      {
-        teacher: teacherByCode.sita,
-        subject: subjectByCode.ENG,
-        batchId: batch2082!._id,
-        yearId: year1._id,
-        type: "NOTE",
-        title: "Medical Terminology Tips",
-        description: "Key prefixes and suffixes used in health sciences vocabulary.",
-        topic: "English for Health Assistants",
-        allowSubmission: false
-      },
-      {
-        teacher: teacherByCode.gita,
-        subject: subjectByCode.CH,
-        batchId: batch2082!._id,
-        yearId: year1._id,
-        type: "HOMEWORK",
-        title: "Community Health Survey",
-        description: "Write 300 words on primary health care services in your municipality.",
-        topic: "Community Health",
-        dueDateBs: dueOverdueBs
-      },
-      {
-        teacher: teacherByCode.sita,
-        subject: subjectByCode.ENG,
-        batchId: batch2082!._id,
-        yearId: year1._id,
-        type: "HOMEWORK",
-        title: "Reading Comprehension — Unit 2",
-        description: "Read the health education passage and answer questions 1-8.",
-        topic: "Reading Skills",
-        dueDateBs: dueTodayBs
-      },
-      {
-        teacher: teacherByCode.hari,
-        subject: subjectByCode.PHAR,
-        batchId: batch2082!._id,
-        yearId: year2._id,
-        type: "HOMEWORK",
-        title: "Drug Classification Worksheet",
-        description: "Classify common medicines by therapeutic group and dosage form.",
-        topic: "Pharmacology",
-        dueDateBs: dueUpcomingBs,
-        isPinned: true
-      },
-      {
-        teacher: teacherByCode.hari,
-        subject: subjectByCode.MS,
-        batchId: batch2082!._id,
-        yearId: year2._id,
-        type: "CAS",
-        title: "Clinical Skills: Wound Dressing",
-        description: "Record observations from your wound dressing practical session.",
-        topic: "Medical Surgery Lab",
-        dueDateBs: dueTodayBs,
-        maxMarks: 25
-      },
-      {
-        teacher: teacherByCode.sita,
-        subject: subjectByCode.MIC,
-        batchId: batch2082!._id,
-        yearId: year2._id,
-        type: "NOTE",
-        title: "Patient Communication Framework",
-        description: "Use the SPIKES protocol when communicating with patients and families.",
-        topic: "Clinical Communication",
-        allowSubmission: false
-      }
-    ];
-
-    const createdAssignments = await Assignment.create(
-      assignmentRows.map((row) => ({
-        schoolId,
-        type: row.type,
-        title: row.title,
-        description: row.description,
-        batchId: row.batchId,
-        yearId: row.yearId,
-        subjectId: row.subject._id,
-        teacherId: row.teacher.profile._id,
-        topic: row.topic,
-        dueDateBs: row.dueDateBs,
-        maxMarks: row.maxMarks,
-        visibleTo: ["STUDENT", "PARENT"],
-        allowSubmission: row.allowSubmission ?? true,
-        isPinned: row.isPinned ?? false,
-        attachments: [],
-        links: row.links ?? []
-      })),
-      options
-    );
-
-    const { AssignmentComment } = await import("../models/AssignmentComment.js");
-    await AssignmentComment.create(
-      [
-        {
-          schoolId,
-          assignmentId: createdAssignments[0]!._id,
-          authorUserId: teacherByCode.ram.userId,
-          authorName: demoCredentials.teachers[0]!.name,
-          authorRole: "TEACHER",
-          content: "Remember to submit by the end of this week. Ask questions in class if stuck."
-        },
-        {
-          schoolId,
-          assignmentId: createdAssignments[1]!._id,
-          authorUserId: teacherByCode.ram.userId,
-          authorName: demoCredentials.teachers[0]!.name,
-          authorRole: "TEACHER",
-          content: "Lab reports must include a labelled diagram of your setup."
-        },
-        {
-          schoolId,
-          assignmentId: createdAssignments[2]!._id,
-          authorUserId: teacherByCode.sita.userId,
-          authorName: demoCredentials.teachers[1]!.name,
-          authorRole: "TEACHER",
-          content: "We will discuss these tips in tomorrow's English period."
-        }
-      ],
-      options
-    );
-
-    await AssignmentSubmission.create(
-      [
-        {
-          schoolId,
-          assignmentId: createdAssignments[0]!._id,
-          studentId: students[0]!.profile._id,
-          content: "Completed all anatomy diagram exercises.",
-          status: "GRADED",
-          marks: 18,
-          feedback: "Good work. Show steps more clearly.",
-          submittedAt: new Date()
-        },
-        {
-          schoolId,
-          assignmentId: createdAssignments[0]!._id,
-          studentId: students[1]!.profile._id,
-          content: "Submitted partial solutions.",
-          status: "SUBMITTED",
-          submittedAt: new Date()
-        }
-      ],
-      options
-    );
-
     const [exam] = await Exam.create(
       [
         {
@@ -1056,7 +879,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
               teacherId: teacherByCode.ram.profile._id,
               quantity: 2,
               issuedDateBs: "2081-09-10",
-              dueDateBs: dueUpcomingBs,
+              dueDateBs: getOffsetBsDate(5),
               status: "ISSUED"
             }
           ],
@@ -1430,16 +1253,6 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           message: "Your child was marked absent in a subject class on 2081-09-16.",
           channel: "IN_APP",
           type: "ATTENDANCE",
-          read: false,
-          smsStatus: "SKIPPED"
-        },
-        {
-          schoolId,
-          recipientUserId: students[0]!.userId,
-          title: "New Homework",
-          message: "Anatomy Diagram Practice has been published.",
-          channel: "IN_APP",
-          type: "HOMEWORK",
           read: false,
           smsStatus: "SKIPPED"
         }

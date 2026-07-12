@@ -19,7 +19,7 @@ export const roleRedirectMap: Record<UserRole, string> = {
   COLLEGE_ADMIN: "/dashboard/college_admin",
   COLLEGE_VIEWER: "/dashboard/college_admin",
   TEACHER: "/dashboard/teacher",
-  STUDENT: "/my-subjects",
+  STUDENT: "/dashboard/student",
   PARENT: "/dashboard/parent",
   LIBRARY_STAFF: "/library",
   LABORATORY_STAFF: "/laboratory",

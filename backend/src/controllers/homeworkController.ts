@@ -19,7 +19,7 @@ import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { compareBsDates, getDeadlineStatus, getTodayBs } from "../utils/nepaliDate.js";
-import { notifyParentsOfStudent } from "../utils/notificationService.js";
+import { notifyParentsOfStudent, sendNotification } from "../utils/notificationService.js";
 import { assertParentAccessToStudent, getLinkedStudentIds } from "../utils/parentScope.js";
 import { assertStudentOwnRecord, getStudentProfile, requireStudentProfile } from "../utils/studentScope.js";
 import { validateAssignmentScope } from "../utils/academicValidation.js";
@@ -65,6 +65,41 @@ const toOptionalId = (value?: ObjectIdLike | null): string | undefined => (value
 
 const collectOptionalIds = (assignments: AssignmentLean[], field: keyof Pick<AssignmentLean, "classId" | "sectionId" | "batchId" | "yearId">): string[] =>
   [...new Set(assignments.map((assignment) => toOptionalId(assignment[field])).filter(Boolean))] as string[];
+
+/** Keep only academic scope fields that match the institution type (college ↔ batch/year, school ↔ class/section). */
+const sanitizeAssignmentAcademicScope = (
+  institutionType: Awaited<ReturnType<typeof getInstitutionType>>,
+  payload: {
+    classId?: string;
+    sectionId?: string;
+    batchId?: string;
+    yearId?: string;
+  }
+) => {
+  if (isCollege(institutionType)) {
+    return {
+      batchId: payload.batchId,
+      yearId: payload.yearId,
+      classId: undefined,
+      sectionId: undefined
+    };
+  }
+  return {
+    classId: payload.classId,
+    sectionId: payload.sectionId,
+    batchId: undefined,
+    yearId: undefined
+  };
+};
+
+const assignmentMatchesStudentScope = (
+  assignment: AssignmentLean | Record<string, unknown>,
+  academicFilter: Record<string, unknown>
+): boolean =>
+  Object.entries(academicFilter).every(([key, expected]) => {
+    const actual = (assignment as Record<string, unknown>)[key] as ObjectIdLike | undefined | null;
+    return actual?.toString() === String(expected ?? "");
+  });
 
 const normalizeAttachments = (raw: unknown): AssignmentAttachment[] => {
   if (!Array.isArray(raw)) return [];
@@ -139,13 +174,20 @@ const buildAssignmentFilter = async (req: Request): Promise<Record<string, unkno
 
   if (req.user?.role === "STUDENT") {
     const profile = await requireStudentProfile(req);
-    const enrolledSubjectIds = await Subject.find(
-      buildSubjectEnrollmentFilter(profile, institutionType, tenantObjectId(req))
-    ).distinct("_id");
+    const enrolledSubjectIds = (
+      await Subject.find(buildSubjectEnrollmentFilter(profile, institutionType, tenantObjectId(req))).distinct("_id")
+    ).map((id) => id.toString());
 
     Object.assign(filter, buildStudentAcademicFilter(profile, institutionType));
-    filter.subjectId = { $in: enrolledSubjectIds };
     filter.visibleTo = "STUDENT";
+
+    // Keep teacher-posted subject filter when it is one of the student's enrolled subjects.
+    const requestedSubjectId = typeof req.query.subjectId === "string" ? req.query.subjectId : undefined;
+    if (requestedSubjectId && enrolledSubjectIds.includes(requestedSubjectId)) {
+      filter.subjectId = requestedSubjectId;
+    } else {
+      filter.subjectId = { $in: enrolledSubjectIds };
+    }
   }
 
   if (req.user?.role === "PARENT") {
@@ -185,38 +227,54 @@ const enrichAssignments = async (
   const yearIds = collectOptionalIds(assignments, "yearId");
   const assignmentIds = assignments.map((a) => a._id.toString());
 
-  const [teachers, subjects, classes, sections, batches, years, commentCounts, submissions] = await Promise.all([
-    Teacher.find({ schoolId, _id: { $in: teacherIds } })
-      .populate("user", "fullName")
-      .lean(),
-    subjectIds.length > 0
-      ? Subject.find({ schoolId, _id: { $in: subjectIds } }).lean()
-      : Promise.resolve([]),
-    classIds.length > 0
-      ? SchoolClass.find({ schoolId, _id: { $in: classIds } }).lean()
-      : Promise.resolve([]),
-    sectionIds.length > 0
-      ? Section.find({ schoolId, _id: { $in: sectionIds } }).lean()
-      : Promise.resolve([]),
-    batchIds.length > 0 ? Batch.find({ schoolId, _id: { $in: batchIds } }).lean() : Promise.resolve([]),
-    yearIds.length > 0 ? Year.find({ schoolId, _id: { $in: yearIds } }).lean() : Promise.resolve([]),
-    AssignmentComment.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
-      {
-        $match: {
-          schoolId,
-          assignmentId: { $in: assignmentIds.map((id) => new mongoose.Types.ObjectId(id)) }
-        }
-      },
-      { $group: { _id: "$assignmentId", count: { $sum: 1 } } }
-    ]),
-    studentId
-      ? AssignmentSubmission.find({
-          schoolId,
-          assignmentId: { $in: assignmentIds },
-          studentId
-        }).lean()
-      : Promise.resolve([])
-  ]);
+  const objectAssignmentIds = assignmentIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const [teachers, subjects, classes, sections, batches, years, commentCounts, submissions, submissionCounts] =
+    await Promise.all([
+      Teacher.find({ schoolId, _id: { $in: teacherIds } })
+        .populate("user", "fullName")
+        .lean(),
+      subjectIds.length > 0
+        ? Subject.find({ schoolId, _id: { $in: subjectIds } }).lean()
+        : Promise.resolve([]),
+      classIds.length > 0
+        ? SchoolClass.find({ schoolId, _id: { $in: classIds } }).lean()
+        : Promise.resolve([]),
+      sectionIds.length > 0
+        ? Section.find({ schoolId, _id: { $in: sectionIds } }).lean()
+        : Promise.resolve([]),
+      batchIds.length > 0 ? Batch.find({ schoolId, _id: { $in: batchIds } }).lean() : Promise.resolve([]),
+      yearIds.length > 0 ? Year.find({ schoolId, _id: { $in: yearIds } }).lean() : Promise.resolve([]),
+      AssignmentComment.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+        {
+          $match: {
+            schoolId,
+            assignmentId: { $in: objectAssignmentIds }
+          }
+        },
+        { $group: { _id: "$assignmentId", count: { $sum: 1 } } }
+      ]),
+      studentId
+        ? AssignmentSubmission.find({
+            schoolId,
+            assignmentId: { $in: assignmentIds },
+            studentId
+          }).lean()
+        : Promise.resolve([]),
+      // Teachers (no single studentId) get aggregate submission counts to verify student linkage.
+      !studentId && assignmentIds.length > 0
+        ? AssignmentSubmission.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+            {
+              $match: {
+                schoolId,
+                assignmentId: { $in: objectAssignmentIds },
+                status: { $in: ["SUBMITTED", "GRADED"] }
+              }
+            },
+            { $group: { _id: "$assignmentId", count: { $sum: 1 } } }
+          ])
+        : Promise.resolve([])
+    ]);
 
   const teacherNameById = new Map(
     teachers.map((t) => [
@@ -231,6 +289,7 @@ const enrichAssignments = async (
   const yearById = new Map(years.map((y) => [y._id.toString(), y]));
   const commentCountByAssignment = new Map(commentCounts.map((c) => [c._id.toString(), c.count]));
   const submissionByAssignment = new Map(submissions.map((s) => [s.assignmentId.toString(), s]));
+  const submissionCountByAssignment = new Map(submissionCounts.map((c) => [c._id.toString(), c.count]));
 
   return assignments.map((assignment) => {
     const id = assignment._id.toString();
@@ -284,7 +343,8 @@ const enrichAssignments = async (
       submissionId: submission?._id.toString(),
       marks: submission?.marks,
       feedback: submission?.feedback,
-      commentCount: commentCountByAssignment.get(id) ?? 0
+      commentCount: commentCountByAssignment.get(id) ?? 0,
+      submissionCount: submissionCountByAssignment.get(id) ?? (submission ? 1 : 0)
     };
   });
 };
@@ -377,16 +437,15 @@ export const getAssignment = asyncHandler(async (req: Request, res: Response) =>
   if (req.user?.role === "STUDENT") {
     const profile = await requireStudentProfile(req);
     studentId = profile.studentId;
-    const enrolledSubjectIds = await Subject.find({
-      schoolId: tenantObjectId(req),
-      classIds: profile.classId
-    }).distinct("_id");
+    const institutionType = await getInstitutionType(req);
+    // Same enrollment + academic filters as listFeed so teacher-posted work is openable by students.
+    const enrolledSubjectIds = await Subject.find(
+      buildSubjectEnrollmentFilter(profile, institutionType, tenantObjectId(req))
+    ).distinct("_id");
 
     const subjectId = assignment.subjectId?.toString();
-    const matchesScope =
-      profile.batchId && profile.yearId
-        ? assignment.batchId?.toString() === profile.batchId && assignment.yearId?.toString() === profile.yearId
-        : assignment.classId?.toString() === profile.classId && assignment.sectionId?.toString() === profile.sectionId;
+    const academicFilter = buildStudentAcademicFilter(profile, institutionType);
+    const matchesScope = assignmentMatchesStudentScope(assignment as AssignmentLean, academicFilter);
 
     if (
       !matchesScope ||
@@ -394,6 +453,27 @@ export const getAssignment = asyncHandler(async (req: Request, res: Response) =>
       !subjectId ||
       !enrolledSubjectIds.some((id) => id.toString() === subjectId)
     ) {
+      throw new ApiError(403, "You do not have access to this post");
+    }
+  }
+
+  if (req.user?.role === "PARENT") {
+    if (!assignment.visibleTo.includes("PARENT")) {
+      throw new ApiError(403, "You do not have access to this post");
+    }
+    const linkedStudentIds = await getLinkedStudentIds(req);
+    const { Student } = await import("../models/Student.js");
+    const children = await Student.find({ _id: { $in: linkedStudentIds } }).lean();
+    const institutionType = await getInstitutionType(req);
+    const college = isCollege(institutionType);
+    const matchesChild = children.some((child) =>
+      college
+        ? assignment.batchId?.toString() === child.batchId?.toString() &&
+          assignment.yearId?.toString() === child.yearId?.toString()
+        : assignment.classId?.toString() === child.classId?.toString() &&
+          assignment.sectionId?.toString() === child.sectionId?.toString()
+    );
+    if (!matchesChild) {
       throw new ApiError(403, "You do not have access to this post");
     }
   }
@@ -428,36 +508,67 @@ export const createAssignment = asyncHandler(async (req: Request, res: Response)
   validateAssignmentScope(institutionType, payload);
   const scope = await assertTeacherSubjectAcademicScope(req, payload.subjectId, payload);
   const teacherId = scope.teacherId;
+  const academicScope = sanitizeAssignmentAcademicScope(institutionType, payload);
 
   const assignment = await Assignment.create({
-    ...payload,
+    type: payload.type,
+    title: payload.title,
+    description: payload.description,
+    ...academicScope,
+    subjectId: payload.subjectId,
+    topic: payload.topic || undefined,
+    dueDateBs: payload.dueDateBs || undefined,
+    maxMarks: payload.maxMarks,
+    rubric: payload.rubric || undefined,
+    visibleTo: payload.visibleTo?.length ? payload.visibleTo : ["STUDENT", "PARENT"],
+    allowSubmission: payload.allowSubmission ?? true,
+    isPinned: payload.isPinned ?? false,
+    attachments: payload.attachments ?? [],
+    links: payload.links ?? [],
     schoolId: req.tenantSchoolId,
     teacherId
   });
 
   if (payload.type === "HOMEWORK" || payload.type === "CAS") {
     const { Student } = await import("../models/Student.js");
-    const studentFilter: Record<string, unknown> = { schoolId: tenantObjectId(req) };
-    if (isCollege(institutionType)) {
-      studentFilter.batchId = payload.batchId;
-      studentFilter.yearId = payload.yearId;
-    } else {
-      studentFilter.classId = payload.classId;
-      studentFilter.sectionId = payload.sectionId;
-    }
-    const students = await Student.find(studentFilter).lean();
+    const studentFilter: Record<string, unknown> = {
+      schoolId: tenantObjectId(req),
+      ...academicScope
+    };
+    // Notify only students who are also enrolled in this subject (same rule as student feed).
+    const enrolledStudents = await Student.find(studentFilter).select("_id user").lean();
+    const subjectFilter = isCollege(institutionType)
+      ? { _id: payload.subjectId, schoolId: tenantObjectId(req), yearIds: academicScope.yearId }
+      : { _id: payload.subjectId, schoolId: tenantObjectId(req), classIds: academicScope.classId };
+    const subjectExists = await Subject.findOne(subjectFilter).select("_id").lean();
 
-    await Promise.all(
-      students.map((student) =>
-        notifyParentsOfStudent(
-          req.tenantSchoolId!,
-          student._id.toString(),
-          `New ${payload.type === "HOMEWORK" ? "Assignment" : payload.type}: ${payload.title}`,
-          payload.description.slice(0, 120),
-          "HOMEWORK"
-        )
-      )
-    );
+    if (subjectExists) {
+      const label = payload.type === "HOMEWORK" ? "Assignment" : "CAS";
+      const title = `New ${label}: ${payload.title}`;
+      const message = payload.description.slice(0, 120);
+
+      await Promise.all(
+        enrolledStudents.flatMap((student) => {
+          const jobs: Promise<unknown>[] = [
+            notifyParentsOfStudent(req.tenantSchoolId!, student._id.toString(), title, message, "HOMEWORK")
+          ];
+          if (student.user) {
+            jobs.push(
+              sendNotification({
+                schoolId: req.tenantSchoolId!,
+                recipientUserId: student.user.toString(),
+                title,
+                message,
+                type: "HOMEWORK",
+                channel: "IN_APP",
+                metadata: { assignmentId: assignment._id.toString(), studentId: student._id.toString() }
+              })
+            );
+          }
+          return jobs;
+        })
+      );
+    }
   }
 
   return sendSuccess(res, "Assignment created", assignment, 201);
@@ -472,24 +583,47 @@ export const updateAssignment = asyncHandler(async (req: Request, res: Response)
     throw new ApiError(403, "Only teachers can update assignments and CAS posts");
   }
 
-  if (payload.subjectId) {
-    const institutionType = await getInstitutionType(req);
-    const existing = await Assignment.findOne(withTenantScope(req, { _id: assignmentId })).lean();
-    await assertTeacherSubjectAcademicScope(req, payload.subjectId, {
-      classId: payload.classId ?? existing?.classId?.toString(),
-      sectionId: payload.sectionId ?? existing?.sectionId?.toString(),
-      batchId: payload.batchId ?? existing?.batchId?.toString(),
-      yearId: payload.yearId ?? existing?.yearId?.toString()
-    });
-    validateAssignmentScope(institutionType, {
-      classId: payload.classId ?? existing?.classId?.toString(),
-      sectionId: payload.sectionId ?? existing?.sectionId?.toString(),
-      batchId: payload.batchId ?? existing?.batchId?.toString(),
-      yearId: payload.yearId ?? existing?.yearId?.toString()
-    });
+  const institutionType = await getInstitutionType(req);
+  const existing = await Assignment.findOne(withTenantScope(req, { _id: assignmentId })).lean();
+  if (!existing) throw new ApiError(404, "Assignment not found");
+
+  const nextScope = {
+    classId: payload.classId ?? existing.classId?.toString(),
+    sectionId: payload.sectionId ?? existing.sectionId?.toString(),
+    batchId: payload.batchId ?? existing.batchId?.toString(),
+    yearId: payload.yearId ?? existing.yearId?.toString()
+  };
+  const subjectId = payload.subjectId ?? existing.subjectId?.toString();
+  if (!subjectId) {
+    throw new ApiError(400, "Subject is required");
   }
 
-  const assignment = await Assignment.findOneAndUpdate(withTenantScope(req, { _id: assignmentId }), payload, { new: true });
+  await assertTeacherSubjectAcademicScope(req, subjectId, nextScope);
+  validateAssignmentScope(institutionType, nextScope);
+
+  const academicScope = sanitizeAssignmentAcademicScope(institutionType, nextScope);
+  const update: Record<string, unknown> = {
+    ...payload,
+    ...academicScope,
+    subjectId,
+    topic: payload.topic === "" ? undefined : (payload.topic ?? existing.topic),
+    dueDateBs: payload.dueDateBs === "" ? undefined : (payload.dueDateBs ?? existing.dueDateBs)
+  };
+
+  // Explicitly clear opposite-institution fields so student filters stay aligned.
+  if (isCollege(institutionType)) {
+    update.$unset = { classId: 1, sectionId: 1 };
+    delete update.classId;
+    delete update.sectionId;
+  } else {
+    update.$unset = { batchId: 1, yearId: 1 };
+    delete update.batchId;
+    delete update.yearId;
+  }
+
+  const assignment = await Assignment.findOneAndUpdate(withTenantScope(req, { _id: assignmentId }), update, {
+    new: true
+  });
   if (!assignment) throw new ApiError(404, "Assignment not found");
   return sendSuccess(res, "Assignment updated", assignment);
 });
@@ -585,13 +719,20 @@ export const submitAssignment = asyncHandler(async (req: Request, res: Response)
 
   if (req.user?.role === "STUDENT") {
     const profile = await requireStudentProfile(req);
-    const matchesScope =
-      profile.batchId && profile.yearId
-        ? assignment.batchId?.toString() === profile.batchId && assignment.yearId?.toString() === profile.yearId
-        : assignment.classId?.toString() === profile.classId && assignment.sectionId?.toString() === profile.sectionId;
+    const institutionType = await getInstitutionType(req);
+    const academicFilter = buildStudentAcademicFilter(profile, institutionType);
+    const matchesScope = assignmentMatchesStudentScope(assignment as AssignmentLean, academicFilter);
 
     if (!matchesScope) {
       throw new ApiError(403, "This assignment is not for your academic group");
+    }
+
+    const enrolledSubjectIds = await Subject.find(
+      buildSubjectEnrollmentFilter(profile, institutionType, tenantObjectId(req))
+    ).distinct("_id");
+    const subjectId = assignment.subjectId?.toString();
+    if (!subjectId || !enrolledSubjectIds.some((id) => id.toString() === subjectId)) {
+      throw new ApiError(403, "You are not enrolled in this subject");
     }
   }
 

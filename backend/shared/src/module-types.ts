@@ -155,6 +155,8 @@ export interface ClassroomPost extends AssignmentRecord {
   marks?: number;
   feedback?: string;
   commentCount: number;
+  /** Number of student submissions (SUBMITTED/GRADED). Useful for teachers. */
+  submissionCount?: number;
 }
 
 export interface ClassroomFeedResponse {

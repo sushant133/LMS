@@ -211,12 +211,35 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
   const notes = assignments.filter((item) => item.type === "NOTE");
   const homework = assignments.filter((item) => item.type === "HOMEWORK" || item.type === "CAS");
 
+  const normalizeAttachments = (raw: unknown) => {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((item) => {
+      if (typeof item === "string") {
+        return { url: item, name: item.split("/").pop() ?? "Attachment" };
+      }
+      const attachment = item as { url: string; name: string; mimeType?: string; kind?: string };
+      return {
+        url: attachment.url,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        kind: attachment.kind
+      };
+    });
+  };
+
+  const mapAssignment = (item: (typeof assignments)[number]) => ({
+    ...item,
+    _id: item._id.toString(),
+    attachments: normalizeAttachments(item.attachments)
+  });
+
   return sendSuccess(res, "Subject detail fetched", {
     subject,
+    studentId: profile.studentId,
     attendance: attendanceHistory,
     marks,
-    assignments: homework,
-    notes,
+    assignments: homework.map(mapAssignment),
+    notes: notes.map(mapAssignment),
     submissions,
     notices
   });
