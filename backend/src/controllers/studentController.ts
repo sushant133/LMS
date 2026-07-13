@@ -342,6 +342,12 @@ export const deleteStudent = asyncHandler(async (req: Request, res: Response) =>
     if (error instanceof Error && error.message === "STUDENT_NOT_FOUND") {
       throw new ApiError(404, "Student not found");
     }
+    if (error instanceof Error && error.message === "STUDENT_HAS_FEE_HISTORY") {
+      throw new ApiError(
+        400,
+        "Cannot permanently delete this student while fee collections or refunds exist. Void financial records first or keep the account for audit."
+      );
+    }
     throw error;
   } finally {
     await endSession(session);

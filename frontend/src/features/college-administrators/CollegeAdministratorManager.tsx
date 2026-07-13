@@ -173,10 +173,7 @@ export const CollegeAdministratorManager = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="College Administrators"
-        description="Create and manage read-only College Administrator accounts with full LMS visibility and no data modification privileges."
-      />
+      <PageHeader title="College Administrators" />
 
       <Card>
         <CardHeader>
@@ -359,10 +356,7 @@ export const CollegeAdministratorManager = () => {
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {(adminsQuery.data ?? []).length === 0 ? (
-            <EmptyState
-              title="No College Administrators found"
-              description="Create the first read-only College Administrator account for monitoring and auditing."
-            />
+            <EmptyState title="No College Administrators found" />
           ) : (
             <Table>
               <TableHead>

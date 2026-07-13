@@ -776,6 +776,7 @@ export const StudentProfileView = () => {
                 <TableHead>
                   <tr>
                     <Th>Book</Th>
+                    <Th>Code</Th>
                     <Th>Issued</Th>
                     <Th>Due</Th>
                     <Th>Returned</Th>
@@ -787,6 +788,11 @@ export const StudentProfileView = () => {
                   {profile.library.issues.map((issue) => (
                     <tr key={String(issue._id)}>
                       <Td>{String(issue.bookTitle)}</Td>
+                      <Td className="font-mono text-sm">
+                        {String(
+                          (issue as { bookCode?: string }).bookCode || "—",
+                        )}
+                      </Td>
                       <Td>{String(issue.issuedDateBs)}</Td>
                       <Td>{String(issue.dueDateBs)}</Td>
                       <Td>{String(issue.returnedDateBs ?? "—")}</Td>

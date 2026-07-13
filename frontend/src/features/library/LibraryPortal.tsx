@@ -73,6 +73,7 @@ export const LibraryPortal = () => {
               <TableHead>
                 <tr>
                   <Th>Book</Th>
+                  <Th>Code</Th>
                   <Th>Issued</Th>
                   <Th>Due</Th>
                   <Th>Returned</Th>
@@ -83,7 +84,7 @@ export const LibraryPortal = () => {
                 {active.length === 0 ? (
                   <tr>
                     <Td
-                      colSpan={5}
+                      colSpan={6}
                       className="py-8 text-center text-sm text-slate-500"
                     >
                       No books currently borrowed.
@@ -93,6 +94,9 @@ export const LibraryPortal = () => {
                   active.map((issue) => (
                     <tr key={issue._id}>
                       <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
+                      <Td className="font-mono text-sm">
+                        {issue.bookCode ?? "—"}
+                      </Td>
                       <Td>{issue.issuedDateBs}</Td>
                       <Td>{issue.dueDateBs}</Td>
                       <Td>{issue.returnedDateBs ?? "—"}</Td>
@@ -122,6 +126,7 @@ export const LibraryPortal = () => {
               <TableHead>
                 <tr>
                   <Th>Book</Th>
+                  <Th>Code</Th>
                   <Th>Issued</Th>
                   <Th>Due</Th>
                   <Th>Returned</Th>
@@ -132,7 +137,7 @@ export const LibraryPortal = () => {
                 {history.length === 0 ? (
                   <tr>
                     <Td
-                      colSpan={5}
+                      colSpan={6}
                       className="py-8 text-center text-sm text-slate-500"
                     >
                       No borrowing history yet.
@@ -142,6 +147,9 @@ export const LibraryPortal = () => {
                   history.map((issue) => (
                     <tr key={issue._id}>
                       <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
+                      <Td className="font-mono text-sm">
+                        {issue.bookCode ?? "—"}
+                      </Td>
                       <Td>{issue.issuedDateBs}</Td>
                       <Td>{issue.dueDateBs}</Td>
                       <Td>{issue.returnedDateBs ?? "—"}</Td>

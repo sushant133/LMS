@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { COMPLAINT_CATEGORIES, COMPLAINT_STATUSES, USER_ROLES } from "./constants.js";
+import {
+  COMPLAINT_CATEGORIES,
+  COMPLAINT_STATUSES,
+  LIBRARY_YEAR_LEVELS,
+  USER_ROLES
+} from "./constants.js";
 import {
   academicYearSchema,
   bsDateSchema,
@@ -120,21 +125,92 @@ export const sendNotificationSchema = z.object({
     .default("GENERAL")
 });
 
-export const libraryBookSchema = z.object({
-  title: z.string().min(2),
-  author: z.string().min(2),
+/** One physical copy code entered by the librarian (not auto-generated). */
+export const libraryBookCopyInputSchema = z.object({
+  bookCode: z.string().trim().min(1, "Book code is required"),
+  shelfLocation: z.string().optional().or(z.literal("")),
+  condition: z.string().optional().or(z.literal(""))
+});
+
+export const libraryYearLevelSchema = z.enum(LIBRARY_YEAR_LEVELS);
+
+export const libraryBookSchema = z
+  .object({
+    title: z.string().min(2),
+    author: z.string().min(2),
+    isbn: z.string().optional().or(z.literal("")),
+    category: z.string().min(1),
+    /** Academic year for HA catalog: 1st Year, 2nd Year, 3rd Year, or All Years. */
+    yearLevel: libraryYearLevelSchema.default("All Years"),
+    totalCopies: z.coerce.number().int().min(1),
+    shelfLocation: z.string().optional().or(z.literal("")),
+    /**
+     * Physical copies with manual codes.
+     * When provided on create, length must equal totalCopies and codes must be unique.
+     */
+    copies: z.array(libraryBookCopyInputSchema).optional()
+  })
+  .superRefine((value, ctx) => {
+    if (!value.copies || value.copies.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Enter a unique book code for every physical copy",
+        path: ["copies"]
+      });
+      return;
+    }
+    if (value.copies.length !== value.totalCopies) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Provide exactly ${value.totalCopies} book code(s) (one per physical copy)`,
+        path: ["copies"]
+      });
+    }
+    const normalized = value.copies.map((c) => c.bookCode.trim().toUpperCase());
+    const emptyIdx = normalized.findIndex((c) => !c);
+    if (emptyIdx >= 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Book code cannot be empty",
+        path: ["copies", emptyIdx, "bookCode"]
+      });
+    }
+    const seen = new Set<string>();
+    for (let i = 0; i < normalized.length; i++) {
+      const code = normalized[i]!;
+      if (seen.has(code)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Duplicate book code "${value.copies[i]!.bookCode}"`,
+          path: ["copies", i, "bookCode"]
+        });
+      }
+      seen.add(code);
+    }
+  });
+
+/** Partial update of master fields only (copies managed separately when adding). */
+export const libraryBookUpdateSchema = z.object({
+  title: z.string().min(2).optional(),
+  author: z.string().min(2).optional(),
   isbn: z.string().optional().or(z.literal("")),
-  category: z.string().min(1),
-  totalCopies: z.coerce.number().int().min(1),
-  shelfLocation: z.string().optional().or(z.literal(""))
+  category: z.string().min(1).optional(),
+  yearLevel: libraryYearLevelSchema.optional(),
+  shelfLocation: z.string().optional().or(z.literal("")),
+  /** Append new physical copies (each with a unique manual code). */
+  addCopies: z.array(libraryBookCopyInputSchema).optional()
 });
 
 export const libraryIssueSchema = z
   .object({
     bookId: objectIdSchema,
+    /** Preferred: issue a specific physical copy by id. */
+    copyId: optionalObjectIdSchema,
+    /** Alternative: issue by librarian book code (e.g. ANA003). */
+    bookCode: z.string().trim().min(1).optional().or(z.literal("")),
     borrowerType: z.enum(["STUDENT", "TEACHER"]),
-    studentId: objectIdSchema.optional(),
-    teacherId: objectIdSchema.optional(),
+    studentId: optionalObjectIdSchema,
+    teacherId: optionalObjectIdSchema,
     issuedDateBs: bsDateSchema,
     dueDateBs: bsDateSchema
   })
@@ -144,6 +220,14 @@ export const libraryIssueSchema = z
     }
     if (value.borrowerType === "TEACHER" && !value.teacherId) {
       ctx.addIssue({ code: "custom", message: "teacherId is required for teacher borrowers", path: ["teacherId"] });
+    }
+    const code = value.bookCode?.trim();
+    if (!value.copyId && !code) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select a physical book copy (book code) to issue",
+        path: ["copyId"]
+      });
     }
   });
 
@@ -238,6 +322,8 @@ export type ParentChildLinkInput = z.infer<typeof parentChildLinkSchema>;
 export type CreateParentFromStudentInput = z.infer<typeof createParentFromStudentSchema>;
 export type SendNotificationInput = z.infer<typeof sendNotificationSchema>;
 export type LibraryBookInput = z.infer<typeof libraryBookSchema>;
+export type LibraryBookUpdateInput = z.infer<typeof libraryBookUpdateSchema>;
+export type LibraryBookCopyInput = z.infer<typeof libraryBookCopyInputSchema>;
 export type LibraryIssueInput = z.infer<typeof libraryIssueSchema>;
 export type ModuleStaffInput = z.infer<typeof moduleStaffSchema>;
 export type TransportRouteInput = z.infer<typeof transportRouteSchema>;

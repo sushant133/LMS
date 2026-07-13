@@ -407,6 +407,7 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
               _id: issue._id.toString(),
               bookTitle: book?.title ?? "Book",
               bookAuthor: book?.author ?? "",
+              bookCode: issue.bookCode ?? "",
               issuedDateBs: issue.issuedDateBs,
               dueDateBs: issue.dueDateBs,
               returnedDateBs: issue.returnedDateBs,

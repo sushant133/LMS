@@ -37,7 +37,7 @@ import { FiscalYear } from "../models/FiscalYear.js";
 import { JournalEntry } from "../models/JournalEntry.js";
 import { Vendor } from "../models/Vendor.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
-import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
+import { LibraryBook, LibraryBookCopy, LibraryIssue } from "../models/LibraryBook.js";
 import {
   Laboratory,
   LaboratoryCategory,
@@ -107,6 +107,7 @@ export const deleteSchoolCascade = async (
     Banner.deleteMany(filter, options),
     TimetableSlot.deleteMany(filter, options),
     LibraryIssue.deleteMany(filter, options),
+    LibraryBookCopy.deleteMany(filter, options),
     LibraryBook.deleteMany(filter, options),
     LaboratoryIssue.deleteMany(filter, options),
     LaboratoryStockRequest.deleteMany(filter, options),

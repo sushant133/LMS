@@ -23,7 +23,7 @@ import { CashBookEntry } from "../models/CashBookEntry.js";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeStructure } from "../models/FeeStructure.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
-import { LibraryBook, LibraryIssue } from "../models/LibraryBook.js";
+import { LibraryBook, LibraryBookCopy, LibraryIssue } from "../models/LibraryBook.js";
 import {
   Laboratory,
   LaboratoryCategory,
@@ -78,50 +78,96 @@ export const ensureSuperAdmin = async (): Promise<void> => {
   console.log(`Super admin created: ${env.SUPER_ADMIN_EMAIL}`);
 };
 
+/**
+ * Drop legacy unique indexes that break on multiple null/empty values.
+ * (Mongo sparse unique still indexes explicit null → E11000 on reseed.)
+ */
+const dropLegacyLaboratoryCodeIndex = async (): Promise<void> => {
+  try {
+    const collection = Laboratory.collection;
+    const indexes = await collection.indexes();
+    for (const idx of indexes) {
+      const name = idx.name ?? "";
+      // Old unique index name from { schoolId: 1, code: 1 } without partial filter
+      if (name === "schoolId_1_code_1") {
+        await collection.dropIndex(name);
+        console.log(`Dropped legacy laboratory index: ${name}`);
+      }
+    }
+  } catch (error) {
+    // Index may not exist yet — safe to ignore
+    console.warn(
+      "Could not drop legacy laboratory code index (may not exist):",
+      error instanceof Error ? error.message : error
+    );
+  }
+};
+
 const syncSeedIndexes = async (): Promise<void> => {
-  await Promise.all([
-    Assignment.syncIndexes(),
-    AssignmentSubmission.syncIndexes(),
-    Attendance.syncIndexes(),
-    Exam.syncIndexes(),
-    FeeCollection.syncIndexes(),
-    FeeStructure.syncIndexes(),
-    Accountant.syncIndexes(),
-    CollegeStaff.syncIndexes(),
-    AccountingExpense.syncIndexes(),
-    AccountingPurchase.syncIndexes(),
-    AccountingIncome.syncIndexes(),
-    SalaryPayment.syncIndexes(),
-    BankAccount.syncIndexes(),
-    CashBookEntry.syncIndexes(),
-    AccountingSettings.syncIndexes(),
-    LibraryBook.syncIndexes(),
-    LibraryIssue.syncIndexes(),
-    Laboratory.syncIndexes(),
-    LaboratoryCategory.syncIndexes(),
-    LaboratoryEquipment.syncIndexes(),
-    LaboratoryIssue.syncIndexes(),
-    LaboratoryStockMovement.syncIndexes(),
-    LaboratoryStockRequest.syncIndexes(),
-    LeaveRequest.syncIndexes(),
-    Payroll.syncIndexes(),
-    Notice.syncIndexes(),
-    Notification.syncIndexes(),
-    ParentChildLink.syncIndexes(),
-    Result.syncIndexes(),
-    School.syncIndexes(),
-    Batch.syncIndexes(),
-    Year.syncIndexes(),
-    Setting.syncIndexes(),
-    Student.syncIndexes(),
-    MasterSubject.syncIndexes(),
-    Subject.syncIndexes(),
-    Teacher.syncIndexes(),
-    TimetableSlot.syncIndexes(),
-    TransportAssignment.syncIndexes(),
-    TransportRoute.syncIndexes(),
-    User.syncIndexes()
-  ]);
+  await dropLegacyLaboratoryCodeIndex();
+
+  // Sync each model independently so one bad index cannot abort the whole seed.
+  // Laboratory is repaired at server boot; treat its sync as best-effort here.
+  const modelsToSync = [
+    Assignment,
+    AssignmentSubmission,
+    Attendance,
+    Exam,
+    FeeCollection,
+    FeeStructure,
+    Accountant,
+    CollegeStaff,
+    AccountingExpense,
+    AccountingPurchase,
+    AccountingIncome,
+    SalaryPayment,
+    BankAccount,
+    CashBookEntry,
+    AccountingSettings,
+    LibraryBook,
+    LibraryBookCopy,
+    LibraryIssue,
+    LaboratoryCategory,
+    LaboratoryEquipment,
+    LaboratoryIssue,
+    LaboratoryStockMovement,
+    LaboratoryStockRequest,
+    LeaveRequest,
+    Payroll,
+    Notice,
+    Notification,
+    ParentChildLink,
+    Result,
+    School,
+    Batch,
+    Year,
+    Setting,
+    Student,
+    MasterSubject,
+    Subject,
+    Teacher,
+    TimetableSlot,
+    TransportAssignment,
+    TransportRoute,
+    User
+  ] as const;
+
+  await Promise.all(
+    modelsToSync.map(async (model) => {
+      try {
+        await model.syncIndexes();
+      } catch (error) {
+        console.warn(
+          `syncIndexes failed for ${model.modelName}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    })
+  );
+
+  // Do NOT call Laboratory.syncIndexes() here.
+  // A legacy unique (schoolId, code) index with multiple code:null docs crashes Atlas index builds.
+  // Boot repair (repairLaboratoryIndexes) owns laboratory indexes exclusively.
 };
 
 export type SeedDemoSchoolOptions = {
@@ -772,6 +818,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           author: "Ministry of Education",
           isbn: "978-9937-1234-0",
           category: "Reference",
+          yearLevel: "All Years",
           totalCopies: 5,
           availableCopies: 4,
           shelfLocation: "A-12"
@@ -780,11 +827,25 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
+    const demoCopyCodes = ["NHC001", "NHC002", "NHC003", "NHC004", "NHC005"];
+    const demoCopies = await LibraryBookCopy.create(
+      demoCopyCodes.map((bookCode, index) => ({
+        schoolId,
+        bookId: book!._id,
+        bookCode,
+        status: index === 0 ? ("ISSUED" as const) : ("AVAILABLE" as const),
+        shelfLocation: "A-12"
+      })),
+      options
+    );
+
     await LibraryIssue.create(
       [
         {
           schoolId,
           bookId: book!._id,
+          copyId: demoCopies[0]!._id,
+          bookCode: demoCopies[0]!.bookCode,
           studentId: students[0]!.profile._id,
           issuedDateBs: "2081-09-01",
           dueDateBs: "2081-09-20",

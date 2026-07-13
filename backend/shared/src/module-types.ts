@@ -62,6 +62,12 @@ export type SmsDeliveryStatus = "PENDING" | "SENT" | "FAILED" | "SKIPPED";
 
 export type LibraryIssueStatus = "ISSUED" | "RETURNED" | "OVERDUE";
 
+/** Status of one physical book copy. */
+export type LibraryCopyStatus = "AVAILABLE" | "ISSUED" | "LOST" | "DAMAGED" | "MAINTENANCE";
+
+/** Academic year level for library catalog (HA: 1st / 2nd / 3rd Year). */
+export type LibraryYearLevel = "1st Year" | "2nd Year" | "3rd Year" | "All Years";
+
 export type LeaveType = "CASUAL" | "SICK" | "MATERNITY" | "UNPAID" | "OTHER";
 
 export type LeaveStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -208,6 +214,18 @@ export interface NotificationRecord {
   updatedAt?: string;
 }
 
+export interface LibraryBookCopyRecord {
+  _id: string;
+  schoolId: string;
+  bookId: string;
+  bookCode: string;
+  status: LibraryCopyStatus;
+  shelfLocation?: string;
+  condition?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface LibraryBookRecord {
   _id: string;
   schoolId: string;
@@ -215,11 +233,15 @@ export interface LibraryBookRecord {
   author: string;
   isbn?: string;
   category: string;
+  /** Year level for filtering (1st / 2nd / 3rd Year, or All Years). */
+  yearLevel?: LibraryYearLevel;
   totalCopies: number;
   availableCopies: number;
   issuedCopies: number;
   status: InventoryStockStatus;
   shelfLocation?: string;
+  /** Individual physical copies with librarian-entered codes. */
+  copies?: LibraryBookCopyRecord[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -228,6 +250,9 @@ export interface LibraryIssueRecord {
   _id: string;
   schoolId: string;
   bookId: string;
+  copyId?: string;
+  /** Physical book code (e.g. ANA003) when issued by copy. */
+  bookCode?: string;
   borrowerType: LibraryBorrowerType;
   studentId?: string;
   teacherId?: string;

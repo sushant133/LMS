@@ -384,6 +384,12 @@ export const CLASS_LEVELS = ["ECD", "Class 1", "Class 2", "Class 3", "Class 4", 
 
 export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year"] as const;
 
+/**
+ * Library catalog year levels for HA college books.
+ * "All Years" = shared / general books not tied to a single year.
+ */
+export const LIBRARY_YEAR_LEVELS = ["1st Year", "2nd Year", "3rd Year", "All Years"] as const;
+
 /** Academic lifecycle status for college students. Only ACTIVE students are promoted. */
 export const STUDENT_ACADEMIC_STATUSES = [
   "ACTIVE",

@@ -27,22 +27,30 @@ export const ensureDemoData = async (): Promise<void> => {
     return;
   }
 
-  await ensureSuperAdmin();
+  try {
+    await ensureSuperAdmin();
 
-  const existingSchool = await School.findOne({ code: DEMO_SCHOOL_CODE });
+    const existingSchool = await School.findOne({ code: DEMO_SCHOOL_CODE });
 
-  if (existingSchool && (await isDemoCollegeComplete(existingSchool._id))) {
-    console.log(`Demo institution (${DEMO_SCHOOL_CODE}) is complete.`);
-    return;
+    if (existingSchool && (await isDemoCollegeComplete(existingSchool._id))) {
+      console.log(`Demo institution (${DEMO_SCHOOL_CODE}) is complete.`);
+      return;
+    }
+
+    if (existingSchool) {
+      console.log(`Demo institution (${DEMO_SCHOOL_CODE}) is incomplete — reseeding...`);
+      await seedDemoSchool({ force: true });
+    } else {
+      console.log("Seeding demo institution and accounts...");
+      await seedDemoSchool();
+    }
+
+    console.log("Demo seed completed.");
+  } catch (error) {
+    // Never block API boot on demo seed / index issues (e.g. legacy lab code index on Atlas)
+    console.error(
+      "Demo seed failed (non-fatal — server will still start):",
+      error instanceof Error ? error.message : error
+    );
   }
-
-  if (existingSchool) {
-    console.log(`Demo institution (${DEMO_SCHOOL_CODE}) is incomplete — reseeding...`);
-    await seedDemoSchool({ force: true });
-  } else {
-    console.log("Seeding demo institution and accounts...");
-    await seedDemoSchool();
-  }
-
-  console.log("Demo seed completed.");
 };

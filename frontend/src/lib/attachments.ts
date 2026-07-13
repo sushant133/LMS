@@ -35,6 +35,96 @@ export const isUploadFileUrl = (url: string): boolean => {
 };
 
 /**
+ * Fetch a protected upload with session cookies and return a blob: URL.
+ * Required after /uploads was auth-gated — plain <a href> / <iframe src> often
+ * fail for students (new tab without cookie context or cross-origin).
+ */
+export const fetchAuthenticatedBlobUrl = async (url: string): Promise<string> => {
+  const resolved = resolveAttachmentUrl(url);
+  if (!resolved) {
+    throw new Error("Invalid file URL");
+  }
+
+  // External non-upload links: open as-is (caller may use resolved URL).
+  if (!isUploadFileUrl(resolved) && /^https?:\/\//i.test(resolved)) {
+    return resolved;
+  }
+
+  const response = await fetch(resolved, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "*/*",
+    },
+  });
+
+  if (response.status === 401) {
+    throw new Error("Please sign in again to open this file.");
+  }
+  if (response.status === 403) {
+    throw new Error("You do not have permission to open this file.");
+  }
+  if (!response.ok) {
+    throw new Error(`Could not open file (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  // Prefer a useful MIME for PDFs when the server omits it
+  const type =
+    blob.type && blob.type !== "application/octet-stream"
+      ? blob.type
+      : resolved.toLowerCase().includes(".pdf")
+        ? "application/pdf"
+        : blob.type;
+  const typed = type && type !== blob.type ? new Blob([blob], { type }) : blob;
+  return URL.createObjectURL(typed);
+};
+
+/** Open a protected upload in a new tab using an authenticated blob URL. */
+export const openAuthenticatedAttachment = async (url: string): Promise<void> => {
+  const resolved = resolveAttachmentUrl(url);
+  if (!isUploadFileUrl(resolved) && !resolved.startsWith("/uploads/")) {
+    window.open(resolved, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  const blobUrl = await fetchAuthenticatedBlobUrl(url);
+  const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    // Popup blocked — fall back to same-tab navigation
+    window.location.href = blobUrl;
+  }
+  // Revoke later so the new tab has time to load
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+};
+
+/** Download a protected upload via authenticated fetch. */
+export const downloadAuthenticatedAttachment = async (
+  url: string,
+  filename?: string,
+): Promise<void> => {
+  const resolved = resolveAttachmentUrl(url);
+  if (!isUploadFileUrl(resolved) && !resolved.startsWith("/uploads/")) {
+    const a = document.createElement("a");
+    a.href = resolved;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    if (filename) a.download = filename;
+    a.click();
+    return;
+  }
+
+  const blobUrl = await fetchAuthenticatedBlobUrl(url);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename?.trim() || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
+};
+
+/**
  * True when the URL is likely an HTML app page (LMS routes, login, dashboards, etc.).
  * Embedding these in an iframe shows the SPA — often the login page — inside class notes.
  */

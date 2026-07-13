@@ -17,7 +17,7 @@ import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeRefund } from "../models/FeeRefund.js";
 import { LaboratoryIssue } from "../models/Laboratory.js";
 import { LeaveRequest, Payroll } from "../models/LeaveRequest.js";
-import { LibraryIssue } from "../models/LibraryBook.js";
+import { LibraryBookCopy, LibraryIssue } from "../models/LibraryBook.js";
 import { Notification } from "../models/Notification.js";
 import { ParentChildLink } from "../models/ParentChildLink.js";
 import { Result } from "../models/Result.js";
@@ -33,14 +33,65 @@ import { User } from "../models/User.js";
 import { Notice } from "../models/Notice.js";
 import { JournalEntry } from "../models/JournalEntry.js";
 import { SubjectAssignment } from "../models/SubjectAssignment.js";
+import { syncBookCopyCounts } from "./libraryCopies.js";
 
 type ObjectIdLike = Types.ObjectId | string;
 
 const opts = (session?: ClientSession | null) => (session ? { session } : {});
 
+const ACTIVE_ISSUE_STATUSES = ["ISSUED", "OVERDUE"] as const;
+
 /**
- * Permanently removes a student account and all personal / linked operational data:
- * Student profile, User login (email, phone, password), attendance, results, fees, etc.
+ * Free physical library copies for open issues, then remove issue rows.
+ * Prevents copies stuck as ISSUED after borrower hard-delete.
+ */
+async function releaseLibraryIssuesForBorrower(params: {
+  schoolId: ObjectIdLike;
+  filter: Record<string, unknown>;
+  session?: ClientSession | null;
+}): Promise<void> {
+  const { schoolId, filter, session } = params;
+  const sessionOpt = opts(session);
+
+  const activeIssues = await LibraryIssue.find({
+    schoolId,
+    ...filter,
+    status: { $in: [...ACTIVE_ISSUE_STATUSES] }
+  })
+    .select("_id copyId bookId")
+    .session(session ?? null)
+    .lean();
+
+  const copyIds = activeIssues
+    .map((issue) => issue.copyId)
+    .filter((id): id is NonNullable<typeof id> => Boolean(id));
+
+  const bookIds = [
+    ...new Set(
+      activeIssues
+        .map((issue) => issue.bookId?.toString())
+        .filter((id): id is string => Boolean(id))
+    )
+  ];
+
+  if (copyIds.length > 0) {
+    await LibraryBookCopy.updateMany(
+      { schoolId, _id: { $in: copyIds }, status: "ISSUED" },
+      { $set: { status: "AVAILABLE" } },
+      sessionOpt
+    );
+  }
+
+  await LibraryIssue.deleteMany({ schoolId, ...filter }, sessionOpt);
+
+  for (const bookId of bookIds) {
+    await syncBookCopyCounts(bookId, schoolId, session);
+  }
+}
+
+/**
+ * Permanently removes a student account and linked operational data.
+ * Posted fee collections / refunds are NEVER hard-deleted (financial integrity).
  */
 export const hardDeleteStudentAccount = async (params: {
   schoolId: ObjectIdLike;
@@ -61,30 +112,51 @@ export const hardDeleteStudentAccount = async (params: {
     throw new Error("STUDENT_NOT_FOUND");
   }
 
+  // Block delete when financial history exists — preserves GL / cash book audit trail
+  const [openFeeCount, openRefundCount] = await Promise.all([
+    FeeCollection.countDocuments({ schoolId, studentId: student._id, isDeleted: false }).session(
+      session ?? null
+    ),
+    FeeRefund.countDocuments({ schoolId, studentId: student._id, isDeleted: false }).session(
+      session ?? null
+    )
+  ]);
+
+  if (openFeeCount > 0 || openRefundCount > 0) {
+    throw new Error("STUDENT_HAS_FEE_HISTORY");
+  }
+
   const userId = student.user;
   const user = await User.findOne({ _id: userId, schoolId }).session(session ?? null);
   const email = user?.email ?? "";
   const fullName = user?.fullName ?? "";
   const admissionNumber = student.admissionNumber;
 
-  // Pull student from daily attendance entry arrays (do not drop whole class sheets)
+  // Pull student from attendance entry arrays (do not drop whole class sheets)
   await DailyAttendance.updateMany(
     { schoolId, "entries.studentId": student._id },
     { $pull: { entries: { studentId: student._id } } },
     sessionOpt
   );
+  await Attendance.updateMany(
+    { schoolId, "entries.studentId": student._id },
+    { $pull: { entries: { studentId: student._id } } },
+    sessionOpt
+  );
+
+  await releaseLibraryIssuesForBorrower({
+    schoolId,
+    filter: { studentId: student._id },
+    session
+  });
 
   await Promise.all([
-    Attendance.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
     AssignmentSubmission.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
     AcademicPromotion.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
     Result.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
-    FeeCollection.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
-    FeeRefund.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
     ParentChildLink.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
-    LibraryIssue.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
     TransportAssignment.deleteMany({ schoolId, studentId: student._id }, sessionOpt),
-    // Detach optional accounting links rather than deleting whole GL history when possible
+    // Detach optional accounting links rather than deleting whole GL history
     JournalEntry.updateMany(
       { schoolId, studentId: student._id },
       { $unset: { studentId: 1 } },
@@ -115,8 +187,7 @@ export const hardDeleteStudentAccount = async (params: {
 };
 
 /**
- * Permanently removes a teacher account and linked operational data:
- * Teacher profile, User login (email, phone, password), assignments, timetable, academic plans, etc.
+ * Permanently removes a teacher account and linked operational data.
  */
 export const hardDeleteTeacherAccount = async (params: {
   schoolId: ObjectIdLike;
@@ -143,10 +214,8 @@ export const hardDeleteTeacherAccount = async (params: {
   const fullName = user?.fullName ?? "";
   const teacherCode = teacher.teacherCode;
 
-  // Hard-delete all subject assignment history with the teacher account
   await SubjectAssignment.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt);
 
-  // Detach from subjects / class coordinator roles
   await Subject.updateMany(
     { schoolId, teacherIds: teacher._id },
     { $pull: { teacherIds: teacher._id } },
@@ -168,7 +237,6 @@ export const hardDeleteTeacherAccount = async (params: {
     sessionOpt
   );
 
-  // Academic management owned by this teacher
   const sessionPlans = await AcademicSessionPlan.find(
     { schoolId, teacherId: teacher._id },
     { _id: 1 },
@@ -204,6 +272,12 @@ export const hardDeleteTeacherAccount = async (params: {
   ).lean();
   const dailyAttendanceIds = dailyAttendanceRows.map((row) => row._id);
 
+  await releaseLibraryIssuesForBorrower({
+    schoolId,
+    filter: { teacherId: teacher._id },
+    session
+  });
+
   await Promise.all([
     sessionPlanIds.length
       ? AcademicSessionPlanUnit.deleteMany({ schoolId, sessionPlanId: { $in: sessionPlanIds } }, sessionOpt)
@@ -237,7 +311,6 @@ export const hardDeleteTeacherAccount = async (params: {
     TimetableSlot.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt),
     LeaveRequest.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt),
     Payroll.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt),
-    LibraryIssue.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt),
     LaboratoryIssue.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt),
     SalaryPayment.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt)
   ]);

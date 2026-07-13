@@ -18,6 +18,11 @@ export const filterLibraryIssues = (
   return issues.filter((issue) => {
     const bookTitle = issue.bookTitle?.toLowerCase() ?? "";
     const borrowerName = issue.borrowerName?.toLowerCase() ?? "";
-    return bookTitle.includes(normalized) || borrowerName.includes(normalized);
+    const bookCode = issue.bookCode?.toLowerCase() ?? "";
+    return (
+      bookTitle.includes(normalized) ||
+      borrowerName.includes(normalized) ||
+      bookCode.includes(normalized)
+    );
   });
 };

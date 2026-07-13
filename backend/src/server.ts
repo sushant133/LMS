@@ -6,7 +6,7 @@ import morgan from "morgan";
 import path from "path";
 import { connectDatabase, disconnectDatabase } from "./config/db.js";
 import { env, getUploadDir } from "./config/env.js";
-import { serveComplaintAttachment } from "./controllers/complaintFileController.js";
+import { serveProtectedUpload } from "./controllers/protectedUploadController.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { protect } from "./middleware/auth.js";
 import { originCheck } from "./middleware/originCheck.js";
@@ -14,6 +14,7 @@ import { securityHeaders } from "./middleware/securityHeaders.js";
 import routes from "./routes/index.js";
 import { ensureDemoData } from "./seed/index.js";
 import { migrateLegacyDemoDisplayNames } from "./utils/migrateLegacyDemoDisplayNames.js";
+import { repairLaboratoryIndexes } from "./utils/repairLaboratoryIndexes.js";
 import { startAcademicManagementNotificationScheduler } from "./utils/academicManagementNotifications.js";
 import { configuredCorsOrigins, isOriginAllowed } from "./utils/allowedOrigins.js";
 import { logger } from "./utils/logger.js";
@@ -60,27 +61,19 @@ if (env.NODE_ENV === "production") {
 }
 
 const uploadsDir = getUploadDir();
-app.get("/uploads/:schoolId/complaints/:filename", protect, serveComplaintAttachment);
-app.use("/uploads", (req, res, next) => {
-  if (req.path.includes("/complaints/")) {
-    return res.status(401).json({ success: false, message: "Authentication required" });
-  }
-  // Never execute uploaded content as scripts
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Content-Disposition", "inline");
-  return next();
+/**
+ * P0 security: all tenant uploads require authentication + school isolation.
+ * Public static serving of /uploads is intentionally disabled (PII risk).
+ * Complaints keep stricter owner/admin ACL inside serveProtectedUpload.
+ */
+// Express 5 named wildcard (path-to-regexp): /uploads/:schoolId/{*filePath}
+app.get("/uploads/:schoolId/{*filePath}", protect, serveProtectedUpload);
+app.use("/uploads", (_req, res) => {
+  res.status(401).json({
+    success: false,
+    message: "Authentication required to access uploaded files"
+  });
 });
-app.use(
-  "/uploads",
-  express.static(uploadsDir, {
-    dotfiles: "deny",
-    index: false,
-    setHeaders: (res) => {
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Cache-Control", "private, max-age=3600");
-    }
-  })
-);
 
 app.get("/", (_req, res) => {
   res.json({
@@ -139,7 +132,21 @@ const shutdown = async (signal: string): Promise<void> => {
 
 const startServer = async (): Promise<void> => {
   await connectDatabase();
-  await migrateLegacyDemoDisplayNames();
+
+  // Fix Atlas laboratory unique index before any seed work (never throws)
+  await repairLaboratoryIndexes();
+
+  try {
+    await migrateLegacyDemoDisplayNames();
+  } catch (error) {
+    logger.warn(
+      `migrateLegacyDemoDisplayNames failed (non-fatal): ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  // Demo seed is best-effort — must not prevent API from listening
   await ensureDemoData();
 
   startAcademicManagementNotificationScheduler();

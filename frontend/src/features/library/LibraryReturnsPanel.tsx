@@ -163,18 +163,22 @@ export const LibraryReturnsPanel = () => {
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
                 <p className="font-medium text-slate-900">
                   {selectedIssue.bookTitle ?? "Book"}
+                  {selectedIssue.bookCode ? (
+                    <span className="ml-2 font-mono text-sm text-brand-700">
+                      [{selectedIssue.bookCode}]
+                    </span>
+                  ) : null}
                 </p>
                 <p className="mt-1 text-slate-600">
                   Borrower:{" "}
                   {selectedIssue.borrowerType === "STUDENT" &&
-                  resolveStudentId(selectedIssue.studentId) &&
-                  selectedIssue.borrowerName ? (
+                  resolveStudentId(selectedIssue.studentId) ? (
                     <StudentNameLink
                       studentId={resolveStudentId(selectedIssue.studentId)!}
-                      name={selectedIssue.borrowerName}
+                      name={selectedIssue.borrowerName?.trim() || "Student"}
                     />
                   ) : (
-                    (selectedIssue.borrowerName ?? "—")
+                    (selectedIssue.borrowerName?.trim() || "—")
                   )}
                 </p>
                 <p className="text-slate-600">
@@ -236,7 +240,7 @@ export const LibraryReturnsPanel = () => {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 className="pl-9"
-                placeholder="Search book or borrower..."
+                placeholder="Search book, code, or borrower..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -247,6 +251,7 @@ export const LibraryReturnsPanel = () => {
               <TableHead>
                 <tr>
                   <Th>Book</Th>
+                  <Th>Code</Th>
                   <Th>Borrower</Th>
                   <Th>Issued</Th>
                   <Th>Due</Th>
@@ -257,7 +262,7 @@ export const LibraryReturnsPanel = () => {
               <TableBody>
                 {filteredActiveIssues.length === 0 ? (
                   <tr>
-                    <Td colSpan={6} className="py-8 text-center text-slate-500">
+                    <Td colSpan={7} className="py-8 text-center text-slate-500">
                       {activeIssues.length === 0
                         ? "No books are currently borrowed."
                         : "No active borrows match your search."}
@@ -274,16 +279,18 @@ export const LibraryReturnsPanel = () => {
                       }
                     >
                       <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
+                      <Td className="font-mono text-sm">
+                        {issue.bookCode ?? "—"}
+                      </Td>
                       <Td>
                         {issue.borrowerType === "STUDENT" &&
-                        resolveStudentId(issue.studentId) &&
-                        issue.borrowerName ? (
+                        resolveStudentId(issue.studentId) ? (
                           <StudentNameLink
                             studentId={resolveStudentId(issue.studentId)!}
-                            name={issue.borrowerName}
+                            name={issue.borrowerName?.trim() || "Student"}
                           />
                         ) : (
-                          (issue.borrowerName ?? "—")
+                          (issue.borrowerName?.trim() || "—")
                         )}
                       </Td>
                       <Td>{issue.issuedDateBs}</Td>
@@ -328,6 +335,7 @@ export const LibraryReturnsPanel = () => {
             <TableHead>
               <tr>
                 <Th>Book</Th>
+                <Th>Code</Th>
                 <Th>Borrower</Th>
                 <Th>Issued</Th>
                 <Th>Due</Th>
@@ -337,7 +345,7 @@ export const LibraryReturnsPanel = () => {
             <TableBody>
               {(returnedIssuesQuery.data ?? []).length === 0 ? (
                 <tr>
-                  <Td colSpan={5} className="py-8 text-center text-slate-500">
+                  <Td colSpan={6} className="py-8 text-center text-slate-500">
                     No returned books recorded yet.
                   </Td>
                 </tr>
@@ -345,16 +353,18 @@ export const LibraryReturnsPanel = () => {
                 (returnedIssuesQuery.data ?? []).map((issue) => (
                   <tr key={issue._id}>
                     <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
+                    <Td className="font-mono text-sm">
+                      {issue.bookCode ?? "—"}
+                    </Td>
                     <Td>
                       {issue.borrowerType === "STUDENT" &&
-                      resolveStudentId(issue.studentId) &&
-                      issue.borrowerName ? (
+                      resolveStudentId(issue.studentId) ? (
                         <StudentNameLink
                           studentId={resolveStudentId(issue.studentId)!}
-                          name={issue.borrowerName}
+                          name={issue.borrowerName?.trim() || "Student"}
                         />
                       ) : (
-                        (issue.borrowerName ?? "—")
+                        (issue.borrowerName?.trim() || "—")
                       )}
                     </Td>
                     <Td>{issue.issuedDateBs}</Td>

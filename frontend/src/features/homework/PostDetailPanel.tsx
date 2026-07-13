@@ -18,7 +18,7 @@ import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { AttachmentViewer } from "components/shared/AttachmentViewer";
-import { resolveAttachmentUrl } from "lib/attachments";
+import { openAuthenticatedAttachment } from "lib/attachments";
 import { ClassroomAttachmentUpload } from "./ClassroomAttachmentUpload";
 import {
   DEADLINE_COLORS,
@@ -412,16 +412,23 @@ export const PostDetailPanel = ({
                             </p>
                           ) : null}
                           {submission.attachmentUrl ? (
-                            <a
-                              href={resolveAttachmentUrl(
-                                submission.attachmentUrl,
-                              )}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-1 inline-block text-brand-700 hover:underline"
+                            <button
+                              type="button"
+                              className="mt-1 inline-block text-left text-brand-700 hover:underline"
+                              onClick={() => {
+                                void openAuthenticatedAttachment(
+                                  submission.attachmentUrl!,
+                                ).catch((error: unknown) => {
+                                  toast.error(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Could not open attachment",
+                                  );
+                                });
+                              }}
                             >
                               View attachment
-                            </a>
+                            </button>
                           ) : null}
                           {submission.status !== "GRADED" ? (
                             <div className="mt-3 grid gap-2 sm:grid-cols-[100px_1fr_auto]">

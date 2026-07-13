@@ -29,8 +29,14 @@ const laboratorySchema = new Schema(
 );
 
 laboratorySchema.index({ schoolId: 1, name: 1 }, { unique: true });
-laboratorySchema.index({ schoolId: 1, code: 1 }, { unique: true, sparse: true });
+// NOTE: Do NOT declare a unique (schoolId, code) index on the schema.
+// MongoDB unique/sparse indexes still index explicit `null` → E11000 when multiple
+// labs have code:null. The safe partial index is created only in
+// `repairLaboratoryIndexes()` as `schoolId_1_code_1_nonempty`.
 laboratorySchema.index({ schoolId: 1, inChargeTeacherId: 1 });
+
+// Prevent mongoose autoIndex from racing seed/startup on this collection
+laboratorySchema.set("autoIndex", false);
 
 export type LaboratoryDocument = HydratedDocument<InferSchemaType<typeof laboratorySchema>>;
 export const Laboratory = mongoose.model("Laboratory", laboratorySchema);

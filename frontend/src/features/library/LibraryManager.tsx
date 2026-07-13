@@ -1,20 +1,26 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   canManageInstitution,
+  LIBRARY_YEAR_LEVELS,
   libraryBookSchema,
   libraryIssueSchema,
   moduleStaffSchema,
+  type LibraryBookCopyRecord,
   type LibraryBookInput,
   type LibraryBookRecord,
+  type LibraryCopyStatus,
   type LibraryDashboardResponse,
   type LibraryInventoryAccessResponse,
   type LibraryIssueInput,
+  type LibraryYearLevel,
   type ModuleStaffInput,
   type UserProfile,
 } from "@phit-erp/shared";
 import {
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   History,
   LayoutDashboard,
   Lock,
@@ -46,17 +52,40 @@ import { cn, parseErrorMessage } from "lib/utils";
 
 type Tab = "dashboard" | "inventory" | "issue" | "returns" | "staff";
 
+type CopyDraft = { bookCode: string; shelfLocation: string; condition: string };
+
+const emptyCopy = (): CopyDraft => ({
+  bookCode: "",
+  shelfLocation: "",
+  condition: "",
+});
+
+const resizeCopies = (current: CopyDraft[], total: number): CopyDraft[] => {
+  const count = Math.max(1, Math.min(200, total || 1));
+  if (current.length === count) return current;
+  if (current.length < count) {
+    return [
+      ...current,
+      ...Array.from({ length: count - current.length }, () => emptyCopy()),
+    ];
+  }
+  return current.slice(0, count);
+};
+
 const defaultBook: LibraryBookInput = {
   title: "",
   author: "",
   isbn: "",
   category: "General",
+  yearLevel: "1st Year",
   totalCopies: 1,
   shelfLocation: "",
+  copies: [{ bookCode: "" }],
 };
 
 const defaultIssue: LibraryIssueInput = {
   bookId: "",
+  copyId: "",
   borrowerType: "STUDENT",
   studentId: "",
   teacherId: "",
@@ -74,6 +103,14 @@ const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
   RETURNED: "bg-brand-100 text-brand-800",
   OVERDUE: "bg-rose-100 text-rose-800",
+};
+
+const copyStatusStyles: Record<LibraryCopyStatus, string> = {
+  AVAILABLE: "bg-emerald-100 text-emerald-800",
+  ISSUED: "bg-sky-100 text-sky-800",
+  LOST: "bg-rose-100 text-rose-800",
+  DAMAGED: "bg-orange-100 text-orange-800",
+  MAINTENANCE: "bg-amber-100 text-amber-800",
 };
 
 const tabs: Array<{
@@ -94,9 +131,14 @@ export const LibraryManager = () => {
   const isAdmin = canManageInstitution(user?.role ?? "");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [bookForm, setBookForm] = useState<LibraryBookInput>(defaultBook);
+  const [copyDrafts, setCopyDrafts] = useState<CopyDraft[]>([emptyCopy()]);
+  const [addCopyDrafts, setAddCopyDrafts] = useState<CopyDraft[]>([]);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [expandedBookId, setExpandedBookId] = useState<string | null>(null);
   const [issueForm, setIssueForm] = useState<LibraryIssueInput>(defaultIssue);
   const [staffForm, setStaffForm] = useState<ModuleStaffInput>(defaultStaff);
+  const [inventorySearch, setInventorySearch] = useState("");
+  const [yearFilter, setYearFilter] = useState<"ALL" | LibraryYearLevel>("ALL");
 
   const dashboardQuery = useQuery({
     queryKey: ["library-dashboard"],
@@ -119,7 +161,6 @@ export const LibraryManager = () => {
   });
 
   const inventoryAccessEnabled = inventoryAccessQuery.data?.enabled ?? false;
-  // School inventory toggle AND per-user module access (library / inventory)
   const libraryModuleWrite =
     isAdmin ||
     ((user?.moduleAccess?.library ?? "WRITE") !== "READ_ONLY" &&
@@ -150,6 +191,50 @@ export const LibraryManager = () => {
     enabled: isAdmin && tab === "staff",
   });
 
+  const selectedBook = useMemo(
+    () =>
+      (booksQuery.data ?? []).find((b) => b._id === issueForm.bookId) ?? null,
+    [booksQuery.data, issueForm.bookId],
+  );
+
+  const availableCopies = useMemo(
+    () =>
+      (selectedBook?.copies ?? []).filter(
+        (c) => c.status === "AVAILABLE",
+      ) as LibraryBookCopyRecord[],
+    [selectedBook],
+  );
+
+  const filteredBooks = useMemo(() => {
+    const q = inventorySearch.trim().toLowerCase();
+    let books = booksQuery.data ?? [];
+    if (yearFilter !== "ALL") {
+      books = books.filter(
+        (book) => (book.yearLevel ?? "All Years") === yearFilter,
+      );
+    }
+    if (!q) return books;
+    return books.filter((book) => {
+      const year = (book.yearLevel ?? "All Years").toLowerCase();
+      const inTitle =
+        book.title.toLowerCase().includes(q) ||
+        book.author.toLowerCase().includes(q) ||
+        book.category.toLowerCase().includes(q) ||
+        year.includes(q) ||
+        (book.isbn ?? "").toLowerCase().includes(q);
+      const inCodes = (book.copies ?? []).some((c) =>
+        c.bookCode.toLowerCase().includes(q),
+      );
+      return inTitle || inCodes;
+    });
+  }, [booksQuery.data, inventorySearch, yearFilter]);
+
+  useEffect(() => {
+    if (!editingBookId) {
+      setCopyDrafts((prev) => resizeCopies(prev, bookForm.totalCopies));
+    }
+  }, [bookForm.totalCopies, editingBookId]);
+
   const invalidateLibrary = async () => {
     await queryClient.invalidateQueries({ queryKey: ["library-books"] });
     await queryClient.invalidateQueries({ queryKey: ["library-issues"] });
@@ -179,13 +264,19 @@ export const LibraryManager = () => {
   });
 
   const saveBook = useMutation({
-    mutationFn: (payload: LibraryBookInput) =>
+    mutationFn: (payload: Record<string, unknown>) =>
       editingBookId
         ? unwrap(api.put(`/library/books/${editingBookId}`, payload))
         : unwrap(api.post("/library/books", payload)),
     onSuccess: async () => {
-      toast.success(editingBookId ? "Book updated" : "Book added");
+      toast.success(
+        editingBookId
+          ? "Book updated"
+          : "Book added with all physical copy codes",
+      );
       setBookForm(defaultBook);
+      setCopyDrafts([emptyCopy()]);
+      setAddCopyDrafts([]);
       setEditingBookId(null);
       await invalidateLibrary();
     },
@@ -205,7 +296,7 @@ export const LibraryManager = () => {
     mutationFn: (payload: LibraryIssueInput) =>
       unwrap(api.post("/library/issues", payload)),
     onSuccess: async () => {
-      toast.success("Book issued");
+      toast.success("Book issued by copy code");
       setIssueForm(defaultIssue);
       await invalidateLibrary();
     },
@@ -233,11 +324,54 @@ export const LibraryManager = () => {
 
   const visibleTabs = tabs.filter((item) => !item.adminOnly || isAdmin);
 
+  const submitBook = () => {
+    if (editingBookId) {
+      const addCopies = addCopyDrafts
+        .filter((c) => c.bookCode.trim())
+        .map((c) => ({
+          bookCode: c.bookCode.trim(),
+          shelfLocation: c.shelfLocation.trim() || bookForm.shelfLocation || "",
+          condition: c.condition.trim() || "",
+        }));
+      saveBook.mutate({
+        title: bookForm.title,
+        author: bookForm.author,
+        isbn: bookForm.isbn,
+        category: bookForm.category,
+        yearLevel: bookForm.yearLevel,
+        shelfLocation: bookForm.shelfLocation,
+        ...(addCopies.length ? { addCopies } : {}),
+      });
+      return;
+    }
+
+    const copies = copyDrafts.map((c) => ({
+      bookCode: c.bookCode.trim(),
+      shelfLocation: c.shelfLocation.trim() || bookForm.shelfLocation || "",
+      condition: c.condition.trim() || "",
+    }));
+
+    const payload: LibraryBookInput = {
+      ...bookForm,
+      totalCopies: copies.length,
+      copies,
+    };
+
+    const parsed = libraryBookSchema.safeParse(payload);
+    if (!parsed.success) {
+      const msg =
+        parsed.error.issues[0]?.message ??
+        "Enter a unique book code for every physical copy";
+      return toast.error(msg);
+    }
+    saveBook.mutate(parsed.data);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Library"
-        description="Manage catalog, inventory, issue books, process returns, and track borrowing activity."
+        description="Register each physical book with a unique code, issue by code, and track which student has which copy."
       />
 
       <ModuleReadOnlyBanner show={libraryReadOnly} />
@@ -267,7 +401,7 @@ export const LibraryManager = () => {
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {[
               {
-                label: "Total Books",
+                label: "Total Physical Books",
                 value: dashboardQuery.data?.totalBooks ?? 0,
               },
               {
@@ -306,6 +440,7 @@ export const LibraryManager = () => {
                 <TableHead>
                   <tr>
                     <Th>Book</Th>
+                    <Th>Code</Th>
                     <Th>Borrower</Th>
                     <Th>Due</Th>
                     <Th>Status</Th>
@@ -315,16 +450,18 @@ export const LibraryManager = () => {
                   {(dashboardQuery.data?.recentlyIssued ?? []).map((issue) => (
                     <tr key={issue._id}>
                       <Td>{issue.bookTitle ?? "—"}</Td>
+                      <Td className="font-mono text-sm">
+                        {issue.bookCode ?? "—"}
+                      </Td>
                       <Td>
                         {issue.borrowerType === "STUDENT" &&
-                        resolveStudentId(issue.studentId) &&
-                        issue.borrowerName ? (
+                        resolveStudentId(issue.studentId) ? (
                           <StudentNameLink
                             studentId={resolveStudentId(issue.studentId)!}
-                            name={issue.borrowerName}
+                            name={issue.borrowerName?.trim() || "Student"}
                           />
                         ) : (
-                          (issue.borrowerName ?? "—")
+                          (issue.borrowerName?.trim() || "—")
                         )}
                       </Td>
                       <Td>{issue.dueDateBs}</Td>
@@ -399,23 +536,31 @@ export const LibraryManager = () => {
           <div
             className={cn(
               "grid gap-6",
-              canManageInventory && "xl:grid-cols-[360px_1fr]",
+              canManageInventory && "xl:grid-cols-[420px_1fr]",
             )}
           >
             {canManageInventory ? (
               <Card>
                 <CardHeader>
                   <CardTitle>
-                    {editingBookId ? "Edit book" : "Add book"}
+                    {editingBookId
+                      ? "Edit book / add more copies"
+                      : "Add book with physical copies"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <p className="text-xs text-slate-500">
+                    {editingBookId
+                      ? "Update title details, or add extra physical copies with new unique codes."
+                      : "Enter title once, set how many physical books you have, then type a unique code for each copy (e.g. ANA001, ANA002)."}
+                  </p>
                   <FormField label="Title">
                     <Input
                       value={bookForm.title}
                       onChange={(e) =>
                         setBookForm((c) => ({ ...c, title: e.target.value }))
                       }
+                      placeholder="e.g. Human Anatomy & Physiology"
                     />
                   </FormField>
                   <FormField label="Author">
@@ -432,8 +577,30 @@ export const LibraryManager = () => {
                       onChange={(e) =>
                         setBookForm((c) => ({ ...c, category: e.target.value }))
                       }
+                      placeholder="e.g. Anatomy, Physiology"
                     />
                   </FormField>
+                  <FormField label="Year">
+                    <Select
+                      value={bookForm.yearLevel ?? "1st Year"}
+                      onChange={(e) =>
+                        setBookForm((c) => ({
+                          ...c,
+                          yearLevel: e.target.value as LibraryYearLevel,
+                        }))
+                      }
+                    >
+                      {LIBRARY_YEAR_LEVELS.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <p className="text-xs text-slate-500 -mt-1">
+                    Assign books to 1st, 2nd, or 3rd Year so staff can filter the
+                    catalog by year. Use “All Years” for shared/reference books.
+                  </p>
                   <FormField label="ISBN (optional)">
                     <Input
                       value={bookForm.isbn}
@@ -442,27 +609,154 @@ export const LibraryManager = () => {
                       }
                     />
                   </FormField>
-                  <FormField label="Total copies">
-                    <NumberInput
-                      value={bookForm.totalCopies}
+                  <FormField label="Default shelf (optional)">
+                    <Input
+                      value={bookForm.shelfLocation ?? ""}
                       onChange={(e) =>
                         setBookForm((c) => ({
                           ...c,
-                          totalCopies: e.target.valueAsNumber,
+                          shelfLocation: e.target.value,
                         }))
                       }
+                      placeholder="e.g. A-12"
                     />
                   </FormField>
+
+                  {!editingBookId ? (
+                    <>
+                      <FormField label="Number of physical copies">
+                        <NumberInput
+                          min={1}
+                          max={200}
+                          value={bookForm.totalCopies}
+                          onChange={(e) => {
+                            const n = e.target.valueAsNumber || 1;
+                            setBookForm((c) => ({ ...c, totalCopies: n }));
+                            setCopyDrafts((prev) => resizeCopies(prev, n));
+                          }}
+                        />
+                      </FormField>
+                      <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-sm font-medium text-slate-800">
+                          Book codes ({copyDrafts.length})
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Each physical book needs its own code. Codes must be
+                          unique (e.g. ANA001 … ANA030).
+                        </p>
+                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                          {copyDrafts.map((copy, index) => (
+                            <div
+                              key={index}
+                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-[1fr_1fr]"
+                            >
+                              <FormField label={`Copy ${index + 1} code *`}>
+                                <Input
+                                  value={copy.bookCode}
+                                  placeholder={`e.g. ANA${String(index + 1).padStart(3, "0")}`}
+                                  onChange={(e) =>
+                                    setCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              bookCode: e.target.value,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
+                              <FormField label="Shelf (optional)">
+                                <Input
+                                  value={copy.shelfLocation}
+                                  placeholder={
+                                    bookForm.shelfLocation || "Shelf"
+                                  }
+                                  onChange={(e) =>
+                                    setCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              shelfLocation: e.target.value,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-slate-800">
+                          Add more physical copies
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() =>
+                            setAddCopyDrafts((rows) => [...rows, emptyCopy()])
+                          }
+                        >
+                          + Add copy row
+                        </Button>
+                      </div>
+                      {addCopyDrafts.length === 0 ? (
+                        <p className="text-xs text-slate-500">
+                          Existing copies stay as-is. Use “+ Add copy row” to
+                          register extra volumes with new codes.
+                        </p>
+                      ) : (
+                        <div className="max-h-56 space-y-2 overflow-y-auto">
+                          {addCopyDrafts.map((copy, index) => (
+                            <div
+                              key={index}
+                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-[1fr_auto]"
+                            >
+                              <Input
+                                value={copy.bookCode}
+                                placeholder="New book code"
+                                onChange={(e) =>
+                                  setAddCopyDrafts((rows) =>
+                                    rows.map((row, i) =>
+                                      i === index
+                                        ? { ...row, bookCode: e.target.value }
+                                        : row,
+                                    ),
+                                  )
+                                }
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  setAddCopyDrafts((rows) =>
+                                    rows.filter((_, i) => i !== index),
+                                  )
+                                }
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
-                    <Button
-                      onClick={() => {
-                        const parsed = libraryBookSchema.safeParse(bookForm);
-                        if (!parsed.success)
-                          return toast.error("Invalid book details");
-                        saveBook.mutate(parsed.data);
-                      }}
-                    >
-                      {editingBookId ? "Update" : "Add book"}
+                    <Button onClick={submitBook} disabled={saveBook.isPending}>
+                      {editingBookId ? "Update" : "Add book & codes"}
                     </Button>
                     {editingBookId ? (
                       <Button
@@ -470,6 +764,8 @@ export const LibraryManager = () => {
                         onClick={() => {
                           setEditingBookId(null);
                           setBookForm(defaultBook);
+                          setCopyDrafts([emptyCopy()]);
+                          setAddCopyDrafts([]);
                         }}
                       >
                         Cancel
@@ -481,38 +777,81 @@ export const LibraryManager = () => {
             ) : null}
 
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                 <CardTitle>Library inventory</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    className="w-auto min-w-[140px]"
+                    value={yearFilter}
+                    onChange={(e) =>
+                      setYearFilter(
+                        e.target.value as "ALL" | LibraryYearLevel,
+                      )
+                    }
+                  >
+                    <option value="ALL">All years</option>
+                    {LIBRARY_YEAR_LEVELS.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </Select>
+                  <Input
+                    className="max-w-xs"
+                    placeholder="Search title, author, year, or book code…"
+                    value={inventorySearch}
+                    onChange={(e) => setInventorySearch(e.target.value)}
+                  />
+                </div>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Book</Th>
-                      <Th>Author</Th>
-                      <Th>Category</Th>
-                      <Th>Total</Th>
-                      <Th>Available</Th>
-                      <Th>Issued</Th>
-                      <Th>Status</Th>
-                      {canManageInventory ? <Th /> : null}
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {(booksQuery.data ?? []).map((book) => (
-                      <tr key={book._id}>
-                        <Td className="font-medium">{book.title}</Td>
-                        <Td>{book.author}</Td>
-                        <Td>{book.category}</Td>
-                        <Td>{book.totalCopies}</Td>
-                        <Td>{book.availableCopies}</Td>
-                        <Td>{book.issuedCopies}</Td>
-                        <Td>
+              <CardContent className="space-y-3">
+                {filteredBooks.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-500">
+                    No books match this year filter or search.
+                  </p>
+                ) : (
+                  filteredBooks.map((book) => {
+                    const expanded = expandedBookId === book._id;
+                    const copies = book.copies ?? [];
+                    return (
+                      <div
+                        key={book._id}
+                        className="rounded-lg border border-slate-200"
+                      >
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 px-3 py-3 text-left hover:bg-slate-50"
+                          onClick={() =>
+                            setExpandedBookId(expanded ? null : book._id)
+                          }
+                        >
+                          {expanded ? (
+                            <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium text-slate-900">
+                                {book.title}
+                              </p>
+                              <Badge className="bg-indigo-100 text-indigo-800">
+                                {book.yearLevel ?? "All Years"}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-slate-500">
+                              {book.author} · {book.category} ·{" "}
+                              {book.totalCopies} copies ·{" "}
+                              {book.availableCopies} available ·{" "}
+                              {book.issuedCopies} issued
+                            </p>
+                          </div>
                           <StockStatusBadge status={book.status} />
-                        </Td>
-                        {canManageInventory ? (
-                          <Td>
-                            <div className="flex gap-1">
+                          {canManageInventory ? (
+                            <div
+                              className="flex gap-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <Button
                                 size="sm"
                                 variant="secondary"
@@ -523,9 +862,12 @@ export const LibraryManager = () => {
                                     author: book.author,
                                     isbn: book.isbn ?? "",
                                     category: book.category,
+                                    yearLevel:
+                                      book.yearLevel ?? "All Years",
                                     totalCopies: book.totalCopies,
                                     shelfLocation: book.shelfLocation ?? "",
                                   });
+                                  setAddCopyDrafts([]);
                                 }}
                               >
                                 Edit
@@ -533,17 +875,68 @@ export const LibraryManager = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => deleteBook.mutate(book._id)}
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Delete "${book.title}" and all its physical copies?`,
+                                    )
+                                  ) {
+                                    deleteBook.mutate(book._id);
+                                  }
+                                }}
                               >
                                 Delete
                               </Button>
                             </div>
-                          </Td>
+                          ) : null}
+                        </button>
+                        {expanded ? (
+                          <div className="border-t border-slate-100 px-3 py-2">
+                            {copies.length === 0 ? (
+                              <p className="py-2 text-sm text-amber-700">
+                                No coded copies yet for this title (legacy
+                                stock). Re-add with codes for full tracking.
+                              </p>
+                            ) : (
+                              <Table>
+                                <TableHead>
+                                  <tr>
+                                    <Th>Book code</Th>
+                                    <Th>Status</Th>
+                                    <Th>Shelf</Th>
+                                  </tr>
+                                </TableHead>
+                                <TableBody>
+                                  {copies.map((copy) => (
+                                    <tr key={copy._id}>
+                                      <Td className="font-mono font-medium">
+                                        {copy.bookCode}
+                                      </Td>
+                                      <Td>
+                                        <Badge
+                                          className={
+                                            copyStatusStyles[copy.status] ?? ""
+                                          }
+                                        >
+                                          {copy.status}
+                                        </Badge>
+                                      </Td>
+                                      <Td>
+                                        {copy.shelfLocation ||
+                                          book.shelfLocation ||
+                                          "—"}
+                                      </Td>
+                                    </tr>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            )}
+                          </div>
                         ) : null}
-                      </tr>
-                    ))}
-                  </TableBody>
-                </Table>
+                      </div>
+                    );
+                  })
+                )}
               </CardContent>
             </Card>
           </div>
@@ -553,24 +946,52 @@ export const LibraryManager = () => {
       {tab === "issue" && (
         <Card>
           <CardHeader>
-            <CardTitle>Issue book</CardTitle>
+            <CardTitle>Issue book by code</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <FormField label="Book">
+            <FormField label="Book title">
               <Select
                 value={issueForm.bookId}
                 onChange={(e) =>
-                  setIssueForm((c) => ({ ...c, bookId: e.target.value }))
+                  setIssueForm((c) => ({
+                    ...c,
+                    bookId: e.target.value,
+                    copyId: "",
+                  }))
                 }
               >
                 <option value="">Select book</option>
                 {(booksQuery.data ?? [])
-                  .filter((b) => b.availableCopies > 0)
+                  .filter(
+                    (b) =>
+                      (b.copies ?? []).some((c) => c.status === "AVAILABLE") ||
+                      b.availableCopies > 0,
+                  )
                   .map((b) => (
                     <option key={b._id} value={b._id}>
-                      {b.title} ({b.availableCopies} available)
+                      [{b.yearLevel ?? "All Years"}] {b.title} (
+                      {(b.copies ?? []).filter((c) => c.status === "AVAILABLE")
+                        .length || b.availableCopies}{" "}
+                      available)
                     </option>
                   ))}
+              </Select>
+            </FormField>
+            <FormField label="Physical book code">
+              <Select
+                value={issueForm.copyId ?? ""}
+                onChange={(e) =>
+                  setIssueForm((c) => ({ ...c, copyId: e.target.value }))
+                }
+                disabled={!issueForm.bookId}
+              >
+                <option value="">Select code to issue</option>
+                {availableCopies.map((copy) => (
+                  <option key={copy._id} value={copy._id}>
+                    {copy.bookCode}
+                    {copy.shelfLocation ? ` · ${copy.shelfLocation}` : ""}
+                  </option>
+                ))}
               </Select>
             </FormField>
             <FormField label="Borrower type">
@@ -640,14 +1061,32 @@ export const LibraryManager = () => {
               <Button
                 onClick={() => {
                   const parsed = libraryIssueSchema.safeParse(issueForm);
-                  if (!parsed.success)
-                    return toast.error("Invalid issue details");
+                  if (!parsed.success) {
+                    return toast.error(
+                      parsed.error.issues[0]?.message ??
+                        "Select book, code, borrower, and dates",
+                    );
+                  }
                   issueBook.mutate(parsed.data);
                 }}
+                disabled={issueBook.isPending}
               >
-                Issue book
+                Issue this copy
               </Button>
             </div>
+            {issueForm.copyId && selectedBook ? (
+              <p className="md:col-span-2 xl:col-span-3 text-sm text-slate-600">
+                Issuing{" "}
+                <span className="font-mono font-semibold">
+                  {
+                    availableCopies.find((c) => c._id === issueForm.copyId)
+                      ?.bookCode
+                  }
+                </span>{" "}
+                of <strong>{selectedBook.title}</strong>. Only this code will
+                become ISSUED; other copies stay available.
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       )}
@@ -695,9 +1134,6 @@ export const LibraryManager = () => {
               >
                 Create account
               </Button>
-              <p className="text-xs text-slate-500">
-                Default password applies unless you set a custom one via API.
-              </p>
             </CardContent>
           </Card>
 
