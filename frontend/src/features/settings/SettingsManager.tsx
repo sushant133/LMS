@@ -218,6 +218,7 @@ export const SettingsManager = () => {
             </div>
             <AddressFields
               value={form.address}
+              streetOptional
               onChange={(address) =>
                 setForm((current) => ({ ...current, address }))
               }

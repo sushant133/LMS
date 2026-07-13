@@ -98,24 +98,38 @@ export const provisionMasterSubjectToAllBatches = async (
   }
 };
 
-export const provisionSubjectsForBatch = async (schoolId: SchoolId, batchId: SchoolId): Promise<void> => {
-  const [years, masterSubjects] = await Promise.all([
-    Year.find({ schoolId, batchId }).lean(),
-    MasterSubject.find({ schoolId, isActive: true }).lean()
-  ]);
+export const provisionSubjectsForBatch = async (
+  schoolId: SchoolId,
+  batchId: SchoolId,
+  session?: mongoose.ClientSession | null
+): Promise<void> => {
+  const sessionOpt = session ? { session } : {};
+
+  const yearQuery = Year.find({ schoolId, batchId }).lean();
+  const masterQuery = MasterSubject.find({ schoolId, isActive: true }).lean();
+  if (session) {
+    yearQuery.session(session);
+    masterQuery.session(session);
+  }
+
+  const [years, masterSubjects] = await Promise.all([yearQuery, masterQuery]);
 
   if (!years.length || !masterSubjects.length) {
     return;
   }
 
   const yearIds = years.map((year) => year._id);
-  const existing = await Subject.find({
+  const existingQuery = Subject.find({
     schoolId,
     masterSubjectId: { $in: masterSubjects.map((master) => master._id) },
     yearIds: { $in: yearIds }
   })
     .select("masterSubjectId yearIds")
     .lean();
+  if (session) {
+    existingQuery.session(session);
+  }
+  const existing = await existingQuery;
 
   const existingKeys = new Set(
     existing.flatMap((subject) =>
@@ -131,7 +145,7 @@ export const provisionSubjectsForBatch = async (schoolId: SchoolId, batchId: Sch
   );
 
   if (toCreate.length) {
-    await Subject.insertMany(toCreate);
+    await Subject.insertMany(toCreate, sessionOpt);
   }
 };
 

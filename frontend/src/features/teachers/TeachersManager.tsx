@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { TeacherInput, TeacherRecord } from "@phit-erp/shared";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
+import { Badge } from "components/ui/badge";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
@@ -16,9 +16,45 @@ import {
 } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
+import { TeacherAssignmentsPanel } from "./TeacherAssignmentsPanel";
 import { TeacherForm } from "./TeacherForm";
+
+const migrationBadgeClass = (status: string): string => {
+  switch (status) {
+    case "ACCEPTED":
+    case "NA":
+      return "bg-emerald-100 text-emerald-800";
+    case "NEEDS_REVIEW":
+      return "bg-orange-100 text-orange-900";
+    default:
+      return "bg-amber-100 text-amber-900";
+  }
+};
+
+/** Compact summary of what an already-created teacher already has on file */
+const legacyLoadSummary = (
+  teacher: TeacherRecord,
+  isCollege: boolean,
+): string => {
+  const subjects = teacher.subjects?.length ?? 0;
+  if (isCollege) {
+    const years = teacher.assignedYearIds?.length ?? 0;
+    const batches = teacher.assignedBatchIds?.length ?? 0;
+    if (subjects === 0 && years === 0 && batches === 0) {
+      return "No load on record";
+    }
+    return `${subjects} subject(s) · ${batches} batch(es) · ${years} year(s)`;
+  }
+  const classes = teacher.assignedClassIds?.length ?? 0;
+  const sections = teacher.assignedSectionIds?.length ?? 0;
+  if (subjects === 0 && classes === 0 && sections === 0) {
+    return "No load on record";
+  }
+  return `${subjects} subject(s) · ${classes} class(es) · ${sections} section(s)`;
+};
 
 const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   fullName: teacher.user.fullName,
@@ -42,8 +78,11 @@ interface TeachersManagerProps {
 
 export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const canManage = useIsTenantAdmin();
+  const isCollege = useIsCollege();
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
+  const [assignmentsTeacher, setAssignmentsTeacher] =
+    useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
     queryKey: ["teachers"],
     queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers")),
@@ -88,15 +127,57 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     return <LoadingState />;
   }
 
-  const teachers = teachersQuery.data ?? [];
+  const teachers = (teachersQuery.data ?? []).filter(
+    (teacher) => Boolean(teacher.user),
+  );
 
   const content = (
     <>
       {!embedded ? (
         <PageHeader
           title="Teacher Management"
-          description="Manage teacher accounts and HR fields. Teaching load is configured under Academics → Subject Assignment."
+          description="One login per teacher. Use Assignments on each row to attach subjects and laboratories to that same account."
         />
+      ) : null}
+
+      {canManage ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="font-medium">Already-created teachers — nothing is lost</p>
+          <p className="mt-1 text-amber-900/90">
+            Edit form is <strong>HR / login only</strong> (name, salary, password). Old
+            subjects and years stay on the teacher record and still work in the teacher
+            portal. Open each row’s <strong>Assignments</strong> button to{" "}
+            <strong>see</strong> that load, add more subjects, and assign laboratories —
+            same login, no second account.
+          </p>
+          <p className="mt-2 text-xs text-amber-800">
+            Path: Teachers → <strong>Assignments</strong> (blue button per row). Look for
+            the amber “Current teaching load” card. Migration PENDING = old style still
+            active; NA / ACCEPTED = matrix-style ready.
+          </p>
+        </div>
+      ) : null}
+
+      {assignmentsTeacher ? (
+        <div className="mb-6 space-y-3 rounded-xl border border-brand-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Assignments — {assignmentsTeacher.user.fullName}
+            </h2>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setAssignmentsTeacher(null)}
+            >
+              Close
+            </Button>
+          </div>
+          <TeacherAssignmentsPanel
+            teacherId={assignmentsTeacher._id}
+            teacherName={assignmentsTeacher.user.fullName}
+            teacher={assignmentsTeacher}
+          />
+        </div>
       ) : null}
 
       {canManage ? (
@@ -163,14 +244,17 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                   <tr>
                     <Th>Name</Th>
                     <Th>Code</Th>
-                    <Th>Qualification</Th>
+                    <Th>Teaching load</Th>
                     <Th>Migration</Th>
                     <Th>Salary</Th>
                     <Th />
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {teachers.map((teacher) => (
+                  {teachers.map((teacher) => {
+                    const status =
+                      teacher.assignmentMigrationStatus ?? "PENDING";
+                    return (
                     <tr key={teacher._id}>
                       <Td>
                         <div>
@@ -183,25 +267,35 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                         </div>
                       </Td>
                       <Td>{teacher.teacherCode}</Td>
-                      <Td>{teacher.qualification}</Td>
-                      <Td className="text-xs">
-                        {teacher.assignmentMigrationStatus ?? "PENDING"}
+                      <Td className="max-w-[14rem] text-xs text-slate-600">
+                        {legacyLoadSummary(teacher, isCollege)}
+                      </Td>
+                      <Td>
+                        <Badge className={migrationBadgeClass(status)}>
+                          {status}
+                        </Badge>
                       </Td>
                       <Td>{formatCurrencyNpr(teacher.basicSalaryNpr)}</Td>
                       {canManage ? (
                         <Td className="text-right">
                           <div className="flex justify-end gap-2">
-                            <Link
-                              to={`/academics/subject-assignments?teacherId=${teacher._id}`}
-                              className="inline-flex h-8 items-center rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-50"
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setEditing(null);
+                                setAccessTeacher(null);
+                                setAssignmentsTeacher(teacher);
+                                window.scrollTo({ top: 0, behavior: "smooth" });
+                              }}
                             >
                               Assignments
-                            </Link>
+                            </Button>
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => {
                                 setAccessTeacher(null);
+                                setAssignmentsTeacher(null);
                                 setEditing(teacher);
                               }}
                             >
@@ -239,7 +333,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                         </Td>
                       ) : null}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

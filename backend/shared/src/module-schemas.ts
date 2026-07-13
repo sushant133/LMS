@@ -278,31 +278,8 @@ export const leaveStatusSchema = z.object({
   status: z.enum(["APPROVED", "REJECTED"])
 });
 
-export {
-  laboratorySchema,
-  laboratoryCategorySchema,
-  laboratoryEquipmentSchema,
-  laboratoryEquipmentUpdateSchema,
-  laboratoryStockAdjustSchema,
-  laboratoryIssueSchema,
-  laboratoryReturnSchema,
-  laboratoryStockRequestSchema,
-  laboratoryStockRequestStatusSchema,
-  laboratoryReportQuerySchema
-} from "./laboratory-schemas.js";
-
-export type {
-  LaboratoryInput,
-  LaboratoryCategoryInput,
-  LaboratoryEquipmentInput,
-  LaboratoryEquipmentUpdateInput,
-  LaboratoryStockAdjustInput,
-  LaboratoryIssueInput,
-  LaboratoryReturnInput,
-  LaboratoryStockRequestInput,
-  LaboratoryStockRequestStatusInput,
-  LaboratoryReportQueryInput
-} from "./laboratory-schemas.js";
+// Laboratory schemas are exported only from laboratory-schemas.ts via package index
+// (do not re-export here — star-export conflict in Vite/ESM).
 
 export const payrollSchema = z.object({
   teacherId: objectIdSchema,

@@ -6,7 +6,8 @@ import {
   LABORATORY_STOCK_MOVEMENT_TYPES,
   LABORATORY_STOCK_PRIORITIES,
   LABORATORY_STOCK_REQUEST_STATUSES,
-  LABORATORY_TYPES
+  LABORATORY_TYPES,
+  LABORATORY_YEAR_LEVELS
 } from "@phit-erp/shared";
 
 const laboratorySchema = new Schema(
@@ -15,6 +16,12 @@ const laboratorySchema = new Schema(
     name: { type: String, required: true, trim: true },
     code: { type: String, trim: true },
     type: { type: String, enum: LABORATORY_TYPES, required: true },
+    yearLevel: {
+      type: String,
+      enum: LABORATORY_YEAR_LEVELS,
+      default: "All Years",
+      index: true
+    },
     customName: { type: String, trim: true },
     department: { type: String, trim: true },
     academicProgram: { type: String, trim: true },
@@ -33,6 +40,7 @@ laboratorySchema.index({ schoolId: 1, name: 1 }, { unique: true });
 // MongoDB unique/sparse indexes still index explicit `null` → E11000 when multiple
 // labs have code:null. The safe partial index is created only in
 // `repairLaboratoryIndexes()` as `schoolId_1_code_1_nonempty`.
+laboratorySchema.index({ schoolId: 1, yearLevel: 1 });
 laboratorySchema.index({ schoolId: 1, inChargeTeacherId: 1 });
 
 // Prevent mongoose autoIndex from racing seed/startup on this collection
@@ -66,6 +74,12 @@ const laboratoryEquipmentSchema = new Schema(
     name: { type: String, required: true, trim: true },
     itemCode: { type: String, required: true, trim: true },
     itemKind: { type: String, enum: LABORATORY_ITEM_KINDS, default: "NON_DISPOSABLE" },
+    yearLevel: {
+      type: String,
+      enum: LABORATORY_YEAR_LEVELS,
+      default: "All Years",
+      index: true
+    },
     brand: { type: String, trim: true },
     /** Equipment model/make (not Mongoose Document.model). */
     equipmentModel: { type: String, trim: true },
@@ -87,6 +101,7 @@ const laboratoryEquipmentSchema = new Schema(
 
 laboratoryEquipmentSchema.index({ schoolId: 1, itemCode: 1 }, { unique: true });
 laboratoryEquipmentSchema.index({ laboratoryId: 1, name: 1 });
+laboratoryEquipmentSchema.index({ schoolId: 1, yearLevel: 1 });
 laboratoryEquipmentSchema.index({ schoolId: 1, availableQuantity: 1, minimumStockLevel: 1 });
 
 export type LaboratoryEquipmentDocument = HydratedDocument<

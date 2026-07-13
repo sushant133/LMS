@@ -1,16 +1,18 @@
-import type {
-  LABORATORY_EQUIPMENT_CONDITIONS,
-  LABORATORY_EQUIPMENT_STATUSES,
-  LABORATORY_INVENTORY_STOCK_STATUSES,
-  LABORATORY_ITEM_KINDS,
-  LABORATORY_REPORT_TYPES,
-  LABORATORY_STOCK_MOVEMENT_TYPES,
-  LABORATORY_STOCK_PRIORITIES,
-  LABORATORY_STOCK_REQUEST_STATUSES,
-  LABORATORY_TYPES
+import {
+  LABORATORY_YEAR_LEVELS,
+  type LABORATORY_EQUIPMENT_CONDITIONS,
+  type LABORATORY_EQUIPMENT_STATUSES,
+  type LABORATORY_INVENTORY_STOCK_STATUSES,
+  type LABORATORY_ITEM_KINDS,
+  type LABORATORY_REPORT_TYPES,
+  type LABORATORY_STOCK_MOVEMENT_TYPES,
+  type LABORATORY_STOCK_PRIORITIES,
+  type LABORATORY_STOCK_REQUEST_STATUSES,
+  type LABORATORY_TYPES
 } from "./laboratory-constants.js";
 
 export type LaboratoryType = (typeof LABORATORY_TYPES)[number];
+export type LaboratoryYearLevel = (typeof LABORATORY_YEAR_LEVELS)[number];
 export type LaboratoryItemKind = (typeof LABORATORY_ITEM_KINDS)[number];
 export type LaboratoryEquipmentCondition = (typeof LABORATORY_EQUIPMENT_CONDITIONS)[number];
 export type LaboratoryEquipmentStatus = (typeof LABORATORY_EQUIPMENT_STATUSES)[number];
@@ -20,12 +22,32 @@ export type LaboratoryStockPriority = (typeof LABORATORY_STOCK_PRIORITIES)[numbe
 export type LaboratoryInventoryStockStatus = (typeof LABORATORY_INVENTORY_STOCK_STATUSES)[number];
 export type LaboratoryReportType = (typeof LABORATORY_REPORT_TYPES)[number];
 
+export type TeacherLabAssignmentRole = "IN_CHARGE" | "ASSISTANT" | "INSTRUCTOR";
+export type TeacherLabAssignmentStatus = "ACTIVE" | "INACTIVE";
+
+export interface TeacherLaboratoryAssignmentRecord {
+  _id: string;
+  schoolId: string;
+  teacherId: string;
+  laboratoryId: string;
+  laboratoryName?: string;
+  role: TeacherLabAssignmentRole;
+  assignedFromBs: string;
+  assignedToBs?: string | null;
+  status: TeacherLabAssignmentStatus;
+  remarks?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface LaboratoryRecord {
   _id: string;
   schoolId: string;
   name: string;
   code?: string;
   type: LaboratoryType;
+  /** Academic year: 1st Year / 2nd Year / 3rd Year / All Years */
+  yearLevel?: LaboratoryYearLevel;
   customName?: string;
   department?: string;
   academicProgram?: string;
@@ -57,6 +79,8 @@ export interface LaboratoryEquipmentRecord {
   categoryId: string;
   categoryName?: string;
   laboratoryName?: string;
+  /** Academic year for inventory filtering */
+  yearLevel?: LaboratoryYearLevel;
   name: string;
   itemCode: string;
   itemKind: LaboratoryItemKind;

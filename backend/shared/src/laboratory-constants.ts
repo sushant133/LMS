@@ -2,6 +2,11 @@ import type { UserRole } from "./types.js";
 
 export const LABORATORY_TYPES = ["COMPUTER", "PHYSICS", "CHEMISTRY", "BIOLOGY", "OTHER"] as const;
 
+/**
+ * Academic year level for HA college labs and equipment (same idea as library yearLevel).
+ */
+export const LABORATORY_YEAR_LEVELS = ["1st Year", "2nd Year", "3rd Year", "All Years"] as const;
+
 export const DEFAULT_LAB_CATEGORIES: Record<(typeof LABORATORY_TYPES)[number], string[]> = {
   COMPUTER: [
     "Computers",

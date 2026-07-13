@@ -1795,7 +1795,7 @@ export const ExamManager = () => {
                         </h3>
                         <p className="text-sm text-slate-600">
                           Grade: {selectedStudentResult.grade} · GPA:{" "}
-                          {selectedStudentResult.gpa.toFixed(2)} ·{" "}
+                          {(selectedStudentResult.gpa ?? 0).toFixed(2)} ·{" "}
                           {selectedStudentResult.percentage}%
                         </p>
                       </div>
@@ -1927,7 +1927,7 @@ export const ExamManager = () => {
                           <Td>
                             <Badge>{result.grade}</Badge>
                           </Td>
-                          <Td>{result.gpa.toFixed(2)}</Td>
+                          <Td>{(result.gpa ?? 0).toFixed(2)}</Td>
                           <Td>
                             <Badge
                               className={
@@ -1998,7 +1998,7 @@ export const ExamManager = () => {
                       <Badge>{marksheetQuery.data.result.grade}</Badge>
                     </div>
                     <p className="mt-3 text-sm text-slate-700">
-                      GPA: {marksheetQuery.data.result.gpa.toFixed(2)} ·
+                      GPA: {(marksheetQuery.data.result.gpa ?? 0).toFixed(2)} ·
                       Percentage: {marksheetQuery.data.result.percentage}% ·{" "}
                       {marksheetQuery.data.result.passFailStatus}
                     </p>

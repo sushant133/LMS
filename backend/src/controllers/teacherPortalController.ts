@@ -8,6 +8,7 @@ import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
+import { resolveLabAccess } from "../utils/laboratoryAccess.js";
 import { getScopeMode } from "../utils/subjectAssignmentService.js";
 import { sendSuccess } from "../utils/response.js";
 import { requireTeacherScope } from "../utils/teacherScope.js";
@@ -95,5 +96,24 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
     batches: [],
     years: [],
     students: students.filter((student) => Boolean(student.user))
+  });
+});
+
+/**
+ * Lightweight flag for teacher sidebar / route guards.
+ * hasLaboratoryAccess = true only when admin assigned ACTIVE lab row(s)
+ * or legacy in-charge exists.
+ */
+export const getTeacherLabAccess = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user?.role !== "TEACHER") {
+    throw new ApiError(403, "Only teachers can access laboratory assignment status");
+  }
+
+  const access = await resolveLabAccess(req);
+  const assignedLabIds = access.assignedLabIds;
+  return sendSuccess(res, "Teacher laboratory access fetched", {
+    hasLaboratoryAccess: assignedLabIds.length > 0,
+    assignedLabIds,
+    laboratoryCount: assignedLabIds.length
   });
 });

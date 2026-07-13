@@ -223,13 +223,22 @@ export const getLaboratoryDashboard = asyncHandler(async (req: Request, res: Res
 
 export const listLaboratories = asyncHandler(async (req: Request, res: Response) => {
   const access = await resolveLabAccess(req);
-  const filter = access.isGlobalManager
+  const baseFilter = access.isGlobalManager
     ? withTenantScope(req)
     : withTenantScope(req, { _id: { $in: access.assignedLabIds } });
 
+  const yearLevel =
+    typeof req.query.yearLevel === "string" && req.query.yearLevel.trim()
+      ? req.query.yearLevel.trim()
+      : undefined;
+  const filter =
+    yearLevel && yearLevel !== "ALL"
+      ? { ...baseFilter, yearLevel }
+      : baseFilter;
+
   const labs = await Laboratory.find(filter)
     .populate({ path: "inChargeTeacherId", populate: { path: "user", select: "fullName" } })
-    .sort({ name: 1 })
+    .sort({ yearLevel: 1, name: 1 })
     .lean();
 
   return sendSuccess(
@@ -276,7 +285,9 @@ export const createLaboratory = asyncHandler(async (req: Request, res: Response)
     name,
     code,
     type: payload.type,
-    customName: payload.type === "OTHER" ? emptyToUndef(payload.customName) : undefined,
+    yearLevel: payload.yearLevel ?? "All Years",
+    // Keep user-facing name on customName for templates + OTHER
+    customName: emptyToUndef(payload.customName) ?? emptyToUndef(payload.name) ?? name,
     department: emptyToUndef(payload.department),
     academicProgram: emptyToUndef(payload.academicProgram),
     description: emptyToUndef(payload.description),
@@ -287,7 +298,7 @@ export const createLaboratory = asyncHandler(async (req: Request, res: Response)
     isActive: payload.isActive
   });
 
-  const categories = DEFAULT_LAB_CATEGORIES[payload.type];
+  const categories = DEFAULT_LAB_CATEGORIES[payload.type] ?? DEFAULT_LAB_CATEGORIES.OTHER;
   await LaboratoryCategory.insertMany(
     categories.map((categoryName) => ({
       schoolId: req.tenantSchoolId,
@@ -359,6 +370,7 @@ export const updateLaboratory = asyncHandler(async (req: Request, res: Response)
   lab.type = nextType;
   lab.customName = nextType === "OTHER" ? emptyToUndef(nextCustomName as string) : undefined;
   lab.name = nextName;
+  if (payload.yearLevel !== undefined) lab.yearLevel = payload.yearLevel;
 
   if (payload.department !== undefined) lab.department = emptyToUndef(payload.department);
   if (payload.academicProgram !== undefined) {
@@ -376,6 +388,18 @@ export const updateLaboratory = asyncHandler(async (req: Request, res: Response)
     }
     if (!payload.inChargeTeacherId) {
       lab.set("inChargeTeacherId", null);
+      // Deactivate multi-lab IN_CHARGE rows for this lab when cleared
+      try {
+        const { TeacherLaboratoryAssignment } = await import(
+          "../models/TeacherLaboratoryAssignment.js"
+        );
+        await TeacherLaboratoryAssignment.updateMany(
+          withTenantScope(req, { laboratoryId: lab._id, role: "IN_CHARGE", status: "ACTIVE" }),
+          { $set: { status: "INACTIVE" } }
+        );
+      } catch {
+        /* non-fatal */
+      }
     } else {
       const teacher = await Teacher.findOne(
         withTenantScope(req, { _id: payload.inChargeTeacherId })
@@ -384,6 +408,38 @@ export const updateLaboratory = asyncHandler(async (req: Request, res: Response)
         throw new ApiError(404, "Laboratory in-charge teacher not found");
       }
       lab.inChargeTeacherId = teacher._id;
+      // Mirror into multi-lab assignment table
+      try {
+        const { TeacherLaboratoryAssignment } = await import(
+          "../models/TeacherLaboratoryAssignment.js"
+        );
+        const { getTodayBs } = await import("../utils/nepaliDate.js");
+        await TeacherLaboratoryAssignment.findOneAndUpdate(
+          withTenantScope(req, {
+            teacherId: teacher._id,
+            laboratoryId: lab._id,
+            role: "IN_CHARGE"
+          }),
+          {
+            $set: {
+              status: "ACTIVE",
+              assignedFromBs: getTodayBs(),
+              assignedToBs: null,
+              updatedBy: req.user?.userId
+            },
+            $setOnInsert: {
+              schoolId: req.tenantSchoolId,
+              teacherId: teacher._id,
+              laboratoryId: lab._id,
+              role: "IN_CHARGE",
+              createdBy: req.user?.userId
+            }
+          },
+          { upsert: true, new: true }
+        );
+      } catch {
+        /* non-fatal */
+      }
     }
   }
 
@@ -508,7 +564,8 @@ export const deleteLaboratoryCategory = asyncHandler(async (req: Request, res: R
 export const listEquipment = asyncHandler(async (req: Request, res: Response) => {
   const access = await resolveLabAccess(req);
   const filter: Record<string, unknown> = withTenantScope(req, labScopeFilter(access));
-  const { laboratoryId, search, itemKind, condition, equipmentStatus, stockStatus } = req.query;
+  const { laboratoryId, search, itemKind, condition, equipmentStatus, stockStatus, yearLevel } =
+    req.query;
 
   if (typeof laboratoryId === "string" && laboratoryId) {
     assertLabAccess(access, laboratoryId);
@@ -517,6 +574,9 @@ export const listEquipment = asyncHandler(async (req: Request, res: Response) =>
 
   if (typeof itemKind === "string" && itemKind) {
     filter.itemKind = itemKind;
+  }
+  if (typeof yearLevel === "string" && yearLevel.trim() && yearLevel !== "ALL") {
+    filter.yearLevel = yearLevel.trim();
   }
   if (typeof condition === "string" && condition) {
     filter.condition = condition;
@@ -536,9 +596,9 @@ export const listEquipment = asyncHandler(async (req: Request, res: Response) =>
   }
 
   const equipment = await LaboratoryEquipment.find(filter)
-    .populate("laboratoryId", "name")
+    .populate("laboratoryId", "name yearLevel")
     .populate("categoryId", "name")
-    .sort({ name: 1 })
+    .sort({ yearLevel: 1, name: 1 })
     .lean();
 
   let enriched = equipment.map((item) => formatEquipment(item as Record<string, unknown>));
@@ -587,6 +647,7 @@ export const createEquipment = asyncHandler(async (req: Request, res: Response) 
     name: payload.name,
     itemCode,
     itemKind: payload.itemKind,
+    yearLevel: payload.yearLevel ?? lab.yearLevel ?? "All Years",
     brand: emptyToUndef(payload.brand),
     equipmentModel: emptyToUndef(payload.equipmentModel),
     unit: emptyToUndef(payload.unit) ?? "pcs",
@@ -664,6 +725,7 @@ export const updateEquipment = asyncHandler(async (req: Request, res: Response) 
   }
 
   if (payload.name !== undefined) equipment.name = payload.name;
+  if (payload.yearLevel !== undefined) equipment.yearLevel = payload.yearLevel;
   if (payload.itemCode !== undefined && payload.itemCode.trim()) {
     const codeDup = await LaboratoryEquipment.findOne({
       schoolId: req.tenantSchoolId,
@@ -937,12 +999,22 @@ export const returnEquipment = asyncHandler(async (req: Request, res: Response) 
   }
   assertLabAccess(access, equipment.laboratoryId.toString());
 
-  const returnQuantity = payload.quantity ?? issue.quantity;
-  if (returnQuantity > issue.quantity) {
+  const outstandingBefore = issue.quantity;
+  const returnQuantity = payload.quantity ?? outstandingBefore;
+  if (returnQuantity <= 0) {
+    throw new ApiError(400, "Return quantity must be at least 1");
+  }
+  if (returnQuantity > outstandingBefore) {
     throw new ApiError(400, "Return quantity cannot exceed issued quantity");
   }
 
-  issue.status = "RETURNED";
+  const isPartial = returnQuantity < outstandingBefore;
+  // Partial return: reduce outstanding qty and keep ISSUED until fully returned
+  if (isPartial) {
+    issue.quantity = outstandingBefore - returnQuantity;
+  } else {
+    issue.status = "RETURNED";
+  }
   issue.returnedDateBs = payload.returnedDateBs;
   await issue.save();
 
@@ -950,14 +1022,18 @@ export const returnEquipment = asyncHandler(async (req: Request, res: Response) 
     equipment,
     type: "RETURN",
     quantity: returnQuantity,
-    notes: "Equipment returned",
+    notes: isPartial ? "Equipment partially returned" : "Equipment returned",
     performedByUserId: recordUserId(req),
     schoolId: req.tenantSchoolId!
   });
 
   await syncLowStockRequests(req.tenantSchoolId!, equipment, recordUserId(req));
 
-  return sendSuccess(res, "Equipment returned", issue);
+  return sendSuccess(
+    res,
+    isPartial ? "Partial return recorded" : "Equipment returned",
+    issue
+  );
 });
 
 // ─── Stock movements ─────────────────────────────────────────────────────────
@@ -1119,13 +1195,26 @@ export const updateStockRequestStatus = asyncHandler(async (req: Request, res: R
   }
 
   const previousStatus = request.status;
+
+  // Prevent double-receive (would inflate inventory)
+  if (payload.status === "RECEIVED" && previousStatus === "RECEIVED") {
+    throw new ApiError(400, "This stock request was already marked as received");
+  }
+  // Only allow RECEIVED when request is still open (not already received/rejected)
+  if (payload.status === "RECEIVED" && previousStatus === "REJECTED") {
+    throw new ApiError(400, "Cannot receive a rejected stock request");
+  }
+
   request.status = payload.status;
   if (payload.adminNotes !== undefined) {
     request.adminNotes = emptyToUndef(payload.adminNotes);
   }
 
-  if (payload.status === "RECEIVED") {
+  if (payload.status === "RECEIVED" && previousStatus !== "RECEIVED") {
     const receivedQty = payload.receivedQuantity ?? request.requiredQuantity;
+    if (receivedQty <= 0) {
+      throw new ApiError(400, "Received quantity must be at least 1");
+    }
     request.receivedQuantity = receivedQty;
 
     if (request.equipmentId) {

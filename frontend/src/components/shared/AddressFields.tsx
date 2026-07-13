@@ -7,9 +7,15 @@ import { Select } from "components/ui/select";
 interface AddressFieldsProps {
   value: AddressSelection;
   onChange: (value: AddressSelection) => void;
+  /** When true, Street Address is not required (e.g. Settings contact info) */
+  streetOptional?: boolean;
 }
 
-export const AddressFields = ({ value, onChange }: AddressFieldsProps) => {
+export const AddressFields = ({
+  value,
+  onChange,
+  streetOptional = false,
+}: AddressFieldsProps) => {
   const { t } = useTranslation();
   const provinces = getAllProvinces();
   const districts = value.province ? getDistrictsByProvince(value.province) : [];
@@ -106,8 +112,23 @@ export const AddressFields = ({ value, onChange }: AddressFieldsProps) => {
       </FormField>
 
       <div className="md:col-span-2">
-        <FormField label={t("streetAddress")}>
-          <Input value={effectiveValue.streetAddress} onChange={(event) => onChange({ ...effectiveValue, streetAddress: event.target.value })} />
+        <FormField
+          label={
+            streetOptional
+              ? `${t("streetAddress")} (optional)`
+              : t("streetAddress")
+          }
+        >
+          <Input
+            value={effectiveValue.streetAddress ?? ""}
+            placeholder={streetOptional ? "Optional" : undefined}
+            onChange={(event) =>
+              onChange({
+                ...effectiveValue,
+                streetAddress: event.target.value,
+              })
+            }
+          />
         </FormField>
       </div>
     </div>

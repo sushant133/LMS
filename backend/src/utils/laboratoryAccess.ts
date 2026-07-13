@@ -2,6 +2,7 @@ import type { Request } from "express";
 import { isInstitutionAdmin, normalizeUserRole } from "@phit-erp/shared";
 import { Laboratory } from "../models/Laboratory.js";
 import { Teacher } from "../models/Teacher.js";
+import { TeacherLaboratoryAssignment } from "../models/TeacherLaboratoryAssignment.js";
 import { ApiError } from "./apiError.js";
 import { withTenantScope } from "./tenant.js";
 
@@ -15,7 +16,9 @@ export type LabAccessContext = {
 
 /**
  * Global managers: Admin, Super Admin, College Viewer (read), Laboratory Staff.
- * Teachers only see laboratories where they are the assigned in-charge.
+ * Teachers see laboratories from:
+ *  1) ACTIVE TeacherLaboratoryAssignment rows (multi-lab SoT)
+ *  2) Legacy Laboratory.inChargeTeacherId (backward compatible)
  */
 export async function resolveLabAccess(req: Request): Promise<LabAccessContext> {
   const role = normalizeUserRole(req.user?.role ?? "");
@@ -37,23 +40,41 @@ export async function resolveLabAccess(req: Request): Promise<LabAccessContext> 
     throw new ApiError(403, "You do not have access to laboratory management");
   }
 
-  const teacher = await Teacher.findOne({ user: req.user.userId }).select("_id").lean();
+  const teacher = await Teacher.findOne(
+    withTenantScope(req, { user: req.user.userId })
+  )
+    .select("_id")
+    .lean();
   if (!teacher) {
     throw new ApiError(403, "Teacher profile not found for laboratory access");
   }
 
-  const labs = await Laboratory.find(
-    withTenantScope(req, { inChargeTeacherId: teacher._id, isActive: true })
-  )
-    .select("_id")
-    .lean();
+  const [assignmentLabIds, legacyLabs] = await Promise.all([
+    TeacherLaboratoryAssignment.find(
+      withTenantScope(req, { teacherId: teacher._id, status: "ACTIVE" })
+    )
+      .distinct("laboratoryId")
+      .then((ids) => ids.map((id) => id.toString())),
+    Laboratory.find(
+      withTenantScope(req, { inChargeTeacherId: teacher._id, isActive: true })
+    )
+      .select("_id")
+      .lean()
+  ]);
+
+  const assignedLabIds = [
+    ...new Set([
+      ...assignmentLabIds,
+      ...legacyLabs.map((lab) => lab._id.toString())
+    ])
+  ];
 
   return {
     role,
     isGlobalManager: false,
     isAdmin: false,
     teacherId: teacher._id.toString(),
-    assignedLabIds: labs.map((lab) => lab._id.toString())
+    assignedLabIds
   };
 }
 

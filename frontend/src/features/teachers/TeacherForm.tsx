@@ -175,13 +175,30 @@ export const TeacherForm = ({
       />
 
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-slate-700">
-        <p className="font-medium text-slate-900">Teaching load is managed separately</p>
+        <p className="font-medium text-slate-900">
+          This form is login / HR only (one account per teacher)
+        </p>
         <p className="mt-1">
-          Assign subjects under{" "}
-          <Link to={assignmentLink} className="font-medium text-blue-700 underline">
-            Academics → Subject Assignment
-          </Link>
-          . This form is for HR / identity fields only.
+          Do <strong>not</strong> create another teacher account for a second subject.
+          After save, open the teacher list → <strong>Assignments</strong> to attach
+          unlimited subjects, years, batches, and laboratories to this same login.{" "}
+          {isEditing && teacherId ? (
+            <>
+              Or go directly to{" "}
+              <Link to={assignmentLink} className="font-medium text-blue-700 underline">
+                Subject Assignment for this teacher
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              Subject matrix:{" "}
+              <Link to={assignmentLink} className="font-medium text-blue-700 underline">
+                Academics → Subject Assignment
+              </Link>
+              .
+            </>
+          )}
         </p>
       </div>
 

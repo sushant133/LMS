@@ -10,6 +10,7 @@ import { Button } from "components/ui/button";
 import { cn } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
+import { useTeacherLabAccess } from "hooks/useTeacherLabAccess";
 import { getCollegeDisplayName, getRoleRedirectPath, roleLabelMap } from "lib/auth";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
@@ -129,6 +130,12 @@ export const AppLayout = () => {
   const { user, logout, availableSchools } = useAuth();
   const { unreadCount } = useNotificationBadge();
   const { t } = useTranslation();
+  const isTeacherUser =
+    Boolean(user) && normalizeUserRole(user!.role) === "TEACHER";
+  /** Only teachers with admin-assigned labs see Laboratory in the sidebar */
+  const teacherLabAccessQuery = useTeacherLabAccess(isTeacherUser);
+  const teacherHasLaboratory =
+    teacherLabAccessQuery.data?.hasLaboratoryAccess === true;
 
   useEffect(() => {
     if (!open) {
@@ -182,6 +189,14 @@ export const AppLayout = () => {
   const visibleItems = navItems
     .filter((item) => item.roles.includes(normalizedRole))
     .filter((item) => {
+      // Teachers: Laboratory only if admin assigned one or more labs
+      if (
+        item.path === "/laboratory" &&
+        normalizedRole === "TEACHER" &&
+        !teacherHasLaboratory
+      ) {
+        return false;
+      }
       if (isModuleOnlyUser) {
         if (normalizedRole === "ACCOUNTANT" || normalizedRole === "CASHIER" || normalizedRole === "AUDITOR" || normalizedRole === "PRINCIPAL") {
           return (
@@ -233,6 +248,19 @@ export const AppLayout = () => {
           : item.path
     }));
 
+  /**
+   * NavLink matches path prefixes by default, so `/academics` stays active on
+   * `/academics/subject-assignments` and both items look selected. Use `end`
+   * when this path is a parent of another sidebar link (or exact-only routes).
+   */
+  const navPaths = visibleItems.map((item) => item.path);
+  const navLinkUsesEnd = (path: string): boolean => {
+    if (path === "/notifications" || path === "/notices") return true;
+    return navPaths.some(
+      (other) => other !== path && other.startsWith(`${path}/`),
+    );
+  };
+
   const brandHomePath =
     visibleItems.find((item) => item.labelKey === "dashboard")?.path ??
     getRoleRedirectPath(normalizedRole) ??
@@ -283,12 +311,14 @@ export const AppLayout = () => {
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  end={item.path === "/notifications" || item.path === "/notices"}
+                  end={navLinkUsesEnd(item.path)}
                   onClick={() => setOpen(false)}
                   className={({ isActive }) =>
                     cn(
                       "flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition",
-                      isActive ? "bg-brand-500 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"
+                      isActive
+                        ? "bg-brand-500 text-white shadow-sm shadow-brand-900/20"
+                        : "text-slate-300 hover:bg-white/10 hover:text-white"
                     )
                   }
                 >

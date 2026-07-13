@@ -6,7 +6,7 @@ import {
   type CollegeAdministratorRecord,
 } from "@phit-erp/shared";
 import type { AdminActivityLogEntry } from "@phit-erp/shared";
-import { Eye, KeyRound, Trash2, UserCog } from "lucide-react";
+import { Eye, KeyRound, Trash2, Upload, UserCog, X } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -17,7 +17,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
-import { api, unwrap } from "lib/api";
+import { api, resolveApiUrl, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
   toastResendCredentials,
@@ -25,6 +25,18 @@ import {
 } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
+
+const photoSrc = (url?: string | null): string | undefined => {
+  if (!url) return undefined;
+  if (
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("data:")
+  ) {
+    return url;
+  }
+  return url.startsWith("/") ? url : `/${url}`;
+};
 
 const defaultForm: CollegeAdministratorInput = {
   fullName: "",
@@ -55,6 +67,45 @@ export const CollegeAdministratorManager = () => {
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  const handlePhotoUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingPhoto(true);
+    const formData = new FormData();
+    formData.append("photo", file);
+
+    try {
+      const response = await fetch(resolveApiUrl("/uploads/staff/photo"), {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          message?: string;
+        };
+        throw new Error(body.message ?? "Upload failed");
+      }
+      const body = (await response.json()) as {
+        data?: { url?: string };
+      };
+      setForm((current) => ({
+        ...current,
+        profilePhotoUrl: body.data?.url ?? "",
+      }));
+      toast.success("Photo uploaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      setIsUploadingPhoto(false);
+      event.target.value = "";
+    }
+  };
 
   const adminsQuery = useQuery({
     queryKey: ["college-administrators", includeDeleted],
@@ -274,17 +325,49 @@ export const CollegeAdministratorManager = () => {
                 }
               />
             </FormField>
-            <FormField label="Profile Photo URL">
-              <Input
-                value={form.profilePhotoUrl ?? ""}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    profilePhotoUrl: event.target.value,
-                  }))
-                }
-                placeholder="https://..."
-              />
+            <FormField label="Profile photo">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50">
+                    <Upload className="h-4 w-4" />
+                    {isUploadingPhoto ? "Uploading..." : "Upload photo"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      disabled={isUploadingPhoto}
+                      onChange={(event) => void handlePhotoUpload(event)}
+                    />
+                  </label>
+                  {form.profilePhotoUrl ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setForm((current) => ({
+                          ...current,
+                          profilePhotoUrl: "",
+                        }))
+                      }
+                    >
+                      <X className="mr-1 h-3.5 w-3.5" />
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
+                {photoSrc(form.profilePhotoUrl) ? (
+                  <img
+                    src={photoSrc(form.profilePhotoUrl)}
+                    alt="Profile preview"
+                    className="h-20 w-20 rounded-lg border border-slate-200 object-cover"
+                  />
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    JPEG, PNG or WebP. Optional.
+                  </p>
+                )}
+              </div>
             </FormField>
             <FormField
               label={
@@ -361,6 +444,7 @@ export const CollegeAdministratorManager = () => {
             <Table>
               <TableHead>
                 <tr>
+                  <Th>Photo</Th>
                   <Th>Name</Th>
                   <Th>Employee ID</Th>
                   <Th>Designation</Th>
@@ -373,6 +457,19 @@ export const CollegeAdministratorManager = () => {
               <TableBody>
                 {(adminsQuery.data ?? []).map((admin) => (
                   <tr key={admin._id}>
+                    <Td>
+                      {photoSrc(admin.profilePhotoUrl) ? (
+                        <img
+                          src={photoSrc(admin.profilePhotoUrl)}
+                          alt=""
+                          className="h-10 w-10 rounded-full border border-slate-200 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-500">
+                          {admin.fullName.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                    </Td>
                     <Td>
                       <div className="font-medium text-slate-900">
                         {admin.fullName}

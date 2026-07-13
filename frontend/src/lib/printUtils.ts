@@ -82,7 +82,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       @page {
         size: A4 ${isLandscape ? "landscape" : "portrait"};
-        margin: ${isLandscape ? "10mm 12mm" : "12mm 14mm"};
+        margin: ${isLandscape ? "10mm 12mm" : "6mm 7mm"};
       }
       .print-results-bulk-table {
         display: block !important;
@@ -95,7 +95,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         max-width: none;
         width: 100%;
         margin: 0;
-        padding: 0;
+        padding: 5mm 6mm;
       }
     </style>
   </head>
@@ -182,28 +182,63 @@ const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
   return { clone, wrapper, isLandscape };
 };
 
+type PdfExportOptions = {
+  pageFormat?: PageFormat;
+  /** Tight margins + avoid page breaks for single-page marksheets */
+  singlePage?: boolean;
+};
+
 const createPdfBlobFromElement = async (
   element: HTMLElement,
-  pageFormat: PageFormat = "a4-portrait"
+  options: PageFormat | PdfExportOptions = "a4-portrait"
 ): Promise<Blob> => {
+  const pageFormat =
+    typeof options === "string" ? options : options.pageFormat ?? "a4-portrait";
+  const singlePage =
+    typeof options === "string" ? false : Boolean(options.singlePage);
+
   const { clone, wrapper, isLandscape } = mountPrintableClone(element, pageFormat);
+
+  // Marksheet: keep internal padding tight so content fits one A4 page
+  if (singlePage) {
+    clone.style.padding = "5mm 6mm";
+    clone.style.maxWidth = "210mm";
+    clone.style.width = "210mm";
+    clone.style.boxSizing = "border-box";
+  }
 
   try {
     await waitForImages(clone);
     const { default: html2pdf } = await import("html2pdf.js");
+    // html2pdf option typings omit pagebreak / windowWidth — cast for single-page export
+    const pdfOptions = {
+      margin: singlePage
+        ? ([5, 6, 5, 6] as [number, number, number, number])
+        : isLandscape
+          ? ([10, 12, 10, 12] as [number, number, number, number])
+          : ([12, 14, 12, 14] as [number, number, number, number]),
+      image: { type: "jpeg" as const, quality: 0.98 },
+      html2canvas: {
+        scale: singlePage ? 2.2 : 2,
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: "#ffffff",
+        logging: false,
+        ...(singlePage ? { windowWidth: 794 } : {})
+      },
+      jsPDF: {
+        unit: "mm" as const,
+        format: "a4" as const,
+        orientation: (isLandscape ? "landscape" : "portrait") as
+          | "portrait"
+          | "landscape"
+      },
+      pagebreak: singlePage
+        ? { mode: ["avoid-all", "css", "legacy"] as string[] }
+        : { mode: ["css", "legacy"] as string[] }
+    };
     return html2pdf()
-      .set({
-        margin: isLandscape ? [10, 12, 10, 12] : [12, 14, 12, 14],
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: "#ffffff",
-          logging: false
-        },
-        jsPDF: { unit: "mm", format: "a4", orientation: isLandscape ? "landscape" : "portrait" }
-      })
+      .set(pdfOptions as never)
       .from(clone)
       .outputPdf("blob");
   } finally {
@@ -260,7 +295,10 @@ export const downloadMarksheetPdfFromElement = async (
   }
 
   await yieldToUi();
-  const blob = await createPdfBlobFromElement(element, "a4-portrait");
+  const blob = await createPdfBlobFromElement(element, {
+    pageFormat: "a4-portrait",
+    singlePage: true
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

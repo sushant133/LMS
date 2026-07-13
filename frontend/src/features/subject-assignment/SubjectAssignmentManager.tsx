@@ -87,16 +87,33 @@ const idOf = (value: unknown): string => {
 
 const labelOfTeacher = (value: SubjectAssignmentRecord["teacherId"]): string => {
   if (!value || typeof value === "string") return String(value ?? "—");
-  const t = value as { teacherCode?: string; user?: { fullName?: string } };
+  const t = value as { teacherCode?: string; user?: { fullName?: string } | null };
   return t.user?.fullName
     ? `${t.user.fullName}${t.teacherCode ? ` (${t.teacherCode})` : ""}`
     : t.teacherCode ?? idOf(value);
+};
+
+const teacherOptionLabel = (t: {
+  teacherCode?: string;
+  user?: { fullName?: string } | null;
+}): string => {
+  const name = t.user?.fullName ?? "Teacher";
+  return t.teacherCode ? `${name} (${t.teacherCode})` : name;
 };
 
 const labelOfSubject = (value: SubjectAssignmentRecord["subjectId"]): string => {
   if (!value || typeof value === "string") return String(value ?? "—");
   const s = value as { name?: string; code?: string };
   return s.name ? `${s.name}${s.code ? ` (${s.code})` : ""}` : idOf(value);
+};
+
+const labelById = (
+  items: Array<{ _id: string; name?: string }>,
+  id: unknown,
+): string => {
+  const key = idOf(id);
+  if (!key) return "—";
+  return items.find((item) => item._id === key)?.name ?? key;
 };
 
 export const SubjectAssignmentManager = () => {
@@ -358,6 +375,17 @@ export const SubjectAssignmentManager = () => {
   const teachers = teachersQuery.data ?? [];
   const subjects = subjectsQuery.data ?? [];
   const assignments = assignmentsQuery.data ?? [];
+  const batches = batchesQuery.data ?? [];
+  const years = yearsQuery.data ?? [];
+  const classes = classesQuery.data ?? [];
+  const sections = sectionsQuery.data ?? [];
+
+  const groupLabel = (row: SubjectAssignmentRecord): string => {
+    if (isCollege) {
+      return `${labelById(batches, row.batchId)} / ${labelById(years, row.yearId)}`;
+    }
+    return `${labelById(classes, row.classId)} / ${labelById(sections, row.sectionId)}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -531,7 +559,7 @@ export const SubjectAssignmentManager = () => {
                           <option value="">Select teacher</option>
                           {teachers.map((t) => (
                             <option key={t._id} value={t._id}>
-                              {t.user.fullName} ({t.teacherCode})
+                              {teacherOptionLabel(t)}
                             </option>
                           ))}
                         </Select>
@@ -702,7 +730,7 @@ export const SubjectAssignmentManager = () => {
                     <option value="">All teachers</option>
                     {teachers.map((t) => (
                       <option key={t._id} value={t._id}>
-                        {t.user.fullName}
+                        {teacherOptionLabel(t)}
                       </option>
                     ))}
                   </Select>
@@ -841,15 +869,7 @@ export const SubjectAssignmentManager = () => {
                         <tr key={row._id}>
                           <Td>{labelOfTeacher(row.teacherId)}</Td>
                           <Td>{labelOfSubject(row.subjectId)}</Td>
-                          <Td className="text-xs text-slate-600">
-                            {isCollege
-                              ? `${row.batchId ? String(row.batchId).slice(-4) : "—"} / ${
-                                  row.yearId ? String(row.yearId).slice(-4) : "—"
-                                }`
-                              : `${row.classId ? String(row.classId).slice(-4) : "—"} / ${
-                                  row.sectionId ? String(row.sectionId).slice(-4) : "—"
-                                }`}
-                          </Td>
+                          <Td className="text-sm text-slate-700">{groupLabel(row)}</Td>
                           <Td>{row.assignmentType}</Td>
                           <Td>
                             {row.assignmentType === "FULL"

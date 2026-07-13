@@ -147,7 +147,7 @@ const startServer = async (): Promise<void> => {
   }
 
   // Demo seed is best-effort — must not prevent API from listening
-  await ensureDemoData();
+  // await ensureDemoData();
 
   startAcademicManagementNotificationScheduler();
 

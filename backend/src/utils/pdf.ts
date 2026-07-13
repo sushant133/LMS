@@ -297,143 +297,192 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
   doc.end();
 }
 
-const drawMarksheetInfoRow = (
-  doc: PDFKit.PDFDocument,
-  label: string,
-  value: string,
-  fonts: { regular: string; bold: string },
-  x: number,
-  y: number,
-  labelWidth: number,
-  valueWidth: number
-): number => {
-  doc.font(fonts.bold).fontSize(9).fillColor("#000000").text(`${label}:`, x, y, { width: labelWidth });
-  doc.font(fonts.regular).fontSize(9).text(value, x + labelWidth, y, { width: valueWidth });
-  return y + 14;
-};
-
 /**
- * Generates an official A4 marksheet PDF matching the HTML preview layout.
+ * Single-page A4 marksheet PDF — B&W-first premium layout.
+ * Black double frame, aligned columns, black table header, compact spacing.
  */
 export async function generateMarksheetPDF(data: MarksheetData, res: Response): Promise<void> {
-  const margin = 42;
-  const doc = new PDFDocument({ size: "A4", margin });
+  const margin = 28;
+  const doc = new PDFDocument({ size: "A4", margin, autoFirstPage: true });
   const fonts = registerPdfFonts(doc);
   const pageWidth = doc.page.width;
+  const pageHeight = doc.page.height;
   const contentWidth = pageWidth - margin * 2;
   const leftX = margin;
-  const rightX = margin + contentWidth / 2 + 8;
+  const INK = "#000000";
+  const MUTED = "#333333";
+  const LINE = "#444444";
+  const SOFT = "#f2f2f2";
+  const ROW = "#f7f7f7";
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="marksheet-${data.studentName.replace(/\s+/g, "-")}.pdf"`);
 
   doc.pipe(res);
 
+  // Double black frame (premium in mono print)
+  doc.rect(16, 16, pageWidth - 32, pageHeight - 32).lineWidth(1.6).strokeColor(INK).stroke();
+  doc.rect(21, 21, pageWidth - 42, pageHeight - 42).lineWidth(0.7).strokeColor(INK).stroke();
+
   let y = margin;
 
-  const logoSize = 64;
+  // Logo + college header (compact)
+  const logoSize = 42;
   const logoX = leftX + contentWidth / 2 - logoSize / 2;
+  doc.circle(logoX + logoSize / 2, y + logoSize / 2, logoSize / 2 + 1.5).lineWidth(1.2).strokeColor(INK).stroke();
   if (!drawCollegeLogo(doc, logoX, y, logoSize)) {
-    doc.rect(logoX, y, logoSize, logoSize).lineWidth(1).strokeColor("#000000").stroke();
     doc
       .font(fonts.bold)
-      .fontSize(18)
-      .fillColor("#000000")
-      .text(data.schoolName.slice(0, 1).toUpperCase(), logoX, y + 20, {
+      .fontSize(16)
+      .fillColor(INK)
+      .text(data.schoolName.slice(0, 1).toUpperCase(), logoX, y + 12, {
         width: logoSize,
         align: "center"
       });
   }
 
-  y += logoSize + 8;
-  doc.font(fonts.bold).fontSize(16).text(data.schoolName, leftX, y, { align: "center", width: contentWidth });
-  y += 20;
+  y += logoSize + 6;
+  doc.font(fonts.bold).fontSize(12).fillColor(INK).text(data.schoolName.toUpperCase(), leftX, y, {
+    align: "center",
+    width: contentWidth
+  });
+  y += 14;
 
   if (data.schoolNameNp && fonts.devanagari !== fonts.regular && hasDevanagari(data.schoolNameNp)) {
-    doc.font(fonts.devanagari).fontSize(11).text(data.schoolNameNp, leftX, y, { align: "center", width: contentWidth });
-    y += 14;
-  }
-
-  if (data.schoolAddress) {
-    doc.font(fonts.regular).fontSize(9).text(data.schoolAddress, leftX, y, { align: "center", width: contentWidth });
-    y += 14;
-  }
-
-  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(1).strokeColor("#000000").stroke();
-  y += 10;
-
-  doc.font(fonts.bold).fontSize(12).text("OFFICIAL MARKSHEET", leftX, y, { align: "center", width: contentWidth });
-  y += 16;
-  doc.font(fonts.bold).fontSize(10).text(data.examName, leftX, y, { align: "center", width: contentWidth });
-  y += 14;
-  if (data.academicYearBs) {
-    doc.font(fonts.regular).fontSize(9).text(`Academic Session: ${data.academicYearBs}`, leftX, y, {
+    doc.font(fonts.devanagari).fontSize(9).fillColor(MUTED).text(data.schoolNameNp, leftX, y, {
       align: "center",
       width: contentWidth
     });
-    y += 16;
+    y += 11;
   }
 
-  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(0.5).strokeColor("#000000").stroke();
-  y += 12;
-
-  const columnWidth = contentWidth / 2 - 12;
-  let leftY = y;
-  let rightY = y;
-
-  leftY = drawMarksheetInfoRow(doc, "Student Name", data.studentName, fonts, leftX, leftY, 88, columnWidth - 88);
-  if (data.registrationNumber) {
-    leftY = drawMarksheetInfoRow(doc, "Registration No.", data.registrationNumber, fonts, leftX, leftY, 88, columnWidth - 88);
-  }
-  leftY = drawMarksheetInfoRow(doc, "Roll No.", String(data.rollNumber), fonts, leftX, leftY, 88, columnWidth - 88);
-  if (data.batchName) {
-    leftY = drawMarksheetInfoRow(doc, "Batch", data.batchName, fonts, leftX, leftY, 88, columnWidth - 88);
-  }
-  if (data.yearName) {
-    leftY = drawMarksheetInfoRow(doc, "Year", data.yearName, fonts, leftX, leftY, 88, columnWidth - 88);
+  if (data.schoolAddress) {
+    doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(data.schoolAddress, leftX, y, {
+      align: "center",
+      width: contentWidth
+    });
+    y += 10;
   }
 
-  rightY = drawMarksheetInfoRow(doc, "Examination", data.examName, fonts, rightX, rightY, 88, columnWidth - 88);
-  if (data.publishDateBs) {
-    rightY = drawMarksheetInfoRow(doc, "Published Date", data.publishDateBs, fonts, rightX, rightY, 88, columnWidth - 88);
+  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(1.2).strokeColor(INK).stroke();
+  y += 6;
+  doc.font(fonts.bold).fontSize(10).fillColor(INK).text("OFFICIAL MARKSHEET", leftX, y, {
+    align: "center",
+    width: contentWidth,
+    characterSpacing: 2
+  });
+  y += 11;
+  doc.font(fonts.bold).fontSize(7).fillColor(MUTED).text("STATEMENT OF MARKS", leftX, y, {
+    align: "center",
+    width: contentWidth,
+    characterSpacing: 1.2
+  });
+  y += 10;
+  doc.font(fonts.bold).fontSize(9.5).fillColor(INK).text(data.examName, leftX, y, {
+    align: "center",
+    width: contentWidth
+  });
+  y += 11;
+  if (data.academicYearBs) {
+    doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(`Academic Session: ${data.academicYearBs}`, leftX, y, {
+      align: "center",
+      width: contentWidth
+    });
+    y += 9;
   }
-  if (data.passFailStatus) {
-    rightY = drawMarksheetInfoRow(doc, "Result Status", data.passFailStatus, fonts, rightX, rightY, 88, columnWidth - 88);
-  }
-  rightY = drawMarksheetInfoRow(doc, "GPA", data.gpa.toFixed(2), fonts, rightX, rightY, 88, columnWidth - 88);
-  rightY = drawMarksheetInfoRow(doc, "Percentage", `${data.percentage.toFixed(2)}%`, fonts, rightX, rightY, 88, columnWidth - 88);
+  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(0.8).strokeColor(INK).stroke();
+  y += 8;
 
-  y = Math.max(leftY, rightY) + 8;
+  // Two equal info panels
+  const panelGap = 8;
+  const panelW = (contentWidth - panelGap) / 2;
+  const panelPad = 6;
+  const panelTop = y;
 
+  const leftLines: Array<[string, string]> = [["Student Name", data.studentName]];
+  if (data.registrationNumber) leftLines.push(["Registration No.", data.registrationNumber]);
+  leftLines.push(["Roll No.", String(data.rollNumber)]);
+  if (data.batchName) leftLines.push(["Batch", data.batchName]);
+  if (data.yearName) leftLines.push(["Year", data.yearName]);
+  if (!data.batchName && data.className) leftLines.push(["Class", data.className]);
+  if (!data.yearName && data.sectionName) leftLines.push(["Section", data.sectionName]);
+
+  const rightLines: Array<[string, string]> = [["Examination", data.examName]];
+  if (data.publishDateBs) rightLines.push(["Published Date", data.publishDateBs]);
+  if (data.passFailStatus) rightLines.push(["Result Status", data.passFailStatus]);
+  rightLines.push(["GPA", data.gpa.toFixed(2)]);
+  rightLines.push(["Percentage", `${data.percentage.toFixed(2)}%`]);
+
+  const rowH = 11;
+  const panelH = Math.max(leftLines.length, rightLines.length) * rowH + 18;
+
+  const drawPanel = (x: number, title: string, rows: Array<[string, string]>) => {
+    doc.rect(x, panelTop, panelW, panelH).lineWidth(0.9).strokeColor(INK).stroke();
+    doc
+      .moveTo(x, panelTop + 14)
+      .lineTo(x + panelW, panelTop + 14)
+      .lineWidth(0.6)
+      .strokeColor(INK)
+      .stroke();
+    doc.font(fonts.bold).fontSize(6.5).fillColor(INK).text(title.toUpperCase(), x + panelPad, panelTop + 4, {
+      width: panelW - panelPad * 2,
+      characterSpacing: 0.6
+    });
+    let rowY = panelTop + 17;
+    rows.forEach(([label, value]) => {
+      doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(label, x + panelPad, rowY, { width: 78 });
+      doc.font(fonts.bold).fontSize(7.5).fillColor(INK).text(value, x + panelPad + 78, rowY, {
+        width: panelW - panelPad * 2 - 78
+      });
+      rowY += rowH;
+    });
+  };
+
+  drawPanel(leftX, "Student particulars", leftLines);
+  drawPanel(leftX + panelW + panelGap, "Examination details", rightLines);
+  y = panelTop + panelH + 8;
+
+  // Marks table — fixed column alignment
   const columns = [
     { label: "SN", x: leftX, width: 18, align: "center" as const },
-    { label: "Subject", x: leftX + 18, width: 88, align: "left" as const },
-    { label: "Th", x: leftX + 106, width: 24, align: "center" as const },
-    { label: "Pr", x: leftX + 130, width: 24, align: "center" as const },
-    { label: "In", x: leftX + 154, width: 24, align: "center" as const },
-    { label: "Total", x: leftX + 178, width: 30, align: "center" as const },
-    { label: "Full", x: leftX + 208, width: 30, align: "center" as const },
-    { label: "Grade", x: leftX + 238, width: 34, align: "center" as const },
-    { label: "Status", x: leftX + 272, width: 38, align: "center" as const },
-    { label: "Remarks", x: leftX + 310, width: contentWidth - 310, align: "left" as const }
+    { label: "Subject", x: leftX + 18, width: 100, align: "left" as const },
+    { label: "Th", x: leftX + 118, width: 26, align: "center" as const },
+    { label: "Pr", x: leftX + 144, width: 26, align: "center" as const },
+    { label: "In", x: leftX + 170, width: 26, align: "center" as const },
+    { label: "Total", x: leftX + 196, width: 32, align: "center" as const },
+    { label: "Full", x: leftX + 228, width: 28, align: "center" as const },
+    { label: "Grade", x: leftX + 256, width: 30, align: "center" as const },
+    { label: "Status", x: leftX + 286, width: 36, align: "center" as const },
+    { label: "Remarks", x: leftX + 322, width: contentWidth - 322, align: "left" as const }
   ];
 
-  const headerHeight = 18;
+  // Shrink row height if many subjects so everything fits one page
+  const subjectCount = Math.max(data.marks.length, 1);
+  const spaceForTable = pageHeight - y - 175; // reserve summary + signatures + meta
+  const headerHeight = 14;
+  const maxRowH = 13;
+  const minRowH = 10;
+  const rowHeight = Math.min(
+    maxRowH,
+    Math.max(minRowH, Math.floor((spaceForTable - headerHeight) / subjectCount))
+  );
+
   const tableTop = y;
-  doc.rect(leftX, tableTop, contentWidth, headerHeight).fillAndStroke("#ffffff", "#000000");
-  doc.fillColor("#000000").font(fonts.bold).fontSize(7.5);
+  doc.rect(leftX, tableTop, contentWidth, headerHeight).fill(INK);
+  doc.fillColor("#ffffff").font(fonts.bold).fontSize(6.5);
   columns.forEach((column) => {
-    doc.text(column.label, column.x + 2, tableTop + 5, {
-      width: column.width - 4,
+    doc.text(column.label, column.x + 1, tableTop + 3.5, {
+      width: column.width - 2,
       align: column.align
     });
   });
 
   y = tableTop + headerHeight;
-  doc.font(fonts.regular).fontSize(7.5);
   data.marks.forEach((mark, index) => {
-    const rowHeight = 16;
-    doc.rect(leftX, y, contentWidth, rowHeight).strokeColor("#000000").lineWidth(0.5).stroke();
+    if (index % 2 === 1) {
+      doc.rect(leftX, y, contentWidth, rowHeight).fill(ROW);
+    }
+    doc.rect(leftX, y, contentWidth, rowHeight).lineWidth(0.35).strokeColor(LINE).stroke();
     const values = [
       String(index + 1),
       mark.subject,
@@ -444,21 +493,39 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
       String(mark.fullMarks),
       mark.grade ?? "-",
       mark.passFail ?? "-",
-      mark.remarks ?? "-"
+      mark.remarks && mark.remarks !== "-" ? mark.remarks : "—"
     ];
     columns.forEach((column, columnIndex) => {
-      doc.text(values[columnIndex] ?? "-", column.x + 2, y + 4, {
-        width: column.width - 4,
-        align: column.align,
-        lineBreak: false
-      });
+      const isBold = columnIndex === 5 || columnIndex === 7;
+      doc
+        .fillColor(INK)
+        .font(isBold ? fonts.bold : fonts.regular)
+        .fontSize(7)
+        .text(values[columnIndex] ?? "—", column.x + 1, y + (rowHeight - 8) / 2, {
+          width: column.width - 2,
+          align: column.align,
+          lineBreak: false,
+          ellipsis: true
+        });
     });
     y += rowHeight;
   });
+  // Outer table border
+  doc
+    .rect(leftX, tableTop, contentWidth, y - tableTop)
+    .lineWidth(0.9)
+    .strokeColor(INK)
+    .stroke();
 
+  // Summary + GPA side by side
+  y += 8;
+  const summaryW = contentWidth * 0.64;
+  const gpaW = contentWidth - summaryW - 8;
+  const gpaX = leftX + summaryW + 8;
+  const summaryTop = y;
+
+  doc.font(fonts.bold).fontSize(7).fillColor(INK).text("RESULT SUMMARY", leftX, y, { characterSpacing: 0.8 });
   y += 10;
-  doc.font(fonts.bold).fontSize(9).text("Result Summary", leftX, y);
-  y += 14;
 
   const summaryRows: Array<[string, string]> = [
     ["Total Obtained Marks", String(data.totalObtained)],
@@ -466,43 +533,105 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
     ["Percentage", `${data.percentage.toFixed(2)}%`],
     ["GPA", data.gpa.toFixed(2)],
     ["Final Grade", data.grade],
-    ["Result", data.passFailStatus ?? "-"]
+    ["Overall Result", data.passFailStatus ?? "—"]
   ];
 
-  summaryRows.forEach(([label, value]) => {
-    doc.font(fonts.bold).fontSize(9).text(label, leftX, y, { width: 150 });
-    doc.font(fonts.regular).fontSize(9).text(value, leftX + 155, y, { width: 120 });
-    y += 13;
+  summaryRows.forEach(([label, value], idx) => {
+    const rh = 11;
+    const bg = idx % 2 === 0 ? SOFT : "#ffffff";
+    doc.rect(leftX, y, summaryW, rh).fillAndStroke(bg, LINE);
+    if (idx === summaryRows.length - 1) {
+      doc.rect(leftX, y, summaryW, rh).lineWidth(1).strokeColor(INK).stroke();
+    }
+    doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(label, leftX + 5, y + 2, {
+      width: summaryW * 0.58
+    });
+    doc.font(fonts.bold).fontSize(7.5).fillColor(INK).text(value, leftX + summaryW * 0.58, y + 2, {
+      width: summaryW * 0.4,
+      align: "right"
+    });
+    y += rh;
   });
 
-  y += 18;
-  const footerTop = y;
-  const half = contentWidth / 2;
+  const gpaH = Math.max(y - summaryTop, 78);
+  // Outlined GPA card (not solid black — readable B&W)
+  doc.rect(gpaX, summaryTop, gpaW, gpaH).lineWidth(1.4).strokeColor(INK).stroke();
+  doc.rect(gpaX + 3, summaryTop + 3, gpaW - 6, gpaH - 6).lineWidth(0.6).strokeColor(INK).stroke();
+  doc.font(fonts.bold).fontSize(6.5).fillColor(MUTED).text("CUMULATIVE GPA", gpaX, summaryTop + 10, {
+    width: gpaW,
+    align: "center",
+    characterSpacing: 0.8
+  });
+  doc.font(fonts.bold).fontSize(20).fillColor(INK).text(data.gpa.toFixed(2), gpaX, summaryTop + 24, {
+    width: gpaW,
+    align: "center"
+  });
+  doc.font(fonts.regular).fontSize(7.5).fillColor(MUTED).text(`${data.percentage.toFixed(2)}% overall`, gpaX, summaryTop + 50, {
+    width: gpaW,
+    align: "center"
+  });
+  doc.font(fonts.bold).fontSize(8).fillColor(INK).text(`GRADE ${data.grade}`, gpaX, summaryTop + 62, {
+    width: gpaW,
+    align: "center"
+  });
 
-  doc.moveTo(leftX, footerTop + 40).lineTo(leftX + half - 20, footerTop + 40).strokeColor("#000000").stroke();
-  doc.font(fonts.regular).fontSize(8).text("Principal Signature", leftX, footerTop + 44, { width: half - 20, align: "center" });
+  y = Math.max(y, summaryTop + gpaH) + 16;
+
+  // Signatures — aligned two columns
+  const half = contentWidth / 2;
   if (data.principalName) {
-    doc.font(fonts.regular).fontSize(8).text(data.principalName, leftX, footerTop + 24, { width: half - 20, align: "center" });
+    doc.font(fonts.regular).fontSize(7.5).fillColor(INK).text(data.principalName, leftX, y, {
+      width: half - 16,
+      align: "center"
+    });
   }
+  doc
+    .moveTo(leftX + 8, y + 28)
+    .lineTo(leftX + half - 20, y + 28)
+    .lineWidth(1)
+    .strokeColor(INK)
+    .stroke();
+  doc.font(fonts.bold).fontSize(6.5).fillColor(MUTED).text("PRINCIPAL SIGNATURE", leftX, y + 31, {
+    width: half - 16,
+    align: "center",
+    characterSpacing: 0.5
+  });
 
   const controller = data.controllerOfExamination ?? "Controller of Examination";
   doc
-    .moveTo(leftX + half + 10, footerTop + 40)
-    .lineTo(leftX + contentWidth, footerTop + 40)
+    .moveTo(leftX + half + 12, y + 28)
+    .lineTo(leftX + contentWidth - 8, y + 28)
+    .lineWidth(1)
+    .strokeColor(INK)
     .stroke();
-  doc.text(controller, leftX + half, footerTop + 44, { width: half - 10, align: "center" });
+  doc.font(fonts.bold).fontSize(6.5).fillColor(MUTED).text(controller.toUpperCase(), leftX + half, y + 31, {
+    width: half - 8,
+    align: "center",
+    characterSpacing: 0.3
+  });
 
-  y = footerTop + 82;
-  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(0.5).strokeColor("#000000").stroke();
-  y += 8;
+  y += 48;
+  doc.moveTo(leftX, y).lineTo(leftX + contentWidth, y).lineWidth(0.7).strokeColor(INK).stroke();
+  y += 5;
 
-  doc.font(fonts.regular).fontSize(8).fillColor("#000000");
-  if (data.printedDateBs) {
-    doc.text(`Printed Date: ${data.printedDateBs}`, leftX, y);
+  doc.font(fonts.regular).fontSize(6.5).fillColor(MUTED);
+  const metaParts: string[] = [];
+  if (data.printedDateBs) metaParts.push(`Printed Date (BS): ${data.printedDateBs}`);
+  if (data.verificationNumber) metaParts.push(`Verification No.: ${data.verificationNumber}`);
+  if (metaParts.length) {
+    doc.text(metaParts.join("   |   "), leftX, y, { width: contentWidth });
+    y += 9;
   }
-  if (data.verificationNumber) {
-    doc.text(`Verification No.: ${data.verificationNumber}`, leftX + 180, y);
-  }
+  doc
+    .font(fonts.regular)
+    .fontSize(6)
+    .fillColor(MUTED)
+    .text(
+      "Computer-generated official marksheet. Authenticity may be verified with the institution using the verification number.",
+      leftX,
+      y,
+      { width: contentWidth }
+    );
 
   doc.end();
 }

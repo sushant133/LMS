@@ -280,25 +280,8 @@ export interface LibraryDashboardResponse {
   inventoryAccessEnabled: boolean;
 }
 
-export type {
-  LaboratoryType,
-  LaboratoryItemKind,
-  LaboratoryEquipmentCondition,
-  LaboratoryEquipmentStatus,
-  LaboratoryStockMovementType,
-  LaboratoryStockRequestStatus,
-  LaboratoryStockPriority,
-  LaboratoryInventoryStockStatus,
-  LaboratoryReportType,
-  LaboratoryRecord,
-  LaboratoryCategoryRecord,
-  LaboratoryEquipmentRecord,
-  LaboratoryIssueRecord,
-  LaboratoryStockMovementRecord,
-  LaboratoryStockRequestRecord,
-  LaboratoryDashboardResponse,
-  LaboratoryReportResponse
-} from "./laboratory-types.js";
+// Laboratory types are exported from laboratory-types.ts via package index only
+// (avoid re-export star-export conflicts in Vite).
 
 export interface TransportStop {
   name: string;

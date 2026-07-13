@@ -7,16 +7,32 @@ import {
   LABORATORY_STOCK_MOVEMENT_TYPES,
   LABORATORY_STOCK_PRIORITIES,
   LABORATORY_STOCK_REQUEST_STATUSES,
-  LABORATORY_TYPES
+  LABORATORY_TYPES,
+  LABORATORY_YEAR_LEVELS
 } from "./laboratory-constants.js";
 import { objectIdSchema, bsDateSchema, moneySchema } from "./schemas.js";
 
+export const laboratoryYearLevelSchema = z.enum(LABORATORY_YEAR_LEVELS);
+
+export const teacherLaboratoryAssignmentSchema = z.object({
+  teacherId: objectIdSchema,
+  laboratoryId: objectIdSchema,
+  role: z.enum(["IN_CHARGE", "ASSISTANT", "INSTRUCTOR"]).default("IN_CHARGE"),
+  /** Optional — backend fills today's BS date when empty */
+  assignedFromBs: bsDateSchema.optional().or(z.literal("")),
+  assignedToBs: bsDateSchema.optional().or(z.literal("")),
+  status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
+  remarks: z.string().trim().max(1000).optional().or(z.literal(""))
+});
+
 export const laboratorySchema = z
   .object({
-    type: z.enum(LABORATORY_TYPES),
+    /** Template for default equipment groups only — lab display name comes from `name`. */
+    type: z.enum(LABORATORY_TYPES).default("OTHER"),
     customName: z.string().optional().or(z.literal("")),
     name: z.string().min(1).optional(),
     code: z.string().trim().max(40).optional().or(z.literal("")),
+    yearLevel: laboratoryYearLevelSchema.default("All Years"),
     department: z.string().trim().max(120).optional().or(z.literal("")),
     academicProgram: z.string().trim().max(120).optional().or(z.literal("")),
     description: z.string().trim().max(2000).optional().or(z.literal("")),
@@ -27,11 +43,11 @@ export const laboratorySchema = z
     isActive: z.boolean().default(true)
   })
   .superRefine((value, ctx) => {
-    if (value.type === "OTHER" && !value.customName?.trim() && !value.name?.trim()) {
+    if (!value.name?.trim() && !value.customName?.trim()) {
       ctx.addIssue({
         code: "custom",
-        message: "Custom laboratory name is required",
-        path: ["customName"]
+        message: "Laboratory name is required",
+        path: ["name"]
       });
     }
   });
@@ -46,6 +62,7 @@ export const laboratoryEquipmentSchema = z.object({
   name: z.string().min(2),
   itemCode: z.string().trim().max(40).optional().or(z.literal("")),
   itemKind: z.enum(LABORATORY_ITEM_KINDS).default("NON_DISPOSABLE"),
+  yearLevel: laboratoryYearLevelSchema.default("All Years"),
   brand: z.string().trim().max(100).optional().or(z.literal("")),
   equipmentModel: z.string().trim().max(100).optional().or(z.literal("")),
   unit: z.string().trim().max(40).optional().or(z.literal("")),

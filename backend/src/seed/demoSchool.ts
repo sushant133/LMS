@@ -265,16 +265,20 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    const yearByBatchAndName = new Map<string, (typeof years)[number]>();
-    for (const year of years) {
-      const batch = [batch2082!, batch2083!].find((item) => item._id.equals(year.batchId));
-      if (batch) {
-        yearByBatchAndName.set(`${batch.name}::${year.name}`, year);
-      }
-    }
+    const year1 =
+      years.find(
+        (y) => y.name === "1st Year" && String(y.batchId) === String(batch2082!._id)
+      ) ?? years.find((y) => y.name === "1st Year" && y.level === 1);
+    const year2 =
+      years.find(
+        (y) => y.name === "2nd Year" && String(y.batchId) === String(batch2082!._id)
+      ) ?? years.find((y) => y.name === "2nd Year" && y.level === 2);
 
-    const year1 = yearByBatchAndName.get("Batch 2082::1st Year")!;
-    const year2 = yearByBatchAndName.get("Batch 2082::2nd Year")!;
+    if (!year1?._id || !year2?._id) {
+      throw new Error(
+        `Demo seed could not resolve academic years (created ${years.length} year rows).`
+      );
+    }
 
     const masterSubjectDefs = [
       { name: "Anatomy", code: "ANAT", yearLevel: 1, theoryMarks: 70, practicalMarks: 30, fullMarks: 100, passMarks: 35 },
@@ -306,20 +310,35 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    await provisionSubjectsForBatch(schoolId, batch2082!._id);
-    await provisionSubjectsForBatch(schoolId, batch2083!._id);
+    // Must use the same Mongo session — otherwise Atlas transactions hide uncommitted MasterSubject/Year rows
+    await provisionSubjectsForBatch(schoolId, batch2082!._id, session);
+    await provisionSubjectsForBatch(schoolId, batch2083!._id, session);
 
     const subjectQuery = Subject.find({ schoolId, yearIds: { $in: [year1._id, year2._id] } });
     const subjects = session ? await subjectQuery.session(session) : await subjectQuery;
 
+    const pickSubject = (code: string, yearId: typeof year1._id) => {
+      const found = subjects.find(
+        (subject) =>
+          subject.code === code &&
+          (subject.yearIds ?? []).some((id) => String(id) === String(yearId))
+      );
+      if (!found) {
+        throw new Error(
+          `Demo seed missing subject ${code} for year ${String(yearId)} (subjects found: ${subjects.length}).`
+        );
+      }
+      return found;
+    };
+
     const subjectByCode = {
-      ANAT: subjects.find((subject) => subject.code === "ANAT" && subject.yearIds.some((id) => id.equals(year1._id)))!,
-      PHYS: subjects.find((subject) => subject.code === "PHYS" && subject.yearIds.some((id) => id.equals(year1._id)))!,
-      ENG: subjects.find((subject) => subject.code === "ENG" && subject.yearIds.some((id) => id.equals(year1._id)))!,
-      CH: subjects.find((subject) => subject.code === "CH" && subject.yearIds.some((id) => id.equals(year1._id)))!,
-      PHAR: subjects.find((subject) => subject.code === "PHAR" && subject.yearIds.some((id) => id.equals(year2._id)))!,
-      MS: subjects.find((subject) => subject.code === "MS" && subject.yearIds.some((id) => id.equals(year2._id)))!,
-      MIC: subjects.find((subject) => subject.code === "MIC" && subject.yearIds.some((id) => id.equals(year2._id)))!
+      ANAT: pickSubject("ANAT", year1._id),
+      PHYS: pickSubject("PHYS", year1._id),
+      ENG: pickSubject("ENG", year1._id),
+      CH: pickSubject("CH", year1._id),
+      PHAR: pickSubject("PHAR", year2._id),
+      MS: pickSubject("MS", year2._id),
+      MIC: pickSubject("MIC", year2._id)
     };
 
     const teacherDefs = [

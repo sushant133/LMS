@@ -360,21 +360,8 @@ export const INCOME_CATEGORIES = [
 
 export const PAYMENT_STATUSES = ["PENDING", "PARTIAL", "PAID"] as const;
 
-export {
-  LABORATORY_TYPES,
-  DEFAULT_LAB_CATEGORIES,
-  LABORATORY_ITEM_KINDS,
-  LABORATORY_ITEM_KIND_LABELS,
-  LABORATORY_EQUIPMENT_CONDITIONS,
-  LABORATORY_EQUIPMENT_STATUSES,
-  LABORATORY_STOCK_MOVEMENT_TYPES,
-  LABORATORY_STOCK_REQUEST_STATUSES,
-  LABORATORY_STOCK_PRIORITIES,
-  LABORATORY_INVENTORY_STOCK_STATUSES,
-  LABORATORY_REPORT_TYPES,
-  LABORATORY_GLOBAL_MANAGER_ROLES,
-  LABORATORY_ACCESS_ROLES
-} from "./laboratory-constants.js";
+// Laboratory constants live in laboratory-constants.ts and are exported from package
+// index only — do not re-export here (Vite star-export conflict).
 
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
 

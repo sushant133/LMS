@@ -33,7 +33,11 @@ export const ResultMarksheetView = ({
 
   const publishedDate =
     data.result.publishedAtBs ?? data.exam.resultPublishDateBs ?? "—";
-  const pdfFilename = `marksheet-${data.student.user.fullName.replace(/\s+/g, "-")}-${data.exam.name.replace(/\s+/g, "-")}.pdf`;
+  const studentName = data.student.user?.fullName ?? "Student";
+  const pdfFilename = `marksheet-${studentName.replace(/\s+/g, "-")}-${data.exam.name.replace(/\s+/g, "-")}.pdf`;
+  const isPass = String(data.result.passFailStatus ?? "")
+    .toUpperCase()
+    .includes("PASS");
 
   const rows = useMemo(
     () =>
@@ -88,6 +92,10 @@ export const ResultMarksheetView = ({
       ref={marksheetRef}
       className="official-marksheet print-results-marksheet"
     >
+      <div className="om-watermark" aria-hidden="true">
+        <span>OFFICIAL</span>
+      </div>
+
       {showActions ? (
         <div className="om-actions no-print">
           <Button
@@ -112,88 +120,104 @@ export const ResultMarksheetView = ({
       ) : null}
 
       <header className="om-header">
-        <div className="om-logo">
-          <CollegeLogo
-            src={data.collegeLogoUrl}
-            alt={`${data.collegeName} logo`}
-          />
+        <div className="om-header-band">
+          <div className="om-logo">
+            <CollegeLogo
+              src={data.collegeLogoUrl}
+              alt={`${data.collegeName} logo`}
+            />
+          </div>
+          <div className="om-header-text">
+            <h1 className="om-college-name">{data.collegeName}</h1>
+            {data.collegeNameNp ? (
+              <p className="om-college-name-np">{data.collegeNameNp}</p>
+            ) : null}
+            {data.collegeAddress ? (
+              <p className="om-college-address">{data.collegeAddress}</p>
+            ) : null}
+          </div>
         </div>
-        <h1 className="om-college-name">{data.collegeName}</h1>
-        {data.collegeNameNp ? (
-          <p className="om-college-name-np">{data.collegeNameNp}</p>
-        ) : null}
-        {data.collegeAddress ? (
-          <p className="om-college-address">{data.collegeAddress}</p>
-        ) : null}
-        <p className="om-doc-title">OFFICIAL MARKSHEET</p>
-        <p className="om-exam-name">{data.exam.name}</p>
-        <p className="om-session">
-          Academic Session: {data.exam.academicYearBs}
-        </p>
+
+        <div className="om-title-block">
+          <p className="om-doc-title">Official Marksheet</p>
+          <p className="om-doc-title-sub">Statement of Marks</p>
+          <p className="om-exam-name">{data.exam.name}</p>
+          <p className="om-session">
+            Academic Session: {data.exam.academicYearBs}
+          </p>
+        </div>
       </header>
 
       <section className="om-student-grid">
-        <dl className="om-info-list">
-          <div className="om-info-row">
-            <dt>Student Name</dt>
-            <dd>{data.student.user.fullName}</dd>
-          </div>
-          <div className="om-info-row">
-            <dt>Registration No.</dt>
-            <dd>{data.student.admissionNumber}</dd>
-          </div>
-          <div className="om-info-row">
-            <dt>Roll No.</dt>
-            <dd>{data.student.rollNumber}</dd>
-          </div>
-          {data.batch ? (
+        <div className="om-info-panel">
+          <p className="om-info-panel-title">Student particulars</p>
+          <dl className="om-info-list">
             <div className="om-info-row">
-              <dt>Batch</dt>
-              <dd>{data.batch.name}</dd>
+              <dt>Student Name</dt>
+              <dd>{studentName}</dd>
             </div>
-          ) : null}
-          {data.year ? (
             <div className="om-info-row">
-              <dt>Year</dt>
-              <dd>{data.year.name}</dd>
+              <dt>Registration No.</dt>
+              <dd>{data.student.admissionNumber}</dd>
             </div>
-          ) : null}
-          {!data.batch && data.schoolClass ? (
             <div className="om-info-row">
-              <dt>Class</dt>
-              <dd>{data.schoolClass.name}</dd>
+              <dt>Roll No.</dt>
+              <dd>{data.student.rollNumber}</dd>
             </div>
-          ) : null}
-          {!data.year && data.section ? (
-            <div className="om-info-row">
-              <dt>Section</dt>
-              <dd>{data.section.name}</dd>
-            </div>
-          ) : null}
-        </dl>
+            {data.batch ? (
+              <div className="om-info-row">
+                <dt>Batch</dt>
+                <dd>{data.batch.name}</dd>
+              </div>
+            ) : null}
+            {data.year ? (
+              <div className="om-info-row">
+                <dt>Year</dt>
+                <dd>{data.year.name}</dd>
+              </div>
+            ) : null}
+            {!data.batch && data.schoolClass ? (
+              <div className="om-info-row">
+                <dt>Class</dt>
+                <dd>{data.schoolClass.name}</dd>
+              </div>
+            ) : null}
+            {!data.year && data.section ? (
+              <div className="om-info-row">
+                <dt>Section</dt>
+                <dd>{data.section.name}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
 
-        <dl className="om-info-list">
-          <div className="om-info-row">
-            <dt>Examination</dt>
-            <dd>{data.exam.name}</dd>
-          </div>
-          <div className="om-info-row">
-            <dt>Published Date</dt>
-            <dd>{publishedDate}</dd>
-          </div>
-          <div className="om-info-row">
-            <dt>Result Status</dt>
-            <dd>{data.result.passFailStatus}</dd>
-          </div>
-          <div className="om-info-row">
-            <dt>GPA</dt>
-            <dd>{data.result.gpa.toFixed(2)}</dd>
-          </div>
-          <div className="om-info-row">
-            <dt>Percentage</dt>
-            <dd>{data.result.percentage}%</dd>
-          </div>
-        </dl>
+        <div className="om-info-panel">
+          <p className="om-info-panel-title">Examination details</p>
+          <dl className="om-info-list">
+            <div className="om-info-row">
+              <dt>Examination</dt>
+              <dd>{data.exam.name}</dd>
+            </div>
+            <div className="om-info-row">
+              <dt>Published Date</dt>
+              <dd>{publishedDate}</dd>
+            </div>
+            <div className="om-info-row">
+              <dt>Result Status</dt>
+              <dd className={isPass ? "om-status-pass" : "om-status-fail"}>
+                {data.result.passFailStatus}
+              </dd>
+            </div>
+            <div className="om-info-row">
+              <dt>GPA</dt>
+              <dd>{data.result.gpa.toFixed(2)}</dd>
+            </div>
+            <div className="om-info-row">
+              <dt>Percentage</dt>
+              <dd>{data.result.percentage}%</dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       <div className="om-marks-table-wrap">
@@ -206,7 +230,7 @@ export const ResultMarksheetView = ({
               <th className="col-practical">Practical</th>
               <th className="col-internal">Internal</th>
               <th className="col-total">Total</th>
-              <th className="col-full">Full Marks</th>
+              <th className="col-full">Full</th>
               <th className="col-grade">Grade</th>
               <th className="col-status">Status</th>
               <th className="col-remarks">Remarks</th>
@@ -223,7 +247,17 @@ export const ResultMarksheetView = ({
                 <td className="col-total">{row.total}</td>
                 <td className="col-full">{row.fullMarks}</td>
                 <td className="col-grade">{row.grade}</td>
-                <td className="col-status">{row.status}</td>
+                <td className="col-status">
+                  <span
+                    className={
+                      row.status === "PASS"
+                        ? "om-badge om-badge-pass"
+                        : "om-badge om-badge-fail"
+                    }
+                  >
+                    {row.status}
+                  </span>
+                </td>
                 <td className="col-remarks">{row.remarks}</td>
               </tr>
             ))}
@@ -231,36 +265,47 @@ export const ResultMarksheetView = ({
         </table>
       </div>
 
-      <section className="om-summary">
-        <h2 className="om-summary-title">Result Summary</h2>
-        <table className="om-summary-table">
-          <tbody>
-            <tr>
-              <th>Total Obtained Marks</th>
-              <td>{data.totalObtained}</td>
-            </tr>
-            <tr>
-              <th>Total Full Marks</th>
-              <td>{data.totalFullMarks}</td>
-            </tr>
-            <tr>
-              <th>Percentage</th>
-              <td>{data.result.percentage}%</td>
-            </tr>
-            <tr>
-              <th>GPA</th>
-              <td>{data.result.gpa.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <th>Final Grade</th>
-              <td>{data.result.grade}</td>
-            </tr>
-            <tr>
-              <th>Result</th>
-              <td>{data.result.passFailStatus}</td>
-            </tr>
-          </tbody>
-        </table>
+      <section className="om-summary-row">
+        <div className="om-summary">
+          <h2 className="om-summary-title">Result Summary</h2>
+          <table className="om-summary-table">
+            <tbody>
+              <tr>
+                <th>Total Obtained Marks</th>
+                <td>{data.totalObtained}</td>
+              </tr>
+              <tr>
+                <th>Total Full Marks</th>
+                <td>{data.totalFullMarks}</td>
+              </tr>
+              <tr>
+                <th>Percentage</th>
+                <td>{data.result.percentage}%</td>
+              </tr>
+              <tr>
+                <th>GPA</th>
+                <td>{data.result.gpa.toFixed(2)}</td>
+              </tr>
+              <tr>
+                <th>Final Grade</th>
+                <td>{data.result.grade}</td>
+              </tr>
+              <tr>
+                <th>Overall Result</th>
+                <td className={isPass ? "om-status-pass" : "om-status-fail"}>
+                  {data.result.passFailStatus}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <aside className="om-gpa-card">
+          <p className="om-gpa-label">Cumulative GPA</p>
+          <p className="om-gpa-value">{data.result.gpa.toFixed(2)}</p>
+          <p className="om-gpa-meta">{data.result.percentage}% overall</p>
+          <p className="om-gpa-grade">Grade {data.result.grade}</p>
+        </aside>
       </section>
 
       <footer className="om-footer">
@@ -280,12 +325,16 @@ export const ResultMarksheetView = ({
       <div className="om-meta">
         <div className="om-meta-lines">
           {data.printedDateBs ? (
-            <p>Printed Date: {data.printedDateBs}</p>
+            <p>Printed Date (BS): {data.printedDateBs}</p>
           ) : null}
           {data.verificationNumber ? (
             <p>Verification No.: {data.verificationNumber}</p>
           ) : null}
         </div>
+        <p className="om-meta-note">
+          This is a computer-generated official marksheet. Verify authenticity
+          with the institution using the verification number when provided.
+        </p>
       </div>
     </article>
   );

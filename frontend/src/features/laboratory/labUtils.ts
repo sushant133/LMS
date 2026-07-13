@@ -1,9 +1,14 @@
-import type {
-  LaboratoryEquipmentInput,
-  LaboratoryInput,
-  LaboratoryReportType,
-  LaboratoryStockRequestStatus,
+import {
+  LABORATORY_YEAR_LEVELS,
+  type LaboratoryEquipmentInput,
+  type LaboratoryInput,
+  type LaboratoryReportType,
+  type LaboratoryStockRequestStatus,
+  type LaboratoryYearLevel,
 } from "@phit-erp/shared";
+
+export { LABORATORY_YEAR_LEVELS };
+export type { LaboratoryYearLevel };
 
 export type LabTab =
   | "dashboard"
@@ -14,14 +19,19 @@ export type LabTab =
   | "reports"
   | "staff";
 
+/**
+ * Optional templates that only seed default equipment groups when a lab is created.
+ * The real lab identity is the Laboratory name the user types.
+ */
 export const labTypeOptions = [
-  { value: "COMPUTER", label: "Computer Lab" },
-  { value: "PHYSICS", label: "Physics Lab" },
-  { value: "CHEMISTRY", label: "Chemistry Lab" },
-  { value: "BIOLOGY", label: "Biology Lab" },
-  { value: "OTHER", label: "Other (Custom Lab)" },
+  { value: "OTHER", label: "General / Custom (no preset groups)" },
+  { value: "COMPUTER", label: "Computer equipment groups" },
+  { value: "PHYSICS", label: "Physics equipment groups" },
+  { value: "CHEMISTRY", label: "Chemistry equipment groups" },
+  { value: "BIOLOGY", label: "Biology equipment groups" },
 ] as const;
 
+/** Equipment category options shown in Add/Edit equipment (itemKind). */
 export const itemKindOptions = [
   { value: "DISPOSABLE", label: "Disposable / Destroyable" },
   { value: "NON_DISPOSABLE", label: "Non-Disposable / Non-Destroyable" },
@@ -79,10 +89,11 @@ export const reportTypeOptions: Array<{ value: LaboratoryReportType; label: stri
 ];
 
 export const defaultLabForm: LaboratoryInput = {
-  type: "COMPUTER",
+  type: "OTHER",
   customName: "",
   name: "",
   code: "",
+  yearLevel: "1st Year",
   department: "",
   academicProgram: "",
   description: "",
@@ -99,6 +110,7 @@ export const defaultEquipmentForm: LaboratoryEquipmentInput = {
   name: "",
   itemCode: "",
   itemKind: "NON_DISPOSABLE",
+  yearLevel: "1st Year",
   brand: "",
   equipmentModel: "",
   unit: "pcs",

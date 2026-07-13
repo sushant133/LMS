@@ -185,12 +185,12 @@ export const StudentProfileView = () => {
           {student.photoUrl ? (
             <img
               src={student.photoUrl}
-              alt={student.user.fullName}
+              alt={student.user?.fullName ?? "Student"}
               className="h-28 w-28 rounded-2xl object-cover shadow-sm"
             />
           ) : (
             <div className="flex h-28 w-28 items-center justify-center rounded-2xl bg-slate-200 text-3xl font-semibold text-slate-600">
-              {student.user.fullName.slice(0, 1)}
+              {(student.user?.fullName ?? "S").slice(0, 1)}
             </div>
           )}
           <h2 className="mt-4 text-2xl font-bold text-slate-900">

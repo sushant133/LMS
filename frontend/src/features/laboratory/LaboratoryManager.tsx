@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { getTodayBs } from "@munatech/nepali-datepicker";
+import { Link } from "react-router-dom";
 import {
   canManageInstitution,
   laboratoryEquipmentSchema,
@@ -29,6 +31,10 @@ import {
   FlaskConical,
   LayoutDashboard,
   Package,
+  PackagePlus,
+  Pencil,
+  ShoppingCart,
+  Trash2,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -62,11 +68,13 @@ import {
   issueStatusStyles,
   itemKindOptions,
   labTypeOptions,
+  LABORATORY_YEAR_LEVELS,
   reportTypeOptions,
   requestStatusStyles,
   rowsToCsv,
   stockActionOptions,
   type LabTab,
+  type LaboratoryYearLevel,
   type StockRequestFormState,
   downloadCsv,
 } from "./labUtils";
@@ -113,6 +121,7 @@ export const LaboratoryManager = () => {
   const [search, setSearch] = useState("");
   const [labFilter, setLabFilter] = useState("");
   const [itemKindFilter, setItemKindFilter] = useState("");
+  const [yearFilter, setYearFilter] = useState<"ALL" | LaboratoryYearLevel>("ALL");
   const [stockStatusFilter, setStockStatusFilter] = useState("");
   const [requestStatusFilter, setRequestStatusFilter] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -150,7 +159,14 @@ export const LaboratoryManager = () => {
   });
 
   const equipmentQuery = useQuery({
-    queryKey: ["laboratory-equipment", labFilter, search, itemKindFilter, stockStatusFilter],
+    queryKey: [
+      "laboratory-equipment",
+      labFilter,
+      search,
+      itemKindFilter,
+      yearFilter,
+      stockStatusFilter,
+    ],
     queryFn: () =>
       unwrap<LaboratoryEquipmentRecord[]>(
         api.get("/laboratory/equipment", {
@@ -158,6 +174,7 @@ export const LaboratoryManager = () => {
             laboratoryId: labFilter || undefined,
             search: search || undefined,
             itemKind: itemKindFilter || undefined,
+            yearLevel: yearFilter !== "ALL" ? yearFilter : undefined,
             stockStatus: stockStatusFilter || undefined,
           },
         }),
@@ -285,12 +302,16 @@ export const LaboratoryManager = () => {
   });
 
   const returnEquipment = useMutation({
-    mutationFn: (id: string) =>
-      unwrap(
+    mutationFn: (id: string) => {
+      // Always use today's BS date — never Gregorian ISO (Zod rejects it)
+      const today = getTodayBs();
+      const returnedDateBs = `${today.year}-${String(today.month).padStart(2, "0")}-${String(today.day).padStart(2, "0")}`;
+      return unwrap(
         api.put(`/laboratory/issues/${id}/return`, {
-          returnedDateBs: issueForm.issuedDateBs || new Date().toISOString().slice(0, 10),
+          returnedDateBs,
         }),
-      ),
+      );
+    },
     onSuccess: async () => {
       toast.success("Equipment returned");
       await invalidateLab();
@@ -392,6 +413,7 @@ export const LaboratoryManager = () => {
       customName: lab.customName ?? "",
       name: lab.name,
       code: lab.code ?? "",
+      yearLevel: lab.yearLevel ?? "All Years",
       department: lab.department ?? "",
       academicProgram: lab.academicProgram ?? "",
       description: lab.description ?? "",
@@ -411,6 +433,7 @@ export const LaboratoryManager = () => {
       name: item.name,
       itemCode: item.itemCode,
       itemKind: item.itemKind ?? "NON_DISPOSABLE",
+      yearLevel: item.yearLevel ?? "All Years",
       brand: item.brand ?? "",
       equipmentModel: item.equipmentModel ?? "",
       unit: item.unit ?? "pcs",
@@ -442,6 +465,25 @@ export const LaboratoryManager = () => {
       remarks: "",
     });
   };
+
+  const beginStockAdjust = (item: LaboratoryEquipmentRecord) => {
+    setStockAction({
+      equipmentId: item._id,
+      type: "INCREASE",
+      quantity: 1,
+      notes: "",
+    });
+    // Scroll stock panel into view on smaller screens
+    document.getElementById("lab-update-stock")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  const selectedStockItem = useMemo(
+    () => equipment.find((item) => item._id === stockAction.equipmentId) ?? null,
+    [equipment, stockAction.equipmentId],
+  );
 
   return (
     <div className="space-y-6">
@@ -581,7 +623,40 @@ export const LaboratoryManager = () => {
                 <CardTitle>{editingLabId ? "Edit laboratory" : "Create laboratory"}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <FormField label="Laboratory type">
+                <FormField label="Laboratory name *">
+                  <Input
+                    value={labForm.name || labForm.customName || ""}
+                    onChange={(e) =>
+                      setLabForm((c) => ({
+                        ...c,
+                        name: e.target.value,
+                        customName: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Anatomy Lab, Microbiology Lab, Nursing Skills Lab"
+                  />
+                </FormField>
+                <FormField label="Year *">
+                  <Select
+                    value={labForm.yearLevel ?? "1st Year"}
+                    onChange={(e) =>
+                      setLabForm((c) => ({
+                        ...c,
+                        yearLevel: e.target.value as LaboratoryYearLevel,
+                      }))
+                    }
+                  >
+                    {LABORATORY_YEAR_LEVELS.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Assign this lab to 1st, 2nd, or 3rd Year (or All Years for shared labs).
+                  </p>
+                </FormField>
+                <FormField label="Equipment groups template (optional)">
                   <Select
                     value={labForm.type}
                     onChange={(e) =>
@@ -597,21 +672,12 @@ export const LaboratoryManager = () => {
                       </option>
                     ))}
                   </Select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    This does not change the lab name. It only adds default equipment groups
+                    (e.g. Glassware, Chemicals) when the lab is created. Use{" "}
+                    <strong>General / Custom</strong> for HA or medical labs.
+                  </p>
                 </FormField>
-                {(labForm.type === "OTHER" || editingLabId) && (
-                  <FormField label="Laboratory name">
-                    <Input
-                      value={labForm.name || labForm.customName || ""}
-                      onChange={(e) =>
-                        setLabForm((c) => ({
-                          ...c,
-                          name: e.target.value,
-                          customName: e.target.value,
-                        }))
-                      }
-                    />
-                  </FormField>
-                )}
                 <FormField label="Laboratory code (optional)">
                   <Input
                     value={labForm.code ?? ""}
@@ -623,6 +689,7 @@ export const LaboratoryManager = () => {
                   <Input
                     value={labForm.department ?? ""}
                     onChange={(e) => setLabForm((c) => ({ ...c, department: e.target.value }))}
+                    placeholder="e.g. Health Assistant Program"
                   />
                 </FormField>
                 <FormField label="Academic program (optional)">
@@ -659,6 +726,14 @@ export const LaboratoryManager = () => {
                       </option>
                     ))}
                   </Select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    One primary in-charge for this lab. To give one teacher{" "}
+                    <strong>many labs</strong> (same login), use{" "}
+                    <Link to="/teachers" className="font-medium text-brand-700 underline">
+                      Teachers → Assignments → Laboratory assignments
+                    </Link>
+                    .
+                  </p>
                 </FormField>
                 <FormField label="Description">
                   <Textarea
@@ -683,8 +758,23 @@ export const LaboratoryManager = () => {
                 <div className="flex flex-wrap gap-2">
                   <Button
                     onClick={() => {
-                      const parsed = laboratorySchema.safeParse(labForm);
-                      if (!parsed.success) return toast.error("Invalid laboratory details");
+                      const name = (labForm.name || labForm.customName || "").trim();
+                      if (!name) {
+                        return toast.error("Please enter a laboratory name");
+                      }
+                      const payload = {
+                        ...labForm,
+                        name,
+                        customName: name,
+                        // Prefer OTHER so the typed name is always the lab title
+                        type: labForm.type || "OTHER",
+                      };
+                      const parsed = laboratorySchema.safeParse(payload);
+                      if (!parsed.success) {
+                        return toast.error(
+                          parsed.error.issues[0]?.message ?? "Invalid laboratory details",
+                        );
+                      }
                       createOrUpdateLab.mutate(parsed.data);
                     }}
                   >
@@ -723,6 +813,7 @@ export const LaboratoryManager = () => {
                   <TableHead>
                     <tr>
                       <Th>Name</Th>
+                      <Th>Year</Th>
                       <Th>Code</Th>
                       <Th>Department</Th>
                       <Th>Location</Th>
@@ -735,6 +826,11 @@ export const LaboratoryManager = () => {
                     {labOptions.map((lab) => (
                       <tr key={lab._id}>
                         <Td className="font-medium">{lab.name}</Td>
+                        <Td>
+                          <Badge className="bg-indigo-100 text-indigo-800">
+                            {lab.yearLevel ?? "All Years"}
+                          </Badge>
+                        </Td>
                         <Td>{lab.code ?? "—"}</Td>
                         <Td>{lab.department ?? "—"}</Td>
                         <Td>
@@ -833,17 +929,31 @@ export const LaboratoryManager = () => {
 
       {tab === "inventory" && (
         <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Search & filter</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {/* Filters */}
+          <Card className="border-slate-200 bg-[linear-gradient(135deg,_white_0%,_#f8fafc_100%)]">
+            <CardContent className="grid gap-3 py-4 md:grid-cols-2 xl:grid-cols-5">
               <FormField label="Laboratory">
                 <Select value={labFilter} onChange={(e) => setLabFilter(e.target.value)}>
                   <option value="">All laboratories</option>
                   {labOptions.map((lab) => (
                     <option key={lab._id} value={lab._id}>
+                      {lab.yearLevel ? `[${lab.yearLevel}] ` : ""}
                       {lab.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Year">
+                <Select
+                  value={yearFilter}
+                  onChange={(e) =>
+                    setYearFilter(e.target.value as "ALL" | LaboratoryYearLevel)
+                  }
+                >
+                  <option value="ALL">All years</option>
+                  {LABORATORY_YEAR_LEVELS.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
                     </option>
                   ))}
                 </Select>
@@ -852,12 +962,12 @@ export const LaboratoryManager = () => {
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Name, code, brand..."
+                  placeholder="Name, code, brand…"
                 />
               </FormField>
-              <FormField label="Item kind">
+              <FormField label="Category">
                 <Select value={itemKindFilter} onChange={(e) => setItemKindFilter(e.target.value)}>
-                  <option value="">All kinds</option>
+                  <option value="">All categories</option>
                   {itemKindOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
@@ -880,15 +990,20 @@ export const LaboratoryManager = () => {
             </CardContent>
           </Card>
 
-          <div className="grid gap-6 xl:grid-cols-[400px_1fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle>
+          <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
+            {/* Add / Edit equipment */}
+            <Card className="h-fit xl:sticky xl:top-4">
+              <CardHeader className="border-b border-slate-100 pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <PackagePlus className="h-5 w-5 text-brand-600" />
                   {editingEquipmentId ? "Edit equipment" : "Add equipment"}
                 </CardTitle>
+                <p className="text-xs text-slate-500">
+                  Register new items or update equipment details for a laboratory.
+                </p>
               </CardHeader>
-              <CardContent className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
-                <FormField label="Laboratory">
+              <CardContent className="max-h-[72vh] space-y-3 overflow-y-auto pt-4 pr-1">
+                <FormField label="Laboratory *">
                   <Select
                     value={equipmentForm.laboratoryId}
                     onChange={(e) =>
@@ -907,35 +1022,7 @@ export const LaboratoryManager = () => {
                     ))}
                   </Select>
                 </FormField>
-                <FormField label="Category">
-                  <Select
-                    value={equipmentForm.categoryId}
-                    onChange={(e) =>
-                      setEquipmentForm((c) => ({ ...c, categoryId: e.target.value }))
-                    }
-                  >
-                    <option value="">Select category</option>
-                    {categories.map((cat) => (
-                      <option key={cat._id} value={cat._id}>
-                        {cat.name}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Equipment name">
-                  <Input
-                    value={equipmentForm.name}
-                    onChange={(e) => setEquipmentForm((c) => ({ ...c, name: e.target.value }))}
-                  />
-                </FormField>
-                <FormField label="Equipment code (optional)">
-                  <Input
-                    value={equipmentForm.itemCode ?? ""}
-                    onChange={(e) => setEquipmentForm((c) => ({ ...c, itemCode: e.target.value }))}
-                    placeholder="Auto-generated if empty"
-                  />
-                </FormField>
-                <FormField label="Category kind">
+                <FormField label="Category *">
                   <Select
                     value={equipmentForm.itemKind}
                     onChange={(e) =>
@@ -952,7 +1039,53 @@ export const LaboratoryManager = () => {
                     ))}
                   </Select>
                 </FormField>
-                <div className="grid grid-cols-2 gap-2">
+                <FormField label="Year *">
+                  <Select
+                    value={equipmentForm.yearLevel ?? "1st Year"}
+                    onChange={(e) =>
+                      setEquipmentForm((c) => ({
+                        ...c,
+                        yearLevel: e.target.value as LaboratoryYearLevel,
+                      }))
+                    }
+                  >
+                    {LABORATORY_YEAR_LEVELS.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Lab group">
+                  <Select
+                    value={equipmentForm.categoryId}
+                    onChange={(e) =>
+                      setEquipmentForm((c) => ({ ...c, categoryId: e.target.value }))
+                    }
+                  >
+                    <option value="">Select lab group / subcategory</option>
+                    {categories.map((cat) => (
+                      <option key={cat._id} value={cat._id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Equipment name *">
+                  <Input
+                    value={equipmentForm.name}
+                    onChange={(e) => setEquipmentForm((c) => ({ ...c, name: e.target.value }))}
+                    placeholder="e.g. Microscope, Beaker 250ml"
+                  />
+                </FormField>
+                <FormField label="Item code">
+                  <Input
+                    value={equipmentForm.itemCode ?? ""}
+                    onChange={(e) => setEquipmentForm((c) => ({ ...c, itemCode: e.target.value }))}
+                    placeholder="Leave blank to auto-generate"
+                  />
+                </FormField>
+                <div className="grid grid-cols-2 gap-3">
                   <FormField label="Brand">
                     <Input
                       value={equipmentForm.brand ?? ""}
@@ -968,20 +1101,24 @@ export const LaboratoryManager = () => {
                     />
                   </FormField>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   <FormField label="Unit">
                     <Input
                       value={equipmentForm.unit ?? "pcs"}
                       onChange={(e) => setEquipmentForm((c) => ({ ...c, unit: e.target.value }))}
+                      placeholder="pcs, ml, set"
                     />
                   </FormField>
-                  <FormField label="Quantity">
+                  <FormField label="Quantity *">
                     <NumberInput
-                      value={equipmentForm.quantity}
+                      min={0}
+                      value={Number.isFinite(equipmentForm.quantity) ? equipmentForm.quantity : 0}
                       onChange={(e) =>
                         setEquipmentForm((c) => ({
                           ...c,
-                          quantity: e.target.valueAsNumber,
+                          quantity: Number.isFinite(e.target.valueAsNumber)
+                            ? e.target.valueAsNumber
+                            : 0,
                         }))
                       }
                     />
@@ -989,24 +1126,32 @@ export const LaboratoryManager = () => {
                 </div>
                 <FormField label="Minimum stock level">
                   <NumberInput
-                    value={equipmentForm.minimumStockLevel ?? 0}
+                    min={0}
+                    value={
+                      Number.isFinite(equipmentForm.minimumStockLevel)
+                        ? (equipmentForm.minimumStockLevel ?? 0)
+                        : 0
+                    }
                     onChange={(e) =>
                       setEquipmentForm((c) => ({
                         ...c,
-                        minimumStockLevel: e.target.valueAsNumber,
+                        minimumStockLevel: Number.isFinite(e.target.valueAsNumber)
+                          ? e.target.valueAsNumber
+                          : 0,
                       }))
                     }
                   />
                 </FormField>
-                <FormField label="Storage location (rack/shelf)">
+                <FormField label="Storage (rack / shelf)">
                   <Input
                     value={equipmentForm.storageLocation ?? ""}
                     onChange={(e) =>
                       setEquipmentForm((c) => ({ ...c, storageLocation: e.target.value }))
                     }
+                    placeholder="e.g. Shelf A-2"
                   />
                 </FormField>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   <FormField label="Condition">
                     <Select
                       value={equipmentForm.condition}
@@ -1050,7 +1195,7 @@ export const LaboratoryManager = () => {
                     onChange={(v) => setEquipmentForm((c) => ({ ...c, purchaseDateBs: v }))}
                   />
                 </FormField>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   <FormField label="Supplier">
                     <Input
                       value={equipmentForm.supplier ?? ""}
@@ -1061,11 +1206,18 @@ export const LaboratoryManager = () => {
                   </FormField>
                   <FormField label="Purchase cost">
                     <NumberInput
-                      value={equipmentForm.purchaseCost ?? 0}
+                      min={0}
+                      value={
+                        Number.isFinite(equipmentForm.purchaseCost)
+                          ? (equipmentForm.purchaseCost ?? 0)
+                          : 0
+                      }
                       onChange={(e) =>
                         setEquipmentForm((c) => ({
                           ...c,
-                          purchaseCost: e.target.valueAsNumber,
+                          purchaseCost: Number.isFinite(e.target.valueAsNumber)
+                            ? e.target.valueAsNumber
+                            : 0,
                         }))
                       }
                     />
@@ -1077,23 +1229,31 @@ export const LaboratoryManager = () => {
                     onChange={(e) =>
                       setEquipmentForm((c) => ({ ...c, description: e.target.value }))
                     }
+                    rows={2}
                   />
                 </FormField>
                 <FormField label="Remarks">
                   <Textarea
                     value={equipmentForm.remarks ?? ""}
                     onChange={(e) => setEquipmentForm((c) => ({ ...c, remarks: e.target.value }))}
+                    rows={2}
                   />
                 </FormField>
-                <div className="flex flex-wrap gap-2">
+                <div className="sticky bottom-0 flex flex-wrap gap-2 border-t border-slate-100 bg-white pt-3">
                   <Button
+                    className="flex-1"
+                    disabled={saveEquipment.isPending}
                     onClick={() => {
                       const parsed = laboratoryEquipmentSchema.safeParse(equipmentForm);
-                      if (!parsed.success) return toast.error("Invalid equipment details");
+                      if (!parsed.success) {
+                        return toast.error(
+                          parsed.error.issues[0]?.message ?? "Invalid equipment details",
+                        );
+                      }
                       saveEquipment.mutate(parsed.data);
                     }}
                   >
-                    {editingEquipmentId ? "Save equipment" : "Add equipment"}
+                    {editingEquipmentId ? "Save changes" : "Add equipment"}
                   </Button>
                   {editingEquipmentId ? (
                     <Button
@@ -1111,139 +1271,299 @@ export const LaboratoryManager = () => {
             </Card>
 
             <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Update stock</CardTitle>
+              {/* Update stock */}
+              <Card id="lab-update-stock" className="border-brand-100 shadow-sm">
+                <CardHeader className="border-b border-slate-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_white_100%)] pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Package className="h-5 w-5 text-brand-600" />
+                    Update stock
+                  </CardTitle>
+                  <p className="text-xs text-slate-500">
+                    Increase, reduce, consume, or mark damaged / lost / maintenance for an item.
+                    Tip: click <strong>Stock</strong> on a row below to pre-select it.
+                  </p>
                 </CardHeader>
-                <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <FormField label="Equipment">
-                    <Select
-                      value={stockAction.equipmentId}
-                      onChange={(e) =>
-                        setStockAction((c) => ({ ...c, equipmentId: e.target.value }))
-                      }
-                    >
-                      <option value="">Select item</option>
-                      {equipment.map((item) => (
-                        <option key={item._id} value={item._id}>
-                          {item.name} ({item.availableQuantity} avail.)
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  <FormField label="Action">
-                    <Select
-                      value={stockAction.type}
-                      onChange={(e) => setStockAction((c) => ({ ...c, type: e.target.value }))}
-                    >
-                      {stockActionOptions.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  <FormField label="Quantity">
-                    <NumberInput
-                      value={stockAction.quantity}
-                      onChange={(e) =>
-                        setStockAction((c) => ({
-                          ...c,
-                          quantity: e.target.valueAsNumber,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Notes">
-                    <Input
-                      value={stockAction.notes}
-                      onChange={(e) => setStockAction((c) => ({ ...c, notes: e.target.value }))}
-                    />
-                  </FormField>
-                  <div className="flex items-end">
+                <CardContent className="space-y-4 pt-4">
+                  {selectedStockItem ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-900">{selectedStockItem.name}</p>
+                        <p className="text-xs text-slate-600">
+                          {selectedStockItem.itemCode} ·{" "}
+                          {selectedStockItem.laboratoryName ?? "Lab"} ·{" "}
+                          {selectedStockItem.categoryName ?? "—"}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-3 text-center text-sm">
+                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                            Total
+                          </p>
+                          <p className="font-semibold text-slate-900">
+                            {selectedStockItem.quantity}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                            Available
+                          </p>
+                          <p className="font-semibold text-emerald-700">
+                            {selectedStockItem.availableQuantity}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                            Issued
+                          </p>
+                          <p className="font-semibold text-sky-700">
+                            {selectedStockItem.issuedQuantity ?? 0}
+                          </p>
+                        </div>
+                        <div className="flex items-center">
+                          <StockStatusBadge status={selectedStockItem.status} />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                      Select equipment below or from the dropdown to update stock.
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <FormField label="Equipment *">
+                      <Select
+                        value={stockAction.equipmentId}
+                        onChange={(e) =>
+                          setStockAction((c) => ({ ...c, equipmentId: e.target.value }))
+                        }
+                      >
+                        <option value="">Select item</option>
+                        {equipment.map((item) => (
+                          <option key={item._id} value={item._id}>
+                            {item.name} · {item.availableQuantity} avail.
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                    <FormField label="Action *">
+                      <Select
+                        value={stockAction.type}
+                        onChange={(e) =>
+                          setStockAction((c) => ({ ...c, type: e.target.value }))
+                        }
+                      >
+                        {stockActionOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                    <FormField label="Quantity *">
+                      <NumberInput
+                        min={1}
+                        value={
+                          Number.isFinite(stockAction.quantity) ? stockAction.quantity : 1
+                        }
+                        onChange={(e) =>
+                          setStockAction((c) => ({
+                            ...c,
+                            quantity: Number.isFinite(e.target.valueAsNumber)
+                              ? Math.max(1, e.target.valueAsNumber)
+                              : 1,
+                          }))
+                        }
+                      />
+                    </FormField>
+                    <FormField label="Notes">
+                      <Input
+                        value={stockAction.notes}
+                        onChange={(e) =>
+                          setStockAction((c) => ({ ...c, notes: e.target.value }))
+                        }
+                        placeholder="Optional reason"
+                      />
+                    </FormField>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
-                      disabled={!stockAction.equipmentId || stockAction.quantity < 1}
+                      disabled={
+                        !stockAction.equipmentId ||
+                        stockAction.quantity < 1 ||
+                        adjustStock.isPending
+                      }
                       onClick={() => adjustStock.mutate()}
                     >
-                      Apply stock change
+                      {adjustStock.isPending ? "Updating…" : "Apply stock change"}
                     </Button>
+                    {stockAction.equipmentId ? (
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          setStockAction({
+                            equipmentId: "",
+                            type: "INCREASE",
+                            quantity: 1,
+                            notes: "",
+                          })
+                        }
+                      >
+                        Clear selection
+                      </Button>
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>
 
+              {/* Equipment inventory table */}
               <Card>
-                <CardHeader>
-                  <CardTitle>Equipment inventory</CardTitle>
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <CardTitle className="text-base">Equipment inventory</CardTitle>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {equipmentQuery.isLoading
+                        ? "Loading…"
+                        : `${equipment.length} item${equipment.length === 1 ? "" : "s"}`}
+                      {labFilter
+                        ? ` · filtered by laboratory`
+                        : ""}
+                    </p>
+                  </div>
                 </CardHeader>
-                <CardContent className="overflow-x-auto">
-                  <Table>
-                    <TableHead>
-                      <tr>
-                        <Th>Item</Th>
-                        <Th>Lab</Th>
-                        <Th>Kind</Th>
-                        <Th>Code</Th>
-                        <Th>Qty</Th>
-                        <Th>Available</Th>
-                        <Th>Min</Th>
-                        <Th>Condition</Th>
-                        <Th>Stock</Th>
-                        <Th />
-                      </tr>
-                    </TableHead>
-                    <TableBody>
-                      {equipment.map((item) => (
-                        <tr key={item._id}>
-                          <Td className="font-medium">
-                            <div>{item.name}</div>
-                            <div className="text-xs text-slate-500">
-                              {item.categoryName ?? "—"}
-                              {item.storageLocation ? ` · ${item.storageLocation}` : ""}
-                            </div>
-                          </Td>
-                          <Td>{item.laboratoryName ?? "—"}</Td>
-                          <Td className="text-xs">
-                            {item.itemKind === "DISPOSABLE" ? "Disposable" : "Durable"}
-                          </Td>
-                          <Td>{item.itemCode}</Td>
-                          <Td>{item.quantity}</Td>
-                          <Td>{item.availableQuantity}</Td>
-                          <Td>{item.minimumStockLevel ?? 0}</Td>
-                          <Td>{item.condition ?? "—"}</Td>
-                          <Td>
-                            <StockStatusBadge status={item.status} />
-                          </Td>
-                          <Td className="space-x-1 whitespace-nowrap">
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => beginEditEquipment(item)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => fillRequestFromEquipment(item)}
-                            >
-                              Request
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => {
-                                if (confirm(`Delete "${item.name}"?`)) {
-                                  deleteEquipment.mutate(item._id);
-                                }
-                              }}
-                            >
-                              Delete
-                            </Button>
-                          </Td>
-                        </tr>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <CardContent className="p-0">
+                  {equipmentQuery.isLoading ? (
+                    <div className="px-6 py-12 text-center text-sm text-slate-500">
+                      Loading equipment…
+                    </div>
+                  ) : equipment.length === 0 ? (
+                    <div className="px-6 py-12 text-center">
+                      <Package className="mx-auto h-10 w-10 text-slate-300" />
+                      <p className="mt-3 font-medium text-slate-700">No equipment found</p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Add equipment using the form on the left, or clear filters.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHead>
+                          <tr className="bg-slate-50/80">
+                            <Th>Item</Th>
+                            <Th>Lab</Th>
+                            <Th>Code</Th>
+                            <Th className="text-right">Total</Th>
+                            <Th className="text-right">Avail.</Th>
+                            <Th className="text-right">Min</Th>
+                            <Th>Condition</Th>
+                            <Th>Stock</Th>
+                            <Th className="text-right">Actions</Th>
+                          </tr>
+                        </TableHead>
+                        <TableBody>
+                          {equipment.map((item) => {
+                            const isSelected = stockAction.equipmentId === item._id;
+                            return (
+                              <tr
+                                key={item._id}
+                                className={cn(
+                                  "transition-colors",
+                                  isSelected && "bg-brand-50/70",
+                                )}
+                              >
+                                <Td className="min-w-[160px]">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-medium text-slate-900">
+                                      {item.name}
+                                    </span>
+                                    <Badge className="bg-indigo-100 text-indigo-800">
+                                      {item.yearLevel ?? "All Years"}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-0.5 text-xs text-slate-500">
+                                    {item.itemKind === "DISPOSABLE"
+                                      ? "Disposable / Destroyable"
+                                      : "Non-Disposable / Non-Destroyable"}
+                                    {item.categoryName ? ` · ${item.categoryName}` : ""}
+                                    {item.storageLocation
+                                      ? ` · ${item.storageLocation}`
+                                      : ""}
+                                  </div>
+                                </Td>
+                                <Td className="text-sm text-slate-700">
+                                  {item.laboratoryName ?? "—"}
+                                </Td>
+                                <Td className="font-mono text-xs text-slate-600">
+                                  {item.itemCode || "—"}
+                                </Td>
+                                <Td className="text-right tabular-nums">{item.quantity}</Td>
+                                <Td className="text-right tabular-nums font-medium text-emerald-700">
+                                  {item.availableQuantity}
+                                </Td>
+                                <Td className="text-right tabular-nums text-slate-600">
+                                  {item.minimumStockLevel ?? 0}
+                                </Td>
+                                <Td className="text-sm">{item.condition ?? "—"}</Td>
+                                <Td>
+                                  <StockStatusBadge status={item.status} />
+                                </Td>
+                                <Td className="text-right">
+                                  <div className="flex flex-wrap justify-end gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant={isSelected ? "default" : "secondary"}
+                                      title="Adjust stock"
+                                      onClick={() => beginStockAdjust(item)}
+                                    >
+                                      <Package className="mr-1 h-3.5 w-3.5" />
+                                      Stock
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      title="Edit equipment"
+                                      onClick={() => beginEditEquipment(item)}
+                                    >
+                                      <Pencil className="mr-1 h-3.5 w-3.5" />
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      title="Create purchase request"
+                                      onClick={() => fillRequestFromEquipment(item)}
+                                    >
+                                      <ShoppingCart className="mr-1 h-3.5 w-3.5" />
+                                      Request
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                      title="Delete equipment"
+                                      disabled={deleteEquipment.isPending}
+                                      onClick={() => {
+                                        if (
+                                          confirm(
+                                            `Delete equipment "${item.name}" (${item.itemCode || "no code"})?\n\nThis cannot be undone. Items with active issues cannot be deleted.`,
+                                          )
+                                        ) {
+                                          deleteEquipment.mutate(item._id);
+                                        }
+                                      }}
+                                    >
+                                      <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                      Delete
+                                    </Button>
+                                  </div>
+                                </Td>
+                              </tr>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

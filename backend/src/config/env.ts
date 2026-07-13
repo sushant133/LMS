@@ -124,7 +124,13 @@ const envSchema = z.object({
    * Process-wide default for subject-assignment scope mode when Setting has no override.
    * Keep `legacy` until migration + dual soak complete.
    */
-  SUBJECT_ASSIGNMENT_SCOPE_DEFAULT: z.enum(["legacy", "dual", "assignment"]).default("legacy"),
+  /**
+   * Teacher LMS scope source.
+   * - dual (default): NA/ACCEPTED teachers use SubjectAssignment matrix; PENDING use legacy arrays
+   * - assignment: always SubjectAssignment rows
+   * - legacy: always Teacher.subjects / assigned* arrays (cartesian, no units)
+   */
+  SUBJECT_ASSIGNMENT_SCOPE_DEFAULT: z.enum(["legacy", "dual", "assignment"]).default("dual"),
   /**
    * When true (and Setting does not override), new timetable slots require subjectAssignmentId.
    * Enable only after backfill is clean for the school.

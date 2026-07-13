@@ -18,13 +18,15 @@ const profileReaders = authorize(
   "ACCOUNTANT"
 );
 
-/** List/get: institution staff + scoped parents/students. COLLEGE_VIEWER inherits GET via COLLEGE_ADMIN. */
+/** List/get: institution staff + scoped parents/students. COLLEGE_VIEWER inherits GET via COLLEGE_ADMIN.
+ * LIBRARY_STAFF needs list for issue-book borrower picker. */
 const studentReaders = authorize(
   "COLLEGE_ADMIN",
   "TEACHER",
   "ACCOUNTANT",
   "PARENT",
-  "STUDENT"
+  "STUDENT",
+  "LIBRARY_STAFF"
 );
 
 const router = Router();

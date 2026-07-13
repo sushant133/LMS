@@ -115,9 +115,26 @@ export default function App() {
                 />
               }
             >
+              <Route path="/notices" element={<NoticesPage />} />
+            </Route>
+
+            {/* Exams / homework-view: not for COLLEGE_STAFF (API rejects; no sidebar) */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "STUDENT",
+                    "PARENT",
+                  ]}
+                />
+              }
+            >
               <Route path="/homework-view" element={<HomeworkPage />} />
               <Route path="/exams" element={<ExamsPage />} />
-              <Route path="/notices" element={<NoticesPage />} />
             </Route>
 
             <Route
@@ -158,8 +175,14 @@ export default function App() {
               <Route path="/students" element={<LazyRoute><StudentsLayout /></LazyRoute>}>
                 <Route index element={<Navigate to="list" replace />} />
                 <Route path="list" element={<LazyRoute><StudentListPage /></LazyRoute>} />
-                <Route path="create" element={<LazyRoute><CreateStudentPage /></LazyRoute>} />
               </Route>
+            </Route>
+            {/* Create student: admin only (teachers list students but cannot create) */}
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
+              <Route
+                path="/students/create"
+                element={<LazyRoute><CreateStudentPage /></LazyRoute>}
+              />
             </Route>
 
             <Route

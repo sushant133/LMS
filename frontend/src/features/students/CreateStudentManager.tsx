@@ -108,7 +108,17 @@ export const CreateStudentManager = () => {
     : classesQuery.isLoading || sectionsQuery.isLoading;
 
   if (!canManage) {
-    return null;
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>New Student Registration</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-slate-600">
+          You do not have permission to create or edit students. Contact a college
+          administrator if you need access.
+        </CardContent>
+      </Card>
+    );
   }
 
   if (isLoading) {

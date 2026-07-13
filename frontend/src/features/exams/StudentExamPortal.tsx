@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { PageContent } from "components/layout/PageContent";
 import { ResultMarksheetView } from "features/exams/ResultMarksheetView";
+import { useNormalizedRole } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
 
 interface EnrichedRoutine extends ExamRoutineRecord {
@@ -62,6 +63,7 @@ export const StudentExamPortal = ({
   results,
   isLoading,
 }: StudentExamPortalProps) => {
+  const role = useNormalizedRole();
   const routinesQuery = useQuery({
     queryKey: ["exam-routines", "student"],
     queryFn: async () => {
@@ -80,6 +82,8 @@ export const StudentExamPortal = ({
   const subjectsQuery = useQuery({
     queryKey: ["student-subjects"],
     queryFn: () => unwrap<SubjectRecord[]>(api.get("/student/subjects")),
+    // Parents must not call student-only portal APIs (403)
+    enabled: role === "STUDENT",
     staleTime: 60_000,
   });
 

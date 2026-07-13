@@ -6,7 +6,7 @@ const addressSchema = new Schema(
     district: { type: String, required: true },
     municipality: { type: String, required: true },
     ward: { type: String, required: true },
-    streetAddress: { type: String, required: true }
+    streetAddress: { type: String, default: "" }
   },
   { _id: false }
 );

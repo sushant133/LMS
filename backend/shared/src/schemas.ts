@@ -44,6 +44,16 @@ export const addressSchema = z.object({
   streetAddress: z.string().min(1)
 });
 
+/** Institution settings contact address — street / tole is optional */
+export const settingsAddressSchema = addressSchema.extend({
+  streetAddress: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .transform((value) => value ?? "")
+});
+
 const isValidPortalLoginId = (value: string): boolean => {
   if (z.email().safeParse(value).success) {
     return true;
@@ -608,6 +618,14 @@ export const adminAccountUpdateSchema = adminAccountSchema.partial().extend({
   email: portalLoginIdSchema.optional()
 });
 
+/** Relative upload path or absolute URL (optional photo) */
+const optionalPhotoUrlSchema = z
+  .string()
+  .trim()
+  .max(500)
+  .optional()
+  .or(z.literal(""));
+
 export const collegeAdministratorSchema = z.object({
   fullName: z.string().min(2),
   employeeId: z.string().min(1),
@@ -616,7 +634,7 @@ export const collegeAdministratorSchema = z.object({
   phone: z.string().min(7),
   email: portalLoginIdSchema,
   password: optionalPortalPasswordSchema,
-  profilePhotoUrl: z.string().url().optional().or(z.literal(""))
+  profilePhotoUrl: optionalPhotoUrlSchema
 });
 
 export const collegeAdministratorUpdateSchema = collegeAdministratorSchema.partial().extend({
@@ -626,13 +644,13 @@ export const collegeAdministratorUpdateSchema = collegeAdministratorSchema.parti
   department: z.string().min(1).optional(),
   phone: z.string().min(7).optional(),
   email: portalLoginIdSchema.optional(),
-  profilePhotoUrl: z.string().url().optional().or(z.literal(""))
+  profilePhotoUrl: optionalPhotoUrlSchema
 });
 
 export const selfProfileUpdateSchema = z.object({
   fullName: z.string().min(2).optional(),
   phone: z.string().min(7).optional(),
-  profilePhotoUrl: z.string().url().optional().or(z.literal(""))
+  profilePhotoUrl: optionalPhotoUrlSchema
 });
 
 export const selfPasswordChangeSchema = z.object({
@@ -652,7 +670,7 @@ export const settingsSchema = z.object({
   principalName: z.string().min(2),
   contactEmail: z.email(),
   contactPhone: z.string().min(7),
-  address: addressSchema,
+  address: settingsAddressSchema,
   holidays: z.array(
     z.object({
       title: z.string().min(1),
