@@ -379,9 +379,18 @@ export const softDeleteAdmin = asyncHandler(async (req: Request, res: Response) 
   ensureNotDeleted(admin);
 
   const before = serializeAdmin(admin as UserLean);
+  const photoToDelete = (admin as { profilePhotoUrl?: string }).profilePhotoUrl;
   admin.email = toDeletedAdminEmail(admin._id, admin.email);
   admin.isActive = false;
+  if ("profilePhotoUrl" in admin) {
+    (admin as { profilePhotoUrl?: string }).profilePhotoUrl = undefined;
+  }
   await admin.save();
+
+  if (photoToDelete) {
+    const { deleteStoredMediaUrl } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrl(photoToDelete);
+  }
 
   const after = serializeAdmin(admin as UserLean);
   await recordAudit(req, {

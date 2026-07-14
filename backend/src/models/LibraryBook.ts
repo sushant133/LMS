@@ -49,7 +49,11 @@ const libraryBookCopySchema = new Schema(
       index: true
     },
     shelfLocation: { type: String, trim: true },
-    condition: { type: String, trim: true }
+    condition: { type: String, trim: true },
+    /** Publisher / publication imprint for this physical copy. */
+    publication: { type: String, trim: true },
+    /** Purchase or catalog price of this copy in NPR. */
+    priceNpr: { type: Number, min: 0, default: 0 }
   },
   { timestamps: true }
 );

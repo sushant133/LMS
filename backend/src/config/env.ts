@@ -74,8 +74,34 @@ const envSchema = z.object({
   /**
    * Absolute or relative path for uploaded files (photos, documents, certificates).
    * Defaults to <cwd>/uploads in development.
+   * When Cloudinary is configured, files are uploaded there and local disk is only a temp staging area.
    */
   UPLOAD_DIR: z.string().optional(),
+  /**
+   * Cloudinary (recommended for production images / profile photos).
+   * When all three are set, image (and other) uploads go to Cloudinary CDN.
+   */
+  CLOUDINARY_CLOUD_NAME: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
+  CLOUDINARY_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
+  CLOUDINARY_API_SECRET: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
+  /** Root folder prefix in Cloudinary (e.g. phit-erp). Tenant schoolId is appended. */
+  CLOUDINARY_FOLDER: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim().replace(/^\/+|\/+$/g, "");
+      return trimmed || "phit-erp";
+    })
+    .default("phit-erp"),
   /**
    * Optional public origin of the API (e.g. https://api.example.com).
    * Used only for diagnostics / absolute URL helpers — routes stay relative by default.
@@ -186,6 +212,10 @@ if (env.NODE_ENV === "production") {
 /** Absolute path for file uploads (photos, documents, certificates, reports). */
 export const getUploadDir = (): string =>
   env.UPLOAD_DIR ? path.resolve(env.UPLOAD_DIR) : path.join(process.cwd(), "uploads");
+
+/** True when Cloudinary credentials are fully configured — uploads go to CDN. */
+export const isCloudinaryEnabled = (): boolean =>
+  Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET);
 
 /** Login page URL for credential emails. */
 export const getAppLoginUrl = (): string => {

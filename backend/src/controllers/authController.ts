@@ -456,11 +456,18 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
 
   if (payload.fullName) user.fullName = payload.fullName;
   if (payload.phone) user.phone = payload.phone;
+  const previousPhoto = user.profilePhotoUrl;
   if (payload.profilePhotoUrl !== undefined) {
     user.profilePhotoUrl = payload.profilePhotoUrl || undefined;
   }
 
   await user.save();
+
+  if (payload.profilePhotoUrl !== undefined) {
+    const { deleteReplacedMedia } = await import("../utils/mediaCleanup.js");
+    await deleteReplacedMedia(previousPhoto, user.profilePhotoUrl);
+  }
+
   await recordAudit(req, {
     action: "auth.profile_update",
     entity: "User",

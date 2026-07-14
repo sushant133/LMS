@@ -222,6 +222,10 @@ export interface LibraryBookCopyRecord {
   status: LibraryCopyStatus;
   shelfLocation?: string;
   condition?: string;
+  /** Publisher / publication imprint for this copy. */
+  publication?: string;
+  /** Purchase or catalog price of this copy (NPR). */
+  priceNpr?: number;
   createdAt?: string;
   updatedAt?: string;
 }

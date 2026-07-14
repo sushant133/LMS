@@ -447,6 +447,7 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
   }
 
   const before = existing.toObject();
+  const previousPhotoUrl = existing.photoUrl;
   const nextCategory = (payload.category ?? existing.category) as CollegeStaffCategory;
   const nextRole = roleForCategory(nextCategory);
   let createdLoginEmail: string | undefined;
@@ -533,6 +534,11 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
   } catch (error) {
     throwIfDuplicateKey(error);
     throw error;
+  }
+
+  if (payload.photoUrl !== undefined) {
+    const { deleteReplacedMedia } = await import("../utils/mediaCleanup.js");
+    await deleteReplacedMedia(previousPhotoUrl, existing.photoUrl);
   }
 
   if (existing.user) {
@@ -738,17 +744,28 @@ export const deleteCollegeStaff = asyncHandler(async (req: Request, res: Respons
   }
 
   const before = staff.toObject();
+  const photoToDelete = staff.photoUrl;
   staff.isDeleted = true;
   staff.status = "INACTIVE";
   staff.enableLogin = false;
   staff.staffId = `${staff.staffId}__deleted__${staff._id.toString().slice(-6)}`;
+  staff.photoUrl = undefined;
   await staff.save();
 
   if (staff.user) {
-    await User.findByIdAndUpdate(staff.user, { isActive: false });
+    const linkedUser = await User.findById(staff.user).select("profilePhotoUrl");
+    await User.findByIdAndUpdate(staff.user, { isActive: false, profilePhotoUrl: undefined });
     if (staff.category === "ACCOUNTANT") {
-      await Accountant.findOneAndUpdate({ user: staff.user }, { isDeleted: true, status: "INACTIVE" });
+      await Accountant.findOneAndUpdate(
+        { user: staff.user },
+        { isDeleted: true, status: "INACTIVE", photoUrl: undefined }
+      );
     }
+    const { deleteStoredMediaUrls } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrls([photoToDelete, linkedUser?.profilePhotoUrl]);
+  } else {
+    const { deleteStoredMediaUrl } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrl(photoToDelete);
   }
 
   await recordAudit(req, {

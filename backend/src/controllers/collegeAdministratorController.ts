@@ -205,6 +205,7 @@ export const updateCollegeAdministrator = asyncHandler(async (req: Request, res:
   if (payload.employeeId) admin.employeeId = payload.employeeId;
   if (payload.designation) admin.designation = payload.designation;
   if (payload.department) admin.department = payload.department;
+  const previousPhoto = admin.profilePhotoUrl;
   if (payload.profilePhotoUrl !== undefined) {
     admin.profilePhotoUrl = payload.profilePhotoUrl || undefined;
   }
@@ -215,6 +216,11 @@ export const updateCollegeAdministrator = asyncHandler(async (req: Request, res:
   }
 
   await admin.save();
+
+  if (payload.profilePhotoUrl !== undefined) {
+    const { deleteReplacedMedia } = await import("../utils/mediaCleanup.js");
+    await deleteReplacedMedia(previousPhoto, admin.profilePhotoUrl);
+  }
 
   const after = serializeCollegeAdministrator(admin as UserLean);
   await recordAudit(req, {
@@ -298,9 +304,16 @@ export const softDeleteCollegeAdministrator = asyncHandler(async (req: Request, 
   ensureNotDeleted(admin);
 
   const before = serializeCollegeAdministrator(admin as UserLean);
+  const photoToDelete = admin.profilePhotoUrl;
   admin.email = toDeletedAdminEmail(admin._id, admin.email);
   admin.isActive = false;
+  admin.profilePhotoUrl = undefined;
   await admin.save();
+
+  if (photoToDelete) {
+    const { deleteStoredMediaUrl } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrl(photoToDelete);
+  }
 
   const after = serializeCollegeAdministrator(admin as UserLean);
   await recordAudit(req, {

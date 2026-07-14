@@ -6,6 +6,7 @@ import { BannerDismissal } from "../models/BannerDismissal.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { deleteReplacedMedia, deleteStoredMediaUrls } from "../utils/mediaCleanup.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -92,6 +93,11 @@ export const createBanner = asyncHandler(async (req: Request, res: Response) => 
 export const updateBanner = asyncHandler(async (req: Request, res: Response) => {
   const payload = bannerSchema.parse(req.body);
 
+  const existing = await Banner.findOne(withTenantScope(req, { _id: req.params.id })).lean();
+  if (!existing) {
+    throw new ApiError(404, "Banner not found");
+  }
+
   const banner = await Banner.findOneAndUpdate(
     withTenantScope(req, { _id: req.params.id }),
     {
@@ -110,12 +116,23 @@ export const updateBanner = asyncHandler(async (req: Request, res: Response) => 
     throw new ApiError(404, "Banner not found");
   }
 
+  // Drop previous CDN/local assets when image URLs change
+  await Promise.all([
+    deleteReplacedMedia(existing.imageUrl, payload.imageUrl),
+    deleteReplacedMedia(existing.thumbnailUrl, payload.thumbnailUrl)
+  ]);
+
   const creator = await User.findById(banner.createdBy).select("fullName").lean();
   return sendSuccess(res, "Banner updated successfully", serializeBanner(banner as BannerLean, creator?.fullName));
 });
 
 export const replaceBannerImage = asyncHandler(async (req: Request, res: Response) => {
   const payload = bannerImageReplaceSchema.parse(req.body);
+
+  const existing = await Banner.findOne(withTenantScope(req, { _id: req.params.id })).lean();
+  if (!existing) {
+    throw new ApiError(404, "Banner not found");
+  }
 
   const banner = await Banner.findOneAndUpdate(
     withTenantScope(req, { _id: req.params.id }),
@@ -133,6 +150,11 @@ export const replaceBannerImage = asyncHandler(async (req: Request, res: Respons
   if (!banner) {
     throw new ApiError(404, "Banner not found");
   }
+
+  await Promise.all([
+    deleteReplacedMedia(existing.imageUrl, payload.imageUrl),
+    deleteReplacedMedia(existing.thumbnailUrl, payload.thumbnailUrl)
+  ]);
 
   const creator = await User.findById(banner.createdBy).select("fullName").lean();
   return sendSuccess(res, "Banner image replaced", serializeBanner(banner as BannerLean, creator?.fullName));
@@ -162,6 +184,7 @@ export const deleteBanner = asyncHandler(async (req: Request, res: Response) => 
   }
 
   await BannerDismissal.deleteMany({ bannerId: banner._id });
+  await deleteStoredMediaUrls([banner.imageUrl, banner.thumbnailUrl]);
   return sendSuccess(res, "Banner deleted successfully");
 });
 

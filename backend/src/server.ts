@@ -5,7 +5,8 @@ import type { Server } from "node:http";
 import morgan from "morgan";
 import path from "path";
 import { connectDatabase, disconnectDatabase } from "./config/db.js";
-import { env, getUploadDir } from "./config/env.js";
+import { env, getUploadDir, isCloudinaryEnabled } from "./config/env.js";
+import { ensureCloudinaryConfigured } from "./utils/cloudinary.js";
 import { serveProtectedUpload } from "./controllers/protectedUploadController.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { protect } from "./middleware/auth.js";
@@ -133,6 +134,15 @@ const shutdown = async (signal: string): Promise<void> => {
 const startServer = async (): Promise<void> => {
   await connectDatabase();
 
+  // CDN for profile photos / all uploads when CLOUDINARY_* env vars are set
+  if (isCloudinaryEnabled()) {
+    ensureCloudinaryConfigured();
+  } else {
+    logger.warn(
+      "Cloudinary is not configured — uploads will be stored on local disk (UPLOAD_DIR). Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET to enable CDN."
+    );
+  }
+
   // Fix Atlas laboratory unique index before any seed work (never throws)
   await repairLaboratoryIndexes();
 
@@ -156,6 +166,9 @@ const startServer = async (): Promise<void> => {
       `Backend listening on http://${env.HOST === "0.0.0.0" ? "localhost" : env.HOST}:${env.PORT} (${env.NODE_ENV})`
     );
     logger.info(`Uploads directory: ${uploadsDir}`);
+    logger.info(
+      `Media storage: ${isCloudinaryEnabled() ? `Cloudinary (${env.CLOUDINARY_CLOUD_NAME})` : "local disk"}`
+    );
     logger.debug(`CORS origins: ${configuredCorsOrigins().join(", ")}`);
     logger.debug(`Trust proxy hops: ${env.TRUST_PROXY}`);
   });

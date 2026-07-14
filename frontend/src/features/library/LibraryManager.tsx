@@ -52,12 +52,20 @@ import { cn, parseErrorMessage } from "lib/utils";
 
 type Tab = "dashboard" | "inventory" | "issue" | "returns" | "staff";
 
-type CopyDraft = { bookCode: string; shelfLocation: string; condition: string };
+type CopyDraft = {
+  bookCode: string;
+  shelfLocation: string;
+  condition: string;
+  publication: string;
+  priceNpr: number;
+};
 
 const emptyCopy = (): CopyDraft => ({
   bookCode: "",
   shelfLocation: "",
   condition: "",
+  publication: "",
+  priceNpr: 0,
 });
 
 const resizeCopies = (current: CopyDraft[], total: number): CopyDraft[] => {
@@ -332,6 +340,8 @@ export const LibraryManager = () => {
           bookCode: c.bookCode.trim(),
           shelfLocation: c.shelfLocation.trim() || bookForm.shelfLocation || "",
           condition: c.condition.trim() || "",
+          publication: c.publication.trim() || "",
+          priceNpr: Number.isFinite(c.priceNpr) && c.priceNpr >= 0 ? c.priceNpr : 0,
         }));
       saveBook.mutate({
         title: bookForm.title,
@@ -349,6 +359,8 @@ export const LibraryManager = () => {
       bookCode: c.bookCode.trim(),
       shelfLocation: c.shelfLocation.trim() || bookForm.shelfLocation || "",
       condition: c.condition.trim() || "",
+      publication: c.publication.trim() || "",
+      priceNpr: Number.isFinite(c.priceNpr) && c.priceNpr >= 0 ? c.priceNpr : 0,
     }));
 
     const payload: LibraryBookInput = {
@@ -644,11 +656,11 @@ export const LibraryManager = () => {
                           Each physical book needs its own code. Codes must be
                           unique (e.g. ANA001 … ANA030).
                         </p>
-                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                        <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
                           {copyDrafts.map((copy, index) => (
                             <div
                               key={index}
-                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-[1fr_1fr]"
+                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-2"
                             >
                               <FormField label={`Copy ${index + 1} code *`}>
                                 <Input
@@ -688,6 +700,47 @@ export const LibraryManager = () => {
                                   }
                                 />
                               </FormField>
+                              <FormField label="Publication (optional)">
+                                <Input
+                                  value={copy.publication}
+                                  placeholder="e.g. Oxford University Press"
+                                  onChange={(e) =>
+                                    setCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              publication: e.target.value,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
+                              <FormField label="Price (NPR, optional)">
+                                <NumberInput
+                                  min={0}
+                                  step={1}
+                                  value={copy.priceNpr || ""}
+                                  placeholder="0"
+                                  onChange={(e) =>
+                                    setCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              priceNpr:
+                                                e.target.valueAsNumber >= 0
+                                                  ? e.target.valueAsNumber
+                                                  : 0,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
                             </div>
                           ))}
                         </div>
@@ -716,37 +769,100 @@ export const LibraryManager = () => {
                           register extra volumes with new codes.
                         </p>
                       ) : (
-                        <div className="max-h-56 space-y-2 overflow-y-auto">
+                        <div className="max-h-72 space-y-2 overflow-y-auto">
                           {addCopyDrafts.map((copy, index) => (
                             <div
                               key={index}
-                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-[1fr_auto]"
+                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-2"
                             >
-                              <Input
-                                value={copy.bookCode}
-                                placeholder="New book code"
-                                onChange={(e) =>
-                                  setAddCopyDrafts((rows) =>
-                                    rows.map((row, i) =>
-                                      i === index
-                                        ? { ...row, bookCode: e.target.value }
-                                        : row,
-                                    ),
-                                  )
-                                }
-                              />
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  setAddCopyDrafts((rows) =>
-                                    rows.filter((_, i) => i !== index),
-                                  )
-                                }
-                              >
-                                Remove
-                              </Button>
+                              <FormField label="Book code *">
+                                <Input
+                                  value={copy.bookCode}
+                                  placeholder="New book code"
+                                  onChange={(e) =>
+                                    setAddCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? { ...row, bookCode: e.target.value }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
+                              <FormField label="Shelf (optional)">
+                                <Input
+                                  value={copy.shelfLocation}
+                                  placeholder={bookForm.shelfLocation || "Shelf"}
+                                  onChange={(e) =>
+                                    setAddCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              shelfLocation: e.target.value,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
+                              <FormField label="Publication (optional)">
+                                <Input
+                                  value={copy.publication}
+                                  placeholder="Publisher / publication"
+                                  onChange={(e) =>
+                                    setAddCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              publication: e.target.value,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
+                              <FormField label="Price (NPR, optional)">
+                                <NumberInput
+                                  min={0}
+                                  step={1}
+                                  value={copy.priceNpr || ""}
+                                  placeholder="0"
+                                  onChange={(e) =>
+                                    setAddCopyDrafts((rows) =>
+                                      rows.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              priceNpr:
+                                                e.target.valueAsNumber >= 0
+                                                  ? e.target.valueAsNumber
+                                                  : 0,
+                                            }
+                                          : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </FormField>
+                              <div className="sm:col-span-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    setAddCopyDrafts((rows) =>
+                                      rows.filter((_, i) => i !== index),
+                                    )
+                                  }
+                                >
+                                  Remove row
+                                </Button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -904,6 +1020,8 @@ export const LibraryManager = () => {
                                     <Th>Book code</Th>
                                     <Th>Status</Th>
                                     <Th>Shelf</Th>
+                                    <Th>Publication</Th>
+                                    <Th>Price (NPR)</Th>
                                   </tr>
                                 </TableHead>
                                 <TableBody>
@@ -925,6 +1043,15 @@ export const LibraryManager = () => {
                                         {copy.shelfLocation ||
                                           book.shelfLocation ||
                                           "—"}
+                                      </Td>
+                                      <Td>{copy.publication?.trim() || "—"}</Td>
+                                      <Td>
+                                        {typeof copy.priceNpr === "number" &&
+                                        copy.priceNpr > 0
+                                          ? copy.priceNpr.toLocaleString(
+                                              "en-NP",
+                                            )
+                                          : "—"}
                                       </Td>
                                     </tr>
                                   ))}

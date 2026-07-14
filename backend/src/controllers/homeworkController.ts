@@ -631,6 +631,17 @@ export const updateAssignment = asyncHandler(async (req: Request, res: Response)
     new: true
   });
   if (!assignment) throw new ApiError(404, "Assignment not found");
+
+  // When attachment list is replaced, drop files removed from Cloudinary/local storage
+  if (payload.attachments) {
+    const { collectAttachmentUrls, deleteStoredMediaUrls } = await import("../utils/mediaCleanup.js");
+    const nextUrls = new Set(collectAttachmentUrls(payload.attachments));
+    const removed = collectAttachmentUrls(
+      existing.attachments as Array<{ url?: string }> | undefined
+    ).filter((url) => !nextUrls.has(url));
+    await deleteStoredMediaUrls(removed);
+  }
+
   return sendSuccess(res, "Assignment updated", assignment);
 });
 
@@ -653,10 +664,28 @@ export const deleteAssignment = asyncHandler(async (req: Request, res: Response)
   await assertTeacherOwnsAssignment(req, assignmentId);
   const deleted = await Assignment.findOneAndDelete(withTenantScope(req, { _id: assignmentId }));
   if (!deleted) throw new ApiError(404, "Assignment not found");
+
+  const submissions = await AssignmentSubmission.find({ assignmentId })
+    .select("attachmentUrl attachments")
+    .lean();
   await Promise.all([
     AssignmentSubmission.deleteMany({ assignmentId }),
     AssignmentComment.deleteMany({ assignmentId })
   ]);
+
+  const { collectAttachmentUrls, deleteStoredMediaUrls } = await import("../utils/mediaCleanup.js");
+  const urls = [
+    ...collectAttachmentUrls(deleted.attachments as Array<{ url?: string }> | undefined),
+    ...submissions.flatMap((s) => {
+      const row = s as { attachmentUrl?: string; attachments?: Array<{ url?: string }> };
+      return [
+        ...(row.attachmentUrl ? [row.attachmentUrl] : []),
+        ...collectAttachmentUrls(row.attachments)
+      ];
+    })
+  ];
+  await deleteStoredMediaUrls(urls);
+
   return sendSuccess(res, "Assignment deleted");
 });
 
@@ -749,6 +778,12 @@ export const submitAssignment = asyncHandler(async (req: Request, res: Response)
     }
   }
 
+  const previousSubmission = await AssignmentSubmission.findOne(
+    withTenantScope(req, { assignmentId: payload.assignmentId, studentId: payload.studentId })
+  )
+    .select("attachmentUrl")
+    .lean();
+
   const submission = await AssignmentSubmission.findOneAndUpdate(
     withTenantScope(req, { assignmentId: payload.assignmentId, studentId: payload.studentId }),
     {
@@ -759,6 +794,16 @@ export const submitAssignment = asyncHandler(async (req: Request, res: Response)
     },
     { upsert: true, new: true }
   );
+
+  // Replace old submission file on Cloudinary/local when student re-submits
+  const nextAttachment =
+    typeof (payload as { attachmentUrl?: string }).attachmentUrl === "string"
+      ? (payload as { attachmentUrl?: string }).attachmentUrl
+      : submission.attachmentUrl;
+  if (previousSubmission?.attachmentUrl && previousSubmission.attachmentUrl !== nextAttachment) {
+    const { deleteStoredMediaUrl } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrl(previousSubmission.attachmentUrl);
+  }
 
   return sendSuccess(res, "Assignment submitted", submission);
 });

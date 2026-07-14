@@ -313,6 +313,11 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     password: payload.password
   });
 
+  const previousPhotoUrl = student.photoUrl;
+  const previousDocuments = [...(student.documents ?? [])];
+  const nextPhotoUrl = payload.photoUrl || undefined;
+  const nextDocuments = payload.documents ?? student.documents;
+
   Object.assign(student, {
     admissionNumber,
     rollNumber: payload.rollNumber ?? 0,
@@ -346,12 +351,29 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     hasScholarship,
     remarks: payload.remarks,
     academicStatus: payload.academicStatus ?? student.academicStatus ?? "ACTIVE",
-    photoUrl: payload.photoUrl || undefined,
-    documents: payload.documents ?? student.documents
+    photoUrl: nextPhotoUrl,
+    documents: nextDocuments
   });
 
   await student.save();
   await student.populate("user", "-password");
+
+  // Cleanup replaced/removed media (Cloudinary + legacy local)
+  {
+    const { deleteReplacedMedia, deleteStoredMediaUrls } = await import("../utils/mediaCleanup.js");
+    await deleteReplacedMedia(previousPhotoUrl, nextPhotoUrl);
+    if (payload.documents) {
+      const nextUrls = new Set(
+        (nextDocuments ?? [])
+          .map((d: { url?: string }) => d.url?.trim())
+          .filter((url): url is string => Boolean(url))
+      );
+      const removedUrls = previousDocuments
+        .map((d) => (d as { url?: string }).url?.trim() ?? "")
+        .filter((url) => url.length > 0 && !nextUrls.has(url));
+      await deleteStoredMediaUrls(removedUrls);
+    }
+  }
 
   await recordAudit(req, {
     action: "student.update",

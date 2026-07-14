@@ -2,14 +2,18 @@ import multer, { type StorageEngine } from "multer";
 import path from "path";
 import fs from "fs-extra";
 import type { Request } from "express";
-import { getUploadDir } from "../config/env.js";
+import { getUploadDir, isCloudinaryEnabled } from "../config/env.js";
 import { ApiError } from "./apiError.js";
+import {
+  buildCloudinaryFolder,
+  uploadLocalFileToCloudinary
+} from "./cloudinary.js";
 import { tenantObjectId } from "./tenant.js";
 
-/** Configurable via UPLOAD_DIR — works for local dev and Hostinger VPS paths. */
+/** Configurable via UPLOAD_DIR — local staging (and fallback when Cloudinary is off). */
 const UPLOAD_ROOT = getUploadDir();
 
-// Ensure base upload directory exists
+// Ensure base upload directory exists (Cloudinary still stages here briefly)
 fs.ensureDirSync(UPLOAD_ROOT);
 
 /**
@@ -138,8 +142,8 @@ export const uploadAcademicAttachments = multer({
 }).array("files", 5);
 
 /**
- * Returns a public URL path for a stored file (relative).
- * In production you would return a signed S3/Cloudinary URL.
+ * Returns a public URL path for a stored file (relative local path).
+ * Prefer finalizeUploadedFile() so Cloudinary is used when configured.
  */
 export function getFilePublicPath(relativePath: string): string {
   const normalized = relativePath
@@ -171,4 +175,66 @@ export function inferAttachmentKind(mimeType: string): "FILE" | "IMAGE" | "PDF" 
   if (mimeType === "application/pdf") return "PDF";
   if (mimeType.startsWith("video/")) return "VIDEO";
   return "FILE";
+}
+
+export interface FinalizedUpload {
+  /** Absolute HTTPS Cloudinary URL, or local /uploads/... path when Cloudinary is off. */
+  url: string;
+  size: number;
+  originalName: string;
+  mimeType: string;
+  kind: "FILE" | "IMAGE" | "PDF" | "VIDEO";
+  /** Cloudinary public_id when stored on CDN. */
+  publicId?: string;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * Finalize a multer disk file: push to Cloudinary when configured, else local /uploads URL.
+ * entityParts e.g. ["students", "photos"] → folder phit-erp/{schoolId}/students/photos
+ */
+export async function finalizeUploadedFile(
+  req: Request,
+  file: Express.Multer.File,
+  ...entityParts: string[]
+): Promise<FinalizedUpload> {
+  const kind = inferAttachmentKind(file.mimetype);
+
+  if (isCloudinaryEnabled()) {
+    const schoolId = tenantObjectId(req).toString();
+    const folder = buildCloudinaryFolder(schoolId, ...entityParts);
+    const uploaded = await uploadLocalFileToCloudinary(file.path, {
+      folder,
+      mimeType: file.mimetype
+    });
+
+    return {
+      url: uploaded.url,
+      size: uploaded.bytes || file.size,
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      kind,
+      publicId: uploaded.publicId,
+      width: uploaded.width,
+      height: uploaded.height
+    };
+  }
+
+  return {
+    url: getUploadPublicUrl(file.path),
+    size: file.size,
+    originalName: file.originalname,
+    mimeType: file.mimetype,
+    kind
+  };
+}
+
+/** Finalize many multer files in parallel. */
+export async function finalizeUploadedFiles(
+  req: Request,
+  files: Express.Multer.File[],
+  ...entityParts: string[]
+): Promise<FinalizedUpload[]> {
+  return Promise.all(files.map((file) => finalizeUploadedFile(req, file, ...entityParts)));
 }

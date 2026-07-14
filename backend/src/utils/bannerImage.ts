@@ -1,6 +1,11 @@
 import path from "path";
 import fs from "fs-extra";
 import sharp from "sharp";
+import { isCloudinaryEnabled } from "../config/env.js";
+import {
+  buildCloudinaryFolder,
+  uploadLocalFileToCloudinary
+} from "./cloudinary.js";
 import { getUploadPublicUrl } from "./upload.js";
 
 const BANNER_MAX_WIDTH = 1920;
@@ -16,13 +21,28 @@ export interface ProcessedBannerImage {
   width: number;
   height: number;
   fileSizeBytes: number;
+  publicId?: string;
+  thumbnailPublicId?: string;
 }
 
-export const processBannerImage = async (filePath: string): Promise<ProcessedBannerImage> => {
+/**
+ * Optimize banner with sharp, then upload to Cloudinary when configured.
+ * @param schoolId — tenant folder for Cloudinary
+ */
+export const processBannerImage = async (
+  filePath: string,
+  schoolId?: string
+): Promise<ProcessedBannerImage> => {
   const metadata = await sharp(filePath).metadata();
   const ext = path.extname(filePath).toLowerCase();
   const isPng = ext === ".png";
   const isWebp = ext === ".webp";
+
+  // Write optimized image to a sibling temp path (avoid sharp in-place overwrite issues)
+  const optimizedPath = filePath.replace(
+    path.extname(filePath),
+    `-opt${path.extname(filePath)}`
+  );
 
   const resized = sharp(filePath).rotate().resize({
     width: BANNER_MAX_WIDTH,
@@ -32,12 +52,16 @@ export const processBannerImage = async (filePath: string): Promise<ProcessedBan
   });
 
   if (isPng) {
-    await resized.png({ compressionLevel: 8, adaptiveFiltering: true }).toFile(filePath);
+    await resized.png({ compressionLevel: 8, adaptiveFiltering: true }).toFile(optimizedPath);
   } else if (isWebp) {
-    await resized.webp({ quality: WEBP_QUALITY }).toFile(filePath);
+    await resized.webp({ quality: WEBP_QUALITY }).toFile(optimizedPath);
   } else {
-    await resized.jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toFile(filePath);
+    await resized.jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toFile(optimizedPath);
   }
+
+  // Replace original with optimized
+  await fs.remove(filePath).catch(() => undefined);
+  await fs.move(optimizedPath, filePath, { overwrite: true });
 
   const optimizedMeta = await sharp(filePath).metadata();
   const width = optimizedMeta.width ?? metadata.width ?? 0;
@@ -49,6 +73,30 @@ export const processBannerImage = async (filePath: string): Promise<ProcessedBan
     .toFile(thumbnailPath);
 
   const fileSizeBytes = (await fs.stat(filePath)).size;
+
+  if (isCloudinaryEnabled() && schoolId) {
+    const folder = buildCloudinaryFolder(schoolId, "banners");
+    const [main, thumb] = await Promise.all([
+      uploadLocalFileToCloudinary(filePath, { folder, mimeType: "image/jpeg", resourceType: "image" }),
+      uploadLocalFileToCloudinary(thumbnailPath, {
+        folder: `${folder}/thumbs`,
+        mimeType: "image/jpeg",
+        resourceType: "image"
+      })
+    ]);
+
+    return {
+      imagePath: filePath,
+      thumbnailPath,
+      imageUrl: main.url,
+      thumbnailUrl: thumb.url,
+      width: main.width ?? width,
+      height: main.height ?? height,
+      fileSizeBytes: main.bytes || fileSizeBytes,
+      publicId: main.publicId,
+      thumbnailPublicId: thumb.publicId
+    };
+  }
 
   return {
     imagePath: filePath,

@@ -142,7 +142,11 @@ export const sendNotificationSchema = z.object({
 export const libraryBookCopyInputSchema = z.object({
   bookCode: z.string().trim().min(1, "Book code is required"),
   shelfLocation: z.string().optional().or(z.literal("")),
-  condition: z.string().optional().or(z.literal(""))
+  condition: z.string().optional().or(z.literal("")),
+  /** Publisher / publication for this physical copy. */
+  publication: z.string().trim().optional().or(z.literal("")),
+  /** Price of this copy in NPR (0 or empty = not set). */
+  priceNpr: z.coerce.number().min(0, "Price cannot be negative").optional().default(0)
 });
 
 export const libraryYearLevelSchema = z.enum(LIBRARY_YEAR_LEVELS);

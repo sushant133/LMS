@@ -24,6 +24,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
+import { deleteReplacedMedia, deleteStoredMediaUrl } from "../utils/mediaCleanup.js";
 import { assertParentAccessToStudent } from "../utils/parentScope.js";
 import { sendSuccess } from "../utils/response.js";
 import { canViewPublishedResults } from "../utils/examResults.js";
@@ -455,8 +456,11 @@ export const addStudentDocument = asyncHandler(async (req: Request, res: Respons
 
   let document: (typeof student.documents)[number];
 
+  let previousMediaUrl: string | undefined;
+
   if (pendingIndex >= 0) {
     const existing = student.documents[pendingIndex]!;
+    previousMediaUrl = existing.url || undefined;
     Object.assign(existing, uploadedFields);
     document = existing;
     student.markModified("documents");
@@ -474,9 +478,11 @@ export const addStudentDocument = asyncHandler(async (req: Request, res: Respons
   }
 
   if (payload.type === "STUDENT_PHOTOGRAPH") {
+    previousMediaUrl = previousMediaUrl || student.photoUrl || undefined;
     student.photoUrl = payload.url;
   }
   await student.save();
+  await deleteReplacedMedia(previousMediaUrl, payload.url);
 
   await recordAudit(req, {
     action: "student.document.upload",
@@ -498,6 +504,7 @@ export const replaceStudentDocument = asyncHandler(async (req: Request, res: Res
   if (index < 0) throw new ApiError(404, "Document not found");
 
   const previous = student.documents[index]!;
+  const previousUrl = previous.url;
   const actor = await User.findById(req.user!.userId).select("fullName").lean();
   Object.assign(previous, {
     type: payload.type || previous.type,
@@ -517,12 +524,13 @@ export const replaceStudentDocument = asyncHandler(async (req: Request, res: Res
     student.photoUrl = updated.url;
   }
   await student.save();
+  await deleteReplacedMedia(previousUrl, payload.url);
 
   await recordAudit(req, {
     action: "student.document.replace",
     entity: "Student",
     entityId: student._id.toString(),
-    before: { documentId: previous._id, url: previous.url },
+    before: { documentId: previous._id, url: previousUrl },
     after: { documentId: updated._id, url: updated.url }
   });
 
@@ -539,6 +547,7 @@ export const deleteStudentDocument = asyncHandler(async (req: Request, res: Resp
   if (index < 0) throw new ApiError(404, "Document not found");
 
   const removed = student.documents[index]!;
+  const removedUrl = removed.url;
   student.documents.splice(index, 1);
 
   // Required categories fall back to PENDING so the profile still tracks them
@@ -566,6 +575,12 @@ export const deleteStudentDocument = asyncHandler(async (req: Request, res: Resp
   }
 
   await student.save();
+  // Always remove the deleted file from Cloudinary/local (unless still referenced as photo)
+  if (removedUrl && student.photoUrl !== removedUrl) {
+    await deleteStoredMediaUrl(removedUrl);
+  } else if (removedUrl && !student.photoUrl) {
+    await deleteStoredMediaUrl(removedUrl);
+  }
 
   await recordAudit(req, {
     action: "student.document.delete",

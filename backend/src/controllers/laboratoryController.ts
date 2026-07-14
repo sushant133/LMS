@@ -1553,14 +1553,22 @@ export const updateLaboratoryStaff = asyncHandler(async (req: Request, res: Resp
 });
 
 export const deleteLaboratoryStaff = asyncHandler(async (req: Request, res: Response) => {
+  const existing = await User.findOne(
+    withTenantScope(req, { _id: req.params.id, role: "LABORATORY_STAFF" })
+  ).select("profilePhotoUrl");
   const user = await User.findOneAndUpdate(
     withTenantScope(req, { _id: req.params.id, role: "LABORATORY_STAFF" }),
-    { isActive: false },
+    { isActive: false, profilePhotoUrl: undefined },
     { new: true }
   ).select("-password");
 
   if (!user) {
     throw new ApiError(404, "Laboratory staff not found");
+  }
+
+  if (existing?.profilePhotoUrl) {
+    const { deleteStoredMediaUrl } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrl(existing.profilePhotoUrl);
   }
 
   return sendSuccess(res, "Laboratory staff deactivated", user);

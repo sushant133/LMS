@@ -1447,10 +1447,16 @@ export const updateAccountant = asyncHandler(async (req: Request, res: Response)
   if (payload.gender) accountant.gender = payload.gender;
   if (payload.address) accountant.address = payload.address;
   if (payload.joinedDateBs) accountant.joinedDateBs = payload.joinedDateBs;
+  const previousAccountantPhoto = accountant.photoUrl;
   if (payload.photoUrl !== undefined) accountant.photoUrl = payload.photoUrl;
 
   await user.save();
   await accountant.save();
+
+  if (payload.photoUrl !== undefined) {
+    const { deleteReplacedMedia } = await import("../utils/mediaCleanup.js");
+    await deleteReplacedMedia(previousAccountantPhoto, accountant.photoUrl);
+  }
 
   const updated = await Accountant.findById(accountant._id).populate("user", "-password");
   await recordAudit(req, { action: "accounting.accountant.update", entity: "Accountant", entityId: accountant._id.toString(), before, after: updated });
@@ -1461,11 +1467,17 @@ export const deleteAccountant = asyncHandler(async (req: Request, res: Response)
   const accountant = await Accountant.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!accountant) throw new ApiError(404, "Accountant not found");
 
+  const photoToDelete = accountant.photoUrl;
   accountant.isDeleted = true;
   accountant.status = "INACTIVE";
+  accountant.photoUrl = undefined;
   await accountant.save();
 
   await User.findByIdAndUpdate(accountant.user, { isActive: false });
+  if (photoToDelete) {
+    const { deleteStoredMediaUrl } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrl(photoToDelete);
+  }
   await recordAudit(req, { action: "accounting.accountant.deactivate", entity: "Accountant", entityId: accountant._id.toString(), before: accountant });
   return sendSuccess(res, "Accountant deactivated");
 });

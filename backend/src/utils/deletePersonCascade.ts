@@ -132,6 +132,15 @@ export const hardDeleteStudentAccount = async (params: {
   const fullName = user?.fullName ?? "";
   const admissionNumber = student.admissionNumber;
 
+  // Collect media URLs before hard-delete (Cloudinary cleanup after commit is fine)
+  const mediaUrls: string[] = [];
+  if (student.photoUrl) mediaUrls.push(student.photoUrl);
+  for (const doc of student.documents ?? []) {
+    const url = (doc as { url?: string }).url;
+    if (url) mediaUrls.push(url);
+  }
+  if (user?.profilePhotoUrl) mediaUrls.push(user.profilePhotoUrl);
+
   // Pull student from attendance entry arrays (do not drop whole class sheets)
   await DailyAttendance.updateMany(
     { schoolId, "entries.studentId": student._id },
@@ -177,6 +186,13 @@ export const hardDeleteStudentAccount = async (params: {
     await User.deleteOne({ _id: userId, schoolId, role: "STUDENT" }, sessionOpt);
   }
 
+  // Best-effort CDN/local cleanup (outside critical path failures)
+  if (mediaUrls.length > 0) {
+    void import("./mediaCleanup.js")
+      .then(({ deleteStoredMediaUrls }) => deleteStoredMediaUrls(mediaUrls))
+      .catch(() => undefined);
+  }
+
   return {
     studentId: student._id.toString(),
     userId: userId?.toString() ?? "",
@@ -213,6 +229,10 @@ export const hardDeleteTeacherAccount = async (params: {
   const email = user?.email ?? "";
   const fullName = user?.fullName ?? "";
   const teacherCode = teacher.teacherCode;
+
+  // Collect Cloudinary / local media before hard-delete
+  const mediaUrls: string[] = [];
+  if (user?.profilePhotoUrl) mediaUrls.push(user.profilePhotoUrl);
 
   await SubjectAssignment.deleteMany({ schoolId, teacherId: teacher._id }, sessionOpt);
 
@@ -260,10 +280,29 @@ export const hardDeleteTeacherAccount = async (params: {
 
   const assignments = await Assignment.find(
     { schoolId, teacherId: teacher._id },
-    { _id: 1 },
+    { _id: 1, attachments: 1 },
     sessionOpt
   ).lean();
   const assignmentIds = assignments.map((row) => row._id);
+  for (const row of assignments) {
+    for (const att of (row as { attachments?: Array<{ url?: string }> }).attachments ?? []) {
+      if (att?.url) mediaUrls.push(att.url);
+    }
+  }
+  if (assignmentIds.length > 0) {
+    const submissions = await AssignmentSubmission.find(
+      { schoolId, assignmentId: { $in: assignmentIds } },
+      { attachmentUrl: 1, attachments: 1 },
+      sessionOpt
+    ).lean();
+    for (const sub of submissions) {
+      const s = sub as { attachmentUrl?: string; attachments?: Array<{ url?: string }> };
+      if (s.attachmentUrl) mediaUrls.push(s.attachmentUrl);
+      for (const att of s.attachments ?? []) {
+        if (att?.url) mediaUrls.push(att.url);
+      }
+    }
+  }
 
   const dailyAttendanceRows = await DailyAttendance.find(
     { schoolId, teacherId: teacher._id },
@@ -326,6 +365,12 @@ export const hardDeleteTeacherAccount = async (params: {
 
   if (userId) {
     await User.deleteOne({ _id: userId, schoolId, role: "TEACHER" }, sessionOpt);
+  }
+
+  if (mediaUrls.length > 0) {
+    void import("./mediaCleanup.js")
+      .then(({ deleteStoredMediaUrls }) => deleteStoredMediaUrls(mediaUrls))
+      .catch(() => undefined);
   }
 
   return {

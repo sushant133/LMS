@@ -233,7 +233,9 @@ export const createBook = asyncHandler(async (req: Request, res: Response) => {
   const copyInputs = (payload.copies ?? []).map((c) => ({
     bookCode: normalizeBookCode(c.bookCode),
     shelfLocation: c.shelfLocation?.trim() || payload.shelfLocation?.trim() || undefined,
-    condition: c.condition?.trim() || undefined
+    condition: c.condition?.trim() || undefined,
+    publication: c.publication?.trim() || undefined,
+    priceNpr: typeof c.priceNpr === "number" && c.priceNpr >= 0 ? c.priceNpr : 0
   }));
 
   await assertCodesUniqueInSchool(
@@ -261,7 +263,9 @@ export const createBook = asyncHandler(async (req: Request, res: Response) => {
         bookCode: c.bookCode,
         status: "AVAILABLE" as const,
         shelfLocation: c.shelfLocation,
-        condition: c.condition
+        condition: c.condition,
+        publication: c.publication,
+        priceNpr: c.priceNpr
       }))
     );
   } catch (error: unknown) {
@@ -310,7 +314,9 @@ export const updateBook = asyncHandler(async (req: Request, res: Response) => {
     const copyInputs = payload.addCopies.map((c) => ({
       bookCode: normalizeBookCode(c.bookCode),
       shelfLocation: c.shelfLocation?.trim() || book.shelfLocation || undefined,
-      condition: c.condition?.trim() || undefined
+      condition: c.condition?.trim() || undefined,
+      publication: c.publication?.trim() || undefined,
+      priceNpr: typeof c.priceNpr === "number" && c.priceNpr >= 0 ? c.priceNpr : 0
     }));
 
     const codes = copyInputs.map((c) => c.bookCode);
@@ -329,7 +335,9 @@ export const updateBook = asyncHandler(async (req: Request, res: Response) => {
           bookCode: c.bookCode,
           status: "AVAILABLE" as const,
           shelfLocation: c.shelfLocation,
-          condition: c.condition
+          condition: c.condition,
+          publication: c.publication,
+          priceNpr: c.priceNpr
         }))
       );
     } catch (error: unknown) {
@@ -722,14 +730,22 @@ export const updateLibraryStaff = asyncHandler(async (req: Request, res: Respons
 });
 
 export const deleteLibraryStaff = asyncHandler(async (req: Request, res: Response) => {
+  const existing = await User.findOne(
+    withTenantScope(req, { _id: req.params.id, role: "LIBRARY_STAFF" })
+  ).select("profilePhotoUrl");
   const user = await User.findOneAndUpdate(
     withTenantScope(req, { _id: req.params.id, role: "LIBRARY_STAFF" }),
-    { isActive: false },
+    { isActive: false, profilePhotoUrl: undefined },
     { new: true }
   ).select("-password");
 
   if (!user) {
     throw new ApiError(404, "Library staff not found");
+  }
+
+  if (existing?.profilePhotoUrl) {
+    const { deleteStoredMediaUrl } = await import("../utils/mediaCleanup.js");
+    await deleteStoredMediaUrl(existing.profilePhotoUrl);
   }
 
   return sendSuccess(res, "Library staff deactivated", user);

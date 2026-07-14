@@ -189,5 +189,10 @@ export const deleteComplaint = asyncHandler(async (req: Request, res: Response) 
     throw new ApiError(404, "Complaint not found");
   }
 
+  const { collectAttachmentUrls, deleteStoredMediaUrls } = await import("../utils/mediaCleanup.js");
+  await deleteStoredMediaUrls(
+    collectAttachmentUrls(complaint.attachments as Array<{ url?: string }> | undefined)
+  );
+
   return sendSuccess(res, "Complaint deleted");
 });
