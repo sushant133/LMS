@@ -508,7 +508,7 @@ export const executePromotion = async (
               filter: { _id: student.studentId, schoolId: options.schoolId },
               update: {
                 $set: {
-                  academicStatus: "PASSED_OUT"
+                  academicStatus: "PASSED_OUT" as StudentAcademicStatus
                 }
               }
             }
@@ -519,8 +519,10 @@ export const executePromotion = async (
             filter: { _id: student.studentId, schoolId: options.schoolId },
             update: {
               $set: {
-                yearId: student.newYearId,
-                academicStatus: "ACTIVE"
+                yearId: student.newYearId
+                  ? (student.newYearId as unknown as Types.ObjectId)
+                  : undefined,
+                academicStatus: "ACTIVE" as StudentAcademicStatus
               }
             }
           }
@@ -529,7 +531,7 @@ export const executePromotion = async (
     );
 
     if (bulkOps.length > 0) {
-      await Student.bulkWrite(bulkOps, getSessionOption(session));
+      await Student.bulkWrite(bulkOps as Parameters<typeof Student.bulkWrite>[0], getSessionOption(session));
     }
 
     // Mark batches fully graduated when every remaining student is non-active
@@ -669,8 +671,10 @@ export const rollbackLatestPromotion = async (
           filter: { _id: student.studentId, schoolId: options.schoolId },
           update: {
             $set: {
-              yearId: student.previousYearId,
-              academicStatus: student.previousStatus || "ACTIVE"
+              yearId: student.previousYearId
+                ? (student.previousYearId as unknown as Types.ObjectId)
+                : undefined,
+              academicStatus: (student.previousStatus || "ACTIVE") as StudentAcademicStatus
             }
           }
         }
@@ -678,7 +682,7 @@ export const rollbackLatestPromotion = async (
     );
 
     if (bulkOps.length > 0) {
-      await Student.bulkWrite(bulkOps, getSessionOption(session));
+      await Student.bulkWrite(bulkOps as Parameters<typeof Student.bulkWrite>[0], getSessionOption(session));
     }
 
     const batchIds = [...new Set(groups.map((g) => asString(g.batchId as unknown as ObjectIdLike)))];

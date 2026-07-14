@@ -160,7 +160,22 @@ const persistResultMarks = async (
 
   const mergedMarksMap = new Map<string, ReturnType<typeof computeSubjectMark>>();
   for (const mark of retainedFromLatest) {
-    mergedMarksMap.set(mark.subjectId.toString(), mark as ReturnType<typeof computeSubjectMark>);
+    // Normalize ObjectId subjectId → string for merge map / computeSubjectMark shape
+    const normalized: ReturnType<typeof computeSubjectMark> = {
+      subjectId: mark.subjectId.toString(),
+      fullMarks: mark.fullMarks,
+      passMarks: mark.passMarks,
+      theoryMarks: mark.theoryMarks ?? 0,
+      practicalMarks: mark.practicalMarks ?? 0,
+      internalMarks: mark.internalMarks ?? 0,
+      obtainedMarks: mark.obtainedMarks,
+      attendanceStatus: mark.attendanceStatus ?? "PRESENT",
+      teacherRemarks: mark.teacherRemarks ?? undefined,
+      percentage: mark.percentage ?? 0,
+      grade: (mark.grade ?? "NG") as ReturnType<typeof computeSubjectMark>["grade"],
+      passFail: (mark.passFail ?? "FAIL") as ReturnType<typeof computeSubjectMark>["passFail"]
+    };
+    mergedMarksMap.set(normalized.subjectId, normalized);
   }
   for (const mark of incomingMarks) {
     mergedMarksMap.set(mark.subjectId, mark);
