@@ -340,8 +340,10 @@ export const StudentProfileView = () => {
                             value: student.bloodGroup ?? "—",
                           },
                           {
-                            label: "Fees Due",
-                            value: formatCurrencyNpr(student.feesDueNpr ?? 0),
+                            label: "Total Fee",
+                            value: student.hasScholarship
+                              ? "Scholarship"
+                              : formatCurrencyNpr(student.feesDueNpr ?? 0),
                           },
                         ]
                   }

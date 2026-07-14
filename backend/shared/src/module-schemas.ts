@@ -43,7 +43,20 @@ export const assignmentAttachmentSchema = z.object({
 
 export const assignmentLinkSchema = z.object({
   title: z.string().min(1),
-  url: z.string().url()
+  url: z
+    .string()
+    .url()
+    .refine(
+      (value) => {
+        try {
+          const parsed = new URL(value);
+          return parsed.protocol === "http:" || parsed.protocol === "https:";
+        } catch {
+          return false;
+        }
+      },
+      { message: "Link URL must use http or https" }
+    )
 });
 
 export const assignmentSchema = z.object({

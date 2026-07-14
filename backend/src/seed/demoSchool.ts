@@ -743,28 +743,53 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    const seedCalendarEvent = (dateBs: string, name: string, eventType: "FESTIVAL" | "SEMESTER_START" | "FINAL_EXAMINATION" | "COLLEGE_HOLIDAY", reason: string) => {
-      const { dateAd, dayOfWeek } = bsToAdDate(dateBs);
+    const seedCalendarEvent = (
+      startDateBs: string,
+      endDateBs: string,
+      name: string,
+      eventType:
+        | "DASHAIN_VACATION"
+        | "SUMMER_VACATION"
+        | "EXAMINATION_WEEK"
+        | "ORIENTATION_PROGRAM"
+        | "FESTIVAL_HOLIDAY"
+        | "PUBLIC_HOLIDAY",
+      reason: string
+    ) => {
+      const start = bsToAdDate(startDateBs);
+      const end = bsToAdDate(endDateBs);
+      const isHoliday =
+        eventType === "DASHAIN_VACATION" ||
+        eventType === "SUMMER_VACATION" ||
+        eventType === "FESTIVAL_HOLIDAY" ||
+        eventType === "PUBLIC_HOLIDAY";
       return {
         schoolId,
         academicYearBs: DEFAULT_ACADEMIC_YEAR_BS,
-        dateBs,
-        dateAd,
-        dayOfWeek,
+        dateBs: startDateBs,
+        startDateBs,
+        endDateBs,
+        dateAd: start.dateAd,
+        startDateAd: start.dateAd,
+        endDateAd: end.dateAd,
+        dayOfWeek: start.dayOfWeek,
         name,
         eventType,
         reason,
-        isHoliday: eventType === "FESTIVAL" || eventType === "COLLEGE_HOLIDAY",
+        isHoliday,
+        status: "ACTIVE" as const,
+        isWorkingDayOverride: false,
         audit: { createdBy: adminUser!._id }
       };
     };
 
     await AcademicCalendarEvent.create(
       [
-        seedCalendarEvent("2083-06-15", "Dashain Vacation", "FESTIVAL", "College Closed"),
-        seedCalendarEvent("2083-08-01", "Semester Begins", "SEMESTER_START", "First Semester Starts"),
-        seedCalendarEvent("2083-11-10", "Final Examination", "FINAL_EXAMINATION", "End of semester examinations"),
-        seedCalendarEvent("2083-05-01", "College Holiday", "COLLEGE_HOLIDAY", "Staff development day")
+        seedCalendarEvent("2083-06-15", "2083-06-28", "Dashain Vacation", "DASHAIN_VACATION", "Dashain Festival"),
+        seedCalendarEvent("2083-02-01", "2083-02-15", "Summer Vacation", "SUMMER_VACATION", "Summer Vacation"),
+        seedCalendarEvent("2083-08-10", "2083-08-17", "Second Terminal Examination", "EXAMINATION_WEEK", "Second Terminal Examination"),
+        seedCalendarEvent("2083-01-05", "2083-01-05", "Orientation Program", "ORIENTATION_PROGRAM", "New batch orientation"),
+        seedCalendarEvent("2083-05-01", "2083-05-01", "Festival Holiday", "FESTIVAL_HOLIDAY", "Staff development day")
       ],
       options
     );

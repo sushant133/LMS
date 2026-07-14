@@ -28,7 +28,7 @@ export const COLLEGE_STAFF_TABS: Array<{
   isReports?: boolean;
 }> = [
   { id: "teachers", label: "Teachers", isTeachers: true },
-  { id: "all", label: "All Non-Teaching Staff" },
+  { id: "all", label: "All Staff" },
   { id: "accountants", label: "Accountants", category: "ACCOUNTANT" },
   { id: "librarians", label: "Librarians", category: "LIBRARIAN" },
   { id: "laboratory", label: "Laboratory Staff", category: "LABORATORY_STAFF" },

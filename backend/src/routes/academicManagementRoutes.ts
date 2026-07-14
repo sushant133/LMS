@@ -3,17 +3,21 @@ import {
   addComment,
   approveLessonPlan,
   approveSessionPlan,
+  approveSyllabus,
   createLessonPlan,
   createLogBookEntry,
   createSessionPlan,
+  createSyllabus,
   deleteLessonPlan,
   deleteLogBookEntry,
   deleteSessionPlan,
+  deleteSyllabus,
   exportAcademicReport,
   getAcademicDashboard,
   getAcademicReport,
   getSessionAttendance,
   getSessionPlan,
+  getSyllabus,
   getSyllabusCoverage,
   getTodayTimetableSlots,
   listComments,
@@ -21,16 +25,21 @@ import {
   listLogBookEntries,
   listSessionPlans,
   listSessionPlanUnits,
+  listSyllabi,
   rejectLessonPlan,
   rejectSessionPlan,
+  rejectSyllabus,
   reviewLogBookEntry,
   submitLessonPlan,
   submitSessionPlan,
+  submitSyllabus,
   unlockLessonPlan,
   unlockSessionPlan,
+  unlockSyllabus,
   updateLessonPlan,
   updateLogBookEntry,
-  updateSessionPlan
+  updateSessionPlan,
+  updateSyllabus
 } from "../controllers/academicManagementController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
@@ -40,6 +49,16 @@ const router = Router();
 router.use(protect, tenantGuard);
 
 router.get("/dashboard", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getAcademicDashboard);
+
+router.get("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listSyllabi);
+router.get("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getSyllabus);
+router.post("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), createSyllabus);
+router.put("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), updateSyllabus);
+router.delete("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), deleteSyllabus);
+router.post("/syllabi/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), submitSyllabus);
+router.post("/syllabi/:id/approve", authorizeInstitutionAdmin, approveSyllabus);
+router.post("/syllabi/:id/reject", authorizeInstitutionAdmin, rejectSyllabus);
+router.post("/syllabi/:id/unlock", authorizeInstitutionAdmin, unlockSyllabus);
 
 router.get("/session-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listSessionPlans);
 router.get("/session-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getSessionPlan);

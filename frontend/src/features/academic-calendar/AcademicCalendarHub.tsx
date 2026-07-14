@@ -6,11 +6,21 @@ import {
   type AcademicCalendarEventRecord,
   type AcademicCalendarFilters,
 } from "@phit-erp/shared";
-import { Download, FileSpreadsheet, Printer, Search } from "lucide-react";
+import {
+  Download,
+  Eye,
+  FileSpreadsheet,
+  Pencil,
+  Plus,
+  Printer,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { PageHeader } from "components/shared/PageHeader";
+import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
@@ -31,9 +41,12 @@ import {
   exportEventsExcel,
   filterEventsLocally,
   formatMonthKey,
+  getEventTypeColor,
   getEventTypeLabel,
   groupEventsByDate,
+  legendGroups,
   resolvePreferredAcademicYear,
+  storedEventsOnly,
 } from "./academicCalendarUtils";
 
 export const AcademicCalendarHub = () => {
@@ -100,13 +113,22 @@ export const AcademicCalendarHub = () => {
     () => filterEventsLocally(events, appliedFilters),
     [events, appliedFilters],
   );
-  const eventsByDate = useMemo(() => groupEventsByDate(events), [events]);
+  const eventsByDate = useMemo(
+    () => groupEventsByDate(filteredEvents),
+    [filteredEvents],
+  );
 
-  /** Holiday & Event List shows only the clicked date (still respects active filters). */
+  /** Admin event table: stored range events only (no auto Saturdays). */
+  const managedEvents = useMemo(
+    () => storedEventsOnly(filteredEvents),
+    [filteredEvents],
+  );
+
+  /** Day-scoped list when a calendar cell is selected. */
   const dateScopedEvents = useMemo(() => {
     if (!selectedDateBs) return [];
-    return filteredEvents.filter((event) => event.dateBs === selectedDateBs);
-  }, [filteredEvents, selectedDateBs]);
+    return eventsByDate.get(selectedDateBs) ?? [];
+  }, [eventsByDate, selectedDateBs]);
 
   const saveMutation = useMutation({
     mutationFn: async ({
@@ -164,12 +186,18 @@ export const AcademicCalendarHub = () => {
     }
   };
 
+  const openCreateForm = () => {
+    setEditingEvent(null);
+    setSelectedDateBs(selectedDateBs || todayBs);
+    setFormOpen(true);
+  };
+
   const handleApplyFilters = () => {
     setAppliedFilters({ ...draftFilters, academicYearBs: resolvedYear });
   };
 
   const handleExportExcel = () => {
-    const rows = selectedDateBs ? dateScopedEvents : filteredEvents;
+    const rows = selectedDateBs ? dateScopedEvents : managedEvents;
     exportEventsExcel(
       rows,
       `academic-calendar-${resolvedYear.replace("/", "-")}.xlsx`,
@@ -183,7 +211,27 @@ export const AcademicCalendarHub = () => {
       `academic-calendar-${resolvedYear.replace("/", "-")}.pdf`,
     );
 
-  // Always land on the institution's current academic year (not the newest year in the list).
+  const handleDelete = (event: AcademicCalendarEventRecord) => {
+    if (event.isSystemGenerated) {
+      toast.error(
+        "Saturday holidays are automatic. Create a Working Day override instead.",
+      );
+      return;
+    }
+    const start = event.startDateBs || event.dateBs;
+    const end = event.endDateBs || event.dateBs;
+    const rangeLabel = start === end ? start : `${start} → ${end}`;
+    if (
+      !window.confirm(
+        `Delete "${event.name}" (${rangeLabel})? This removes the event from every date in the range.`,
+      )
+    ) {
+      return;
+    }
+    deleteMutation.mutate(event._id);
+  };
+
+  // Always land on the institution's current academic year.
   useEffect(() => {
     if (academicYearBs) return;
 
@@ -201,7 +249,6 @@ export const AcademicCalendarHub = () => {
     dashboardQuery.data?.academicYearBs,
   ]);
 
-  // If auth school year loads after mount and user hasn't picked another year, sync to current.
   useEffect(() => {
     if (!schoolAcademicYearBs) return;
     if (!academicYearBs) {
@@ -216,7 +263,6 @@ export const AcademicCalendarHub = () => {
     }));
   }, [resolvedYear]);
 
-  // Keep selected-date list in sync when events reload after create/edit/delete.
   useEffect(() => {
     if (!selectedDateBs) {
       setSelectedEvents([]);
@@ -225,7 +271,6 @@ export const AcademicCalendarHub = () => {
     setSelectedEvents(eventsByDate.get(selectedDateBs) ?? []);
   }, [eventsByDate, selectedDateBs]);
 
-  // Clear date selection when academic year changes.
   useEffect(() => {
     setSelectedDateBs("");
     setSelectedEvents([]);
@@ -236,9 +281,15 @@ export const AcademicCalendarHub = () => {
     <div className="space-y-6">
       <PageHeader
         title={`Academic Calendar ${formatAcademicYearLabel(resolvedYear)}`}
-        description="Official institutional calendar using Bikram Sambat (BS) with English month names."
+        description="Institution-wide Bikram Sambat calendar with date-range events, vacations, examinations, and automatic Saturday public holidays."
         action={
           <div className="flex flex-wrap gap-2">
+            {canManage ? (
+              <Button type="button" onClick={openCreateForm}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Event
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" onClick={handlePrint}>
               <Printer className="mr-2 h-4 w-4" />
               Print
@@ -336,7 +387,7 @@ export const AcademicCalendarHub = () => {
                     handleApplyFilters();
                   }
                 }}
-                placeholder="BS/AD date, name, type..."
+                placeholder="Name, category, date..."
               />
               <Button type="button" onClick={handleApplyFilters}>
                 <Search className="h-4 w-4" />
@@ -373,17 +424,167 @@ export const AcademicCalendarHub = () => {
           </div>
         )}
 
+        <div className="flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
+          <span className="w-full text-sm font-medium text-slate-800 sm:w-auto">
+            Legend
+          </span>
+          {legendGroups.map((group) => (
+            <span key={group.key} className="inline-flex items-center gap-1.5">
+              <span
+                className="h-3 w-3 rounded-full"
+                style={{ backgroundColor: group.color }}
+              />
+              {group.label}
+            </span>
+          ))}
+        </div>
+
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <div>
-              <CardTitle>Holiday &amp; Event List</CardTitle>
+              <CardTitle>Event List</CardTitle>
               <p className="mt-1 text-sm text-slate-500">
-                {selectedDateBs
-                  ? `Showing holidays and events for ${selectedDateBs}`
-                  : "Click a date on the calendar to view its holidays and events."}
+                All created events with start/end dates. Saturday public holidays
+                are automatic and not listed here.
               </p>
             </div>
-            {selectedDateBs ? (
+            {canManage ? (
+              <Button type="button" size="sm" onClick={openCreateForm}>
+                <Plus className="mr-1 h-4 w-4" />
+                Add Event
+              </Button>
+            ) : null}
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            {managedEvents.length === 0 ? (
+              <EmptyState
+                title="No events created yet"
+                description={
+                  canManage
+                    ? "Add a single-day or multi-day event (vacation, exam week, festival, etc.) using Add Event."
+                    : "No calendar events have been published for this academic year."
+                }
+              />
+            ) : (
+              <Table>
+                <TableHead>
+                  <tr>
+                    <Th>Event Name</Th>
+                    <Th>Category</Th>
+                    <Th>Start Date (BS)</Th>
+                    <Th>End Date (BS)</Th>
+                    <Th>Total Days</Th>
+                    <Th>Description</Th>
+                    <Th>Created By</Th>
+                    <Th>Status</Th>
+                    <Th>Actions</Th>
+                  </tr>
+                </TableHead>
+                <TableBody>
+                  {managedEvents.map((event) => {
+                    const start = event.startDateBs || event.dateBs;
+                    const end = event.endDateBs || event.dateBs;
+                    return (
+                      <tr
+                        key={event._id}
+                        className="border-t border-slate-100 hover:bg-slate-50"
+                      >
+                        <Td className="font-medium text-slate-900">
+                          {event.name}
+                        </Td>
+                        <Td>
+                          <Badge
+                            style={{
+                              backgroundColor: `${getEventTypeColor(event.eventType)}22`,
+                              color: getEventTypeColor(event.eventType),
+                              borderColor: `${getEventTypeColor(event.eventType)}55`,
+                            }}
+                          >
+                            {getEventTypeLabel(event.eventType)}
+                          </Badge>
+                        </Td>
+                        <Td>{start}</Td>
+                        <Td>{end}</Td>
+                        <Td>{event.totalDays ?? 1}</Td>
+                        <Td className="max-w-[200px] truncate">
+                          {event.reason || "—"}
+                        </Td>
+                        <Td>{event.audit?.createdByName ?? "—"}</Td>
+                        <Td>
+                          <span
+                            className={
+                              event.status === "INACTIVE"
+                                ? "text-slate-500"
+                                : "font-medium text-emerald-700"
+                            }
+                          >
+                            {event.status ?? "ACTIVE"}
+                          </span>
+                        </Td>
+                        <Td>
+                          <div className="flex gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              title="View"
+                              onClick={() => {
+                                setSelectedDateBs(start);
+                                setSelectedEvents(
+                                  eventsByDate.get(start) ?? [event],
+                                );
+                                setDetailOpen(true);
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {canManage ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Edit"
+                                  onClick={() => {
+                                    setEditingEvent(event);
+                                    setFormOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Delete"
+                                  disabled={deleteMutation.isPending}
+                                  onClick={() => handleDelete(event)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                </Button>
+                              </>
+                            ) : null}
+                          </div>
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {selectedDateBs ? (
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <div>
+                <CardTitle>Events on {selectedDateBs}</CardTitle>
+                <p className="mt-1 text-sm text-slate-500">
+                  Including multi-day events that cover this date and automatic
+                  Saturday holidays.
+                </p>
+              </div>
               <Button
                 type="button"
                 variant="outline"
@@ -396,78 +597,52 @@ export const AcademicCalendarHub = () => {
               >
                 Clear date
               </Button>
-            ) : null}
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            {!selectedDateBs ? (
-              <EmptyState
-                title="No date selected"
-                description="Click any date in the academic calendar above to list holidays and events for that day."
-              />
-            ) : dateScopedEvents.length === 0 ? (
-              <EmptyState
-                title="No holidays or events on this date"
-                description={
-                  canManage
-                    ? `Nothing is scheduled for ${selectedDateBs}. You can add an event from the date dialog.`
-                    : `Nothing is scheduled for ${selectedDateBs}.`
-                }
-              />
-            ) : (
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>BS Date</Th>
-                    <Th>AD Date</Th>
-                    <Th>Day</Th>
-                    <Th>Holiday/Event</Th>
-                    <Th>Type</Th>
-                    <Th>Reason</Th>
-                  </tr>
-                </TableHead>
-                <TableBody>
+            </CardHeader>
+            <CardContent>
+              {dateScopedEvents.length === 0 ? (
+                <EmptyState
+                  title="No events on this date"
+                  description={
+                    canManage
+                      ? "Click Add Event to schedule something for this day."
+                      : "Nothing is scheduled for this date."
+                  }
+                />
+              ) : (
+                <ul className="space-y-2">
                   {dateScopedEvents.map((event) => (
-                    <tr
+                    <li
                       key={event._id}
-                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-                      onClick={() => {
-                        setSelectedEvents(
-                          eventsByDate.get(event.dateBs) ?? [event],
-                        );
-                        setDetailOpen(true);
-                      }}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
-                      <Td>{event.dateBs}</Td>
-                      <Td>{event.dateAd}</Td>
-                      <Td>{event.dayOfWeek}</Td>
-                      <Td
-                        className={
-                          event.isHoliday ? "font-medium text-red-700" : ""
-                        }
-                      >
-                        {event.name}
-                      </Td>
-                      <Td>{getEventTypeLabel(event.eventType)}</Td>
-                      <Td>{event.reason ?? "—"}</Td>
-                    </tr>
+                      <div>
+                        <span
+                          className={
+                            event.isHoliday
+                              ? "font-medium text-red-700"
+                              : "font-medium text-slate-900"
+                          }
+                        >
+                          {event.name}
+                        </span>
+                        <span className="ml-2 text-slate-500">
+                          {getEventTypeLabel(event.eventType)}
+                          {event.isSystemGenerated ? " · auto" : ""}
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-500">
+                        {(event.startDateBs || event.dateBs) ===
+                        (event.endDateBs || event.dateBs)
+                          ? event.dateBs
+                          : `${event.startDateBs} → ${event.endDateBs}`}
+                      </span>
+                    </li>
                   ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="no-print flex flex-wrap gap-3 text-xs text-slate-600">
-          {eventTypeOptions.map((option) => (
-            <span key={option.value} className="inline-flex items-center gap-1">
-              <span
-                className="h-3 w-3 rounded-full"
-                style={{ backgroundColor: option.color }}
-              />
-              {option.label}
-            </span>
-          ))}
-        </div>
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <EventDetailDialog
@@ -478,11 +653,20 @@ export const AcademicCalendarHub = () => {
         deleting={deleteMutation.isPending}
         onClose={() => setDetailOpen(false)}
         onEdit={(event) => {
+          if (event.isSystemGenerated) {
+            toast.message(
+              "Saturday holidays are automatic. Add a Working Day override to hold classes.",
+            );
+            setEditingEvent(null);
+            setFormOpen(true);
+            setDetailOpen(false);
+            return;
+          }
           setEditingEvent(event);
           setFormOpen(true);
           setDetailOpen(false);
         }}
-        onDelete={(event) => deleteMutation.mutate(event._id)}
+        onDelete={handleDelete}
         onAdd={() => {
           setEditingEvent(null);
           setFormOpen(true);
@@ -493,7 +677,7 @@ export const AcademicCalendarHub = () => {
       <EventFormDialog
         open={formOpen}
         academicYearBs={resolvedYear}
-        dateBs={selectedDateBs}
+        dateBs={selectedDateBs || todayBs}
         editingEvent={editingEvent}
         saving={saveMutation.isPending}
         onClose={() => {

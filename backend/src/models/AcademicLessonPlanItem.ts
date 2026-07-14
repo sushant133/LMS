@@ -6,6 +6,7 @@ const itemSchema = new Schema(
     lessonPlanId: { type: Schema.Types.ObjectId, ref: "AcademicLessonPlan", required: true },
     serialNo: { type: Number, required: true, min: 1 },
     sessionPlanUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSessionPlanUnit" },
+    subUnitTitle: { type: String, default: "" },
     subjectLabel: { type: String, default: "" },
     plannedTopic: { type: String, required: true },
     description: { type: String, default: "" },
@@ -14,6 +15,8 @@ const itemSchema = new Schema(
     teachingAids: { type: String, default: "" },
     assessmentMethod: { type: String, default: "" },
     deadline: { type: String, default: "" },
+    itemStartDateBs: { type: String, default: "" },
+    itemEndDateBs: { type: String, default: "" },
     estimatedClasses: { type: Number, default: 1, min: 1 },
     completedClasses: { type: Number, default: 0, min: 0 },
     completionStatus: {

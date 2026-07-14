@@ -2,8 +2,9 @@ import type { CSSProperties } from "react";
 import {
   ACADEMIC_CALENDAR_EVENT_TYPE_COLORS,
   ACADEMIC_CALENDAR_EVENT_TYPE_LABELS,
-  ACADEMIC_CALENDAR_EVENT_TYPES,
+  ACADEMIC_CALENDAR_LEGEND_GROUPS,
   BS_MONTH_NAMES,
+  PRIMARY_ACADEMIC_CALENDAR_EVENT_TYPES,
   parseAcademicYearStart,
   type AcademicCalendarEventInput,
   type AcademicCalendarEventRecord,
@@ -35,6 +36,8 @@ export const defaultCalendarFilters = (): AcademicCalendarFilters => ({
   dateFromBs: "",
   dateToBs: "",
   dateAd: "",
+  status: undefined,
+  excludeSystemGenerated: undefined,
 });
 
 export const filtersToParams = (
@@ -42,7 +45,9 @@ export const filtersToParams = (
 ): Record<string, string> => {
   const params: Record<string, string> = {};
   Object.entries(filters).forEach(([key, value]) => {
-    if (value) params[key] = String(value);
+    if (value !== undefined && value !== null && value !== "") {
+      params[key] = String(value);
+    }
   });
   return params;
 };
@@ -72,6 +77,14 @@ export const getWeekdayFromBs = (dateBs: string): string => {
       "Saturday",
     ][date.getDay()] ?? ""
   );
+};
+
+export const isSaturdayBs = (dateBs: string): boolean => {
+  const [year, month, day] = dateBs.split("-").map(Number);
+  if (!year || !month || !day) return false;
+  const ad = bsToAd(year, month, day);
+  const date = new Date(ad.year, ad.month - 1, ad.day);
+  return date.getDay() === 6;
 };
 
 export const getFirstWeekdayIndex = (year: number, month: number): number => {
@@ -143,7 +156,6 @@ export const resolvePreferredAcademicYear = (
   if (list.includes(inferred)) {
     return inferred;
   }
-  // Year that matches today's BS calendar year (e.g. 2083/2084 when today is 2083-…)
   const matching = list.find((year) =>
     year.startsWith(`${inferred.split("/")[0]}/`),
   );
@@ -160,12 +172,44 @@ export const getEventTypeColor = (
   eventType: AcademicCalendarEventType,
 ): string => ACADEMIC_CALENDAR_EVENT_TYPE_COLORS[eventType];
 
+export const eventCoversDate = (
+  event: AcademicCalendarEventRecord,
+  dateBs: string,
+): boolean => {
+  const start = event.startDateBs || event.dateBs;
+  const end = event.endDateBs || event.dateBs;
+  return dateBs >= start && dateBs <= end;
+};
+
+/** Prefer holidays, then exams, then other events for cell coloring. */
+export const pickPrimaryEvent = (
+  events: AcademicCalendarEventRecord[],
+): AcademicCalendarEventRecord | undefined => {
+  if (events.length === 0) return undefined;
+  const holiday = events.find((event) => event.isHoliday);
+  if (holiday) return holiday;
+  const override = events.find((event) => event.isWorkingDayOverride);
+  if (override) return override;
+  return events[0];
+};
+
 export const getDateCellClass = (
   event: AcademicCalendarEventRecord | undefined,
   isToday: boolean,
+  isSaturday = false,
 ): string => {
   if (!event) {
+    if (isSaturday) {
+      return isToday
+        ? "ring-2 ring-brand-500 bg-red-100 text-red-800"
+        : "bg-red-50 text-red-700 hover:bg-red-100";
+    }
     return isToday ? "ring-2 ring-brand-500 bg-brand-50" : "hover:bg-slate-50";
+  }
+  if (event.isWorkingDayOverride) {
+    return isToday
+      ? "ring-2 ring-brand-500 bg-emerald-100 text-emerald-900"
+      : "bg-emerald-50 text-emerald-800 hover:bg-emerald-100";
   }
   if (event.isHoliday) {
     return "bg-red-100 text-red-800 hover:bg-red-200";
@@ -176,7 +220,7 @@ export const getDateCellClass = (
 export const getDateCellStyle = (
   event: AcademicCalendarEventRecord | undefined,
 ): CSSProperties | undefined => {
-  if (!event || event.isHoliday) return undefined;
+  if (!event || event.isHoliday || event.isWorkingDayOverride) return undefined;
   return {
     backgroundColor: `${getEventTypeColor(event.eventType)}22`,
     color: "#0f172a",
@@ -188,10 +232,13 @@ export const buildDefaultEventInput = (
   dateBs = "",
 ): AcademicCalendarEventInput => ({
   academicYearBs,
+  startDateBs: dateBs,
+  endDateBs: dateBs,
   dateBs,
   name: "",
-  eventType: "ACADEMIC_EVENT",
+  eventType: "PUBLIC_HOLIDAY",
   reason: "",
+  status: "ACTIVE",
 });
 
 export const exportEventsExcel = (
@@ -199,12 +246,16 @@ export const exportEventsExcel = (
   filename: string,
 ) => {
   const rows = events.map((event) => ({
-    "BS Date": event.dateBs,
-    "AD Date": event.dateAd,
-    Day: event.dayOfWeek,
-    "Holiday/Event": event.name,
-    Type: getEventTypeLabel(event.eventType),
-    Reason: event.reason ?? "",
+    "Event Name": event.name,
+    Category: getEventTypeLabel(event.eventType),
+    "Start Date (BS)": event.startDateBs || event.dateBs,
+    "End Date (BS)": event.endDateBs || event.dateBs,
+    "Total Days": event.totalDays ?? 1,
+    Description: event.reason ?? "",
+    "Created By": event.audit?.createdByName ?? "",
+    Status: event.status ?? "ACTIVE",
+    "AD Start": event.startDateAd || event.dateAd,
+    "AD End": event.endDateAd || event.dateAd,
   }));
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
@@ -212,7 +263,8 @@ export const exportEventsExcel = (
   XLSX.writeFile(workbook, filename);
 };
 
-export const eventTypeOptions = ACADEMIC_CALENDAR_EVENT_TYPES.map(
+/** Primary categories for the create/edit form. */
+export const eventTypeOptions = PRIMARY_ACADEMIC_CALENDAR_EVENT_TYPES.map(
   (eventType) => ({
     value: eventType,
     label: getEventTypeLabel(eventType),
@@ -220,16 +272,75 @@ export const eventTypeOptions = ACADEMIC_CALENDAR_EVENT_TYPES.map(
   }),
 );
 
+/** Compact legend for the calendar footer. */
+export const legendGroups = ACADEMIC_CALENDAR_LEGEND_GROUPS.map((group) => ({
+  key: group.key,
+  label: group.label,
+  color: group.color,
+}));
+
+/**
+ * Map each BS date to events covering that day (supports multi-day ranges).
+ */
 export const groupEventsByDate = (
   events: AcademicCalendarEventRecord[],
 ): Map<string, AcademicCalendarEventRecord[]> => {
   const map = new Map<string, AcademicCalendarEventRecord[]>();
+
   events.forEach((event) => {
-    const existing = map.get(event.dateBs) ?? [];
-    existing.push(event);
-    map.set(event.dateBs, existing);
+    const start = event.startDateBs || event.dateBs;
+    const end = event.endDateBs || event.dateBs;
+
+    // Walk AD-based offsets via string compare — dates are ISO-like YYYY-MM-DD
+    // For multi-day, expand using known month lengths on the client.
+    const days = expandBsRangeClient(start, end);
+    days.forEach((dateBs) => {
+      const existing = map.get(dateBs) ?? [];
+      // Avoid duplicate entries for the same event id
+      if (!existing.some((item) => item._id === event._id)) {
+        existing.push(event);
+      }
+      map.set(dateBs, existing);
+    });
   });
+
   return map;
+};
+
+/**
+ * Expand a BS range for calendar display.
+ * Uses nepali-datepicker month lengths when possible; falls back to day-by-day AD walk.
+ */
+export const expandBsRangeClient = (
+  startDateBs: string,
+  endDateBs: string,
+): string[] => {
+  if (!startDateBs) return [];
+  if (!endDateBs || endDateBs === startDateBs) return [startDateBs];
+  if (endDateBs < startDateBs) return [startDateBs];
+
+  const dates: string[] = [];
+  let [y, m, d] = startDateBs.split("-").map(Number);
+  if (!y || !m || !d) return [startDateBs];
+
+  for (let i = 0; i < 450; i += 1) {
+    const current = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    dates.push(current);
+    if (current >= endDateBs) break;
+
+    const daysInMonth = getDaysInBsMonth(y, m);
+    d += 1;
+    if (d > daysInMonth) {
+      d = 1;
+      m += 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+    }
+  }
+
+  return dates;
 };
 
 export const filterEventsLocally = (
@@ -240,16 +351,27 @@ export const filterEventsLocally = (
   return events.filter((event) => {
     if (filters.eventType && event.eventType !== filters.eventType)
       return false;
-    if (filters.monthBs && !event.dateBs.startsWith(filters.monthBs))
+    if (filters.status && event.status !== filters.status) return false;
+    if (filters.monthBs) {
+      const start = event.startDateBs || event.dateBs;
+      const end = event.endDateBs || event.dateBs;
+      const monthStart = `${filters.monthBs}-01`;
+      const monthEnd = `${filters.monthBs}-32`;
+      // Overlap with month
+      if (end < monthStart || start > monthEnd) return false;
+    }
+    if (filters.dateAd && event.dateAd !== filters.dateAd && event.startDateAd !== filters.dateAd)
       return false;
-    if (filters.dateAd && event.dateAd !== filters.dateAd) return false;
     if (keyword) {
       const haystack = [
         event.dateBs,
+        event.startDateBs,
+        event.endDateBs,
         event.dateAd,
         event.name,
         getEventTypeLabel(event.eventType),
         event.reason ?? "",
+        event.audit?.createdByName ?? "",
       ]
         .join(" ")
         .toLowerCase();
@@ -258,3 +380,9 @@ export const filterEventsLocally = (
     return true;
   });
 };
+
+/** Stored events only (exclude auto Saturday holidays) for the admin event table. */
+export const storedEventsOnly = (
+  events: AcademicCalendarEventRecord[],
+): AcademicCalendarEventRecord[] =>
+  events.filter((event) => !event.isSystemGenerated);

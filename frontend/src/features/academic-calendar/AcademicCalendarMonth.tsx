@@ -7,6 +7,8 @@ import {
   getDateCellClass,
   getDateCellStyle,
   getEventTypeLabel,
+  isSaturdayBs,
+  pickPrimaryEvent,
 } from "./academicCalendarUtils";
 
 interface AcademicCalendarMonthProps {
@@ -40,7 +42,12 @@ export const AcademicCalendarMonth = ({
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500">
         {WEEKDAY_LABELS.map((label) => (
-          <div key={label}>{label}</div>
+          <div
+            key={label}
+            className={cn(label === "Sat" && "font-semibold text-red-600")}
+          >
+            {label}
+          </div>
         ))}
       </div>
       <div className="mt-1 grid grid-cols-7 gap-1">
@@ -51,11 +58,12 @@ export const AcademicCalendarMonth = ({
 
           const dateBs = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
           const dayEvents = eventsByDate.get(dateBs) ?? [];
-          const primaryEvent = dayEvents[0];
+          const primaryEvent = pickPrimaryEvent(dayEvents);
           const isToday = dateBs === todayBs;
           const isSelected = Boolean(
             selectedDateBs && dateBs === selectedDateBs,
           );
+          const saturday = isSaturdayBs(dateBs);
           const title = dayEvents
             .map(
               (event) =>
@@ -67,12 +75,12 @@ export const AcademicCalendarMonth = ({
             <button
               key={dateBs}
               type="button"
-              title={title || undefined}
+              title={title || (saturday ? "Public Holiday (Saturday)" : undefined)}
               onClick={() => onDateClick(dateBs, dayEvents)}
               style={getDateCellStyle(primaryEvent)}
               className={cn(
                 "relative flex h-8 items-center justify-center rounded-md text-xs font-medium transition cursor-pointer",
-                getDateCellClass(primaryEvent, isToday),
+                getDateCellClass(primaryEvent, isToday, saturday),
                 isSelected && "ring-2 ring-brand-600 ring-offset-1",
               )}
             >

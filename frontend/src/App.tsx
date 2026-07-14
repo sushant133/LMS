@@ -8,8 +8,12 @@ import { LoginPage } from "pages/LoginPage";
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const StudentsLayout = lazy(() => import("pages/StudentsPage"));
-const CreateStudentPage = lazy(() => import("pages/CreateStudentPage").then((module) => ({ default: module.CreateStudentPage })));
-const StudentListPage = lazy(() => import("pages/StudentListPage").then((module) => ({ default: module.StudentListPage })));
+const CreateStudentPage = lazy(() =>
+  import("pages/CreateStudentPage").then((module) => ({ default: module.CreateStudentPage })),
+);
+const StudentListPage = lazy(() =>
+  import("pages/StudentListPage").then((module) => ({ default: module.StudentListPage })),
+);
 const TeachersPage = lazy(() => import("pages/TeachersPage").then((module) => ({ default: module.TeachersPage })));
 const CollegeStaffPage = lazy(() => import("pages/CollegeStaffPage").then((module) => ({ default: module.CollegeStaffPage })));
 const AcademicsPage = lazy(() => import("pages/AcademicsPage").then((module) => ({ default: module.AcademicsPage })));
@@ -171,18 +175,34 @@ export default function App() {
               <Route path="/my-library" element={<MyLibraryPage />} />
             </Route>
 
+            {/* Students: tabs (Create | List) stay on layout; content swaps in the outlet */}
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
-              <Route path="/students" element={<LazyRoute><StudentsLayout /></LazyRoute>}>
-                <Route index element={<Navigate to="list" replace />} />
-                <Route path="list" element={<LazyRoute><StudentListPage /></LazyRoute>} />
-              </Route>
-            </Route>
-            {/* Create student: admin only (teachers list students but cannot create) */}
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
               <Route
-                path="/students/create"
-                element={<LazyRoute><CreateStudentPage /></LazyRoute>}
-              />
+                path="/students"
+                element={
+                  <LazyRoute>
+                    <StudentsLayout />
+                  </LazyRoute>
+                }
+              >
+                <Route index element={<Navigate to="list" replace />} />
+                <Route
+                  path="list"
+                  element={
+                    <LazyRoute>
+                      <StudentListPage />
+                    </LazyRoute>
+                  }
+                />
+                <Route
+                  path="create"
+                  element={
+                    <LazyRoute>
+                      <CreateStudentPage />
+                    </LazyRoute>
+                  }
+                />
+              </Route>
             </Route>
 
             <Route

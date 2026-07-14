@@ -239,8 +239,8 @@ export const StudentDocumentsSection = ({
         <h3 className="text-base font-semibold text-slate-900">Documents</h3>
         <p className="mt-1 text-sm text-slate-500">
           Upload student documents (PDF, JPG, JPEG, PNG — max 500 KB each).
-          Required documents may be left pending; the student can still be
-          created.
+          Documents can be added later; the student can still be created without
+          them.
           {!studentId
             ? " Queued files will upload after the student is saved."
             : null}
@@ -273,7 +273,6 @@ export const StudentDocumentsSection = ({
               {STUDENT_DOCUMENT_CATEGORIES.map((item) => (
                 <option key={item.key} value={item.key}>
                   {item.label}
-                  {item.required ? " *" : ""}
                 </option>
               ))}
             </Select>
@@ -336,13 +335,6 @@ export const StudentDocumentsSection = ({
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <FileText className="h-4 w-4 text-slate-500" />
                 <span className="font-medium text-slate-800">{cat.label}</span>
-                {cat.required ? (
-                  <Badge className="bg-blue-100 text-blue-800">Required</Badge>
-                ) : (
-                  <Badge className="bg-slate-100 text-slate-700">
-                    Optional
-                  </Badge>
-                )}
                 {isMissingRequired || pendingDocs.length > 0 ? (
                   <Badge className="bg-amber-100 text-amber-900">Pending</Badge>
                 ) : null}

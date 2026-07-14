@@ -55,24 +55,31 @@ export const validateStudentAdmissionScope = async (
     yearId?: string;
   }
 ): Promise<void> => {
+  // Admission scope is optional on create — only validate pairs when provided.
   if (isCollege(institutionType)) {
-    if (!payload.batchId || !payload.yearId) {
-      throw new ApiError(400, "Batch and year are required for college institutions");
-    }
     if (payload.classId || payload.sectionId) {
       throw new ApiError(400, "Class and section are not used for college institutions");
     }
-    await validateCollegeStudentScope(schoolId, payload.batchId, payload.yearId);
+    if (payload.batchId && payload.yearId) {
+      await validateCollegeStudentScope(schoolId, payload.batchId, payload.yearId);
+      return;
+    }
+    if (payload.batchId || payload.yearId) {
+      throw new ApiError(400, "Provide both batch and year, or leave both empty");
+    }
     return;
   }
 
-  if (!payload.classId || !payload.sectionId) {
-    throw new ApiError(400, "Class and section are required for class & section programs");
-  }
   if (payload.batchId || payload.yearId) {
     throw new ApiError(400, "Batch and year are not used for class & section programs");
   }
-  await validateSchoolStudentScope(schoolId, payload.classId, payload.sectionId);
+  if (payload.classId && payload.sectionId) {
+    await validateSchoolStudentScope(schoolId, payload.classId, payload.sectionId);
+    return;
+  }
+  if (payload.classId || payload.sectionId) {
+    throw new ApiError(400, "Provide both class and section, or leave both empty");
+  }
 };
 
 export const validateAttendanceScope = (

@@ -3,7 +3,7 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 const unitSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
-    sessionPlanId: { type: Schema.Types.ObjectId, ref: "AcademicSessionPlan", required: true },
+    syllabusId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabus", required: true },
     unitNo: { type: Number, required: true, min: 1 },
     chapterName: { type: String, required: true },
     estimatedTeachingHours: { type: Number, default: 0, min: 0 },
@@ -13,8 +13,6 @@ const unitSchema = new Schema(
     practicalRequired: { type: Boolean, default: false },
     internalAssessment: { type: String, default: "" },
     tentativeCompletionMonth: { type: String, default: "" },
-    startDateBs: { type: String, default: "" },
-    endDateBs: { type: String, default: "" },
     status: {
       type: String,
       enum: ["PENDING", "IN_PROGRESS", "COMPLETED", "DELAYED"],
@@ -25,7 +23,7 @@ const unitSchema = new Schema(
   { timestamps: true }
 );
 
-unitSchema.index({ sessionPlanId: 1, unitNo: 1 }, { unique: true });
+unitSchema.index({ syllabusId: 1, unitNo: 1 }, { unique: true });
 
-export type AcademicSessionPlanUnitDocument = InferSchemaType<typeof unitSchema>;
-export const AcademicSessionPlanUnit = mongoose.model("AcademicSessionPlanUnit", unitSchema);
+export type AcademicSyllabusUnitDocument = InferSchemaType<typeof unitSchema>;
+export const AcademicSyllabusUnit = mongoose.model("AcademicSyllabusUnit", unitSchema);

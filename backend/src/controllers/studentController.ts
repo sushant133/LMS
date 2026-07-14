@@ -120,16 +120,49 @@ export const getStudentById = asyncHandler(async (req: Request, res: Response) =
   return sendSuccess(res, "Student fetched", student);
 });
 
+const emptyAddress = () => ({
+  province: "",
+  district: "",
+  municipality: "",
+  ward: "",
+  streetAddress: ""
+});
+
+/** Generate a unique-enough admission number when the form leaves it blank. */
+const generateAdmissionNumber = (): string => {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `ADM-${stamp}-${rand}`;
+};
+
+/** Generate a portal login id when the form leaves it blank. */
+const generateStudentLoginId = (admissionNumber: string): string => {
+  const base = admissionNumber
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 24);
+  return base.length >= 3 ? `s${base}` : `student${Date.now().toString(36)}`;
+};
+
 export const createStudent = asyncHandler(async (req: Request, res: Response) => {
   const payload = studentSchema.parse(req.body);
-  ensureValidBsDate(payload.admissionDateBs);
-  ensureValidBsDate(payload.dateOfBirthBs);
+  if (payload.admissionDateBs) ensureValidBsDate(payload.admissionDateBs);
+  if (payload.dateOfBirthBs) ensureValidBsDate(payload.dateOfBirthBs);
 
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
   await validateStudentAdmissionScope(institutionType, schoolId, payload);
 
-  const loginEmail = payload.email;
+  const hasScholarship = Boolean(payload.hasScholarship);
+  const feesDueNpr = hasScholarship ? 0 : (payload.feesDueNpr ?? 0);
+  const fullName = (payload.fullName || "").trim() || "Student";
+  const admissionNumber =
+    (payload.admissionNumber || "").trim() || generateAdmissionNumber();
+  let loginEmail = (payload.email || "").trim().toLowerCase();
+  if (!loginEmail) {
+    loginEmail = generateStudentLoginId(admissionNumber);
+  }
+
   const existingUser = await User.findOne({ email: loginEmail });
   if (existingUser) {
     throw new ApiError(409, "A user with this email already exists");
@@ -144,9 +177,9 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
       [
         {
           schoolId,
-          fullName: payload.fullName,
+          fullName,
           email: loginEmail,
-          phone: payload.phone,
+          phone: payload.phone || "",
           password: portalPassword,
           role: "STUDENT",
           mustChangePassword: wasGenerated
@@ -161,26 +194,33 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
         {
           schoolId,
           user: user._id,
-          admissionNumber: payload.admissionNumber,
-          rollNumber: payload.rollNumber,
+          admissionNumber,
+          rollNumber: payload.rollNumber ?? 0,
           ...(isCollege(institutionType)
-            ? { batchId: payload.batchId, yearId: payload.yearId }
-            : { classId: payload.classId, sectionId: payload.sectionId }),
+            ? {
+                ...(payload.batchId ? { batchId: payload.batchId } : {}),
+                ...(payload.yearId ? { yearId: payload.yearId } : {})
+              }
+            : {
+                ...(payload.classId ? { classId: payload.classId } : {}),
+                ...(payload.sectionId ? { sectionId: payload.sectionId } : {})
+              }),
           academicStatus: payload.academicStatus ?? "ACTIVE",
-          admissionDateBs: payload.admissionDateBs,
-          dateOfBirthBs: payload.dateOfBirthBs,
-          gender: payload.gender,
+          admissionDateBs: payload.admissionDateBs || "",
+          dateOfBirthBs: payload.dateOfBirthBs || "",
+          gender: payload.gender || "",
           bloodGroup: payload.bloodGroup,
           disabilityCategory: payload.disabilityCategory,
           ethnicityCategory: payload.ethnicityCategory,
-          address: payload.address,
-          fatherName: payload.fatherName,
+          address: payload.address ?? emptyAddress(),
+          fatherName: payload.fatherName || "",
           fatherPhone: payload.fatherPhone || undefined,
-          motherName: payload.motherName,
+          motherName: payload.motherName || "",
           motherPhone: payload.motherPhone || undefined,
-          guardianName: payload.guardianName,
-          guardianPhone: payload.guardianPhone,
-          feesDueNpr: payload.feesDueNpr,
+          guardianName: payload.guardianName || "",
+          guardianPhone: payload.guardianPhone || "",
+          feesDueNpr,
+          hasScholarship,
           remarks: payload.remarks,
           photoUrl: payload.photoUrl || undefined,
           // Missing required categories are stored as PENDING so the student
@@ -199,12 +239,12 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
       action: "student.create",
       entity: "Student",
       entityId: student._id.toString(),
-      after: { admissionNumber: student.admissionNumber, fullName: payload.fullName }
+      after: { admissionNumber: student.admissionNumber, fullName }
     });
 
     const credentialsEmail = await notifyAccountCredentials({
       userId: user._id.toString(),
-      fullName: payload.fullName,
+      fullName,
       email: loginEmail,
       password: portalPassword,
       schoolId: schoolId.toString(),
@@ -233,8 +273,8 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
 
 export const updateStudent = asyncHandler(async (req: Request, res: Response) => {
   const payload = studentSchema.parse(req.body);
-  ensureValidBsDate(payload.admissionDateBs);
-  ensureValidBsDate(payload.dateOfBirthBs);
+  if (payload.admissionDateBs) ensureValidBsDate(payload.admissionDateBs);
+  if (payload.dateOfBirthBs) ensureValidBsDate(payload.dateOfBirthBs);
 
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
@@ -245,7 +285,18 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     throw new ApiError(404, "Student not found");
   }
 
-  const loginEmail = payload.email;
+  const fullName = (payload.fullName || "").trim() || "Student";
+  const admissionNumber =
+    (payload.admissionNumber || "").trim() || student.admissionNumber || generateAdmissionNumber();
+  const hasScholarship = Boolean(payload.hasScholarship);
+  const feesDueNpr = hasScholarship ? 0 : (payload.feesDueNpr ?? 0);
+
+  let loginEmail = (payload.email || "").trim().toLowerCase();
+  if (!loginEmail) {
+    const current = await User.findById(student.user).select("email").lean();
+    loginEmail = current?.email || generateStudentLoginId(admissionNumber);
+  }
+
   const currentUser = await User.findById(student.user).select("email").lean();
 
   if (loginEmail !== currentUser?.email) {
@@ -256,32 +307,43 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   }
 
   await updatePortalUser(student.user, {
-    fullName: payload.fullName,
+    fullName,
     email: loginEmail,
     phone: payload.phone,
     password: payload.password
   });
 
   Object.assign(student, {
-    admissionNumber: payload.admissionNumber,
-    rollNumber: payload.rollNumber,
+    admissionNumber,
+    rollNumber: payload.rollNumber ?? 0,
     ...(isCollege(institutionType)
-      ? { batchId: payload.batchId, yearId: payload.yearId, classId: undefined, sectionId: undefined }
-      : { classId: payload.classId, sectionId: payload.sectionId, batchId: undefined, yearId: undefined }),
-    admissionDateBs: payload.admissionDateBs,
-    dateOfBirthBs: payload.dateOfBirthBs,
-    gender: payload.gender,
+      ? {
+          batchId: payload.batchId || undefined,
+          yearId: payload.yearId || undefined,
+          classId: undefined,
+          sectionId: undefined
+        }
+      : {
+          classId: payload.classId || undefined,
+          sectionId: payload.sectionId || undefined,
+          batchId: undefined,
+          yearId: undefined
+        }),
+    admissionDateBs: payload.admissionDateBs || "",
+    dateOfBirthBs: payload.dateOfBirthBs || "",
+    gender: payload.gender || "",
     bloodGroup: payload.bloodGroup,
     disabilityCategory: payload.disabilityCategory,
     ethnicityCategory: payload.ethnicityCategory,
-    address: payload.address,
-    fatherName: payload.fatherName,
+    address: payload.address ?? emptyAddress(),
+    fatherName: payload.fatherName || "",
     fatherPhone: payload.fatherPhone || undefined,
-    motherName: payload.motherName,
+    motherName: payload.motherName || "",
     motherPhone: payload.motherPhone || undefined,
-    guardianName: payload.guardianName,
-    guardianPhone: payload.guardianPhone,
-    feesDueNpr: payload.feesDueNpr,
+    guardianName: payload.guardianName || "",
+    guardianPhone: payload.guardianPhone || "",
+    feesDueNpr,
+    hasScholarship,
     remarks: payload.remarks,
     academicStatus: payload.academicStatus ?? student.academicStatus ?? "ACTIVE",
     photoUrl: payload.photoUrl || undefined,
@@ -295,7 +357,7 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     action: "student.update",
     entity: "Student",
     entityId: student._id.toString(),
-    after: { admissionNumber: student.admissionNumber, fullName: payload.fullName }
+    after: { admissionNumber: student.admissionNumber, fullName }
   });
 
   return sendSuccess(res, "Student updated successfully", student);

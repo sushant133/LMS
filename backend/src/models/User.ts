@@ -1,6 +1,10 @@
 import bcrypt from "bcryptjs";
 import mongoose, { Schema, type HydratedDocument, type Model } from "mongoose";
-import { USER_ROLES, type UserRole } from "@phit-erp/shared";
+import {
+  MODULE_PERMISSION_ACTIONS,
+  USER_ROLES,
+  type UserRole
+} from "@phit-erp/shared";
 
 export interface UserDocument {
   schoolId?: mongoose.Types.ObjectId | null;
@@ -9,18 +13,28 @@ export interface UserDocument {
   password: string;
   phone?: string;
   employeeId?: string;
+  /** Position title only — never auto-grants permissions. */
   designation?: string;
   department?: string;
   profilePhotoUrl?: string;
   role: UserRole;
+  /**
+   * Additional ERP roles for multi-responsibility (one login).
+   * Checked by authorize() alongside primary role.
+   */
+  secondaryRoles?: UserRole[];
   isActive: boolean;
   mustChangePassword: boolean;
   /**
    * Per-module access control.
-   * Keys: ERP module keys (academic-management, library, …).
-   * Values: "WRITE" | "READ_ONLY". Missing key = WRITE (enabled).
+   * Values: "NONE" | "READ_ONLY" | "WRITE". Missing key = WRITE (legacy default).
    */
-  moduleAccess?: Record<string, "WRITE" | "READ_ONLY">;
+  moduleAccess?: Record<string, "NONE" | "READ_ONLY" | "WRITE">;
+  /**
+   * Optional granular actions per module.
+   * Keys: ERP module keys. Values: arrays of action strings.
+   */
+  moduleActions?: Record<string, string[]>;
   comparePassword(candidate: string): Promise<boolean>;
 }
 
@@ -38,11 +52,20 @@ const userSchema = new Schema<UserDocument, UserModel>(
     department: { type: String, trim: true },
     profilePhotoUrl: { type: String, trim: true },
     role: { type: String, enum: USER_ROLES, required: true },
+    secondaryRoles: {
+      type: [{ type: String, enum: USER_ROLES }],
+      default: undefined
+    },
     isActive: { type: Boolean, default: true },
     mustChangePassword: { type: Boolean, default: false },
     moduleAccess: {
       type: Map,
-      of: { type: String, enum: ["WRITE", "READ_ONLY"] },
+      of: { type: String, enum: ["NONE", "READ_ONLY", "WRITE"] },
+      default: undefined
+    },
+    moduleActions: {
+      type: Map,
+      of: [{ type: String, enum: MODULE_PERMISSION_ACTIONS }],
       default: undefined
     }
   },
@@ -70,7 +93,6 @@ userSchema.pre("save", async function hashPassword(next) {
     return next();
   }
 
-  // Cost 12 is a solid default for interactive logins (balance security vs latency)
   user.password = await bcrypt.hash(user.password, 12);
   next();
 });

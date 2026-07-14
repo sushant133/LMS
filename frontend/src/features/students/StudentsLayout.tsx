@@ -25,7 +25,7 @@ export const StudentsLayout = () => {
         title={canManage ? "Student Management" : "My Students"}
         description={
           canManage
-            ? "Admissions, BS dates, Nepal address data, guardian details, and fee due tracking."
+            ? "Admissions, BS dates, Nepal address data, guardian details, total fee and scholarship."
             : `Students in your assigned ${labels.primaryPlural.toLowerCase()} and ${labels.secondaryPlural.toLowerCase()}. Contact the college admin to register new students.`
         }
       />

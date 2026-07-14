@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  type AcademicSessionPlanInput,
-  type AcademicSessionPlanRecord,
+  type AcademicSyllabusInput,
   type AcademicSyllabusRecord,
   type SubjectAssignmentRecord,
   type SubjectRecord,
   canManageInstitution,
 } from "@phit-erp/shared";
-import { Download, Plus, Send, Trash2 } from "lucide-react";
+import { Plus, Send, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
@@ -21,7 +20,6 @@ import { Textarea } from "components/ui/textarea";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
-import { NepaliDateField } from "components/shared/NepaliDateField";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
 import { parseErrorMessage } from "lib/utils";
@@ -30,7 +28,6 @@ import {
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
-  mapSourceUnitToSessionUnit,
   NEPALI_MONTHS,
   statusBadgeClass,
 } from "./academicManagementUtils";
@@ -53,7 +50,7 @@ import {
   type HierarchySubjectNode,
 } from "./academicHierarchyUtils";
 
-interface SessionPlanPanelProps {
+interface SyllabusPanelProps {
   filters: AcademicManagementFilters;
   subjects: Array<
     Pick<
@@ -87,10 +84,10 @@ const emptyUnit = (unitNo = 1) => ({
   status: "PENDING" as const,
 });
 
-const blankSessionForm = (
+const blankSyllabusForm = (
   filters: AcademicManagementFilters,
-  teacherId?: string,
-): AcademicSessionPlanInput => ({
+  _teacherId?: string,
+): AcademicSyllabusInput => ({
   academicYearBs: filters.academicYearBs || "2082/083",
   session: filters.session || filters.academicYearBs || "2082/083",
   faculty: filters.faculty || "",
@@ -100,12 +97,13 @@ const blankSessionForm = (
   batchId: filters.batchId,
   yearId: filters.yearId,
   subjectId: filters.subjectId || "",
-  teacherId: teacherId || filters.teacherId || "",
+  // Teacher is optional — subject syllabus is shared with assigned teachers
+  teacherId: filters.teacherId || "",
   attachmentUrl: "",
   units: [emptyUnit()],
 });
 
-export const SessionPlanPanel = ({
+export const SyllabusPanel = ({
   filters,
   subjects,
   teacherId,
@@ -116,7 +114,7 @@ export const SessionPlanPanel = ({
   isCollege = false,
   institutionName = "Institution",
   writeAccess = true,
-}: SessionPlanPanelProps) => {
+}: SyllabusPanelProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "");
@@ -129,26 +127,24 @@ export const SessionPlanPanel = ({
   const [selectedYearKey, setSelectedYearKey] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] =
     useState<HierarchySubjectNode | null>(null);
-  const [form, setForm] = useState<AcademicSessionPlanInput>(() =>
-    blankSessionForm(filters, teacherId),
+  const [form, setForm] = useState<AcademicSyllabusInput>(() =>
+    blankSyllabusForm(filters, teacherId),
   );
 
-  // Keep teacherId on the form once teacher scope resolves (async)
-  useEffect(() => {
-    if (!teacherId) return;
-    setForm((current) =>
-      current.teacherId === teacherId
-        ? current
-        : { ...current, teacherId },
-    );
-  }, [teacherId]);
+  const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
+  const subjectOptions = useMemo(() => {
+    if (isCollege || yearOptions.length > 0) {
+      return filterSubjectsByYear(subjects, years, form.yearId);
+    }
+    return filterSubjectsByClass(subjects, form.classId);
+  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
 
-  const queryKey = ["academic-management", "session-plans", filters];
+  const queryKey = ["academic-management", "syllabi", filters];
   const plansQuery = useQuery({
     queryKey,
     queryFn: () =>
-      unwrap<AcademicSessionPlanRecord[]>(
-        api.get("/academic-management/session-plans", {
+      unwrap<AcademicSyllabusRecord[]>(
+        api.get("/academic-management/syllabi", {
           params: filtersToParams(filters),
         }),
       ),
@@ -156,15 +152,15 @@ export const SessionPlanPanel = ({
 
   const resetForm = () => {
     setEditingId(null);
-    setForm(blankSessionForm(filters, teacherId));
+    setForm(blankSyllabusForm(filters, teacherId));
   };
 
-  const openCreateForm = () => {
+  const openCreateSyllabusForm = () => {
     resetForm();
     setShowForm(true);
   };
 
-  const openEditForm = (plan: AcademicSessionPlanRecord) => {
+  const openEditForm = (plan: AcademicSyllabusRecord) => {
     setEditingId(plan._id);
     setForm({
       academicYearBs: plan.academicYearBs,
@@ -190,8 +186,8 @@ export const SessionPlanPanel = ({
               practicalRequired: unit.practicalRequired ?? false,
               internalAssessment: unit.internalAssessment || "",
               tentativeCompletionMonth: unit.tentativeCompletionMonth || "",
-              startDateBs: unit.startDateBs || "",
-              endDateBs: unit.endDateBs || "",
+              startDateBs: (unit as { startDateBs?: string }).startDateBs || "",
+              endDateBs: (unit as { endDateBs?: string }).endDateBs || "",
               status: unit.status || "PENDING",
               attachmentUrl: unit.attachmentUrl,
             }))
@@ -200,100 +196,11 @@ export const SessionPlanPanel = ({
     setShowForm(true);
   };
 
-  const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
-  const subjectOptions = useMemo(() => {
-    if (isCollege || yearOptions.length > 0) {
-      return filterSubjectsByYear(subjects, years, form.yearId);
-    }
-    return filterSubjectsByClass(subjects, form.classId);
-  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
-
-  /** Matching official syllabi for year + subject — used to pre-fill units. */
-  const syllabiQuery = useQuery({
-    queryKey: [
-      "academic-management",
-      "syllabi-for-session",
-      form.subjectId,
-      form.yearId,
-      form.academicYearBs,
-    ],
-    queryFn: () =>
-      unwrap<AcademicSyllabusRecord[]>(
-        api.get("/academic-management/syllabi", {
-          params: filtersToParams({
-            subjectId: form.subjectId,
-            yearId: form.yearId,
-            classId: form.classId,
-            academicYearBs: form.academicYearBs,
-          }),
-        }),
-      ),
-    enabled: showForm && Boolean(form.subjectId),
-  });
-
-  const matchedSyllabus = useMemo(() => {
-    const list = syllabiQuery.data ?? [];
-    if (list.length === 0) return null;
-    // Prefer approved, then any for this subject
-    return (
-      list.find((s) => s.status === "APPROVED") ||
-      list.find((s) => s.status !== "REJECTED") ||
-      list[0] ||
-      null
-    );
-  }, [syllabiQuery.data]);
-
-  const importFromSyllabus = (syllabus: AcademicSyllabusRecord, replace = true) => {
-    if (!syllabus.units?.length) {
-      toast.message("Selected syllabus has no units to import");
-      return;
-    }
-    const imported = syllabus.units.map((unit, index) =>
-      mapSourceUnitToSessionUnit(unit, index),
-    );
-    setForm((current) => ({
-      ...current,
-      subjectId: syllabus.subjectId || current.subjectId,
-      yearId: syllabus.yearId || current.yearId,
-      classId: syllabus.classId || current.classId,
-      batchId: syllabus.batchId || current.batchId,
-      faculty: syllabus.faculty || current.faculty,
-      academicYearBs: syllabus.academicYearBs || current.academicYearBs,
-      session: syllabus.session || current.session,
-      semesterBs: syllabus.semesterBs || current.semesterBs,
-      units: replace
-        ? imported
-        : [
-            ...current.units.filter((u) => u.chapterName.trim()),
-            ...imported.map((u, i) => ({
-              ...u,
-              unitNo: current.units.length + i + 1,
-            })),
-          ],
-    }));
-    toast.success(
-      `Imported ${imported.length} unit${imported.length === 1 ? "" : "s"} from syllabus`,
-    );
-  };
-
-  // Auto-import syllabus units when creating a new plan and subject is chosen
-  useEffect(() => {
-    if (!showForm || editingId || !matchedSyllabus) return;
-    // Only auto-fill when units are still the blank default
-    const onlyBlank =
-      form.units.length === 1 &&
-      !form.units[0]?.chapterName?.trim() &&
-      !form.units[0]?.topicsCovered?.trim();
-    if (!onlyBlank) return;
-    importFromSyllabus(matchedSyllabus, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot import when syllabus appears
-  }, [matchedSyllabus?._id, showForm, editingId, form.subjectId]);
-
   const createMutation = useMutation({
-    mutationFn: (payload: AcademicSessionPlanInput) =>
-      unwrap(api.post("/academic-management/session-plans", payload)),
+    mutationFn: (payload: AcademicSyllabusInput) =>
+      unwrap(api.post("/academic-management/syllabi", payload)),
     onSuccess: () => {
-      toast.success("Session plan saved as draft");
+      toast.success("Syllabus saved as draft");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       setShowForm(false);
       resetForm();
@@ -307,10 +214,10 @@ export const SessionPlanPanel = ({
       payload,
     }: {
       id: string;
-      payload: AcademicSessionPlanInput;
-    }) => unwrap(api.put(`/academic-management/session-plans/${id}`, payload)),
+      payload: AcademicSyllabusInput;
+    }) => unwrap(api.put(`/academic-management/syllabi/${id}`, payload)),
     onSuccess: () => {
-      toast.success("Session plan updated");
+      toast.success("Syllabus updated");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       setShowForm(false);
       resetForm();
@@ -318,10 +225,9 @@ export const SessionPlanPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const saveSessionPlan = () => {
-    const resolvedTeacherId = teacherId || form.teacherId;
-    if (!form.subjectId || !resolvedTeacherId) {
-      toast.error("Subject and teacher are required");
+  const saveSyllabus = () => {
+    if (!form.subjectId) {
+      toast.error("Subject is required");
       return;
     }
     if (
@@ -332,9 +238,10 @@ export const SessionPlanPanel = ({
       toast.error("Each unit needs a unit number and chapter title");
       return;
     }
-    const payload: AcademicSessionPlanInput = {
+    const optionalTeacher = (form.teacherId || teacherId || "").trim();
+    const payload: AcademicSyllabusInput = {
       ...form,
-      teacherId: resolvedTeacherId,
+      teacherId: optionalTeacher,
       session: form.session || form.academicYearBs,
       units: form.units.map((unit, index) => ({
         ...unit,
@@ -351,9 +258,9 @@ export const SessionPlanPanel = ({
 
   const submitMutation = useMutation({
     mutationFn: (id: string) =>
-      unwrap(api.post(`/academic-management/session-plans/${id}/submit`)),
+      unwrap(api.post(`/academic-management/syllabi/${id}/submit`)),
     onSuccess: () => {
-      toast.success("Session plan submitted");
+      toast.success("Syllabus submitted");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -362,12 +269,12 @@ export const SessionPlanPanel = ({
   const approveMutation = useMutation({
     mutationFn: ({ id, remarks }: { id: string; remarks?: string }) =>
       unwrap(
-        api.post(`/academic-management/session-plans/${id}/approve`, {
+        api.post(`/academic-management/syllabi/${id}/approve`, {
           remarks,
         }),
       ),
     onSuccess: () => {
-      toast.success("Session plan approved");
+      toast.success("Syllabus approved");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -376,12 +283,12 @@ export const SessionPlanPanel = ({
   const rejectMutation = useMutation({
     mutationFn: ({ id, remarks }: { id: string; remarks: string }) =>
       unwrap(
-        api.post(`/academic-management/session-plans/${id}/reject`, {
+        api.post(`/academic-management/syllabi/${id}/reject`, {
           remarks,
         }),
       ),
     onSuccess: () => {
-      toast.success("Session plan rejected");
+      toast.success("Syllabus rejected");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -389,9 +296,9 @@ export const SessionPlanPanel = ({
 
   const unlockMutation = useMutation({
     mutationFn: (id: string) =>
-      unwrap(api.post(`/academic-management/session-plans/${id}/unlock`)),
+      unwrap(api.post(`/academic-management/syllabi/${id}/unlock`)),
     onSuccess: () => {
-      toast.success("Session plan unlocked");
+      toast.success("Syllabus unlocked");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -399,9 +306,9 @@ export const SessionPlanPanel = ({
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) =>
-      unwrap(api.delete(`/academic-management/session-plans/${id}`)),
+      unwrap(api.delete(`/academic-management/syllabi/${id}`)),
     onSuccess: () => {
-      toast.success("Session plan deleted");
+      toast.success("Syllabus deleted");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -433,7 +340,7 @@ export const SessionPlanPanel = ({
           subjectId: plan.subjectId,
           yearId: plan.yearId,
           classId: plan.classId,
-          teacherId: plan.teacherId,
+          teacherId: plan.teacherId || "",
           faculty: plan.faculty,
           subjectName: plan.subject?.name,
           teacherName: plan.teacher?.user?.fullName,
@@ -543,7 +450,7 @@ export const SessionPlanPanel = ({
     return keywordFilteredPlans;
   }, [selectedSubject, selectedPlans, keywordFilteredPlans]);
 
-  const renderPlanCard = (plan: AcademicSessionPlanRecord, compact = false) => (
+  const renderPlanCard = (plan: AcademicSyllabusRecord, compact = false) => (
     <Card key={plan._id} className={compact ? "border-slate-200 shadow-none" : undefined}>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
         <div>
@@ -551,7 +458,8 @@ export const SessionPlanPanel = ({
             {plan.subject?.name} · {plan.academicYearBs}
           </CardTitle>
           <p className="text-sm text-slate-600">
-            Teacher: {plan.teacher?.user?.fullName ?? "—"} · Completed:{" "}
+            Teacher:{" "}
+            {plan.teacher?.user?.fullName ?? "Shared (by subject)"} · Completed:{" "}
             {plan.completedUnits} · Remaining: {plan.remainingUnits}
           </p>
           <AcademicProgressBar
@@ -586,8 +494,6 @@ export const SessionPlanPanel = ({
                 <Th>Unit</Th>
                 <Th>Title</Th>
                 <Th>Topics</Th>
-                <Th>Start (BS)</Th>
-                <Th>End (BS)</Th>
                 <Th>Hours</Th>
                 <Th>Outcomes</Th>
                 <Th>References</Th>
@@ -600,8 +506,6 @@ export const SessionPlanPanel = ({
                   <Td>{unit.unitNo}</Td>
                   <Td>{unit.chapterName}</Td>
                   <Td className="max-w-xs">{unit.topicsCovered || "—"}</Td>
-                  <Td>{unit.startDateBs || "—"}</Td>
-                  <Td>{unit.endDateBs || "—"}</Td>
                   <Td>{unit.estimatedTeachingHours}</Td>
                   <Td className="max-w-xs truncate">{unit.learningOutcomes || "—"}</Td>
                   <Td className="max-w-xs truncate">{unit.references || "—"}</Td>
@@ -686,7 +590,7 @@ export const SessionPlanPanel = ({
         ) : null}
         <div className="no-print">
           <AcademicCommentsPanel
-            entityType="SESSION_PLAN"
+            entityType="SYLLABUS"
             entityId={plan._id}
             canComment={isAdmin || plan.status !== "APPROVED"}
           />
@@ -701,11 +605,11 @@ export const SessionPlanPanel = ({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Session Plan</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Syllabus</h2>
           <p className="text-sm text-slate-600">
             {isAdmin
-              ? "Centralized view of all teachers' yearly syllabus plans, organized by year and subject."
-              : "Create and save your complete yearly syllabus (units, topics, hours, outcomes). You can build Lesson Plans from your draft without waiting for admin approval."}
+              ? "Official subject syllabi for all teachers, organized by year and subject. Units are free-form boxes you can add as needed."
+              : "Create the official syllabus for your subject: add unit/chapter boxes with topics, hours, outcomes, and references. Add as many units as required."}
           </p>
         </div>
         {canMutate ? (
@@ -715,12 +619,12 @@ export const SessionPlanPanel = ({
                 setShowForm(false);
                 resetForm();
               } else {
-                openCreateForm();
+                openCreateSyllabusForm();
               }
             }}
           >
             <Plus className="mr-2 h-4 w-4" />
-            {showForm ? "Close Form" : "New Session Plan"}
+            {showForm ? "Close Form" : "New Syllabus"}
           </Button>
         ) : null}
       </div>
@@ -729,33 +633,15 @@ export const SessionPlanPanel = ({
         <Card className="no-print">
           <CardHeader>
             <CardTitle>
-              {editingId ? "Edit Session Plan" : "Create Complete Session Plan"}
+              {editingId ? "Edit Syllabus" : "Create Complete Syllabus"}
             </CardTitle>
             <p className="text-sm text-slate-600">
-              Choose year and subject — units load automatically from the official
-              Syllabus when available. You can still edit or add boxes.
+              Add all units for the year — chapter, topics, hours, outcomes,
+              references, and assessment. Save as draft anytime; submit when ready
+              for admin review.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {matchedSyllabus && showForm ? (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950">
-                <span>
-                  Syllabus found for this subject
-                  {matchedSyllabus.status === "APPROVED" ? " (approved)" : ""}.{" "}
-                  {matchedSyllabus.units.length} unit
-                  {matchedSyllabus.units.length === 1 ? "" : "s"} available.
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => importFromSyllabus(matchedSyllabus, true)}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Load from Syllabus
-                </Button>
-              </div>
-            ) : null}
             <div className="grid gap-3 md:grid-cols-3">
               {yearOptions.length > 0 ? (
                 <FormField label="Year">
@@ -767,7 +653,6 @@ export const SessionPlanPanel = ({
                         ...current,
                         yearId,
                         subjectId: "",
-                        units: [emptyUnit()],
                       }));
                     }}
                   >
@@ -809,8 +694,6 @@ export const SessionPlanPanel = ({
                     setForm((current) => ({
                       ...current,
                       subjectId: event.target.value,
-                      // Reset units so auto-import from syllabus can run
-                      units: [emptyUnit()],
                     }))
                   }
                   disabled={
@@ -838,10 +721,10 @@ export const SessionPlanPanel = ({
                   ))}
                 </Select>
               </FormField>
-              {isAdmin && teachers.length > 0 ? (
-                <FormField label="Teacher">
+              {teachers.length > 0 ? (
+                <FormField label="Teacher (optional)">
                   <Select
-                    value={form.teacherId}
+                    value={form.teacherId || ""}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -849,13 +732,17 @@ export const SessionPlanPanel = ({
                       }))
                     }
                   >
-                    <option value="">Select teacher</option>
+                    <option value="">No specific teacher — shared syllabus</option>
                     {teachers.map((teacher) => (
                       <option key={teacher._id} value={teacher._id}>
                         {teacher.user.fullName}
                       </option>
                     ))}
                   </Select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Leave empty for a subject syllabus. Teachers with this subject
+                    assigned can still open and use it.
+                  </p>
                 </FormField>
               ) : null}
               <FormField label="Academic Year (BS)">
@@ -1036,45 +923,6 @@ export const SessionPlanPanel = ({
                     placeholder="Textbooks, articles, resources"
                   />
                 </FormField>
-                <FormField label="Unit start date (BS)">
-                  <NepaliDateField
-                    value={unit.startDateBs || ""}
-                    onChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? {
-                                ...row,
-                                startDateBs: value,
-                                endDateBs:
-                                  row.endDateBs && row.endDateBs >= value
-                                    ? row.endDateBs
-                                    : value,
-                              }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="Start date"
-                  />
-                </FormField>
-                <FormField label="Unit end date (BS)">
-                  <NepaliDateField
-                    value={unit.endDateBs || ""}
-                    onChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, endDateBs: value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="End date"
-                  />
-                </FormField>
                 <FormField label="Tentative completion month">
                   <Select
                     value={unit.tentativeCompletionMonth || ""}
@@ -1165,15 +1013,14 @@ export const SessionPlanPanel = ({
                 Add Unit
               </Button>
               <Button
-                onClick={saveSessionPlan}
+                onClick={saveSyllabus}
                 disabled={
                   !form.subjectId ||
-                  !(form.teacherId || teacherId) ||
                   createMutation.isPending ||
                   updateMutation.isPending
                 }
               >
-                {editingId ? "Update Session Plan" : "Save Complete Session Plan"}
+                {editingId ? "Update Syllabus" : "Save Complete Syllabus"}
               </Button>
               <Button
                 variant="outline"
@@ -1213,15 +1060,15 @@ export const SessionPlanPanel = ({
           {!selectedSubjectMeta ? (
             <EmptyState
               title="Select a subject"
-              description="Choose Faculty → Year → Subject to view Session Plans. Curriculum is shared across student batches."
+              description="Choose Faculty → Year → Subject to view Syllabi. Curriculum is shared across student batches."
             />
           ) : selectedPlans.length === 0 ? (
             <EmptyState
-              title={`No Session Plans for ${selectedSubjectMeta.subject.subjectName}`}
+              title={`No Syllabi for ${selectedSubjectMeta.subject.subjectName}`}
               description={
                 isAdmin
-                  ? "Teachers have not created a Session Plan for this subject yet."
-                  : "Create a Session Plan for this subject to start yearly planning."
+                  ? "Teachers have not created a Syllabus for this subject yet."
+                  : "Create a Syllabus for this subject to start yearly planning."
               }
             />
           ) : (
@@ -1244,7 +1091,7 @@ export const SessionPlanPanel = ({
                       : "—"}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {selectedPlans.length} Session Plan
+                    {selectedPlans.length} Syllabus
                     {selectedPlans.length === 1 ? "" : "s"} · One curriculum
                     subject · Teachers listed separately (not by batch)
                   </p>
@@ -1271,20 +1118,20 @@ export const SessionPlanPanel = ({
       </div>
 
       {/* Dedicated print / PDF area (filtered or selected subject) */}
-      <div id="session-plan-print-area" className="hidden print:block">
+      <div id="syllabus-print-area" className="hidden print:block">
         <AcademicPrintHeader
           institutionName={institutionName}
-          title="Session Plan Report"
+          title="Syllabus Report"
           subtitle={
             selectedSubjectMeta
               ? `${selectedSubjectMeta.faculty.label} · ${selectedSubjectMeta.year.label} · ${selectedSubjectMeta.subject.subjectName}`
-              : "Filtered Session Plans"
+              : "Filtered Syllabi"
           }
           academicYearBs={filters.academicYearBs}
           generatedAt={new Date().toLocaleString()}
         />
         {printPlans.length === 0 ? (
-          <p className="text-sm text-slate-600">No session plans to export.</p>
+          <p className="text-sm text-slate-600">No Syllabi to export.</p>
         ) : (
           groupByTeacher(printPlans).map((group) => (
             <div key={group.teacherId} className="mb-8 break-inside-avoid">

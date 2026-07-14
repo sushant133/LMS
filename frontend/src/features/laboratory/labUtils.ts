@@ -1,14 +1,23 @@
-import {
-  LABORATORY_YEAR_LEVELS,
-  type LaboratoryEquipmentInput,
-  type LaboratoryInput,
-  type LaboratoryReportType,
-  type LaboratoryStockRequestStatus,
-  type LaboratoryYearLevel,
+import type {
+  LaboratoryEquipmentInput,
+  LaboratoryInput,
+  LaboratoryReportType,
+  LaboratoryStockRequestStatus,
 } from "@phit-erp/shared";
 
-export { LABORATORY_YEAR_LEVELS };
-export type { LaboratoryYearLevel };
+/**
+ * Must stay in sync with `@phit-erp/shared` LABORATORY_YEAR_LEVELS.
+ * Defined locally so Vite always has a concrete named export (file: package
+ * re-exports can fail as "does not provide an export named …" in dev).
+ */
+export const LABORATORY_YEAR_LEVELS = [
+  "1st Year",
+  "2nd Year",
+  "3rd Year",
+  "All Years",
+] as const;
+
+export type LaboratoryYearLevel = (typeof LABORATORY_YEAR_LEVELS)[number];
 
 export type LabTab =
   | "dashboard"

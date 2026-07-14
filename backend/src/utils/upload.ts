@@ -142,12 +142,27 @@ export const uploadAcademicAttachments = multer({
  * In production you would return a signed S3/Cloudinary URL.
  */
 export function getFilePublicPath(relativePath: string): string {
-  const normalized = relativePath.replace(/\\/g, "/").replace(/^uploads\//, "");
+  const normalized = relativePath
+    .replace(/\\/g, "/")
+    .replace(/^uploads\//, "")
+    // Never allow path traversal segments in public URLs
+    .replace(/^(\.\.\/)+/, "")
+    .replace(/\/(\.\.)(\/|$)/g, "/");
   return `/uploads/${normalized}`;
 }
 
 export function getUploadPublicUrl(filePath: string): string {
-  const relativeToUploads = path.relative(UPLOAD_ROOT, filePath);
+  const rootResolved = path.resolve(UPLOAD_ROOT);
+  const absolute = path.resolve(filePath);
+  const relativeToUploads = path.relative(rootResolved, absolute);
+  // Reject files outside the upload root
+  if (
+    relativeToUploads.startsWith("..") ||
+    path.isAbsolute(relativeToUploads) ||
+    relativeToUploads === ""
+  ) {
+    throw new ApiError(500, "Uploaded file path is outside the configured upload directory");
+  }
   return getFilePublicPath(relativeToUploads);
 }
 

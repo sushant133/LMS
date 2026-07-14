@@ -46,7 +46,7 @@ export const downloadStudentsExcel = (
     "Guardian Name",
     "Guardian Phone",
     "Address",
-    ...(options.includeFees ? ["Fees Due (NPR)"] : []),
+    ...(options.includeFees ? ["Total Fee (NPR)"] : []),
     "Remarks",
   ];
 
@@ -72,7 +72,13 @@ export const downloadStudentsExcel = (
     student.guardianName,
     student.guardianPhone,
     formatAddress(student.address),
-    ...(options.includeFees ? [formatCurrencyNpr(student.feesDueNpr)] : []),
+    ...(options.includeFees
+      ? [
+          student.hasScholarship
+            ? "Scholarship"
+            : formatCurrencyNpr(student.feesDueNpr),
+        ]
+      : []),
     student.remarks ?? "",
   ]);
 

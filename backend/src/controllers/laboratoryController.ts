@@ -32,6 +32,7 @@ import {
   notifyAccountCredentials,
   resolvePortalPassword
 } from "../utils/credentialEmail.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import {
   assertCanDeleteLaboratory,
   assertLabAccess,
@@ -586,7 +587,7 @@ export const listEquipment = asyncHandler(async (req: Request, res: Response) =>
   }
 
   if (typeof search === "string" && search.trim()) {
-    const term = search.trim();
+    const term = escapeRegex(search.trim());
     filter.$or = [
       { name: { $regex: term, $options: "i" } },
       { itemCode: { $regex: term, $options: "i" } },

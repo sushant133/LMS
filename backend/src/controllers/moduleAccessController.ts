@@ -1,16 +1,24 @@
 import type { Request, Response } from "express";
 import {
   ERP_MODULES,
+  LEADERSHIP_DESIGNATIONS,
+  MODULE_PERMISSION_ACTIONS,
+  MODULE_PERMISSION_ACTION_LABELS,
+  PERMISSION_PRESETS,
+  buildPresetModuleAccess,
   expandModuleAccessMap,
+  expandModuleActionsMap,
   updateModuleAccessSchema,
   type ErpModuleKey,
-  type ModuleAccessMap
+  type ModuleAccessMap,
+  type ModuleActionsMap,
+  type UserRole
 } from "@phit-erp/shared";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import {
-  getExpandedModuleAccessForUser,
+  getFullPermissionStateForUser,
   updateUserModuleAccess
 } from "../utils/moduleAccessService.js";
 import { sendSuccess } from "../utils/response.js";
@@ -22,23 +30,37 @@ const mapFromDoc = (raw: unknown): ModuleAccessMap => {
   return {};
 };
 
+const actionsFromDoc = (raw: unknown): ModuleActionsMap => {
+  if (!raw) return {};
+  if (raw instanceof Map) return Object.fromEntries(raw.entries()) as ModuleActionsMap;
+  if (typeof raw === "object") return { ...(raw as ModuleActionsMap) };
+  return {};
+};
+
 export const listErpModules = asyncHandler(async (_req: Request, res: Response) => {
-  return sendSuccess(
-    res,
-    "ERP modules fetched",
-    ERP_MODULES.map((m) => ({
+  return sendSuccess(res, "ERP modules fetched", {
+    modules: ERP_MODULES.map((m) => ({
       key: m.key,
       label: m.label,
-      description: m.description
-    }))
-  );
+      description: m.description,
+      availableActions: m.availableActions ?? [...MODULE_PERMISSION_ACTIONS]
+    })),
+    actions: MODULE_PERMISSION_ACTIONS.map((action) => ({
+      key: action,
+      label: MODULE_PERMISSION_ACTION_LABELS[action]
+    })),
+    presets: PERMISSION_PRESETS,
+    leadershipDesignations: LEADERSHIP_DESIGNATIONS
+  });
 });
 
 export const getUserModuleAccess = asyncHandler(async (req: Request, res: Response) => {
   const userId = String(req.params.userId ?? "");
   if (!userId) throw new ApiError(400, "userId is required");
 
-  const user = await User.findById(userId).select("fullName email role employeeId moduleAccess schoolId").lean();
+  const user = await User.findById(userId)
+    .select("fullName email role employeeId designation department moduleAccess moduleActions secondaryRoles schoolId")
+    .lean();
   if (!user) throw new ApiError(404, "User not found");
 
   if (req.user?.role !== "SUPER_ADMIN") {
@@ -48,7 +70,10 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
     }
   }
 
-  const expanded = expandModuleAccessMap(mapFromDoc(user.moduleAccess));
+  const map = mapFromDoc(user.moduleAccess);
+  const actions = actionsFromDoc(user.moduleActions);
+  const expanded = expandModuleAccessMap(map);
+  const expandedActions = expandModuleActionsMap(map, actions);
 
   return sendSuccess(res, "Module access fetched", {
     userId,
@@ -56,13 +81,21 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
     email: user.email,
     employeeId: user.employeeId,
     role: user.role,
+    designation: user.designation,
+    department: user.department,
+    secondaryRoles: (user.secondaryRoles as UserRole[]) ?? [],
     moduleAccess: expanded,
+    moduleActions: expandedActions,
     modules: ERP_MODULES.map((m) => ({
       key: m.key,
       label: m.label,
       description: m.description,
-      mode: expanded[m.key as ErpModuleKey]
-    }))
+      mode: expanded[m.key as ErpModuleKey],
+      actions: expandedActions[m.key as ErpModuleKey],
+      availableActions: m.availableActions ?? [...MODULE_PERMISSION_ACTIONS]
+    })),
+    leadershipDesignations: LEADERSHIP_DESIGNATIONS,
+    presets: PERMISSION_PRESETS
   });
 });
 
@@ -70,31 +103,60 @@ export const putUserModuleAccess = asyncHandler(async (req: Request, res: Respon
   const userId = String(req.params.userId ?? "");
   if (!userId) throw new ApiError(400, "userId is required");
 
-  const payload = updateModuleAccessSchema.parse(req.body);
-  const expanded = await updateUserModuleAccess(req, userId, payload.moduleAccess as ModuleAccessMap);
+  const parsed = updateModuleAccessSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const detail = parsed.error.issues[0];
+    const path = detail?.path?.length ? detail.path.join(".") : "payload";
+    throw new ApiError(400, detail ? `${path}: ${detail.message}` : "Invalid permission payload");
+  }
+  const payload = parsed.data;
+  const result = await updateUserModuleAccess(req, userId, {
+    moduleAccess: payload.moduleAccess as ModuleAccessMap,
+    moduleActions: (payload.moduleActions ?? {}) as ModuleActionsMap,
+    secondaryRoles: (payload.secondaryRoles ?? []) as UserRole[],
+    designation: payload.designation,
+    reason: payload.reason
+  });
 
-  return sendSuccess(res, "Module access updated", {
+  return sendSuccess(res, "Department access & permissions updated", {
     userId,
-    moduleAccess: expanded,
+    ...result,
     modules: ERP_MODULES.map((m) => ({
       key: m.key,
       label: m.label,
       description: m.description,
-      mode: expanded[m.key as ErpModuleKey]
+      mode: result.moduleAccess[m.key as ErpModuleKey],
+      actions: result.moduleActions[m.key as ErpModuleKey],
+      availableActions: m.availableActions ?? [...MODULE_PERMISSION_ACTIONS]
     }))
   });
 });
 
 export const getMyModuleAccess = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new ApiError(401, "Authentication required");
-  const expanded = await getExpandedModuleAccessForUser(req.user.userId, req.user.role);
+  const state = await getFullPermissionStateForUser(req.user.userId, req.user.role);
   return sendSuccess(res, "My module access fetched", {
-    moduleAccess: expanded,
+    ...state,
     modules: ERP_MODULES.map((m) => ({
       key: m.key,
       label: m.label,
       description: m.description,
-      mode: expanded[m.key]
+      mode: state.moduleAccess[m.key],
+      actions: state.moduleActions[m.key]
     }))
+  });
+});
+
+/** Helper for admin UI: return a preset map without saving. */
+export const previewPermissionPreset = asyncHandler(async (req: Request, res: Response) => {
+  const preset = String(req.query.preset ?? "FULL_ACCESS");
+  if (!PERMISSION_PRESETS.includes(preset as (typeof PERMISSION_PRESETS)[number])) {
+    throw new ApiError(400, "Invalid preset");
+  }
+  const moduleAccess = buildPresetModuleAccess(preset as (typeof PERMISSION_PRESETS)[number]);
+  return sendSuccess(res, "Preset preview", {
+    preset,
+    moduleAccess,
+    moduleActions: expandModuleActionsMap(moduleAccess, {})
   });
 });

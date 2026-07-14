@@ -20,6 +20,7 @@ import {
   notifyAccountCredentials,
   resolvePortalPassword
 } from "../utils/credentialEmail.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { sendSuccess } from "../utils/response.js";
@@ -234,8 +235,6 @@ const applyStaffProfileFields = (
   if (payload.status) target.status = payload.status;
   if (payload.enableLogin !== undefined) target.enableLogin = payload.enableLogin;
 };
-
-const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export const listCollegeStaff = asyncHandler(async (req: Request, res: Response) => {
   const category = req.query.category as CollegeStaffCategory | undefined;

@@ -42,7 +42,10 @@ export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
 
   const normalizedRole = normalizeUserRole(user.role);
 
-  if (roles && !hasProtectedRouteAccess(normalizedRole, roles)) {
+  if (
+    roles &&
+    !hasProtectedRouteAccess(normalizedRole, roles, user.secondaryRoles)
+  ) {
     const fallback = getRoleRedirectPath(user.role);
     if (!fallback || fallback === location.pathname) {
       return <PageLoadingState />;

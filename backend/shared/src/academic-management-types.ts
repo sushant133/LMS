@@ -4,7 +4,13 @@ export type LessonPlanItemStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "DE
 
 export type LogBookReviewStatus = "PENDING" | "REVIEWED" | "APPROVED" | "NEEDS_IMPROVEMENT";
 
-export type AcademicManagementTab = "dashboard" | "session-plan" | "lesson-plan" | "log-book" | "reports";
+export type AcademicManagementTab =
+  | "dashboard"
+  | "syllabus"
+  | "session-plan"
+  | "lesson-plan"
+  | "log-book"
+  | "reports";
 
 export type AcademicReportType =
   | "session-plan"
@@ -76,6 +82,9 @@ export interface AcademicSessionPlanUnitRecord {
   practicalRequired: boolean;
   internalAssessment: string;
   tentativeCompletionMonth: string;
+  /** Unit teaching window (BS YYYY-MM-DD). */
+  startDateBs?: string;
+  endDateBs?: string;
   status: LessonPlanItemStatus;
   attachmentUrl?: string;
   /** Months where this unit appears in a Lesson Plan (hierarchical coverage). */
@@ -112,6 +121,48 @@ export interface SessionPlanSyllabusCoverage {
   completed: AcademicSessionPlanUnitRecord[];
 }
 
+/** Official subject syllabus: units/chapters as configurable boxes (before Session Plan). */
+export interface AcademicSyllabusUnitRecord {
+  _id: string;
+  syllabusId: string;
+  unitNo: number;
+  chapterName: string;
+  estimatedTeachingHours: number;
+  learningOutcomes: string;
+  topicsCovered: string;
+  references: string;
+  practicalRequired: boolean;
+  internalAssessment: string;
+  tentativeCompletionMonth: string;
+  startDateBs?: string;
+  endDateBs?: string;
+  status: LessonPlanItemStatus;
+  attachmentUrl?: string;
+}
+
+export interface AcademicSyllabusRecord extends AcademicManagementScope {
+  _id: string;
+  schoolId: string;
+  academicYearBs: string;
+  session: string;
+  faculty?: string;
+  semesterBs?: string;
+  subjectId: string;
+  /** Optional owner; access for teachers is by assigned subject. */
+  teacherId?: string;
+  status: AcademicPlanStatus;
+  adminRemarks?: string;
+  attachmentUrl?: string;
+  units: AcademicSyllabusUnitRecord[];
+  completedPercent: number;
+  remainingPercent: number;
+  completedUnits: number;
+  remainingUnits: number;
+  audit: AcademicAuditTrail;
+  subject?: { _id: string; name: string; code: string };
+  teacher?: { _id: string; teacherCode: string; user?: { fullName: string } };
+}
+
 export interface AcademicSessionPlanRecord extends AcademicManagementScope {
   _id: string;
   schoolId: string;
@@ -139,6 +190,8 @@ export interface AcademicLessonPlanItemRecord {
   lessonPlanId: string;
   serialNo: number;
   sessionPlanUnitId?: string;
+  /** Sub-topic selected from the session plan unit's topics list. */
+  subUnitTitle?: string;
   subjectLabel: string;
   plannedTopic: string;
   description: string;
@@ -147,6 +200,8 @@ export interface AcademicLessonPlanItemRecord {
   teachingAids: string;
   assessmentMethod: string;
   deadline: string;
+  itemStartDateBs?: string;
+  itemEndDateBs?: string;
   estimatedClasses: number;
   completedClasses: number;
   completionStatus: LessonPlanItemStatus;
@@ -154,7 +209,10 @@ export interface AcademicLessonPlanItemRecord {
   completedPercent: number;
   /** Percent of estimated classes still remaining (100 - completedPercent, floored at 0). */
   remainingPercent: number;
-  unit?: Pick<AcademicSessionPlanUnitRecord, "_id" | "unitNo" | "chapterName">;
+  unit?: Pick<
+    AcademicSessionPlanUnitRecord,
+    "_id" | "unitNo" | "chapterName" | "topicsCovered" | "startDateBs" | "endDateBs"
+  >;
 }
 
 export type AcademicTeacherAlertType = "LOG_BOOK_MISSING" | "LESSON_PLAN_APPROACHING" | "LESSON_PLAN_OVERDUE";
@@ -185,7 +243,10 @@ export interface AcademicLessonPlanRecord extends AcademicManagementScope {
   semesterBs?: string;
   subjectId: string;
   teacherId: string;
+  /** @deprecated Prefer startDateBs / endDateBs. */
   month: string;
+  startDateBs?: string;
+  endDateBs?: string;
   monthlyDescription?: string;
   status: AcademicPlanStatus;
   preparedBy?: string;
@@ -216,6 +277,7 @@ export interface AcademicLogBookEntryRecord extends AcademicManagementScope {
   lessonPlanId?: string;
   lessonPlanItemId?: string;
   sessionPlanUnitId?: string;
+  subUnitTitle?: string;
   academicYearBs: string;
   session: string;
   faculty?: string;

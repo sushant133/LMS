@@ -29,10 +29,15 @@ export const resendCredentials = asyncHandler(async (req: Request, res: Response
     throw new ApiError(400, "Cannot resend credentials for a deleted account");
   }
 
+  // Never allow non–System Admins to reset System Administrator credentials
+  if (existing.role === "SUPER_ADMIN" && req.user?.role !== "SUPER_ADMIN") {
+    throw new ApiError(403, "You cannot resend credentials for a System Administrator account");
+  }
+
   // Tenant isolation: institution users may only resend within their school.
   if (req.user?.role !== "SUPER_ADMIN") {
     const actorSchool = req.tenantSchoolId ?? req.user?.schoolId;
-    if (!actorSchool || existing.schoolId?.toString() !== actorSchool.toString()) {
+    if (!actorSchool || !existing.schoolId || existing.schoolId.toString() !== actorSchool.toString()) {
       throw new ApiError(403, "You cannot resend credentials for users outside your institution");
     }
   }
@@ -48,10 +53,12 @@ export const resendCredentials = asyncHandler(async (req: Request, res: Response
       ? `Login credentials have been sent to: ${result.credentialsEmail.email}`
       : `Credential email could not be delivered. Reason: ${result.credentialsEmail.error ?? "Unknown error"}`;
 
+    // Only return plaintext password when email delivery failed (admin must share manually).
+    // Successful email delivery must not echo the password in the API response body.
     return sendSuccess(res, message, {
       user: result.user,
       loginEmail: result.user.email,
-      defaultPassword: result.password,
+      ...(result.credentialsEmail.sent ? {} : { defaultPassword: result.password }),
       credentialsEmail: result.credentialsEmail
     });
   } catch (error) {

@@ -140,24 +140,6 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
         />
       ) : null}
 
-      {canManage ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <p className="font-medium">Already-created teachers — nothing is lost</p>
-          <p className="mt-1 text-amber-900/90">
-            Edit form is <strong>HR / login only</strong> (name, salary, password). Old
-            subjects and years stay on the teacher record and still work in the teacher
-            portal. Open each row’s <strong>Assignments</strong> button to{" "}
-            <strong>see</strong> that load, add more subjects, and assign laboratories —
-            same login, no second account.
-          </p>
-          <p className="mt-2 text-xs text-amber-800">
-            Path: Teachers → <strong>Assignments</strong> (blue button per row). Look for
-            the amber “Current teaching load” card. Migration PENDING = old style still
-            active; NA / ACCEPTED = matrix-style ready.
-          </p>
-        </div>
-      ) : null}
-
       {assignmentsTeacher ? (
         <div className="mb-6 space-y-3 rounded-xl border border-brand-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">

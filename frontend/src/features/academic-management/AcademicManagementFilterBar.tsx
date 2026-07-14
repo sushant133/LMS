@@ -29,7 +29,12 @@ interface AcademicManagementFilterBarProps {
   onExportPdf: () => void;
   onPrint: () => void;
   activeTab:
-    "dashboard" | "session-plan" | "lesson-plan" | "log-book" | "reports";
+    | "dashboard"
+    | "syllabus"
+    | "session-plan"
+    | "lesson-plan"
+    | "log-book"
+    | "reports";
   classes: Option[];
   sections: Option[];
   batches: Option[];
@@ -208,7 +213,7 @@ export const AcademicManagementFilterBar = ({
             </Select>
           </label>
         ) : null}
-        {activeTab !== "session-plan" ? (
+        {activeTab !== "session-plan" && activeTab !== "syllabus" ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium text-slate-700">Month</span>
             <Select

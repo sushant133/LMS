@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import {
   activeSchoolSchema,
@@ -86,7 +87,18 @@ const getSafeUser = async (userId: string) => {
       ? (user.schoolId as unknown as SchoolRecord)
       : null;
 
-  const moduleAccess = expandModuleAccessMap(mapModuleAccess((user as { moduleAccess?: unknown }).moduleAccess));
+  const rawAccess = mapModuleAccess((user as { moduleAccess?: unknown }).moduleAccess);
+  const rawActions = (() => {
+    const raw = (user as { moduleActions?: unknown }).moduleActions;
+    if (!raw) return {};
+    if (raw instanceof Map) return Object.fromEntries(raw.entries());
+    if (typeof raw === "object") return { ...(raw as Record<string, string[]>) };
+    return {};
+  })();
+  const moduleAccess = expandModuleAccessMap(rawAccess);
+  const secondaryRoles = ((user as { secondaryRoles?: string[] }).secondaryRoles ?? []).map((role) =>
+    normalizeUserRole(role)
+  );
 
   return {
     _id: user._id.toString(),
@@ -102,7 +114,9 @@ const getSafeUser = async (userId: string) => {
     profilePhotoUrl: user.profilePhotoUrl,
     isActive: user.isActive,
     mustChangePassword: user.mustChangePassword,
-    moduleAccess
+    moduleAccess,
+    moduleActions: rawActions,
+    secondaryRoles
   };
 };
 
@@ -248,12 +262,23 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   );
 });
 
+/**
+ * Dummy bcrypt hash so missing-user logins still pay the hash cost
+ * (mitigates user-enumeration via response timing).
+ */
+const DUMMY_PASSWORD_HASH = "$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYIeWEgxeii";
+
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const payload = loginSchema.parse(req.body);
   const email = payload.email.toLowerCase().trim();
   const user = await User.findOne({ email });
 
-  if (!user || !(await user.comparePassword(payload.password))) {
+  // Always run bcrypt so timing does not leak whether the login ID exists
+  const passwordOk = user
+    ? await user.comparePassword(payload.password)
+    : await bcrypt.compare(payload.password, DUMMY_PASSWORD_HASH);
+
+  if (!user || !passwordOk) {
     // Constant-looking message; never reveal whether the email exists
     await recordAudit(req, {
       action: "auth.login_failed",
@@ -390,7 +415,11 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string; role: string; schoolId?: string | null };
+      const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as {
+        userId: string;
+        role: string;
+        schoolId?: string | null;
+      };
       if (decoded.schoolId) {
         await AuditLog.create({
           schoolId: decoded.schoolId,
@@ -450,13 +479,32 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   const payload = selfPasswordChangeSchema.parse(req.body);
   const user = await User.findById(req.user.userId);
 
-  if (!user || !(await user.comparePassword(payload.currentPassword))) {
+  // Dummy compare when user missing keeps timing closer for incorrect-current-password path
+  const currentOk = user
+    ? await user.comparePassword(payload.currentPassword)
+    : await bcrypt.compare(payload.currentPassword, DUMMY_PASSWORD_HASH);
+
+  if (!user || !currentOk) {
     throw new ApiError(401, "Current password is incorrect");
+  }
+
+  if (payload.newPassword === payload.currentPassword) {
+    throw new ApiError(400, "New password must be different from the current password");
   }
 
   user.password = payload.newPassword;
   user.mustChangePassword = false;
   await user.save();
+
+  // Re-issue session cookie after password change
+  const normalizedRole = normalizeUserRole(user.role as string);
+  const token = signJwt({
+    userId: user._id.toString(),
+    role: normalizedRole,
+    email: user.email,
+    schoolId: user.schoolId ? user.schoolId.toString() : null
+  });
+  setAuthCookie(res, token);
 
   await recordAudit(req, {
     action: "auth.password_change",

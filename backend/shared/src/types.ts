@@ -195,16 +195,30 @@ export interface UserProfile {
   role: UserRole;
   phone?: string;
   employeeId?: string;
+  /**
+   * Position title only (Principal, Director, …).
+   * Never grants ERP permissions by itself — Super Admin assigns module access.
+   */
   designation?: string;
   department?: string;
   profilePhotoUrl?: string;
   isActive: boolean;
   mustChangePassword?: boolean;
   /**
-   * Per-module access: WRITE (enabled) or READ_ONLY (disabled modifications).
-   * Missing keys default to WRITE. Admins always have WRITE.
+   * Per-module access: NONE | READ_ONLY | WRITE.
+   * Missing keys default to WRITE for backward compatibility. Admins always have WRITE.
    */
-  moduleAccess?: Partial<Record<string, "WRITE" | "READ_ONLY">>;
+  moduleAccess?: Partial<Record<string, "NONE" | "READ_ONLY" | "WRITE">>;
+  /**
+   * Optional granular actions per module (view, create, approve, …).
+   * When omitted, actions are derived from the module access mode.
+   */
+  moduleActions?: Partial<Record<string, string[]>>;
+  /**
+   * Extra ERP roles for multi-responsibility on one login
+   * (e.g. Principal who also teaches → secondaryRoles includes TEACHER).
+   */
+  secondaryRoles?: UserRole[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -263,6 +277,8 @@ export interface StudentRecord {
   guardianName: string;
   guardianPhone: string;
   feesDueNpr: number;
+  /** When true, student is on full scholarship (no fee amount due). */
+  hasScholarship?: boolean;
   remarks?: string;
   // New for Phase 0 foundations
   photoUrl?: string;
@@ -957,7 +973,7 @@ export interface AuthResponse {
   user: UserProfile;
   permissions?: InstitutionPermissions;
   /** Fully expanded module access map for the signed-in user. */
-  moduleAccess?: Partial<Record<string, "WRITE" | "READ_ONLY">>;
+  moduleAccess?: Partial<Record<string, "NONE" | "READ_ONLY" | "WRITE">>;
   redirectTo: string;
   activeSchoolId?: string | null;
   availableSchools?: SchoolRecord[];

@@ -6,6 +6,8 @@ interface CalendarEventNotice {
   _id: string;
   name: string;
   dateBs: string;
+  startDateBs?: string;
+  endDateBs?: string;
   eventType: AcademicCalendarEventType;
 }
 
@@ -24,6 +26,13 @@ const calendarRoles = [
   "AUDITOR",
   "PRINCIPAL"
 ] as const;
+
+const formatEventDates = (event: CalendarEventNotice): string => {
+  const start = event.startDateBs || event.dateBs;
+  const end = event.endDateBs || event.dateBs;
+  if (start === end) return `${start} BS`;
+  return `${start} → ${end} BS`;
+};
 
 const notifySchoolUsers = async (
   schoolId: string,
@@ -51,8 +60,8 @@ export const notifyCalendarEventCreated = async (schoolId: string, event: Calend
   await notifySchoolUsers(
     schoolId,
     "Academic calendar updated",
-    `${event.name} (${typeLabel}) scheduled on ${event.dateBs} BS.`,
-    { eventId: event._id, dateBs: event.dateBs }
+    `${event.name} (${typeLabel}) scheduled for ${formatEventDates(event)}.`,
+    { eventId: event._id, dateBs: event.startDateBs || event.dateBs }
   );
 };
 
@@ -61,8 +70,8 @@ export const notifyCalendarEventUpdated = async (schoolId: string, event: Calend
   await notifySchoolUsers(
     schoolId,
     "Academic calendar event updated",
-    `${event.name} (${typeLabel}) on ${event.dateBs} BS has been updated.`,
-    { eventId: event._id, dateBs: event.dateBs }
+    `${event.name} (${typeLabel}) for ${formatEventDates(event)} has been updated.`,
+    { eventId: event._id, dateBs: event.startDateBs || event.dateBs }
   );
 };
 
@@ -73,6 +82,6 @@ export const notifyCalendarEventDeleted = async (
   await notifySchoolUsers(
     schoolId,
     "Academic calendar event removed",
-    `${event.name} on ${event.dateBs} BS has been removed from the calendar.`
+    `${event.name} on ${event.dateBs} has been removed from the calendar.`
   );
 };

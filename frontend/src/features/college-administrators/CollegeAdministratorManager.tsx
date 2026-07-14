@@ -28,14 +28,17 @@ import { parseErrorMessage } from "lib/utils";
 
 const photoSrc = (url?: string | null): string | undefined => {
   if (!url) return undefined;
-  if (
-    url.startsWith("http://") ||
-    url.startsWith("https://") ||
-    url.startsWith("data:")
-  ) {
-    return url;
+  const trimmed = url.trim();
+  if (/^(javascript|data|vbscript|file):/i.test(trimmed)) {
+    return undefined;
   }
-  return url.startsWith("/") ? url : `/${url}`;
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+    return trimmed;
+  }
+  return `/${trimmed}`;
 };
 
 const defaultForm: CollegeAdministratorInput = {

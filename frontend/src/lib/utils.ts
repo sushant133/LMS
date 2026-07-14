@@ -70,9 +70,23 @@ export const hasNumberInputValue = (
 
 export const parseErrorMessage = (error: unknown): string => {
   if (typeof error === "object" && error && "response" in error) {
-    const response = (error as { response?: { data?: { message?: string } } })
-      .response;
-    return response?.data?.message ?? "Something went wrong";
+    const response = (
+      error as {
+        response?: {
+          data?: {
+            message?: string;
+            errors?: Array<{ path?: string; message?: string }>;
+          };
+        };
+      }
+    ).response;
+    const data = response?.data;
+    if (data?.errors?.length) {
+      const first = data.errors[0];
+      const path = first?.path ? `${first.path}: ` : "";
+      return `${data.message ?? "Validation failed"} — ${path}${first?.message ?? ""}`.trim();
+    }
+    return data?.message ?? "Something went wrong";
   }
 
   if (error instanceof Error) {

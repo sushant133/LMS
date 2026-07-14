@@ -28,7 +28,7 @@ export const CollegeStaffPage = () => {
     <PageContent className="space-y-6">
       <PageHeader
         title="College Staff"
-        description="Teachers use the Teacher system. Non-teaching staff can be created on any role tab (or All Non-Teaching Staff). Each tab lists only that role. Edit a person or use Module Access to set read/write permissions. Login credentials are emailed on create."
+        description="Teachers use the Teacher system. Staff can be created on any role tab (or All Staff). Each tab lists only that role. Edit a person or use Module Access to set read/write permissions. Login credentials are emailed on create."
       />
 
       <div className="flex flex-wrap gap-2">

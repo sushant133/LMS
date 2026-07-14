@@ -5,6 +5,7 @@ import {
   type AcademicManagementDashboard,
   type AcademicManagementFilters,
   type AcademicSessionPlanRecord,
+  type AcademicSyllabusRecord,
   type BatchRecord,
   type ClassRecord,
   type SectionRecord,
@@ -15,6 +16,7 @@ import {
   hasInstitutionAccess,
 } from "@phit-erp/shared";
 import {
+  BookMarked,
   BookOpen,
   CalendarDays,
   ClipboardList,
@@ -40,16 +42,19 @@ import { LessonPlanPanel } from "./LessonPlanPanel";
 import { LogBookPanel } from "./LogBookPanel";
 import { AcademicReportsPanel } from "./AcademicReportsPanel";
 import { SessionPlanPanel } from "./SessionPlanPanel";
+import { SyllabusPanel } from "./SyllabusPanel";
 import {
   defaultAcademicFilters,
   exportLessonPlansExcel,
   exportLogBookExcel,
   exportSessionPlansExcel,
+  exportSyllabiExcel,
   filtersToParams,
 } from "./academicManagementUtils";
 
 type Tab =
   | "dashboard"
+  | "syllabus"
   | "session-plan"
   | "lesson-plan"
   | "log-book"
@@ -57,6 +62,7 @@ type Tab =
 
 const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "syllabus", label: "Syllabus", icon: BookMarked },
   { id: "session-plan", label: "Session Plan", icon: BookOpen },
   { id: "lesson-plan", label: "Lesson Plan", icon: CalendarDays },
   { id: "log-book", label: "Log Book", icon: ClipboardList },
@@ -65,6 +71,8 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
 
 const printAreaIdForTab = (tab: Tab): string | null => {
   switch (tab) {
+    case "syllabus":
+      return "syllabus-print-area";
     case "session-plan":
       return "session-plan-print-area";
     case "lesson-plan":
@@ -186,6 +194,17 @@ export const AcademicManagementHub = () => {
     enabled: activeTab === "dashboard",
   });
 
+  const syllabiQuery = useQuery({
+    queryKey: ["academic-management", "syllabi", academicListParams],
+    queryFn: () =>
+      unwrap<AcademicSyllabusRecord[]>(
+        api.get("/academic-management/syllabi", {
+          params: academicListParams,
+        }),
+      ),
+    enabled: activeTab === "syllabus",
+  });
+
   const sessionPlansQuery = useQuery({
     queryKey: ["academic-management", "session-plans", academicListParams],
     queryFn: () =>
@@ -292,6 +311,18 @@ export const AcademicManagementHub = () => {
       toast.message("Use Export CSV in the Reports tab");
       return;
     }
+    if (activeTab === "syllabus") {
+      if (!syllabiQuery.data?.length) {
+        toast.message("No syllabi to export for the current filters");
+        return;
+      }
+      exportSyllabiExcel(
+        syllabiQuery.data,
+        `syllabus-${appliedFilters.academicYearBs || "export"}.xlsx`,
+      );
+      toast.success("Syllabus exported to Excel");
+      return;
+    }
     if (activeTab === "session-plan") {
       if (!sessionPlansQuery.data?.length) {
         toast.message("No session plans to export for the current filters");
@@ -332,7 +363,7 @@ export const AcademicManagementHub = () => {
   const handleExportPdf = () => {
     const printId = printAreaIdForTab(activeTab);
     if (!printId) {
-      toast.message("Switch to Session Plan, Lesson Plan, or Log Book to export PDF");
+      toast.message("Switch to Syllabus, Session Plan, Lesson Plan, or Log Book to export PDF");
       return;
     }
     void downloadPdfFromElementById(
@@ -347,7 +378,7 @@ export const AcademicManagementHub = () => {
   const handlePrint = () => {
     const printId = printAreaIdForTab(activeTab);
     if (!printId) {
-      toast.message("Switch to Session Plan, Lesson Plan, or Log Book to print");
+      toast.message("Switch to Syllabus, Session Plan, Lesson Plan, or Log Book to print");
       return;
     }
     void printElementById(printId, `${activeTab}-print`);
@@ -365,7 +396,7 @@ export const AcademicManagementHub = () => {
     <div className="space-y-6">
       <PageHeader
         title="Academic Management"
-        description="Unified session planning, lesson planning, and daily log books with syllabus tracking and approvals."
+        description="Syllabus, session planning, lesson planning, and daily log books with tracking and approvals."
       />
 
       <ModuleReadOnlyBanner show={academicReadOnly} />
@@ -424,6 +455,16 @@ export const AcademicManagementHub = () => {
         <AcademicManagementDashboardPanel
           data={dashboardQuery.data}
           loading={dashboardQuery.isLoading}
+        />
+      </div>
+      <div className={cn(activeTab === "syllabus" ? "block" : "hidden")}>
+        <SyllabusPanel
+          filters={appliedFilters}
+          subjects={subjects}
+          teacherId={teacherId}
+          teachers={teachersQuery.data ?? []}
+          writeAccess={canWriteAcademic}
+          {...hierarchyProps}
         />
       </div>
       <div className={cn(activeTab === "session-plan" ? "block" : "hidden")}>

@@ -29,11 +29,11 @@ const studentDocumentSchema = new Schema(
 
 const addressSchema = new Schema(
   {
-    province: { type: String, required: true },
-    district: { type: String, required: true },
-    municipality: { type: String, required: true },
-    ward: { type: String, required: true },
-    streetAddress: { type: String, required: true }
+    province: { type: String, default: "" },
+    district: { type: String, default: "" },
+    municipality: { type: String, default: "" },
+    ward: { type: String, default: "" },
+    streetAddress: { type: String, default: "" }
   },
   { _id: false }
 );
@@ -43,7 +43,7 @@ const studentSchema = new Schema(
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     user: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
     admissionNumber: { type: String, required: true, trim: true },
-    rollNumber: { type: Number, required: true },
+    rollNumber: { type: Number, default: 0 },
     classId: { type: Schema.Types.ObjectId, ref: "SchoolClass" },
     sectionId: { type: Schema.Types.ObjectId, ref: "Section" },
     batchId: { type: Schema.Types.ObjectId, ref: "Batch" },
@@ -54,20 +54,31 @@ const studentSchema = new Schema(
       default: "ACTIVE",
       index: true
     },
-    admissionDateBs: { type: String, required: true },
-    dateOfBirthBs: { type: String, required: true },
-    gender: { type: String, required: true },
+    admissionDateBs: { type: String, default: "" },
+    dateOfBirthBs: { type: String, default: "" },
+    gender: { type: String, default: "" },
     bloodGroup: { type: String, enum: BLOOD_GROUPS },
     disabilityCategory: { type: String, enum: DISABILITY_CATEGORIES },
     ethnicityCategory: { type: String, enum: ETHNICITY_CATEGORIES },
-    address: { type: addressSchema, required: true },
-    fatherName: { type: String, required: true },
-    fatherPhone: { type: String, trim: true },
-    motherName: { type: String, required: true },
-    motherPhone: { type: String, trim: true },
-    guardianName: { type: String, required: true },
-    guardianPhone: { type: String, required: true },
+    address: {
+      type: addressSchema,
+      default: () => ({
+        province: "",
+        district: "",
+        municipality: "",
+        ward: "",
+        streetAddress: ""
+      })
+    },
+    fatherName: { type: String, default: "" },
+    fatherPhone: { type: String, trim: true, default: "" },
+    motherName: { type: String, default: "" },
+    motherPhone: { type: String, trim: true, default: "" },
+    guardianName: { type: String, default: "" },
+    guardianPhone: { type: String, default: "" },
     feesDueNpr: { type: Number, default: 0 },
+    /** Full scholarship — UI shows "Scholarship" instead of a fee amount. */
+    hasScholarship: { type: Boolean, default: false },
     remarks: { type: String },
     // Phase 0 - Foundation fields
     photoUrl: { type: String },

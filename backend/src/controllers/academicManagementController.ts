@@ -8,6 +8,7 @@ import {
   academicLogBookReviewSchema,
   academicRejectActionSchema,
   academicSessionPlanSchema,
+  academicSyllabusSchema,
   type AcademicManagementFilters
 } from "@phit-erp/shared";
 import { AcademicLessonPlan } from "../models/AcademicLessonPlan.js";
@@ -15,6 +16,8 @@ import { AcademicLessonPlanItem } from "../models/AcademicLessonPlanItem.js";
 import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
+import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
+import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { AcademicComment } from "../models/AcademicComment.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
@@ -22,12 +25,14 @@ import { recordAudit } from "../utils/audit.js";
 import {
   addAcademicComment,
   applyTeacherScopeToFilter,
+  applyTeacherSubjectScopeToFilter,
   assertApprovableStatus,
   assertApprovedSessionPlanForLesson,
   assertEditableStatus,
   assertLessonPlanItemsBelongToSessionPlan,
   assertNoDuplicateLessonPlanUnitsInMonth,
   assertNoDuplicateLogBookForItemDate,
+  assertSyllabusAccess,
   assertTeacherOwnership,
   buildAcademicFilter,
   buildDashboard,
@@ -44,6 +49,7 @@ import {
   serializeLessonPlan,
   serializeLogBookEntry,
   serializeSessionPlan,
+  serializeSyllabus,
   syncLessonPlanItemProgress,
   syncSessionPlanProgress,
   matchesKeyword
@@ -364,6 +370,294 @@ export const unlockSessionPlan = asyncHandler(async (req: Request, res: Response
   return sendSuccess(res, "Session plan unlocked", serialized);
 });
 
+// ─── Syllabus (official subject units; same box UI as Session Plan) ─────────
+
+export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
+  const filter = buildAcademicFilter(req, parseFilters(req));
+  // Teachers see syllabi for subjects they are assigned (not only their teacherId)
+  await applyTeacherSubjectScopeToFilter(req, filter);
+
+  const filters = parseFilters(req);
+  const rows = await AcademicSyllabus.find(filter).sort({ updatedAt: -1 }).lean();
+  const serialized = (await Promise.all(rows.map((row) => serializeSyllabus(row._id.toString())))).filter(Boolean);
+  const filtered = serialized.filter((plan) =>
+    matchesKeyword(filters.keyword, [
+      plan?.subject?.name,
+      plan?.teacher?.user?.fullName,
+      plan?.status,
+      plan?.faculty,
+      ...(plan?.units ?? []).map((unit) => unit.chapterName)
+    ])
+  );
+  return sendSuccess(res, "Syllabi fetched", filtered);
+});
+
+export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  const plan = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  }).lean();
+
+  if (!plan) throw new ApiError(404, "Syllabus not found");
+  await assertSyllabusAccess(req, {
+    teacherId: plan.teacherId?.toString(),
+    subjectId: plan.subjectId.toString()
+  });
+
+  const serialized = await serializeSyllabus(plan._id.toString());
+  return sendSuccess(res, "Syllabus fetched", serialized);
+});
+
+export const createSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  const payload = academicSyllabusSchema.parse(req.body);
+  const optionalTeacherId = payload.teacherId?.trim() || undefined;
+
+  if (req.user?.role === "TEACHER") {
+    const scope = await requireTeacherScope(req);
+    // Teachers may only create for subjects they teach
+    if (!scope.subjectIds.includes(payload.subjectId)) {
+      throw new ApiError(403, "You can only create syllabi for subjects assigned to you");
+    }
+    if (optionalTeacherId && optionalTeacherId !== scope.teacherId) {
+      throw new ApiError(403, "Teachers cannot assign a syllabus to another teacher");
+    }
+  }
+
+  const result = await withTransaction(async (session) => {
+    const created = await AcademicSyllabus.create(
+      [
+        {
+          ...payload,
+          teacherId: optionalTeacherId || undefined,
+          schoolId: tenantObjectId(req),
+          status: "DRAFT",
+          audit: { createdBy: actorObjectId(req) }
+        }
+      ],
+      { session }
+    );
+
+    const doc = created[0];
+    if (!doc) throw new ApiError(500, "Failed to create syllabus");
+
+    await AcademicSyllabusUnit.insertMany(
+      payload.units.map((unit) => ({
+        ...unit,
+        status: "PENDING",
+        schoolId: tenantObjectId(req),
+        syllabusId: doc._id
+      })),
+      { session }
+    );
+
+    await recordAudit(req, {
+      action: "academic.syllabus.create",
+      entity: "SYLLABUS",
+      entityId: doc._id.toString(),
+      after: doc
+    });
+    return doc._id.toString();
+  });
+
+  const serialized = await serializeSyllabus(result);
+  return sendSuccess(res, "Syllabus created", serialized, 201);
+});
+
+export const updateSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  const payload = academicSyllabusSchema.partial().parse(req.body);
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+  await assertSyllabusAccess(req, {
+    teacherId: existing.teacherId?.toString(),
+    subjectId: existing.subjectId.toString()
+  });
+  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+
+  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+  if (safePayload.teacherId === "") {
+    safePayload.teacherId = undefined;
+  }
+
+  await withTransaction(async (session) => {
+    Object.assign(existing, safePayload, {
+      audit: { ...existing.audit, updatedBy: actorObjectId(req) }
+    });
+    if (payload.teacherId !== undefined && !payload.teacherId?.trim()) {
+      existing.teacherId = undefined;
+    }
+    await existing.save({ session });
+
+    if (payload.units) {
+      await AcademicSyllabusUnit.deleteMany({ syllabusId: existing._id }, { session });
+      await AcademicSyllabusUnit.insertMany(
+        payload.units.map((unit) => ({
+          ...unit,
+          status: unit.status ?? "PENDING",
+          schoolId: tenantObjectId(req),
+          syllabusId: existing._id
+        })),
+        { session }
+      );
+    }
+
+    await recordAudit(req, {
+      action: "academic.syllabus.update",
+      entity: "SYLLABUS",
+      entityId: existing._id.toString(),
+      after: existing
+    });
+  });
+
+  const serialized = await serializeSyllabus(existing._id.toString());
+  return sendSuccess(res, "Syllabus updated", serialized);
+});
+
+export const deleteSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+  await assertSyllabusAccess(req, {
+    teacherId: existing.teacherId?.toString(),
+    subjectId: existing.subjectId.toString()
+  });
+
+  existing.isDeleted = true;
+  existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
+  await existing.save();
+  await AcademicSyllabusUnit.deleteMany({ syllabusId: existing._id });
+  await recordAudit(req, {
+    action: "academic.syllabus.delete",
+    entity: "SYLLABUS",
+    entityId: existing._id.toString()
+  });
+  return sendSuccess(res, "Syllabus deleted", { deleted: true });
+});
+
+export const submitSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+  await assertSyllabusAccess(req, {
+    teacherId: existing.teacherId?.toString(),
+    subjectId: existing.subjectId.toString()
+  });
+
+  existing.status = "PENDING_APPROVAL";
+  existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
+  await existing.save();
+  await notifyAdmins(req, "Syllabus Submitted", "A syllabus was submitted for approval.", {
+    entityId: existing._id.toString()
+  });
+  const serialized = await serializeSyllabus(existing._id.toString());
+  return sendSuccess(res, "Syllabus submitted", serialized);
+});
+
+export const approveSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  academicApprovalActionSchema.parse(req.body ?? {});
+  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can approve");
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+  assertApprovableStatus(existing.status);
+
+  existing.status = "APPROVED";
+  existing.adminRemarks = req.body?.remarks;
+  existing.audit = {
+    ...existing.audit,
+    approvedBy: actorObjectId(req),
+    approvedAt: new Date(),
+    updatedBy: actorObjectId(req)
+  };
+  await existing.save();
+  await recordApproval(req, "SYLLABUS", existing._id.toString(), "APPROVED", req.body?.remarks);
+  if (existing.teacherId) {
+    await notifyTeacher(
+      req,
+      existing.teacherId.toString(),
+      "Syllabus Approved",
+      "Your syllabus has been approved.",
+      { entityId: existing._id.toString() }
+    );
+  }
+  const serialized = await serializeSyllabus(existing._id.toString());
+  return sendSuccess(res, "Syllabus approved", serialized);
+});
+
+export const rejectSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  const payload = academicRejectActionSchema.parse(req.body);
+  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can reject");
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+
+  existing.status = "REJECTED";
+  existing.adminRemarks = payload.remarks;
+  existing.audit = {
+    ...existing.audit,
+    rejectedBy: actorObjectId(req),
+    rejectedAt: new Date(),
+    rejectionReason: payload.remarks,
+    updatedBy: actorObjectId(req)
+  };
+  await existing.save();
+  await recordApproval(req, "SYLLABUS", existing._id.toString(), "REJECTED", payload.remarks);
+  if (existing.teacherId) {
+    await notifyTeacher(
+      req,
+      existing.teacherId.toString(),
+      "Syllabus Rejected",
+      payload.remarks,
+      { entityId: existing._id.toString() }
+    );
+  }
+  const serialized = await serializeSyllabus(existing._id.toString());
+  return sendSuccess(res, "Syllabus rejected", serialized);
+});
+
+export const unlockSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can unlock");
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+
+  existing.status = "DRAFT";
+  existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
+  await existing.save();
+  await recordApproval(req, "SYLLABUS", existing._id.toString(), "UNLOCKED");
+  if (existing.teacherId) {
+    await notifyTeacher(
+      req,
+      existing.teacherId.toString(),
+      "Syllabus Unlocked",
+      "Your syllabus has been unlocked for corrections.",
+      { entityId: existing._id.toString() }
+    );
+  }
+  const serialized = await serializeSyllabus(existing._id.toString());
+  return sendSuccess(res, "Syllabus unlocked", serialized);
+});
+
 export const listLessonPlans = asyncHandler(async (req: Request, res: Response) => {
   const filter = buildAcademicFilter(req, parseFilters(req));
   await applyTeacherScopeToFilter(req, filter);
@@ -398,11 +692,13 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     academicYearBs: payload.academicYearBs
   });
   await assertLessonPlanItemsBelongToSessionPlan(req, payload.sessionPlanId, payload.items);
+  const derivedMonth =
+    payload.month || getNepaliMonthNameFromBsDate(payload.startDateBs) || "";
   await assertNoDuplicateLessonPlanUnitsInMonth(req, {
     sessionPlanId: payload.sessionPlanId,
     teacherId: payload.teacherId,
     subjectId: payload.subjectId,
-    month: payload.month,
+    month: derivedMonth,
     academicYearBs: payload.academicYearBs,
     unitIds: payload.items.map((item) => item.sessionPlanUnitId)
   });
@@ -412,6 +708,7 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
       [
         {
           ...payload,
+          month: derivedMonth,
           schoolId: tenantObjectId(req),
           status: "DRAFT",
           preparedBy: await getActorName(req.user!.userId),
@@ -480,7 +777,14 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   const subjectId = payload.subjectId ?? existing.subjectId.toString();
   const teacherId = payload.teacherId ?? existing.teacherId.toString();
   const academicYearBs = payload.academicYearBs ?? existing.academicYearBs;
-  const month = payload.month ?? existing.month;
+  const startDateBs =
+    payload.startDateBs ??
+    (existing as { startDateBs?: string }).startDateBs ??
+    "";
+  const month =
+    payload.month ||
+    existing.month ||
+    (startDateBs ? getNepaliMonthNameFromBsDate(startDateBs) : "");
 
   await assertApprovedSessionPlanForLesson(req, sessionPlanId, {
     subjectId,
@@ -506,6 +810,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   await withTransaction(async (session) => {
     Object.assign(existing, safePayload, {
       sessionPlanId,
+      month,
       audit: { ...existing.audit, updatedBy: actorObjectId(req) }
     });
     await existing.save({ session });
@@ -681,43 +986,57 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     if (payload.teacherId !== scope.teacherId) throw new ApiError(403, "Teachers can only create their own log book entries");
   }
 
-  // Hierarchical rule: Log Book must reference a Lesson Plan topic
-  const item = await AcademicLessonPlanItem.findById(payload.lessonPlanItemId).lean();
-  if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
-    throw new ApiError(400, "Invalid lesson plan item. Select a topic from the monthly Lesson Plan.");
-  }
-  const plan = await AcademicLessonPlan.findOne({
-    _id: item.lessonPlanId,
-    schoolId: tenantObjectId(req),
-    isDeleted: false
-  }).lean();
-  if (!plan) throw new ApiError(400, "Lesson plan for this item was not found");
-  if (plan.teacherId.toString() !== payload.teacherId) {
-    throw new ApiError(400, "Lesson plan item does not belong to the selected teacher");
-  }
-  if (plan.subjectId.toString() !== payload.subjectId) {
-    throw new ApiError(400, "Lesson plan item subject does not match this log entry");
+  // Prefer Session Plan unit; optionally link a Lesson Plan topic
+  const unitDoc = await AcademicSessionPlanUnit.findById(payload.sessionPlanUnitId).lean();
+  if (!unitDoc || unitDoc.schoolId.toString() !== tenantObjectId(req).toString()) {
+    throw new ApiError(400, "Select a valid unit from the Session Plan.");
   }
 
-  // Auto-populate unit / topic / objectives from Lesson Plan (Session Plan hierarchy)
-  let unitLabel = payload.unit;
-  if (item.sessionPlanUnitId) {
-    const unit = await AcademicSessionPlanUnit.findById(item.sessionPlanUnitId).lean();
-    if (unit) {
-      unitLabel = unitLabel || `Unit ${unit.unitNo}: ${unit.chapterName}`;
-      payload.sessionPlanUnitId = unit._id.toString();
-    } else {
-      payload.sessionPlanUnitId = item.sessionPlanUnitId.toString();
+  let unitLabel = payload.unit || `Unit ${unitDoc.unitNo}: ${unitDoc.chapterName}`;
+  let lessonPlanId: string | undefined = payload.lessonPlanId || undefined;
+  let lessonPlanItemId: string | undefined =
+    payload.lessonPlanItemId && payload.lessonPlanItemId.length > 0
+      ? payload.lessonPlanItemId
+      : undefined;
+
+  if (lessonPlanItemId) {
+    const item = await AcademicLessonPlanItem.findById(lessonPlanItemId).lean();
+    if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
+      throw new ApiError(400, "Invalid lesson plan topic selected.");
     }
+    const plan = await AcademicLessonPlan.findOne({
+      _id: item.lessonPlanId,
+      schoolId: tenantObjectId(req),
+      isDeleted: false
+    }).lean();
+    if (!plan) throw new ApiError(400, "Lesson plan for this topic was not found");
+    if (plan.teacherId.toString() !== payload.teacherId) {
+      throw new ApiError(400, "Lesson plan topic does not belong to the selected teacher");
+    }
+    if (plan.subjectId.toString() !== payload.subjectId) {
+      throw new ApiError(400, "Lesson plan topic subject does not match this log entry");
+    }
+    lessonPlanId = plan._id.toString();
+    unitLabel = unitLabel || item.subjectLabel || unitLabel;
+    payload.topicCovered = payload.topicCovered || item.plannedTopic;
+    payload.objectives = payload.objectives || item.learningObjectives || "";
+    await assertNoDuplicateLogBookForItemDate(req, lessonPlanItemId, dateBs);
   }
-  payload.lessonPlanId = plan._id.toString();
-  payload.unit = unitLabel || item.subjectLabel || payload.unit;
-  payload.topicCovered = payload.topicCovered || item.plannedTopic;
-  payload.objectives = payload.objectives || item.learningObjectives || "";
 
-  await assertNoDuplicateLogBookForItemDate(req, payload.lessonPlanItemId, dateBs);
+  if (payload.subUnitTitle) {
+    payload.topicCovered =
+      payload.topicCovered ||
+      `${unitDoc.chapterName} — ${payload.subUnitTitle}`;
+  } else {
+    payload.topicCovered =
+      payload.topicCovered || unitDoc.topicsCovered || unitDoc.chapterName;
+  }
+  payload.unit = unitLabel;
+  payload.sessionPlanUnitId = unitDoc._id.toString();
+  payload.lessonPlanId = lessonPlanId;
+  payload.lessonPlanItemId = lessonPlanItemId ?? "";
 
-  // Use Nepali month name so Log Book groups align with Lesson Plan.month
+  // Use Nepali month name so Log Book groups align with Lesson Plan period
   const month = getNepaliMonthNameFromBsDate(dateBs);
   const logBookId = await getOrCreateLogBook(req, { ...payload, month });
 
@@ -745,8 +1064,10 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     audit: { createdBy: actorObjectId(req) }
   });
 
-  // Auto progress: Log Book → Lesson Plan item → Session Plan unit / progress
-  await syncLessonPlanItemProgress(entry.lessonPlanItemId!.toString());
+  // Auto progress when linked to a Lesson Plan item
+  if (entry.lessonPlanItemId) {
+    await syncLessonPlanItemProgress(entry.lessonPlanItemId.toString());
+  }
 
   await recordAudit(req, { action: "academic.log_book.create", entity: "LOG_BOOK_ENTRY", entityId: entry._id.toString(), after: entry });
   const serialized = await serializeLogBookEntry(entry._id.toString());

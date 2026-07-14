@@ -613,7 +613,7 @@ export const CollegeStaffManager = ({
               </Select>
               {listCategory && !editing ? (
                 <p className="mt-1 text-xs text-slate-500">
-                  Locked to this tab&apos;s role. Switch to &quot;All Non-Teaching Staff&quot; to
+                  Locked to this tab&apos;s role. Switch to &quot;All Staff&quot; to
                   pick any role.
                 </p>
               ) : null}
@@ -874,7 +874,7 @@ export const CollegeStaffManager = ({
               title={listCategory ? `No ${title.toLowerCase()} yet` : "No staff found"}
               description={
                 listCategory
-                  ? `Create someone with this role using the form above (role is fixed for this tab). People created under another role appear in that tab or under All Non-Teaching Staff.`
+                  ? `Create someone with this role using the form above (role is fixed for this tab). People created under another role appear in that tab or under All Staff.`
                   : "Use the form above: choose Staff role, fill details, and credentials are emailed on create. Teachers are under the Teachers tab."
               }
             />

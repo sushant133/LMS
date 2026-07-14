@@ -373,7 +373,7 @@ export const StudentListManager = () => {
                   <Th>{labels.secondary}</Th>
                   {isCollege ? <Th>Status</Th> : null}
                   <Th>Guardian</Th>
-                  {canManage ? <Th>Fees Due</Th> : null}
+                  {canManage ? <Th>Total Fee</Th> : null}
                   <Th />
                 </tr>
               </TableHead>
@@ -438,7 +438,15 @@ export const StudentListManager = () => {
                     ) : null}
                     <Td>{student.guardianName}</Td>
                     {canManage ? (
-                      <Td>{formatCurrencyNpr(student.feesDueNpr)}</Td>
+                      <Td>
+                        {student.hasScholarship ? (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                            Scholarship
+                          </span>
+                        ) : (
+                          formatCurrencyNpr(student.feesDueNpr)
+                        )}
+                      </Td>
                     ) : null}
                     <Td className="text-right">
                       <div className="flex justify-end gap-2">

@@ -12,6 +12,7 @@ interface SignPayload {
 
 export const signJwt = (payload: SignPayload): string =>
   jwt.sign(payload, env.JWT_SECRET as Secret, {
+    algorithm: "HS256",
     expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"]
   });
 

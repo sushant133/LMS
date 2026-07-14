@@ -18,8 +18,12 @@ export const serveComplaintAttachment = asyncHandler(async (req: Request, res: R
     throw new ApiError(400, "Invalid file path");
   }
 
-  if (req.user.role !== "SUPER_ADMIN" && req.user.schoolId !== schoolId) {
-    throw new ApiError(403, "Access denied");
+  // Coerce both sides to string (JWT schoolId is string; avoid false negatives)
+  if (req.user.role !== "SUPER_ADMIN") {
+    const userSchool = req.user.schoolId ? String(req.user.schoolId) : "";
+    if (!userSchool || userSchool !== schoolId) {
+      throw new ApiError(403, "Access denied");
+    }
   }
 
   const publicPath = `/uploads/${schoolId}/complaints/${filename}`;

@@ -10,7 +10,7 @@ import {
   canManageInstitution,
 } from "@phit-erp/shared";
 import { Check, Plus, Search, Send } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -28,8 +28,11 @@ import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
 import { parseErrorMessage } from "lib/utils";
 import {
+  dedupeYearsForSelect,
+  filterSubjectsByClass,
+  filterSubjectsByYear,
   filtersToParams,
-  NEPALI_MONTHS,
+  parseSubUnitsFromTopics,
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
@@ -71,19 +74,25 @@ interface LessonPlanPanelProps {
 const emptyItem = (
   serialNo: number,
   unit?: AcademicSessionPlanUnitRecord,
+  subUnitTitle = "",
 ): AcademicLessonPlanInput["items"][number] => ({
   serialNo,
   sessionPlanUnitId: unit?._id ?? "",
+  subUnitTitle,
   subjectLabel: unit ? `Unit ${unit.unitNo}` : "",
-  plannedTopic: unit
-    ? unit.topicsCovered || unit.chapterName
-    : "",
+  plannedTopic: subUnitTitle
+    ? subUnitTitle
+    : unit
+      ? unit.topicsCovered || unit.chapterName
+      : "",
   description: "",
   learningObjectives: unit?.learningOutcomes ?? "",
   teachingMethod: "",
   teachingAids: "",
   assessmentMethod: "",
   deadline: "",
+  itemStartDateBs: unit?.startDateBs || "",
+  itemEndDateBs: unit?.endDateBs || "",
   estimatedClasses: Math.max(
     1,
     Math.round(unit?.estimatedTeachingHours || 1),
@@ -110,6 +119,8 @@ export const LessonPlanPanel = ({
   const [showForm, setShowForm] = useState(false);
   const [unitSearch, setUnitSearch] = useState("");
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
+  /** Tracks which session plan already had units auto-selected (so Clear stays cleared). */
+  const autoSelectedForPlanRef = useRef<string>("");
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
     null,
   );
@@ -127,11 +138,21 @@ export const LessonPlanPanel = ({
     yearId: filters.yearId,
     subjectId: filters.subjectId || "",
     teacherId: teacherId || filters.teacherId || "",
-    month: filters.month || NEPALI_MONTHS[0] || "Baisakh",
+    month: "",
+    startDateBs: "",
+    endDateBs: "",
     sessionPlanId: "",
     monthlyDescription: "",
     items: [],
   });
+
+  const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
+  const subjectOptions = useMemo(() => {
+    if (isCollege || yearOptions.length > 0) {
+      return filterSubjectsByYear(subjects, years, form.yearId);
+    }
+    return filterSubjectsByClass(subjects, form.classId);
+  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
 
   // Keep teacherId once teacher scope resolves
   useEffect(() => {
@@ -185,6 +206,12 @@ export const LessonPlanPanel = ({
       form.sessionPlanId !== usableSessionPlans[0]!._id
     ) {
       const plan = usableSessionPlans[0]!;
+      const starts = plan.units
+        .map((u) => u.startDateBs)
+        .filter(Boolean) as string[];
+      const ends = plan.units
+        .map((u) => u.endDateBs)
+        .filter(Boolean) as string[];
       setForm((current) => ({
         ...current,
         sessionPlanId: plan._id,
@@ -198,8 +225,16 @@ export const LessonPlanPanel = ({
         yearId: plan.yearId || current.yearId,
         subjectId: plan.subjectId || current.subjectId,
         teacherId: plan.teacherId || current.teacherId || teacherId || "",
+        startDateBs:
+          current.startDateBs ||
+          (starts.length ? starts.sort()[0]! : current.startDateBs),
+        endDateBs:
+          current.endDateBs ||
+          (ends.length ? ends.sort().at(-1)! : current.endDateBs),
       }));
-      setSelectedUnitIds([]);
+      // Pre-select all units from the session plan so teachers don't re-enter them
+      autoSelectedForPlanRef.current = plan._id;
+      setSelectedUnitIds(plan.units.map((u) => u._id));
     }
   }, [usableSessionPlans, form.sessionPlanId, showForm, teacherId]);
 
@@ -243,7 +278,22 @@ export const LessonPlanPanel = ({
       ),
   });
 
-  // Rebuild form items when selected units change
+  // When units API loads for a newly chosen Session Plan, select all once
+  useEffect(() => {
+    if (!form.sessionPlanId || !showForm) return;
+    if (autoSelectedForPlanRef.current === form.sessionPlanId) return;
+    const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
+    if (units.length === 0) return;
+    autoSelectedForPlanRef.current = form.sessionPlanId;
+    setSelectedUnitIds(units.map((u) => u._id));
+  }, [
+    form.sessionPlanId,
+    showForm,
+    unitsQuery.data,
+    coverageQuery.data?.units,
+  ]);
+
+  // Rebuild form items when selected units change — inherit all fields from Session Plan
   useEffect(() => {
     if (!form.sessionPlanId) return;
     const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
@@ -256,14 +306,29 @@ export const LessonPlanPanel = ({
           const prev = current.items.find(
             (item) => item.sessionPlanUnitId === unitId,
           );
+          const subUnits = parseSubUnitsFromTopics(unit.topicsCovered);
+          const defaultSub =
+            prev?.subUnitTitle ||
+            (subUnits.length === 1 ? subUnits[0]! : "");
           return {
-            ...emptyItem(index + 1, unit),
+            ...emptyItem(index + 1, unit, defaultSub),
             ...prev,
             serialNo: index + 1,
             sessionPlanUnitId: unit._id,
             subjectLabel: `Unit ${unit.unitNo}`,
+            subUnitTitle: defaultSub,
             plannedTopic:
-              prev?.plannedTopic || unit.topicsCovered || unit.chapterName,
+              prev?.plannedTopic ||
+              defaultSub ||
+              unit.topicsCovered ||
+              unit.chapterName,
+            itemStartDateBs:
+              prev?.itemStartDateBs ||
+              unit.startDateBs ||
+              current.startDateBs ||
+              "",
+            itemEndDateBs:
+              prev?.itemEndDateBs || unit.endDateBs || current.endDateBs || "",
             learningObjectives:
               prev?.learningObjectives || unit.learningOutcomes || "",
             estimatedClasses:
@@ -272,7 +337,27 @@ export const LessonPlanPanel = ({
           };
         })
         .filter(Boolean) as AcademicLessonPlanInput["items"];
-      return { ...current, items: nextItems };
+
+      const itemStarts = nextItems
+        .map((i) => i.itemStartDateBs)
+        .filter(Boolean) as string[];
+      const itemEnds = nextItems
+        .map((i) => i.itemEndDateBs)
+        .filter(Boolean) as string[];
+
+      return {
+        ...current,
+        items: nextItems,
+        // Plan dates follow selected units when not set manually
+        startDateBs:
+          current.startDateBs ||
+          (itemStarts.length ? [...itemStarts].sort()[0]! : current.startDateBs),
+        endDateBs:
+          current.endDateBs ||
+          (itemEnds.length
+            ? [...itemEnds].sort().at(-1)!
+            : current.endDateBs),
+      };
     });
   }, [selectedUnitIds, unitsQuery.data, coverageQuery.data?.units, form.sessionPlanId]);
 
@@ -283,6 +368,7 @@ export const LessonPlanPanel = ({
       toast.success("Lesson plan saved");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       setShowForm(false);
+      autoSelectedForPlanRef.current = "";
       setSelectedUnitIds([]);
       setUnitSearch("");
     },
@@ -492,23 +578,20 @@ export const LessonPlanPanel = ({
   );
 
   const toggleUnit = (unitId: string) => {
-    const unit = units.find((row) => row._id === unitId);
-    // Block re-selecting a unit already planned this month (unless unselecting)
-    if (
-      unit &&
-      (unit.plannedInMonths ?? []).includes(form.month) &&
-      !selectedUnitIds.includes(unitId)
-    ) {
-      toast.error(
-        `Unit ${unit.unitNo} is already planned for ${form.month}.`,
-      );
-      return;
-    }
     setSelectedUnitIds((current) =>
       current.includes(unitId)
         ? current.filter((id) => id !== unitId)
         : [...current, unitId],
     );
+  };
+
+  const selectAllSessionUnits = () => {
+    if (units.length === 0) {
+      toast.message("No units on this Session Plan");
+      return;
+    }
+    setSelectedUnitIds(units.map((u) => u._id));
+    toast.success(`Selected all ${units.length} units from Session Plan`);
   };
 
   const updateItemField = <K extends keyof AcademicLessonPlanInput["items"][number]>(
@@ -533,12 +616,22 @@ export const LessonPlanPanel = ({
           <h2 className="text-lg font-semibold text-slate-900">Lesson Plan</h2>
           <p className="text-sm text-slate-600">
             {isAdmin
-              ? "Centralized monthly plans for all teachers, organized by year and subject."
-              : "Monthly planning from your Session Plan (draft or approved). Select units/topics, set deadlines, and save."}
+              ? "Lesson plans for all teachers — select date range, Session Plan units and sub-topics."
+              : "Plan from your Session Plan: choose start/end dates, units and sub-units (topics), then save."}
           </p>
         </div>
         {canMutate ? (
-          <Button onClick={() => setShowForm((current) => !current)}>
+          <Button
+            onClick={() =>
+              setShowForm((current) => {
+                if (current) {
+                  autoSelectedForPlanRef.current = "";
+                  setSelectedUnitIds([]);
+                }
+                return !current;
+              })
+            }
+          >
             <Plus className="mr-2 h-4 w-4" />
             New Lesson Plan
           </Button>
@@ -550,8 +643,8 @@ export const LessonPlanPanel = ({
           <CardHeader>
             <CardTitle>Create Lesson Plan</CardTitle>
             <p className="text-sm text-slate-600">
-              Select Academic Year, Subject, Month — your Session Plan (draft or
-              approved) loads automatically. Pick units/topics and save the monthly plan.
+              Set the date range, load your Session Plan, then select units and
+              sub-units (topics listed on each unit).
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -570,6 +663,54 @@ export const LessonPlanPanel = ({
                   placeholder="e.g. 2082/083"
                 />
               </FormField>
+              {yearOptions.length > 0 ? (
+                <FormField label="Year">
+                  <Select
+                    value={form.yearId || ""}
+                    onChange={(event) => {
+                      const yearId = event.target.value;
+                      setForm((current) => ({
+                        ...current,
+                        yearId,
+                        subjectId: "",
+                        sessionPlanId: "",
+                      }));
+                      setSelectedUnitIds([]);
+                    }}
+                  >
+                    <option value="">Select year first</option>
+                    {yearOptions.map((year) => (
+                      <option key={year._id} value={year._id}>
+                        {year.name}
+                        {year.level != null ? ` (Year ${year.level})` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              ) : classes.length > 0 ? (
+                <FormField label="Class">
+                  <Select
+                    value={form.classId || ""}
+                    onChange={(event) => {
+                      const classId = event.target.value;
+                      setForm((current) => ({
+                        ...current,
+                        classId,
+                        subjectId: "",
+                        sessionPlanId: "",
+                      }));
+                      setSelectedUnitIds([]);
+                    }}
+                  >
+                    <option value="">Select class first</option>
+                    {classes.map((klass) => (
+                      <option key={klass._id} value={klass._id}>
+                        {klass.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              ) : null}
               <FormField label="Subject">
                 <Select
                   value={form.subjectId}
@@ -580,11 +721,27 @@ export const LessonPlanPanel = ({
                       sessionPlanId: "",
                     }))
                   }
+                  disabled={
+                    yearOptions.length > 0
+                      ? !form.yearId
+                      : classes.length > 0
+                        ? !form.classId
+                        : false
+                  }
                 >
-                  <option value="">Select subject</option>
-                  {subjects.map((subject) => (
+                  <option value="">
+                    {yearOptions.length > 0 && !form.yearId
+                      ? "Select year first"
+                      : classes.length > 0 && !form.classId
+                        ? "Select class first"
+                        : subjectOptions.length === 0
+                          ? "No subjects for this year"
+                          : "Select subject"}
+                  </option>
+                  {subjectOptions.map((subject) => (
                     <option key={subject._id} value={subject._id}>
                       {subject.name}
+                      {subject.code ? ` (${subject.code})` : ""}
                     </option>
                   ))}
                 </Select>
@@ -610,22 +767,33 @@ export const LessonPlanPanel = ({
                   </Select>
                 </FormField>
               ) : null}
-              <FormField label="Month">
-                <Select
-                  value={form.month}
-                  onChange={(event) =>
+              <FormField label="Start date (BS)">
+                <NepaliDateField
+                  value={form.startDateBs || ""}
+                  onChange={(value) =>
                     setForm((current) => ({
                       ...current,
-                      month: event.target.value,
+                      startDateBs: value,
+                      endDateBs:
+                        current.endDateBs && current.endDateBs >= value
+                          ? current.endDateBs
+                          : value,
                     }))
                   }
-                >
-                  {NEPALI_MONTHS.map((month) => (
-                    <option key={month} value={month}>
-                      {month}
-                    </option>
-                  ))}
-                </Select>
+                  placeholder="Plan start"
+                />
+              </FormField>
+              <FormField label="End date (BS)">
+                <NepaliDateField
+                  value={form.endDateBs || ""}
+                  onChange={(value) =>
+                    setForm((current) => ({
+                      ...current,
+                      endDateBs: value,
+                    }))
+                  }
+                  placeholder="Plan end"
+                />
               </FormField>
               <FormField label="Faculty (optional)">
                 <Input
@@ -646,7 +814,15 @@ export const LessonPlanPanel = ({
                     const plan = usableSessionPlans.find(
                       (row) => row._id === event.target.value,
                     );
-                    setSelectedUnitIds([]);
+                    // Pull every unit + date range from the Session Plan automatically
+                    const starts = (plan?.units ?? [])
+                      .map((u) => u.startDateBs)
+                      .filter(Boolean) as string[];
+                    const ends = (plan?.units ?? [])
+                      .map((u) => u.endDateBs)
+                      .filter(Boolean) as string[];
+                    autoSelectedForPlanRef.current = event.target.value || "";
+                    setSelectedUnitIds((plan?.units ?? []).map((u) => u._id));
                     setForm((current) => ({
                       ...current,
                       sessionPlanId: event.target.value,
@@ -654,10 +830,24 @@ export const LessonPlanPanel = ({
                         plan?.academicYearBs || current.academicYearBs,
                       session: plan?.session || current.session,
                       faculty: plan?.faculty || current.faculty,
+                      yearId: plan?.yearId || current.yearId,
+                      classId: plan?.classId || current.classId,
+                      batchId: plan?.batchId || current.batchId,
                       subjectId: plan?.subjectId || current.subjectId,
                       teacherId:
                         plan?.teacherId || current.teacherId || teacherId || "",
+                      startDateBs: starts.length
+                        ? [...starts].sort()[0]!
+                        : current.startDateBs,
+                      endDateBs: ends.length
+                        ? [...ends].sort().at(-1)!
+                        : current.endDateBs,
                     }));
+                    if (plan?.units?.length) {
+                      toast.success(
+                        `Loaded ${plan.units.length} units from Session Plan`,
+                      );
+                    }
                   }}
                 >
                   <option value="">
@@ -735,16 +925,38 @@ export const LessonPlanPanel = ({
 
             {form.sessionPlanId ? (
               <div className="space-y-3">
-                <FormField label="Select units / topics from Session Plan">
-                  <div className="relative mb-2">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      className="pl-9"
-                      value={unitSearch}
-                      onChange={(event) => setUnitSearch(event.target.value)}
-                      placeholder="Search by unit number, title, or topics…"
-                    />
+                <FormField label="Units from Session Plan (auto-filled)">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[12rem] flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        className="pl-9"
+                        value={unitSearch}
+                        onChange={(event) => setUnitSearch(event.target.value)}
+                        placeholder="Search units…"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={selectAllSessionUnits}
+                    >
+                      Select all units
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setSelectedUnitIds([])}
+                    >
+                      Clear
+                    </Button>
                   </div>
+                  <p className="mb-2 text-xs text-slate-500">
+                    Units, topics, hours, and dates come from the Session Plan.
+                    Toggle units if you only need some for this plan.
+                  </p>
                   <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y">
                     {filteredUnits.length === 0 ? (
                       <p className="p-3 text-sm text-slate-500">
@@ -821,7 +1033,7 @@ export const LessonPlanPanel = ({
                   </div>
                 </FormField>
 
-                <FormField label="Monthly description">
+                <FormField label="Plan description">
                   <Textarea
                     value={form.monthlyDescription ?? ""}
                     onChange={(event) =>
@@ -830,20 +1042,25 @@ export const LessonPlanPanel = ({
                         monthlyDescription: event.target.value,
                       }))
                     }
-                    placeholder="Brief monthly teaching focus / description"
+                    placeholder="Brief teaching focus for this period"
                   />
                 </FormField>
 
                 {form.items.length > 0 ? (
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-slate-800">
-                      Complete lesson details for {form.month} (
-                      {form.items.length} unit
+                      Lesson details ({form.items.length} unit
                       {form.items.length === 1 ? "" : "s"})
+                      {form.startDateBs && form.endDateBs
+                        ? ` · ${form.startDateBs} → ${form.endDateBs}`
+                        : ""}
                     </p>
                     {form.items.map((item, index) => {
                       const unit = units.find(
                         (u) => u._id === item.sessionPlanUnitId,
+                      );
+                      const subUnits = parseSubUnitsFromTopics(
+                        unit?.topicsCovered,
                       );
                       return (
                         <div
@@ -859,10 +1076,65 @@ export const LessonPlanPanel = ({
                               : {unit?.chapterName || item.plannedTopic}
                             </p>
                             <p className="mt-1 text-xs text-slate-600">
-                              From Session Plan:{" "}
+                              Session Plan topics:{" "}
                               {unit?.topicsCovered || item.plannedTopic || "—"}
                             </p>
                           </div>
+                          <FormField label="Unit (from Session Plan)">
+                            <Input
+                              value={
+                                unit
+                                  ? `Unit ${unit.unitNo}: ${unit.chapterName}`
+                                  : item.subjectLabel
+                              }
+                              readOnly
+                              className="bg-slate-50"
+                            />
+                          </FormField>
+                          <FormField label="Sub-unit / topic">
+                            {subUnits.length > 0 ? (
+                              <Select
+                                value={item.subUnitTitle || ""}
+                                onChange={(event) => {
+                                  const sub = event.target.value;
+                                  setForm((current) => ({
+                                    ...current,
+                                    items: current.items.map((row, i) =>
+                                      i === index
+                                        ? {
+                                            ...row,
+                                            subUnitTitle: sub,
+                                            plannedTopic:
+                                              sub ||
+                                              unit?.chapterName ||
+                                              row.plannedTopic,
+                                          }
+                                        : row,
+                                    ),
+                                  }));
+                                }}
+                              >
+                                <option value="">All topics / chapter</option>
+                                {subUnits.map((sub) => (
+                                  <option key={sub} value={sub}>
+                                    {sub}
+                                  </option>
+                                ))}
+                              </Select>
+                            ) : (
+                              <Input
+                                value={item.plannedTopic}
+                                onChange={(event) =>
+                                  updateItemField(
+                                    index,
+                                    "plannedTopic",
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="Topic / sub-unit"
+                              />
+                            )}
+                          </FormField>
                           <FormField label="Planned topic">
                             <Input
                               value={item.plannedTopic}
@@ -873,7 +1145,7 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder="Topic for this month"
+                              placeholder="Topic for this period"
                             />
                           </FormField>
                           <FormField label="Estimated classes">
@@ -1006,6 +1278,14 @@ export const LessonPlanPanel = ({
                     );
                     return;
                   }
+                  if (!form.startDateBs || !form.endDateBs) {
+                    toast.error("Select plan start and end dates (BS)");
+                    return;
+                  }
+                  if (form.endDateBs < form.startDateBs) {
+                    toast.error("End date must be on or after start date");
+                    return;
+                  }
                   if (!resolvedTeacherId) {
                     toast.error("Teacher profile is required to save a lesson plan");
                     return;
@@ -1014,12 +1294,15 @@ export const LessonPlanPanel = ({
                     ...form,
                     teacherId: resolvedTeacherId,
                     session: form.session || form.academicYearBs,
+                    month: form.month || "",
                   });
                 }}
                 disabled={
                   !form.sessionPlanId ||
                   form.items.length === 0 ||
                   !form.subjectId ||
+                  !form.startDateBs ||
+                  !form.endDateBs ||
                   !(teacherId || form.teacherId) ||
                   createMutation.isPending
                 }

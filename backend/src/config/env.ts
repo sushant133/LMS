@@ -171,6 +171,16 @@ if (env.NODE_ENV === "production") {
   if (env.JWT_REFRESH_SECRET && env.JWT_REFRESH_SECRET.length < 32) {
     throw new Error("JWT_REFRESH_SECRET must be at least 32 characters in production when set");
   }
+  // Block well-known demo defaults for the System Administrator account
+  const weakAdminPasswords = ["Admin@123456", "ChangeMe123!", "password", "admin123", "123456"];
+  if (weakAdminPasswords.includes(env.SUPER_ADMIN_PASSWORD)) {
+    throw new Error(
+      "SUPER_ADMIN_PASSWORD must not use a default/demo value in production. Set a strong unique password."
+    );
+  }
+  if (env.SEED_DEMO) {
+    throw new Error("SEED_DEMO must be false in production");
+  }
 }
 
 /** Absolute path for file uploads (photos, documents, certificates, reports). */

@@ -1194,8 +1194,11 @@ export const listAuditLogs = asyncHandler(async (req: Request, res: Response) =>
   return sendSuccess(res, "Audit logs fetched", logs);
 });
 
-const monthDateFilter = (monthBs?: string): Record<string, unknown> | undefined =>
-  monthBs ? { $regex: `^${monthBs}` } : undefined;
+/** BS month filter YYYY-MM — reject free-form input to prevent regex injection. */
+const monthDateFilter = (monthBs?: string): Record<string, unknown> | undefined => {
+  if (!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) return undefined;
+  return { $regex: `^${monthBs}` };
+};
 
 export const generateAccountingReport = asyncHandler(async (req: Request, res: Response) => {
   const reportType = req.params.reportType as AccountingReportType;

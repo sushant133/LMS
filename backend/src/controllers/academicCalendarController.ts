@@ -10,9 +10,11 @@ import { recordAudit } from "../utils/audit.js";
 import { ApiError } from "../utils/apiError.js";
 import {
   buildAcademicCalendarDashboard,
+  enrichEventById,
   inferAcademicYearFromDateBs,
   listAcademicCalendarEvents,
   listAcademicYears,
+  prepareEventDateFields,
   resolveHolidayFlag
 } from "../utils/academicCalendarService.js";
 import {
@@ -20,7 +22,7 @@ import {
   notifyCalendarEventDeleted,
   notifyCalendarEventUpdated
 } from "../utils/academicCalendarNotifications.js";
-import { bsToAdDate, ensureValidBsDate } from "../utils/nepaliDate.js";
+import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
@@ -54,14 +56,12 @@ export const listEvents = asyncHandler(async (req: Request, res: Response) => {
 
 export const getEvent = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
-  const event = await AcademicCalendarEvent.findOne({ _id: req.params.id, schoolId }).lean();
-  if (!event) {
+  const eventId = String(req.params.id ?? "");
+  const record = await enrichEventById(schoolId, eventId);
+  if (!record) {
     throw new ApiError(404, "Calendar event not found");
   }
-
-  const events = await listAcademicCalendarEvents(schoolId, { dateFromBs: event.dateBs, dateToBs: event.dateBs });
-  const match = events.find((item) => item._id === event._id.toString());
-  sendSuccess(res, "Calendar event fetched", match ?? null);
+  sendSuccess(res, "Calendar event fetched", record);
 });
 
 export const createEvent = asyncHandler(async (req: Request, res: Response) => {
@@ -72,20 +72,22 @@ export const createEvent = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const payload = parsed.data;
-  const dateBs = ensureValidBsDate(payload.dateBs);
-  const { dateAd, dayOfWeek } = bsToAdDate(dateBs);
-  const academicYearBs = payload.academicYearBs || inferAcademicYearFromDateBs(dateBs);
+  const startDateBs = ensureValidBsDate(payload.startDateBs);
+  const endDateBs = ensureValidBsDate(payload.endDateBs);
+  const academicYearBs = payload.academicYearBs || inferAcademicYearFromDateBs(startDateBs);
+  const dateFields = prepareEventDateFields(startDateBs, endDateBs);
+  const isWorkingDayOverride = payload.eventType === "WORKING_DAY";
 
   const created = await AcademicCalendarEvent.create({
     schoolId,
     academicYearBs,
-    dateBs,
-    dateAd,
-    dayOfWeek,
+    ...dateFields,
     name: payload.name,
     eventType: payload.eventType,
     reason: payload.reason,
     isHoliday: resolveHolidayFlag(payload.eventType),
+    status: payload.status ?? "ACTIVE",
+    isWorkingDayOverride,
     audit: { createdBy: req.user?.userId }
   });
 
@@ -96,7 +98,7 @@ export const createEvent = asyncHandler(async (req: Request, res: Response) => {
     after: created.toObject()
   });
 
-  const [record] = await listAcademicCalendarEvents(schoolId, { dateFromBs: dateBs, dateToBs: dateBs });
+  const record = await enrichEventById(schoolId, created._id.toString());
   if (record) {
     await notifyCalendarEventCreated(schoolId.toString(), record);
   }
@@ -110,7 +112,8 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(400, parsed.error.issues[0]?.message ?? "Invalid event payload");
   }
 
-  const existing = await AcademicCalendarEvent.findOne({ _id: req.params.id, schoolId });
+  const eventId = String(req.params.id ?? "");
+  const existing = await AcademicCalendarEvent.findOne({ _id: eventId, schoolId });
   if (!existing) {
     throw new ApiError(404, "Calendar event not found");
   }
@@ -118,14 +121,19 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
   const before = existing.toObject();
   const payload = parsed.data;
 
-  if (payload.dateBs) {
-    const dateBs = ensureValidBsDate(payload.dateBs);
-    const { dateAd, dayOfWeek } = bsToAdDate(dateBs);
-    existing.dateBs = dateBs;
-    existing.dateAd = dateAd;
-    existing.dayOfWeek = dayOfWeek;
+  const nextStart = payload.startDateBs || payload.dateBs || existing.startDateBs || existing.dateBs;
+  const nextEnd = payload.endDateBs || existing.endDateBs || nextStart;
+
+  if (payload.startDateBs || payload.endDateBs || payload.dateBs) {
+    const startDateBs = ensureValidBsDate(nextStart);
+    const endDateBs = ensureValidBsDate(nextEnd);
+    if (endDateBs < startDateBs) {
+      throw new ApiError(400, "End date must be on or after the start date");
+    }
+    const dateFields = prepareEventDateFields(startDateBs, endDateBs);
+    Object.assign(existing, dateFields);
     if (!payload.academicYearBs) {
-      existing.academicYearBs = inferAcademicYearFromDateBs(dateBs);
+      existing.academicYearBs = inferAcademicYearFromDateBs(startDateBs);
     }
   }
 
@@ -134,8 +142,14 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
   if (payload.eventType) {
     existing.eventType = payload.eventType;
     existing.isHoliday = resolveHolidayFlag(payload.eventType);
+    existing.isWorkingDayOverride = payload.eventType === "WORKING_DAY";
   }
-  if (payload.reason !== undefined) existing.reason = payload.reason;
+  if (payload.reason !== undefined) {
+    existing.reason = payload.reason ?? undefined;
+  }
+  if (payload.status) {
+    existing.status = payload.status;
+  }
 
   existing.audit = {
     ...existing.audit,
@@ -152,10 +166,7 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
     after: existing.toObject()
   });
 
-  const [record] = await listAcademicCalendarEvents(schoolId, {
-    dateFromBs: existing.dateBs,
-    dateToBs: existing.dateBs
-  });
+  const record = await enrichEventById(schoolId, existing._id.toString());
   if (record) {
     await notifyCalendarEventUpdated(schoolId.toString(), record);
   }
@@ -164,15 +175,18 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
 
 export const deleteEvent = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
-  const existing = await AcademicCalendarEvent.findOne({ _id: req.params.id, schoolId });
+  const eventId = String(req.params.id ?? "");
+  const existing = await AcademicCalendarEvent.findOne({ _id: eventId, schoolId });
   if (!existing) {
     throw new ApiError(404, "Calendar event not found");
   }
 
   const before = existing.toObject();
+  const start = existing.startDateBs || existing.dateBs;
+  const end = existing.endDateBs || existing.dateBs;
   await notifyCalendarEventDeleted(schoolId.toString(), {
     name: existing.name,
-    dateBs: existing.dateBs
+    dateBs: start === end ? start : `${start} → ${end}`
   });
   await existing.deleteOne();
 

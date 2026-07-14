@@ -9,7 +9,7 @@ import { api, unwrap } from "lib/api";
 import { parseErrorMessage } from "lib/utils";
 
 interface AcademicCommentsPanelProps {
-  entityType: "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY";
+  entityType: "SYLLABUS" | "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY";
   entityId: string;
   canComment: boolean;
 }

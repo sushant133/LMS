@@ -426,10 +426,16 @@ export const listTopics = asyncHandler(async (req: Request, res: Response) => {
 
 export const getAssignment = asyncHandler(async (req: Request, res: Response) => {
   const assignmentId = String(req.params.id);
+  const role = req.user?.role ?? "";
+
+  if (!["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "STUDENT", "PARENT"].includes(role)) {
+    throw new ApiError(403, "You do not have permission to view this post");
+  }
+
   const assignment = await Assignment.findOne(withTenantScope(req, { _id: assignmentId })).lean();
   if (!assignment) throw new ApiError(404, "Assignment not found");
 
-  if (req.user?.role === "TEACHER") {
+  if (role === "TEACHER") {
     await assertTeacherOwnsAssignment(req, assignmentId);
   }
 
@@ -684,14 +690,21 @@ export const addComment = asyncHandler(async (req: Request, res: Response) => {
 
 export const listSubmissions = asyncHandler(async (req: Request, res: Response) => {
   const assignmentId = String(req.params.assignmentId);
-  if (req.user?.role === "TEACHER") {
+  const role = req.user?.role ?? "";
+
+  // Only academic roles may list submissions (route also enforces; defense in depth)
+  if (!["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER", "STUDENT", "PARENT"].includes(role)) {
+    throw new ApiError(403, "You do not have permission to view submissions");
+  }
+
+  if (role === "TEACHER") {
     await assertTeacherOwnsAssignment(req, assignmentId);
   }
 
   const filter = withTenantScope(req, { assignmentId });
-  if (req.user?.role === "PARENT" || req.user?.role === "STUDENT") {
+  if (role === "PARENT" || role === "STUDENT") {
     const studentIds: string[] = [];
-    if (req.user.role === "PARENT") {
+    if (role === "PARENT") {
       studentIds.push(...(await getLinkedStudentIds(req)));
     } else {
       const profile = await getStudentProfile(req);

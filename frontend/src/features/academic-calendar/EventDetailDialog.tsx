@@ -52,55 +52,87 @@ export const EventDetailDialog = ({
               No events scheduled for this date.
             </p>
           ) : (
-            events.map((event) => (
-              <div
-                key={event._id}
-                className="rounded-xl border border-slate-200 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-2">
-                    <h3 className="font-semibold text-slate-900">
-                      {event.name}
-                    </h3>
-                    <Badge
-                      style={{
-                        backgroundColor: `${getEventTypeColor(event.eventType)}22`,
-                        color: getEventTypeColor(event.eventType),
-                        borderColor: `${getEventTypeColor(event.eventType)}55`,
-                      }}
-                    >
-                      {getEventTypeLabel(event.eventType)}
-                    </Badge>
-                  </div>
-                  {canManage ? (
-                    <div className="flex gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onEdit(event)}
+            events.map((event) => {
+              const start = event.startDateBs || event.dateBs;
+              const end = event.endDateBs || event.dateBs;
+              const isRange = start !== end;
+              const isSystem = Boolean(event.isSystemGenerated);
+
+              return (
+                <div
+                  key={event._id}
+                  className="rounded-xl border border-slate-200 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-2">
+                      <h3 className="font-semibold text-slate-900">
+                        {event.name}
+                        {isSystem ? (
+                          <span className="ml-2 text-xs font-normal text-slate-500">
+                            (auto)
+                          </span>
+                        ) : null}
+                      </h3>
+                      <Badge
+                        style={{
+                          backgroundColor: `${getEventTypeColor(event.eventType)}22`,
+                          color: getEventTypeColor(event.eventType),
+                          borderColor: `${getEventTypeColor(event.eventType)}55`,
+                        }}
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={deleting}
-                        onClick={() => onDelete(event)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-600" />
-                      </Button>
+                        {getEventTypeLabel(event.eventType)}
+                      </Badge>
                     </div>
-                  ) : null}
+                    {canManage && !isSystem ? (
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onEdit(event)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={deleting}
+                          onClick={() => onDelete(event)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <dl className="mt-3 grid gap-1 text-sm text-slate-600">
+                    {isRange ? (
+                      <>
+                        <div>
+                          Range: {start} → {end} ({event.totalDays ?? "—"} days)
+                        </div>
+                        <div>
+                          AD: {event.startDateAd || event.dateAd} →{" "}
+                          {event.endDateAd || event.dateAd}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>AD Date: {event.dateAd}</div>
+                        <div>Day: {event.dayOfWeek}</div>
+                      </>
+                    )}
+                    {event.reason ? <div>Reason: {event.reason}</div> : null}
+                    {event.isSystemGenerated ? (
+                      <div className="text-xs text-slate-500">
+                        Automatic Saturday public holiday. Mark this day as
+                        &quot;Working Day (Override)&quot; if classes are held.
+                      </div>
+                    ) : null}
+                  </dl>
                 </div>
-                <dl className="mt-3 grid gap-1 text-sm text-slate-600">
-                  <div>AD Date: {event.dateAd}</div>
-                  <div>Day: {event.dayOfWeek}</div>
-                  {event.reason ? <div>Reason: {event.reason}</div> : null}
-                </dl>
-              </div>
-            ))
+              );
+            })
           )}
 
           {canManage ? (

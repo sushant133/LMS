@@ -3,6 +3,7 @@ import {
   type AcademicLessonPlanRecord,
   type AcademicLogBookEntryInput,
   type AcademicLogBookEntryRecord,
+  type AcademicSessionPlanRecord,
   type SubjectAssignmentRecord,
   type SubjectRecord,
   type TodayTimetableSlot,
@@ -28,8 +29,12 @@ import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
 import { parseErrorMessage } from "lib/utils";
 import {
+  dedupeYearsForSelect,
+  filterSubjectsByClass,
+  filterSubjectsByYear,
   filtersToParams,
   NEPALI_MONTHS,
+  parseSubUnitsFromTopics,
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
@@ -133,6 +138,8 @@ export const LogBookPanel = ({
     dateBs: filters.dateFrom || formatTodayBs(),
     lessonPlanItemId: "",
     lessonPlanId: undefined,
+    sessionPlanUnitId: "",
+    subUnitTitle: "",
     topicCovered: "",
     unit: "",
     objectives: "",
@@ -147,6 +154,14 @@ export const LogBookPanel = ({
     nextClassPlan: "",
     attachmentUrl: "",
   });
+
+  const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
+  const subjectOptions = useMemo(() => {
+    if (isCollege || yearOptions.length > 0) {
+      return filterSubjectsByYear(subjects, years, form.yearId);
+    }
+    return filterSubjectsByClass(subjects, form.classId);
+  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
 
   const effectiveTeacherId =
     teacherId || form.teacherId || filters.teacherId || "";
@@ -174,7 +189,30 @@ export const LogBookPanel = ({
     enabled: isTeacher && showForm,
   });
 
-  // Monthly Lesson Plans for the selected subject/month (hierarchical source)
+  // Session Plan units for unit / sub-unit selection (taught topic source)
+  const sessionPlansQuery = useQuery({
+    queryKey: [
+      "academic-management",
+      "session-plans-for-log",
+      form.subjectId,
+      effectiveTeacherId,
+      form.academicYearBs,
+    ],
+    queryFn: () =>
+      unwrap<AcademicSessionPlanRecord[]>(
+        api.get("/academic-management/session-plans", {
+          params: filtersToParams({
+            ...filters,
+            subjectId: form.subjectId || filters.subjectId,
+            teacherId: effectiveTeacherId || filters.teacherId,
+            academicYearBs: form.academicYearBs || filters.academicYearBs,
+          }),
+        }),
+      ),
+    enabled: showForm && Boolean(form.subjectId || filters.subjectId),
+  });
+
+  // All Lesson Plans for subject/year (no month filter) so date-range plans cascade into Log Book
   const lessonPlansQuery = useQuery({
     queryKey: [
       "academic-management",
@@ -182,7 +220,6 @@ export const LogBookPanel = ({
       form.subjectId,
       effectiveTeacherId,
       form.academicYearBs,
-      selectedMonth,
     ],
     queryFn: () =>
       unwrap<AcademicLessonPlanRecord[]>(
@@ -192,32 +229,64 @@ export const LogBookPanel = ({
             subjectId: form.subjectId || filters.subjectId,
             teacherId: effectiveTeacherId || filters.teacherId,
             academicYearBs: form.academicYearBs || filters.academicYearBs,
-            month: selectedMonth,
+            // Intentionally omit month — show every plan topic for cascade pick
+            month: "",
           }),
         }),
       ),
     enabled: showForm && Boolean(form.subjectId || filters.subjectId),
   });
 
+  const sessionUnits = useMemo(() => {
+    const plans = sessionPlansQuery.data ?? [];
+    return plans.flatMap((plan) =>
+      plan.units.map((unit) => ({
+        ...unit,
+        planId: plan._id,
+        planStatus: plan.status,
+      })),
+    );
+  }, [sessionPlansQuery.data]);
+
+  const selectedSessionUnit = useMemo(
+    () => sessionUnits.find((unit) => unit._id === form.sessionPlanUnitId),
+    [sessionUnits, form.sessionPlanUnitId],
+  );
+
+  const logSubUnits = useMemo(
+    () => parseSubUnitsFromTopics(selectedSessionUnit?.topicsCovered),
+    [selectedSessionUnit?.topicsCovered],
+  );
+
   const lessonItemOptions = useMemo(() => {
     const plans = lessonPlansQuery.data ?? [];
-    return plans.flatMap((plan) =>
+    const options = plans.flatMap((plan) =>
       plan.items.map((item) => ({
         id: item._id,
         planId: plan._id,
-        month: plan.month,
-        label: `${plan.month} · ${item.unit ? `U${item.unit.unitNo} · ` : ""}${item.plannedTopic} (${item.completedClasses}/${item.estimatedClasses})`,
+        month: plan.month || plan.startDateBs || "",
+        label: `${plan.startDateBs || plan.month || "Plan"}${plan.endDateBs ? `→${plan.endDateBs}` : ""} · ${item.unit ? `U${item.unit.unitNo}` : item.subjectLabel || "Unit"}${item.subUnitTitle ? ` · ${item.subUnitTitle}` : ""} · ${item.plannedTopic}`,
         topic: item.plannedTopic,
+        subUnitTitle: item.subUnitTitle || "",
         unit: item.unit
           ? `Unit ${item.unit.unitNo}: ${item.unit.chapterName}`
           : item.subjectLabel || "",
         objectives: item.learningObjectives || "",
+        teachingMethod: item.teachingMethod || "",
+        teachingAids: item.teachingAids || "",
         subjectId: plan.subjectId,
+        sessionPlanUnitId: item.sessionPlanUnitId || "",
         completionStatus: item.completionStatus,
         completedPercent: item.completedPercent,
         remainingPercent: item.remainingPercent,
       })),
     );
+    // Incomplete topics first so teachers pick the next class faster
+    return options.sort((a, b) => {
+      const aDone = a.completionStatus === "COMPLETED" ? 1 : 0;
+      const bDone = b.completionStatus === "COMPLETED" ? 1 : 0;
+      return aDone - bDone;
+    });
   }, [lessonPlansQuery.data]);
 
   const selectedLessonPlan = useMemo(() => {
@@ -311,16 +380,74 @@ export const LogBookPanel = ({
     }
   };
 
-  const selectLessonItem = (itemId: string) => {
-    const option = lessonItemOptions.find((row) => row.id === itemId);
+  const applyLessonItemToForm = (
+    itemId: string,
+    options: typeof lessonItemOptions,
+    quiet = false,
+  ) => {
+    if (!itemId) {
+      setForm((current) => ({
+        ...current,
+        lessonPlanItemId: "",
+        lessonPlanId: undefined,
+      }));
+      return;
+    }
+    const option = options.find((row) => row.id === itemId);
+    if (!option) return;
+    // Full cascade from Lesson Plan → Log Book (no retyping)
     setForm((current) => ({
       ...current,
       lessonPlanItemId: itemId,
-      lessonPlanId: option?.planId,
-      topicCovered: option?.topic || "",
-      unit: option?.unit || "",
-      objectives: option?.objectives || "",
-      subjectId: option?.subjectId || current.subjectId,
+      lessonPlanId: option.planId,
+      subjectId: option.subjectId || current.subjectId,
+      sessionPlanUnitId:
+        option.sessionPlanUnitId || current.sessionPlanUnitId || "",
+      subUnitTitle: option.subUnitTitle || "",
+      unit: option.unit || current.unit,
+      topicCovered: option.topic || option.subUnitTitle || current.topicCovered,
+      objectives: option.objectives || current.objectives,
+      teachingMethod: option.teachingMethod || current.teachingMethod,
+      teachingAids: option.teachingAids || current.teachingAids,
+    }));
+    if (!quiet) toast.success("Filled from Lesson Plan");
+  };
+
+  const selectLessonItem = (itemId: string) => {
+    applyLessonItemToForm(itemId, lessonItemOptions, false);
+  };
+
+  // Auto-pick next incomplete Lesson Plan topic when opening form / changing subject
+  useEffect(() => {
+    if (!showForm) return;
+    if (form.lessonPlanItemId) return;
+    if (lessonItemOptions.length === 0) return;
+    const openTopics = lessonItemOptions.filter(
+      (row) => row.completionStatus !== "COMPLETED",
+    );
+    const auto =
+      openTopics.length === 1
+        ? openTopics[0]
+        : lessonItemOptions.length === 1
+          ? lessonItemOptions[0]
+          : null;
+    if (!auto) return;
+    applyLessonItemToForm(auto.id, lessonItemOptions, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when options appear
+  }, [showForm, form.subjectId, lessonItemOptions, form.lessonPlanItemId]);
+
+  const selectSessionUnit = (unitId: string) => {
+    const unit = sessionUnits.find((row) => row._id === unitId);
+    setForm((current) => ({
+      ...current,
+      sessionPlanUnitId: unitId,
+      subUnitTitle: "",
+      unit: unit ? `Unit ${unit.unitNo}: ${unit.chapterName}` : "",
+      topicCovered: unit?.topicsCovered || unit?.chapterName || "",
+      objectives: unit?.learningOutcomes || current.objectives,
+      // Manual unit pick clears lesson-plan link (user can re-link)
+      lessonPlanItemId: "",
+      lessonPlanId: undefined,
     }));
   };
 
@@ -537,13 +664,14 @@ export const LogBookPanel = ({
           <CardHeader>
             <CardTitle>Create Log Book Entry</CardTitle>
             <p className="text-sm text-slate-600">
-              Select subject and month to load the Lesson Plan, then pick the
-              planned topic taught today.
+              Pick the <strong>Lesson Plan topic</strong> you taught — unit,
+              sub-unit, topic, and objectives fill in automatically. Only add
+              what is new for today.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <FormField label="Date (BS)">
+              <FormField label="Date taught (BS)">
                 <NepaliDateField
                   value={form.dateBs}
                   onChange={(value) => {
@@ -553,28 +681,6 @@ export const LogBookPanel = ({
                   }}
                   placeholder="Select date"
                 />
-              </FormField>
-              <FormField label="Month (Lesson Plan)">
-                <Select
-                  value={selectedMonth}
-                  onChange={(event) => {
-                    setSelectedMonth(event.target.value);
-                    setForm((current) => ({
-                      ...current,
-                      lessonPlanItemId: "",
-                      lessonPlanId: undefined,
-                      topicCovered: "",
-                      unit: "",
-                      objectives: "",
-                    }));
-                  }}
-                >
-                  {NEPALI_MONTHS.map((month) => (
-                    <option key={month} value={month}>
-                      {month}
-                    </option>
-                  ))}
-                </Select>
               </FormField>
               <FormField label="Period number">
                 <NumberInput
@@ -615,6 +721,8 @@ export const LogBookPanel = ({
                         teacherId: event.target.value,
                         lessonPlanItemId: "",
                         lessonPlanId: undefined,
+                        sessionPlanUnitId: "",
+                        subUnitTitle: "",
                         topicCovered: "",
                         unit: "",
                         objectives: "",
@@ -630,6 +738,64 @@ export const LogBookPanel = ({
                   </Select>
                 </FormField>
               ) : null}
+              {yearOptions.length > 0 ? (
+                <FormField label="Year">
+                  <Select
+                    value={form.yearId || ""}
+                    onChange={(event) => {
+                      const yearId = event.target.value;
+                      setForm((current) => ({
+                        ...current,
+                        yearId,
+                        subjectId: "",
+                        lessonPlanItemId: "",
+                        lessonPlanId: undefined,
+                        sessionPlanUnitId: "",
+                        subUnitTitle: "",
+                        topicCovered: "",
+                        unit: "",
+                        objectives: "",
+                      }));
+                    }}
+                  >
+                    <option value="">Select year first</option>
+                    {yearOptions.map((year) => (
+                      <option key={year._id} value={year._id}>
+                        {year.name}
+                        {year.level != null ? ` (Year ${year.level})` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              ) : classes.length > 0 ? (
+                <FormField label="Class">
+                  <Select
+                    value={form.classId || ""}
+                    onChange={(event) => {
+                      const classId = event.target.value;
+                      setForm((current) => ({
+                        ...current,
+                        classId,
+                        subjectId: "",
+                        lessonPlanItemId: "",
+                        lessonPlanId: undefined,
+                        sessionPlanUnitId: "",
+                        subUnitTitle: "",
+                        topicCovered: "",
+                        unit: "",
+                        objectives: "",
+                      }));
+                    }}
+                  >
+                    <option value="">Select class first</option>
+                    {classes.map((klass) => (
+                      <option key={klass._id} value={klass._id}>
+                        {klass.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              ) : null}
               <FormField label="Subject">
                 <Select
                   value={form.subjectId}
@@ -639,16 +805,34 @@ export const LogBookPanel = ({
                       subjectId: event.target.value,
                       lessonPlanItemId: "",
                       lessonPlanId: undefined,
+                      sessionPlanUnitId: "",
+                      subUnitTitle: "",
                       topicCovered: "",
                       unit: "",
                       objectives: "",
                     }))
                   }
+                  disabled={
+                    yearOptions.length > 0
+                      ? !form.yearId
+                      : classes.length > 0
+                        ? !form.classId
+                        : false
+                  }
                 >
-                  <option value="">Select subject</option>
-                  {subjects.map((subject) => (
+                  <option value="">
+                    {yearOptions.length > 0 && !form.yearId
+                      ? "Select year first"
+                      : classes.length > 0 && !form.classId
+                        ? "Select class first"
+                        : subjectOptions.length === 0
+                          ? "No subjects for this year"
+                          : "Select subject"}
+                  </option>
+                  {subjectOptions.map((subject) => (
                     <option key={subject._id} value={subject._id}>
                       {subject.name}
+                      {subject.code ? ` (${subject.code})` : ""}
                     </option>
                   ))}
                 </Select>
@@ -701,87 +885,125 @@ export const LogBookPanel = ({
               </div>
             ) : null}
 
-            {selectedLessonPlan ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                    <Link2 className="h-4 w-4 text-brand-600" />
-                    Lesson Plan · {selectedLessonPlan.month} ·{" "}
-                    {selectedLessonPlan.subject?.name}
-                  </p>
-                  <span className="text-xs text-slate-600">
-                    {selectedLessonPlan.completedTopics ?? 0}/
-                    {selectedLessonPlan.plannedTopics ??
-                      selectedLessonPlan.items.length}{" "}
-                    topics done
-                  </span>
-                </div>
-                <AcademicProgressBar
-                  completedPercent={selectedLessonPlan.completedPercent}
-                  remainingPercent={selectedLessonPlan.remainingPercent}
-                />
-                <p className="text-xs text-slate-600">
-                  Planned:{" "}
-                  {selectedLessonPlan.items
-                    .map((i) => i.plannedTopic)
-                    .join(" · ") || "—"}
-                </p>
-              </div>
-            ) : form.subjectId && !lessonPlansQuery.isLoading ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                No Lesson Plan found for {selectedMonth}. Create a monthly
-                Lesson Plan (from the approved Session Plan) first.
-              </div>
-            ) : null}
-
-            <FormField label="Select planned unit / topic (required)">
-              <Select
-                value={form.lessonPlanItemId ?? ""}
-                onChange={(event) => selectLessonItem(event.target.value)}
-              >
-                <option value="">
-                  {lessonPlansQuery.isLoading
-                    ? "Loading Lesson Plan topics…"
-                    : lessonItemOptions.length === 0
-                      ? "No planned topics — create a Lesson Plan first"
-                      : "Select unit / topic from Lesson Plan"}
-                </option>
-                {lessonItemOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                    {option.completionStatus === "COMPLETED"
-                      ? " ✓ completed"
-                      : ""}
-                  </option>
-                ))}
-              </Select>
-              <p className="text-xs text-slate-500 mt-1">
-                Progress updates automatically when you save this entry.
+            <div className="rounded-2xl border border-brand-100 bg-brand-50/50 p-4 space-y-3">
+              <p className="text-sm font-semibold text-brand-950 flex items-center gap-2">
+                <Link2 className="h-4 w-4" />
+                From Lesson Plan (recommended)
               </p>
-            </FormField>
+              <FormField label="Lesson Plan topic taught *">
+                <Select
+                  value={form.lessonPlanItemId ?? ""}
+                  onChange={(event) => selectLessonItem(event.target.value)}
+                >
+                  <option value="">
+                    {lessonPlansQuery.isLoading
+                      ? "Loading Lesson Plan topics…"
+                      : lessonItemOptions.length === 0
+                        ? "No Lesson Plan topics — create a Lesson Plan first"
+                        : "Select topic from Lesson Plan"}
+                  </option>
+                  {lessonItemOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                      {option.completionStatus === "COMPLETED"
+                        ? " ✓ done"
+                        : ""}
+                    </option>
+                  ))}
+                </Select>
+                <p className="mt-1 text-xs text-slate-600">
+                  Unit, sub-unit, topic, and objectives fill automatically from
+                  the Lesson Plan (which came from Session Plan / Syllabus).
+                </p>
+              </FormField>
 
-            {form.lessonPlanItemId ? (
-              <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
-                <FormField label="Unit (from Session / Lesson Plan)">
-                  <Input value={form.unit} readOnly className="bg-white" />
-                </FormField>
-                <FormField label="Topic (from Lesson Plan)">
-                  <Input
-                    value={form.topicCovered}
-                    readOnly
-                    className="bg-white"
-                  />
-                </FormField>
-                <div className="sm:col-span-2">
-                  <FormField label="Objectives (from Lesson Plan)">
-                    <Textarea
-                      value={form.objectives}
+              {form.lessonPlanItemId ? (
+                <div className="grid gap-3 sm:grid-cols-2 rounded-xl border border-emerald-100 bg-white p-3">
+                  <FormField label="Unit">
+                    <Input value={form.unit} readOnly className="bg-slate-50" />
+                  </FormField>
+                  <FormField label="Sub-unit / topic">
+                    <Input
+                      value={form.subUnitTitle || form.topicCovered}
                       readOnly
-                      className="bg-white"
-                      rows={2}
+                      className="bg-slate-50"
                     />
                   </FormField>
+                  <div className="sm:col-span-2">
+                    <FormField label="Objectives">
+                      <Textarea
+                        value={form.objectives}
+                        readOnly
+                        rows={2}
+                        className="bg-slate-50"
+                      />
+                    </FormField>
+                  </div>
                 </div>
+              ) : null}
+            </div>
+
+            {!form.lessonPlanItemId ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+                <p className="text-sm font-medium text-slate-800">
+                  Or pick unit from Session Plan (if no Lesson Plan yet)
+                </p>
+                <FormField label="Unit (Session Plan)">
+                  <Select
+                    value={form.sessionPlanUnitId || ""}
+                    onChange={(event) => selectSessionUnit(event.target.value)}
+                  >
+                    <option value="">
+                      {sessionPlansQuery.isLoading
+                        ? "Loading units…"
+                        : sessionUnits.length === 0
+                          ? "No Session Plan units"
+                          : "Select unit"}
+                    </option>
+                    {sessionUnits.map((unit) => (
+                      <option key={unit._id} value={unit._id}>
+                        Unit {unit.unitNo}: {unit.chapterName}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Sub-unit / topic">
+                  {logSubUnits.length > 0 ? (
+                    <Select
+                      value={form.subUnitTitle || ""}
+                      onChange={(event) => {
+                        const sub = event.target.value;
+                        setForm((current) => ({
+                          ...current,
+                          subUnitTitle: sub,
+                          topicCovered:
+                            sub ||
+                            selectedSessionUnit?.topicsCovered ||
+                            selectedSessionUnit?.chapterName ||
+                            current.topicCovered,
+                        }));
+                      }}
+                    >
+                      <option value="">Whole unit / chapter</option>
+                      {logSubUnits.map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      value={form.topicCovered}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          topicCovered: event.target.value,
+                        }))
+                      }
+                      placeholder="Topic taught"
+                    />
+                  )}
+                </FormField>
               </div>
             ) : null}
 
@@ -867,17 +1089,33 @@ export const LogBookPanel = ({
             />
             <div className="flex gap-2">
               <Button
-                onClick={() =>
+                onClick={() => {
+                  if (!form.dateBs) {
+                    toast.error("Select the date taught");
+                    return;
+                  }
+                  if (!form.lessonPlanItemId && !form.sessionPlanUnitId) {
+                    toast.error(
+                      "Select a Lesson Plan topic (or a Session Plan unit)",
+                    );
+                    return;
+                  }
                   createMutation.mutate({
                     ...form,
                     teacherId: teacherId || form.teacherId,
-                    lessonPlanItemId: form.lessonPlanItemId,
-                  })
-                }
+                    lessonPlanItemId: form.lessonPlanItemId || "",
+                    sessionPlanUnitId: form.sessionPlanUnitId || "",
+                    subUnitTitle: form.subUnitTitle || "",
+                    topicCovered:
+                      form.topicCovered ||
+                      form.subUnitTitle ||
+                      form.unit ||
+                      "Topic taught",
+                  });
+                }}
                 disabled={
                   !form.dateBs ||
-                  !form.lessonPlanItemId ||
-                  !form.topicCovered ||
+                  (!form.lessonPlanItemId && !form.sessionPlanUnitId) ||
                   !form.subjectId ||
                   !(teacherId || form.teacherId) ||
                   createMutation.isPending

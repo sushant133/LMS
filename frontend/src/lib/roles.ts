@@ -18,18 +18,26 @@ export {
   isSystemAdministrator
 };
 
-export const hasProtectedRouteAccess = (userRole: string, allowedRoles?: UserRole[]): boolean => {
+export const hasProtectedRouteAccess = (
+  userRole: string,
+  allowedRoles?: UserRole[],
+  secondaryRoles?: string[]
+): boolean => {
   if (!allowedRoles || allowedRoles.length === 0) {
     return true;
   }
 
   const normalizedRole = normalizeUserRole(userRole);
+  const effective = new Set<UserRole>([
+    normalizedRole,
+    ...(secondaryRoles ?? []).map((role) => normalizeUserRole(role))
+  ]);
 
-  if (allowedRoles.includes(normalizedRole)) {
+  if (allowedRoles.some((role) => effective.has(normalizeUserRole(role)))) {
     return true;
   }
 
-  if (normalizedRole === "COLLEGE_VIEWER" && allowedRoles.includes("COLLEGE_ADMIN")) {
+  if (effective.has("COLLEGE_VIEWER") && allowedRoles.includes("COLLEGE_ADMIN")) {
     return true;
   }
 
@@ -42,7 +50,10 @@ export const hasProtectedRouteAccess = (userRole: string, allowedRoles?: UserRol
       "LIBRARY_STAFF",
       "LABORATORY_STAFF",
       "ACCOUNTANT",
-      "COLLEGE_STAFF"
+      "COLLEGE_STAFF",
+      "PRINCIPAL",
+      "CASHIER",
+      "AUDITOR"
     ];
     return allowedRoles.some((role) => staffModuleRoles.includes(role));
   }

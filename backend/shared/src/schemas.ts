@@ -137,32 +137,75 @@ export const createSchoolSchema = schoolSchema.extend({
 
 export const updateSchoolSchema = schoolSchema;
 
+/** Student address — all parts optional so create form can leave them blank. */
+export const optionalStudentAddressSchema = z.object({
+  province: z.string().optional().or(z.literal("")).default(""),
+  district: z.string().optional().or(z.literal("")).default(""),
+  municipality: z.string().optional().or(z.literal("")).default(""),
+  ward: z.string().optional().or(z.literal("")).default(""),
+  streetAddress: z.string().optional().or(z.literal("")).default("")
+});
+
+/** BS date optional on student create (empty allowed). */
+const optionalBsDateSchema = z
+  .string()
+  .trim()
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => value ?? "")
+  .refine((value) => value === "" || /^\d{4}-\d{2}-\d{2}$/.test(value), {
+    message: "Date must be in BS format YYYY-MM-DD"
+  });
+
+/**
+ * Student create/update — all profile fields are optional at the form level.
+ * Backend fills safe defaults where the database still needs a value.
+ */
 export const studentSchema = z.object({
-  fullName: z.string().min(2),
-  email: portalLoginIdSchema,
-  phone: z.string().optional().or(z.literal("")),
+  fullName: z.string().trim().optional().or(z.literal("")).default(""),
+  email: z.preprocess(
+    (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
+    z
+      .string()
+      .optional()
+      .or(z.literal(""))
+      .transform((value) => value ?? "")
+      .refine((value) => value === "" || isValidPortalLoginId(value), {
+        message: "Enter a valid login ID"
+      })
+  ),
+  phone: z.string().optional().or(z.literal("")).default(""),
   password: optionalPortalPasswordSchema,
-  admissionNumber: z.string().min(1),
-  rollNumber: z.coerce.number().min(1),
+  admissionNumber: z.string().optional().or(z.literal("")).default(""),
+  rollNumber: z.coerce.number().min(0).optional().default(0),
   classId: optionalObjectIdSchema,
   sectionId: optionalObjectIdSchema,
   batchId: optionalObjectIdSchema,
   yearId: optionalObjectIdSchema,
-  admissionDateBs: bsDateSchema,
-  dateOfBirthBs: bsDateSchema,
-  gender: z.string().min(1),
+  admissionDateBs: optionalBsDateSchema.default(""),
+  dateOfBirthBs: optionalBsDateSchema.default(""),
+  gender: z.string().optional().or(z.literal("")).default(""),
   bloodGroup: z.enum(BLOOD_GROUPS).optional(),
   disabilityCategory: z.enum(DISABILITY_CATEGORIES).optional(),
   ethnicityCategory: z.enum(ETHNICITY_CATEGORIES).optional(),
-  address: addressSchema,
-  fatherName: z.string().min(2),
-  fatherPhone: z.string().min(7).optional().or(z.literal("")),
-  motherName: z.string().min(2),
-  motherPhone: z.string().min(7).optional().or(z.literal("")),
-  guardianName: z.string().min(2),
-  guardianPhone: z.string().min(7),
-  feesDueNpr: moneySchema,
-  remarks: z.string().optional(),
+  address: optionalStudentAddressSchema.default({
+    province: "",
+    district: "",
+    municipality: "",
+    ward: "",
+    streetAddress: ""
+  }),
+  fatherName: z.string().optional().or(z.literal("")).default(""),
+  fatherPhone: z.string().optional().or(z.literal("")).default(""),
+  motherName: z.string().optional().or(z.literal("")).default(""),
+  motherPhone: z.string().optional().or(z.literal("")).default(""),
+  guardianName: z.string().optional().or(z.literal("")).default(""),
+  guardianPhone: z.string().optional().or(z.literal("")).default(""),
+  /** Full fee amount when not on scholarship (also used as outstanding due). */
+  feesDueNpr: moneySchema.default(0),
+  /** When true, student is on scholarship — no fee amount; UI shows "Scholarship". */
+  hasScholarship: z.boolean().optional().default(false),
+  remarks: z.string().optional().or(z.literal("")).default(""),
   academicStatus: z.enum(STUDENT_ACADEMIC_STATUSES).optional().default("ACTIVE"),
   // Phase 0 foundation fields (optional for backward compatibility)
   photoUrl: z.string().optional().or(z.literal("")),
@@ -618,13 +661,37 @@ export const adminAccountUpdateSchema = adminAccountSchema.partial().extend({
   email: portalLoginIdSchema.optional()
 });
 
-/** Relative upload path or absolute URL (optional photo) */
-const optionalPhotoUrlSchema = z
-  .string()
-  .trim()
-  .max(500)
-  .optional()
-  .or(z.literal(""));
+/**
+ * Optional profile/staff photo URL.
+ * Allow relative /uploads/… paths or http(s) URLs only — block javascript:/data: and other schemes.
+ */
+const optionalPhotoUrlSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? "" : value),
+  z
+    .union([
+      z.literal(""),
+      z
+        .string()
+        .trim()
+        .max(500)
+        .refine(
+          (url) => {
+            if (url.startsWith("/uploads/")) {
+              // Relative tenant upload path — no scheme, no path traversal
+              return !url.includes("..") && !url.includes("\\") && !/[\u0000-\u001f]/.test(url);
+            }
+            try {
+              const parsed = new URL(url);
+              return parsed.protocol === "http:" || parsed.protocol === "https:";
+            } catch {
+              return false;
+            }
+          },
+          { message: "Photo URL must be an http(s) URL or a /uploads/ path" }
+        )
+    ])
+    .optional()
+);
 
 export const collegeAdministratorSchema = z.object({
   fullName: z.string().min(2),

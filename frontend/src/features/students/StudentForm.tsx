@@ -45,17 +45,17 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   email: "",
   phone: "",
   admissionNumber: "",
-  rollNumber: 1,
+  rollNumber: 0,
   classId: isCollege ? undefined : "",
   sectionId: isCollege ? undefined : "",
   batchId: isCollege ? "" : undefined,
   yearId: isCollege ? "" : undefined,
   admissionDateBs: "",
   dateOfBirthBs: "",
-  gender: "Male",
-  bloodGroup: "A+",
-  disabilityCategory: "None",
-  ethnicityCategory: "Other",
+  gender: "",
+  bloodGroup: undefined,
+  disabilityCategory: undefined,
+  ethnicityCategory: undefined,
   address: {
     province: "",
     district: "",
@@ -70,6 +70,7 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   guardianName: "",
   guardianPhone: "",
   feesDueNpr: 0,
+  hasScholarship: false,
   remarks: "",
   academicStatus: "ACTIVE",
 });
@@ -136,10 +137,17 @@ export const StudentForm = ({
       return;
     }
 
+    const hasScholarship = Boolean(form.hasScholarship);
     const parsed = studentSchema.safeParse({
       ...form,
-      email: form.email.trim(),
+      email: (form.email ?? "").trim(),
       password: password.trim() || undefined,
+      hasScholarship,
+      // Scholarship students do not carry a fee amount
+      feesDueNpr: hasScholarship ? 0 : Number(form.feesDueNpr) || 0,
+      bloodGroup: form.bloodGroup || undefined,
+      disabilityCategory: form.disabilityCategory || undefined,
+      ethnicityCategory: form.ethnicityCategory || undefined,
       documents,
       photoUrl:
         documents.find(
@@ -155,14 +163,21 @@ export const StudentForm = ({
       return;
     }
 
-    if (isCollege && (!parsed.data.batchId || !parsed.data.yearId)) {
-      toast.error("Batch and year are required");
-      return;
-    }
-
-    if (!isCollege && (!parsed.data.classId || !parsed.data.sectionId)) {
-      toast.error("Class and section are required");
-      return;
+    // Soft pairing only when one side is chosen
+    if (isCollege) {
+      const hasBatch = Boolean(parsed.data.batchId);
+      const hasYear = Boolean(parsed.data.yearId);
+      if (hasBatch !== hasYear) {
+        toast.error("Provide both batch and year, or leave both empty");
+        return;
+      }
+    } else {
+      const hasClass = Boolean(parsed.data.classId);
+      const hasSection = Boolean(parsed.data.sectionId);
+      if (hasClass !== hasSection) {
+        toast.error("Provide both class and section, or leave both empty");
+        return;
+      }
     }
 
     await onSubmit(parsed.data);
@@ -334,11 +349,12 @@ export const StudentForm = ({
         </FormField>
         <FormField label="Gender">
           <Select
-            value={form.gender}
+            value={form.gender || ""}
             onChange={(event) =>
               setForm((current) => ({ ...current, gender: event.target.value }))
             }
           >
+            <option value="">Select gender</option>
             <option value="Male">Male</option>
             <option value="Female">Female</option>
             <option value="Other">Other</option>
@@ -346,14 +362,16 @@ export const StudentForm = ({
         </FormField>
         <FormField label="Blood Group">
           <Select
-            value={form.bloodGroup ?? "A+"}
+            value={form.bloodGroup ?? ""}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
-                bloodGroup: event.target.value as StudentInput["bloodGroup"],
+                bloodGroup: (event.target.value ||
+                  undefined) as StudentInput["bloodGroup"],
               }))
             }
           >
+            <option value="">Select blood group</option>
             {BLOOD_GROUPS.map((group) => (
               <option key={group} value={group}>
                 {group}
@@ -363,15 +381,16 @@ export const StudentForm = ({
         </FormField>
         <FormField label="Disability Category">
           <Select
-            value={form.disabilityCategory ?? "None"}
+            value={form.disabilityCategory ?? ""}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
-                disabilityCategory: event.target
-                  .value as StudentInput["disabilityCategory"],
+                disabilityCategory: (event.target.value ||
+                  undefined) as StudentInput["disabilityCategory"],
               }))
             }
           >
+            <option value="">Select category</option>
             {DISABILITY_CATEGORIES.map((category) => (
               <option key={category} value={category}>
                 {category}
@@ -381,15 +400,16 @@ export const StudentForm = ({
         </FormField>
         <FormField label="Ethnicity">
           <Select
-            value={form.ethnicityCategory ?? "Other"}
+            value={form.ethnicityCategory ?? ""}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
-                ethnicityCategory: event.target
-                  .value as StudentInput["ethnicityCategory"],
+                ethnicityCategory: (event.target.value ||
+                  undefined) as StudentInput["ethnicityCategory"],
               }))
             }
           >
+            <option value="">Select ethnicity</option>
             {ETHNICITY_CATEGORIES.map((category) => (
               <option key={category} value={category}>
                 {category}
@@ -397,17 +417,43 @@ export const StudentForm = ({
             ))}
           </Select>
         </FormField>
-        <FormField label="Fees Due (NPR)">
-          <NumberInput
-            value={form.feesDueNpr}
-            onChange={(event) =>
+        <FormField label="Fee type">
+          <Select
+            value={form.hasScholarship ? "SCHOLARSHIP" : "TOTAL_FEE"}
+            onChange={(event) => {
+              const isScholarship = event.target.value === "SCHOLARSHIP";
               setForm((current) => ({
                 ...current,
-                feesDueNpr: event.target.valueAsNumber,
-              }))
-            }
-          />
+                hasScholarship: isScholarship,
+                feesDueNpr: isScholarship ? 0 : current.feesDueNpr,
+              }));
+            }}
+          >
+            <option value="TOTAL_FEE">Total Fee</option>
+            <option value="SCHOLARSHIP">Scholarship</option>
+          </Select>
         </FormField>
+        {form.hasScholarship ? (
+          <FormField label="Scholarship">
+            <Input value="Scholarship" readOnly className="bg-slate-50 font-medium text-emerald-800" />
+          </FormField>
+        ) : (
+          <FormField label="Total Fee (NPR)">
+            <NumberInput
+              min={0}
+              value={form.feesDueNpr}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  feesDueNpr: Number.isFinite(event.target.valueAsNumber)
+                    ? event.target.valueAsNumber
+                    : 0,
+                }))
+              }
+              placeholder="Enter full fee amount"
+            />
+          </FormField>
+        )}
         <FormField label="Academic Status">
           <Select
             value={form.academicStatus ?? "ACTIVE"}

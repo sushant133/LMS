@@ -18,6 +18,8 @@ import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
 import { AcademicProgress } from "../models/AcademicProgress.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
+import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
+import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { Attendance } from "../models/Attendance.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
@@ -171,6 +173,19 @@ export const applyTeacherScopeToFilter = async (req: Request, filter: Record<str
   }
 };
 
+/**
+ * Syllabus is subject-level: teachers see records for their assigned subjects
+ * (not only rows that name them as teacherId).
+ */
+export const applyTeacherSubjectScopeToFilter = async (
+  req: Request,
+  filter: Record<string, unknown>
+): Promise<void> => {
+  const scope = await getTeacherScope(req);
+  if (!scope) return;
+  filter.subjectId = { $in: scope.subjectIds };
+};
+
 export const assertTeacherOwnership = async (req: Request, teacherId: string): Promise<void> => {
   if (!req.user) throw new ApiError(401, "Authentication required");
   if (isAcademicAdmin(req.user.role)) return;
@@ -179,6 +194,20 @@ export const assertTeacherOwnership = async (req: Request, teacherId: string): P
   if (scope.teacherId !== teacherId) {
     throw new ApiError(403, "You can only access your own academic records");
   }
+};
+
+/** Teachers may access a syllabus if they teach the subject (or are the named teacher). */
+export const assertSyllabusAccess = async (
+  req: Request,
+  params: { teacherId?: string | null; subjectId: string }
+): Promise<void> => {
+  if (!req.user) throw new ApiError(401, "Authentication required");
+  if (isAcademicAdmin(req.user.role)) return;
+
+  const scope = await requireTeacherScope(req);
+  if (params.teacherId && params.teacherId === scope.teacherId) return;
+  if (scope.subjectIds.includes(params.subjectId)) return;
+  throw new ApiError(403, "You can only access syllabi for subjects assigned to you");
 };
 
 export const assertEditableStatus = (status: AcademicPlanStatus): void => {
@@ -211,7 +240,7 @@ export const sanitizeTeacherOwnedUpdate = <T extends Record<string, unknown>>(
 
 export const recordApproval = async (
   req: Request,
-  entityType: "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY",
+  entityType: "SYLLABUS" | "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY",
   entityId: string,
   action: "SUBMITTED" | "APPROVED" | "REJECTED" | "UNLOCKED",
   remarks?: string
@@ -790,6 +819,8 @@ export const serializeSessionPlan = async (planId: string) => {
       practicalRequired: unit.practicalRequired,
       internalAssessment: unit.internalAssessment,
       tentativeCompletionMonth: unit.tentativeCompletionMonth,
+      startDateBs: (unit as { startDateBs?: string }).startDateBs ?? "",
+      endDateBs: (unit as { endDateBs?: string }).endDateBs ?? "",
       status: unit.status,
       attachmentUrl: unit.attachmentUrl
     })),
@@ -800,6 +831,66 @@ export const serializeSessionPlan = async (planId: string) => {
     audit: formatAudit(plan),
     subject: plan.subjectId as unknown as { _id: string; name: string; code: string } | undefined,
     teacher: plan.teacherId as unknown as { _id: string; teacherCode: string; user?: { fullName: string } } | undefined
+  };
+};
+
+export const serializeSyllabus = async (syllabusId: string) => {
+  const plan = await AcademicSyllabus.findById(syllabusId)
+    .populate("subjectId", "name code")
+    .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
+    .lean();
+
+  if (!plan) return null;
+
+  const units = await AcademicSyllabusUnit.find({ syllabusId: plan._id }).sort({ unitNo: 1 }).lean();
+  const total = units.length;
+  const completed = units.filter((unit) => unit.status === "COMPLETED").length;
+
+  return {
+    _id: plan._id.toString(),
+    schoolId: plan.schoolId.toString(),
+    academicYearBs: plan.academicYearBs,
+    session: plan.session,
+    faculty: plan.faculty,
+    semesterBs: plan.semesterBs,
+    classId: plan.classId?.toString(),
+    sectionId: plan.sectionId?.toString(),
+    batchId: plan.batchId?.toString(),
+    yearId: plan.yearId?.toString(),
+    subjectId: plan.subjectId?._id?.toString() ?? plan.subjectId?.toString(),
+    teacherId: plan.teacherId
+      ? (plan.teacherId as { _id?: { toString(): string } })._id?.toString() ??
+        plan.teacherId.toString()
+      : undefined,
+    status: plan.status,
+    adminRemarks: plan.adminRemarks,
+    attachmentUrl: plan.attachmentUrl,
+    units: units.map((unit) => ({
+      _id: unit._id.toString(),
+      syllabusId: unit.syllabusId.toString(),
+      unitNo: unit.unitNo,
+      chapterName: unit.chapterName,
+      estimatedTeachingHours: unit.estimatedTeachingHours,
+      learningOutcomes: unit.learningOutcomes,
+      topicsCovered: unit.topicsCovered,
+      references: unit.references,
+      practicalRequired: unit.practicalRequired,
+      internalAssessment: unit.internalAssessment,
+      tentativeCompletionMonth: unit.tentativeCompletionMonth,
+      startDateBs: (unit as { startDateBs?: string }).startDateBs ?? "",
+      endDateBs: (unit as { endDateBs?: string }).endDateBs ?? "",
+      status: unit.status,
+      attachmentUrl: unit.attachmentUrl
+    })),
+    completedPercent: total > 0 ? Math.round((completed / total) * 100) : 0,
+    remainingPercent: total > 0 ? Math.round(((total - completed) / total) * 100) : 100,
+    completedUnits: completed,
+    remainingUnits: total - completed,
+    audit: formatAudit(plan),
+    subject: plan.subjectId as unknown as { _id: string; name: string; code: string } | undefined,
+    teacher: plan.teacherId
+      ? (plan.teacherId as unknown as { _id: string; teacherCode: string; user?: { fullName: string } })
+      : undefined
   };
 };
 
@@ -829,6 +920,7 @@ export const serializeLessonPlan = async (planId: string) => {
       lessonPlanId: item.lessonPlanId.toString(),
       serialNo: item.serialNo,
       sessionPlanUnitId: item.sessionPlanUnitId?.toString(),
+      subUnitTitle: (item as { subUnitTitle?: string }).subUnitTitle ?? "",
       subjectLabel: item.subjectLabel,
       plannedTopic: item.plannedTopic,
       description: item.description,
@@ -837,6 +929,8 @@ export const serializeLessonPlan = async (planId: string) => {
       teachingAids: item.teachingAids,
       assessmentMethod: item.assessmentMethod,
       deadline: item.deadline,
+      itemStartDateBs: (item as { itemStartDateBs?: string }).itemStartDateBs ?? "",
+      itemEndDateBs: (item as { itemEndDateBs?: string }).itemEndDateBs ?? "",
       estimatedClasses: item.estimatedClasses,
       completedClasses: item.completedClasses,
       completionStatus,
@@ -844,7 +938,14 @@ export const serializeLessonPlan = async (planId: string) => {
       completedPercent,
       remainingPercent,
       unit: unit
-        ? { _id: unit._id.toString(), unitNo: unit.unitNo, chapterName: unit.chapterName }
+        ? {
+            _id: unit._id.toString(),
+            unitNo: unit.unitNo,
+            chapterName: unit.chapterName,
+            topicsCovered: unit.topicsCovered,
+            startDateBs: (unit as { startDateBs?: string }).startDateBs ?? "",
+            endDateBs: (unit as { endDateBs?: string }).endDateBs ?? ""
+          }
         : undefined
     };
   });
@@ -858,6 +959,13 @@ export const serializeLessonPlan = async (planId: string) => {
   const delayedUnits = enrichedItems.filter((item) => item.completionStatus === "DELAYED").length;
   const completedPercent = calcCompletedPercent(totalClasses, completedClasses);
   const remainingPercent = calcRemainingPercent(totalClasses, completedClasses);
+
+  const planStart = (plan as { startDateBs?: string }).startDateBs ?? "";
+  const planEnd = (plan as { endDateBs?: string }).endDateBs ?? "";
+  const derivedMonth =
+    plan.month ||
+    (planStart ? getNepaliMonthNameFromBsDate(planStart) : "") ||
+    "";
 
   return {
     _id: plan._id.toString(),
@@ -873,7 +981,9 @@ export const serializeLessonPlan = async (planId: string) => {
     yearId: plan.yearId?.toString(),
     subjectId: plan.subjectId?._id?.toString() ?? plan.subjectId?.toString(),
     teacherId: plan.teacherId?._id?.toString() ?? plan.teacherId?.toString(),
-    month: plan.month,
+    month: derivedMonth,
+    startDateBs: planStart,
+    endDateBs: planEnd,
     monthlyDescription: (plan as { monthlyDescription?: string }).monthlyDescription ?? "",
     status: plan.status,
     preparedBy: plan.preparedBy,
@@ -910,6 +1020,7 @@ export const serializeLogBookEntry = async (entryId: string) => {
     lessonPlanId: entry.lessonPlanId?.toString(),
     lessonPlanItemId: entry.lessonPlanItemId?.toString(),
     sessionPlanUnitId: entry.sessionPlanUnitId?.toString(),
+    subUnitTitle: (entry as { subUnitTitle?: string }).subUnitTitle ?? "",
     academicYearBs: entry.academicYearBs,
     session: entry.session,
     faculty: entry.faculty,
@@ -1278,7 +1389,7 @@ export const matchesKeyword = (keyword: string | undefined, values: Array<string
 
 export const addAcademicComment = async (
   req: Request,
-  entityType: "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY",
+  entityType: "SYLLABUS" | "SESSION_PLAN" | "LESSON_PLAN" | "LOG_BOOK_ENTRY",
   entityId: string,
   comment: string
 ) => {

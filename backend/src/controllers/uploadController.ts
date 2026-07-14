@@ -1,19 +1,18 @@
 import type { Request, Response } from "express";
-import path from "path";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendSuccess } from "../utils/response.js";
 import { ApiError } from "../utils/apiError.js";
-import { getFilePublicPath, getUploadPublicUrl, inferAttachmentKind } from "../utils/upload.js";
+import { getUploadPublicUrl, inferAttachmentKind } from "../utils/upload.js";
 import { recordAudit } from "../utils/audit.js";
 
 export const uploadStudentPhotoHandler = asyncHandler(async (req: Request, res: Response) => {
-  const file = (req as any).file as Express.Multer.File | undefined;
+  const file = (req as { file?: Express.Multer.File }).file;
   if (!file) {
     throw new ApiError(400, "No photo file uploaded");
   }
 
-  const relativePath = path.relative(process.cwd(), file.path);
-  const publicUrl = getFilePublicPath(relativePath);
+  // Always derive public URL from UPLOAD_ROOT (not process.cwd()) so custom UPLOAD_DIR works
+  const publicUrl = getUploadPublicUrl(file.path);
 
   // Audit the upload
   if (req.params.studentId) {
@@ -33,21 +32,18 @@ export const uploadStudentPhotoHandler = asyncHandler(async (req: Request, res: 
 });
 
 export const uploadDocumentsHandler = asyncHandler(async (req: Request, res: Response) => {
-  const files = (req as any).files as Express.Multer.File[] | undefined;
+  const files = (req as { files?: Express.Multer.File[] }).files;
   if (!files || files.length === 0) {
     throw new ApiError(400, "No document files uploaded");
   }
 
-  const uploaded = files.map((file) => {
-    const relativePath = path.relative(process.cwd(), file.path);
-    return {
-      url: getFilePublicPath(relativePath),
-      originalName: file.originalname,
-      size: file.size,
-      mimeType: file.mimetype,
-      type: (Array.isArray(req.body.documentType) ? req.body.documentType[0] : req.body.documentType) || "OTHER"
-    };
-  });
+  const uploaded = files.map((file) => ({
+    url: getUploadPublicUrl(file.path),
+    originalName: file.originalname,
+    size: file.size,
+    mimeType: file.mimetype,
+    type: (Array.isArray(req.body.documentType) ? req.body.documentType[0] : req.body.documentType) || "OTHER"
+  }));
 
   await recordAudit(req, {
     action: "document.upload",

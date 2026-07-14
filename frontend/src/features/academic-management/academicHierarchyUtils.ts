@@ -725,14 +725,19 @@ export const buildYearIdToLevelKeyMap = (
 };
 
 export const groupByTeacher = <
-  T extends { teacherId: string; teacher?: { user?: { fullName?: string } } },
+  T extends {
+    teacherId?: string;
+    teacher?: { user?: { fullName?: string } };
+  },
 >(
   records: T[],
 ): Array<{ teacherId: string; teacherName: string; items: T[] }> => {
   const map = new Map<string, { teacherId: string; teacherName: string; items: T[] }>();
   for (const record of records) {
-    const teacherId = record.teacherId;
-    const teacherName = record.teacher?.user?.fullName ?? "Teacher";
+    const teacherId = record.teacherId || "shared";
+    const teacherName =
+      record.teacher?.user?.fullName ??
+      (record.teacherId ? "Teacher" : "Shared (by subject)");
     const group = map.get(teacherId) ?? {
       teacherId,
       teacherName,
@@ -747,7 +752,19 @@ export const groupByTeacher = <
 };
 
 export const matchSessionPlanKeyword = (
-  plan: AcademicSessionPlanRecord,
+  plan: AcademicSessionPlanRecord | {
+    subject?: { name?: string };
+    teacher?: { user?: { fullName?: string } };
+    status?: string;
+    academicYearBs?: string;
+    faculty?: string;
+    units: Array<{
+      unitNo: number;
+      chapterName: string;
+      topicsCovered?: string;
+      references?: string;
+    }>;
+  },
   keyword: string,
 ): boolean => {
   const kw = keyword.toLowerCase().trim();

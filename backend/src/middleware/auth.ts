@@ -2,9 +2,11 @@ import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { isCollegeViewer, normalizeUserRole, type UserRole } from "@phit-erp/shared";
 import { env } from "../config/env.js";
+import { User } from "../models/User.js";
 import { enforceInstitutionReadOnly } from "./readOnlyGuard.js";
 import { enforceModuleAccess } from "./moduleAccessGuard.js";
 import { ApiError } from "../utils/apiError.js";
+import { getUserSecondaryRoles } from "../utils/moduleAccessService.js";
 
 interface JwtPayload {
   userId: string;
@@ -13,6 +15,11 @@ interface JwtPayload {
   schoolId?: string | null;
 }
 
+/**
+ * Cookie JWT auth.
+ * Verifies token, then reloads isActive/role/schoolId from DB so deactivation
+ * and role demotion take effect immediately (not only after token expiry).
+ */
 export const protect = (req: Request, _res: Response, next: NextFunction): void => {
   const token = req.cookies?.[env.COOKIE_NAME] as string | undefined;
 
@@ -20,19 +27,41 @@ export const protect = (req: Request, _res: Response, next: NextFunction): void 
     return next(new ApiError(401, "Authentication required"));
   }
 
-  try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    req.user = { ...decoded, role: normalizeUserRole(decoded.role) };
-    // Institution viewer read-only, then per-user module access on writes
-    return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
-      if (err) return next(err);
-      void enforceModuleAccess(req, _res, next);
-    });
-  } catch {
-    next(new ApiError(401, "Invalid or expired session"));
-  }
+  void (async () => {
+    try {
+      const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
+
+      const dbUser = await User.findById(decoded.userId)
+        .select("isActive role email schoolId")
+        .lean();
+
+      if (!dbUser || !dbUser.isActive) {
+        return next(new ApiError(401, "Invalid or expired session"));
+      }
+
+      // Prefer live DB role/school over JWT claims so admin changes apply immediately
+      req.user = {
+        userId: decoded.userId,
+        role: normalizeUserRole(dbUser.role as string),
+        email: dbUser.email || decoded.email,
+        schoolId: dbUser.schoolId ? dbUser.schoolId.toString() : null
+      };
+
+      return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
+        if (err) return next(err);
+        void enforceModuleAccess(req, _res, next);
+      });
+    } catch {
+      return next(new ApiError(401, "Invalid or expired session"));
+    }
+  })();
 };
 
+/**
+ * Role gate supporting multi-responsibility accounts.
+ * User matches if primary role OR any secondaryRoles is allowed.
+ * SUPER_ADMIN always passes. COLLEGE_VIEWER may GET as COLLEGE_ADMIN.
+ */
 export const authorize =
   (...roles: UserRole[]) =>
   (req: Request, _res: Response, next: NextFunction): void => {
@@ -54,11 +83,23 @@ export const authorize =
       }
     }
 
-    if (!roles.includes(normalizedRole)) {
-      return next(new ApiError(403, "You do not have permission to perform this action"));
+    if (roles.includes(normalizedRole)) {
+      return next();
     }
 
-    next();
+    // Multi-role: check secondary responsibilities asynchronously
+    void (async () => {
+      try {
+        const secondary = await getUserSecondaryRoles(req.user!.userId);
+        const hasSecondary = secondary.some((role) => roles.includes(normalizeUserRole(role)));
+        if (hasSecondary) {
+          return next();
+        }
+        return next(new ApiError(403, "You do not have permission to perform this action"));
+      } catch (error) {
+        return next(error);
+      }
+    })();
   };
 
 /** Full Administrator and System Administrator operational write access. */

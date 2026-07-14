@@ -15,10 +15,9 @@ const auditSchema = new Schema(
   { _id: false }
 );
 
-const lessonPlanSchema = new Schema(
+const academicSyllabusSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
-    sessionPlanId: { type: Schema.Types.ObjectId, ref: "AcademicSessionPlan" },
     academicYearBs: { type: String, required: true, index: true },
     session: { type: String, required: true },
     faculty: { type: String },
@@ -28,37 +27,31 @@ const lessonPlanSchema = new Schema(
     batchId: { type: Schema.Types.ObjectId, ref: "Batch" },
     yearId: { type: Schema.Types.ObjectId, ref: "Year" },
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject", required: true, index: true },
-    teacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true, index: true },
-    /** Legacy monthly label; new plans use startDateBs/endDateBs. */
-    month: { type: String, default: "", index: true },
-    startDateBs: { type: String, default: "", index: true },
-    endDateBs: { type: String, default: "" },
-    monthlyDescription: { type: String, default: "" },
+    /** Optional — subject syllabus shared by assigned teachers. */
+    teacherId: { type: Schema.Types.ObjectId, ref: "Teacher", index: true },
     status: {
       type: String,
       enum: ["DRAFT", "SUBMITTED", "PENDING_APPROVAL", "APPROVED", "REJECTED"],
       default: "DRAFT",
       index: true
     },
-    preparedBy: { type: String },
-    checkedBy: { type: String },
-    approvedByName: { type: String },
-    approvalDate: { type: String },
     adminRemarks: { type: String },
+    attachmentUrl: { type: String },
     audit: { type: auditSchema, required: true },
     isDeleted: { type: Boolean, default: false, index: true }
   },
   { timestamps: true }
 );
 
-lessonPlanSchema.index(
-  { schoolId: 1, academicYearBs: 1, subjectId: 1, teacherId: 1, startDateBs: 1, classId: 1, sectionId: 1 },
-  { unique: true, partialFilterExpression: { isDeleted: false, classId: { $exists: true }, startDateBs: { $gt: "" } } }
+// One active syllabus per subject + year level (college) or class (school)
+academicSyllabusSchema.index(
+  { schoolId: 1, academicYearBs: 1, subjectId: 1, yearId: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false, yearId: { $exists: true, $ne: null } } }
 );
-lessonPlanSchema.index(
-  { schoolId: 1, academicYearBs: 1, subjectId: 1, teacherId: 1, startDateBs: 1, batchId: 1, yearId: 1 },
-  { unique: true, partialFilterExpression: { isDeleted: false, batchId: { $exists: true }, startDateBs: { $gt: "" } } }
+academicSyllabusSchema.index(
+  { schoolId: 1, academicYearBs: 1, subjectId: 1, classId: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false, classId: { $exists: true, $ne: null } } }
 );
 
-export type AcademicLessonPlanDocument = InferSchemaType<typeof lessonPlanSchema>;
-export const AcademicLessonPlan = mongoose.model("AcademicLessonPlan", lessonPlanSchema);
+export type AcademicSyllabusDocument = InferSchemaType<typeof academicSyllabusSchema>;
+export const AcademicSyllabus = mongoose.model("AcademicSyllabus", academicSyllabusSchema);

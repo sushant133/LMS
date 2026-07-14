@@ -86,10 +86,22 @@ export const sanitizeStaffFormNumbers = <
 
 export const staffPhotoSrc = (photoUrl?: string | null): string | undefined => {
   if (!photoUrl) return undefined;
-  if (photoUrl.startsWith("http://") || photoUrl.startsWith("https://") || photoUrl.startsWith("data:")) {
-    return photoUrl;
+  const trimmed = photoUrl.trim();
+  // Block javascript:, data:, and other non-image schemes (stored XSS / phishing)
+  if (/^(javascript|data|vbscript|file):/i.test(trimmed)) {
+    return undefined;
   }
-  return photoUrl.startsWith("/") ? photoUrl : `/${photoUrl}`;
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("/uploads/")) {
+    return trimmed;
+  }
+  // Relative upload paths only
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+    return trimmed;
+  }
+  return `/${trimmed}`;
 };
 
 export const emailStatusStyle: Record<string, string> = {

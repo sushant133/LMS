@@ -74,13 +74,18 @@ export const getDailyAttendanceConfig = async (schoolId: string): Promise<DailyA
   };
 };
 
+/**
+ * Resolve holiday for attendance using the Academic Calendar
+ * (date-range events + automatic Saturday public holidays + legacy settings).
+ */
 export const getHolidayForDate = async (
   schoolId: string,
   dateBs: string
 ): Promise<{ title: string; dateBs: string } | null> => {
-  const settings = await Setting.findOne({ schoolId }).select("holidays").lean();
-  const holiday = settings?.holidays?.find((item) => item.dateBs === dateBs);
-  return holiday ?? null;
+  const { resolveCalendarHolidayForDate } = await import("./academicCalendarService.js");
+  const holiday = await resolveCalendarHolidayForDate(schoolId, dateBs);
+  if (!holiday) return null;
+  return { title: holiday.title, dateBs: holiday.dateBs };
 };
 
 interface AvailabilityParams {

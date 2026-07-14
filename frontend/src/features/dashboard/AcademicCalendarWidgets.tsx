@@ -5,6 +5,7 @@ import {
   GraduationCap,
   PartyPopper,
   ScrollText,
+  Sun,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -49,6 +50,9 @@ const WidgetCard = ({
   </Link>
 );
 
+const formatRangeMeta = (start: string, end: string): string =>
+  start === end ? start : `${start} → ${end}`;
+
 export const AcademicCalendarWidgets = () => {
   const dashboardQuery = useQuery({
     queryKey: ["academic-calendar", "dashboard"],
@@ -60,8 +64,8 @@ export const AcademicCalendarWidgets = () => {
 
   if (dashboardQuery.isPending) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, index) => (
           <div
             key={index}
             className="h-36 animate-pulse rounded-2xl border border-slate-200 bg-white"
@@ -74,22 +78,60 @@ export const AcademicCalendarWidgets = () => {
   const data = dashboardQuery.data;
   if (!data) return null;
 
+  const todayItems = (data.todayEvents ?? []).map((event) => ({
+    label: event.name,
+    meta: getEventTypeLabel(event.eventType),
+  }));
+
+  const activeMultiDay = (data.activeMultiDayEvents ?? []).map((event) => ({
+    label: event.name,
+    meta: formatRangeMeta(
+      event.startDateBs || event.dateBs,
+      event.endDateBs || event.dateBs,
+    ),
+  }));
+
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
       <WidgetCard
-        title="Today's BS Date"
+        title="Today"
         icon={CalendarDays}
         value={data.todayBs}
-        items={[{ label: data.todayAd, meta: "AD equivalent" }]}
+        items={
+          todayItems.length > 0
+            ? todayItems
+            : [{ label: data.todayAd, meta: "AD equivalent" }]
+        }
+      />
+      <WidgetCard
+        title="Active Events"
+        icon={Sun}
+        value={`${(data.activeMultiDayEvents ?? []).length || (data.todayEvents ?? []).filter((e) => e.totalDays > 1).length}`}
+        items={
+          activeMultiDay.length > 0
+            ? activeMultiDay
+            : (data.todayEvents ?? [])
+                .filter((event) => !event.isSystemGenerated)
+                .slice(0, 3)
+                .map((event) => ({
+                  label: event.name,
+                  meta: getEventTypeLabel(event.eventType),
+                }))
+        }
       />
       <WidgetCard
         title="Upcoming Holidays"
         icon={PartyPopper}
-        value={`${data.upcomingHolidays.length}`}
-        items={data.upcomingHolidays.map((event) => ({
-          label: event.name,
-          meta: event.dateBs,
-        }))}
+        value={`${(data.upcomingHolidays ?? []).filter((e) => !e.isSystemGenerated).length}`}
+        items={(data.upcomingHolidays ?? [])
+          .filter((event) => !event.isSystemGenerated)
+          .map((event) => ({
+            label: event.name,
+            meta: formatRangeMeta(
+              event.startDateBs || event.dateBs,
+              event.endDateBs || event.dateBs,
+            ),
+          }))}
       />
       <WidgetCard
         title="Upcoming Academic Events"
@@ -97,7 +139,10 @@ export const AcademicCalendarWidgets = () => {
         value={`${data.upcomingAcademicEvents.length}`}
         items={data.upcomingAcademicEvents.map((event) => ({
           label: event.name,
-          meta: event.dateBs,
+          meta: formatRangeMeta(
+            event.startDateBs || event.dateBs,
+            event.endDateBs || event.dateBs,
+          ),
         }))}
       />
       <WidgetCard
@@ -106,7 +151,10 @@ export const AcademicCalendarWidgets = () => {
         value={`${data.upcomingExaminations.length}`}
         items={data.upcomingExaminations.map((event) => ({
           label: event.name,
-          meta: `${event.dateBs} · ${getEventTypeLabel(event.eventType)}`,
+          meta: `${formatRangeMeta(
+            event.startDateBs || event.dateBs,
+            event.endDateBs || event.dateBs,
+          )} · ${getEventTypeLabel(event.eventType)}`,
         }))}
       />
     </div>
