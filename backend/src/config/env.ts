@@ -72,14 +72,15 @@ const envSchema = z.object({
     })
     .pipe(z.number().int().min(0)),
   /**
-   * Absolute or relative path for uploaded files (photos, documents, certificates).
+   * Absolute or relative path for uploaded files (PDFs, docs, videos, certificates).
    * Defaults to <cwd>/uploads in development.
-   * When Cloudinary is configured, files are uploaded there and local disk is only a temp staging area.
+   * Images go to Cloudinary when configured; non-image files always stay here.
    */
   UPLOAD_DIR: z.string().optional(),
   /**
-   * Cloudinary (recommended for production images / profile photos).
-   * When all three are set, image (and other) uploads go to Cloudinary CDN.
+   * Cloudinary — **images only** (profile photos, staff photos, banners, photo attachments).
+   * When all three are set, image uploads go to Cloudinary CDN.
+   * PDFs, Word docs, and videos are never sent to Cloudinary (local UPLOAD_DIR only).
    */
   CLOUDINARY_CLOUD_NAME: z
     .string()

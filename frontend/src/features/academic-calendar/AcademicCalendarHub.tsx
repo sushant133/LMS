@@ -343,6 +343,7 @@ export const AcademicCalendarHub = () => {
                   value={formatMonthKey(month.year, month.month)}
                 >
                   {month.name}
+                  {month.adRangeLabel ? ` (${month.adRangeLabel})` : ""}
                 </option>
               ))}
             </Select>
@@ -399,16 +400,18 @@ export const AcademicCalendarHub = () => {
 
       <div id="academic-calendar-print" className="space-y-6">
         {eventsQuery.isPending ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 12 }).map((_, index) => (
               <div
                 key={index}
-                className="h-52 animate-pulse rounded-2xl border border-slate-200 bg-white"
-              />
+                className="h-80 animate-pulse overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-b from-slate-50 to-white shadow-sm"
+              >
+                <div className="h-14 bg-gradient-to-r from-slate-100 to-slate-50" />
+              </div>
             ))}
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {months.map((month) => (
               <AcademicCalendarMonth
                 key={`${month.year}-${month.month}`}
@@ -424,14 +427,17 @@ export const AcademicCalendarHub = () => {
           </div>
         )}
 
-        <div className="flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
-          <span className="w-full text-sm font-medium text-slate-800 sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3.5 text-xs text-slate-600 shadow-[0_1px_3px_rgba(15,23,42,0.04)] backdrop-blur-sm">
+          <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             Legend
           </span>
           {legendGroups.map((group) => (
-            <span key={group.key} className="inline-flex items-center gap-1.5">
+            <span
+              key={group.key}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-100 bg-slate-50/80 px-2.5 py-1 font-medium text-slate-700"
+            >
               <span
-                className="h-3 w-3 rounded-full"
+                className="h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-white"
                 style={{ backgroundColor: group.color }}
               />
               {group.label}

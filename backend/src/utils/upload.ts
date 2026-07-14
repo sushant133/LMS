@@ -178,20 +178,28 @@ export function inferAttachmentKind(mimeType: string): "FILE" | "IMAGE" | "PDF" 
 }
 
 export interface FinalizedUpload {
-  /** Absolute HTTPS Cloudinary URL, or local /uploads/... path when Cloudinary is off. */
+  /**
+   * Images: HTTPS Cloudinary URL when Cloudinary is enabled.
+   * PDFs / docs / videos: always local `/uploads/...` path.
+   */
   url: string;
   size: number;
   originalName: string;
   mimeType: string;
   kind: "FILE" | "IMAGE" | "PDF" | "VIDEO";
-  /** Cloudinary public_id when stored on CDN. */
+  /** Cloudinary public_id when stored on CDN (images only). */
   publicId?: string;
   width?: number;
   height?: number;
 }
 
+/** Cloudinary is used for images only (profile photos, banners, photo attachments). */
+const isImageMime = (mimeType: string): boolean => mimeType.startsWith("image/");
+
 /**
- * Finalize a multer disk file: push to Cloudinary when configured, else local /uploads URL.
+ * Finalize a multer disk file:
+ * - Images → Cloudinary (when configured)
+ * - PDFs, Office docs, videos → local disk under UPLOAD_DIR
  * entityParts e.g. ["students", "photos"] → folder phit-erp/{schoolId}/students/photos
  */
 export async function finalizeUploadedFile(
@@ -201,12 +209,14 @@ export async function finalizeUploadedFile(
 ): Promise<FinalizedUpload> {
   const kind = inferAttachmentKind(file.mimetype);
 
-  if (isCloudinaryEnabled()) {
+  // Cloudinary: images only — PDFs and other files stay on the server
+  if (isCloudinaryEnabled() && isImageMime(file.mimetype)) {
     const schoolId = tenantObjectId(req).toString();
     const folder = buildCloudinaryFolder(schoolId, ...entityParts);
     const uploaded = await uploadLocalFileToCloudinary(file.path, {
       folder,
-      mimeType: file.mimetype
+      mimeType: file.mimetype,
+      resourceType: "image"
     });
 
     return {

@@ -134,12 +134,12 @@ const shutdown = async (signal: string): Promise<void> => {
 const startServer = async (): Promise<void> => {
   await connectDatabase();
 
-  // CDN for profile photos / all uploads when CLOUDINARY_* env vars are set
+  // CDN for images only (profile/staff/banner photos) when CLOUDINARY_* env vars are set
   if (isCloudinaryEnabled()) {
     ensureCloudinaryConfigured();
   } else {
     logger.warn(
-      "Cloudinary is not configured — uploads will be stored on local disk (UPLOAD_DIR). Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET to enable CDN."
+      "Cloudinary is not configured — image uploads will be stored on local disk (UPLOAD_DIR). Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET to enable image CDN."
     );
   }
 
@@ -167,7 +167,7 @@ const startServer = async (): Promise<void> => {
     );
     logger.info(`Uploads directory: ${uploadsDir}`);
     logger.info(
-      `Media storage: ${isCloudinaryEnabled() ? `Cloudinary (${env.CLOUDINARY_CLOUD_NAME})` : "local disk"}`
+      `Image storage: ${isCloudinaryEnabled() ? `Cloudinary (${env.CLOUDINARY_CLOUD_NAME})` : "local disk"} · PDFs/docs: local disk`
     );
     logger.debug(`CORS origins: ${configuredCorsOrigins().join(", ")}`);
     logger.debug(`Trust proxy hops: ${env.TRUST_PROXY}`);

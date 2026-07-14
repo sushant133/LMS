@@ -88,7 +88,7 @@ const defaultBook: LibraryBookInput = {
   yearLevel: "1st Year",
   totalCopies: 1,
   shelfLocation: "",
-  copies: [{ bookCode: "" }],
+  copies: [{ bookCode: "", priceNpr: 0 }],
 };
 
 const defaultIssue: LibraryIssueInput = {

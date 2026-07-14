@@ -119,15 +119,124 @@ export const buildMonthGrid = (
 export const formatMonthKey = (year: number, month: number): string =>
   `${year}-${String(month).padStart(2, "0")}`;
 
+const AD_MONTH_ABBREV = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/** English short month name (1–12). */
+export const getAdMonthAbbrev = (adMonth: number): string =>
+  AD_MONTH_ABBREV[adMonth - 1] ?? "";
+
+/**
+ * AD month span for a BS month, e.g. Baisakh → "Apr/May".
+ * Uses first and last day of the BS month.
+ */
+export const getBsMonthAdRangeLabel = (year: number, month: number): string => {
+  try {
+    const daysInMonth = getDaysInBsMonth(year, month);
+    const first = bsToAd(year, month, 1);
+    const last = bsToAd(year, month, daysInMonth);
+    const a = getAdMonthAbbrev(first.month);
+    const b = getAdMonthAbbrev(last.month);
+    if (!a || !b) return "";
+    return a === b ? a : `${a}/${b}`;
+  } catch {
+    return "";
+  }
+};
+
+/** AD calendar day for a BS date (day of month only), for cell corner display. */
+export const getAdDayParts = (
+  dateBs: string,
+): { day: number; month: number; year: number; label: string } | null => {
+  const [year, month, day] = dateBs.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  try {
+    const ad = bsToAd(year, month, day);
+    return {
+      day: ad.day,
+      month: ad.month,
+      year: ad.year,
+      /** Small corner label: AD day number only (no month) */
+      label: String(ad.day),
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Unique events that touch any day of a given BS month (for the list under each month).
+ * Sorted by start date, then name.
+ */
+export const listEventsForBsMonth = (
+  eventsByDate: Map<string, AcademicCalendarEventRecord[]>,
+  year: number,
+  month: number,
+): AcademicCalendarEventRecord[] => {
+  const prefix = formatMonthKey(year, month);
+  const byId = new Map<string, AcademicCalendarEventRecord>();
+
+  eventsByDate.forEach((dayEvents, dateBs) => {
+    if (!dateBs.startsWith(prefix)) return;
+    dayEvents.forEach((event) => {
+      if (!byId.has(event._id)) {
+        byId.set(event._id, event);
+      }
+    });
+  });
+
+  return [...byId.values()].sort((a, b) => {
+    const sa = a.startDateBs || a.dateBs;
+    const sb = b.startDateBs || b.dateBs;
+    if (sa !== sb) return sa.localeCompare(sb);
+    return a.name.localeCompare(b.name);
+  });
+};
+
+/** Saturday BS dates in a month that have no stored event (auto public holidays). */
+export const listAutoSaturdayDatesInMonth = (
+  year: number,
+  month: number,
+  eventsByDate: Map<string, AcademicCalendarEventRecord[]>,
+): string[] => {
+  const daysInMonth = getDaysInBsMonth(year, month);
+  const saturdays: string[] = [];
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dateBs = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (!isSaturdayBs(dateBs)) continue;
+    const dayEvents = eventsByDate.get(dateBs) ?? [];
+    // Already covered by a holiday/event entry
+    if (dayEvents.some((e) => e.isHoliday || e.isSystemGenerated)) continue;
+    saturdays.push(dateBs);
+  }
+  return saturdays;
+};
+
 export const buildAcademicYearMonths = (
   academicYearBs: string,
-): Array<{ year: number; month: number; name: string }> => {
+): Array<{ year: number; month: number; name: string; adRangeLabel: string }> => {
   const startYear = parseAcademicYearStart(academicYearBs);
-  return BS_MONTH_NAMES.map((name, index) => ({
-    year: startYear,
-    month: index + 1,
-    name,
-  }));
+  return BS_MONTH_NAMES.map((name, index) => {
+    const month = index + 1;
+    return {
+      year: startYear,
+      month,
+      name,
+      adRangeLabel: getBsMonthAdRangeLabel(startYear, month),
+    };
+  });
 };
 
 export const inferDefaultAcademicYear = (): string => {
@@ -201,20 +310,22 @@ export const getDateCellClass = (
   if (!event) {
     if (isSaturday) {
       return isToday
-        ? "ring-2 ring-brand-500 bg-red-100 text-red-800"
-        : "bg-red-50 text-red-700 hover:bg-red-100";
+        ? "bg-gradient-to-b from-rose-100 to-rose-50 text-rose-800 ring-2 ring-brand-500/70"
+        : "bg-gradient-to-b from-rose-50 to-rose-50/70 text-rose-700 hover:from-rose-100 hover:to-rose-50";
     }
-    return isToday ? "ring-2 ring-brand-500 bg-brand-50" : "hover:bg-slate-50";
+    return isToday
+      ? "bg-gradient-to-b from-brand-100 to-brand-50 text-brand-900 ring-2 ring-brand-500/70"
+      : "";
   }
   if (event.isWorkingDayOverride) {
     return isToday
-      ? "ring-2 ring-brand-500 bg-emerald-100 text-emerald-900"
-      : "bg-emerald-50 text-emerald-800 hover:bg-emerald-100";
+      ? "bg-gradient-to-b from-emerald-100 to-emerald-50 text-emerald-900 ring-2 ring-brand-500/70"
+      : "bg-gradient-to-b from-emerald-50 to-white text-emerald-800 hover:from-emerald-100";
   }
   if (event.isHoliday) {
-    return "bg-red-100 text-red-800 hover:bg-red-200";
+    return "bg-gradient-to-b from-rose-100 to-rose-50 text-rose-800 hover:from-rose-200 hover:to-rose-100";
   }
-  return isToday ? "ring-2 ring-brand-500" : "hover:opacity-90";
+  return isToday ? "ring-2 ring-brand-500/70" : "hover:brightness-[0.98]";
 };
 
 export const getDateCellStyle = (

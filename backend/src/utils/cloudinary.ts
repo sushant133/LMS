@@ -33,11 +33,11 @@ export interface CloudinaryUploadResult {
   resourceType: string;
 }
 
+/** Cloudinary is images-only in this app — never upload PDF/video/raw via this helper. */
 const pickResourceType = (mimeType: string): CloudinaryResourceType => {
   if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  // PDFs and office docs — auto lets Cloudinary store correctly
-  return "auto";
+  // Defensive: callers should only pass images; default to image resource type
+  return "image";
 };
 
 /**
