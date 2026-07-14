@@ -306,13 +306,15 @@ const NotificationsPanel = ({
             <Bell className="h-5 w-5 text-brand-700" />
             Latest Notifications
           </CardTitle>
-          <p className="mt-1 text-sm text-slate-500">Unread alerts for attendance, fees, assignments, and notices.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Alerts clear from your inbox after you open them.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {unreadCount > 0 ? <Badge className="bg-amber-100 text-amber-800">{unreadCount} unread</Badge> : null}
           {unreadCount > 0 ? (
             <Button size="sm" variant="secondary" onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
-              Mark all read
+              Clear all
             </Button>
           ) : null}
         </div>
@@ -320,7 +322,7 @@ const NotificationsPanel = ({
       <CardContent className="space-y-3">
         {unreadNotifications.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
-            You&apos;re all caught up. No unread notifications.
+            You&apos;re all caught up. No notifications.
           </div>
         ) : (
           unreadNotifications.map((notification) => (

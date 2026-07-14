@@ -61,9 +61,6 @@ const typeBadgeClass = (type: string): string => {
 };
 
 export const NotificationCenter = () => {
-  const [statusFilter, setStatusFilter] = useState<"all" | "unread" | "read">(
-    "all",
-  );
   const [typeFilter, setTypeFilter] = useState("");
 
   const notificationsQuery = useQuery({
@@ -80,22 +77,24 @@ export const NotificationCenter = () => {
 
   const filtered = useMemo(() => {
     return notifications.filter((item) => {
-      if (statusFilter === "unread" && item.read) return false;
-      if (statusFilter === "read" && !item.read) return false;
       if (typeFilter && item.type !== typeFilter) return false;
       return true;
     });
-  }, [notifications, statusFilter, typeFilter]);
+  }, [notifications, typeFilter]);
 
   const unreadCount = notifications.filter((item) => !item.read).length;
+  const totalCount = notifications.length;
 
-  const markRead = useMutation({
+  const clearOne = useMutation({
     mutationFn: (id: string) => unwrap(api.put(`/notifications/${id}/read`)),
     onMutate: (id) => {
       applyNotificationReadLocally(id);
     },
+    onSuccess: () => {
+      toast.success("Notification cleared");
+    },
     onError: async () => {
-      toast.error("Could not mark notification as read");
+      toast.error("Could not clear notification");
       await invalidateNotificationQueries();
     },
     onSettled: async () => {
@@ -103,16 +102,16 @@ export const NotificationCenter = () => {
     },
   });
 
-  const markAllRead = useMutation({
+  const clearAll = useMutation({
     mutationFn: () => unwrap(api.put("/notifications/read-all")),
     onMutate: () => {
       applyNotificationReadLocally();
     },
     onSuccess: () => {
-      toast.success("All notifications marked read");
+      toast.success("All notifications cleared");
     },
     onError: async () => {
-      toast.error("Could not mark all as read");
+      toast.error("Could not clear notifications");
       await invalidateNotificationQueries();
     },
     onSettled: async () => {
@@ -124,40 +123,27 @@ export const NotificationCenter = () => {
     <PageContent className="space-y-6">
       <PageHeader
         title="Notifications"
-        description="Your personal inbox for academic, fee, library, exam, and system alerts. Badge count stays in sync with this list."
+        description="Your personal inbox. Opening or clearing a notification removes it from the list and the badge."
         action={
-          unreadCount > 0 ? (
+          totalCount > 0 ? (
             <Button
               variant="secondary"
-              onClick={() => markAllRead.mutate()}
-              disabled={markAllRead.isPending}
+              onClick={() => clearAll.mutate()}
+              disabled={clearAll.isPending}
             >
               <CheckCheck className="mr-2 h-4 w-4" />
-              Mark all read ({unreadCount})
+              Clear all ({totalCount})
             </Button>
           ) : null
         }
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              { id: "all", label: "All" },
-              { id: "unread", label: `Unread (${unreadCount})` },
-              { id: "read", label: "Read" },
-            ] as const
-          ).map((tab) => (
-            <Button
-              key={tab.id}
-              size="sm"
-              variant={statusFilter === tab.id ? "default" : "outline"}
-              onClick={() => setStatusFilter(tab.id)}
-            >
-              {tab.label}
-            </Button>
-          ))}
-        </div>
+        {unreadCount > 0 ? (
+          <Badge className="bg-brand-600 text-white">
+            {unreadCount} unread
+          </Badge>
+        ) : null}
         <Select
           className="w-full max-w-xs sm:ml-auto"
           value={typeFilter}
@@ -182,9 +168,10 @@ export const NotificationCenter = () => {
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-sm text-slate-500">
               <Bell className="h-8 w-8 text-slate-300" />
-              <p>No notifications yet.</p>
+              <p>No notifications</p>
               <p className="text-xs">
                 Alerts for plans, fees, library, and exams will appear here.
+                They clear automatically after you read them.
               </p>
             </CardContent>
           </Card>
@@ -199,11 +186,14 @@ export const NotificationCenter = () => {
             <Card
               key={notification._id}
               className={cn(
-                "min-w-0 transition",
-                notification.read
-                  ? "border-slate-200 opacity-80"
-                  : "border-brand-200 bg-brand-50/30",
+                "min-w-0 cursor-pointer transition hover:border-brand-300",
+                "border-brand-200 bg-brand-50/30",
               )}
+              onClick={() => {
+                if (!clearOne.isPending) {
+                  clearOne.mutate(notification._id);
+                }
+              }}
             >
               <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
@@ -225,11 +215,7 @@ export const NotificationCenter = () => {
                         SMS {notification.smsStatus}
                       </Badge>
                     ) : null}
-                    {!notification.read ? (
-                      <Badge className="bg-brand-600 text-white">New</Badge>
-                    ) : (
-                      <Badge className="bg-slate-100 text-slate-600">Read</Badge>
-                    )}
+                    <Badge className="bg-brand-600 text-white">New</Badge>
                   </div>
                   <p className="mt-1 text-sm text-slate-600">
                     {notification.message}
@@ -240,17 +226,18 @@ export const NotificationCenter = () => {
                     </p>
                   ) : null}
                 </div>
-                {!notification.read ? (
-                  <Button
-                    className="shrink-0 self-start"
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => markRead.mutate(notification._id)}
-                    disabled={markRead.isPending}
-                  >
-                    Mark read
-                  </Button>
-                ) : null}
+                <Button
+                  className="shrink-0 self-start"
+                  size="sm"
+                  variant="secondary"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    clearOne.mutate(notification._id);
+                  }}
+                  disabled={clearOne.isPending}
+                >
+                  Clear
+                </Button>
               </CardContent>
             </Card>
           ))

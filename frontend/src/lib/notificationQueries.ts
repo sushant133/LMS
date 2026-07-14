@@ -9,23 +9,19 @@ const patchDashboardNotifications = (
     return old;
   }
 
+  // Cleared notifications are removed entirely (no read history)
+  const nextNotifications = notificationId
+    ? (old.notifications ?? []).filter((item) => item._id !== notificationId)
+    : [];
+
   const nextUnread = notificationId
     ? Math.max(0, (old.unreadNotificationCount ?? 0) - 1)
     : 0;
 
-  const nextNotifications = notificationId
-    ? (old.notifications ?? []).map((item) =>
-        item._id === notificationId ? { ...item, read: true } : item,
-      )
-    : (old.notifications ?? []).map((item) => ({ ...item, read: true }));
-
-  // Dashboard panel usually only shows unread — keep unread-first list in sync
-  const visibleNotifications = nextNotifications.filter((n) => !n.read).slice(0, 5);
-
   return {
     ...old,
     unreadNotificationCount: nextUnread,
-    notifications: visibleNotifications,
+    notifications: nextNotifications.filter((n) => !n.read).slice(0, 5),
     stats: (old.stats ?? []).map((stat) =>
       stat.label === "Unread Alerts" ? { ...stat, value: nextUnread } : stat,
     ),
@@ -45,9 +41,11 @@ const patchDashboardNotifications = (
   };
 };
 
-/** Optimistic local updates so badge, list, and dashboard stay aligned immediately. */
+/**
+ * Optimistic local updates when a notification is read/cleared.
+ * Removes the item from lists and updates the badge count.
+ */
 export const applyNotificationReadLocally = (notificationId?: string): void => {
-  // All notification-count query variants (with/without user id)
   queryClient.setQueriesData<number>({ queryKey: ["notification-count"] }, (count) => {
     const current = typeof count === "number" ? count : 0;
     return notificationId ? Math.max(0, current - 1) : 0;
@@ -62,11 +60,9 @@ export const applyNotificationReadLocally = (notificationId?: string): void => {
     (old) => {
       if (!old) return old;
       if (notificationId) {
-        return old.map((item) =>
-          item._id === notificationId ? { ...item, read: true } : item,
-        );
+        return old.filter((item) => item._id !== notificationId);
       }
-      return old.map((item) => ({ ...item, read: true }));
+      return [];
     },
   );
 };

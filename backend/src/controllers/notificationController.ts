@@ -35,31 +35,34 @@ export const getUnreadNotificationCount = asyncHandler(async (req: Request, res:
   return sendSuccess(res, "Unread notification count fetched", { count });
 });
 
+/**
+ * Mark one notification as read and remove it from the inbox.
+ * Read notifications are cleared immediately (not kept as a "read" history list).
+ */
 export const markNotificationRead = asyncHandler(async (req: Request, res: Response) => {
   const id = String(req.params.id ?? "");
   if (!id) throw new ApiError(400, "Notification id is required");
 
-  const notification = await Notification.findOneAndUpdate(
-    buildPersonalNotificationFilter(req, { _id: id }),
-    { read: true },
-    { new: true }
+  const notification = await Notification.findOneAndDelete(
+    buildPersonalNotificationFilter(req, { _id: id })
   ).lean();
 
   if (!notification) throw new ApiError(404, "Notification not found");
-  return sendSuccess(
-    res,
-    "Notification marked as read",
-    serializeNotification(notification as Parameters<typeof serializeNotification>[0])
-  );
+  return sendSuccess(res, "Notification cleared", {
+    ...serializeNotification(notification as Parameters<typeof serializeNotification>[0]),
+    read: true,
+    cleared: true
+  });
 });
 
+/**
+ * Clear the entire personal inbox (all notifications for this user).
+ */
 export const markAllNotificationsRead = asyncHandler(async (req: Request, res: Response) => {
-  const result = await Notification.updateMany(
-    buildPersonalNotificationFilter(req, { read: false }),
-    { read: true }
-  );
-  return sendSuccess(res, "All notifications marked as read", {
-    modifiedCount: result.modifiedCount ?? 0
+  const result = await Notification.deleteMany(buildPersonalNotificationFilter(req, {}));
+  return sendSuccess(res, "All notifications cleared", {
+    deletedCount: result.deletedCount ?? 0,
+    modifiedCount: result.deletedCount ?? 0
   });
 });
 
