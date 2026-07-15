@@ -26,7 +26,12 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
-import { getAcademicLabels } from "lib/academicStructureUtils";
+import {
+  filterSubjectsByClass,
+  filterSubjectsByYear,
+  filterYearsByBatch,
+  getAcademicLabels,
+} from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -244,22 +249,76 @@ export const SubjectAssignmentManager = () => {
     }
   }, [settingsQuery.data?.academicYearBs]);
 
-  const filteredSections = useMemo(() => {
+  /** Sections for the create form (scoped to selected class). */
+  const formSections = useMemo(() => {
     const sections = sectionsQuery.data ?? [];
-    if (!formClassId && !filterClassId) return sections;
-    const classId = formClassId || filterClassId;
-    return sections.filter((s) => s.classId === classId);
-  }, [sectionsQuery.data, formClassId, filterClassId]);
+    if (!formClassId) return [];
+    return sections.filter((s) => s.classId === formClassId);
+  }, [sectionsQuery.data, formClassId]);
 
-  const filteredYears = useMemo(() => {
+  /** Years for the create form (scoped to selected batch). */
+  const formYears = useMemo(
+    () => filterYearsByBatch(yearsQuery.data ?? [], formBatchId),
+    [yearsQuery.data, formBatchId],
+  );
+
+  /** Subjects for create form — only those linked to the selected year (college) or class (school). */
+  const formSubjects = useMemo(() => {
+    const all = subjectsQuery.data ?? [];
+    if (isCollege) {
+      return filterSubjectsByYear(all, formYearId);
+    }
+    return filterSubjectsByClass(all, formClassId);
+  }, [formClassId, formYearId, isCollege, subjectsQuery.data]);
+
+  /** Filter panel: years for selected batch (or all when batch not chosen). */
+  const filterYears = useMemo(() => {
     const years = yearsQuery.data ?? [];
-    if (!formBatchId && !filterBatchId) return years;
-    const batchId = formBatchId || filterBatchId;
-    return years.filter((y) => y.batchId === batchId);
-  }, [yearsQuery.data, formBatchId, filterBatchId]);
+    if (!filterBatchId) return years;
+    return years.filter((y) => y.batchId === filterBatchId);
+  }, [yearsQuery.data, filterBatchId]);
+
+  // Drop subject selection when it no longer matches Batch/Year (or Class) scope
+  useEffect(() => {
+    if (!formSubjectId) return;
+    if (!formSubjects.some((s) => s._id === formSubjectId)) {
+      setFormSubjectId("");
+    }
+  }, [formSubjectId, formSubjects]);
+
+  const canSubmitCreate = Boolean(
+    (formAy || resolvedAy) &&
+      formSubjectId &&
+      formEffectiveFrom &&
+      (isCollege
+        ? formBatchId && formYearId
+        : formClassId && formSectionId) &&
+      teacherRows.some((r) => r.teacherId),
+  );
 
   const bulkMutation = useMutation({
     mutationFn: async () => {
+      if (!(formAy || resolvedAy)) {
+        throw new Error("Academic Year (BS) is required");
+      }
+      if (isCollege) {
+        if (!formBatchId) throw new Error(`Select a ${labels.primary.toLowerCase()}`);
+        if (!formYearId) throw new Error(`Select a ${labels.secondary.toLowerCase()}`);
+      } else {
+        if (!formClassId) throw new Error("Select a class");
+        if (!formSectionId) throw new Error("Select a section");
+      }
+      if (!formSubjectId) {
+        throw new Error(
+          isCollege
+            ? `Select a subject for the chosen ${labels.secondary.toLowerCase()}`
+            : "Select a subject for the chosen class",
+        );
+      }
+      if (!formEffectiveFrom) {
+        throw new Error("Effective From (BS) date is required");
+      }
+
       const teachers = teacherRows
         .filter((r) => r.teacherId)
         .map((r) => ({
@@ -441,19 +500,6 @@ export const SubjectAssignmentManager = () => {
                       onChange={(e) => setFormAy(e.target.value)}
                     />
                   </FormField>
-                  <FormField label="Subject">
-                    <Select
-                      value={formSubjectId}
-                      onChange={(e) => setFormSubjectId(e.target.value)}
-                    >
-                      <option value="">Select subject</option>
-                      {subjects.map((s) => (
-                        <option key={s._id} value={s._id}>
-                          {s.name} ({s.code})
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
                   {isCollege ? (
                     <>
                       <FormField label={labels.primary}>
@@ -462,6 +508,7 @@ export const SubjectAssignmentManager = () => {
                           onChange={(e) => {
                             setFormBatchId(e.target.value);
                             setFormYearId("");
+                            setFormSubjectId("");
                           }}
                         >
                           <option value="">Select {labels.primary.toLowerCase()}</option>
@@ -475,12 +522,40 @@ export const SubjectAssignmentManager = () => {
                       <FormField label={labels.secondary}>
                         <Select
                           value={formYearId}
-                          onChange={(e) => setFormYearId(e.target.value)}
+                          disabled={!formBatchId}
+                          onChange={(e) => {
+                            setFormYearId(e.target.value);
+                            setFormSubjectId("");
+                          }}
                         >
-                          <option value="">Select {labels.secondary.toLowerCase()}</option>
-                          {filteredYears.map((y) => (
+                          <option value="">
+                            {formBatchId
+                              ? `Select ${labels.secondary.toLowerCase()}`
+                              : `Select ${labels.primary.toLowerCase()} first`}
+                          </option>
+                          {formYears.map((y) => (
                             <option key={y._id} value={y._id}>
                               {y.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormField>
+                      <FormField label="Subject">
+                        <Select
+                          value={formSubjectId}
+                          disabled={!formYearId}
+                          onChange={(e) => setFormSubjectId(e.target.value)}
+                        >
+                          <option value="">
+                            {formYearId
+                              ? formSubjects.length
+                                ? "Select subject"
+                                : "No subjects for this year"
+                              : `Select ${labels.secondary.toLowerCase()} first`}
+                          </option>
+                          {formSubjects.map((s) => (
+                            <option key={s._id} value={s._id}>
+                              {s.name} ({s.code})
                             </option>
                           ))}
                         </Select>
@@ -494,6 +569,7 @@ export const SubjectAssignmentManager = () => {
                           onChange={(e) => {
                             setFormClassId(e.target.value);
                             setFormSectionId("");
+                            setFormSubjectId("");
                           }}
                         >
                           <option value="">Select class</option>
@@ -507,12 +583,35 @@ export const SubjectAssignmentManager = () => {
                       <FormField label="Section">
                         <Select
                           value={formSectionId}
+                          disabled={!formClassId}
                           onChange={(e) => setFormSectionId(e.target.value)}
                         >
-                          <option value="">Select section</option>
-                          {filteredSections.map((s) => (
+                          <option value="">
+                            {formClassId ? "Select section" : "Select class first"}
+                          </option>
+                          {formSections.map((s) => (
                             <option key={s._id} value={s._id}>
                               {s.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormField>
+                      <FormField label="Subject">
+                        <Select
+                          value={formSubjectId}
+                          disabled={!formClassId}
+                          onChange={(e) => setFormSubjectId(e.target.value)}
+                        >
+                          <option value="">
+                            {formClassId
+                              ? formSubjects.length
+                                ? "Select subject"
+                                : "No subjects for this class"
+                              : "Select class first"}
+                          </option>
+                          {formSubjects.map((s) => (
+                            <option key={s._id} value={s._id}>
+                              {s.name} ({s.code})
                             </option>
                           ))}
                         </Select>
@@ -688,7 +787,7 @@ export const SubjectAssignmentManager = () => {
 
                 <div className="flex justify-end">
                   <Button
-                    disabled={bulkMutation.isPending}
+                    disabled={bulkMutation.isPending || !canSubmitCreate}
                     onClick={() => bulkMutation.mutate()}
                   >
                     {bulkMutation.isPending ? "Saving..." : "Create Assignments"}
@@ -753,7 +852,10 @@ export const SubjectAssignmentManager = () => {
                     <FormField label={labels.primary}>
                       <Select
                         value={filterBatchId}
-                        onChange={(e) => setFilterBatchId(e.target.value)}
+                        onChange={(e) => {
+                          setFilterBatchId(e.target.value);
+                          setFilterYearId("");
+                        }}
                       >
                         <option value="">All</option>
                         {(batchesQuery.data ?? []).map((b) => (
@@ -769,7 +871,7 @@ export const SubjectAssignmentManager = () => {
                         onChange={(e) => setFilterYearId(e.target.value)}
                       >
                         <option value="">All</option>
-                        {(yearsQuery.data ?? []).map((y) => (
+                        {filterYears.map((y) => (
                           <option key={y._id} value={y._id}>
                             {y.name}
                           </option>

@@ -158,7 +158,8 @@ export const createAdmin = asyncHandler(async (req: Request, res: Response) => {
       email,
       password,
       schoolId: schoolId.toString(),
-      req
+      req,
+      accountKind: "ADMIN"
     });
 
     return sendSuccess(

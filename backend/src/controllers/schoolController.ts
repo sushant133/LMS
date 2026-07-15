@@ -135,7 +135,8 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
       email: adminUser.email,
       password: adminPassword,
       schoolId: school._id.toString(),
-      req
+      req,
+      accountKind: "ADMIN"
     });
 
     return sendSuccess(

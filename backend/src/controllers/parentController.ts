@@ -254,7 +254,8 @@ export const createParentFromStudent = asyncHandler(async (req: Request, res: Re
         email: parentUser.email,
         password: portalPassword,
         schoolId: schoolId.toString(),
-        req
+        req,
+        accountKind: "PARENT"
       });
     }
 

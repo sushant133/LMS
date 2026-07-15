@@ -1506,7 +1506,8 @@ export const createLaboratoryStaff = asyncHandler(async (req: Request, res: Resp
     email,
     password: portalPassword,
     schoolId: req.tenantSchoolId?.toString(),
-    req
+    req,
+    accountKind: "STAFF"
   });
 
   return sendSuccess(

@@ -292,7 +292,8 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
       email: loginEmail,
       password: portalPassword,
       schoolId: schoolId.toString(),
-      req
+      req,
+      accountKind: "TEACHER"
     });
 
     return sendSuccess(

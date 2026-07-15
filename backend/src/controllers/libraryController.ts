@@ -685,7 +685,8 @@ export const createLibraryStaff = asyncHandler(async (req: Request, res: Respons
     email,
     password: portalPassword,
     schoolId: req.tenantSchoolId?.toString(),
-    req
+    req,
+    accountKind: "STAFF"
   });
 
   return sendSuccess(

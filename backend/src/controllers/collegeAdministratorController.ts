@@ -164,7 +164,8 @@ export const createCollegeAdministrator = asyncHandler(async (req: Request, res:
       email,
       password,
       schoolId: schoolId.toString(),
-      req
+      req,
+      accountKind: "ADMIN"
     });
 
     return sendSuccess(

@@ -1401,7 +1401,8 @@ export const createAccountant = asyncHandler(async (req: Request, res: Response)
     email,
     password: portalPassword,
     schoolId: req.tenantSchoolId?.toString(),
-    req
+    req,
+    accountKind: "STAFF"
   });
 
   return sendSuccess(
@@ -1502,7 +1503,8 @@ export const resetAccountantPassword = asyncHandler(async (req: Request, res: Re
     password: portalPassword,
     schoolId: user.schoolId?.toString(),
     req,
-    emailType: "PASSWORD_RESET"
+    emailType: "PASSWORD_RESET",
+    accountKind: "STAFF"
   });
 
   await recordAudit(req, { action: "accounting.accountant.reset-password", entity: "Accountant", entityId: accountant._id.toString() });

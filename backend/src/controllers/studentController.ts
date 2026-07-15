@@ -248,7 +248,8 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
       email: loginEmail,
       password: portalPassword,
       schoolId: schoolId.toString(),
-      req
+      req,
+      accountKind: "STUDENT"
     });
 
     return sendSuccess(

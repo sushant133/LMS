@@ -39,12 +39,18 @@ export interface SendEmailParams {
   text: string;
   /** Optional override; defaults to SMTP_FROM_EMAIL / SMTP_USER. */
   replyTo?: string;
+  /**
+   * Optional category for logging / provider classification
+   * (e.g. account-credentials, notices). Not shown to recipients.
+   */
+  category?: string;
   attachments?: Array<{
     filename: string;
     path?: string;
     content?: Buffer | string;
     cid?: string;
     contentType?: string;
+    contentDisposition?: "inline" | "attachment";
   }>;
 }
 
@@ -73,6 +79,13 @@ const buildMessageId = (fromAddress: string): string => {
   return `<${id}@${domain}>`;
 };
 
+/** Basic check before SMTP — synthetic student usernames without @ must not be mailed. */
+export const isDeliverableEmailAddress = (value: string): boolean => {
+  const email = value.trim().toLowerCase();
+  // Practical check: local@domain.tld (rejects bare usernames used as student login IDs)
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+};
+
 export const sendEmail = async (params: SendEmailParams): Promise<SendEmailResult> => {
   const mailer = getMailTransporter();
 
@@ -81,6 +94,15 @@ export const sendEmail = async (params: SendEmailParams): Promise<SendEmailResul
       sent: false,
       skipped: true,
       error: "SMTP is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS."
+    };
+  }
+
+  const to = params.to.trim().toLowerCase();
+  if (!isDeliverableEmailAddress(to)) {
+    return {
+      sent: false,
+      skipped: true,
+      error: `Recipient "${params.to}" is not a deliverable email address.`
     };
   }
 
@@ -104,6 +126,7 @@ export const sendEmail = async (params: SendEmailParams): Promise<SendEmailResul
 
   const replyTo = (params.replyTo || env.SMTP_REPLY_TO || from.address).trim();
   const messageId = buildMessageId(from.address);
+  const hasInlineImages = Boolean(params.attachments?.some((a) => a.cid));
 
   try {
     const info = await mailer.sendMail({
@@ -111,22 +134,36 @@ export const sendEmail = async (params: SendEmailParams): Promise<SendEmailResul
         name: from.name,
         address: from.address
       },
-      to: params.to,
+      to,
       replyTo,
       subject: params.subject,
       // Multipart text + html (nodemailer) improves deliverability vs HTML-only
       text: params.text,
       html: params.html,
       messageId,
-      // Help mailbox providers classify as transactional, not bulk marketing
+      // Keep headers light — heavy bulk/marketing headers push free mailboxes into spam
       headers: {
         "X-Entity-Ref-ID": crypto.randomBytes(8).toString("hex"),
-        "X-Mailer": "PHIT-LMS",
+        "X-Mailer": "PHIT-LMS/1.0",
         "X-Auto-Response-Suppress": "OOF, AutoReply",
-        Precedence: "auto_reply",
-        "Auto-Submitted": "auto-generated"
+        "Auto-Submitted": "auto-generated",
+        ...(params.category ? { "X-PHIT-Category": params.category } : {})
       },
-      attachments: params.attachments
+      // Important for Gmail/Yahoo: mark as personal/transactional, not bulk list mail
+      priority: "normal",
+      // When CID images are present, nodemailer builds multipart/related automatically
+      attachments: params.attachments?.map((attachment) => ({
+        filename: attachment.filename,
+        path: attachment.path,
+        content: attachment.content,
+        cid: attachment.cid,
+        contentType: attachment.contentType,
+        contentDisposition: attachment.contentDisposition ?? (attachment.cid ? "inline" : "attachment"),
+        // Avoid treating logo as a downloadable file attachment
+        ...(attachment.cid ? { contentTransferEncoding: "base64" as const } : {})
+      })),
+      // Prefer quoted-printable for text parts when no binary body
+      encoding: hasInlineImages ? undefined : "utf-8"
     });
 
     return {

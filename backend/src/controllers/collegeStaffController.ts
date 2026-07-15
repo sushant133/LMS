@@ -391,7 +391,8 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
       email,
       password: resolved.password,
       schoolId: schoolId.toString(),
-      req
+      req,
+      accountKind: "STAFF"
     });
 
     await CollegeStaff.findByIdAndUpdate(staff!._id, {
@@ -514,7 +515,8 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
       email,
       password: resolved.password,
       schoolId: tenantObjectId(req).toString(),
-      req
+      req,
+      accountKind: "STAFF"
     });
 
     existing.credentialsEmailStatus = credentialsEmail.sent
@@ -662,7 +664,8 @@ export const resetCollegeStaffPassword = asyncHandler(async (req: Request, res: 
     password: resolved.password,
     schoolId: tenantObjectId(req).toString(),
     req,
-    emailType: "PASSWORD_RESET"
+    emailType: "PASSWORD_RESET",
+    accountKind: "STAFF"
   });
 
   staff.credentialsEmailStatus = credentialsEmail.sent
@@ -716,7 +719,8 @@ export const resendCollegeStaffCredentials = asyncHandler(async (req: Request, r
     email: user.email,
     password: resolved.password,
     schoolId: tenantObjectId(req).toString(),
-    req
+    req,
+    accountKind: "STAFF"
   });
 
   staff.credentialsEmailStatus = credentialsEmail.sent
