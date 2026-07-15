@@ -72,15 +72,19 @@ const envSchema = z.object({
     })
     .pipe(z.number().int().min(0)),
   /**
-   * Absolute or relative path for uploaded files (PDFs, docs, videos, certificates).
+   * Absolute or relative path for the centralized upload root on this machine/VPS.
    * Defaults to <cwd>/uploads in development.
-   * Images go to Cloudinary when configured; non-image files always stay here.
+   * Production example: UPLOAD_DIR=/var/www/phit-erp/uploads
+   *
+   * All new uploads (images, PDFs, documents) are stored here as files.
+   * MongoDB stores only relative paths + metadata — never binary content.
+   * Works the same in local dev and production (only this env value changes).
    */
   UPLOAD_DIR: z.string().optional(),
   /**
-   * Cloudinary — **images only** (profile photos, staff photos, banners, photo attachments).
-   * When all three are set, image uploads go to Cloudinary CDN.
-   * PDFs, Word docs, and videos are never sent to Cloudinary (local UPLOAD_DIR only).
+   * Legacy Cloudinary credentials (optional).
+   * New uploads always go to local/VPS disk (UPLOAD_DIR).
+   * These vars are only used to delete historical Cloudinary assets still referenced in MongoDB.
    */
   CLOUDINARY_CLOUD_NAME: z
     .string()
@@ -94,7 +98,7 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value?.trim() || undefined),
-  /** Root folder prefix in Cloudinary (e.g. phit-erp). Tenant schoolId is appended. */
+  /** Legacy Cloudinary folder prefix (cleanup only). */
   CLOUDINARY_FOLDER: z
     .string()
     .optional()
@@ -210,11 +214,17 @@ if (env.NODE_ENV === "production") {
   }
 }
 
-/** Absolute path for file uploads (photos, documents, certificates, reports). */
+/**
+ * Absolute path for the centralized upload root.
+ * Dev: <backend cwd>/uploads · Prod: set UPLOAD_DIR (e.g. /var/www/phit-erp/uploads).
+ */
 export const getUploadDir = (): string =>
   env.UPLOAD_DIR ? path.resolve(env.UPLOAD_DIR) : path.join(process.cwd(), "uploads");
 
-/** True when Cloudinary credentials are fully configured — uploads go to CDN. */
+/**
+ * True when legacy Cloudinary credentials are fully configured.
+ * Used only for deleting historical CDN assets — new uploads always use local disk.
+ */
 export const isCloudinaryEnabled = (): boolean =>
   Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET);
 

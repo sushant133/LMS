@@ -1,272 +1,98 @@
-import multer, { type StorageEngine } from "multer";
-import path from "path";
-import fs from "fs-extra";
-import type { Request } from "express";
-import { getUploadDir, isCloudinaryEnabled } from "../config/env.js";
-import { ApiError } from "./apiError.js";
-import {
-  buildCloudinaryFolder,
-  uploadLocalFileToCloudinary
-} from "./cloudinary.js";
-import { tenantObjectId } from "./tenant.js";
-
-/** Configurable via UPLOAD_DIR — local staging (and fallback when Cloudinary is off). */
-const UPLOAD_ROOT = getUploadDir();
-
-// Ensure base upload directory exists (Cloudinary still stages here briefly)
-fs.ensureDirSync(UPLOAD_ROOT);
-
 /**
- * Creates tenant-scoped storage.
- * All files are stored under: uploads/{schoolId}/{entity}/{filename}
+ * Upload facade — delegates to the centralized VPS file storage service.
+ *
+ * All new uploads are stored on the local/VPS filesystem under UPLOAD_DIR.
+ * MongoDB receives only relative paths and metadata (never binary data).
+ *
+ * Existing import sites can keep using this module; implementation lives in
+ * `services/fileStorage`.
  */
-function createTenantStorage(entity: string): StorageEngine {
-  return multer.diskStorage({
-    destination: async (req, _file, cb) => {
-      try {
-        const schoolId = tenantObjectId(req);
-        const dest = path.join(UPLOAD_ROOT, schoolId.toString(), entity);
-        await fs.ensureDir(dest);
-        cb(null, dest);
-      } catch (err) {
-        cb(err as Error, "");
-      }
-    },
-    filename: (_req, file, cb) => {
-      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      // Sanitize extension: no path segments, lowercase, allowlist
-      const rawExt = path.extname(file.originalname || "").toLowerCase().replace(/[^a-z0-9.]/g, "");
-      const allowedExt = new Set([
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".pdf",
-        ".doc",
-        ".docx",
-        ".mp4",
-        ".webm",
-        ".mov"
-      ]);
-      const ext = allowedExt.has(rawExt) ? rawExt : "";
-      // Never use original client filename (path traversal / executable names)
-      cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
-    }
-  });
-}
 
-/** Normalize browser quirks (e.g. image/jpg) before MIME allowlist checks. */
-const normalizeMimeType = (mimeType: string): string => {
-  const lower = (mimeType || "").toLowerCase().trim();
-  if (lower === "image/jpg") return "image/jpeg";
-  if (lower === "image/pjpeg") return "image/jpeg";
-  if (lower === "image/x-png") return "image/png";
-  return lower;
-};
+import type { Request } from "express";
+import {
+  finalizeLocalUpload,
+  finalizeLocalUploads,
+  inferAttachmentKind,
+  toPublicRelativePath,
+  UPLOAD_MODULES,
+  type FileStorageMeta,
+  type FinalizeUploadOptions
+} from "../services/fileStorage/index.js";
 
-const allowedMimeTypes = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-];
+// ─── Multer middlewares (module-scoped) ─────────────────────────────────────
+export {
+  uploadStudentPhoto,
+  uploadStudentDocuments,
+  uploadTeacherPhoto,
+  uploadStaffPhoto,
+  uploadTeacherDocuments,
+  uploadLibraryBookCover,
+  uploadLibraryEbook,
+  uploadLibraryDocuments,
+  uploadNoticeImage,
+  uploadBannerImage,
+  uploadAssignmentAttachments,
+  uploadClassroomAttachments,
+  uploadResultsAttachments,
+  uploadLaboratoryAttachments,
+  uploadInventoryAttachments,
+  uploadAccountingAttachments,
+  uploadProfilePhoto,
+  uploadComplaintAttachments,
+  uploadAcademicAttachments,
+  uploadTempFiles
+} from "../services/fileStorage/index.js";
 
-const studentDocumentMimeTypes = ["image/jpeg", "image/png", "application/pdf"];
-const studentDocumentFileFilter = createFileFilter(
-  studentDocumentMimeTypes,
-  "Invalid file type. Allowed: PDF, JPG, JPEG, PNG (not HEIC/HEIF — convert to JPG first)"
-);
-
-const classroomMimeTypes = [
-  ...allowedMimeTypes,
-  "video/mp4",
-  "video/webm",
-  "video/quicktime"
-];
-
-function createFileFilter(mimeTypes: string[], message: string) {
-  const allowed = new Set(mimeTypes.map((m) => m.toLowerCase()));
-  return (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-    const mime = normalizeMimeType(file.mimetype);
-    // Mutate so downstream Cloudinary/local logic sees a canonical type
-    file.mimetype = mime;
-    if (allowed.has(mime)) {
-      cb(null, true);
-      return;
-    }
-    // Clearer message for common phone formats
-    if (mime === "image/heic" || mime === "image/heif") {
-      cb(
-        new ApiError(
-          400,
-          "HEIC/HEIF photos are not supported. Please convert to JPG or PNG and try again."
-        )
-      );
-      return;
-    }
-    cb(new ApiError(400, `${message} (received: ${file.mimetype || "unknown"})`));
-  };
-}
-
-const fileFilter = createFileFilter(
-  allowedMimeTypes,
-  "Invalid file type. Allowed: JPG, PNG, WEBP, PDF, DOC, DOCX"
-);
-const classroomFileFilter = createFileFilter(
-  classroomMimeTypes,
-  "Invalid file type. Allowed: JPG, PNG, WEBP, PDF, DOC, DOCX, MP4, WEBM, MOV"
-);
-
-export const uploadStudentPhoto = multer({
-  storage: createTenantStorage("students/photos"),
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
-  fileFilter
-}).single("photo");
-
-export const uploadStudentDocuments = multer({
-  storage: createTenantStorage("students/documents"),
-  limits: { fileSize: 500 * 1024 }, // 500KB per document
-  fileFilter: studentDocumentFileFilter
-}).array("documents", 10);
-
-export const uploadClassroomAttachments = multer({
-  storage: createTenantStorage("classroom"),
-  limits: { fileSize: 25 * 1024 * 1024 },
-  fileFilter: classroomFileFilter
-}).array("files", 10);
-
-const bannerMimeTypes = ["image/jpeg", "image/png", "image/webp"];
-const bannerFileFilter = createFileFilter(
-  bannerMimeTypes,
-  "Invalid image type. Allowed: JPG, JPEG, PNG, WEBP (not HEIC)"
-);
-
-export const uploadBannerImage = multer({
-  storage: createTenantStorage("banners"),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: bannerFileFilter
-}).single("image");
-
-export const uploadStaffPhoto = multer({
-  storage: createTenantStorage("staff/photos"),
-  limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: bannerFileFilter
-}).single("photo");
-
-const complaintMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"];
-const complaintFileFilter = createFileFilter(complaintMimeTypes, "Invalid file type. Allowed: JPG, JPEG, PNG, WEBP, PDF");
-
-export const uploadComplaintAttachments = multer({
-  storage: createTenantStorage("complaints"),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: complaintFileFilter
-}).array("files", 5);
-
-export const uploadAcademicAttachments = multer({
-  storage: createTenantStorage("academic-management"),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: complaintFileFilter
-}).array("files", 5);
+export { UPLOAD_MODULES };
 
 /**
  * Returns a public URL path for a stored file (relative local path).
- * Prefer finalizeUploadedFile() so Cloudinary is used when configured.
+ * Prefer finalizeUploadedFile() for full metadata.
  */
 export function getFilePublicPath(relativePath: string): string {
   const normalized = relativePath
     .replace(/\\/g, "/")
     .replace(/^uploads\//, "")
-    // Never allow path traversal segments in public URLs
     .replace(/^(\.\.\/)+/, "")
     .replace(/\/(\.\.)(\/|$)/g, "/");
   return `/uploads/${normalized}`;
 }
 
 export function getUploadPublicUrl(filePath: string): string {
-  const rootResolved = path.resolve(UPLOAD_ROOT);
-  const absolute = path.resolve(filePath);
-  const relativeToUploads = path.relative(rootResolved, absolute);
-  // Reject files outside the upload root
-  if (
-    relativeToUploads.startsWith("..") ||
-    path.isAbsolute(relativeToUploads) ||
-    relativeToUploads === ""
-  ) {
-    throw new ApiError(500, "Uploaded file path is outside the configured upload directory");
-  }
-  return getFilePublicPath(relativeToUploads);
+  return toPublicRelativePath(filePath);
 }
 
-export function inferAttachmentKind(mimeType: string): "FILE" | "IMAGE" | "PDF" | "VIDEO" {
-  if (mimeType.startsWith("image/")) return "IMAGE";
-  if (mimeType === "application/pdf") return "PDF";
-  if (mimeType.startsWith("video/")) return "VIDEO";
-  return "FILE";
-}
-
-export interface FinalizedUpload {
-  /**
-   * Images: HTTPS Cloudinary URL when Cloudinary is enabled.
-   * PDFs / docs / videos: always local `/uploads/...` path.
-   */
-  url: string;
-  size: number;
-  originalName: string;
-  mimeType: string;
-  kind: "FILE" | "IMAGE" | "PDF" | "VIDEO";
-  /** Cloudinary public_id when stored on CDN (images only). */
-  publicId?: string;
-  width?: number;
-  height?: number;
-}
-
-/** Cloudinary is used for images only (profile photos, banners, photo attachments). */
-const isImageMime = (mimeType: string): boolean => mimeType.startsWith("image/");
+export { inferAttachmentKind };
 
 /**
- * Finalize a multer disk file:
- * - Images → Cloudinary (when configured)
- * - PDFs, Office docs, videos → local disk under UPLOAD_DIR
- * entityParts e.g. ["students", "photos"] → folder phit-erp/{schoolId}/students/photos
+ * Finalized upload shape returned to controllers / API responses.
+ * `url` is always a relative `/uploads/...` path (never an absolute filesystem path).
+ */
+export type FinalizedUpload = FileStorageMeta & {
+  /** @deprecated Cloudinary no longer used for new uploads; kept optional for API shape. */
+  publicId?: string;
+};
+
+/**
+ * Finalize a multer disk file into MongoDB-safe metadata.
+ * Always stores on VPS/local disk under UPLOAD_DIR — never Cloudinary, never MongoDB binary.
+ *
+ * @param entityParts e.g. ["students", "photos"] or ["assignments"]
  */
 export async function finalizeUploadedFile(
   req: Request,
   file: Express.Multer.File,
   ...entityParts: string[]
 ): Promise<FinalizedUpload> {
-  const kind = inferAttachmentKind(file.mimetype);
-
-  // Cloudinary: images only — PDFs and other files stay on the server
-  if (isCloudinaryEnabled() && isImageMime(file.mimetype)) {
-    const schoolId = tenantObjectId(req).toString();
-    const folder = buildCloudinaryFolder(schoolId, ...entityParts);
-    const uploaded = await uploadLocalFileToCloudinary(file.path, {
-      folder,
-      mimeType: file.mimetype,
-      resourceType: "image"
-    });
-
-    return {
-      url: uploaded.url,
-      size: uploaded.bytes || file.size,
-      originalName: file.originalname,
-      mimeType: file.mimetype,
-      kind,
-      publicId: uploaded.publicId,
-      width: uploaded.width,
-      height: uploaded.height
-    };
-  }
-
-  return {
-    url: getUploadPublicUrl(file.path),
-    size: file.size,
-    originalName: file.originalname,
-    mimeType: file.mimetype,
-    kind
+  const options: FinalizeUploadOptions = {
+    entityId:
+      typeof req.params.studentId === "string"
+        ? req.params.studentId
+        : typeof req.params.id === "string"
+          ? req.params.id
+          : undefined
   };
+  return finalizeLocalUpload(req, file, entityParts, options);
 }
 
 /** Finalize many multer files in parallel. */
@@ -275,5 +101,13 @@ export async function finalizeUploadedFiles(
   files: Express.Multer.File[],
   ...entityParts: string[]
 ): Promise<FinalizedUpload[]> {
-  return Promise.all(files.map((file) => finalizeUploadedFile(req, file, ...entityParts)));
+  const options: FinalizeUploadOptions = {
+    entityId:
+      typeof req.params.studentId === "string"
+        ? req.params.studentId
+        : typeof req.params.id === "string"
+          ? req.params.id
+          : undefined
+  };
+  return finalizeLocalUploads(req, files, entityParts, options);
 }

@@ -5,6 +5,7 @@ import { getUploadDir } from "../config/env.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { serveComplaintAttachment } from "./complaintFileController.js";
+import { logger } from "../utils/logger.js";
 
 /** Safe path segments: letters, digits, dot, underscore, hyphen */
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
@@ -43,9 +44,43 @@ const parseWildcardPath = (value: unknown): string[] => {
   return [];
 };
 
+/** Best-effort Content-Type from extension (never trusts client path for authorization). */
+const contentTypeForPath = (filePath: string): string | undefined => {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".doc")) return "application/msword";
+  if (lower.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+  if (lower.endsWith(".xlsx")) {
+    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  }
+  if (lower.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+  if (lower.endsWith(".pptx")) {
+    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  }
+  if (lower.endsWith(".txt")) return "text/plain; charset=utf-8";
+  if (lower.endsWith(".zip")) return "application/zip";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  return undefined;
+};
+
 /**
- * Authenticated file serving for all tenant uploads.
+ * Authenticated file serving for all tenant uploads on the VPS filesystem.
  * Path: /uploads/:schoolId/{*filePath}
+ *
+ * Security:
+ * - Requires authentication
+ * - Tenant isolation (non-SUPER_ADMIN may only access own schoolId)
+ * - Path traversal blocked via SAFE_SEGMENT + resolve containment check
+ * - Complaints: stricter owner/admin ACL
  */
 export const serveProtectedUpload = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) {
@@ -74,11 +109,14 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
   if (req.user.role !== "SUPER_ADMIN") {
     const userSchool = req.user.schoolId ? String(req.user.schoolId) : "";
     if (!userSchool || userSchool !== schoolId) {
+      logger.warn(
+        `Upload access denied: user ${req.user.userId} school=${userSchool} tried schoolId=${schoolId}`
+      );
       throw new ApiError(403, "Access denied");
     }
   }
 
-  // Complaints: stricter ACL
+  // Complaints: stricter ACL (owner or institution admin)
   if (relativeParts[0] === "complaints") {
     if (relativeParts.length !== 2) {
       throw new ApiError(400, "Invalid complaint file path");
@@ -120,9 +158,9 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
   res.setHeader("Cache-Control", "private, max-age=3600");
   res.setHeader("Content-Disposition", "inline");
 
-  const lower = filePath.toLowerCase();
-  if (lower.endsWith(".pdf")) {
-    res.setHeader("Content-Type", "application/pdf");
+  const contentType = contentTypeForPath(filePath);
+  if (contentType) {
+    res.setHeader("Content-Type", contentType);
   }
 
   return res.sendFile(filePath);

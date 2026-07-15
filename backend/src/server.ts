@@ -3,10 +3,8 @@ import cors from "cors";
 import express from "express";
 import type { Server } from "node:http";
 import morgan from "morgan";
-import path from "path";
 import { connectDatabase, disconnectDatabase } from "./config/db.js";
-import { env, getUploadDir, isCloudinaryEnabled } from "./config/env.js";
-import { ensureCloudinaryConfigured } from "./utils/cloudinary.js";
+import { env, getUploadDir } from "./config/env.js";
 import { serveProtectedUpload } from "./controllers/protectedUploadController.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { protect } from "./middleware/auth.js";
@@ -19,6 +17,7 @@ import { repairLaboratoryIndexes } from "./utils/repairLaboratoryIndexes.js";
 import { startAcademicManagementNotificationScheduler } from "./utils/academicManagementNotifications.js";
 import { configuredCorsOrigins, isOriginAllowed } from "./utils/allowedOrigins.js";
 import { logger } from "./utils/logger.js";
+import { ensureUploadDirectories } from "./services/fileStorage/index.js";
 
 const app = express();
 
@@ -63,9 +62,12 @@ if (env.NODE_ENV === "production") {
 
 const uploadsDir = getUploadDir();
 /**
- * P0 security: all tenant uploads require authentication + school isolation.
- * Public static serving of /uploads is intentionally disabled (PII risk).
- * Complaints keep stricter owner/admin ACL inside serveProtectedUpload.
+ * Secure file serving for the centralized VPS storage root.
+ *
+ * - Public unauthenticated static serving is intentionally disabled (PII risk).
+ * - Authenticated route enforces school (tenant) isolation + path-traversal checks.
+ * - Complaints keep stricter owner/admin ACL inside serveProtectedUpload.
+ * - Relative paths in MongoDB: /uploads/{schoolId}/{module}/filename.ext
  */
 // Express 5 named wildcard (path-to-regexp): /uploads/:schoolId/{*filePath}
 app.get("/uploads/:schoolId/{*filePath}", protect, serveProtectedUpload);
@@ -91,17 +93,13 @@ app.get("/api/health", (_req, res) => {
     message: "PHIT LMS backend is running",
     environment: env.NODE_ENV,
     timestamp: new Date().toISOString(),
-    /** Where new image uploads are stored (no secrets). */
-    imageStorage: isCloudinaryEnabled()
-      ? {
-          mode: "cloudinary",
-          cloud: env.CLOUDINARY_CLOUD_NAME,
-          folder: env.CLOUDINARY_FOLDER || "phit-erp"
-        }
-      : {
-          mode: "local",
-          note: "Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET and restart the backend"
-        }
+    /** Centralized VPS/local filesystem storage (no secrets). */
+    fileStorage: {
+      mode: "local",
+      uploadDir: uploadsDir,
+      publicPrefix: "/uploads",
+      note: "All uploads stored on VPS/local disk. MongoDB holds relative paths + metadata only."
+    }
   });
 });
 
@@ -145,13 +143,16 @@ const shutdown = async (signal: string): Promise<void> => {
 const startServer = async (): Promise<void> => {
   await connectDatabase();
 
-  // CDN for images only (profile/staff/banner photos) when CLOUDINARY_* env vars are set
-  if (isCloudinaryEnabled()) {
-    ensureCloudinaryConfigured();
-  } else {
-    logger.warn(
-      "Cloudinary is not configured — image uploads will be stored on local disk (UPLOAD_DIR). Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET to enable image CDN."
+  // Centralized VPS/local upload tree — create all module folders (and per-tenant dirs)
+  try {
+    await ensureUploadDirectories();
+  } catch (error) {
+    logger.error(
+      `Failed to ensure upload directories at ${uploadsDir}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
     );
+    throw error;
   }
 
   // Fix Atlas laboratory unique index before any seed work (never throws)
@@ -176,10 +177,7 @@ const startServer = async (): Promise<void> => {
     logger.info(
       `Backend listening on http://${env.HOST === "0.0.0.0" ? "localhost" : env.HOST}:${env.PORT} (${env.NODE_ENV})`
     );
-    logger.info(`Uploads directory: ${uploadsDir}`);
-    logger.info(
-      `Image storage: ${isCloudinaryEnabled() ? `Cloudinary (${env.CLOUDINARY_CLOUD_NAME})` : "local disk"} · PDFs/docs: local disk`
-    );
+    logger.info(`File storage (VPS/local): ${uploadsDir} → public /uploads/*`);
     logger.debug(`CORS origins: ${configuredCorsOrigins().join(", ")}`);
     logger.debug(`Trust proxy hops: ${env.TRUST_PROXY}`);
   });

@@ -121,6 +121,14 @@ export const createSchool = asyncHandler(async (req: Request, res: Response) => 
 
     await commitTransaction(session);
 
+    // Bootstrap tenant upload folder tree on the VPS/local filesystem
+    try {
+      const { ensureTenantUploadDirectories } = await import("../services/fileStorage/index.js");
+      await ensureTenantUploadDirectories(school._id.toString());
+    } catch {
+      /* non-fatal — folders are also created lazily on first upload */
+    }
+
     const credentialsEmail = await notifyAccountCredentials({
       userId: adminUser._id.toString(),
       fullName: adminUser.fullName,

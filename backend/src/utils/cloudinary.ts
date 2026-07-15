@@ -1,3 +1,10 @@
+/**
+ * Legacy Cloudinary helpers.
+ *
+ * New uploads always go to the centralized VPS/local filesystem (UPLOAD_DIR).
+ * This module remains only so mediaCleanup can delete historical CDN assets
+ * still referenced by older MongoDB documents.
+ */
 import { v2 as cloudinary, type UploadApiResponse } from "cloudinary";
 import fs from "fs-extra";
 import { env, isCloudinaryEnabled } from "../config/env.js";

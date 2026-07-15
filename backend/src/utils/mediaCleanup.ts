@@ -1,15 +1,14 @@
-import path from "path";
-import fs from "fs-extra";
 import { v2 as cloudinary } from "cloudinary";
-import { env, getUploadDir, isCloudinaryEnabled } from "../config/env.js";
+import { env, isCloudinaryEnabled } from "../config/env.js";
 import { ensureCloudinaryConfigured } from "./cloudinary.js";
 import { logger } from "./logger.js";
+import { deleteLocalFileByPublicPath } from "../services/fileStorage/index.js";
 
 type ResourceType = "image" | "video" | "raw";
 
 /**
  * Parse a Cloudinary delivery URL into public_id + resource_type.
- * Supports version segments and simple transformation path segments.
+ * Kept for backward compatibility with assets uploaded before VPS-local storage.
  */
 export const extractCloudinaryPublicId = (
   url: string
@@ -31,12 +30,10 @@ export const extractCloudinaryPublicId = (
       resourceRaw === "video" ? "video" : resourceRaw === "raw" ? "raw" : "image";
 
     let rest = parts.slice(uploadIdx + 1);
-    // Signed URL segment
     if (rest[0]?.startsWith("s--")) {
       rest = rest.slice(1);
     }
 
-    // Skip transformations (contain commas / known prefixes) then optional version v123
     while (rest.length > 0) {
       const seg = rest[0]!;
       if (/^v\d+$/.test(seg)) {
@@ -55,7 +52,6 @@ export const extractCloudinaryPublicId = (
 
     if (rest.length === 0) return null;
 
-    // public_id is folder/name without extension (Cloudinary destroy convention)
     let publicId = decodeURIComponent(rest.join("/"));
     publicId = publicId.replace(/\.[a-zA-Z0-9]{2,5}$/, "");
     if (!publicId) return null;
@@ -69,46 +65,11 @@ export const extractCloudinaryPublicId = (
 export const isCloudinaryUrl = (url?: string | null): boolean =>
   Boolean(url && extractCloudinaryPublicId(url));
 
-/** Best-effort local file delete for legacy /uploads paths. */
-const deleteLocalUploadIfPresent = async (url: string): Promise<void> => {
-  try {
-    let relative = url.trim();
-    if (relative.startsWith("http://") || relative.startsWith("https://")) {
-      // Not a local path
-      return;
-    }
-    if (relative.startsWith("/uploads/")) {
-      relative = relative.slice("/uploads/".length);
-    } else if (relative.startsWith("uploads/")) {
-      relative = relative.slice("uploads/".length);
-    } else {
-      return;
-    }
-
-    // Path traversal guard
-    const root = path.resolve(getUploadDir());
-    const target = path.resolve(root, relative);
-    const rel = path.relative(root, target);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) return;
-
-    if (await fs.pathExists(target)) {
-      await fs.remove(target);
-      // Also remove common banner thumbnail sibling if present
-      const ext = path.extname(target);
-      const thumb = target.replace(ext, `-thumb${ext}`);
-      if (await fs.pathExists(thumb)) {
-        await fs.remove(thumb);
-      }
-    }
-  } catch (error) {
-    logger.warn(
-      `Local media cleanup failed for ${url}: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-};
-
 /**
- * Delete one media URL from Cloudinary (if CDN URL) and/or local disk (if /uploads path).
+ * Delete one media URL:
+ * - Legacy Cloudinary CDN URLs (when credentials are still configured)
+ * - Local/VPS `/uploads/...` relative paths via the file storage service
+ *
  * Never throws — deletion failures are logged so business deletes still succeed.
  */
 export const deleteStoredMediaUrl = async (url?: string | null): Promise<void> => {
@@ -123,7 +84,6 @@ export const deleteStoredMediaUrl = async (url?: string | null): Promise<void> =
         resource_type: cloud.resourceType,
         invalidate: true
       });
-      // If resource type was wrong, retry as image then raw
       if (result?.result === "not found") {
         for (const rt of ["image", "raw", "video"] as const) {
           if (rt === cloud.resourceType) continue;
@@ -145,7 +105,7 @@ export const deleteStoredMediaUrl = async (url?: string | null): Promise<void> =
     return;
   }
 
-  // Also attempt destroy if URL looks like Cloudinary but env was misread
+  // Attempt destroy if URL looks like Cloudinary even when env is partial
   if (cloud && env.CLOUDINARY_CLOUD_NAME) {
     try {
       ensureCloudinaryConfigured();
@@ -154,11 +114,12 @@ export const deleteStoredMediaUrl = async (url?: string | null): Promise<void> =
         invalidate: true
       });
     } catch {
-      /* already logged pattern above */
+      /* best-effort legacy cleanup */
     }
+    return;
   }
 
-  await deleteLocalUploadIfPresent(trimmed);
+  await deleteLocalFileByPublicPath(trimmed);
 };
 
 /** Delete many media URLs (deduped). Safe to call with empty/mixed arrays. */
@@ -171,6 +132,7 @@ export const deleteStoredMediaUrls = async (
 
 /**
  * When a photo/document is replaced or cleared, remove the previous asset if the URL changed.
+ * Handles both VPS `/uploads/...` paths and legacy Cloudinary URLs.
  */
 export const deleteReplacedMedia = async (
   previousUrl?: string | null,

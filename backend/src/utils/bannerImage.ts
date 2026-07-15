@@ -1,12 +1,7 @@
 import path from "path";
 import fs from "fs-extra";
 import sharp from "sharp";
-import { isCloudinaryEnabled } from "../config/env.js";
-import {
-  buildCloudinaryFolder,
-  uploadLocalFileToCloudinary
-} from "./cloudinary.js";
-import { getUploadPublicUrl } from "./upload.js";
+import { toPublicRelativePath } from "../services/fileStorage/index.js";
 
 const BANNER_MAX_WIDTH = 1920;
 const THUMBNAIL_WIDTH = 320;
@@ -21,17 +16,15 @@ export interface ProcessedBannerImage {
   width: number;
   height: number;
   fileSizeBytes: number;
-  publicId?: string;
-  thumbnailPublicId?: string;
 }
 
 /**
- * Optimize banner with sharp, then upload to Cloudinary when configured.
- * @param schoolId — tenant folder for Cloudinary
+ * Optimize banner with sharp and keep both full + thumbnail on local/VPS disk.
+ * Relative `/uploads/...` paths are returned for MongoDB storage.
  */
 export const processBannerImage = async (
   filePath: string,
-  schoolId?: string
+  _schoolId?: string
 ): Promise<ProcessedBannerImage> => {
   const metadata = await sharp(filePath).metadata();
   const ext = path.extname(filePath).toLowerCase();
@@ -74,35 +67,11 @@ export const processBannerImage = async (
 
   const fileSizeBytes = (await fs.stat(filePath)).size;
 
-  if (isCloudinaryEnabled() && schoolId) {
-    const folder = buildCloudinaryFolder(schoolId, "banners");
-    const [main, thumb] = await Promise.all([
-      uploadLocalFileToCloudinary(filePath, { folder, mimeType: "image/jpeg", resourceType: "image" }),
-      uploadLocalFileToCloudinary(thumbnailPath, {
-        folder: `${folder}/thumbs`,
-        mimeType: "image/jpeg",
-        resourceType: "image"
-      })
-    ]);
-
-    return {
-      imagePath: filePath,
-      thumbnailPath,
-      imageUrl: main.url,
-      thumbnailUrl: thumb.url,
-      width: main.width ?? width,
-      height: main.height ?? height,
-      fileSizeBytes: main.bytes || fileSizeBytes,
-      publicId: main.publicId,
-      thumbnailPublicId: thumb.publicId
-    };
-  }
-
   return {
     imagePath: filePath,
     thumbnailPath,
-    imageUrl: getUploadPublicUrl(filePath),
-    thumbnailUrl: getUploadPublicUrl(thumbnailPath),
+    imageUrl: toPublicRelativePath(filePath),
+    thumbnailUrl: toPublicRelativePath(thumbnailPath),
     width,
     height,
     fileSizeBytes
