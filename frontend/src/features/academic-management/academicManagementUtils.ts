@@ -55,8 +55,36 @@ export const statusBadgeClass = (status: string): string => {
 };
 
 /**
+ * Curriculum identity for a subject instance.
+ * College provisions one Subject doc per batch year; HA curriculum is shared —
+ * masterSubjectId / code / name collapse those instances to one label.
+ */
+export const curriculumKeyForSubject = (subject: {
+  _id: string;
+  name?: string;
+  code?: string;
+  masterSubjectId?: string | null | { _id?: string };
+}): string => {
+  const master =
+    typeof subject.masterSubjectId === "object" && subject.masterSubjectId
+      ? String(
+          (subject.masterSubjectId as { _id?: string })._id ??
+            subject.masterSubjectId,
+        )
+      : subject.masterSubjectId
+        ? String(subject.masterSubjectId)
+        : "";
+  if (master && master !== "[object Object]") return `master:${master}`;
+  const code = (subject.code ?? "").trim().toLowerCase();
+  if (code) return `code:${code}`;
+  const name = (subject.name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (name) return `name:${name}`;
+  return `id:${subject._id}`;
+};
+
+/**
  * Deduplicate curriculum subjects that appear once per batch (same name/code/master).
- * Keeps the first occurrence for select lists.
+ * Keeps the first occurrence for select lists; merges all instance ids onto `subjectIds` when present.
  */
 export const dedupeSubjectsForSelect = <
   T extends {
@@ -67,20 +95,27 @@ export const dedupeSubjectsForSelect = <
   },
 >(
   subjects: T[],
-): T[] => {
-  const seen = new Map<string, T>();
+): Array<T & { subjectIds?: string[] }> => {
+  const seen = new Map<string, T & { subjectIds?: string[] }>();
   for (const subject of subjects) {
-    const key = (
-      subject.masterSubjectId ||
-      subject.code ||
-      subject.name ||
-      subject._id
-    )
-      .toString()
-      .trim()
-      .toLowerCase();
-    if (!seen.has(key)) {
-      seen.set(key, subject);
+    const key = curriculumKeyForSubject(subject);
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, { ...subject, subjectIds: [subject._id] });
+      continue;
+    }
+    existing.subjectIds = [
+      ...new Set([...(existing.subjectIds ?? [existing._id]), subject._id]),
+    ];
+    // Prefer a non-empty code / cleaner name
+    if (!existing.code && subject.code) {
+      existing.code = subject.code;
+    }
+    if (
+      subject.name &&
+      (!existing.name || existing.name.length > subject.name.length)
+    ) {
+      existing.name = subject.name;
     }
   }
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -202,6 +237,8 @@ export const mapSourceUnitToSessionUnit = (
     startDateBs?: string;
     endDateBs?: string;
     status?: string;
+    syllabusId?: string;
+    syllabusChapterId?: string;
   },
   index: number,
 ) => ({
@@ -217,7 +254,154 @@ export const mapSourceUnitToSessionUnit = (
   startDateBs: unit.startDateBs || "",
   endDateBs: unit.endDateBs || "",
   status: (unit.status as "PENDING" | "IN_PROGRESS" | "COMPLETED" | "DELAYED") || "PENDING",
+  syllabusId: unit.syllabusId || "",
+  syllabusChapterId: unit.syllabusChapterId || "",
 });
+
+/**
+ * Import hierarchical syllabus (Chapter → Unit → Sub Unit) into Session Plan units.
+ * Each syllabus Chapter becomes one Session Plan unit; sub-unit headings become topicsCovered lines.
+ */
+export const mapSyllabusHierarchyToSessionUnits = (
+  syllabus: {
+    _id: string;
+    chapters?: Array<{
+      _id: string;
+      chapterNo: number;
+      title: string;
+      description?: string;
+      estimatedHours?: number;
+      references?: string;
+      tentativeCompletionMonth?: string;
+      units: Array<{
+        _id: string;
+        title: string;
+        learningObjective?: string;
+        teachingHours?: number;
+        subUnits: Array<{
+          _id: string;
+          heading: string;
+          learningOutcomes?: string;
+          practicalRequired?: boolean;
+          internalAssessment?: string;
+          teachingHours?: number;
+        }>;
+      }>;
+    }>;
+    units?: Array<{
+      unitNo: number;
+      chapterName: string;
+      estimatedTeachingHours?: number;
+      learningOutcomes?: string;
+      topicsCovered?: string;
+      references?: string;
+      practicalRequired?: boolean;
+      internalAssessment?: string;
+      tentativeCompletionMonth?: string;
+      status?: string;
+    }>;
+  },
+) => {
+  if (syllabus.chapters && syllabus.chapters.length > 0) {
+    return syllabus.chapters.map((chapter, index) => {
+      const allSubs = chapter.units.flatMap((u) => u.subUnits);
+      const topicsCovered = allSubs.map((s) => s.heading).filter(Boolean).join("\n");
+      const learningOutcomes =
+        chapter.units
+          .map((u) => u.learningObjective)
+          .filter(Boolean)
+          .join("\n") ||
+        allSubs
+          .map((s) => s.learningOutcomes)
+          .filter(Boolean)
+          .join("\n");
+      const estimatedTeachingHours =
+        chapter.estimatedHours ||
+        chapter.units.reduce(
+          (sum, u) =>
+            sum +
+            (u.teachingHours ||
+              u.subUnits.reduce((s, su) => s + (su.teachingHours || 0), 0)),
+          0,
+        );
+      const practicalRequired = allSubs.some((s) => s.practicalRequired);
+      const internalAssessment = allSubs
+        .map((s) => s.internalAssessment)
+        .filter(Boolean)
+        .join("; ");
+
+      return {
+        unitNo: chapter.chapterNo || index + 1,
+        chapterName: chapter.title,
+        estimatedTeachingHours,
+        learningOutcomes,
+        topicsCovered: topicsCovered || chapter.description || "",
+        references: chapter.references || "",
+        practicalRequired,
+        internalAssessment,
+        tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
+        startDateBs: "",
+        endDateBs: "",
+        status: "PENDING" as const,
+        syllabusId: syllabus._id,
+        syllabusChapterId: chapter._id,
+      };
+    });
+  }
+
+  // Legacy flat units
+  return (syllabus.units ?? []).map((unit, index) =>
+    mapSourceUnitToSessionUnit(unit, index),
+  );
+};
+
+/**
+ * Find a syllabus sub-unit matching a topic heading under a chapter/session unit.
+ */
+export const matchSyllabusSubUnit = (
+  syllabus: {
+    chapters?: Array<{
+      _id: string;
+      units: Array<{
+        _id: string;
+        subUnits: Array<{ _id: string; heading: string; learningOutcomes?: string; description?: string }>;
+      }>;
+    }>;
+  } | null | undefined,
+  opts: {
+    syllabusChapterId?: string;
+    heading?: string;
+  },
+): {
+  syllabusId?: string;
+  syllabusChapterId?: string;
+  syllabusUnitId?: string;
+  syllabusSubUnitId?: string;
+  heading?: string;
+  learningOutcomes?: string;
+  description?: string;
+} | null => {
+  if (!syllabus?.chapters?.length || !opts.heading?.trim()) return null;
+  const needle = opts.heading.trim().toLowerCase();
+  for (const chapter of syllabus.chapters) {
+    if (opts.syllabusChapterId && chapter._id !== opts.syllabusChapterId) continue;
+    for (const unit of chapter.units) {
+      for (const sub of unit.subUnits) {
+        if (sub.heading.trim().toLowerCase() === needle) {
+          return {
+            syllabusChapterId: chapter._id,
+            syllabusUnitId: unit._id,
+            syllabusSubUnitId: sub._id,
+            heading: sub.heading,
+            learningOutcomes: sub.learningOutcomes,
+            description: sub.description,
+          };
+        }
+      }
+    }
+  }
+  return null;
+};
 
 export const remainingPercentOf = (completedPercent: number): number =>
   Math.max(0, 100 - Math.min(100, completedPercent));
@@ -227,24 +411,80 @@ const exportUnitBasedPlansExcel = (
   filename: string,
   sheetName: string,
 ) => {
-  const rows = plans.flatMap((plan) =>
-    plan.units.map((unit) => ({
-      "Academic Year": plan.academicYearBs,
-      Faculty: plan.faculty ?? "",
-      Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
-      Subject: plan.subject?.name ?? plan.subjectId,
-      "Subject Code": plan.subject?.code ?? "",
-      "Approval Status": plan.status,
-      "Completion %": plan.completedPercent,
-      "Unit No": unit.unitNo,
-      "Unit Title": unit.chapterName,
-      Topics: unit.topicsCovered,
-      "Estimated Hours": unit.estimatedTeachingHours,
-      "Learning Outcomes": unit.learningOutcomes,
-      References: unit.references,
-      "Unit Status": unit.status,
-    })),
-  );
+  const rows: Array<Record<string, unknown>> = [];
+  for (const plan of plans) {
+    const syllabus = plan as AcademicSyllabusRecord;
+    if (syllabus.chapters && syllabus.chapters.length > 0) {
+      for (const chapter of syllabus.chapters) {
+        for (const unit of chapter.units) {
+          if (unit.subUnits.length > 0) {
+            for (const sub of unit.subUnits) {
+              rows.push({
+                "Academic Year": plan.academicYearBs,
+                Faculty: plan.faculty ?? "",
+                Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
+                Subject: plan.subject?.name ?? plan.subjectId,
+                "Subject Code":
+                  syllabus.subjectCode || plan.subject?.code || "",
+                "Approval Status": plan.status,
+                "Completion %": plan.completedPercent,
+                "Chapter No": chapter.chapterNo,
+                "Chapter Title": chapter.title,
+                "Unit No": unit.unitNo,
+                "Unit Title": unit.title,
+                "Sub Unit": sub.displayNo,
+                Heading: sub.heading,
+                "Teaching Hours": sub.teachingHours,
+                "Learning Outcomes": sub.learningOutcomes,
+                Practical: sub.practicalRequired ? "Yes" : "No",
+                Status: sub.status,
+              });
+            }
+          } else {
+            rows.push({
+              "Academic Year": plan.academicYearBs,
+              Faculty: plan.faculty ?? "",
+              Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
+              Subject: plan.subject?.name ?? plan.subjectId,
+              "Subject Code":
+                syllabus.subjectCode || plan.subject?.code || "",
+              "Approval Status": plan.status,
+              "Completion %": plan.completedPercent,
+              "Chapter No": chapter.chapterNo,
+              "Chapter Title": chapter.title,
+              "Unit No": unit.unitNo,
+              "Unit Title": unit.title,
+              "Sub Unit": "",
+              Heading: "",
+              "Teaching Hours": unit.teachingHours,
+              "Learning Outcomes": unit.learningObjective,
+              Practical: "",
+              Status: "",
+            });
+          }
+        }
+      }
+      continue;
+    }
+    for (const unit of plan.units) {
+      rows.push({
+        "Academic Year": plan.academicYearBs,
+        Faculty: plan.faculty ?? "",
+        Teacher: plan.teacher?.user?.fullName ?? plan.teacherId,
+        Subject: plan.subject?.name ?? plan.subjectId,
+        "Subject Code": plan.subject?.code ?? "",
+        "Approval Status": plan.status,
+        "Completion %": plan.completedPercent,
+        "Unit No": unit.unitNo,
+        "Unit Title": unit.chapterName,
+        Topics: unit.topicsCovered,
+        "Estimated Hours": unit.estimatedTeachingHours,
+        "Learning Outcomes": unit.learningOutcomes,
+        References: unit.references,
+        "Unit Status": unit.status,
+      });
+    }
+  }
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, sheetName);

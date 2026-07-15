@@ -30,7 +30,7 @@ import {
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
-  mapSourceUnitToSessionUnit,
+  mapSyllabusHierarchyToSessionUnits,
   NEPALI_MONTHS,
   statusBadgeClass,
 } from "./academicManagementUtils";
@@ -46,6 +46,7 @@ import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
+  dedupePlansByCurriculum,
   groupByTeacher,
   matchSessionPlanKeyword,
   recordsForCurriculumSubject,
@@ -85,6 +86,8 @@ const emptyUnit = (unitNo = 1) => ({
   startDateBs: "",
   endDateBs: "",
   status: "PENDING" as const,
+  syllabusId: "",
+  syllabusChapterId: "",
 });
 
 const blankSessionForm = (
@@ -194,6 +197,8 @@ export const SessionPlanPanel = ({
               endDateBs: unit.endDateBs || "",
               status: unit.status || "PENDING",
               attachmentUrl: unit.attachmentUrl,
+              syllabusId: unit.syllabusId || "",
+              syllabusChapterId: unit.syllabusChapterId || "",
             }))
           : [emptyUnit()],
     });
@@ -244,13 +249,17 @@ export const SessionPlanPanel = ({
   }, [syllabiQuery.data]);
 
   const importFromSyllabus = (syllabus: AcademicSyllabusRecord, replace = true) => {
-    if (!syllabus.units?.length) {
-      toast.message("Selected syllabus has no units to import");
+    const hasHierarchy = Boolean(syllabus.chapters?.length);
+    const hasLegacy = Boolean(syllabus.units?.length);
+    if (!hasHierarchy && !hasLegacy) {
+      toast.message("Selected syllabus has no chapters/units to import");
       return;
     }
-    const imported = syllabus.units.map((unit, index) =>
-      mapSourceUnitToSessionUnit(unit, index),
-    );
+    const imported = mapSyllabusHierarchyToSessionUnits(syllabus);
+    if (imported.length === 0) {
+      toast.message("Selected syllabus has no chapters/units to import");
+      return;
+    }
     setForm((current) => ({
       ...current,
       subjectId: syllabus.subjectId || current.subjectId,
@@ -272,11 +281,13 @@ export const SessionPlanPanel = ({
           ],
     }));
     toast.success(
-      `Imported ${imported.length} unit${imported.length === 1 ? "" : "s"} from syllabus`,
+      hasHierarchy
+        ? `Imported ${imported.length} chapter${imported.length === 1 ? "" : "s"} from hierarchical syllabus (topics = sub-units)`
+        : `Imported ${imported.length} unit${imported.length === 1 ? "" : "s"} from syllabus`,
     );
   };
 
-  // Auto-import syllabus units when creating a new plan and subject is chosen
+  // Auto-import hierarchical syllabus when creating a new plan and subject is chosen
   useEffect(() => {
     if (!showForm || editingId || !matchedSyllabus) return;
     // Only auto-fill when units are still the blank default
@@ -517,19 +528,22 @@ export const SessionPlanPanel = ({
 
   const selectedPlans = useMemo(() => {
     if (!selectedSubject) return [];
-    return recordsForCurriculumSubject(
+    const matched = recordsForCurriculumSubject(
       keywordFilteredPlans,
       selectedSubject.subjectIds,
       selectedYearKey,
       yearIdToLevelKey,
       isCollege,
     );
+    // Collapse batch-instance duplicates; keep separate plans per teacher
+    return dedupePlansByCurriculum(matched, subjects, true);
   }, [
     keywordFilteredPlans,
     selectedSubject,
     selectedYearKey,
     yearIdToLevelKey,
     isCollege,
+    subjects,
   ]);
 
   const teacherGroups = useMemo(
@@ -740,10 +754,12 @@ export const SessionPlanPanel = ({
             {matchedSyllabus && showForm ? (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950">
                 <span>
-                  Syllabus found for this subject
+                  Hierarchical syllabus found
                   {matchedSyllabus.status === "APPROVED" ? " (approved)" : ""}.{" "}
-                  {matchedSyllabus.units.length} unit
-                  {matchedSyllabus.units.length === 1 ? "" : "s"} available.
+                  {matchedSyllabus.chapters?.length
+                    ? `${matchedSyllabus.chapters.length} chapter(s) · ${matchedSyllabus.totalSubUnits ?? 0} sub-unit(s)`
+                    : `${matchedSyllabus.units.length} unit(s)`}{" "}
+                  — Session Plan units map 1:1 to chapters; topics = sub-units.
                 </span>
                 <Button
                   type="button"

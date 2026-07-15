@@ -1,4 +1,4 @@
-import { Bold, Italic, List, ListOrdered, Underline } from "lucide-react";
+import { Bold, Italic, Link2, List, ListOrdered, Underline } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "components/ui/button";
 import { cn } from "lib/utils";
@@ -24,10 +24,15 @@ export const RichTextEditor = ({
     }
   }, [value]);
 
-  const applyCommand = (command: string) => {
-    document.execCommand(command, false);
+  const applyCommand = (command: string, value?: string) => {
+    document.execCommand(command, false, value);
     editorRef.current?.focus();
     onChange(editorRef.current?.innerHTML ?? "");
+  };
+
+  const insertLink = () => {
+    const url = window.prompt("Enter URL");
+    if (url) applyCommand("createLink", url);
   };
 
   return (
@@ -77,6 +82,16 @@ export const RichTextEditor = ({
           onClick={() => applyCommand("insertOrderedList")}
         >
           <ListOrdered className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          title="Insert hyperlink"
+          onClick={insertLink}
+        >
+          <Link2 className="h-4 w-4" />
         </Button>
       </div>
       <div

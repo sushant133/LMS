@@ -39,7 +39,9 @@ import {
   updateLessonPlan,
   updateLogBookEntry,
   updateSessionPlan,
-  updateSyllabus
+  updateSyllabus,
+  updateSyllabusSubUnitProgress,
+  reorderSyllabusHierarchy
 } from "../controllers/academicManagementController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
@@ -59,6 +61,16 @@ router.post("/syllabi/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TE
 router.post("/syllabi/:id/approve", authorizeInstitutionAdmin, approveSyllabus);
 router.post("/syllabi/:id/reject", authorizeInstitutionAdmin, rejectSyllabus);
 router.post("/syllabi/:id/unlock", authorizeInstitutionAdmin, unlockSyllabus);
+router.patch(
+  "/syllabi/:id/sub-units/:subUnitId/progress",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
+  updateSyllabusSubUnitProgress
+);
+router.post(
+  "/syllabi/:id/reorder",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
+  reorderSyllabusHierarchy
+);
 
 router.get("/session-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listSessionPlans);
 router.get("/session-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getSessionPlan);

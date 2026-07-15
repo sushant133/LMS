@@ -32,6 +32,10 @@ const assignmentSchema = new Schema(
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject" },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true },
     topic: { type: String, trim: true },
+    /** Optional hierarchical syllabus links for homework. */
+    syllabusChapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter" },
+    syllabusUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusTopic" },
+    syllabusSubUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusSubUnit" },
     dueDateBs: { type: String },
     maxMarks: { type: Number, min: 0 },
     rubric: { type: String },

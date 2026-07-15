@@ -14,6 +14,9 @@ import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
+import { AcademicSyllabusChapter } from "../models/AcademicSyllabusChapter.js";
+import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
+import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
 import { Batch } from "../models/Batch.js";
 import { AssignmentComment } from "../models/AssignmentComment.js";
@@ -93,6 +96,9 @@ export const deleteSchoolCascade = async (
     AcademicSessionPlanUnit.deleteMany(filter, options),
     AcademicProgress.deleteMany(filter, options),
     AcademicSessionPlan.deleteMany(filter, options),
+    AcademicSyllabusSubUnit.deleteMany(filter, options),
+    AcademicSyllabusTopic.deleteMany(filter, options),
+    AcademicSyllabusChapter.deleteMany(filter, options),
     AcademicSyllabusUnit.deleteMany(filter, options),
     AcademicSyllabus.deleteMany(filter, options),
     AssignmentComment.deleteMany(filter, options),

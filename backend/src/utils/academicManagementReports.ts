@@ -148,6 +148,70 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
       };
     }
     case "syllabus-completion": {
+      const { AcademicSyllabus } = await import("../models/AcademicSyllabus.js");
+      const { serializeSyllabus } = await import("./academicManagementService.js");
+      const syllabi = await AcademicSyllabus.find({
+        ...baseFilter,
+        isDeleted: false
+      })
+        .sort({ updatedAt: -1 })
+        .lean();
+      const serialized = (
+        await Promise.all(syllabi.map((row) => serializeSyllabus(row._id.toString())))
+      ).filter(Boolean);
+
+      if (serialized.length > 0) {
+        const rows: Array<Record<string, unknown>> = [];
+        for (const plan of serialized) {
+          if (!plan) continue;
+          const subjectName = plan.subject?.name ?? "Subject";
+          if (plan.chapters && plan.chapters.length > 0) {
+            for (const chapter of plan.chapters) {
+              for (const unit of chapter.units) {
+                for (const sub of unit.subUnits) {
+                  rows.push({
+                    subjectName,
+                    subjectCode: plan.subjectCode || plan.subject?.code || "",
+                    teacher: plan.teacher?.user?.fullName ?? "Shared",
+                    chapterNo: chapter.chapterNo,
+                    chapterTitle: chapter.title,
+                    unitNo: unit.unitNo,
+                    unitTitle: unit.title,
+                    subUnit: sub.displayNo,
+                    heading: sub.heading,
+                    status: sub.status,
+                    teachingHours: sub.teachingHours,
+                    practical: sub.practicalRequired ? "Yes" : "No",
+                    subjectCompletionPercent: plan.completedPercent,
+                    remainingPercent: plan.remainingPercent,
+                    hoursCovered: plan.teachingHoursCovered,
+                    remainingHours: plan.remainingTeachingHours
+                  });
+                }
+              }
+            }
+          } else {
+            rows.push({
+              subjectName,
+              subjectCode: plan.subjectCode || plan.subject?.code || "",
+              teacher: plan.teacher?.user?.fullName ?? "Shared",
+              subjectCompletionPercent: plan.completedPercent,
+              remainingPercent: plan.remainingPercent,
+              completedSubUnits: plan.completedSubUnits,
+              remainingSubUnits: plan.remainingSubUnits,
+              totalChapters: plan.totalChapters,
+              hoursCovered: plan.teachingHoursCovered,
+              remainingHours: plan.remainingTeachingHours
+            });
+          }
+        }
+        return {
+          title: "Syllabus Completion Report",
+          rows
+        };
+      }
+
+      // Fallback: session-plan progress (legacy)
       const progress = await AcademicProgress.find(progressFilter).lean();
       const names = await subjectNameMap(progress.map((row) => row.subjectId.toString()));
       return {

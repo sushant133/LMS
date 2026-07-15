@@ -23,6 +23,11 @@ const entrySchema = new Schema(
     lessonPlanItemId: { type: Schema.Types.ObjectId, ref: "AcademicLessonPlanItem" },
     sessionPlanUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSessionPlanUnit" },
     subUnitTitle: { type: String, default: "" },
+    /** Optional hierarchical syllabus coverage links. */
+    syllabusId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabus" },
+    syllabusChapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter" },
+    syllabusUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusTopic" },
+    syllabusSubUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusSubUnit" },
     academicYearBs: { type: String, required: true, index: true },
     session: { type: String, required: true },
     faculty: { type: String },

@@ -9,7 +9,11 @@ import {
   academicRejectActionSchema,
   academicSessionPlanSchema,
   academicSyllabusSchema,
-  type AcademicManagementFilters
+  academicSyllabusUpdateSchema,
+  academicSyllabusSubUnitProgressSchema,
+  academicSyllabusReorderSchema,
+  type AcademicManagementFilters,
+  type AcademicSyllabusChapterInput
 } from "@phit-erp/shared";
 import { AcademicLessonPlan } from "../models/AcademicLessonPlan.js";
 import { AcademicLessonPlanItem } from "../models/AcademicLessonPlanItem.js";
@@ -18,7 +22,16 @@ import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
+import { AcademicSyllabusChapter } from "../models/AcademicSyllabusChapter.js";
+import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
+import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { AcademicComment } from "../models/AcademicComment.js";
+import {
+  deleteSyllabusHierarchy,
+  legacyUnitsToChapters,
+  renumberAfterReorder,
+  saveSyllabusHierarchy
+} from "../utils/syllabusHierarchyService.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
@@ -172,7 +185,9 @@ export const createSessionPlan = asyncHandler(async (req: Request, res: Response
         // Progress is driven by Log Book → Lesson Plan sync only (never manual COMPLETED)
         status: "PENDING",
         schoolId: tenantObjectId(req),
-        sessionPlanId: createdPlan._id
+        sessionPlanId: createdPlan._id,
+        syllabusId: unit.syllabusId?.trim() || undefined,
+        syllabusChapterId: unit.syllabusChapterId?.trim() || undefined
       })),
       { session }
     );
@@ -219,7 +234,9 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
           Object.assign(prev, unit, {
             schoolId: tenantObjectId(req),
             sessionPlanId: existing._id,
-            status: preservedStatus
+            status: preservedStatus,
+            syllabusId: unit.syllabusId?.trim() || undefined,
+            syllabusChapterId: unit.syllabusChapterId?.trim() || undefined
           });
           await prev.save({ session });
         } else {
@@ -229,7 +246,9 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
                 ...unit,
                 status: "PENDING",
                 schoolId: tenantObjectId(req),
-                sessionPlanId: existing._id
+                sessionPlanId: existing._id,
+                syllabusId: unit.syllabusId?.trim() || undefined,
+                syllabusChapterId: unit.syllabusChapterId?.trim() || undefined
               }
             ],
             { session }
@@ -380,17 +399,58 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
   const filters = parseFilters(req);
   const rows = await AcademicSyllabus.find(filter).sort({ updatedAt: -1 }).lean();
   const serialized = (await Promise.all(rows.map((row) => serializeSyllabus(row._id.toString())))).filter(Boolean);
-  const filtered = serialized.filter((plan) =>
-    matchesKeyword(filters.keyword, [
+  const filtered = serialized.filter((plan) => {
+    const chapterTitles = (plan?.chapters ?? []).map((c) => c.title);
+    const unitTitles = (plan?.chapters ?? []).flatMap((c) => c.units.map((u) => u.title));
+    const subHeadings = (plan?.chapters ?? []).flatMap((c) =>
+      c.units.flatMap((u) => u.subUnits.map((s) => s.heading))
+    );
+    const subDescriptions = (plan?.chapters ?? []).flatMap((c) =>
+      c.units.flatMap((u) => u.subUnits.map((s) => s.description))
+    );
+    return matchesKeyword(filters.keyword, [
       plan?.subject?.name,
+      plan?.subject?.code,
+      plan?.subjectCode,
       plan?.teacher?.user?.fullName,
       plan?.status,
       plan?.faculty,
-      ...(plan?.units ?? []).map((unit) => unit.chapterName)
-    ])
-  );
+      plan?.remarks,
+      ...(plan?.units ?? []).map((unit) => unit.chapterName),
+      ...(plan?.units ?? []).map((unit) => unit.topicsCovered),
+      ...chapterTitles,
+      ...unitTitles,
+      ...subHeadings,
+      ...subDescriptions
+    ]);
+  });
   return sendSuccess(res, "Syllabi fetched", filtered);
 });
+
+const resolveSyllabusChapters = (payload: {
+  chapters?: AcademicSyllabusChapterInput[];
+  units?: Array<{
+    unitNo: number;
+    chapterName: string;
+    estimatedTeachingHours?: number;
+    learningOutcomes?: string;
+    topicsCovered?: string;
+    references?: string;
+    practicalRequired?: boolean;
+    internalAssessment?: string;
+    tentativeCompletionMonth?: string;
+    status?: string;
+    attachmentUrl?: string;
+  }>;
+}): AcademicSyllabusChapterInput[] => {
+  if (payload.chapters && payload.chapters.length > 0) {
+    return payload.chapters;
+  }
+  if (payload.units && payload.units.length > 0) {
+    return legacyUnitsToChapters(payload.units);
+  }
+  return [];
+};
 
 export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
   const plan = await AcademicSyllabus.findOne({
@@ -412,6 +472,10 @@ export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
 export const createSyllabus = asyncHandler(async (req: Request, res: Response) => {
   const payload = academicSyllabusSchema.parse(req.body);
   const optionalTeacherId = payload.teacherId?.trim() || undefined;
+  const chapters = resolveSyllabusChapters(payload);
+  if (chapters.length === 0) {
+    throw new ApiError(400, "At least one chapter or unit is required");
+  }
 
   if (req.user?.role === "TEACHER") {
     const scope = await requireTeacherScope(req);
@@ -425,13 +489,21 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
   }
 
   const result = await withTransaction(async (session) => {
+    const {
+      units: _legacyUnits,
+      chapters: _chapterPayload,
+      teacherId: _teacherId,
+      ...headerFields
+    } = payload;
+
     const created = await AcademicSyllabus.create(
       [
         {
-          ...payload,
+          ...headerFields,
           teacherId: optionalTeacherId || undefined,
           schoolId: tenantObjectId(req),
           status: "DRAFT",
+          hierarchyMigratedAt: new Date(),
           audit: { createdBy: actorObjectId(req) }
         }
       ],
@@ -441,14 +513,13 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
     const doc = created[0];
     if (!doc) throw new ApiError(500, "Failed to create syllabus");
 
-    await AcademicSyllabusUnit.insertMany(
-      payload.units.map((unit) => ({
-        ...unit,
-        status: "PENDING",
-        schoolId: tenantObjectId(req),
-        syllabusId: doc._id
-      })),
-      { session }
+    await saveSyllabusHierarchy(
+      {
+        schoolId: tenantObjectId(req).toString(),
+        syllabusId: doc._id.toString(),
+        chapters
+      },
+      session
     );
 
     await recordAudit(req, {
@@ -465,7 +536,7 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const updateSyllabus = asyncHandler(async (req: Request, res: Response) => {
-  const payload = academicSyllabusSchema.partial().parse(req.body);
+  const payload = academicSyllabusUpdateSchema.parse(req.body);
   const existing = await AcademicSyllabus.findOne({
     _id: req.params.id,
     schoolId: tenantObjectId(req),
@@ -479,10 +550,26 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
   });
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
+  // Teachers may only change structure while draft/rejected; approved structure is admin-only
+  const structureChanging = Boolean(payload.chapters || payload.units);
+  if (
+    structureChanging &&
+    req.user?.role === "TEACHER" &&
+    existing.status !== "DRAFT" &&
+    existing.status !== "REJECTED"
+  ) {
+    throw new ApiError(
+      403,
+      "Teachers cannot modify syllabus structure after submission. Use progress updates on sub-units instead."
+    );
+  }
+
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   if (safePayload.teacherId === "") {
     safePayload.teacherId = undefined;
   }
+  delete safePayload.units;
+  delete safePayload.chapters;
 
   await withTransaction(async (session) => {
     Object.assign(existing, safePayload, {
@@ -493,16 +580,21 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
     }
     await existing.save({ session });
 
-    if (payload.units) {
-      await AcademicSyllabusUnit.deleteMany({ syllabusId: existing._id }, { session });
-      await AcademicSyllabusUnit.insertMany(
-        payload.units.map((unit) => ({
-          ...unit,
-          status: unit.status ?? "PENDING",
-          schoolId: tenantObjectId(req),
-          syllabusId: existing._id
-        })),
-        { session }
+    if (structureChanging) {
+      const chapters = resolveSyllabusChapters({
+        chapters: payload.chapters,
+        units: payload.units
+      });
+      if (chapters.length === 0) {
+        throw new ApiError(400, "At least one chapter or unit is required");
+      }
+      await saveSyllabusHierarchy(
+        {
+          schoolId: tenantObjectId(req).toString(),
+          syllabusId: existing._id.toString(),
+          chapters
+        },
+        session
       );
     }
 
@@ -533,6 +625,7 @@ export const deleteSyllabus = asyncHandler(async (req: Request, res: Response) =
   existing.isDeleted = true;
   existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
   await existing.save();
+  await deleteSyllabusHierarchy(existing._id.toString());
   await AcademicSyllabusUnit.deleteMany({ syllabusId: existing._id });
   await recordAudit(req, {
     action: "academic.syllabus.delete",
@@ -540,6 +633,181 @@ export const deleteSyllabus = asyncHandler(async (req: Request, res: Response) =
     entityId: existing._id.toString()
   });
   return sendSuccess(res, "Syllabus deleted", { deleted: true });
+});
+
+/** Teacher progress update on a single sub-unit (no structure changes). */
+export const updateSyllabusSubUnitProgress = asyncHandler(async (req: Request, res: Response) => {
+  const payload = academicSyllabusSubUnitProgressSchema.parse(req.body ?? {});
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+  await assertSyllabusAccess(req, {
+    teacherId: existing.teacherId?.toString(),
+    subjectId: existing.subjectId.toString()
+  });
+
+  const subUnit = await AcademicSyllabusSubUnit.findOne({
+    _id: req.params.subUnitId,
+    syllabusId: existing._id,
+    schoolId: tenantObjectId(req)
+  });
+  if (!subUnit) throw new ApiError(404, "Sub unit not found");
+
+  if (payload.status !== undefined) subUnit.status = payload.status;
+  if (payload.teachingNotes !== undefined) subUnit.teachingNotes = payload.teachingNotes;
+  if (payload.teacherAttachments !== undefined) {
+    subUnit.set("teacherAttachments", payload.teacherAttachments);
+  }
+  if (payload.todaysCoverage !== undefined) subUnit.todaysCoverage = payload.todaysCoverage;
+  if (payload.remarks !== undefined) subUnit.remarks = payload.remarks;
+  await subUnit.save();
+
+  // Keep legacy flat unit status roughly in sync
+  const chapterSubs = await AcademicSyllabusSubUnit.find({ chapterId: subUnit.chapterId }).lean();
+  const allDone = chapterSubs.every((s) => s.status === "COMPLETED" || s.status === "SKIPPED");
+  const anyProgress = chapterSubs.some(
+    (s) => s.status === "IN_PROGRESS" || s.status === "COMPLETED" || s.status === "SKIPPED"
+  );
+  const chapter = await AcademicSyllabusChapter.findById(subUnit.chapterId).lean();
+  if (chapter) {
+    const legacyStatus = allDone ? "COMPLETED" : anyProgress ? "IN_PROGRESS" : "PENDING";
+    await AcademicSyllabusUnit.updateOne(
+      { syllabusId: existing._id, unitNo: chapter.chapterNo },
+      { $set: { status: legacyStatus } }
+    );
+  }
+
+  await recordAudit(req, {
+    action: "academic.syllabus.subUnit.progress",
+    entity: "SYLLABUS",
+    entityId: existing._id.toString(),
+    after: { subUnitId: subUnit._id.toString(), status: subUnit.status }
+  });
+
+  const serialized = await serializeSyllabus(existing._id.toString());
+  return sendSuccess(res, "Sub unit progress updated", serialized);
+});
+
+/** Reorder chapters / units / sub-units and renumber automatically. */
+export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: Response) => {
+  const payload = academicSyllabusReorderSchema.parse(req.body ?? {});
+  const existing = await AcademicSyllabus.findOne({
+    _id: req.params.id,
+    schoolId: tenantObjectId(req),
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Syllabus not found");
+  await assertSyllabusAccess(req, {
+    teacherId: existing.teacherId?.toString(),
+    subjectId: existing.subjectId.toString()
+  });
+  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+
+  await withTransaction(async (session) => {
+    if (payload.chapterIds?.length) {
+      for (let i = 0; i < payload.chapterIds.length; i++) {
+        await AcademicSyllabusChapter.updateOne(
+          { _id: payload.chapterIds[i], syllabusId: existing._id },
+          { $set: { sortOrder: i } },
+          { session }
+        );
+      }
+    }
+    if (payload.unitIdsByChapter) {
+      for (const [chapterId, unitIds] of Object.entries(payload.unitIdsByChapter)) {
+        for (let i = 0; i < unitIds.length; i++) {
+          await AcademicSyllabusTopic.updateOne(
+            { _id: unitIds[i], chapterId, syllabusId: existing._id },
+            { $set: { sortOrder: i } },
+            { session }
+          );
+        }
+      }
+    }
+    if (payload.subUnitIdsByUnit) {
+      for (const [unitId, subIds] of Object.entries(payload.subUnitIdsByUnit)) {
+        for (let i = 0; i < subIds.length; i++) {
+          await AcademicSyllabusSubUnit.updateOne(
+            { _id: subIds[i], unitId, syllabusId: existing._id },
+            { $set: { sortOrder: i } },
+            { session }
+          );
+        }
+      }
+    }
+    await renumberAfterReorder(existing._id.toString(), session);
+    // Rebuild legacy units from current hierarchy numbers via serialize path after commit
+  });
+
+  // Rebuild legacy flat units from hierarchy
+  const serialized = await serializeSyllabus(existing._id.toString());
+  if (serialized?.chapters) {
+    const { chaptersToLegacyUnits } = await import("../utils/syllabusHierarchyService.js");
+    const legacy = chaptersToLegacyUnits(
+      serialized.chapters.map((c) => ({
+        chapterNo: c.chapterNo,
+        title: c.title,
+        description: c.description,
+        estimatedHours: c.estimatedHours,
+        weightagePercent: c.weightagePercent,
+        references: c.references,
+        remarks: c.remarks,
+        tentativeCompletionMonth: c.tentativeCompletionMonth,
+        units: c.units.map((u) => ({
+          unitNo: u.unitNo,
+          title: u.title,
+          description: u.description,
+          teachingHours: u.teachingHours,
+          learningObjective: u.learningObjective,
+          references: u.references,
+          remarks: u.remarks,
+          subUnits: u.subUnits.map((s) => ({
+            subUnitNo: s.subUnitNo,
+            heading: s.heading,
+            description: s.description,
+            learningOutcomes: s.learningOutcomes,
+            internalAssessment: s.internalAssessment,
+            practicalRequired: s.practicalRequired,
+            labName: s.labName,
+            requiredEquipment: s.requiredEquipment,
+            hospitalPosting: s.hospitalPosting,
+            clinicalHours: s.clinicalHours,
+            references: s.references,
+            teachingHours: s.teachingHours,
+            attachments: s.attachments,
+            remarks: s.remarks,
+            status: s.status,
+            teachingNotes: s.teachingNotes,
+            teacherAttachments: s.teacherAttachments,
+            todaysCoverage: s.todaysCoverage
+          }))
+        }))
+      })),
+      existing._id.toString()
+    );
+    await AcademicSyllabusUnit.deleteMany({ syllabusId: existing._id });
+    if (legacy.length) {
+      await AcademicSyllabusUnit.insertMany(
+        legacy.map((unit) => ({
+          ...unit,
+          schoolId: tenantObjectId(req),
+          syllabusId: existing._id
+        }))
+      );
+    }
+  }
+
+  await recordAudit(req, {
+    action: "academic.syllabus.reorder",
+    entity: "SYLLABUS",
+    entityId: existing._id.toString()
+  });
+
+  const refreshed = await serializeSyllabus(existing._id.toString());
+  return sendSuccess(res, "Syllabus hierarchy reordered", refreshed);
 });
 
 export const submitSyllabus = asyncHandler(async (req: Request, res: Response) => {
@@ -734,6 +1002,17 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     await AcademicLessonPlanItem.insertMany(
       payload.items.map((item) => {
         const unit = unitMap.get(item.sessionPlanUnitId);
+        const unitAny = unit as
+          | {
+              syllabusId?: { toString(): string };
+              syllabusChapterId?: { toString(): string };
+              learningOutcomes?: string;
+              estimatedTeachingHours?: number;
+              topicsCovered?: string;
+              chapterName?: string;
+              unitNo?: number;
+            }
+          | undefined;
         return {
           ...item,
           subjectLabel: item.subjectLabel || (unit ? `Unit ${unit.unitNo}` : ""),
@@ -744,6 +1023,15 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
           estimatedClasses:
             item.estimatedClasses ||
             Math.max(1, Math.round(unit?.estimatedTeachingHours || 1)),
+          // Inherit syllabus chapter link from session unit when client omits hierarchy ids
+          syllabusId:
+            item.syllabusId?.trim() || unitAny?.syllabusId?.toString?.() || undefined,
+          syllabusChapterId:
+            item.syllabusChapterId?.trim() ||
+            unitAny?.syllabusChapterId?.toString?.() ||
+            undefined,
+          syllabusUnitId: item.syllabusUnitId?.trim() || undefined,
+          syllabusSubUnitId: item.syllabusSubUnitId?.trim() || undefined,
           schoolId: tenantObjectId(req),
           lessonPlanId: createdPlan._id
         };
@@ -1020,7 +1308,36 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     unitLabel = unitLabel || item.subjectLabel || unitLabel;
     payload.topicCovered = payload.topicCovered || item.plannedTopic;
     payload.objectives = payload.objectives || item.learningObjectives || "";
+    // Inherit hierarchical syllabus links from the Lesson Plan item
+    const itemAny = item as {
+      syllabusId?: { toString(): string };
+      syllabusChapterId?: { toString(): string };
+      syllabusUnitId?: { toString(): string };
+      syllabusSubUnitId?: { toString(): string };
+      subUnitTitle?: string;
+    };
+    if (!payload.syllabusId && itemAny.syllabusId) payload.syllabusId = itemAny.syllabusId.toString();
+    if (!payload.syllabusChapterId && itemAny.syllabusChapterId) {
+      payload.syllabusChapterId = itemAny.syllabusChapterId.toString();
+    }
+    if (!payload.syllabusUnitId && itemAny.syllabusUnitId) {
+      payload.syllabusUnitId = itemAny.syllabusUnitId.toString();
+    }
+    if (!payload.syllabusSubUnitId && itemAny.syllabusSubUnitId) {
+      payload.syllabusSubUnitId = itemAny.syllabusSubUnitId.toString();
+    }
+    if (!payload.subUnitTitle && itemAny.subUnitTitle) payload.subUnitTitle = itemAny.subUnitTitle;
     await assertNoDuplicateLogBookForItemDate(req, lessonPlanItemId, dateBs);
+  }
+
+  // Inherit chapter link from Session Plan unit when not set
+  const unitAny = unitDoc as {
+    syllabusId?: { toString(): string };
+    syllabusChapterId?: { toString(): string };
+  };
+  if (!payload.syllabusId && unitAny.syllabusId) payload.syllabusId = unitAny.syllabusId.toString();
+  if (!payload.syllabusChapterId && unitAny.syllabusChapterId) {
+    payload.syllabusChapterId = unitAny.syllabusChapterId.toString();
   }
 
   if (payload.subUnitTitle) {
@@ -1054,6 +1371,10 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
 
   const entry = await AcademicLogBookEntry.create({
     ...payload,
+    syllabusId: payload.syllabusId?.trim() || undefined,
+    syllabusChapterId: payload.syllabusChapterId?.trim() || undefined,
+    syllabusUnitId: payload.syllabusUnitId?.trim() || undefined,
+    syllabusSubUnitId: payload.syllabusSubUnitId?.trim() || undefined,
     schoolId: tenantObjectId(req),
     logBookId,
     serialNo: count + 1,
@@ -1067,6 +1388,27 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
   // Auto progress when linked to a Lesson Plan item
   if (entry.lessonPlanItemId) {
     await syncLessonPlanItemProgress(entry.lessonPlanItemId.toString());
+  }
+
+  // Mark linked syllabus sub-unit as completed when a class log is recorded
+  if (payload.syllabusSubUnitId) {
+    try {
+      const { AcademicSyllabusSubUnit } = await import("../models/AcademicSyllabusSubUnit.js");
+      await AcademicSyllabusSubUnit.updateOne(
+        {
+          _id: payload.syllabusSubUnitId,
+          schoolId: tenantObjectId(req)
+        },
+        {
+          $set: {
+            status: "COMPLETED",
+            todaysCoverage: payload.topicCovered || ""
+          }
+        }
+      );
+    } catch {
+      // Non-blocking — log book entry is still valid without syllabus progress
+    }
   }
 
   await recordAudit(req, { action: "academic.log_book.create", entity: "LOG_BOOK_ENTRY", entityId: entry._id.toString(), after: entry });

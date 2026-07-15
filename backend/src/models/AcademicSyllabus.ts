@@ -37,6 +37,14 @@ const academicSyllabusSchema = new Schema(
     },
     adminRemarks: { type: String },
     attachmentUrl: { type: String },
+    /** Optional override; UI may show Subject.code when empty. */
+    subjectCode: { type: String, default: "" },
+    totalTheoryHours: { type: Number, default: 0, min: 0 },
+    totalPracticalHours: { type: Number, default: 0, min: 0 },
+    creditHours: { type: Number, default: 0, min: 0 },
+    remarks: { type: String, default: "" },
+    /** Set when legacy flat units were migrated into Chapter → Unit → SubUnit. */
+    hierarchyMigratedAt: { type: Date },
     audit: { type: auditSchema, required: true },
     isDeleted: { type: Boolean, default: false, index: true }
   },

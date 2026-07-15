@@ -87,6 +87,9 @@ export interface AcademicSessionPlanUnitRecord {
   endDateBs?: string;
   status: LessonPlanItemStatus;
   attachmentUrl?: string;
+  /** Optional link to hierarchical syllabus chapter (sync source). */
+  syllabusId?: string;
+  syllabusChapterId?: string;
   /** Months where this unit appears in a Lesson Plan (hierarchical coverage). */
   plannedInMonths?: string[];
   planningStatus?: SyllabusUnitPlanningStatus;
@@ -140,6 +143,96 @@ export interface AcademicSyllabusUnitRecord {
   attachmentUrl?: string;
 }
 
+/** Hierarchical syllabus progress status (sub-unit level). */
+export type SyllabusSubUnitStatus =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "SKIPPED"
+  | "REVISION_REQUIRED";
+
+export interface SyllabusAttachmentRecord {
+  url: string;
+  name: string;
+  mimeType?: string;
+  kind?: "FILE" | "IMAGE" | "PDF" | "VIDEO" | "LINK" | "WORD" | "EXCEL" | "POWERPOINT";
+}
+
+export interface SyllabusReferencesRecord {
+  textbooks: string;
+  journal: string;
+  whoGuidelines: string;
+  internetResources: string;
+  freeText: string;
+}
+
+export interface AcademicSyllabusSubUnitRecord {
+  _id: string;
+  syllabusId: string;
+  chapterId: string;
+  unitId: string;
+  /** Display number within parent unit (1, 2, 3 → shown as 1.1, 1.2 with unitNo). */
+  subUnitNo: number;
+  /** Computed display label e.g. "1.1", "2.3". */
+  displayNo: string;
+  heading: string;
+  description: string;
+  learningOutcomes: string;
+  internalAssessment: string;
+  practicalRequired: boolean;
+  labName: string;
+  requiredEquipment: string;
+  hospitalPosting: string;
+  clinicalHours: number;
+  references: SyllabusReferencesRecord;
+  teachingHours: number;
+  attachments: SyllabusAttachmentRecord[];
+  remarks: string;
+  status: SyllabusSubUnitStatus;
+  teachingNotes: string;
+  teacherAttachments: SyllabusAttachmentRecord[];
+  todaysCoverage: string;
+  completedPercent: number;
+}
+
+export interface AcademicSyllabusTopicRecord {
+  _id: string;
+  syllabusId: string;
+  chapterId: string;
+  unitNo: number;
+  title: string;
+  description: string;
+  teachingHours: number;
+  learningObjective: string;
+  references: string;
+  remarks: string;
+  subUnits: AcademicSyllabusSubUnitRecord[];
+  completedPercent: number;
+  remainingPercent: number;
+  completedSubUnits: number;
+  remainingSubUnits: number;
+  totalSubUnits: number;
+}
+
+export interface AcademicSyllabusChapterRecord {
+  _id: string;
+  syllabusId: string;
+  chapterNo: number;
+  title: string;
+  description: string;
+  estimatedHours: number;
+  weightagePercent: number;
+  references: string;
+  remarks: string;
+  tentativeCompletionMonth: string;
+  units: AcademicSyllabusTopicRecord[];
+  completedPercent: number;
+  remainingPercent: number;
+  completedSubUnits: number;
+  remainingSubUnits: number;
+  totalSubUnits: number;
+}
+
 export interface AcademicSyllabusRecord extends AcademicManagementScope {
   _id: string;
   schoolId: string;
@@ -150,17 +243,56 @@ export interface AcademicSyllabusRecord extends AcademicManagementScope {
   subjectId: string;
   /** Optional owner; access for teachers is by assigned subject. */
   teacherId?: string;
+  subjectCode?: string;
+  totalTheoryHours?: number;
+  totalPracticalHours?: number;
+  creditHours?: number;
+  remarks?: string;
   status: AcademicPlanStatus;
   adminRemarks?: string;
   attachmentUrl?: string;
+  /** Hierarchical chapters → units → sub-units. */
+  chapters: AcademicSyllabusChapterRecord[];
+  /**
+   * Legacy flat units derived from hierarchy (or original rows before migration).
+   * Kept for Session Plan import and older clients.
+   */
   units: AcademicSyllabusUnitRecord[];
   completedPercent: number;
   remainingPercent: number;
   completedUnits: number;
   remainingUnits: number;
+  completedSubUnits: number;
+  remainingSubUnits: number;
+  totalSubUnits: number;
+  totalChapters: number;
+  totalTopics: number;
+  theoryHoursCovered: number;
+  practicalHoursCovered: number;
+  teachingHoursCovered: number;
+  remainingTeachingHours: number;
   audit: AcademicAuditTrail;
   subject?: { _id: string; name: string; code: string };
   teacher?: { _id: string; teacherCode: string; user?: { fullName: string } };
+}
+
+/** Aggregate progress report row for hierarchical syllabus. */
+export interface SyllabusHierarchyProgressReport {
+  title: string;
+  rows: Array<Record<string, unknown>>;
+  summary: {
+    totalSubjects: number;
+    totalChapters: number;
+    totalUnits: number;
+    totalSubUnits: number;
+    completedSubUnits: number;
+    pendingSubUnits: number;
+    completionPercent: number;
+    theoryHours: number;
+    practicalHours: number;
+    teachingHoursCovered: number;
+    remainingHours: number;
+  };
 }
 
 export interface AcademicSessionPlanRecord extends AcademicManagementScope {
@@ -192,6 +324,11 @@ export interface AcademicLessonPlanItemRecord {
   sessionPlanUnitId?: string;
   /** Sub-topic selected from the session plan unit's topics list. */
   subUnitTitle?: string;
+  /** Hierarchical syllabus links (Subject → Chapter → Unit → Sub Unit). */
+  syllabusId?: string;
+  syllabusChapterId?: string;
+  syllabusUnitId?: string;
+  syllabusSubUnitId?: string;
   subjectLabel: string;
   plannedTopic: string;
   description: string;
@@ -211,7 +348,14 @@ export interface AcademicLessonPlanItemRecord {
   remainingPercent: number;
   unit?: Pick<
     AcademicSessionPlanUnitRecord,
-    "_id" | "unitNo" | "chapterName" | "topicsCovered" | "startDateBs" | "endDateBs"
+    | "_id"
+    | "unitNo"
+    | "chapterName"
+    | "topicsCovered"
+    | "startDateBs"
+    | "endDateBs"
+    | "syllabusId"
+    | "syllabusChapterId"
   >;
 }
 
@@ -278,6 +422,10 @@ export interface AcademicLogBookEntryRecord extends AcademicManagementScope {
   lessonPlanItemId?: string;
   sessionPlanUnitId?: string;
   subUnitTitle?: string;
+  syllabusId?: string;
+  syllabusChapterId?: string;
+  syllabusUnitId?: string;
+  syllabusSubUnitId?: string;
   academicYearBs: string;
   session: string;
   faculty?: string;

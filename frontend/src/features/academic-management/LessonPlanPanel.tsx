@@ -4,6 +4,7 @@ import {
   type AcademicLessonPlanRecord,
   type AcademicSessionPlanRecord,
   type AcademicSessionPlanUnitRecord,
+  type AcademicSyllabusRecord,
   type SessionPlanSyllabusCoverage,
   type SubjectAssignmentRecord,
   type SubjectRecord,
@@ -32,6 +33,7 @@ import {
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
+  matchSyllabusSubUnit,
   parseSubUnitsFromTopics,
   statusBadgeClass,
 } from "./academicManagementUtils";
@@ -46,6 +48,7 @@ import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
+  dedupePlansByCurriculum,
   groupByTeacher,
   matchLessonPlanKeyword,
   recordsForCurriculumSubject,
@@ -75,18 +78,32 @@ const emptyItem = (
   serialNo: number,
   unit?: AcademicSessionPlanUnitRecord,
   subUnitTitle = "",
+  syllabusMatch?: {
+    syllabusId?: string;
+    syllabusChapterId?: string;
+    syllabusUnitId?: string;
+    syllabusSubUnitId?: string;
+    learningOutcomes?: string;
+    description?: string;
+  } | null,
 ): AcademicLessonPlanInput["items"][number] => ({
   serialNo,
   sessionPlanUnitId: unit?._id ?? "",
   subUnitTitle,
-  subjectLabel: unit ? `Unit ${unit.unitNo}` : "",
+  syllabusId: syllabusMatch?.syllabusId || unit?.syllabusId || "",
+  syllabusChapterId:
+    syllabusMatch?.syllabusChapterId || unit?.syllabusChapterId || "",
+  syllabusUnitId: syllabusMatch?.syllabusUnitId || "",
+  syllabusSubUnitId: syllabusMatch?.syllabusSubUnitId || "",
+  subjectLabel: unit ? `Chapter ${unit.unitNo}` : "",
   plannedTopic: subUnitTitle
     ? subUnitTitle
     : unit
       ? unit.topicsCovered || unit.chapterName
       : "",
-  description: "",
-  learningObjectives: unit?.learningOutcomes ?? "",
+  description: syllabusMatch?.description || "",
+  learningObjectives:
+    syllabusMatch?.learningOutcomes || unit?.learningOutcomes || "",
   teachingMethod: "",
   teachingAids: "",
   assessmentMethod: "",
@@ -268,6 +285,38 @@ export const LessonPlanPanel = ({
     enabled: Boolean(form.sessionPlanId) && showForm,
   });
 
+  /** Matching official syllabus for hierarchy auto-link (Chapter → Unit → Sub Unit). */
+  const syllabiQuery = useQuery({
+    queryKey: [
+      "academic-management",
+      "syllabi-for-lesson",
+      form.subjectId,
+      form.academicYearBs,
+    ],
+    queryFn: () =>
+      unwrap<AcademicSyllabusRecord[]>(
+        api.get("/academic-management/syllabi", {
+          params: filtersToParams({
+            subjectId: form.subjectId,
+            academicYearBs: form.academicYearBs,
+            yearId: form.yearId,
+          }),
+        }),
+      ),
+    enabled: showForm && Boolean(form.subjectId),
+  });
+
+  const matchedSyllabus = useMemo(() => {
+    const list = syllabiQuery.data ?? [];
+    if (list.length === 0) return null;
+    return (
+      list.find((s) => s.status === "APPROVED") ||
+      list.find((s) => s.status !== "REJECTED") ||
+      list[0] ||
+      null
+    );
+  }, [syllabiQuery.data]);
+
   const plansQuery = useQuery({
     queryKey: ["academic-management", "lesson-plans", filters],
     queryFn: () =>
@@ -293,7 +342,7 @@ export const LessonPlanPanel = ({
     coverageQuery.data?.units,
   ]);
 
-  // Rebuild form items when selected units change — inherit all fields from Session Plan
+  // Rebuild form items when selected units change — inherit Session Plan + syllabus hierarchy
   useEffect(() => {
     if (!form.sessionPlanId) return;
     const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
@@ -310,18 +359,50 @@ export const LessonPlanPanel = ({
           const defaultSub =
             prev?.subUnitTitle ||
             (subUnits.length === 1 ? subUnits[0]! : "");
+          const match = matchSyllabusSubUnit(matchedSyllabus, {
+            syllabusChapterId: unit.syllabusChapterId,
+            heading: defaultSub,
+          });
+          const syllabusMatch = match
+            ? {
+                syllabusId: matchedSyllabus?._id,
+                syllabusChapterId:
+                  match.syllabusChapterId || unit.syllabusChapterId,
+                syllabusUnitId: match.syllabusUnitId,
+                syllabusSubUnitId: match.syllabusSubUnitId,
+                learningOutcomes: match.learningOutcomes,
+                description: match.description,
+              }
+            : {
+                syllabusId: unit.syllabusId || matchedSyllabus?._id || "",
+                syllabusChapterId: unit.syllabusChapterId || "",
+              };
           return {
-            ...emptyItem(index + 1, unit, defaultSub),
+            ...emptyItem(index + 1, unit, defaultSub, syllabusMatch),
             ...prev,
             serialNo: index + 1,
             sessionPlanUnitId: unit._id,
-            subjectLabel: `Unit ${unit.unitNo}`,
+            subjectLabel: `Chapter ${unit.unitNo}`,
             subUnitTitle: defaultSub,
             plannedTopic:
               prev?.plannedTopic ||
               defaultSub ||
               unit.topicsCovered ||
               unit.chapterName,
+            syllabusId:
+              prev?.syllabusId ||
+              syllabusMatch.syllabusId ||
+              unit.syllabusId ||
+              "",
+            syllabusChapterId:
+              prev?.syllabusChapterId ||
+              syllabusMatch.syllabusChapterId ||
+              unit.syllabusChapterId ||
+              "",
+            syllabusUnitId:
+              prev?.syllabusUnitId || match?.syllabusUnitId || "",
+            syllabusSubUnitId:
+              prev?.syllabusSubUnitId || match?.syllabusSubUnitId || "",
             itemStartDateBs:
               prev?.itemStartDateBs ||
               unit.startDateBs ||
@@ -330,7 +411,10 @@ export const LessonPlanPanel = ({
             itemEndDateBs:
               prev?.itemEndDateBs || unit.endDateBs || current.endDateBs || "",
             learningObjectives:
-              prev?.learningObjectives || unit.learningOutcomes || "",
+              prev?.learningObjectives ||
+              match?.learningOutcomes ||
+              unit.learningOutcomes ||
+              "",
             estimatedClasses:
               prev?.estimatedClasses ||
               Math.max(1, Math.round(unit.estimatedTeachingHours || 1)),
@@ -359,7 +443,13 @@ export const LessonPlanPanel = ({
             : current.endDateBs),
       };
     });
-  }, [selectedUnitIds, unitsQuery.data, coverageQuery.data?.units, form.sessionPlanId]);
+  }, [
+    selectedUnitIds,
+    unitsQuery.data,
+    coverageQuery.data?.units,
+    form.sessionPlanId,
+    matchedSyllabus,
+  ]);
 
   const createMutation = useMutation({
     mutationFn: (payload: AcademicLessonPlanInput) =>
@@ -531,19 +621,22 @@ export const LessonPlanPanel = ({
 
   const selectedPlans = useMemo(() => {
     if (!selectedSubject) return [];
-    return recordsForCurriculumSubject(
+    const matched = recordsForCurriculumSubject(
       filteredPlans,
       selectedSubject.subjectIds,
       selectedYearKey,
       yearIdToLevelKey,
       isCollege,
     );
+    // Collapse batch-instance duplicates; keep separate plans per teacher
+    return dedupePlansByCurriculum(matched, subjects, true);
   }, [
     filteredPlans,
     selectedSubject,
     selectedYearKey,
     yearIdToLevelKey,
     isCollege,
+    subjects,
   ]);
 
   const teacherGroups = useMemo(
@@ -643,8 +736,9 @@ export const LessonPlanPanel = ({
           <CardHeader>
             <CardTitle>Create Lesson Plan</CardTitle>
             <p className="text-sm text-slate-600">
-              Set the date range, load your Session Plan, then select units and
-              sub-units (topics listed on each unit).
+              Set the date range, load Session Plan (from Syllabus chapters), then
+              select chapters and sub-units. Sub-units auto-link to the official
+              hierarchical syllabus for progress tracking.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1091,12 +1185,21 @@ export const LessonPlanPanel = ({
                               className="bg-slate-50"
                             />
                           </FormField>
-                          <FormField label="Sub-unit / topic">
+                          <FormField label="Sub Unit (from Syllabus)">
                             {subUnits.length > 0 ? (
                               <Select
                                 value={item.subUnitTitle || ""}
                                 onChange={(event) => {
                                   const sub = event.target.value;
+                                  const match = matchSyllabusSubUnit(
+                                    matchedSyllabus,
+                                    {
+                                      syllabusChapterId:
+                                        unit?.syllabusChapterId ||
+                                        item.syllabusChapterId,
+                                      heading: sub,
+                                    },
+                                  );
                                   setForm((current) => ({
                                     ...current,
                                     items: current.items.map((row, i) =>
@@ -1108,6 +1211,26 @@ export const LessonPlanPanel = ({
                                               sub ||
                                               unit?.chapterName ||
                                               row.plannedTopic,
+                                            syllabusId:
+                                              matchedSyllabus?._id ||
+                                              unit?.syllabusId ||
+                                              row.syllabusId ||
+                                              "",
+                                            syllabusChapterId:
+                                              match?.syllabusChapterId ||
+                                              unit?.syllabusChapterId ||
+                                              row.syllabusChapterId ||
+                                              "",
+                                            syllabusUnitId:
+                                              match?.syllabusUnitId || "",
+                                            syllabusSubUnitId:
+                                              match?.syllabusSubUnitId || "",
+                                            learningObjectives:
+                                              match?.learningOutcomes ||
+                                              row.learningObjectives,
+                                            description:
+                                              match?.description ||
+                                              row.description,
                                           }
                                         : row,
                                     ),

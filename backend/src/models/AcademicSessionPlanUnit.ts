@@ -20,7 +20,10 @@ const unitSchema = new Schema(
       enum: ["PENDING", "IN_PROGRESS", "COMPLETED", "DELAYED"],
       default: "PENDING"
     },
-    attachmentUrl: { type: String }
+    attachmentUrl: { type: String },
+    /** Optional link to hierarchical syllabus (Chapter level). */
+    syllabusId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabus" },
+    syllabusChapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter" }
   },
   { timestamps: true }
 );

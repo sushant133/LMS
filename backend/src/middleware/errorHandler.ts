@@ -29,6 +29,28 @@ export const errorHandler = (error: unknown, _req: Request, res: Response, _next
     });
   }
 
+  // Multer file upload errors (size limit, unexpected field, etc.)
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: string }).name === "MulterError"
+  ) {
+    const multerError = error as { code?: string; message?: string; field?: string };
+    let message = multerError.message || "File upload failed";
+    if (multerError.code === "LIMIT_FILE_SIZE") {
+      message = "File is too large for this upload. Try a smaller image (photos max 2MB, banners max 5MB).";
+    } else if (multerError.code === "LIMIT_UNEXPECTED_FILE") {
+      message = `Unexpected file field${multerError.field ? ` "${multerError.field}"` : ""}. Please use the correct upload control.`;
+    } else if (multerError.code === "LIMIT_FILE_COUNT") {
+      message = "Too many files in this upload.";
+    }
+    return res.status(400).json({
+      success: false,
+      message
+    });
+  }
+
   if (error instanceof MongooseError.CastError) {
     return res.status(400).json({
       success: false,

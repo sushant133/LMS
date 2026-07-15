@@ -20,6 +20,11 @@ import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
+import {
+  computeHierarchyStats,
+  ensureSyllabusHierarchy,
+  loadSyllabusHierarchy
+} from "./syllabusHierarchyService.js";
 import { Attendance } from "../models/Attendance.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
@@ -822,7 +827,10 @@ export const serializeSessionPlan = async (planId: string) => {
       startDateBs: (unit as { startDateBs?: string }).startDateBs ?? "",
       endDateBs: (unit as { endDateBs?: string }).endDateBs ?? "",
       status: unit.status,
-      attachmentUrl: unit.attachmentUrl
+      attachmentUrl: unit.attachmentUrl,
+      syllabusId: (unit as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
+      syllabusChapterId:
+        (unit as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ?? ""
     })),
     completedPercent: progress?.completedPercent ?? (total > 0 ? Math.round((completed / total) * 100) : 0),
     remainingPercent: progress?.remainingPercent ?? (total > 0 ? Math.round(((total - completed) / total) * 100) : 100),
@@ -842,13 +850,32 @@ export const serializeSyllabus = async (syllabusId: string) => {
 
   if (!plan) return null;
 
+  const schoolId = plan.schoolId.toString();
+  // Auto-migrate legacy flat units → Chapter → Unit → SubUnit (idempotent)
+  await ensureSyllabusHierarchy(syllabusId, schoolId);
+
+  const chapters = await loadSyllabusHierarchy(syllabusId);
+  const stats = computeHierarchyStats(chapters);
+
   const units = await AcademicSyllabusUnit.find({ syllabusId: plan._id }).sort({ unitNo: 1 }).lean();
   const total = units.length;
   const completed = units.filter((unit) => unit.status === "COMPLETED").length;
+  // Prefer sub-unit based progress when hierarchy exists
+  const completedPercent =
+    stats.totalSubUnits > 0
+      ? stats.completedPercent
+      : total > 0
+        ? Math.round((completed / total) * 100)
+        : 0;
+  const remainingPercent = Math.max(0, 100 - completedPercent);
+
+  const subject = plan.subjectId as unknown as { _id: string; name: string; code: string } | undefined;
+  const subjectCode =
+    (plan as { subjectCode?: string }).subjectCode || subject?.code || "";
 
   return {
     _id: plan._id.toString(),
-    schoolId: plan.schoolId.toString(),
+    schoolId,
     academicYearBs: plan.academicYearBs,
     session: plan.session,
     faculty: plan.faculty,
@@ -862,9 +889,16 @@ export const serializeSyllabus = async (syllabusId: string) => {
       ? (plan.teacherId as { _id?: { toString(): string } })._id?.toString() ??
         plan.teacherId.toString()
       : undefined,
+    subjectCode,
+    totalTheoryHours: (plan as { totalTheoryHours?: number }).totalTheoryHours ?? stats.theoryHours,
+    totalPracticalHours:
+      (plan as { totalPracticalHours?: number }).totalPracticalHours ?? stats.practicalHours,
+    creditHours: (plan as { creditHours?: number }).creditHours ?? 0,
+    remarks: (plan as { remarks?: string }).remarks ?? "",
     status: plan.status,
     adminRemarks: plan.adminRemarks,
     attachmentUrl: plan.attachmentUrl,
+    chapters,
     units: units.map((unit) => ({
       _id: unit._id.toString(),
       syllabusId: unit.syllabusId.toString(),
@@ -882,12 +916,21 @@ export const serializeSyllabus = async (syllabusId: string) => {
       status: unit.status,
       attachmentUrl: unit.attachmentUrl
     })),
-    completedPercent: total > 0 ? Math.round((completed / total) * 100) : 0,
-    remainingPercent: total > 0 ? Math.round(((total - completed) / total) * 100) : 100,
-    completedUnits: completed,
-    remainingUnits: total - completed,
+    completedPercent,
+    remainingPercent,
+    completedUnits: stats.totalSubUnits > 0 ? stats.completedSubUnits : completed,
+    remainingUnits: stats.totalSubUnits > 0 ? stats.remainingSubUnits : total - completed,
+    completedSubUnits: stats.completedSubUnits,
+    remainingSubUnits: stats.remainingSubUnits,
+    totalSubUnits: stats.totalSubUnits,
+    totalChapters: stats.totalChapters,
+    totalTopics: stats.totalTopics,
+    theoryHoursCovered: stats.theoryHoursCovered,
+    practicalHoursCovered: stats.practicalHoursCovered,
+    teachingHoursCovered: stats.teachingHoursCovered,
+    remainingTeachingHours: stats.remainingTeachingHours,
     audit: formatAudit(plan),
-    subject: plan.subjectId as unknown as { _id: string; name: string; code: string } | undefined,
+    subject,
     teacher: plan.teacherId
       ? (plan.teacherId as unknown as { _id: string; teacherCode: string; user?: { fullName: string } })
       : undefined
@@ -921,6 +964,13 @@ export const serializeLessonPlan = async (planId: string) => {
       serialNo: item.serialNo,
       sessionPlanUnitId: item.sessionPlanUnitId?.toString(),
       subUnitTitle: (item as { subUnitTitle?: string }).subUnitTitle ?? "",
+      syllabusId: (item as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
+      syllabusChapterId:
+        (item as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ?? "",
+      syllabusUnitId:
+        (item as { syllabusUnitId?: { toString(): string } }).syllabusUnitId?.toString?.() ?? "",
+      syllabusSubUnitId:
+        (item as { syllabusSubUnitId?: { toString(): string } }).syllabusSubUnitId?.toString?.() ?? "",
       subjectLabel: item.subjectLabel,
       plannedTopic: item.plannedTopic,
       description: item.description,
@@ -944,7 +994,12 @@ export const serializeLessonPlan = async (planId: string) => {
             chapterName: unit.chapterName,
             topicsCovered: unit.topicsCovered,
             startDateBs: (unit as { startDateBs?: string }).startDateBs ?? "",
-            endDateBs: (unit as { endDateBs?: string }).endDateBs ?? ""
+            endDateBs: (unit as { endDateBs?: string }).endDateBs ?? "",
+            syllabusId:
+              (unit as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
+            syllabusChapterId:
+              (unit as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ??
+              ""
           }
         : undefined
     };
@@ -1021,6 +1076,13 @@ export const serializeLogBookEntry = async (entryId: string) => {
     lessonPlanItemId: entry.lessonPlanItemId?.toString(),
     sessionPlanUnitId: entry.sessionPlanUnitId?.toString(),
     subUnitTitle: (entry as { subUnitTitle?: string }).subUnitTitle ?? "",
+    syllabusId: (entry as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
+    syllabusChapterId:
+      (entry as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ?? "",
+    syllabusUnitId:
+      (entry as { syllabusUnitId?: { toString(): string } }).syllabusUnitId?.toString?.() ?? "",
+    syllabusSubUnitId:
+      (entry as { syllabusSubUnitId?: { toString(): string } }).syllabusSubUnitId?.toString?.() ?? "",
     academicYearBs: entry.academicYearBs,
     session: entry.session,
     faculty: entry.faculty,

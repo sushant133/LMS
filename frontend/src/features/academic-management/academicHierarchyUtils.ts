@@ -114,12 +114,15 @@ export const curriculumSubjectKey = (subject: {
   code?: string;
   name?: string;
 }): string => {
-  if (subject.masterSubjectId) return `master:${subject.masterSubjectId}`;
+  // masterSubjectId may arrive as string or nested {_id}
+  const masterId = idOf(subject.masterSubjectId);
+  if (masterId && masterId !== "[object Object]") return `master:${masterId}`;
   const code = (subject.code ?? "").trim().toLowerCase();
   if (code) return `code:${code}`;
-  const name = (subject.name ?? "").trim().toLowerCase();
+  // Normalize whitespace so "Anatomy " and "Anatomy" collapse
+  const name = (subject.name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   if (name) return `name:${name}`;
-  return `id:${subject._id}`;
+  return `id:${idOf(subject._id) || subject._id}`;
 };
 
 const teacherNameOf = (
@@ -607,30 +610,245 @@ export const buildAcademicHierarchy = (params: {
     return a.label.localeCompare(b.label);
   });
 
-  // If a curriculum subject already appears under a named faculty+year,
-  // drop the duplicate under "General" so the tree is not batch/faculty-duplicated.
-  const claimed = new Set<string>();
+  // Collapse curriculum subjects that appear under multiple free-text faculties
+  // (or General + named) for the same year level. One subject node per year.
+  // Prefer a named faculty over General; merge teachers / subject instance ids.
+  type MergedPlacement = {
+    subject: HierarchySubjectNode;
+    facultyKey: string;
+    facultyLabel: string;
+  };
+  const mergedByYear = new Map<string, Map<string, MergedPlacement>>();
+
+  const preferFaculty = (
+    current: MergedPlacement,
+    nextFacultyKey: string,
+    nextFacultyLabel: string,
+    nextSubject: HierarchySubjectNode,
+  ) => {
+    // Named faculty wins over General
+    if (
+      current.facultyKey === GENERAL_FACULTY_KEY &&
+      nextFacultyKey !== GENERAL_FACULTY_KEY
+    ) {
+      current.facultyKey = nextFacultyKey;
+      current.facultyLabel = nextFacultyLabel;
+      current.subject.facultyKey = nextFacultyKey;
+      current.subject.facultyLabel = nextFacultyLabel;
+      return;
+    }
+    // Prefer faculty that already has teachers assigned
+    if (
+      current.facultyKey !== nextFacultyKey &&
+      current.subject.teacherIds.length === 0 &&
+      nextSubject.teacherIds.length > 0 &&
+      nextFacultyKey !== GENERAL_FACULTY_KEY
+    ) {
+      current.facultyKey = nextFacultyKey;
+      current.facultyLabel = nextFacultyLabel;
+      current.subject.facultyKey = nextFacultyKey;
+      current.subject.facultyLabel = nextFacultyLabel;
+    }
+  };
+
   for (const fac of facultyNodes) {
-    if (fac.key === GENERAL_FACULTY_KEY) continue;
     for (const year of fac.years) {
+      if (!mergedByYear.has(year.key)) mergedByYear.set(year.key, new Map());
+      const bySubject = mergedByYear.get(year.key)!;
       for (const sub of year.subjects) {
-        claimed.add(`${year.key}::${sub.subjectKey}`);
+        const existing = bySubject.get(sub.subjectKey);
+        if (!existing) {
+          bySubject.set(sub.subjectKey, {
+            subject: {
+              ...sub,
+              subjectIds: [...sub.subjectIds],
+              teacherIds: [...sub.teacherIds],
+              teacherNames: [...sub.teacherNames],
+            },
+            facultyKey: fac.key,
+            facultyLabel: fac.label,
+          });
+          continue;
+        }
+        existing.subject.subjectIds = [
+          ...new Set([...existing.subject.subjectIds, ...sub.subjectIds]),
+        ];
+        existing.subject.recordCount += sub.recordCount;
+        existing.subject.teacherIds = [
+          ...new Set([...existing.subject.teacherIds, ...sub.teacherIds]),
+        ];
+        existing.subject.teacherNames = [
+          ...new Set([...existing.subject.teacherNames, ...sub.teacherNames]),
+        ].sort((a, b) => a.localeCompare(b));
+        if (!existing.subject.subjectCode && sub.subjectCode) {
+          existing.subject.subjectCode = sub.subjectCode;
+        }
+        preferFaculty(existing, fac.key, fac.label, sub);
       }
     }
   }
-  for (const fac of facultyNodes) {
-    if (fac.key !== GENERAL_FACULTY_KEY) continue;
+
+  // Rebuild faculty → year → subject from collapsed map (no duplicate subjects)
+  const rebuilt = new Map<string, HierarchyFacultyNode>();
+  for (const [yearKey, bySubject] of mergedByYear.entries()) {
+    for (const placement of bySubject.values()) {
+      const facKey = placement.facultyKey;
+      let facNode = rebuilt.get(facKey);
+      if (!facNode) {
+        facNode = {
+          key: facKey,
+          label: placement.facultyLabel,
+          years: [],
+          recordCount: 0,
+        };
+        rebuilt.set(facKey, facNode);
+      }
+      let yearNode = facNode.years.find((y) => y.key === yearKey);
+      if (!yearNode) {
+        yearNode = {
+          key: yearKey,
+          label: placement.subject.yearLabel || yearLevelLabel(yearKey),
+          sortOrder: yearSortOrder(yearKey),
+          subjects: [],
+          recordCount: 0,
+        };
+        facNode.years.push(yearNode);
+      }
+      yearNode.subjects.push({
+        ...placement.subject,
+        facultyKey: facKey,
+        facultyLabel: placement.facultyLabel,
+        yearKey,
+      });
+    }
+  }
+
+  const collapsedFaculties = [...rebuilt.values()].map((fac) => {
     for (const year of fac.years) {
-      year.subjects = year.subjects.filter(
-        (s) => !claimed.has(`${year.key}::${s.subjectKey}`),
+      // Safety net: same display name under one year → one row (batch leftovers)
+      const byName = new Map<string, HierarchySubjectNode>();
+      for (const sub of year.subjects) {
+        const nameKey = sub.subjectName.trim().toLowerCase().replace(/\s+/g, " ");
+        const existing = byName.get(nameKey);
+        if (!existing) {
+          byName.set(nameKey, {
+            ...sub,
+            subjectIds: [...sub.subjectIds],
+            teacherIds: [...sub.teacherIds],
+            teacherNames: [...sub.teacherNames],
+          });
+          continue;
+        }
+        existing.subjectIds = [
+          ...new Set([...existing.subjectIds, ...sub.subjectIds]),
+        ];
+        existing.recordCount += sub.recordCount;
+        existing.teacherIds = [
+          ...new Set([...existing.teacherIds, ...sub.teacherIds]),
+        ];
+        existing.teacherNames = [
+          ...new Set([...existing.teacherNames, ...sub.teacherNames]),
+        ].sort((a, b) => a.localeCompare(b));
+        if (!existing.subjectCode && sub.subjectCode) {
+          existing.subjectCode = sub.subjectCode;
+        }
+        // Prefer master: keys over weaker keys
+        if (
+          sub.subjectKey.startsWith("master:") &&
+          !existing.subjectKey.startsWith("master:")
+        ) {
+          existing.subjectKey = sub.subjectKey;
+        }
+      }
+      year.subjects = [...byName.values()].sort((a, b) =>
+        a.subjectName.localeCompare(b.subjectName),
       );
       year.recordCount = year.subjects.reduce((sum, s) => sum + s.recordCount, 0);
     }
-    fac.years = fac.years.filter((y) => y.subjects.length > 0);
+    fac.years.sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label),
+    );
     fac.recordCount = fac.years.reduce((sum, y) => sum + y.recordCount, 0);
-  }
+    return fac;
+  });
 
-  return facultyNodes.filter((f) => f.years.length > 0);
+  collapsedFaculties.sort((a, b) => {
+    if (a.key === GENERAL_FACULTY_KEY) return 1;
+    if (b.key === GENERAL_FACULTY_KEY) return -1;
+    return a.label.localeCompare(b.label);
+  });
+
+  return collapsedFaculties.filter((f) => f.years.length > 0);
+};
+
+/**
+ * Collapse multiple batch-provisioned plans for the same curriculum subject
+ * into one row for Academic Management views (shared across batches).
+ * Prefers APPROVED > submitted > draft, then most recently updated.
+ */
+export const dedupePlansByCurriculum = <
+  T extends {
+    _id: string;
+    subjectId: string;
+    academicYearBs?: string;
+    teacherId?: string;
+    status?: string;
+    updatedAt?: string;
+  },
+>(
+  plans: T[],
+  subjects: Array<{
+    _id: string;
+    masterSubjectId?: string | null;
+    code?: string;
+    name?: string;
+  }>,
+  /** When true, keep separate rows per teacher assignment. Default false for syllabus. */
+  splitByTeacher = false,
+): T[] => {
+  if (plans.length <= 1) return plans;
+  const subjectById = new Map(subjects.map((s) => [s._id, s]));
+  const statusRank = (status?: string) => {
+    switch (status) {
+      case "APPROVED":
+        return 5;
+      case "PENDING_APPROVAL":
+      case "SUBMITTED":
+        return 4;
+      case "DRAFT":
+        return 3;
+      case "REJECTED":
+        return 2;
+      default:
+        return 1;
+    }
+  };
+
+  const best = new Map<string, T>();
+  for (const plan of plans) {
+    const subject = subjectById.get(plan.subjectId);
+    const curriculumKey = subject
+      ? curriculumSubjectKey(subject)
+      : `id:${plan.subjectId}`;
+    const teacherPart = splitByTeacher ? plan.teacherId || "shared" : "all";
+    const key = `${plan.academicYearBs || ""}::${curriculumKey}::${teacherPart}`;
+    const existing = best.get(key);
+    if (!existing) {
+      best.set(key, plan);
+      continue;
+    }
+    const rankNew = statusRank(plan.status);
+    const rankOld = statusRank(existing.status);
+    if (rankNew > rankOld) {
+      best.set(key, plan);
+      continue;
+    }
+    if (rankNew < rankOld) continue;
+    const newTime = plan.updatedAt ? Date.parse(plan.updatedAt) : 0;
+    const oldTime = existing.updatedAt ? Date.parse(existing.updatedAt) : 0;
+    if (newTime >= oldTime) best.set(key, plan);
+  }
+  return [...best.values()];
 };
 
 /** Flatten hierarchy years for panels that still iterate year nodes. */
@@ -753,34 +971,78 @@ export const groupByTeacher = <
 
 export const matchSessionPlanKeyword = (
   plan: AcademicSessionPlanRecord | {
-    subject?: { name?: string };
+    subject?: { name?: string; code?: string };
+    subjectCode?: string;
     teacher?: { user?: { fullName?: string } };
     status?: string;
     academicYearBs?: string;
     faculty?: string;
+    remarks?: string;
     units: Array<{
       unitNo: number;
       chapterName: string;
       topicsCovered?: string;
       references?: string;
     }>;
+    chapters?: Array<{
+      title: string;
+      description?: string;
+      units: Array<{
+        title: string;
+        description?: string;
+        subUnits: Array<{
+          heading: string;
+          description?: string;
+          learningOutcomes?: string;
+        }>;
+      }>;
+    }>;
   },
   keyword: string,
 ): boolean => {
   const kw = keyword.toLowerCase().trim();
   if (!kw) return true;
+  const chapters =
+    "chapters" in plan && Array.isArray(plan.chapters) ? plan.chapters : [];
+  const hierarchyTerms = chapters.flatMap(
+    (ch: {
+      title: string;
+      description?: string;
+      units: Array<{
+        title: string;
+        description?: string;
+        subUnits: Array<{
+          heading: string;
+          description?: string;
+          learningOutcomes?: string;
+        }>;
+      }>;
+    }) => [
+      ch.title,
+      ch.description,
+      ...ch.units.flatMap((u) => [
+        u.title,
+        u.description,
+        ...u.subUnits.flatMap((s) => [s.heading, s.description, s.learningOutcomes]),
+      ]),
+    ],
+  );
   return [
     plan.subject?.name,
+    plan.subject?.code,
+    "subjectCode" in plan ? plan.subjectCode : undefined,
     plan.teacher?.user?.fullName,
     plan.status,
     plan.academicYearBs,
     plan.faculty,
+    "remarks" in plan ? plan.remarks : undefined,
     ...plan.units.flatMap((u) => [
       String(u.unitNo),
       u.chapterName,
       u.topicsCovered,
       u.references,
     ]),
+    ...hierarchyTerms,
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(kw));

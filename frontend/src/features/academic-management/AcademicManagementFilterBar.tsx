@@ -1,11 +1,17 @@
 import type { AcademicManagementFilters } from "@phit-erp/shared";
 import { FileDown, Printer, RotateCcw, Search } from "lucide-react";
+import { useMemo } from "react";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { NEPALI_MONTHS } from "./academicManagementUtils";
+import {
+  dedupeSubjectsForSelect,
+  dedupeYearsForSelect,
+  expandYearIdsForSelection,
+  NEPALI_MONTHS,
+} from "./academicManagementUtils";
 
 interface Option {
   _id: string;
@@ -13,6 +19,9 @@ interface Option {
   level?: number;
   batchId?: string;
   classId?: string;
+  code?: string;
+  masterSubjectId?: string | null;
+  yearIds?: string[];
 }
 
 interface TeacherOption {
@@ -69,6 +78,29 @@ export const AcademicManagementFilterBar = ({
   const update = (patch: Partial<AcademicManagementFilters>) =>
     onChange({ ...filters, ...patch });
 
+  /** Year options once per level (not once per batch). */
+  const yearOptions = useMemo(
+    () => dedupeYearsForSelect(years),
+    [years],
+  );
+
+  /**
+   * HA / college curriculum is fixed by year level — not by student batch.
+   * Collapse batch-provisioned subject instances to one name (master/code/name).
+   */
+  const subjectOptions = useMemo(() => {
+    let list = subjects;
+    if (isCollege && filters.yearId) {
+      const yearIds = new Set(expandYearIdsForSelection(years, filters.yearId));
+      list = subjects.filter((subject) => {
+        const subjectYearIds = (subject as Option).yearIds;
+        if (!subjectYearIds?.length) return true;
+        return subjectYearIds.some((id) => yearIds.has(id));
+      });
+    }
+    return dedupeSubjectsForSelect(list);
+  }, [subjects, years, filters.yearId, isCollege]);
+
   return (
     <div className="rounded-3xl border border-white/70 bg-white/90 p-4 shadow-sm">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -106,27 +138,17 @@ export const AcademicManagementFilterBar = ({
               <span className="font-medium text-slate-700">Year</span>
               <Select
                 value={filters.yearId ?? ""}
-                onChange={(event) => update({ yearId: event.target.value })}
+                onChange={(event) =>
+                  update({ yearId: event.target.value, subjectId: "" })
+                }
               >
                 <option value="">All years</option>
-                {(() => {
-                  const seen = new Set<string>();
-                  const unique: Option[] = [];
-                  for (const year of years) {
-                    const levelKey =
-                      (year as Option & { level?: number }).level != null
-                        ? `level:${(year as Option & { level?: number }).level}`
-                        : year.name;
-                    if (seen.has(levelKey)) continue;
-                    seen.add(levelKey);
-                    unique.push(year);
-                  }
-                  return unique.map((year) => (
-                    <option key={year._id} value={year._id}>
-                      {year.name}
-                    </option>
-                  ));
-                })()}
+                {yearOptions.map((year) => (
+                  <option key={year._id} value={year._id}>
+                    {year.name}
+                    {year.level != null ? ` (Year ${year.level})` : ""}
+                  </option>
+                ))}
               </Select>
             </label>
             <label className="space-y-1 text-sm">
@@ -189,13 +211,19 @@ export const AcademicManagementFilterBar = ({
             value={filters.subjectId ?? ""}
             onChange={(event) => update({ subjectId: event.target.value })}
           >
-            <option value="">All</option>
-            {subjects.map((subject) => (
+            <option value="">All subjects</option>
+            {subjectOptions.map((subject) => (
               <option key={subject._id} value={subject._id}>
                 {subject.name}
+                {subject.code ? ` (${subject.code})` : ""}
               </option>
             ))}
           </Select>
+          {isCollege ? (
+            <span className="block text-xs text-slate-500">
+              One name per curriculum subject (shared across batches)
+            </span>
+          ) : null}
         </label>
         {showTeacherFilter ? (
           <label className="space-y-1 text-sm">

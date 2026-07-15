@@ -140,6 +140,10 @@ export const LogBookPanel = ({
     lessonPlanId: undefined,
     sessionPlanUnitId: "",
     subUnitTitle: "",
+    syllabusId: "",
+    syllabusChapterId: "",
+    syllabusUnitId: "",
+    syllabusSubUnitId: "",
     topicCovered: "",
     unit: "",
     objectives: "",
@@ -265,17 +269,22 @@ export const LogBookPanel = ({
         id: item._id,
         planId: plan._id,
         month: plan.month || plan.startDateBs || "",
-        label: `${plan.startDateBs || plan.month || "Plan"}${plan.endDateBs ? `→${plan.endDateBs}` : ""} · ${item.unit ? `U${item.unit.unitNo}` : item.subjectLabel || "Unit"}${item.subUnitTitle ? ` · ${item.subUnitTitle}` : ""} · ${item.plannedTopic}`,
+        label: `${plan.startDateBs || plan.month || "Plan"}${plan.endDateBs ? `→${plan.endDateBs}` : ""} · ${item.unit ? `Ch ${item.unit.unitNo}` : item.subjectLabel || "Chapter"}${item.subUnitTitle ? ` · ${item.subUnitTitle}` : ""} · ${item.plannedTopic}`,
         topic: item.plannedTopic,
         subUnitTitle: item.subUnitTitle || "",
         unit: item.unit
-          ? `Unit ${item.unit.unitNo}: ${item.unit.chapterName}`
+          ? `Chapter ${item.unit.unitNo}: ${item.unit.chapterName}`
           : item.subjectLabel || "",
         objectives: item.learningObjectives || "",
         teachingMethod: item.teachingMethod || "",
         teachingAids: item.teachingAids || "",
         subjectId: plan.subjectId,
         sessionPlanUnitId: item.sessionPlanUnitId || "",
+        syllabusId: item.syllabusId || item.unit?.syllabusId || "",
+        syllabusChapterId:
+          item.syllabusChapterId || item.unit?.syllabusChapterId || "",
+        syllabusUnitId: item.syllabusUnitId || "",
+        syllabusSubUnitId: item.syllabusSubUnitId || "",
         completionStatus: item.completionStatus,
         completedPercent: item.completedPercent,
         remainingPercent: item.remainingPercent,
@@ -395,7 +404,7 @@ export const LogBookPanel = ({
     }
     const option = options.find((row) => row.id === itemId);
     if (!option) return;
-    // Full cascade from Lesson Plan → Log Book (no retyping)
+    // Full cascade: Lesson Plan → Log Book (+ hierarchical syllabus links)
     setForm((current) => ({
       ...current,
       lessonPlanItemId: itemId,
@@ -404,13 +413,25 @@ export const LogBookPanel = ({
       sessionPlanUnitId:
         option.sessionPlanUnitId || current.sessionPlanUnitId || "",
       subUnitTitle: option.subUnitTitle || "",
+      syllabusId: option.syllabusId || current.syllabusId || "",
+      syllabusChapterId:
+        option.syllabusChapterId || current.syllabusChapterId || "",
+      syllabusUnitId: option.syllabusUnitId || current.syllabusUnitId || "",
+      syllabusSubUnitId:
+        option.syllabusSubUnitId || current.syllabusSubUnitId || "",
       unit: option.unit || current.unit,
       topicCovered: option.topic || option.subUnitTitle || current.topicCovered,
       objectives: option.objectives || current.objectives,
       teachingMethod: option.teachingMethod || current.teachingMethod,
       teachingAids: option.teachingAids || current.teachingAids,
     }));
-    if (!quiet) toast.success("Filled from Lesson Plan");
+    if (!quiet) {
+      toast.success(
+        option.syllabusSubUnitId
+          ? "Filled from Lesson Plan · linked to syllabus sub-unit"
+          : "Filled from Lesson Plan",
+      );
+    }
   };
 
   const selectLessonItem = (itemId: string) => {
@@ -442,7 +463,11 @@ export const LogBookPanel = ({
       ...current,
       sessionPlanUnitId: unitId,
       subUnitTitle: "",
-      unit: unit ? `Unit ${unit.unitNo}: ${unit.chapterName}` : "",
+      syllabusId: unit?.syllabusId || "",
+      syllabusChapterId: unit?.syllabusChapterId || "",
+      syllabusUnitId: "",
+      syllabusSubUnitId: "",
+      unit: unit ? `Chapter ${unit.unitNo}: ${unit.chapterName}` : "",
       topicCovered: unit?.topicsCovered || unit?.chapterName || "",
       objectives: unit?.learningOutcomes || current.objectives,
       // Manual unit pick clears lesson-plan link (user can re-link)
@@ -912,8 +937,9 @@ export const LogBookPanel = ({
                   ))}
                 </Select>
                 <p className="mt-1 text-xs text-slate-600">
-                  Unit, sub-unit, topic, and objectives fill automatically from
-                  the Lesson Plan (which came from Session Plan / Syllabus).
+                  Chapter, sub-unit, topic, and objectives fill from Lesson Plan
+                  (synced from hierarchical Syllabus). Saving marks the linked
+                  syllabus sub-unit completed.
                 </p>
               </FormField>
 
@@ -962,7 +988,7 @@ export const LogBookPanel = ({
                     </option>
                     {sessionUnits.map((unit) => (
                       <option key={unit._id} value={unit._id}>
-                        Unit {unit.unitNo}: {unit.chapterName}
+                        Chapter {unit.unitNo}: {unit.chapterName}
                       </option>
                     ))}
                   </Select>

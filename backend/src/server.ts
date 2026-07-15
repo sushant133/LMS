@@ -90,7 +90,18 @@ app.get("/api/health", (_req, res) => {
     success: true,
     message: "PHIT LMS backend is running",
     environment: env.NODE_ENV,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    /** Where new image uploads are stored (no secrets). */
+    imageStorage: isCloudinaryEnabled()
+      ? {
+          mode: "cloudinary",
+          cloud: env.CLOUDINARY_CLOUD_NAME,
+          folder: env.CLOUDINARY_FOLDER || "phit-erp"
+        }
+      : {
+          mode: "local",
+          note: "Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET and restart the backend"
+        }
   });
 });
 

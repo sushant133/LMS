@@ -4,9 +4,18 @@ import {
   type AcademicSyllabusRecord,
   type SubjectAssignmentRecord,
   type SubjectRecord,
+  type SyllabusSubUnitStatus,
   canManageInstitution,
 } from "@phit-erp/shared";
-import { Plus, Send, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Plus,
+  Send,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
@@ -15,7 +24,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
-import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -28,7 +36,6 @@ import {
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
-  NEPALI_MONTHS,
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
@@ -43,12 +50,22 @@ import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
+  dedupePlansByCurriculum,
   groupByTeacher,
   matchSessionPlanKeyword,
   recordsForCurriculumSubject,
   type HierarchyScopeOption,
   type HierarchySubjectNode,
 } from "./academicHierarchyUtils";
+import { SyllabusHierarchyEditor } from "./SyllabusHierarchyEditor";
+import {
+  blankSyllabusForm,
+  formToPayload,
+  recordToForm,
+  SUB_UNIT_STATUS_OPTIONS,
+  subUnitStatusBadgeClass,
+  type SyllabusFormState,
+} from "./syllabusFormUtils";
 
 interface SyllabusPanelProps {
   filters: AcademicManagementFilters;
@@ -68,40 +85,6 @@ interface SyllabusPanelProps {
   /** When false, hide create/edit/delete/submit actions (module read-only). */
   writeAccess?: boolean;
 }
-
-const emptyUnit = (unitNo = 1) => ({
-  unitNo,
-  chapterName: "",
-  estimatedTeachingHours: 0,
-  learningOutcomes: "",
-  topicsCovered: "",
-  references: "",
-  practicalRequired: false,
-  internalAssessment: "",
-  tentativeCompletionMonth: "",
-  startDateBs: "",
-  endDateBs: "",
-  status: "PENDING" as const,
-});
-
-const blankSyllabusForm = (
-  filters: AcademicManagementFilters,
-  _teacherId?: string,
-): AcademicSyllabusInput => ({
-  academicYearBs: filters.academicYearBs || "2082/083",
-  session: filters.session || filters.academicYearBs || "2082/083",
-  faculty: filters.faculty || "",
-  semesterBs: filters.semesterBs || "",
-  classId: filters.classId,
-  sectionId: filters.sectionId,
-  batchId: filters.batchId,
-  yearId: filters.yearId,
-  subjectId: filters.subjectId || "",
-  // Teacher is optional — subject syllabus is shared with assigned teachers
-  teacherId: filters.teacherId || "",
-  attachmentUrl: "",
-  units: [emptyUnit()],
-});
 
 export const SyllabusPanel = ({
   filters,
@@ -127,9 +110,11 @@ export const SyllabusPanel = ({
   const [selectedYearKey, setSelectedYearKey] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] =
     useState<HierarchySubjectNode | null>(null);
-  const [form, setForm] = useState<AcademicSyllabusInput>(() =>
-    blankSyllabusForm(filters, teacherId),
+  const [form, setForm] = useState<SyllabusFormState>(() =>
+    blankSyllabusForm(filters),
   );
+  const [viewExpanded, setViewExpanded] = useState<Record<string, boolean>>({});
+  const [globalExpand, setGlobalExpand] = useState(false);
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
@@ -152,7 +137,7 @@ export const SyllabusPanel = ({
 
   const resetForm = () => {
     setEditingId(null);
-    setForm(blankSyllabusForm(filters, teacherId));
+    setForm(blankSyllabusForm(filters));
   };
 
   const openCreateSyllabusForm = () => {
@@ -162,37 +147,7 @@ export const SyllabusPanel = ({
 
   const openEditForm = (plan: AcademicSyllabusRecord) => {
     setEditingId(plan._id);
-    setForm({
-      academicYearBs: plan.academicYearBs,
-      session: plan.session || plan.academicYearBs,
-      faculty: plan.faculty || "",
-      semesterBs: plan.semesterBs || "",
-      classId: plan.classId,
-      sectionId: plan.sectionId,
-      batchId: plan.batchId,
-      yearId: plan.yearId,
-      subjectId: plan.subjectId,
-      teacherId: plan.teacherId || teacherId || "",
-      attachmentUrl: plan.attachmentUrl || "",
-      units:
-        plan.units.length > 0
-          ? plan.units.map((unit) => ({
-              unitNo: unit.unitNo,
-              chapterName: unit.chapterName,
-              estimatedTeachingHours: unit.estimatedTeachingHours ?? 0,
-              learningOutcomes: unit.learningOutcomes || "",
-              topicsCovered: unit.topicsCovered || "",
-              references: unit.references || "",
-              practicalRequired: unit.practicalRequired ?? false,
-              internalAssessment: unit.internalAssessment || "",
-              tentativeCompletionMonth: unit.tentativeCompletionMonth || "",
-              startDateBs: (unit as { startDateBs?: string }).startDateBs || "",
-              endDateBs: (unit as { endDateBs?: string }).endDateBs || "",
-              status: unit.status || "PENDING",
-              attachmentUrl: unit.attachmentUrl,
-            }))
-          : [emptyUnit()],
-    });
+    setForm(recordToForm(plan));
     setShowForm(true);
   };
 
@@ -225,30 +180,59 @@ export const SyllabusPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const progressMutation = useMutation({
+    mutationFn: ({
+      syllabusId,
+      subUnitId,
+      status,
+      teachingNotes,
+      todaysCoverage,
+    }: {
+      syllabusId: string;
+      subUnitId: string;
+      status?: SyllabusSubUnitStatus;
+      teachingNotes?: string;
+      todaysCoverage?: string;
+    }) =>
+      unwrap(
+        api.patch(
+          `/academic-management/syllabi/${syllabusId}/sub-units/${subUnitId}/progress`,
+          { status, teachingNotes, todaysCoverage },
+        ),
+      ),
+    onSuccess: () => {
+      toast.success("Progress updated");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const saveSyllabus = () => {
     if (!form.subjectId) {
       toast.error("Subject is required");
       return;
     }
     if (
-      form.units.some(
-        (unit) => !unit.chapterName.trim() || !Number.isFinite(unit.unitNo),
+      form.chapters.some(
+        (ch) =>
+          !ch.title.trim() ||
+          (ch.units as { title: string; subUnits: { heading: string }[] }[]).some(
+            (u) =>
+              !u.title.trim() ||
+              u.subUnits.some((s) => !s.heading.trim()),
+          ),
       )
     ) {
-      toast.error("Each unit needs a unit number and chapter title");
+      toast.error(
+        "Each chapter, unit, and sub-unit needs a title / heading",
+      );
       return;
     }
     const optionalTeacher = (form.teacherId || teacherId || "").trim();
-    const payload: AcademicSyllabusInput = {
+    const payload = formToPayload({
       ...form,
       teacherId: optionalTeacher,
-      session: form.session || form.academicYearBs,
-      units: form.units.map((unit, index) => ({
-        ...unit,
-        unitNo: unit.unitNo || index + 1,
-        chapterName: unit.chapterName.trim(),
-      })),
-    };
+    });
     if (editingId) {
       updateMutation.mutate({ id: editingId, payload });
     } else {
@@ -369,7 +353,6 @@ export const SyllabusPanel = ({
     [years],
   );
 
-  // Auto-select first subject when hierarchy loads / filters change
   useEffect(() => {
     if (
       selectedSubject &&
@@ -424,19 +407,22 @@ export const SyllabusPanel = ({
 
   const selectedPlans = useMemo(() => {
     if (!selectedSubject) return [];
-    return recordsForCurriculumSubject(
+    const matched = recordsForCurriculumSubject(
       keywordFilteredPlans,
       selectedSubject.subjectIds,
       selectedYearKey,
       yearIdToLevelKey,
       isCollege,
     );
+    // One syllabus per curriculum subject (not one per batch-provisioned subject id)
+    return dedupePlansByCurriculum(matched, subjects, false);
   }, [
     keywordFilteredPlans,
     selectedSubject,
     selectedYearKey,
     yearIdToLevelKey,
     isCollege,
+    subjects,
   ]);
 
   const teacherGroups = useMemo(
@@ -444,160 +430,398 @@ export const SyllabusPanel = ({
     [selectedPlans],
   );
 
-  // PDF export includes all filtered plans (or selected subject when chosen)
   const printPlans = useMemo(() => {
     if (selectedSubject && selectedPlans.length > 0) return selectedPlans;
     return keywordFilteredPlans;
   }, [selectedSubject, selectedPlans, keywordFilteredPlans]);
 
-  const renderPlanCard = (plan: AcademicSyllabusRecord, compact = false) => (
-    <Card key={plan._id} className={compact ? "border-slate-200 shadow-none" : undefined}>
-      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-        <div>
-          <CardTitle className="text-base">
-            {plan.subject?.name} · {plan.academicYearBs}
-          </CardTitle>
-          <p className="text-sm text-slate-600">
-            Teacher:{" "}
-            {plan.teacher?.user?.fullName ?? "Shared (by subject)"} · Completed:{" "}
-            {plan.completedUnits} · Remaining: {plan.remainingUnits}
-          </p>
-          <AcademicProgressBar
-            className="mt-2 max-w-md"
-            completedPercent={plan.completedPercent}
-            remainingPercent={plan.remainingPercent}
-          />
-        </div>
-        <Badge className={statusBadgeClass(plan.status)}>{plan.status}</Badge>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-2 sm:grid-cols-3 text-sm no-print">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-xs text-slate-500">Total units</p>
-            <p className="font-semibold">
-              {plan.completedUnits + plan.remainingUnits}
+  const isExpanded = (key: string, defaultOpen = false) => {
+    if (viewExpanded[key] !== undefined) return viewExpanded[key];
+    return globalExpand || defaultOpen;
+  };
+
+  const toggleView = (key: string) => {
+    setViewExpanded((prev) => ({ ...prev, [key]: !isExpanded(key) }));
+  };
+
+  const canEditStructure = (plan: AcademicSyllabusRecord) =>
+    canMutate &&
+    (isAdmin || plan.status === "DRAFT" || plan.status === "REJECTED");
+
+  const canUpdateProgress = (plan: AcademicSyllabusRecord) =>
+    canMutate &&
+    (isAdmin ||
+      plan.status === "APPROVED" ||
+      plan.status === "SUBMITTED" ||
+      plan.status === "PENDING_APPROVAL" ||
+      plan.status === "DRAFT");
+
+  const renderPlanCard = (plan: AcademicSyllabusRecord, compact = false) => {
+    const chapters = plan.chapters ?? [];
+    const totalSub = plan.totalSubUnits ?? 0;
+    const completedSub = plan.completedSubUnits ?? 0;
+
+    return (
+      <Card key={plan._id} className={compact ? "border-slate-200 shadow-none" : undefined}>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-base">
+              {plan.subject?.name}
+              {plan.subjectCode || plan.subject?.code
+                ? ` (${plan.subjectCode || plan.subject?.code})`
+                : ""}{" "}
+              · {plan.academicYearBs}
+            </CardTitle>
+            <p className="text-sm text-slate-600">
+              Teacher:{" "}
+              {plan.teacher?.user?.fullName ?? "Shared (by subject)"}
+              {plan.totalTheoryHours || plan.totalPracticalHours || plan.creditHours
+                ? ` · Theory ${plan.totalTheoryHours ?? 0}h · Practical ${plan.totalPracticalHours ?? 0}h · Credit ${plan.creditHours ?? 0}`
+                : null}
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {plan.totalChapters ?? chapters.length} chapters ·{" "}
+              {plan.totalTopics ?? 0} units · {totalSub} sub-units · Completed:{" "}
+              {completedSub} · Remaining: {plan.remainingSubUnits ?? totalSub - completedSub}
+            </p>
+            <AcademicProgressBar
+              className="mt-2 max-w-md"
+              completedPercent={plan.completedPercent}
+              remainingPercent={plan.remainingPercent}
+            />
           </div>
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-            <p className="text-xs text-emerald-700">Completed</p>
-            <p className="font-semibold text-emerald-900">{plan.completedUnits}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="no-print"
+              onClick={() => {
+                const next = !globalExpand;
+                setGlobalExpand(next);
+                const map: Record<string, boolean> = {};
+                for (const ch of chapters) {
+                  map[`${plan._id}-ch-${ch._id}`] = next;
+                  for (const u of ch.units) {
+                    map[`${plan._id}-u-${u._id}`] = next;
+                  }
+                }
+                setViewExpanded((prev) => ({ ...prev, ...map }));
+              }}
+            >
+              {globalExpand ? (
+                <>
+                  <ChevronsDownUp className="mr-1 h-4 w-4" />
+                  Collapse
+                </>
+              ) : (
+                <>
+                  <ChevronsUpDown className="mr-1 h-4 w-4" />
+                  Expand
+                </>
+              )}
+            </Button>
+            <Badge className={statusBadgeClass(plan.status)}>{plan.status}</Badge>
           </div>
-          <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
-            <p className="text-xs text-amber-700">Remaining</p>
-            <p className="font-semibold text-amber-900">{plan.remainingUnits}</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2 sm:grid-cols-4 text-sm no-print">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">Chapters</p>
+              <p className="font-semibold">{plan.totalChapters ?? chapters.length}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">Sub-units</p>
+              <p className="font-semibold">{totalSub}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+              <p className="text-xs text-emerald-700">Completed</p>
+              <p className="font-semibold text-emerald-900">{completedSub}</p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
+              <p className="text-xs text-amber-700">Hours covered</p>
+              <p className="font-semibold text-amber-900">
+                {plan.teachingHoursCovered ?? 0}
+                {plan.remainingTeachingHours != null
+                  ? ` / rem. ${plan.remainingTeachingHours}`
+                  : ""}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHead>
-              <tr>
-                <Th>Unit</Th>
-                <Th>Title</Th>
-                <Th>Topics</Th>
-                <Th>Hours</Th>
-                <Th>Outcomes</Th>
-                <Th>References</Th>
-                <Th>Status</Th>
-              </tr>
-            </TableHead>
-            <TableBody>
-              {plan.units.map((unit) => (
-                <tr key={unit._id}>
-                  <Td>{unit.unitNo}</Td>
-                  <Td>{unit.chapterName}</Td>
-                  <Td className="max-w-xs">{unit.topicsCovered || "—"}</Td>
-                  <Td>{unit.estimatedTeachingHours}</Td>
-                  <Td className="max-w-xs truncate">{unit.learningOutcomes || "—"}</Td>
-                  <Td className="max-w-xs truncate">{unit.references || "—"}</Td>
-                  <Td>
-                    <Badge className={statusBadgeClass(unit.status)}>
-                      {unit.status}
-                    </Badge>
-                  </Td>
-                </tr>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-        {canMutate ? (
-          <div className="flex flex-wrap gap-2 no-print">
-            {(plan.status === "DRAFT" || plan.status === "REJECTED") && (
-              <Button size="sm" variant="outline" onClick={() => openEditForm(plan)}>
-                Edit / Complete
-              </Button>
-            )}
-            {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
-              <Button size="sm" onClick={() => submitMutation.mutate(plan._id)}>
-                <Send className="mr-2 h-4 w-4" />
-                Submit
-              </Button>
-            ) : null}
-            {isAdmin &&
-            (plan.status === "SUBMITTED" ||
-              plan.status === "PENDING_APPROVAL") ? (
-              <>
-                <Button
-                  size="sm"
-                  onClick={() => approveMutation.mutate({ id: plan._id })}
-                >
-                  Approve
+
+          {chapters.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No hierarchy yet. Edit to add chapters, units, and sub-units.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {chapters.map((chapter) => {
+                const chKey = `${plan._id}-ch-${chapter._id}`;
+                const chOpen = isExpanded(chKey, true);
+                return (
+                  <div
+                    key={chapter._id}
+                    className="rounded-2xl border border-slate-200 overflow-hidden"
+                  >
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100/80"
+                      onClick={() => toggleView(chKey)}
+                    >
+                      {chOpen ? (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900">
+                          Chapter {chapter.chapterNo}: {chapter.title}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {chapter.units.length} unit(s) · {chapter.totalSubUnits}{" "}
+                          sub-unit(s) · {chapter.completedPercent}% complete
+                          {chapter.tentativeCompletionMonth
+                            ? ` · Expected: ${chapter.tentativeCompletionMonth}`
+                            : ""}
+                        </p>
+                      </div>
+                      <div className="hidden sm:block w-28">
+                        <AcademicProgressBar
+                          completedPercent={chapter.completedPercent}
+                          remainingPercent={chapter.remainingPercent}
+                        />
+                      </div>
+                    </button>
+                    {chOpen ? (
+                      <div className="space-y-2 border-t border-slate-100 p-3">
+                        {chapter.description ? (
+                          <p className="text-sm text-slate-600">{chapter.description}</p>
+                        ) : null}
+                        {chapter.units.map((unit) => {
+                          const uKey = `${plan._id}-u-${unit._id}`;
+                          const uOpen = isExpanded(uKey, false);
+                          return (
+                            <div
+                              key={unit._id}
+                              className="rounded-xl border border-slate-200 bg-white"
+                            >
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+                                onClick={() => toggleView(uKey)}
+                              >
+                                {uOpen ? (
+                                  <ChevronDown className="h-4 w-4 text-slate-500" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-slate-500" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-medium text-slate-800">
+                                    Unit {unit.unitNo}: {unit.title}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {unit.totalSubUnits} sub-unit(s) ·{" "}
+                                    {unit.completedPercent}%
+                                  </p>
+                                </div>
+                              </button>
+                              {uOpen ? (
+                                <div className="space-y-2 border-t border-slate-100 p-3">
+                                  {unit.subUnits.map((sub) => (
+                                    <div
+                                      key={sub._id}
+                                      className="rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2"
+                                    >
+                                      <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                          <p className="text-sm font-medium text-slate-900">
+                                            <span className="mr-2 rounded bg-brand-50 px-1.5 py-0.5 text-xs font-semibold text-brand-800">
+                                              {sub.displayNo}
+                                            </span>
+                                            {sub.heading}
+                                          </p>
+                                          {sub.learningOutcomes ? (
+                                            <p className="mt-1 text-xs text-slate-600 whitespace-pre-wrap">
+                                              {sub.learningOutcomes}
+                                            </p>
+                                          ) : null}
+                                          {sub.practicalRequired ? (
+                                            <p className="mt-1 text-xs text-emerald-700">
+                                              Practical
+                                              {sub.labName ? ` · ${sub.labName}` : ""}
+                                              {sub.clinicalHours
+                                                ? ` · ${sub.clinicalHours} clinical hrs`
+                                                : ""}
+                                            </p>
+                                          ) : null}
+                                          {sub.teachingNotes ? (
+                                            <p className="mt-1 text-xs text-slate-500">
+                                              Notes: {sub.teachingNotes}
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                        <div className="flex flex-col items-end gap-1 no-print">
+                                          <Badge
+                                            className={subUnitStatusBadgeClass(sub.status)}
+                                          >
+                                            {sub.status.replace(/_/g, " ")}
+                                          </Badge>
+                                          {canUpdateProgress(plan) ? (
+                                            <Select
+                                              className="h-8 w-[160px] text-xs"
+                                              value={sub.status}
+                                              disabled={progressMutation.isPending}
+                                              onChange={(e) => {
+                                                progressMutation.mutate({
+                                                  syllabusId: plan._id,
+                                                  subUnitId: sub._id,
+                                                  status: e.target
+                                                    .value as SyllabusSubUnitStatus,
+                                                });
+                                              }}
+                                            >
+                                              {SUB_UNIT_STATUS_OPTIONS.map((opt) => (
+                                                <option key={opt.value} value={opt.value}>
+                                                  {opt.label}
+                                                </option>
+                                              ))}
+                                            </Select>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                      {canUpdateProgress(plan) &&
+                                      (plan.status === "APPROVED" || isAdmin) ? (
+                                        <div className="mt-2 grid gap-2 no-print md:grid-cols-2">
+                                          <Input
+                                            className="h-8 text-xs"
+                                            placeholder="Teaching notes…"
+                                            defaultValue={sub.teachingNotes || ""}
+                                            onBlur={(e) => {
+                                              if (
+                                                e.target.value !==
+                                                (sub.teachingNotes || "")
+                                              ) {
+                                                progressMutation.mutate({
+                                                  syllabusId: plan._id,
+                                                  subUnitId: sub._id,
+                                                  teachingNotes: e.target.value,
+                                                });
+                                              }
+                                            }}
+                                          />
+                                          <Input
+                                            className="h-8 text-xs"
+                                            placeholder="Today's coverage…"
+                                            defaultValue={sub.todaysCoverage || ""}
+                                            onBlur={(e) => {
+                                              if (
+                                                e.target.value !==
+                                                (sub.todaysCoverage || "")
+                                              ) {
+                                                progressMutation.mutate({
+                                                  syllabusId: plan._id,
+                                                  subUnitId: sub._id,
+                                                  todaysCoverage: e.target.value,
+                                                });
+                                              }
+                                            }}
+                                          />
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {canMutate ? (
+            <div className="flex flex-wrap gap-2 no-print">
+              {canEditStructure(plan) && (
+                <Button size="sm" variant="outline" onClick={() => openEditForm(plan)}>
+                  Edit hierarchy
                 </Button>
+              )}
+              {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
+                <Button size="sm" onClick={() => submitMutation.mutate(plan._id)}>
+                  <Send className="mr-2 h-4 w-4" />
+                  Submit
+                </Button>
+              ) : null}
+              {isAdmin &&
+              (plan.status === "SUBMITTED" ||
+                plan.status === "PENDING_APPROVAL") ? (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => approveMutation.mutate({ id: plan._id })}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const remarks = window.prompt("Rejection remarks");
+                      if (remarks)
+                        rejectMutation.mutate({ id: plan._id, remarks });
+                    }}
+                  >
+                    Reject
+                  </Button>
+                </>
+              ) : null}
+              {isAdmin && plan.status === "APPROVED" ? (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    const remarks = window.prompt("Rejection remarks");
-                    if (remarks)
-                      rejectMutation.mutate({ id: plan._id, remarks });
-                  }}
+                  onClick={() => unlockMutation.mutate(plan._id)}
                 >
-                  Reject
+                  Unlock
                 </Button>
-              </>
-            ) : null}
-            {isAdmin && plan.status === "APPROVED" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => unlockMutation.mutate(plan._id)}
-              >
-                Unlock
-              </Button>
-            ) : null}
-            {(plan.status === "DRAFT" ||
-              plan.status === "REJECTED" ||
-              isAdmin) && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => deleteMutation.mutate(plan._id)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </Button>
-            )}
+              ) : null}
+              {(plan.status === "DRAFT" ||
+                plan.status === "REJECTED" ||
+                isAdmin) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => deleteMutation.mutate(plan._id)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              )}
+            </div>
+          ) : null}
+          {plan.attachmentUrl ? (
+            <a
+              href={plan.attachmentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-brand-700 hover:underline no-print"
+            >
+              View attachment
+            </a>
+          ) : null}
+          <div className="no-print">
+            <AcademicCommentsPanel
+              entityType="SYLLABUS"
+              entityId={plan._id}
+              canComment={isAdmin || plan.status !== "APPROVED"}
+            />
           </div>
-        ) : null}
-        {plan.attachmentUrl ? (
-          <a
-            href={plan.attachmentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-brand-700 hover:underline no-print"
-          >
-            View attachment
-          </a>
-        ) : null}
-        <div className="no-print">
-          <AcademicCommentsPanel
-            entityType="SYLLABUS"
-            entityId={plan._id}
-            canComment={isAdmin || plan.status !== "APPROVED"}
-          />
-        </div>
-      </CardContent>
-    </Card>
-  );
+        </CardContent>
+      </Card>
+    );
+  };
 
   if (plansQuery.isLoading) return <LoadingState />;
 
@@ -605,11 +829,13 @@ export const SyllabusPanel = ({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Syllabus</h2>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Complete Syllabus
+          </h2>
           <p className="text-sm text-slate-600">
-            {isAdmin
-              ? "Official subject syllabi for all teachers, organized by year and subject. Units are free-form boxes you can add as needed."
-              : "Create the official syllabus for your subject: add unit/chapter boxes with topics, hours, outcomes, and references. Add as many units as required."}
+            Hierarchical syllabus: Chapter → Unit → Sub Unit with progress tracking,
+            auto-numbering, and integration-ready links for lesson plans, attendance,
+            and homework.
           </p>
         </div>
         {canMutate ? (
@@ -636,12 +862,11 @@ export const SyllabusPanel = ({
               {editingId ? "Edit Syllabus" : "Create Complete Syllabus"}
             </CardTitle>
             <p className="text-sm text-slate-600">
-              Add all units for the year — chapter, topics, hours, outcomes,
-              references, and assessment. Save as draft anytime; submit when ready
-              for admin review.
+              Define subject metadata, then build unlimited chapters, units, and
+              sub-units. Save as draft anytime; submit when ready for review.
             </p>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
             <div className="grid gap-3 md:grid-cols-3">
               {yearOptions.length > 0 ? (
                 <FormField label="Year">
@@ -690,12 +915,15 @@ export const SyllabusPanel = ({
               <FormField label="Subject">
                 <Select
                   value={form.subjectId}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const subjectId = event.target.value;
+                    const subject = subjectOptions.find((s) => s._id === subjectId);
                     setForm((current) => ({
                       ...current,
-                      subjectId: event.target.value,
-                    }))
-                  }
+                      subjectId,
+                      subjectCode: subject?.code || current.subjectCode || "",
+                    }));
+                  }}
                   disabled={
                     yearOptions.length > 0
                       ? !form.yearId
@@ -739,10 +967,6 @@ export const SyllabusPanel = ({
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Leave empty for a subject syllabus. Teachers with this subject
-                    assigned can still open and use it.
-                  </p>
                 </FormField>
               ) : null}
               <FormField label="Academic Year (BS)">
@@ -767,7 +991,7 @@ export const SyllabusPanel = ({
                       faculty: event.target.value,
                     }))
                   }
-                  placeholder="Faculty (optional)"
+                  placeholder="e.g. Health Assistant / Nursing"
                 />
               </FormField>
               <FormField label="Semester (optional)">
@@ -782,214 +1006,77 @@ export const SyllabusPanel = ({
                   placeholder="e.g. 1st / Odd"
                 />
               </FormField>
-            </div>
-            {form.units.map((unit, index) => (
-              <div
-                key={index}
-                className="grid gap-3 rounded-2xl border border-slate-200 p-4 md:grid-cols-2"
-              >
-                <div className="md:col-span-2 flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-800">
-                    Unit {unit.unitNo || index + 1}
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 w-8 shrink-0 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 border-rose-200"
-                    title={
-                      form.units.length <= 1
-                        ? "At least one unit is required"
-                        : "Delete this unit"
-                    }
-                    aria-label="Delete unit"
-                    disabled={form.units.length <= 1}
-                    onClick={() => {
-                      if (form.units.length <= 1) {
-                        toast.error("At least one unit is required");
-                        return;
-                      }
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units
-                          .filter((_, rowIndex) => rowIndex !== index)
-                          .map((row, rowIndex) => ({
-                            ...row,
-                            unitNo: rowIndex + 1,
-                          })),
-                      }));
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-                <FormField label="Unit number">
-                  <NumberInput
-                    min={1}
-                    value={unit.unitNo}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, unitNo: event.target.valueAsNumber }
-                            : row,
-                        ),
-                      }))
-                    }
-                  />
-                </FormField>
-                <FormField label="Unit / chapter title">
-                  <Input
-                    value={unit.chapterName}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, chapterName: event.target.value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="Chapter / unit title"
-                  />
-                </FormField>
-                <FormField label="Topics / subtopics">
+              <FormField label="Subject Code">
+                <Input
+                  value={form.subjectCode ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      subjectCode: event.target.value,
+                    }))
+                  }
+                  placeholder="Auto from subject if empty"
+                />
+              </FormField>
+              <FormField label="Total Theory Hours">
+                <NumberInput
+                  min={0}
+                  value={form.totalTheoryHours ?? 0}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      totalTheoryHours: event.target.valueAsNumber || 0,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Total Practical Hours">
+                <NumberInput
+                  min={0}
+                  value={form.totalPracticalHours ?? 0}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      totalPracticalHours: event.target.valueAsNumber || 0,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Credit Hours">
+                <NumberInput
+                  min={0}
+                  value={form.creditHours ?? 0}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      creditHours: event.target.valueAsNumber || 0,
+                    }))
+                  }
+                />
+              </FormField>
+              <div className="md:col-span-3">
+                <FormField label="Remarks">
                   <Textarea
-                    value={unit.topicsCovered}
+                    value={form.remarks ?? ""}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, topicsCovered: event.target.value }
-                            : row,
-                        ),
+                        remarks: event.target.value,
                       }))
                     }
-                    placeholder="List topics covered in this unit"
+                    placeholder="Optional syllabus remarks"
                   />
                 </FormField>
-                <FormField label="Estimated teaching hours">
-                  <NumberInput
-                    min={0}
-                    value={unit.estimatedTeachingHours}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? {
-                                ...row,
-                                estimatedTeachingHours:
-                                  event.target.valueAsNumber,
-                              }
-                            : row,
-                        ),
-                      }))
-                    }
-                  />
-                </FormField>
-                <FormField label="Learning outcomes">
-                  <Textarea
-                    value={unit.learningOutcomes}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, learningOutcomes: event.target.value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="What students should achieve"
-                  />
-                </FormField>
-                <FormField label="References">
-                  <Textarea
-                    value={unit.references}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, references: event.target.value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="Textbooks, articles, resources"
-                  />
-                </FormField>
-                <FormField label="Tentative completion month">
-                  <Select
-                    value={unit.tentativeCompletionMonth || ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? {
-                                ...row,
-                                tentativeCompletionMonth: event.target.value,
-                              }
-                            : row,
-                        ),
-                      }))
-                    }
-                  >
-                    <option value="">Select month (optional)</option>
-                    {NEPALI_MONTHS.map((month) => (
-                      <option key={month} value={month}>
-                        {month}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Internal assessment">
-                  <Input
-                    value={unit.internalAssessment || ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? {
-                                ...row,
-                                internalAssessment: event.target.value,
-                              }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="IA / assignment notes"
-                  />
-                </FormField>
-                <label className="flex items-center gap-2 text-sm text-slate-700 md:col-span-2">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(unit.practicalRequired)}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? {
-                                ...row,
-                                practicalRequired: event.target.checked,
-                              }
-                            : row,
-                        ),
-                      }))
-                    }
-                    className="h-4 w-4 rounded border-slate-300"
-                  />
-                  Practical required for this unit
-                </label>
               </div>
-            ))}
+            </div>
+
+            <SyllabusHierarchyEditor
+              chapters={form.chapters}
+              onChange={(chapters) =>
+                setForm((current) => ({ ...current, chapters }))
+              }
+            />
+
             <AcademicAttachmentUpload
               attachmentUrl={form.attachmentUrl}
               onChange={(url) =>
@@ -997,21 +1084,6 @@ export const SyllabusPanel = ({
               }
             />
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setForm((current) => ({
-                    ...current,
-                    units: [
-                      ...current.units,
-                      emptyUnit(current.units.length + 1),
-                    ],
-                  }))
-                }
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Unit
-              </Button>
               <Button
                 onClick={saveSyllabus}
                 disabled={
@@ -1067,7 +1139,7 @@ export const SyllabusPanel = ({
               title={`No Syllabi for ${selectedSubjectMeta.subject.subjectName}`}
               description={
                 isAdmin
-                  ? "Teachers have not created a Syllabus for this subject yet."
+                  ? "No syllabus created for this subject yet."
                   : "Create a Syllabus for this subject to start yearly planning."
               }
             />
@@ -1092,8 +1164,8 @@ export const SyllabusPanel = ({
                   </p>
                   <p className="text-xs text-slate-500">
                     {selectedPlans.length} Syllabus
-                    {selectedPlans.length === 1 ? "" : "s"} · One curriculum
-                    subject · Teachers listed separately (not by batch)
+                    {selectedPlans.length === 1 ? "" : "s"} · Hierarchical Chapter →
+                    Unit → Sub Unit structure
                   </p>
                 </CardContent>
               </Card>
@@ -1117,7 +1189,6 @@ export const SyllabusPanel = ({
         </div>
       </div>
 
-      {/* Dedicated print / PDF area (filtered or selected subject) */}
       <div id="syllabus-print-area" className="hidden print:block">
         <AcademicPrintHeader
           institutionName={institutionName}
@@ -1127,58 +1198,37 @@ export const SyllabusPanel = ({
               ? `${selectedSubjectMeta.faculty.label} · ${selectedSubjectMeta.year.label} · ${selectedSubjectMeta.subject.subjectName}`
               : "Filtered Syllabi"
           }
-          academicYearBs={filters.academicYearBs}
-          generatedAt={new Date().toLocaleString()}
         />
-        {printPlans.length === 0 ? (
-          <p className="text-sm text-slate-600">No Syllabi to export.</p>
-        ) : (
-          groupByTeacher(printPlans).map((group) => (
-            <div key={group.teacherId} className="mb-8 break-inside-avoid">
-              <h3 className="mb-2 text-base font-bold text-slate-900">
-                Teacher: {group.teacherName}
-              </h3>
-              {group.items.map((plan) => (
-                <div key={plan._id} className="mb-6">
-                  <p className="font-semibold">
-                    {plan.subject?.name} · {plan.academicYearBs} · {plan.status}
-                  </p>
-                  <p className="text-sm text-slate-600 mb-2">
-                    Completion: {plan.completedPercent}% · Units:{" "}
-                    {plan.completedUnits}/
-                    {plan.completedUnits + plan.remainingUnits}
-                  </p>
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr>
-                        <th className="border p-1 text-left">Unit</th>
-                        <th className="border p-1 text-left">Title</th>
-                        <th className="border p-1 text-left">Topics</th>
-                        <th className="border p-1 text-left">Hours</th>
-                        <th className="border p-1 text-left">References</th>
-                        <th className="border p-1 text-left">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {plan.units.map((unit) => (
-                        <tr key={unit._id}>
-                          <td className="border p-1">{unit.unitNo}</td>
-                          <td className="border p-1">{unit.chapterName}</td>
-                          <td className="border p-1">{unit.topicsCovered}</td>
-                          <td className="border p-1">
-                            {unit.estimatedTeachingHours}
-                          </td>
-                          <td className="border p-1">{unit.references}</td>
-                          <td className="border p-1">{unit.status}</td>
-                        </tr>
+        {printPlans.map((plan) => (
+          <div key={plan._id} className="mb-6 break-inside-avoid">
+            <h3 className="font-semibold">
+              {plan.subject?.name} ({plan.subjectCode || plan.subject?.code || "—"}) ·{" "}
+              {plan.academicYearBs} · {plan.completedPercent}%
+            </h3>
+            {(plan.chapters ?? []).map((chapter) => (
+              <div key={chapter._id} className="mt-2">
+                <p className="font-medium">
+                  Chapter {chapter.chapterNo}: {chapter.title}
+                </p>
+                {chapter.units.map((unit) => (
+                  <div key={unit._id} className="ml-3 mt-1">
+                    <p>
+                      Unit {unit.unitNo}: {unit.title}
+                    </p>
+                    <ul className="ml-4 list-disc text-sm">
+                      {unit.subUnits.map((sub) => (
+                        <li key={sub._id}>
+                          {sub.displayNo} {sub.heading} — {sub.status} (
+                          {sub.teachingHours}h)
+                        </li>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </div>
-          ))
-        )}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ))}
         <AcademicPrintFooter />
       </div>
     </div>

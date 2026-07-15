@@ -7,6 +7,11 @@ const itemSchema = new Schema(
     serialNo: { type: Number, required: true, min: 1 },
     sessionPlanUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSessionPlanUnit" },
     subUnitTitle: { type: String, default: "" },
+    /** Optional hierarchical syllabus links (Subject → Chapter → Unit → Sub Unit). */
+    syllabusId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabus" },
+    syllabusChapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter" },
+    syllabusUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusTopic" },
+    syllabusSubUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusSubUnit" },
     subjectLabel: { type: String, default: "" },
     plannedTopic: { type: String, required: true },
     description: { type: String, default: "" },

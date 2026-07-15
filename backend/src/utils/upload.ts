@@ -55,6 +55,15 @@ function createTenantStorage(entity: string): StorageEngine {
   });
 }
 
+/** Normalize browser quirks (e.g. image/jpg) before MIME allowlist checks. */
+const normalizeMimeType = (mimeType: string): string => {
+  const lower = (mimeType || "").toLowerCase().trim();
+  if (lower === "image/jpg") return "image/jpeg";
+  if (lower === "image/pjpeg") return "image/jpeg";
+  if (lower === "image/x-png") return "image/png";
+  return lower;
+};
+
 const allowedMimeTypes = [
   "image/jpeg",
   "image/png",
@@ -64,10 +73,10 @@ const allowedMimeTypes = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ];
 
-const studentDocumentMimeTypes = ["image/jpeg", "image/jpg", "image/png", "application/pdf"];
+const studentDocumentMimeTypes = ["image/jpeg", "image/png", "application/pdf"];
 const studentDocumentFileFilter = createFileFilter(
   studentDocumentMimeTypes,
-  "Invalid file type. Allowed: PDF, JPG, JPEG, PNG"
+  "Invalid file type. Allowed: PDF, JPG, JPEG, PNG (not HEIC/HEIF — convert to JPG first)"
 );
 
 const classroomMimeTypes = [
@@ -78,16 +87,33 @@ const classroomMimeTypes = [
 ];
 
 function createFileFilter(mimeTypes: string[], message: string) {
+  const allowed = new Set(mimeTypes.map((m) => m.toLowerCase()));
   return (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-    if (mimeTypes.includes(file.mimetype)) {
+    const mime = normalizeMimeType(file.mimetype);
+    // Mutate so downstream Cloudinary/local logic sees a canonical type
+    file.mimetype = mime;
+    if (allowed.has(mime)) {
       cb(null, true);
-    } else {
-      cb(new ApiError(400, message));
+      return;
     }
+    // Clearer message for common phone formats
+    if (mime === "image/heic" || mime === "image/heif") {
+      cb(
+        new ApiError(
+          400,
+          "HEIC/HEIF photos are not supported. Please convert to JPG or PNG and try again."
+        )
+      );
+      return;
+    }
+    cb(new ApiError(400, `${message} (received: ${file.mimetype || "unknown"})`));
   };
 }
 
-const fileFilter = createFileFilter(allowedMimeTypes, "Invalid file type. Allowed: JPG, PNG, WEBP, PDF, DOC, DOCX");
+const fileFilter = createFileFilter(
+  allowedMimeTypes,
+  "Invalid file type. Allowed: JPG, PNG, WEBP, PDF, DOC, DOCX"
+);
 const classroomFileFilter = createFileFilter(
   classroomMimeTypes,
   "Invalid file type. Allowed: JPG, PNG, WEBP, PDF, DOC, DOCX, MP4, WEBM, MOV"
@@ -111,8 +137,11 @@ export const uploadClassroomAttachments = multer({
   fileFilter: classroomFileFilter
 }).array("files", 10);
 
-const bannerMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-const bannerFileFilter = createFileFilter(bannerMimeTypes, "Invalid file type. Allowed: JPG, JPEG, PNG, WEBP");
+const bannerMimeTypes = ["image/jpeg", "image/png", "image/webp"];
+const bannerFileFilter = createFileFilter(
+  bannerMimeTypes,
+  "Invalid image type. Allowed: JPG, JPEG, PNG, WEBP (not HEIC)"
+);
 
 export const uploadBannerImage = multer({
   storage: createTenantStorage("banners"),

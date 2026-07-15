@@ -673,7 +673,8 @@ const optionalPhotoUrlSchema = z.preprocess(
       z
         .string()
         .trim()
-        .max(500)
+        // Cloudinary secure_url can exceed 500 chars with long folders / transforms
+        .max(2048)
         .refine(
           (url) => {
             if (url.startsWith("/uploads/")) {

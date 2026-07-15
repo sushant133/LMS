@@ -31,6 +31,11 @@ const dailyAttendanceSchema = new Schema(
     endTime: { type: String },
     entries: { type: [dailyAttendanceEntrySchema], default: [] },
     notes: { type: String, default: "" },
+    /** Optional syllabus coverage for the session. */
+    syllabusChapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter" },
+    syllabusUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusTopic" },
+    syllabusSubUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusSubUnit" },
+    syllabusCoverageNote: { type: String, default: "" },
     status: { type: String, enum: ["DRAFT", "SUBMITTED", "LOCKED"], default: "LOCKED" },
     syncedAttendanceId: { type: Schema.Types.ObjectId, ref: "Attendance" },
     synchronizedAt: { type: Date },

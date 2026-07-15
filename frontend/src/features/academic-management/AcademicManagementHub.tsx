@@ -445,7 +445,13 @@ export const AcademicManagementHub = () => {
           batchId: item.batchId,
           level: item.level,
         }))}
-        subjects={subjects.map((item) => ({ _id: item._id, name: item.name }))}
+        subjects={subjects.map((item) => ({
+          _id: item._id,
+          name: item.name,
+          code: item.code,
+          masterSubjectId: item.masterSubjectId ?? null,
+          yearIds: item.yearIds,
+        }))}
         teachers={teachersQuery.data ?? []}
         academicYearBs={settingsQuery.data?.academicYearBs ?? ""}
         showTeacherFilter={isAdmin}
