@@ -243,55 +243,74 @@ const persistResultMarks = async (
 };
 
 export const listExams = asyncHandler(async (req: Request, res: Response) => {
-  const filter: Record<string, unknown> = withTenantScope(req);
+  const schoolFilter = withTenantScope(req);
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
-  const teacherScope = await getTeacherScope(req);
+  const role = req.user?.role ?? "";
 
-  if (teacherScope) {
-    if (college) {
-      filter.batchIds = { $in: teacherScope.batchIds };
-      filter.yearIds = { $in: teacherScope.yearIds };
-    } else {
-      filter.classIds = { $in: teacherScope.classIds };
-    }
-  }
+  /**
+   * Teachers must see every exam (all batches / years) so they can open the full
+   * multi-year routine. Marks entry stays scoped by subject assignment elsewhere.
+   * Previously: filter.batchIds/yearIds = { $in: teacherScope.* } hid all exams
+   * when assignments were empty or only covered a subset of cohorts.
+   */
+  let exams = await Exam.find(schoolFilter).sort({ startDateBs: -1 }).lean();
 
   const studentProfile = await getStudentProfile(req);
   if (studentProfile) {
-    if (college && studentProfile.batchId) {
-      // Multi-year exams (e.g. Third Term) store several yearIds; match if student's year is included
-      filter.batchIds = studentProfile.batchId;
-      if (studentProfile.yearId) {
-        filter.yearIds = studentProfile.yearId;
+    exams = exams.filter((exam) => {
+      if (college) {
+        const yearIds = (exam.yearIds ?? []).map((id) => id.toString());
+        const batchIds = (exam.batchIds ?? []).map((id) => id.toString());
+        // Unscoped exam → whole college
+        if (yearIds.length === 0 && batchIds.length === 0) return true;
+        // Prefer year match (multi-year / multi-batch terms e.g. 1st·2083 + 2nd·2082)
+        if (studentProfile.yearId && yearIds.includes(studentProfile.yearId)) return true;
+        // Legacy batch-only scope (no yearIds stored)
+        if (
+          yearIds.length === 0 &&
+          studentProfile.batchId &&
+          batchIds.includes(studentProfile.batchId)
+        ) {
+          return true;
+        }
+        return false;
       }
-    } else if (studentProfile.classId) {
-      filter.classIds = studentProfile.classId;
-    }
-  }
-
-  if (req.user?.role === "PARENT") {
+      const classIds = (exam.classIds ?? []).map((id) => id.toString());
+      if (classIds.length === 0) return true;
+      return Boolean(studentProfile.classId && classIds.includes(studentProfile.classId));
+    });
+  } else if (role === "PARENT") {
     const studentIds = await getLinkedStudentIds(req);
-    const students = await Student.find({ _id: { $in: studentIds } }).lean();
-    if (college) {
-      const batchIds = [
-        ...new Set(students.map((s) => s.batchId?.toString()).filter(Boolean) as string[])
-      ];
-      const yearIds = [
-        ...new Set(students.map((s) => s.yearId?.toString()).filter(Boolean) as string[])
-      ];
-      // Match exams scoped to any linked child's batch/year (supports multi-year exams)
-      filter.batchIds = { $in: batchIds };
-      filter.yearIds = { $in: yearIds };
-    } else {
-      const classIds = [
-        ...new Set(students.map((s) => s.classId?.toString()).filter(Boolean) as string[])
-      ];
-      filter.classIds = { $in: classIds };
-    }
+    const children = await Student.find({
+      _id: { $in: studentIds },
+      schoolId: tenantObjectId(req)
+    }).lean();
+    const childYearIds = new Set(
+      children.map((s) => s.yearId?.toString()).filter(Boolean) as string[]
+    );
+    const childBatchIds = new Set(
+      children.map((s) => s.batchId?.toString()).filter(Boolean) as string[]
+    );
+    const childClassIds = new Set(
+      children.map((s) => s.classId?.toString()).filter(Boolean) as string[]
+    );
+
+    exams = exams.filter((exam) => {
+      if (college) {
+        const yearIds = (exam.yearIds ?? []).map((id) => id.toString());
+        const batchIds = (exam.batchIds ?? []).map((id) => id.toString());
+        if (yearIds.length === 0 && batchIds.length === 0) return true;
+        if (yearIds.some((id) => childYearIds.has(id))) return true;
+        if (yearIds.length === 0 && batchIds.some((id) => childBatchIds.has(id))) return true;
+        return false;
+      }
+      const classIds = (exam.classIds ?? []).map((id) => id.toString());
+      if (classIds.length === 0) return true;
+      return classIds.some((id) => childClassIds.has(id));
+    });
   }
 
-  const exams = await Exam.find(filter).sort({ startDateBs: -1 }).lean();
   return sendSuccess(
     res,
     "Exams fetched",

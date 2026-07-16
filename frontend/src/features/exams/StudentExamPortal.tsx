@@ -19,6 +19,8 @@ import { api, unwrap } from "lib/api";
 interface EnrichedRoutine extends ExamRoutineRecord {
   subjectName?: string;
   subjectCode?: string;
+  yearName?: string;
+  yearLevel?: number;
 }
 
 interface StudentExamPortalProps {
@@ -64,19 +66,14 @@ export const StudentExamPortal = ({
   isLoading,
 }: StudentExamPortalProps) => {
   const role = useNormalizedRole();
+  /**
+   * Load published routines in one call (backend filters to published + student's year).
+   * Do not depend on the exams list first — that previously returned empty when
+   * exam batch/year matching was too strict, so routines never loaded.
+   */
   const routinesQuery = useQuery({
     queryKey: ["exam-routines", "student"],
-    queryFn: async () => {
-      const all = await Promise.all(
-        exams.map((exam) =>
-          unwrap<EnrichedRoutine[]>(
-            api.get("/exams/routines", { params: { examId: exam._id } }),
-          ).catch(() => []),
-        ),
-      );
-      return all.flat();
-    },
-    enabled: exams.length > 0,
+    queryFn: () => unwrap<EnrichedRoutine[]>(api.get("/exams/routines")),
   });
 
   const subjectsQuery = useQuery({
@@ -107,9 +104,11 @@ export const StudentExamPortal = ({
 
   const upcomingRoutines = useMemo(() => {
     const routines = routinesQuery.data ?? [];
-    return [...routines].sort((left, right) =>
-      left.examDateBs.localeCompare(right.examDateBs),
-    );
+    return [...routines].sort((left, right) => {
+      const byDate = left.examDateBs.localeCompare(right.examDateBs);
+      if (byDate !== 0) return byDate;
+      return (left.startTime ?? "").localeCompare(right.startTime ?? "");
+    });
   }, [routinesQuery.data]);
 
   const sortedResults = useMemo(

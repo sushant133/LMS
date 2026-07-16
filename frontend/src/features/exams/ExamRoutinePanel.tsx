@@ -866,103 +866,157 @@ export const ExamRoutinePanel = ({
 };
 
 /**
- * Teacher view of an exam's schedule — all year tables (1st / 2nd / 3rd), read-only.
+ * Teacher view of exam schedules — all years / batches (1st / 2nd / 3rd), read-only.
+ * When examId is empty, loads every exam routine for the college so teachers are not
+ * stuck with an empty dropdown after assignment-scoped exam lists.
  */
-export const TeacherRoutineList = ({ examId }: { examId: string }) => {
+export const TeacherRoutineList = ({
+  examId,
+  exams = [],
+}: {
+  examId: string;
+  exams?: ExamRecord[];
+}) => {
   const routinesQuery = useQuery({
-    queryKey: ["exam-routines", examId, "teacher"],
+    queryKey: ["exam-routines", "teacher", examId || "all"],
     queryFn: () =>
       unwrap<EnrichedRoutine[]>(
-        api.get("/exams/routines", { params: { examId } }),
+        api.get(
+          "/exams/routines",
+          examId ? { params: { examId } } : undefined,
+        ),
       ),
-    enabled: Boolean(examId),
   });
+
+  const examNameById = useMemo(
+    () => new Map(exams.map((exam) => [exam._id, exam.name])),
+    [exams],
+  );
 
   const routines = routinesQuery.data ?? [];
 
-  const tables = useMemo(() => {
-    const byYear = new Map<
+  /** Group: exam → year tables so multi-exam view stays clear */
+  const examGroups = useMemo(() => {
+    const byExam = new Map<
       string,
-      { title: string; level?: number; slots: EnrichedRoutine[] }
+      {
+        examId: string;
+        examName: string;
+        tables: Array<{
+          key: string;
+          title: string;
+          level?: number;
+          slots: EnrichedRoutine[];
+        }>;
+      }
     >();
+
     for (const r of routines) {
-      const key = r.yearId || "__legacy__";
+      const eid = r.examId;
+      if (!byExam.has(eid)) {
+        byExam.set(eid, {
+          examId: eid,
+          examName: examNameById.get(eid) ?? "Exam",
+          tables: [],
+        });
+      }
+      const group = byExam.get(eid)!;
+      const yearKey = r.yearId || "__legacy__";
       const title = r.yearName || (r.yearId ? "Year" : "Exam schedule");
       if ((title || "").toLowerCase() === "ended") continue;
-      const existing = byYear.get(key);
-      if (existing) existing.slots.push(r);
-      else
-        byYear.set(key, {
+      let table = group.tables.find((t) => t.key === yearKey);
+      if (!table) {
+        table = {
+          key: yearKey,
           title,
           level: r.yearLevel,
-          slots: [r],
-        });
+          slots: [],
+        };
+        group.tables.push(table);
+      }
+      table.slots.push(r);
     }
-    return Array.from(byYear.entries())
-      .map(([key, value]) => ({ key, ...value }))
-      .sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
-  }, [routines]);
+
+    return Array.from(byExam.values()).map((group) => ({
+      ...group,
+      tables: group.tables.sort((a, b) => (a.level ?? 99) - (b.level ?? 99)),
+    }));
+  }, [examNameById, routines]);
 
   if (routinesQuery.isLoading) return <LoadingState />;
 
   if (routines.length === 0) {
     return (
       <EmptyState
-        title="No routine published"
-        description="Exam schedule will appear here once the admin publishes the routine."
+        title={examId ? "No routine for this exam" : "No exam routines yet"}
+        description={
+          examId
+            ? "This exam has no schedule rows yet, or the routine is still being prepared."
+            : "Exam schedules for all years will appear here once the admin adds and publishes routines."
+        }
       />
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <p className="text-xs text-slate-500">
-        Full exam routine for all years. Students only see their own year.
+        Full exam routine for all years and batches. Students only see their own
+        enrolled year after the admin publishes the routine.
       </p>
-      {tables.map((table) => (
-        <div key={table.key} className="space-y-2">
-          <h4 className="text-sm font-semibold text-slate-800">
-            {table.title} — exam routine
-          </h4>
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <Table>
-              <TableHead>
-                <tr>
-                  <Th>Subject</Th>
-                  <Th>Date</Th>
-                  <Th>Day</Th>
-                  <Th>Time</Th>
-                  <Th>Duration</Th>
-                  <Th>Hall</Th>
-                  <Th>Invigilator</Th>
-                </tr>
-              </TableHead>
-              <TableBody>
-                {table.slots.map((routine) => (
-                  <tr key={routine._id}>
-                    <Td>
-                      <div className="font-medium">
-                        {routine.subjectName ?? "Subject"}
-                      </div>
-                      {routine.subjectCode ? (
-                        <div className="text-xs text-slate-500">
-                          {routine.subjectCode}
-                        </div>
-                      ) : null}
-                    </Td>
-                    <Td>{routine.examDateBs}</Td>
-                    <Td>{routine.day}</Td>
-                    <Td>
-                      {routine.startTime} – {routine.endTime}
-                    </Td>
-                    <Td>{routine.durationMinutes} min</Td>
-                    <Td>{routine.examHall || "—"}</Td>
-                    <Td>{routine.invigilator || "—"}</Td>
-                  </tr>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+      {examGroups.map((group) => (
+        <div key={group.examId} className="space-y-3">
+          {examGroups.length > 1 || !examId ? (
+            <h3 className="text-base font-semibold text-slate-900">
+              {group.examName}
+            </h3>
+          ) : null}
+          {group.tables.map((table) => (
+            <div key={`${group.examId}-${table.key}`} className="space-y-2">
+              <h4 className="text-sm font-semibold text-slate-800">
+                {table.title} — exam routine
+              </h4>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <Table>
+                  <TableHead>
+                    <tr>
+                      <Th>Subject</Th>
+                      <Th>Date</Th>
+                      <Th>Day</Th>
+                      <Th>Time</Th>
+                      <Th>Duration</Th>
+                      <Th>Hall</Th>
+                      <Th>Invigilator</Th>
+                    </tr>
+                  </TableHead>
+                  <TableBody>
+                    {table.slots.map((routine) => (
+                      <tr key={routine._id}>
+                        <Td>
+                          <div className="font-medium">
+                            {routine.subjectName ?? "Subject"}
+                          </div>
+                          {routine.subjectCode ? (
+                            <div className="text-xs text-slate-500">
+                              {routine.subjectCode}
+                            </div>
+                          ) : null}
+                        </Td>
+                        <Td>{routine.examDateBs}</Td>
+                        <Td>{routine.day}</Td>
+                        <Td>
+                          {routine.startTime} – {routine.endTime}
+                        </Td>
+                        <Td>{routine.durationMinutes} min</Td>
+                        <Td>{routine.examHall || "—"}</Td>
+                        <Td>{routine.invigilator || "—"}</Td>
+                      </tr>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ))}
         </div>
       ))}
     </div>

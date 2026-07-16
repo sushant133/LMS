@@ -709,10 +709,10 @@ export const ExamManager = () => {
   ]);
 
   const startDateValue = examForm.startDateBs
-    ? parseBsDate(examForm.startDateBs)
+    ? (parseBsDate(examForm.startDateBs) ?? undefined)
     : undefined;
   const endDateValue = examForm.endDateBs
-    ? parseBsDate(examForm.endDateBs)
+    ? (parseBsDate(examForm.endDateBs) ?? undefined)
     : undefined;
 
   const buildScopedExamForm = (
@@ -1747,24 +1747,32 @@ export const ExamManager = () => {
 
           <Card>
             <CardHeader>
-              <CardTitle>My Exam Routines</CardTitle>
+              <CardTitle>Exam Routines (all years)</CardTitle>
+              <p className="text-sm text-slate-500">
+                Full schedules for every batch and year. Leave exam filter empty
+                to see all exams, or pick one exam to focus.
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <FormField label="Exam">
+              <FormField label="Filter by exam (optional)">
                 <Select
                   value={teacherViewExamId}
                   onChange={(event) => setTeacherViewExamId(event.target.value)}
                 >
-                  <option value="">Select exam</option>
+                  <option value="">All exams</option>
                   {(examsQuery.data ?? []).map((exam) => (
                     <option key={exam._id} value={exam._id}>
                       {exam.name}
+                      {exam.routinePublished ? " · published" : " · draft"}
                     </option>
                   ))}
                 </Select>
               </FormField>
               <Suspense fallback={<LoadingState />}>
-                <TeacherRoutineList examId={teacherViewExamId} />
+                <TeacherRoutineList
+                  examId={teacherViewExamId}
+                  exams={examsQuery.data ?? []}
+                />
               </Suspense>
             </CardContent>
           </Card>
