@@ -7,26 +7,33 @@ let transporter: Transporter | null = null;
 export const isSmtpConfigured = (): boolean =>
   Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
 
+const isGmailSmtp = (): boolean =>
+  Boolean(env.SMTP_HOST?.toLowerCase().includes("gmail.com") || env.SMTP_HOST?.toLowerCase().includes("googlemail.com"));
+
 export const getMailTransporter = (): Transporter | null => {
   if (!isSmtpConfigured()) {
     return null;
   }
 
   if (!transporter) {
+    // Explicit SMTP transport options (avoids nodemailer overload picking a non-SMTP shape)
     transporter = nodemailer.createTransport({
-      host: env.SMTP_HOST,
+      host: env.SMTP_HOST as string,
       port: env.SMTP_PORT,
       secure: env.SMTP_SECURE,
       auth: {
-        user: env.SMTP_USER,
-        pass: env.SMTP_PASS
+        user: env.SMTP_USER as string,
+        pass: env.SMTP_PASS as string
       },
       // Prefer STARTTLS on 587; Gmail/App passwords work best with this path
       requireTLS: !env.SMTP_SECURE && env.SMTP_PORT === 587,
       tls: {
         minVersion: "TLSv1.2"
-      }
-    });
+      },
+      connectionTimeout: 30_000,
+      greetingTimeout: 20_000,
+      socketTimeout: 40_000
+    } as nodemailer.TransportOptions);
   }
 
   return transporter;
@@ -62,9 +69,15 @@ export interface SendEmailResult {
 }
 
 const resolveFromAddress = (): { name: string; address: string } => {
-  const address = (env.SMTP_FROM_EMAIL || env.SMTP_USER || "").trim().toLowerCase();
+  const authUser = (env.SMTP_USER || "").trim().toLowerCase();
+  const configuredFrom = (env.SMTP_FROM_EMAIL || "").trim().toLowerCase();
+
+  // Gmail only allows sending as the authenticated account (unless "Send mail as" is set).
+  // Mismatched From is a top reason free Gmail SMTP lands in Spam.
+  const address = isGmailSmtp() && authUser ? authUser : configuredFrom || authUser;
+
   return {
-    name: env.SMTP_FROM_NAME || "PHIT LMS",
+    name: (env.SMTP_FROM_NAME || "PHIT LMS").trim() || "PHIT LMS",
     address
   };
 };
@@ -115,18 +128,15 @@ export const sendEmail = async (params: SendEmailParams): Promise<SendEmailResul
     };
   }
 
-  // Gmail rejects or spam-scores mismatched From vs authenticated user
   const authUser = (env.SMTP_USER || "").trim().toLowerCase();
-  if (authUser && from.address !== authUser && env.SMTP_HOST?.includes("gmail.com")) {
+  if (authUser && from.address !== authUser && isGmailSmtp()) {
     console.warn(
-      `[email] SMTP_FROM_EMAIL (${from.address}) differs from SMTP_USER (${authUser}). ` +
-        "With Gmail, From must match the authenticated account or messages often land in spam."
+      `[email] SMTP_FROM_EMAIL differs from SMTP_USER on Gmail — forcing From to ${authUser} for deliverability.`
     );
   }
 
   const replyTo = (params.replyTo || env.SMTP_REPLY_TO || from.address).trim();
   const messageId = buildMessageId(from.address);
-  const hasInlineImages = Boolean(params.attachments?.some((a) => a.cid));
 
   try {
     const info = await mailer.sendMail({
@@ -134,36 +144,44 @@ export const sendEmail = async (params: SendEmailParams): Promise<SendEmailResul
         name: from.name,
         address: from.address
       },
+      // Envelope must match authenticated user on Gmail
+      envelope: {
+        from: from.address,
+        to: [to]
+      },
       to,
       replyTo,
       subject: params.subject,
-      // Multipart text + html (nodemailer) improves deliverability vs HTML-only
+      // Multipart text + html improves Primary placement vs HTML-only
       text: params.text,
       html: params.html,
       messageId,
-      // Keep headers light — heavy bulk/marketing headers push free mailboxes into spam
+      date: new Date(),
+      // Keep headers minimal and transactional — bulk/list headers push free inboxes to Spam/Promotions
       headers: {
         "X-Entity-Ref-ID": crypto.randomBytes(8).toString("hex"),
-        "X-Mailer": "PHIT-LMS/1.0",
         "X-Auto-Response-Suppress": "OOF, AutoReply",
-        "Auto-Submitted": "auto-generated",
         ...(params.category ? { "X-PHIT-Category": params.category } : {})
       },
-      // Important for Gmail/Yahoo: mark as personal/transactional, not bulk list mail
       priority: "normal",
-      // When CID images are present, nodemailer builds multipart/related automatically
+      // Personal/transactional style (not bulk newsletter)
+      encoding: "utf-8",
       attachments: params.attachments?.map((attachment) => ({
         filename: attachment.filename,
         path: attachment.path,
         content: attachment.content,
         cid: attachment.cid,
         contentType: attachment.contentType,
-        contentDisposition: attachment.contentDisposition ?? (attachment.cid ? "inline" : "attachment"),
-        // Avoid treating logo as a downloadable file attachment
-        ...(attachment.cid ? { contentTransferEncoding: "base64" as const } : {})
-      })),
-      // Prefer quoted-printable for text parts when no binary body
-      encoding: hasInlineImages ? undefined : "utf-8"
+        contentDisposition:
+          attachment.contentDisposition ?? (attachment.cid ? "inline" : "attachment"),
+        ...(attachment.cid
+          ? {
+              contentTransferEncoding: "base64" as const,
+              // Helps clients treat logo as related body part, not a download
+              contentDisposition: "inline" as const
+            }
+          : {})
+      }))
     });
 
     return {

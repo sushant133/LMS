@@ -228,16 +228,53 @@ export const getUploadDir = (): string =>
 export const isCloudinaryEnabled = (): boolean =>
   Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET);
 
-/** Login page URL for credential emails. */
-export const getAppLoginUrl = (): string => {
-  const base =
-    env.APP_URL?.trim() ||
-    env.CORS_ORIGINS.split(",")
-      .map((origin) => origin.trim())
-      .find(Boolean) ||
-    "http://localhost:5173";
-  return `${base.replace(/\/$/, "")}/login`;
+const isLocalHostname = (hostname: string): boolean =>
+  hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "0.0.0.0";
+
+const normalizeBaseUrl = (value: string): string => value.replace(/\/$/, "");
+
+/**
+ * Public frontend base URL for credential emails / login links.
+ * Prefer a non-localhost HTTPS origin so real student inboxes never get
+ * http://localhost links (those look like phishing and land in Spam).
+ */
+export const getPublicAppBaseUrl = (): string => {
+  const candidates = [
+    env.APP_URL?.trim(),
+    ...env.CORS_ORIGINS.split(",").map((origin) => origin.trim())
+  ].filter((value): value is string => Boolean(value));
+
+  const parsed = candidates
+    .map((value) => {
+      try {
+        return new URL(value);
+      } catch {
+        return null;
+      }
+    })
+    .filter((url): url is URL => Boolean(url));
+
+  const publicHttps = parsed.find(
+    (url) => url.protocol === "https:" && !isLocalHostname(url.hostname)
+  );
+  if (publicHttps) {
+    return normalizeBaseUrl(publicHttps.origin);
+  }
+
+  const anyPublic = parsed.find((url) => !isLocalHostname(url.hostname));
+  if (anyPublic) {
+    return normalizeBaseUrl(anyPublic.origin);
+  }
+
+  if (candidates[0]) {
+    return normalizeBaseUrl(candidates[0]);
+  }
+
+  return "http://localhost:5173";
 };
+
+/** Login page URL for credential emails. */
+export const getAppLoginUrl = (): string => `${getPublicAppBaseUrl()}/login`;
 
 /** First configured CORS origin (frontend base). */
 export const getPrimaryFrontendOrigin = (): string =>

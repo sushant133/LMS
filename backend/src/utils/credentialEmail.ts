@@ -1,11 +1,10 @@
 import crypto from "node:crypto";
 import type { Request } from "express";
 import { INSTITUTION_NAME } from "@phit-erp/shared";
-import { env, getAppLoginUrl } from "../config/env.js";
+import { getAppLoginUrl, getPublicAppBaseUrl } from "../config/env.js";
 import { EmailDeliveryLog } from "../models/EmailDeliveryLog.js";
 import { User } from "../models/User.js";
 import {
-  COLLEGE_LOGO_EMAIL_CID,
   collegeLogoExists,
   getCollegeLogoEmailAttachment,
   getCollegeLogoPath
@@ -154,27 +153,47 @@ const accountKindLabel = (kind?: CredentialAccountKind): string => {
 };
 
 /**
- * Prefer a calm, non-spammy subject. Avoid words like "password", "credentials",
- * "login details free", ALL CAPS, or excessive punctuation — those hurt inbox placement
- * especially for high-volume student enrollments.
+ * Prefer a calm, non-spammy subject. Same style for students, teachers, and staff
+ * so all roles get equal Primary-inbox treatment. Avoid words like "password",
+ * "credentials", ALL CAPS, or excessive punctuation.
  */
 const buildWelcomeSubject = (kind?: CredentialAccountKind): string => {
   switch (kind) {
     case "STUDENT":
-      return `${INSTITUTION_NAME} – Welcome to the student portal`;
+      return `${INSTITUTION_NAME}: your student portal account`;
     case "TEACHER":
-      return `${INSTITUTION_NAME} – Welcome to the teacher portal`;
+      return `${INSTITUTION_NAME}: your teacher portal account`;
     case "PARENT":
-      return `${INSTITUTION_NAME} – Welcome to the parent portal`;
+      return `${INSTITUTION_NAME}: your parent portal account`;
     case "STAFF":
-      return `${INSTITUTION_NAME} – Welcome to the staff portal`;
+      return `${INSTITUTION_NAME}: your staff portal account`;
     case "ADMIN":
-      return `${INSTITUTION_NAME} – Administrator portal access`;
+      return `${INSTITUTION_NAME}: your administrator portal account`;
     default:
-      return `${INSTITUTION_NAME} – Welcome to PHIT LMS`;
+      return `${INSTITUTION_NAME}: your portal account`;
   }
 };
 
+const buildLogoBlock = (params: {
+  logoCid?: string;
+  logoPublicUrl?: string;
+  institution: string;
+}): string => {
+  // Prefer CID (inline, works without remote image load). Public HTTPS is fallback only.
+  if (params.logoCid) {
+    return `<img src="cid:${params.logoCid}" alt="${params.institution}" width="64" height="64" style="display:block;margin:0 0 12px;border:0;outline:none;text-decoration:none;" />`;
+  }
+  if (params.logoPublicUrl) {
+    return `<img src="${escapeHtml(params.logoPublicUrl)}" alt="${params.institution}" width="64" height="64" style="display:block;margin:0 0 12px;border:0;outline:none;text-decoration:none;" />`;
+  }
+  return "";
+};
+
+/**
+ * Personal, transactional layout (not a marketing newsletter).
+ * Same template for students / teachers / staff so delivery is consistent.
+ * High text-to-image ratio and a single CTA help Gmail Primary placement.
+ */
 const buildWelcomeEmailHtml = (params: {
   fullName: string;
   email: string;
@@ -190,96 +209,58 @@ const buildWelcomeEmailHtml = (params: {
   const loginUrl = escapeHtml(params.loginUrl);
   const institution = escapeHtml(INSTITUTION_NAME);
   const kind = accountKindLabel(params.accountKind);
-  const roleLine =
-    params.accountKind === "STUDENT"
-      ? "Your student portal account is ready."
-      : `Your ${kind} portal account is ready.`;
+  const roleLine = `Your ${kind} portal account at ${institution} is ready.`;
+  const logoBlock = buildLogoBlock({
+    logoCid: params.logoCid,
+    logoPublicUrl: params.logoPublicUrl,
+    institution
+  });
 
-  // Prefer CID (works offline / without "display images"); public HTTPS URL is a fallback
-  // for clients that strip related parts. Never use the huge raw file as a remote asset.
-  let logoBlock: string;
-  if (params.logoCid) {
-    logoBlock = `<img src="cid:${params.logoCid}" alt="${institution}" width="72" height="72" style="display:block;margin:0 auto 12px;border:0;outline:none;text-decoration:none;border-radius:12px;" />`;
-  } else if (params.logoPublicUrl) {
-    logoBlock = `<img src="${escapeHtml(params.logoPublicUrl)}" alt="${institution}" width="72" height="72" style="display:block;margin:0 auto 12px;border:0;outline:none;text-decoration:none;border-radius:12px;" />`;
-  } else {
-    logoBlock = `<div style="width:72px;height:72px;margin:0 auto 12px;border-radius:12px;background:#0c2d6b;color:#ffffff;font-weight:700;font-size:22px;line-height:72px;text-align:center;">PHIT</div>`;
-  }
-
-  // Keep HTML simple: solid header color (not CSS gradients), limited markup, plain language.
-  // Spam filters score complex HTML + large inline images poorly on high-volume student mail.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-  <title>Welcome to ${institution}</title>
+  <title>${institution} portal account</title>
 </head>
-<body style="margin:0;padding:0;background:#f3f6fb;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3f6fb;padding:24px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
-          <tr>
-            <td style="background:#0c2d6b;padding:28px 24px;text-align:center;color:#ffffff;">
-              ${logoBlock}
-              <div style="font-size:18px;font-weight:700;letter-spacing:0.2px;">${institution}</div>
-              <div style="margin-top:6px;font-size:13px;opacity:0.9;">Learning Management System</div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:28px 24px 8px;">
-              <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#0c2d6b;">Hello ${name},</h1>
-              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#374151;">
-                ${roleLine}
-                You can sign in to PHIT LMS with the details below.
-              </p>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
-                <tr>
-                  <td style="padding:16px 18px;">
-                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Portal link</div>
-                    <div style="font-size:14px;word-break:break-all;margin-bottom:14px;">
-                      <a href="${loginUrl}" style="color:#0c2d6b;text-decoration:none;font-weight:600;">${loginUrl}</a>
-                    </div>
-                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Login ID</div>
-                    <div style="font-size:15px;font-weight:600;margin-bottom:14px;color:#111827;">${email}</div>
-                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Temporary access code</div>
-                    <div style="font-size:15px;font-weight:700;letter-spacing:0.03em;color:#111827;font-family:Consolas,Monaco,monospace;">${accessCode}</div>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
-                For your security, change this temporary access code after your first sign-in. Do not share it with others.
-              </p>
-              <div style="text-align:center;margin:24px 0 8px;">
-                <a href="${loginUrl}" style="display:inline-block;background:#0c2d6b;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px;">
-                  Open PHIT LMS
-                </a>
-              </div>
-              <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
-                If you have trouble signing in, contact the LMS administrator at your institution.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:8px 24px 28px;">
-              <p style="margin:0;font-size:14px;line-height:1.6;color:#374151;">
-                Regards,<br />
-                <strong>${institution}</strong><br />
-                LMS Administration
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background:#f8fafc;border-top:1px solid #e5e7eb;padding:16px 24px;text-align:center;font-size:12px;color:#9ca3af;">
-              This is an automated message from ${institution} LMS. Please keep your access code private.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+<body style="margin:0;padding:0;background:#ffffff;font-family:Georgia,'Times New Roman',serif;color:#222222;">
+  <div style="max-width:560px;margin:0 auto;padding:28px 20px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#222222;">
+    ${logoBlock}
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.55;">Hello ${name},</p>
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.55;">
+      ${roleLine}
+      Please use the details below to sign in.
+    </p>
+    <p style="margin:0 0 8px;font-size:15px;line-height:1.55;">
+      <strong>Portal:</strong><br />
+      <a href="${loginUrl}" style="color:#0c2d6b;word-break:break-all;">${loginUrl}</a>
+    </p>
+    <p style="margin:0 0 8px;font-size:15px;line-height:1.55;">
+      <strong>Login ID:</strong><br />
+      ${email}
+    </p>
+    <p style="margin:0 0 16px;font-size:15px;line-height:1.55;">
+      <strong>Password:</strong><br />
+      <span style="font-family:Consolas,Monaco,monospace;font-size:15px;">${accessCode}</span>
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;line-height:1.55;color:#444444;">
+      Please change this password after your first sign-in and do not share it with others.
+    </p>
+    <p style="margin:0 0 20px;">
+      <a href="${loginUrl}" style="display:inline-block;background:#0c2d6b;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:10px 20px;border-radius:6px;">
+        Open portal
+      </a>
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;line-height:1.55;color:#444444;">
+      If you have trouble signing in, contact the LMS administrator at your institution.
+    </p>
+    <p style="margin:0;font-size:15px;line-height:1.55;">
+      Regards,<br />
+      ${institution}<br />
+      LMS Administration
+    </p>
+  </div>
 </body>
 </html>`;
 };
@@ -292,26 +273,21 @@ const buildWelcomeEmailText = (params: {
   accountKind?: CredentialAccountKind;
 }): string => {
   const kind = accountKindLabel(params.accountKind);
-  const roleLine =
-    params.accountKind === "STUDENT"
-      ? "Your student portal account is ready."
-      : `Your ${kind} portal account is ready.`;
 
   return `Hello ${params.fullName},
 
-${roleLine}
-You can sign in to PHIT LMS with the details below.
+Your ${kind} portal account at ${INSTITUTION_NAME} is ready. Please use the details below to sign in.
 
-Portal link
+Portal:
 ${params.loginUrl}
 
-Login ID
+Login ID:
 ${params.email}
 
-Temporary access code
+Password:
 ${params.password}
 
-For your security, change this temporary access code after your first sign-in. Do not share it with others.
+Please change this password after your first sign-in and do not share it with others.
 
 If you have trouble signing in, contact the LMS administrator at your institution.
 
@@ -321,12 +297,17 @@ LMS Administration`;
 };
 
 const resolveLogoPublicUrl = (): string | undefined => {
-  const base =
-    env.APP_URL?.trim() ||
-    env.CORS_ORIGINS.split(",")
-      .map((origin) => origin.trim())
-      .find(Boolean);
+  const base = getPublicAppBaseUrl();
   if (!base) return undefined;
+  try {
+    const url = new URL(base);
+    // Never put localhost image URLs in outbound mail (broken + spammy)
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
   // Frontend serves /college-logo.png from public/
   return `${base.replace(/\/$/, "")}/college-logo.png`;
 };
@@ -349,7 +330,7 @@ export const notifyAccountCredentials = async (
       email,
       skipped: true,
       error:
-        "Login ID is not a full email address, so no message was sent. Share the portal access code with the user manually, or set a real email on the account."
+        "Login ID is not a full email address, so no message was sent. Share the Login ID and Password with the user manually, or set a real email on the account."
     };
     try {
       await EmailDeliveryLog.create({
@@ -375,8 +356,9 @@ export const notifyAccountCredentials = async (
   }
 
   const logoAttachment = await getCollegeLogoEmailAttachment();
-  const logoCid = logoAttachment?.cid ?? (collegeLogoExists() ? COLLEGE_LOGO_EMAIL_CID : undefined);
-  const logoPublicUrl = logoAttachment ? undefined : resolveLogoPublicUrl();
+  // Always prefer inline CID when we have a buffer — same path for students, teachers, staff
+  const logoCid = logoAttachment?.cid;
+  const logoPublicUrl = logoCid ? undefined : resolveLogoPublicUrl();
 
   const html = buildWelcomeEmailHtml({
     fullName: input.fullName,
@@ -384,7 +366,7 @@ export const notifyAccountCredentials = async (
     password: input.password,
     loginUrl,
     accountKind: input.accountKind,
-    logoCid: logoAttachment ? logoCid : undefined,
+    logoCid,
     logoPublicUrl
   });
   const text = buildWelcomeEmailText({
@@ -395,12 +377,13 @@ export const notifyAccountCredentials = async (
     accountKind: input.accountKind
   });
 
+  // Same category family for every role so providers treat student mail like staff mail
   const delivery = await sendEmail({
     to: email,
     subject,
     html,
     text,
-    category: `account-access-${(input.accountKind ?? "general").toLowerCase()}`,
+    category: "portal-account-welcome",
     attachments: logoAttachment
       ? [
           {
@@ -542,21 +525,19 @@ const buildAdminCredentialsUpdatedHtml = (params: {
   const loginUrl = escapeHtml(params.loginUrl);
   const institution = escapeHtml(INSTITUTION_NAME);
   const passwordBlock = params.password
-    ? `<div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">New temporary access code</div>
-                    <div style="font-size:15px;font-weight:700;letter-spacing:0.03em;color:#111827;font-family:Consolas,Monaco,monospace;margin-bottom:14px;">${escapeHtml(params.password)}</div>`
-    : `<div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Access code</div>
-                    <div style="font-size:14px;color:#374151;margin-bottom:14px;">Your existing access code was not changed.</div>`;
+    ? `<p style="margin:0 0 16px;"><strong>Password:</strong><br /><span style="font-family:Consolas,Monaco,monospace;">${escapeHtml(params.password)}</span></p>`
+    : `<p style="margin:0 0 16px;"><strong>Password:</strong><br />Your existing password was not changed.</p>`;
 
   const changeSummary = [
     params.loginIdChanged ? "login ID" : null,
-    params.passwordChanged ? "sign-in code" : null
+    params.passwordChanged ? "password" : null
   ]
     .filter(Boolean)
     .join(" and ");
 
   const logoBlock = params.logoCid
-    ? `<img src="cid:${params.logoCid}" alt="${institution}" width="72" height="72" style="display:block;margin:0 auto 12px;border:0;outline:none;text-decoration:none;border-radius:12px;" />`
-    : `<div style="width:72px;height:72px;margin:0 auto 12px;border-radius:12px;background:#0c2d6b;color:#ffffff;font-weight:700;font-size:22px;line-height:72px;text-align:center;">PHIT</div>`;
+    ? `<img src="cid:${params.logoCid}" alt="${institution}" width="64" height="64" style="display:block;margin:0 0 12px;border:0;outline:none;text-decoration:none;" />`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -566,71 +547,29 @@ const buildAdminCredentialsUpdatedHtml = (params: {
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
   <title>Administrator access updated</title>
 </head>
-<body style="margin:0;padding:0;background:#f3f6fb;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3f6fb;padding:24px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
-          <tr>
-            <td style="background:#0c2d6b;padding:28px 24px;text-align:center;color:#ffffff;">
-              ${logoBlock}
-              <div style="font-size:18px;font-weight:700;letter-spacing:0.2px;">${institution}</div>
-              <div style="margin-top:6px;font-size:13px;opacity:0.9;">Administrator account notice</div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:28px 24px 8px;">
-              <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#0c2d6b;">Administrator access updated</h1>
-              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#374151;">
-                Hello <strong>${name}</strong>,
-              </p>
-              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#374151;">
-                Your administrator account ${changeSummary ? `${changeSummary} has` : "access has"} been updated by the Super Admin for <strong>${institution}</strong> LMS.
-              </p>
-              <p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#374151;">
-                Please use the following details to sign in:
-              </p>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
-                <tr>
-                  <td style="padding:16px 18px;">
-                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Portal link</div>
-                    <div style="font-size:14px;word-break:break-all;margin-bottom:14px;">
-                      <a href="${loginUrl}" style="color:#0c2d6b;text-decoration:none;font-weight:600;">${loginUrl}</a>
-                    </div>
-                    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;margin-bottom:4px;">Admin Login ID</div>
-                    <div style="font-size:15px;font-weight:600;margin-bottom:14px;color:#111827;">${loginId}</div>
-                    ${passwordBlock}
-                  </td>
-                </tr>
-              </table>
-              <div style="text-align:center;margin:24px 0 8px;">
-                <a href="${loginUrl}" style="display:inline-block;background:#0c2d6b;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px;">
-                  Open PHIT LMS
-                </a>
-              </div>
-              <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
-                Keep this information private. If you did not expect this change, contact the Super Admin immediately.
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:8px 24px 28px;">
-              <p style="margin:0;font-size:14px;line-height:1.6;color:#374151;">
-                Regards,<br />
-                <strong>${institution}</strong><br />
-                LMS Super Administration
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background:#f8fafc;border-top:1px solid #e5e7eb;padding:16px 24px;text-align:center;font-size:12px;color:#9ca3af;">
-              This is an automated security notice from ${institution} LMS.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+<body style="margin:0;padding:0;background:#ffffff;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#222222;">
+  <div style="max-width:560px;margin:0 auto;padding:28px 20px;font-size:15px;line-height:1.55;color:#222222;">
+    ${logoBlock}
+    <p style="margin:0 0 16px;">Hello ${name},</p>
+    <p style="margin:0 0 16px;">
+      Your administrator account ${changeSummary ? `${changeSummary} has` : "access has"} been updated by the Super Admin for ${institution} LMS.
+      Please use the following details to sign in:
+    </p>
+    <p style="margin:0 0 8px;"><strong>Portal:</strong><br /><a href="${loginUrl}" style="color:#0c2d6b;word-break:break-all;">${loginUrl}</a></p>
+    <p style="margin:0 0 8px;"><strong>Admin Login ID:</strong><br />${loginId}</p>
+    ${passwordBlock}
+    <p style="margin:16px 0;">
+      <a href="${loginUrl}" style="display:inline-block;background:#0c2d6b;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:10px 20px;border-radius:6px;">Open portal</a>
+    </p>
+    <p style="margin:0 0 16px;font-size:14px;color:#444444;">
+      Keep this information private. If you did not expect this change, contact the Super Admin immediately.
+    </p>
+    <p style="margin:0;">
+      Regards,<br />
+      ${institution}<br />
+      LMS Super Administration
+    </p>
+  </div>
 </body>
 </html>`;
 };
@@ -645,16 +584,16 @@ const buildAdminCredentialsUpdatedText = (params: {
 }): string => {
   const changeSummary = [
     params.loginIdChanged ? "login ID" : null,
-    params.passwordChanged ? "sign-in code" : null
+    params.passwordChanged ? "password" : null
   ]
     .filter(Boolean)
     .join(" and ");
 
   const passwordSection = params.password
-    ? `New temporary access code
+    ? `Password:
 ${params.password}`
-    : `Access code
-Your existing access code was not changed.`;
+    : `Password:
+Your existing password was not changed.`;
 
   return `Hello ${params.fullName},
 
@@ -686,7 +625,7 @@ export const notifyAdminCredentialsUpdated = async (
 ): Promise<CredentialEmailResult> => {
   const email = input.email.toLowerCase().trim();
   const loginUrl = getAppLoginUrl();
-  const subject = `${INSTITUTION_NAME} – Administrator access updated`;
+  const subject = `${INSTITUTION_NAME}: administrator access updated`;
   const emailType: CredentialEmailType = "ADMIN_CREDENTIALS_UPDATED";
 
   const logoAttachment = await getCollegeLogoEmailAttachment();
