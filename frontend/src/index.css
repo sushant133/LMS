@@ -224,3 +224,7 @@ input[type="file"]:disabled {
     transform: scale(0.96) translateY(8px);
   }
 }
+/* Nepali datepicker popover is portaled to body; keep above sticky app chrome */
+[data-popover-content] {
+  z-index: 9999 !important;
+}

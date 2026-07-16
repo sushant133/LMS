@@ -1,4 +1,4 @@
-import { getTodayBs, parseBsDate } from "@munatech/nepali-datepicker";
+import { parseBsDate } from "@munatech/nepali-datepicker";
 import { Suspense, lazy, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
@@ -1020,14 +1020,20 @@ export const ExamManager = () => {
                           Exam schedule (Nepali calendar)
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                          Pick dates from the live BS calendar. End date cannot
-                          be before the start date.
+                          Pick any start date first (including future exams). If
+                          start moves after end, end date is auto-adjusted. End
+                          date cannot be before the start date.
                         </p>
                         <div className="mt-4 grid gap-4 md:grid-cols-3">
                           <FormField label="Start Date (BS)">
+                            {/*
+                              Do NOT set maxDate to endDate here.
+                              Defaults both start at today, so maxDate=end locked
+                              every future day and users could not schedule exams.
+                              Range validity is kept by auto-bumping end when needed.
+                            */}
                             <NepaliDateField
                               value={examForm.startDateBs}
-                              maxDate={endDateValue ?? undefined}
                               onChange={(value) =>
                                 setExamForm((current) => {
                                   const nextEnd =
@@ -1036,10 +1042,17 @@ export const ExamManager = () => {
                                     current.endDateBs < value
                                       ? value
                                       : current.endDateBs;
+                                  const nextPublish =
+                                    current.resultPublishDateBs &&
+                                    value &&
+                                    current.resultPublishDateBs < value
+                                      ? value
+                                      : current.resultPublishDateBs;
                                   return {
                                     ...current,
                                     startDateBs: value,
                                     endDateBs: nextEnd,
+                                    resultPublishDateBs: nextPublish,
                                   };
                                 })
                               }
@@ -1048,21 +1061,28 @@ export const ExamManager = () => {
                           <FormField label="End Date (BS)">
                             <NepaliDateField
                               value={examForm.endDateBs}
-                              minDate={startDateValue ?? getTodayBs()}
+                              minDate={startDateValue}
                               onChange={(value) =>
-                                setExamForm((current) => ({
-                                  ...current,
-                                  endDateBs: value,
-                                }))
+                                setExamForm((current) => {
+                                  const nextPublish =
+                                    current.resultPublishDateBs &&
+                                    value &&
+                                    current.resultPublishDateBs < value
+                                      ? value
+                                      : current.resultPublishDateBs;
+                                  return {
+                                    ...current,
+                                    endDateBs: value,
+                                    resultPublishDateBs: nextPublish,
+                                  };
+                                })
                               }
                             />
                           </FormField>
                           <FormField label="Result Publish Date (optional)">
                             <NepaliDateField
                               value={examForm.resultPublishDateBs ?? ""}
-                              minDate={
-                                endDateValue ?? startDateValue ?? getTodayBs()
-                              }
+                              minDate={endDateValue ?? startDateValue}
                               onChange={(value) =>
                                 setExamForm((current) => ({
                                   ...current,

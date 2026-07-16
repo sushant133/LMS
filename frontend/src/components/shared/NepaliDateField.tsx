@@ -22,7 +22,7 @@ export const NepaliDateField = ({
   minDate,
   maxDate
 }: NepaliDateFieldProps) => (
-  <div className="rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-brand-500 [&_select]:min-w-[4.5rem] [&_select]:cursor-pointer [&_select]:rounded-md [&_select]:border-slate-300 [&_select]:bg-white [&_select]:px-2 [&_select]:py-1 [&_select]:text-sm [&_select]:text-slate-900">
+  <div className="relative z-0 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-brand-500 focus-within:z-10 [&_select]:min-w-[4.5rem] [&_select]:cursor-pointer [&_select]:rounded-md [&_select]:border-slate-300 [&_select]:bg-white [&_select]:px-2 [&_select]:py-1 [&_select]:text-sm [&_select]:text-slate-900">
     <Picker
       language="en"
       captionLayout={captionLayout}
@@ -37,7 +37,9 @@ export const NepaliDateField = ({
 
         onChange(formatBsValue(date));
       }}
-      placeholder={placeholder}
+      placeholder={placeholder ?? "Select BS date"}
+      // Calendar is portaled to body; keep it above sticky app chrome
+      calendarClassName="z-[200]"
       className="w-full justify-between rounded-lg border-none bg-transparent px-0 py-0 text-sm text-slate-900 shadow-none outline-none"
     />
   </div>
