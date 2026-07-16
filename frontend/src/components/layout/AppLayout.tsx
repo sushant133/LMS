@@ -23,6 +23,8 @@ import { useTeacherLabAccess } from "hooks/useTeacherLabAccess";
 import {
   getCollegeDisplayName,
   getRoleRedirectPath,
+  getUserDisplayTitle,
+  getUserRoleSubtitle,
   roleLabelMap,
 } from "lib/auth";
 import { redirectToLogin } from "lib/redirectToLogin";
@@ -136,7 +138,7 @@ const navItems: NavItem[] = [
   {
     labelKey: "myTimetable",
     path: "/timetable",
-    roles: ["TEACHER"],
+    roles: ["TEACHER", "STUDENT"],
     section: "myWork",
   },
   {
@@ -647,8 +649,10 @@ export const AppLayout = () => {
             <div className="mt-4 pt-4">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                  {roleLabelMap[normalizedRole]}
-                  {user.designation ? ` · ${user.designation}` : ""}
+                  {getUserDisplayTitle(user)}
+                  {getUserRoleSubtitle(user)
+                    ? ` · ${getUserRoleSubtitle(user)}`
+                    : ""}
                 </p>
                 <p className="mt-2 truncate font-semibold">{user.fullName}</p>
                 <p className="truncate text-sm text-slate-300">{user.email}</p>
@@ -695,8 +699,15 @@ export const AppLayout = () => {
                       >
                         {collegeName}
                       </div>
-                      <div className="text-[10px] font-medium uppercase tracking-widest text-brand-700/80">
-                        {roleLabelMap[normalizedRole]}
+                      <div
+                        className="text-[10px] font-medium uppercase tracking-widest text-brand-700/80"
+                        title={
+                          getUserRoleSubtitle(user)
+                            ? `${getUserDisplayTitle(user)} · ${getUserRoleSubtitle(user)}`
+                            : getUserDisplayTitle(user)
+                        }
+                      >
+                        {getUserDisplayTitle(user)}
                       </div>
                     </div>
                   </div>

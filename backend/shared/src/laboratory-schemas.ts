@@ -56,7 +56,22 @@ export const laboratoryCategorySchema = z.object({
   name: z.string().min(1)
 });
 
-export const laboratoryEquipmentSchema = z.object({
+const minMaxStockRefine = (
+  value: { minimumStockLevel?: number; maximumStockLevel?: number },
+  ctx: z.RefinementCtx
+) => {
+  const min = value.minimumStockLevel ?? 0;
+  const max = value.maximumStockLevel ?? 0;
+  if (min > 0 && max > 0 && min > max) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Minimum stock level cannot be greater than maximum stock level",
+      path: ["minimumStockLevel"]
+    });
+  }
+};
+
+const laboratoryEquipmentBaseSchema = z.object({
   laboratoryId: objectIdSchema,
   categoryId: objectIdSchema,
   name: z.string().min(2),
@@ -67,7 +82,14 @@ export const laboratoryEquipmentSchema = z.object({
   equipmentModel: z.string().trim().max(100).optional().or(z.literal("")),
   unit: z.string().trim().max(40).optional().or(z.literal("")),
   quantity: z.coerce.number().int().min(0),
+  /** Reorder point — stock at or below this is low / critical. */
   minimumStockLevel: z.coerce.number().int().min(0).default(0),
+  /**
+   * Full / target capacity for this item (e.g. only 4 units fit on the shelf).
+   * Used for status thresholds and restock targets so small-capacity items
+   * are not wrongly marked critical.
+   */
+  maximumStockLevel: z.coerce.number().int().min(0).default(0),
   purchaseDateBs: bsDateSchema.optional().or(z.literal("")),
   supplier: z.string().trim().max(150).optional().or(z.literal("")),
   purchaseCost: moneySchema.optional(),
@@ -78,10 +100,15 @@ export const laboratoryEquipmentSchema = z.object({
   remarks: z.string().trim().max(2000).optional().or(z.literal(""))
 });
 
-export const laboratoryEquipmentUpdateSchema = laboratoryEquipmentSchema.partial().extend({
-  laboratoryId: objectIdSchema.optional(),
-  categoryId: objectIdSchema.optional()
-});
+export const laboratoryEquipmentSchema = laboratoryEquipmentBaseSchema.superRefine(minMaxStockRefine);
+
+export const laboratoryEquipmentUpdateSchema = laboratoryEquipmentBaseSchema
+  .partial()
+  .extend({
+    laboratoryId: objectIdSchema.optional(),
+    categoryId: objectIdSchema.optional()
+  })
+  .superRefine(minMaxStockRefine);
 
 export const laboratoryStockAdjustSchema = z.object({
   type: z.enum(LABORATORY_STOCK_MOVEMENT_TYPES),

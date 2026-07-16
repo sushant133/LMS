@@ -3,6 +3,7 @@ import {
   createBook,
   createLibraryStaff,
   deleteBook,
+  deleteBookCopy,
   deleteLibraryStaff,
   getInventoryAccess,
   getLibraryDashboard,
@@ -14,6 +15,7 @@ import {
   returnBook,
   setInventoryAccess,
   updateBook,
+  updateBookCopy,
   updateLibraryStaff
 } from "../controllers/libraryController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
@@ -33,6 +35,9 @@ router.get("/books", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), listBooks);
 router.post("/books", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), createBook);
 router.put("/books/:id", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), updateBook);
 router.delete("/books/:id", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), deleteBook);
+
+router.put("/copies/:id", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), updateBookCopy);
+router.delete("/copies/:id", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), deleteBookCopy);
 
 router.get("/issues", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), listIssues);
 router.post("/issues", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), issueBook);

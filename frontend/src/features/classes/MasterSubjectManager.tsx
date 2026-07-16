@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  COLLEGE_YEAR_NAMES,
+  COLLEGE_PROGRAM_YEAR_NAMES,
   masterSubjectSchema,
   type MasterSubjectInput,
   type MasterSubjectRecord,
@@ -339,7 +339,7 @@ export const MasterSubjectManager = ({
                     }))
                   }
                 >
-                  {COLLEGE_YEAR_NAMES.map((name, index) => (
+                  {COLLEGE_PROGRAM_YEAR_NAMES.map((name, index) => (
                     <option key={name} value={index + 1}>
                       {name}
                     </option>
@@ -457,7 +457,7 @@ export const MasterSubjectManager = ({
           />
         ) : (
           <div className="space-y-6">
-            {COLLEGE_YEAR_NAMES.map((yearName, index) => {
+            {COLLEGE_PROGRAM_YEAR_NAMES.map((yearName, index) => {
               const yearLevel = index + 1;
               const yearSubjects = subjectsByYear.get(yearLevel) ?? [];
 

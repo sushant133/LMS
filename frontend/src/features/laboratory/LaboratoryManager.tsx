@@ -439,6 +439,7 @@ export const LaboratoryManager = () => {
       unit: item.unit ?? "pcs",
       quantity: item.quantity,
       minimumStockLevel: item.minimumStockLevel ?? 0,
+      maximumStockLevel: item.maximumStockLevel ?? 0,
       purchaseDateBs: item.purchaseDateBs ?? "",
       supplier: item.supplier ?? "",
       purchaseCost: item.purchaseCost ?? 0,
@@ -459,7 +460,14 @@ export const LaboratoryManager = () => {
       categoryName: item.categoryName ?? "",
       currentStock: item.availableQuantity,
       minimumStock: item.minimumStockLevel ?? 0,
-      requiredQuantity: Math.max(1, item.requiredQuantity || item.minimumStockLevel || 1),
+      requiredQuantity: Math.max(
+        1,
+        item.requiredQuantity ||
+          (item.maximumStockLevel > 0
+            ? Math.max(0, item.maximumStockLevel - item.availableQuantity)
+            : item.minimumStockLevel) ||
+          1,
+      ),
       priority:
         item.status === "OUT_OF_STOCK" || item.status === "CRITICAL_STOCK" ? "HIGH" : "MEDIUM",
       remarks: "",
@@ -1124,24 +1132,44 @@ export const LaboratoryManager = () => {
                     />
                   </FormField>
                 </div>
-                <FormField label="Minimum stock level">
-                  <NumberInput
-                    min={0}
-                    value={
-                      Number.isFinite(equipmentForm.minimumStockLevel)
-                        ? (equipmentForm.minimumStockLevel ?? 0)
-                        : 0
-                    }
-                    onChange={(e) =>
-                      setEquipmentForm((c) => ({
-                        ...c,
-                        minimumStockLevel: Number.isFinite(e.target.valueAsNumber)
-                          ? e.target.valueAsNumber
-                          : 0,
-                      }))
-                    }
-                  />
-                </FormField>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField label="Minimum stock level">
+                    <NumberInput
+                      min={0}
+                      value={
+                        Number.isFinite(equipmentForm.minimumStockLevel)
+                          ? (equipmentForm.minimumStockLevel ?? 0)
+                          : 0
+                      }
+                      onChange={(e) =>
+                        setEquipmentForm((c) => ({
+                          ...c,
+                          minimumStockLevel: Number.isFinite(e.target.valueAsNumber)
+                            ? e.target.valueAsNumber
+                            : 0,
+                        }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Maximum stock level">
+                    <NumberInput
+                      min={0}
+                      value={
+                        Number.isFinite(equipmentForm.maximumStockLevel)
+                          ? (equipmentForm.maximumStockLevel ?? 0)
+                          : 0
+                      }
+                      onChange={(e) =>
+                        setEquipmentForm((c) => ({
+                          ...c,
+                          maximumStockLevel: Number.isFinite(e.target.valueAsNumber)
+                            ? e.target.valueAsNumber
+                            : 0,
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
                 <FormField label="Storage (rack / shelf)">
                   <Input
                     value={equipmentForm.storageLocation ?? ""}
@@ -1319,6 +1347,18 @@ export const LaboratoryManager = () => {
                             {selectedStockItem.issuedQuantity ?? 0}
                           </p>
                         </div>
+                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                            Min / Max
+                          </p>
+                          <p className="font-semibold text-slate-900">
+                            {selectedStockItem.minimumStockLevel ?? 0}
+                            {" / "}
+                            {(selectedStockItem.maximumStockLevel ?? 0) > 0
+                              ? selectedStockItem.maximumStockLevel
+                              : "—"}
+                          </p>
+                        </div>
                         <div className="flex items-center">
                           <StockStatusBadge status={selectedStockItem.status} />
                         </div>
@@ -1455,6 +1495,7 @@ export const LaboratoryManager = () => {
                             <Th className="text-right">Total</Th>
                             <Th className="text-right">Avail.</Th>
                             <Th className="text-right">Min</Th>
+                            <Th className="text-right">Max</Th>
                             <Th>Condition</Th>
                             <Th>Stock</Th>
                             <Th className="text-right">Actions</Th>
@@ -1502,6 +1543,11 @@ export const LaboratoryManager = () => {
                                 </Td>
                                 <Td className="text-right tabular-nums text-slate-600">
                                   {item.minimumStockLevel ?? 0}
+                                </Td>
+                                <Td className="text-right tabular-nums text-slate-600">
+                                  {(item.maximumStockLevel ?? 0) > 0
+                                    ? item.maximumStockLevel
+                                    : "—"}
                                 </Td>
                                 <Td className="text-sm">{item.condition ?? "—"}</Td>
                                 <Td>

@@ -262,7 +262,14 @@ export interface StudentRecord {
   sectionId?: string;
   batchId?: string;
   yearId?: string;
-  academicStatus?: "ACTIVE" | "PASSED_OUT" | "ALUMNI" | "WITHDRAWN" | "CANCELLED" | "SUSPENDED";
+  academicStatus?:
+    | "ACTIVE"
+    | "PENDING_NOT_PASSED"
+    | "PASSED_OUT"
+    | "ALUMNI"
+    | "WITHDRAWN"
+    | "CANCELLED"
+    | "SUSPENDED";
   admissionDateBs: string;
   dateOfBirthBs: string;
   gender: string;
@@ -736,6 +743,8 @@ export interface ExamRoutineRecord {
   _id: string;
   schoolId: string;
   examId: string;
+  /** College year this schedule row belongs to (1st / 2nd / 3rd). */
+  yearId?: string;
   subjectId: string;
   examDateBs: string;
   day: string;
@@ -745,6 +754,11 @@ export interface ExamRoutineRecord {
   examHall?: string;
   invigilator?: string;
   remarks?: string;
+  /** Enriched on list API */
+  subjectName?: string;
+  subjectCode?: string;
+  yearName?: string;
+  yearLevel?: number;
   createdAt?: string;
   updatedAt?: string;
 }

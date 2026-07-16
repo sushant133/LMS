@@ -147,7 +147,8 @@ const formatEquipment = (item: any) => {
       categoryId,
       quantity: Number(item.quantity ?? 0),
       availableQuantity: Number(item.availableQuantity ?? 0),
-      minimumStockLevel: Number(item.minimumStockLevel ?? 0)
+      minimumStockLevel: Number(item.minimumStockLevel ?? 0),
+      maximumStockLevel: Number(item.maximumStockLevel ?? 0)
     }),
     laboratoryName: lab && typeof lab === "object" ? lab.name : undefined,
     categoryName: category && typeof category === "object" ? category.name : undefined
@@ -655,6 +656,7 @@ export const createEquipment = asyncHandler(async (req: Request, res: Response) 
     quantity: payload.quantity,
     availableQuantity: payload.quantity,
     minimumStockLevel: payload.minimumStockLevel ?? 0,
+    maximumStockLevel: payload.maximumStockLevel ?? 0,
     purchaseDateBs: emptyToUndef(payload.purchaseDateBs),
     supplier: emptyToUndef(payload.supplier),
     purchaseCost: payload.purchaseCost,
@@ -746,6 +748,9 @@ export const updateEquipment = asyncHandler(async (req: Request, res: Response) 
   if (payload.unit !== undefined) equipment.unit = emptyToUndef(payload.unit) ?? "pcs";
   if (payload.minimumStockLevel !== undefined) {
     equipment.minimumStockLevel = payload.minimumStockLevel;
+  }
+  if (payload.maximumStockLevel !== undefined) {
+    equipment.maximumStockLevel = payload.maximumStockLevel;
   }
   if (payload.purchaseDateBs !== undefined) {
     equipment.set("purchaseDateBs", emptyToUndef(payload.purchaseDateBs));
@@ -1356,9 +1361,15 @@ export const getLaboratoryReports = asyncHandler(async (req: Request, res: Respo
           equipment: e.name,
           available: e.availableQuantity,
           minimum: e.minimumStockLevel,
+          maximum: e.maximumStockLevel,
           required: e.requiredQuantity,
           status: e.status,
-          priority: getStockPriority(e.availableQuantity, e.minimumStockLevel)
+          priority: getStockPriority(
+            e.availableQuantity,
+            e.minimumStockLevel,
+            e.maximumStockLevel,
+            e.quantity
+          )
         }));
       break;
     case "OUT_OF_STOCK":
@@ -1368,7 +1379,8 @@ export const getLaboratoryReports = asyncHandler(async (req: Request, res: Respo
           laboratory: e.laboratoryName,
           equipment: e.name,
           code: e.itemCode,
-          minimum: e.minimumStockLevel
+          minimum: e.minimumStockLevel,
+          maximum: e.maximumStockLevel
         }));
       break;
     case "DAMAGED":

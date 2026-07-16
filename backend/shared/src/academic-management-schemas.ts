@@ -16,6 +16,7 @@ const bsDateOptional = z
 
 export const academicSessionPlanUnitSchema = z.object({
   unitNo: z.coerce.number().int().min(1),
+  /** Unit heading only (e.g. "Unit 1 : Introduction to Human Anatomy"). Sub-units are not listed. */
   chapterName: z.string().min(1),
   estimatedTeachingHours: z.coerce.number().min(0).default(0),
   learningOutcomes: z.string().default(""),
@@ -30,9 +31,10 @@ export const academicSessionPlanUnitSchema = z.object({
   endDateBs: bsDateOptional,
   status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED", "DELAYED"]).default("PENDING"),
   attachmentUrl: z.string().optional(),
-  /** Optional link back to hierarchical syllabus chapter. */
+  /** Optional link back to hierarchical syllabus unit (import source). */
   syllabusId: z.string().optional().default(""),
-  syllabusChapterId: z.string().optional().default("")
+  syllabusChapterId: z.string().optional().default(""),
+  syllabusUnitId: z.string().optional().default("")
 });
 
 /** Syllabus unit box — same structure as session-plan units (legacy flat shape; still accepted). */
@@ -62,8 +64,8 @@ const syllabusReferencesSchema = z.object({
   freeText: z.string().default("")
 });
 
-/** Sub Unit (sub-topic) under a Unit. */
-export const academicSyllabusSubUnitSchema = z.object({
+/** Sub Unit fields shared by all nesting levels (unlimited child depth). */
+const academicSyllabusSubUnitBaseFields = {
   /** Client temp id or existing Mongo id (optional on create). */
   clientKey: z.string().optional(),
   subUnitNo: z.coerce.number().int().min(1).optional(),
@@ -90,9 +92,59 @@ export const academicSyllabusSubUnitSchema = z.object({
   teachingNotes: z.string().default(""),
   teacherAttachments: z.array(syllabusAttachmentSchema).default([]),
   todaysCoverage: z.string().default("")
-});
+};
 
-/** Unit (topic) under a Chapter. */
+/**
+ * Sub Unit (sub-topic) under a Unit — supports unlimited nesting via `children`.
+ * Numbering is auto-generated as 1.1, 1.1.1, 1.1.1.1, …
+ */
+export type AcademicSyllabusSubUnitInputShape = {
+  clientKey?: string;
+  subUnitNo?: number;
+  heading: string;
+  description?: string;
+  learningOutcomes?: string;
+  internalAssessment?: string;
+  practicalRequired?: boolean;
+  labName?: string;
+  requiredEquipment?: string;
+  hospitalPosting?: string;
+  clinicalHours?: number;
+  references?: {
+    textbooks: string;
+    journal: string;
+    whoGuidelines: string;
+    internetResources: string;
+    freeText: string;
+  };
+  teachingHours?: number;
+  attachments?: Array<{
+    url: string;
+    name: string;
+    mimeType?: string;
+    kind?: "FILE" | "IMAGE" | "PDF" | "VIDEO" | "LINK" | "WORD" | "EXCEL" | "POWERPOINT";
+  }>;
+  remarks?: string;
+  status?: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "SKIPPED" | "REVISION_REQUIRED";
+  teachingNotes?: string;
+  teacherAttachments?: Array<{
+    url: string;
+    name: string;
+    mimeType?: string;
+    kind?: "FILE" | "IMAGE" | "PDF" | "VIDEO" | "LINK" | "WORD" | "EXCEL" | "POWERPOINT";
+  }>;
+  todaysCoverage?: string;
+  children?: AcademicSyllabusSubUnitInputShape[];
+};
+
+export const academicSyllabusSubUnitSchema: z.ZodType<AcademicSyllabusSubUnitInputShape> = z.lazy(() =>
+  z.object({
+    ...academicSyllabusSubUnitBaseFields,
+    children: z.array(academicSyllabusSubUnitSchema).default([])
+  })
+);
+
+/** Unit (topic) under a Chapter (or subject when chapter is optional). */
 export const academicSyllabusTopicSchema = z.object({
   clientKey: z.string().optional(),
   unitNo: z.coerce.number().int().min(1).optional(),
@@ -102,14 +154,23 @@ export const academicSyllabusTopicSchema = z.object({
   learningObjective: z.string().default(""),
   references: z.string().default(""),
   remarks: z.string().default(""),
+  /** Unit-level practical flag (also tracked on sub-units when needed). */
+  practicalRequired: z.boolean().default(false),
   subUnits: z.array(academicSyllabusSubUnitSchema).default([])
 });
 
-/** Chapter under a Subject syllabus. */
+/**
+ * Optional grouping under a Subject syllabus.
+ * Choose at most one kind: Chapter OR Part (never both). Use NONE to skip grouping.
+ */
+export const syllabusSectionKindSchema = z.enum(["NONE", "CHAPTER", "PART"]);
+
 export const academicSyllabusChapterSchema = z.object({
   clientKey: z.string().optional(),
   chapterNo: z.coerce.number().int().min(1).optional(),
-  title: z.string().min(1),
+  /** NONE = ungrouped units; CHAPTER or PART = optional heading type (pick one). */
+  sectionKind: syllabusSectionKindSchema.default("NONE"),
+  title: z.string().default(""),
   description: z.string().default(""),
   estimatedHours: z.coerce.number().min(0).default(0),
   weightagePercent: z.coerce.number().min(0).max(100).default(0),
@@ -192,7 +253,7 @@ export const academicLessonPlanItemSchema = z.object({
   sessionPlanUnitId: z.string().min(1, "Select a unit from the Session Plan"),
   /** Optional sub-topic from the unit's topics list. */
   subUnitTitle: z.string().default(""),
-  /** Optional hierarchical syllabus links. */
+  /** Optional hierarchical syllabus links (Chapter → Unit → Sub Unit → Child…). */
   syllabusId: z.string().optional().default(""),
   syllabusChapterId: z.string().optional().default(""),
   syllabusUnitId: z.string().optional().default(""),
@@ -211,23 +272,47 @@ export const academicLessonPlanItemSchema = z.object({
   remarks: z.string().default("")
 });
 
-export const academicLessonPlanSchema = scopeSchema.extend({
-  /** Required: Lesson Plans must be created from a Session Plan (draft or approved). */
-  sessionPlanId: z.string().min(1, "A Session Plan is required"),
-  academicYearBs: z.string().min(1),
-  session: z.string().min(1),
-  faculty: z.string().optional(),
-  semesterBs: z.string().optional(),
-  subjectId: z.string().min(1),
-  teacherId: z.string().min(1),
-  /** @deprecated Prefer startDateBs/endDateBs — kept for older clients. */
-  month: z.string().default(""),
-  startDateBs: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date (BS) is required"),
-  endDateBs: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date (BS) is required"),
-  /** Optional free-text description for the plan period. */
-  monthlyDescription: z.string().default(""),
-  items: z.array(academicLessonPlanItemSchema).min(1)
-});
+const bsDateRequired = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD BS");
+
+/**
+ * One Lesson Plan = one teaching day.
+ * Prefer `teachingDateBs`; legacy clients may still send startDateBs/endDateBs
+ * (normalized to the same teaching date on the server).
+ */
+export const academicLessonPlanSchema = scopeSchema
+  .extend({
+    /** Required: Lesson Plans must be created from a Session Plan (draft or approved). */
+    sessionPlanId: z.string().min(1, "A Session Plan is required"),
+    academicYearBs: z.string().min(1),
+    session: z.string().min(1),
+    faculty: z.string().optional(),
+    semesterBs: z.string().optional(),
+    subjectId: z.string().min(1),
+    teacherId: z.string().min(1),
+    /** @deprecated Prefer teachingDateBs — kept for older clients. */
+    month: z.string().default(""),
+    /** Single teaching day (BS). Preferred over start/end range. */
+    teachingDateBs: bsDateRequired.or(z.literal("")).optional().default(""),
+    /** @deprecated Use teachingDateBs — kept for backward compatibility. */
+    startDateBs: bsDateRequired.or(z.literal("")).optional().default(""),
+    /** @deprecated Use teachingDateBs — kept for backward compatibility. */
+    endDateBs: bsDateRequired.or(z.literal("")).optional().default(""),
+    /** Optional free-text description for the plan period. */
+    monthlyDescription: z.string().default(""),
+    items: z.array(academicLessonPlanItemSchema).min(1)
+  })
+  .superRefine((data, ctx) => {
+    const teachingDate = (data.teachingDateBs || data.startDateBs || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(teachingDate)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Teaching date (BS) is required",
+        path: ["teachingDateBs"]
+      });
+    }
+  });
 
 export const academicLogBookEntrySchema = scopeSchema.extend({
   lessonPlanId: z.string().optional(),
@@ -250,8 +335,13 @@ export const academicLogBookEntrySchema = scopeSchema.extend({
   dateBs: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date (BS) is required"),
   unit: z.string().default(""),
   topicCovered: z.string().min(1),
+  /** What the teacher intended to achieve during that lesson. */
   objectives: z.string().default(""),
   teachingMethod: z.string().default(""),
+  /**
+   * @deprecated Replaced by `objectives` in the Log Book form.
+   * Kept for backward compatibility with existing records.
+   */
   teachingAids: z.string().default(""),
   theoryPractical: z.enum(["THEORY", "PRACTICAL", "BOTH"]).default("THEORY"),
   periodNumber: z.coerce.number().int().min(1),

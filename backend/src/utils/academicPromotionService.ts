@@ -178,11 +178,24 @@ const buildGroupsFromStudents = (params: {
       continue;
     }
 
-    const maxLevel = Math.max(...batchYears.keys());
+    // "Ended" is a placement year only — not part of the 1st→2nd→3rd promotion ladder
+    if (currentYear.name === "Ended") {
+      continue;
+    }
+
+    const programLevels = [...batchYears.entries()]
+      .filter(([, year]) => year.name !== "Ended")
+      .map(([level]) => level);
+    if (programLevels.length === 0) {
+      validationErrors.push(`Batch ${batch.name} has no program year configuration.`);
+      continue;
+    }
+
+    const maxLevel = Math.max(...programLevels);
     const isFinalYear = currentYear.level >= maxLevel;
     const nextYear = isFinalYear ? undefined : batchYears.get(currentYear.level + 1);
 
-    if (!isFinalYear && !nextYear) {
+    if (!isFinalYear && (!nextYear || nextYear.name === "Ended")) {
       validationErrors.push(
         `Batch ${batch.name}: no Year level ${currentYear.level + 1} configured for promotion from ${currentYear.name}.`
       );

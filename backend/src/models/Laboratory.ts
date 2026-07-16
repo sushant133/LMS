@@ -87,6 +87,8 @@ const laboratoryEquipmentSchema = new Schema(
     quantity: { type: Number, required: true, min: 0 },
     availableQuantity: { type: Number, required: true, min: 0 },
     minimumStockLevel: { type: Number, default: 0, min: 0 },
+    /** Full / target capacity (e.g. only 4 units can be stocked). 0 = not set. */
+    maximumStockLevel: { type: Number, default: 0, min: 0 },
     purchaseDateBs: { type: String, trim: true },
     supplier: { type: String, trim: true },
     purchaseCost: { type: Number, min: 0 },

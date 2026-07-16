@@ -225,6 +225,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                 <TableHead>
                   <tr>
                     <Th>Name</Th>
+                    <Th>Designation</Th>
                     <Th>Code</Th>
                     <Th>Teaching load</Th>
                     <Th>Migration</Th>
@@ -236,6 +237,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                   {teachers.map((teacher) => {
                     const status =
                       teacher.assignmentMigrationStatus ?? "PENDING";
+                    const designation =
+                      teacher.user?.designation?.trim() || "";
                     return (
                     <tr key={teacher._id}>
                       <Td>
@@ -247,6 +250,15 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                             {teacher.user.email}
                           </div>
                         </div>
+                      </Td>
+                      <Td>
+                        {designation ? (
+                          <Badge className="bg-brand-100 text-brand-900">
+                            {designation}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </Td>
                       <Td>{teacher.teacherCode}</Td>
                       <Td className="max-w-[14rem] text-xs text-slate-600">

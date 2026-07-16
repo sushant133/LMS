@@ -110,8 +110,14 @@ export const ExamManager = () => {
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
   const [examForm, setExamForm] = useState<ExamInput>(defaultExamValue);
-  const [examBatchId, setExamBatchId] = useState("");
-  const [examYearId, setExamYearId] = useState("");
+  /**
+   * College: selected year IDs (each year belongs to a batch).
+   * e.g. Third Term = 1st Year of Batch 2083 + 2nd Year of Batch 2082 + 3rd Year of Batch 2081.
+   */
+  const [examYearIds, setExamYearIds] = useState<string[]>([]);
+  /** Picker for adding one cohort at a time (Batch → Year → Add). */
+  const [scopeAddBatchId, setScopeAddBatchId] = useState("");
+  const [scopeAddYearId, setScopeAddYearId] = useState("");
   const [examClassId, setExamClassId] = useState("");
   const [editingExamId, setEditingExamId] = useState<string | null>(null);
   const [marksheetSelection, setMarksheetSelection] = useState<{
@@ -157,26 +163,23 @@ export const ExamManager = () => {
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () =>
-      unwrap<Array<{ _id: string; name: string; academicYearBs: string }>>(
-        api.get("/academics/batches"),
-      ),
+      unwrap<
+        Array<{
+          _id: string;
+          name: string;
+          academicYearBs: string;
+          isActive?: boolean;
+        }>
+      >(api.get("/academics/batches")),
     enabled: (isAdmin || isTeacher) && isCollege,
   });
   const yearsQuery = useQuery({
     queryKey: ["years"],
     queryFn: () =>
-      unwrap<Array<{ _id: string; name: string; batchId: string }>>(
-        api.get("/academics/years"),
-      ),
+      unwrap<
+        Array<{ _id: string; name: string; batchId: string; level?: number }>
+      >(api.get("/academics/years")),
     enabled: (isAdmin || isTeacher) && isCollege,
-  });
-  const examYearsQuery = useQuery({
-    queryKey: ["years", "exam-form", examBatchId],
-    queryFn: () =>
-      unwrap<Array<{ _id: string; name: string; batchId: string }>>(
-        api.get("/academics/years", { params: { batchId: examBatchId } }),
-      ),
-    enabled: isAdmin && isCollege && Boolean(examBatchId),
   });
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -325,8 +328,9 @@ export const ExamManager = () => {
     onSuccess: async () => {
       toast.success(editingExamId ? "Exam updated" : "Exam created");
       setExamForm(defaultExamValue);
-      setExamBatchId("");
-      setExamYearId("");
+      setExamYearIds([]);
+      setScopeAddBatchId("");
+      setScopeAddYearId("");
       setExamClassId("");
       setEditingExamId(null);
       await queryClient.invalidateQueries({ queryKey: ["exams"] });
@@ -582,10 +586,94 @@ export const ExamManager = () => {
     subjects.map((subject) => [subject._id, subject]),
   );
 
-  const examYearOptions = useMemo(
-    () => (examBatchId ? (examYearsQuery.data ?? []) : []),
-    [examBatchId, examYearsQuery.data],
-  );
+  const batchById = useMemo(() => {
+    const map = new Map<
+      string,
+      { _id: string; name: string; academicYearBs: string; isActive?: boolean }
+    >();
+    for (const batch of batchesQuery.data ?? []) {
+      map.set(batch._id, batch);
+    }
+    return map;
+  }, [batchesQuery.data]);
+
+  const activeBatchesSorted = useMemo(() => {
+    return [...(batchesQuery.data ?? [])]
+      .filter((batch) => batch.isActive !== false)
+      .sort((a, b) =>
+        (b.academicYearBs || b.name).localeCompare(a.academicYearBs || a.name),
+      );
+  }, [batchesQuery.data]);
+
+  const yearLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const year of yearsQuery.data ?? []) {
+      if ((year.name ?? "").toLowerCase() === "ended") continue;
+      const batchName = batchById.get(year.batchId)?.name ?? "Batch";
+      map.set(year._id, `${year.name} · ${batchName}`);
+    }
+    return map;
+  }, [batchById, yearsQuery.data]);
+
+  /** Program years for the batch currently chosen in the add-cohort picker. */
+  const scopeAddYearOptions = useMemo(() => {
+    if (!scopeAddBatchId) return [];
+    return (yearsQuery.data ?? [])
+      .filter(
+        (year) =>
+          year.batchId === scopeAddBatchId &&
+          (year.name ?? "").toLowerCase() !== "ended" &&
+          !examYearIds.includes(year._id),
+      )
+      .sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
+  }, [examYearIds, scopeAddBatchId, yearsQuery.data]);
+
+  /**
+   * Current cohorts: newest batch → 1st Year, next → 2nd Year, next → 3rd Year.
+   * Matches college reality (Batch 2083 = 1st, Batch 2082 = 2nd, Batch 2081 = 3rd).
+   */
+  const currentCohortYearIds = useMemo(() => {
+    const years = yearsQuery.data ?? [];
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const batch = activeBatchesSorted[index];
+      if (!batch) break;
+      const level = index + 1;
+      const year =
+        years.find(
+          (item) =>
+            item.batchId === batch._id &&
+            item.level === level &&
+            (item.name ?? "").toLowerCase() !== "ended",
+        ) ??
+        years.find(
+          (item) =>
+            item.batchId === batch._id &&
+            (item.name ?? "").toLowerCase().includes(`${level}`) &&
+            (item.name ?? "").toLowerCase() !== "ended",
+        );
+      if (year) ids.push(year._id);
+    }
+    return ids;
+  }, [activeBatchesSorted, yearsQuery.data]);
+
+  const currentCohortsSelected =
+    currentCohortYearIds.length > 0 &&
+    currentCohortYearIds.every((id) => examYearIds.includes(id)) &&
+    examYearIds.length === currentCohortYearIds.length;
+
+  const selectedCohortLabels = useMemo(() => {
+    return examYearIds
+      .map((id) => {
+        const year = (yearsQuery.data ?? []).find((item) => item._id === id);
+        return {
+          id,
+          label: yearLabelById.get(id) ?? id,
+          level: year?.level ?? 99,
+        };
+      })
+      .sort((a, b) => a.level - b.level);
+  }, [examYearIds, yearLabelById, yearsQuery.data]);
 
   const academicSessionOptions = useMemo(() => {
     const sessions = new Set<string>();
@@ -617,22 +705,36 @@ export const ExamManager = () => {
   const buildScopedExamForm = (
     current: ExamInput,
     scope: {
-      batchId?: string;
-      yearId?: string;
+      yearIds?: string[];
       classId?: string;
     },
   ): ExamInput => {
     if (isCollege) {
-      const batchId = scope.batchId ?? examBatchId;
-      const yearId = scope.yearId ?? examYearId;
-      const selectedBatch = (batchesQuery.data ?? []).find(
-        (batch) => batch._id === batchId,
+      const yearIds = scope.yearIds ?? examYearIds;
+      const selectedYears = (yearsQuery.data ?? []).filter((year) =>
+        yearIds.includes(year._id),
       );
+      const batchIds = [
+        ...new Set(
+          selectedYears
+            .map((year) => year.batchId)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      // Prefer current settings session; else newest selected batch session
+      const sessionFromBatches = batchIds
+        .map((id) => batchById.get(id)?.academicYearBs)
+        .filter(Boolean)
+        .sort((a, b) => (b as string).localeCompare(a as string));
+      const academicYearBs =
+        settingsQuery.data?.academicYearBs ||
+        sessionFromBatches[0] ||
+        current.academicYearBs;
       return {
         ...current,
-        academicYearBs: selectedBatch?.academicYearBs ?? current.academicYearBs,
-        batchIds: batchId ? [batchId] : [],
-        yearIds: yearId ? [yearId] : [],
+        academicYearBs,
+        batchIds,
+        yearIds: [...yearIds],
         classIds: [],
       };
     }
@@ -646,18 +748,46 @@ export const ExamManager = () => {
     };
   };
 
+  const applyExamYearSelection = (yearIds: string[]) => {
+    setExamYearIds(yearIds);
+    setExamForm((current) => buildScopedExamForm(current, { yearIds }));
+  };
+
+  const addScopeCohort = () => {
+    if (!scopeAddBatchId) {
+      toast.error("Select a batch first");
+      return;
+    }
+    if (!scopeAddYearId) {
+      toast.error("Select a year for that batch");
+      return;
+    }
+    if (examYearIds.includes(scopeAddYearId)) {
+      toast.error("That year cohort is already added");
+      return;
+    }
+    applyExamYearSelection([...examYearIds, scopeAddYearId]);
+    setScopeAddYearId("");
+  };
+
+  const removeScopeCohort = (yearId: string) => {
+    applyExamYearSelection(examYearIds.filter((id) => id !== yearId));
+  };
+
   const resetExamForm = () => {
     setExamForm(defaultExamValue);
-    setExamBatchId("");
-    setExamYearId("");
+    setExamYearIds([]);
+    setScopeAddBatchId("");
+    setScopeAddYearId("");
     setExamClassId("");
     setEditingExamId(null);
   };
 
   const loadExamForEdit = (exam: ExamRecord) => {
     setEditingExamId(exam._id);
-    setExamBatchId(exam.batchIds?.[0] ?? "");
-    setExamYearId(exam.yearIds?.[0] ?? "");
+    setExamYearIds(exam.yearIds ?? []);
+    setScopeAddBatchId("");
+    setScopeAddYearId("");
     setExamClassId(exam.classIds?.[0] ?? "");
     setExamForm({
       name: exam.name,
@@ -776,7 +906,11 @@ export const ExamManager = () => {
                     </CardTitle>
                     <p className="text-sm text-slate-500">
                       Use the live Nepali calendar for exam dates and assign the
-                      exam to a {isCollege ? "batch and year" : "class"}.
+                      exam to{" "}
+                      {isCollege
+                        ? "year cohorts (each year belongs to its intake batch — e.g. 1st Year · Batch 2083, 2nd Year · Batch 2082)"
+                        : "a class"}
+                      .
                     </p>
                   </CardHeader>
                   <CardContent>
@@ -785,9 +919,9 @@ export const ExamManager = () => {
                       onSubmit={(event) => {
                         event.preventDefault();
 
-                        if (isCollege && (!examBatchId || !examYearId)) {
+                        if (isCollege && examYearIds.length === 0) {
                           toast.error(
-                            `Select both ${labels.primary.toLowerCase()} and ${labels.secondary.toLowerCase()}`,
+                            "Select at least one year cohort (e.g. 1st Year · Batch 2083), or use Current 1st/2nd/3rd year cohorts",
                           );
                           return;
                         }
@@ -933,65 +1067,179 @@ export const ExamManager = () => {
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
                           {isCollege
-                            ? `Choose the ${labels.primary.toLowerCase()} first, then select the ${labels.secondary.toLowerCase()} for this exam session.`
+                            ? "Use current cohorts for Third Term, or add cohorts one by one: pick Batch → Year → Add (e.g. Batch 2083 + 1st Year, then Batch 2082 + 2nd Year)."
                             : "Choose which class this exam applies to."}
                         </p>
-                        <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <div className="mt-4 grid gap-4">
                           {isCollege ? (
-                            <>
-                              <FormField label={labels.primary}>
-                                <Select
-                                  value={examBatchId}
-                                  onChange={(event) => {
-                                    const batchId = event.target.value;
-                                    setExamBatchId(batchId);
-                                    setExamYearId("");
-                                    setExamForm((current) =>
-                                      buildScopedExamForm(current, {
-                                        batchId,
-                                        yearId: "",
-                                        classId: "",
-                                      }),
-                                    );
-                                  }}
-                                >
-                                  <option value="">
-                                    Select {labels.primary.toLowerCase()}
-                                  </option>
-                                  {(batchesQuery.data ?? []).map((batch) => (
-                                    <option key={batch._id} value={batch._id}>
-                                      {batch.name} ({batch.academicYearBs})
-                                    </option>
-                                  ))}
-                                </Select>
-                              </FormField>
-                              <FormField label={labels.secondary}>
-                                <Select
-                                  value={examYearId}
-                                  disabled={
-                                    !examBatchId || examYearsQuery.isLoading
-                                  }
-                                  onChange={(event) => {
-                                    const yearId = event.target.value;
-                                    setExamYearId(yearId);
-                                    setExamForm((current) =>
-                                      buildScopedExamForm(current, { yearId }),
-                                    );
-                                  }}
-                                >
-                                  <option value="">
-                                    {examBatchId
-                                      ? `Select ${labels.secondary.toLowerCase()}`
-                                      : `Select ${labels.primary.toLowerCase()} first`}
-                                  </option>
-                                  {examYearOptions.map((year) => (
-                                    <option key={year._id} value={year._id}>
-                                      {year.name}
-                                    </option>
-                                  ))}
-                                </Select>
-                              </FormField>
-                            </>
+                            <div className="space-y-4">
+                              {yearsQuery.isLoading ||
+                              batchesQuery.isLoading ? (
+                                <p className="text-sm text-slate-500">
+                                  Loading batches and years…
+                                </p>
+                              ) : activeBatchesSorted.length === 0 ? (
+                                <p className="text-sm text-slate-500">
+                                  No batches found. Create batches under
+                                  Academics first.
+                                </p>
+                              ) : (
+                                <>
+                                  {currentCohortYearIds.length > 0 ? (
+                                    <div className="rounded-xl border border-brand-100 bg-brand-50/40 p-3">
+                                      <label className="flex cursor-pointer items-start gap-2 text-sm font-medium text-slate-800">
+                                        <input
+                                          type="checkbox"
+                                          className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                                          checked={currentCohortsSelected}
+                                          onChange={(event) => {
+                                            applyExamYearSelection(
+                                              event.target.checked
+                                                ? [...currentCohortYearIds]
+                                                : [],
+                                            );
+                                            setScopeAddBatchId("");
+                                            setScopeAddYearId("");
+                                          }}
+                                        />
+                                        <span>
+                                          Current 1st / 2nd / 3rd year cohorts
+                                          <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                                            {currentCohortYearIds
+                                              .map(
+                                                (id) =>
+                                                  yearLabelById.get(id) ?? id,
+                                              )
+                                              .join(" · ")}
+                                          </span>
+                                        </span>
+                                      </label>
+                                    </div>
+                                  ) : null}
+
+                                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
+                                    <p className="text-sm font-medium text-slate-800">
+                                      Add another cohort
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-slate-500">
+                                      First select batch, then year, then Add.
+                                      Example: Batch 2083 → 1st Year.
+                                    </p>
+                                    <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                                      <FormField label={labels.primary}>
+                                        <Select
+                                          value={scopeAddBatchId}
+                                          onChange={(event) => {
+                                            setScopeAddBatchId(
+                                              event.target.value,
+                                            );
+                                            setScopeAddYearId("");
+                                          }}
+                                        >
+                                          <option value="">
+                                            Select{" "}
+                                            {labels.primary.toLowerCase()}
+                                          </option>
+                                          {activeBatchesSorted.map((batch) => (
+                                            <option
+                                              key={batch._id}
+                                              value={batch._id}
+                                            >
+                                              {batch.name} (
+                                              {batch.academicYearBs})
+                                            </option>
+                                          ))}
+                                        </Select>
+                                      </FormField>
+                                      <FormField label={labels.secondary}>
+                                        <Select
+                                          value={scopeAddYearId}
+                                          disabled={!scopeAddBatchId}
+                                          onChange={(event) =>
+                                            setScopeAddYearId(
+                                              event.target.value,
+                                            )
+                                          }
+                                        >
+                                          <option value="">
+                                            {scopeAddBatchId
+                                              ? `Select ${labels.secondary.toLowerCase()}`
+                                              : `Select ${labels.primary.toLowerCase()} first`}
+                                          </option>
+                                          {scopeAddYearOptions.map((year) => (
+                                            <option
+                                              key={year._id}
+                                              value={year._id}
+                                            >
+                                              {year.name}
+                                            </option>
+                                          ))}
+                                        </Select>
+                                      </FormField>
+                                      <div className="flex items-end">
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className="w-full md:w-auto"
+                                          disabled={
+                                            !scopeAddBatchId || !scopeAddYearId
+                                          }
+                                          onClick={addScopeCohort}
+                                        >
+                                          Add
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    {scopeAddBatchId &&
+                                    scopeAddYearOptions.length === 0 ? (
+                                      <p className="mt-2 text-xs text-amber-700">
+                                        No more years left to add for this
+                                        batch (already selected or none
+                                        configured).
+                                      </p>
+                                    ) : null}
+                                  </div>
+
+                                  {selectedCohortLabels.length > 0 ? (
+                                    <div>
+                                      <p className="mb-2 text-sm font-medium text-slate-800">
+                                        Selected cohorts (
+                                        {selectedCohortLabels.length})
+                                      </p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {selectedCohortLabels.map((cohort) => (
+                                          <Badge
+                                            key={cohort.id}
+                                            className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 text-slate-800"
+                                          >
+                                            {cohort.label}
+                                            <button
+                                              type="button"
+                                              className="ml-0.5 rounded text-slate-500 hover:text-red-600"
+                                              aria-label={`Remove ${cohort.label}`}
+                                              onClick={() =>
+                                                removeScopeCohort(cohort.id)
+                                              }
+                                            >
+                                              ×
+                                            </button>
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                      <p className="mt-2 text-xs text-slate-500">
+                                        A separate exam routine table will be
+                                        available for each cohort.
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-slate-500">
+                                      No cohorts selected yet. Use current
+                                      cohorts or add Batch + Year above.
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           ) : (
                             <FormField label="Class">
                               <Select
@@ -1065,6 +1313,25 @@ export const ExamManager = () => {
                               {exam.startDateBs} to {exam.endDateBs} ·{" "}
                               {exam.academicYearBs}
                             </p>
+                            {isCollege ? (
+                              <p className="mt-1 text-xs text-slate-500">
+                                {(yearsQuery.data ?? [])
+                                  .filter((y) =>
+                                    (exam.yearIds ?? []).includes(y._id),
+                                  )
+                                  .sort(
+                                    (a, b) =>
+                                      (a.level ?? 99) - (b.level ?? 99),
+                                  )
+                                  .map((y) => {
+                                    const batchName =
+                                      batchById.get(y.batchId)?.name ??
+                                      "Batch";
+                                    return `${y.name} · ${batchName}`;
+                                  })
+                                  .join(" · ") || "No year cohorts"}
+                              </p>
+                            ) : null}
                             <div className="mt-2 flex flex-wrap gap-2">
                               <Badge>
                                 {EXAM_STATUS_LABELS[exam.status] ?? exam.status}
@@ -1235,6 +1502,9 @@ export const ExamManager = () => {
                         <ExamRoutinePanel
                           exam={selectedExam}
                           subjects={subjectsQuery.data ?? []}
+                          years={yearsQuery.data ?? []}
+                          batches={batchesQuery.data ?? []}
+                          isCollege={isCollege}
                           isAdmin={canManage}
                           readOnly={!canManage}
                         />

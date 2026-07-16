@@ -25,8 +25,10 @@ import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
+import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
 import {
   dedupeYearsForSelect,
@@ -156,6 +158,7 @@ export const LessonPlanPanel = ({
     subjectId: filters.subjectId || "",
     teacherId: teacherId || filters.teacherId || "",
     month: "",
+    teachingDateBs: "",
     startDateBs: "",
     endDateBs: "",
     sessionPlanId: "",
@@ -170,6 +173,12 @@ export const LessonPlanPanel = ({
     }
     return filterSubjectsByClass(subjects, form.classId);
   }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
+
+  const selectedFormSubject = useMemo(
+    () => subjectOptions.find((s) => s._id === form.subjectId),
+    [subjectOptions, form.subjectId],
+  );
+  const formNepaliText = isNepaliSubject(selectedFormSubject);
 
   // Keep teacherId once teacher scope resolves
   useEffect(() => {
@@ -861,32 +870,18 @@ export const LessonPlanPanel = ({
                   </Select>
                 </FormField>
               ) : null}
-              <FormField label="Start date (BS)">
+              <FormField label="Teaching date (BS)">
                 <NepaliDateField
-                  value={form.startDateBs || ""}
+                  value={form.teachingDateBs || form.startDateBs || ""}
                   onChange={(value) =>
                     setForm((current) => ({
                       ...current,
+                      teachingDateBs: value,
                       startDateBs: value,
-                      endDateBs:
-                        current.endDateBs && current.endDateBs >= value
-                          ? current.endDateBs
-                          : value,
-                    }))
-                  }
-                  placeholder="Plan start"
-                />
-              </FormField>
-              <FormField label="End date (BS)">
-                <NepaliDateField
-                  value={form.endDateBs || ""}
-                  onChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
                       endDateBs: value,
                     }))
                   }
-                  placeholder="Plan end"
+                  placeholder="Teaching day"
                 />
               </FormField>
               <FormField label="Faculty (optional)">
@@ -901,6 +896,19 @@ export const LessonPlanPanel = ({
                   placeholder="Faculty / Program"
                 />
               </FormField>
+            </div>
+
+            {formNepaliText ? (
+              <NepaliSubjectBanner
+                subjectName={
+                  selectedFormSubject
+                    ? `${selectedFormSubject.name}${selectedFormSubject.code ? ` (${selectedFormSubject.code})` : ""}`
+                    : undefined
+                }
+              />
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
               <FormField label="Session Plan">
                 <Select
                   value={form.sessionPlanId}
@@ -917,26 +925,36 @@ export const LessonPlanPanel = ({
                       .filter(Boolean) as string[];
                     autoSelectedForPlanRef.current = event.target.value || "";
                     setSelectedUnitIds((plan?.units ?? []).map((u) => u._id));
-                    setForm((current) => ({
-                      ...current,
-                      sessionPlanId: event.target.value,
-                      academicYearBs:
-                        plan?.academicYearBs || current.academicYearBs,
-                      session: plan?.session || current.session,
-                      faculty: plan?.faculty || current.faculty,
-                      yearId: plan?.yearId || current.yearId,
-                      classId: plan?.classId || current.classId,
-                      batchId: plan?.batchId || current.batchId,
-                      subjectId: plan?.subjectId || current.subjectId,
-                      teacherId:
-                        plan?.teacherId || current.teacherId || teacherId || "",
-                      startDateBs: starts.length
-                        ? [...starts].sort()[0]!
-                        : current.startDateBs,
-                      endDateBs: ends.length
-                        ? [...ends].sort().at(-1)!
-                        : current.endDateBs,
-                    }));
+                    const fromUnits =
+                      starts.length ? [...starts].sort()[0]! : "";
+                    setForm((current) => {
+                      const defaultTeaching =
+                        fromUnits ||
+                        current.teachingDateBs ||
+                        current.startDateBs ||
+                        "";
+                      return {
+                        ...current,
+                        sessionPlanId: event.target.value,
+                        academicYearBs:
+                          plan?.academicYearBs || current.academicYearBs,
+                        session: plan?.session || current.session,
+                        faculty: plan?.faculty || current.faculty,
+                        yearId: plan?.yearId || current.yearId,
+                        classId: plan?.classId || current.classId,
+                        batchId: plan?.batchId || current.batchId,
+                        subjectId: plan?.subjectId || current.subjectId,
+                        teacherId:
+                          plan?.teacherId ||
+                          current.teacherId ||
+                          teacherId ||
+                          "",
+                        teachingDateBs:
+                          defaultTeaching || current.teachingDateBs,
+                        startDateBs: defaultTeaching || current.startDateBs,
+                        endDateBs: defaultTeaching || current.endDateBs,
+                      };
+                    });
                     if (plan?.units?.length) {
                       toast.success(
                         `Loaded ${plan.units.length} units from Session Plan`,
@@ -1145,8 +1163,8 @@ export const LessonPlanPanel = ({
                     <p className="text-sm font-medium text-slate-800">
                       Lesson details ({form.items.length} unit
                       {form.items.length === 1 ? "" : "s"})
-                      {form.startDateBs && form.endDateBs
-                        ? ` · ${form.startDateBs} → ${form.endDateBs}`
+                      {form.teachingDateBs || form.startDateBs
+                        ? ` · Teaching date ${form.teachingDateBs || form.startDateBs}`
                         : ""}
                     </p>
                     {form.items.map((item, index) => {
@@ -1185,7 +1203,7 @@ export const LessonPlanPanel = ({
                               className="bg-slate-50"
                             />
                           </FormField>
-                          <FormField label="Sub Unit (from Syllabus)">
+                          <FormField label="Sub Unit / Child (from Syllabus)">
                             {subUnits.length > 0 ? (
                               <Select
                                 value={item.subUnitTitle || ""}
@@ -1247,6 +1265,7 @@ export const LessonPlanPanel = ({
                             ) : (
                               <Input
                                 value={item.plannedTopic}
+                                nepali={formNepaliText}
                                 onChange={(event) =>
                                   updateItemField(
                                     index,
@@ -1254,13 +1273,16 @@ export const LessonPlanPanel = ({
                                     event.target.value,
                                   )
                                 }
-                                placeholder="Topic / sub-unit"
+                                placeholder={
+                                  formNepaliText ? "विषय / उप-एकाइ" : "Topic / sub-unit"
+                                }
                               />
                             )}
                           </FormField>
                           <FormField label="Planned topic">
                             <Input
                               value={item.plannedTopic}
+                              nepali={formNepaliText}
                               onChange={(event) =>
                                 updateItemField(
                                   index,
@@ -1268,7 +1290,11 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder="Topic for this period"
+                              placeholder={
+                                formNepaliText
+                                  ? "यस दिनको विषय"
+                                  : "Topic for this period"
+                              }
                             />
                           </FormField>
                           <FormField label="Estimated classes">
@@ -1287,6 +1313,7 @@ export const LessonPlanPanel = ({
                           <FormField label="Learning objectives">
                             <Textarea
                               value={item.learningObjectives}
+                              nepali={formNepaliText}
                               onChange={(event) =>
                                 updateItemField(
                                   index,
@@ -1294,12 +1321,17 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder="Objectives for this lesson block"
+                              placeholder={
+                                formNepaliText
+                                  ? "सिकाइ उद्देश्यहरू…"
+                                  : "Objectives for this lesson block"
+                              }
                             />
                           </FormField>
                           <FormField label="Description">
                             <Textarea
                               value={item.description}
+                              nepali={formNepaliText}
                               onChange={(event) =>
                                 updateItemField(
                                   index,
@@ -1307,12 +1339,17 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder="Lesson description / content outline"
+                              placeholder={
+                                formNepaliText
+                                  ? "पाठको विवरण…"
+                                  : "Lesson description / content outline"
+                              }
                             />
                           </FormField>
                           <FormField label="Teaching method">
                             <Input
                               value={item.teachingMethod}
+                              nepali={formNepaliText}
                               onChange={(event) =>
                                 updateItemField(
                                   index,
@@ -1320,12 +1357,17 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder="Lecture, demo, group work…"
+                              placeholder={
+                                formNepaliText
+                                  ? "प्रवचन, प्रदर्शन…"
+                                  : "Lecture, demo, group work…"
+                              }
                             />
                           </FormField>
                           <FormField label="Teaching aids">
                             <Input
                               value={item.teachingAids}
+                              nepali={formNepaliText}
                               onChange={(event) =>
                                 updateItemField(
                                   index,
@@ -1333,12 +1375,17 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder="PPT, charts, lab equipment…"
+                              placeholder={
+                                formNepaliText
+                                  ? "पावरपोइन्ट, चार्ट…"
+                                  : "PPT, charts, lab equipment…"
+                              }
                             />
                           </FormField>
                           <FormField label="Assessment method">
                             <Input
                               value={item.assessmentMethod}
+                              nepali={formNepaliText}
                               onChange={(event) =>
                                 updateItemField(
                                   index,
@@ -1401,12 +1448,10 @@ export const LessonPlanPanel = ({
                     );
                     return;
                   }
-                  if (!form.startDateBs || !form.endDateBs) {
-                    toast.error("Select plan start and end dates (BS)");
-                    return;
-                  }
-                  if (form.endDateBs < form.startDateBs) {
-                    toast.error("End date must be on or after start date");
+                  const teachingDate =
+                    form.teachingDateBs || form.startDateBs || "";
+                  if (!teachingDate) {
+                    toast.error("Select the teaching date (BS)");
                     return;
                   }
                   if (!resolvedTeacherId) {
@@ -1415,6 +1460,9 @@ export const LessonPlanPanel = ({
                   }
                   createMutation.mutate({
                     ...form,
+                    teachingDateBs: teachingDate,
+                    startDateBs: teachingDate,
+                    endDateBs: teachingDate,
                     teacherId: resolvedTeacherId,
                     session: form.session || form.academicYearBs,
                     month: form.month || "",
@@ -1424,8 +1472,7 @@ export const LessonPlanPanel = ({
                   !form.sessionPlanId ||
                   form.items.length === 0 ||
                   !form.subjectId ||
-                  !form.startDateBs ||
-                  !form.endDateBs ||
+                  !(form.teachingDateBs || form.startDateBs) ||
                   !(teacherId || form.teacherId) ||
                   createMutation.isPending
                 }

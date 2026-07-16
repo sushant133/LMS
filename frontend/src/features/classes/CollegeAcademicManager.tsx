@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  COLLEGE_PROGRAM_YEAR_NAMES,
   COLLEGE_YEAR_NAMES,
   batchSchema,
   type BatchInput,
@@ -424,7 +425,8 @@ export const CollegeAcademicManager = () => {
                 {yearsForSelectedBatch.length === 0 ? (
                   <p className="text-sm text-slate-500">
                     Years are auto-created with each batch (
-                    {COLLEGE_YEAR_NAMES.join(", ")}).
+                    {COLLEGE_YEAR_NAMES.join(", ")} — program years:{" "}
+                    {COLLEGE_PROGRAM_YEAR_NAMES.join(", ")}).
                   </p>
                 ) : null}
               </div>

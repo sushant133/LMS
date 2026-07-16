@@ -13,6 +13,7 @@ const topicSchema = new Schema(
     learningObjective: { type: String, default: "" },
     references: { type: String, default: "" },
     remarks: { type: String, default: "" },
+    practicalRequired: { type: Boolean, default: false },
     sortOrder: { type: Number, default: 0, min: 0 }
   },
   { timestamps: true }

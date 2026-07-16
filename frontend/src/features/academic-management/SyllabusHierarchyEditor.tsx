@@ -8,46 +8,267 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { FormField } from "components/shared/FormField";
-import { RichTextEditor } from "features/notices/RichTextEditor";
 import { cn } from "lib/utils";
 import { NEPALI_MONTHS } from "./academicManagementUtils";
 import {
   type ChapterDraft,
+  type SectionKind,
   type SubUnitDraft,
   type UnitDraft,
+  addChildAtPath,
+  addSiblingAfterPath,
+  appendTopLevelSub,
+  countSubUnits,
+  displayNoForPath,
   emptyChapter,
   emptySubUnit,
   emptyUnit,
+  formatSectionLabel,
   moveItem,
+  moveSubAtPath,
+  removeSubAtPath,
   renumberChapters,
+  updateSubAtPath,
 } from "./syllabusFormUtils";
 
 interface SyllabusHierarchyEditorProps {
   chapters: ChapterDraft[];
-  onChange: (chapters: ChapterDraft[]) => void;
+  onChange: (chapters: ChapterDraft[] | ((prev: ChapterDraft[]) => ChapterDraft[])) => void;
   readOnly?: boolean;
+  /** When true (e.g. editing existing syllabus), expand all sections and units. */
+  defaultExpandAll?: boolean;
+  /** Nepali subject: Devanagari font on titles/headings/descriptions. */
+  nepaliText?: boolean;
 }
+
+/**
+ * Recursive sub-unit editor — heading only, unlimited depth.
+ *
+ * Per row actions:
+ *  - Same level → next sibling (1.1.1 → 1.1.2 → 1.1.3)
+ *  - Nest → child under this row (1.1 → 1.1.1 → 1.1.1.1)
+ */
+const SubUnitNodeEditor = ({
+  sub,
+  path,
+  unitNo,
+  siblingCount,
+  onUpdateTree,
+  readOnly,
+  nepaliText = false,
+}: {
+  sub: SubUnitDraft;
+  path: number[];
+  unitNo: number;
+  siblingCount: number;
+  onUpdateTree: (
+    mutator: (subs: SubUnitDraft[]) => SubUnitDraft[],
+  ) => void;
+  readOnly?: boolean;
+  nepaliText?: boolean;
+}) => {
+  const displayNo = displayNoForPath(unitNo, path);
+  const children: SubUnitDraft[] = Array.isArray(sub.children)
+    ? (sub.children as SubUnitDraft[])
+    : [];
+  const index = path[path.length - 1] ?? 0;
+  const nextSiblingPreview = (() => {
+    // e.g. 1.1.1 → preview 1.1.2
+    const parts = displayNo.split(".");
+    const last = Number(parts[parts.length - 1] || 1);
+    parts[parts.length - 1] = String(last + 1);
+    return parts.join(".");
+  })();
+  const firstChildPreview = `${displayNo}.1`;
+
+  const patch = (p: Partial<SubUnitDraft>) => {
+    onUpdateTree((subs) => updateSubAtPath(subs, path, p));
+  };
+
+  return (
+    <div
+      className={cn(
+        "space-y-1.5",
+        path.length > 0 && "ml-0",
+        path.length > 1 && "ml-3 border-l-2 border-l-brand-100 pl-3",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
+        <span
+          className="shrink-0 rounded-md bg-brand-50 px-2 py-0.5 font-mono text-xs font-semibold text-brand-800"
+          title={`Auto number: ${displayNo}`}
+        >
+          {displayNo}
+        </span>
+        <Input
+          className="h-8 min-w-[10rem] flex-1 border-slate-200 bg-white px-2 text-sm"
+          value={sub.heading}
+          disabled={readOnly}
+          nepali={nepaliText}
+          onChange={(e) => patch({ heading: e.target.value })}
+          placeholder={
+            nepaliText
+              ? `${displayNo} को शीर्षक (नेपालीमा लेख्नुहोस्)`
+              : `Heading for ${displayNo}`
+          }
+          aria-label={`Heading ${displayNo}`}
+        />
+        {!readOnly ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0 border-sky-200 bg-sky-50 text-sky-900 hover:bg-sky-100"
+              title={`Add same level after this → ${nextSiblingPreview}`}
+              onClick={() => {
+                onUpdateTree((subs) =>
+                  addSiblingAfterPath(subs, path, emptySubUnit()),
+                );
+              }}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Same ({nextSiblingPreview})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0 border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100"
+              title={`Add nested child under this → ${firstChildPreview}`}
+              onClick={() => {
+                onUpdateTree((subs) =>
+                  addChildAtPath(subs, path, emptySubUnit()),
+                );
+              }}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Nest ({firstChildPreview})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0 text-rose-600 border-rose-200"
+              disabled={siblingCount <= 1 && path.length === 1}
+              title="Remove this heading"
+              onClick={() =>
+                onUpdateTree((subs) => removeSubAtPath(subs, path))
+              }
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2"
+              disabled={index === 0}
+              title="Move up (renumbers automatically)"
+              onClick={() =>
+                onUpdateTree((subs) => moveSubAtPath(subs, path, -1))
+              }
+            >
+              ↑
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2"
+              disabled={index >= siblingCount - 1}
+              title="Move down (renumbers automatically)"
+              onClick={() =>
+                onUpdateTree((subs) => moveSubAtPath(subs, path, 1))
+              }
+            >
+              ↓
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Nested children always visible so 1.1.1, 1.1.1.1, … can be edited */}
+      <div className="space-y-1.5">
+        {children.map((child, cIndex) => (
+          <SubUnitNodeEditor
+            key={child.clientKey}
+            sub={child}
+            path={[...path, cIndex]}
+            unitNo={unitNo}
+            siblingCount={children.length}
+            onUpdateTree={onUpdateTree}
+            readOnly={readOnly}
+            nepaliText={nepaliText}
+          />
+        ))}
+        {!readOnly ? (
+          <button
+            type="button"
+            className="ml-1 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50"
+            onClick={() => {
+              onUpdateTree((subs) =>
+                addChildAtPath(subs, path, emptySubUnit()),
+              );
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add under {displayNo} → {firstChildPreview}
+            {children.length > 0
+              ? ` / ${displayNo}.${children.length + 1}`
+              : ""}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+};
 
 export const SyllabusHierarchyEditor = ({
   chapters,
   onChange,
   readOnly = false,
+  defaultExpandAll = false,
+  nepaliText = false,
 }: SyllabusHierarchyEditorProps) => {
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(
     () => new Set(chapters.map((c) => c.clientKey)),
   );
-  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() => new Set());
-  const [expandedSubs, setExpandedSubs] = useState<Set<string>>(() => new Set());
+  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() =>
+    defaultExpandAll
+      ? new Set(chapters.flatMap((c) => c.units.map((u) => u.clientKey)))
+      : new Set(),
+  );
   const [dragChapterKey, setDragChapterKey] = useState<string | null>(null);
 
-  const setChapters = (next: ChapterDraft[]) => onChange(renumberChapters(next));
+  // When loading an existing syllabus for edit, expand everything once
+  useEffect(() => {
+    if (!defaultExpandAll) return;
+    setExpandedChapters(new Set(chapters.map((c) => c.clientKey)));
+    setExpandedUnits(
+      new Set(chapters.flatMap((c) => c.units.map((u) => u.clientKey))),
+    );
+    // only on mount / when editing key remounts editor
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultExpandAll]);
+
+  /** Always apply renumber + support functional updates (no lost nested adds). */
+  const setChapters = (
+    next: ChapterDraft[] | ((prev: ChapterDraft[]) => ChapterDraft[]),
+  ) => {
+    if (typeof next === "function") {
+      onChange((prev) => renumberChapters(next(prev)));
+    } else {
+      onChange(renumberChapters(next));
+    }
+  };
 
   const allExpanded = useMemo(() => {
     if (chapters.length === 0) return false;
@@ -57,30 +278,20 @@ export const SyllabusHierarchyEditor = ({
   const expandAll = () => {
     setExpandedChapters(new Set(chapters.map((c) => c.clientKey)));
     setExpandedUnits(
-      new Set(
-        chapters.flatMap((c) =>
-          (c.units as UnitDraft[]).map((u) => u.clientKey),
-        ),
-      ),
-    );
-    setExpandedSubs(
-      new Set(
-        chapters.flatMap((c) =>
-          (c.units as UnitDraft[]).flatMap((u) =>
-            (u.subUnits as SubUnitDraft[]).map((s) => s.clientKey),
-          ),
-        ),
-      ),
+      new Set(chapters.flatMap((c) => c.units.map((u) => u.clientKey))),
     );
   };
 
   const collapseAll = () => {
     setExpandedChapters(new Set());
     setExpandedUnits(new Set());
-    setExpandedSubs(new Set());
   };
 
-  const toggle = (set: Set<string>, key: string, setter: (s: Set<string>) => void) => {
+  const toggle = (
+    set: Set<string>,
+    key: string,
+    setter: (s: Set<string>) => void,
+  ) => {
     const next = new Set(set);
     if (next.has(key)) next.delete(key);
     else next.add(key);
@@ -88,16 +299,20 @@ export const SyllabusHierarchyEditor = ({
   };
 
   const updateChapter = (cIndex: number, patch: Partial<ChapterDraft>) => {
-    setChapters(
-      chapters.map((ch, i) => (i === cIndex ? { ...ch, ...patch } : ch)),
+    setChapters((prev) =>
+      prev.map((ch, i) => (i === cIndex ? { ...ch, ...patch } : ch)),
     );
   };
 
-  const updateUnit = (cIndex: number, uIndex: number, patch: Partial<UnitDraft>) => {
-    setChapters(
-      chapters.map((ch, i) => {
+  const updateUnit = (
+    cIndex: number,
+    uIndex: number,
+    patch: Partial<UnitDraft>,
+  ) => {
+    setChapters((prev) =>
+      prev.map((ch, i) => {
         if (i !== cIndex) return ch;
-        const units = (ch.units as UnitDraft[]).map((u, j) =>
+        const units = ch.units.map((u, j) =>
           j === uIndex ? { ...u, ...patch } : u,
         );
         return { ...ch, units };
@@ -105,23 +320,23 @@ export const SyllabusHierarchyEditor = ({
     );
   };
 
-  const updateSub = (
+  /** Mutate nested sub-unit tree for a unit without stale closures. */
+  const mutateUnitSubs = (
     cIndex: number,
     uIndex: number,
-    sIndex: number,
-    patch: Partial<SubUnitDraft>,
+    mutator: (subs: SubUnitDraft[]) => SubUnitDraft[],
   ) => {
-    setChapters(
-      chapters.map((ch, i) => {
+    setChapters((prev) =>
+      prev.map((ch, i) => {
         if (i !== cIndex) return ch;
-        const units = (ch.units as UnitDraft[]).map((u, j) => {
-          if (j !== uIndex) return u;
-          const subUnits = (u.subUnits as SubUnitDraft[]).map((s, k) =>
-            k === sIndex ? { ...s, ...patch } : s,
-          );
-          return { ...u, subUnits };
-        });
-        return { ...ch, units };
+        return {
+          ...ch,
+          units: ch.units.map((u, j) => {
+            if (j !== uIndex) return u;
+            const currentSubs = (u.subUnits ?? []) as SubUnitDraft[];
+            return { ...u, subUnits: mutator(currentSubs) };
+          }),
+        };
       }),
     );
   };
@@ -142,12 +357,17 @@ export const SyllabusHierarchyEditor = ({
             Syllabus hierarchy
           </p>
           <p className="text-xs text-slate-500">
-            Subject → Chapter → Unit (Topic) → Sub Unit (Sub Topic). Numbers update
-            automatically when reordered.
+            Subject → optional Chapter or Part (pick one) → Unit → Sub Unit.
+            Sub-units are heading-only (1.1, 1.1.1…).
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={allExpanded ? collapseAll : expandAll}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={allExpanded ? collapseAll : expandAll}
+          >
             {allExpanded ? (
               <>
                 <ChevronsDownUp className="mr-1.5 h-4 w-4" />
@@ -160,35 +380,56 @@ export const SyllabusHierarchyEditor = ({
               </>
             )}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setChapters([...chapters, emptyChapter(chapters.length + 1)])}
-          >
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add Chapter
-          </Button>
+          <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-1">
+            <span className="px-1.5 text-xs text-slate-500">Add</span>
+            <Select
+              className="h-8 w-[130px] border-0 bg-white text-sm shadow-sm"
+              defaultValue=""
+              value=""
+              onChange={(e) => {
+                const kind = e.target.value as SectionKind | "";
+                if (!kind) return;
+                setChapters([
+                  ...chapters,
+                  emptyChapter(chapters.length + 1, kind),
+                ]);
+                // reset select to placeholder
+                e.target.value = "";
+              }}
+            >
+              <option value="" disabled>
+                Section type…
+              </option>
+              <option value="NONE">Units only</option>
+              <option value="CHAPTER">Chapter</option>
+              <option value="PART">Part</option>
+            </Select>
+          </div>
         </div>
       </div>
 
       {chapters.map((chapter, cIndex) => {
         const chOpen = expandedChapters.has(chapter.clientKey);
-        const units = chapter.units as UnitDraft[];
+        const units = chapter.units;
+        const kind = ((chapter.sectionKind as SectionKind) || "NONE") as SectionKind;
+        const sectionNo = chapter.chapterNo || cIndex + 1;
 
         return (
           <div
             key={chapter.clientKey}
             className={cn(
               "rounded-2xl border border-slate-200 bg-white shadow-sm transition",
-              dragChapterKey === chapter.clientKey && "opacity-60 ring-2 ring-brand-300",
+              dragChapterKey === chapter.clientKey &&
+                "opacity-60 ring-2 ring-brand-300",
             )}
             draggable
             onDragStart={() => setDragChapterKey(chapter.clientKey)}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => {
               if (!dragChapterKey) return;
-              const from = chapters.findIndex((c) => c.clientKey === dragChapterKey);
+              const from = chapters.findIndex(
+                (c) => c.clientKey === dragChapterKey,
+              );
               if (from < 0) return;
               setChapters(moveItem(chapters, from, cIndex));
               setDragChapterKey(null);
@@ -199,8 +440,8 @@ export const SyllabusHierarchyEditor = ({
               <button
                 type="button"
                 className="cursor-grab text-slate-400 hover:text-slate-600"
-                title="Drag to reorder chapter"
-                aria-label="Drag chapter"
+                title="Drag to reorder section"
+                aria-label="Drag section"
               >
                 <GripVertical className="h-4 w-4" />
               </button>
@@ -208,7 +449,11 @@ export const SyllabusHierarchyEditor = ({
                 type="button"
                 className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"
                 onClick={() =>
-                  toggle(expandedChapters, chapter.clientKey, setExpandedChapters)
+                  toggle(
+                    expandedChapters,
+                    chapter.clientKey,
+                    setExpandedChapters,
+                  )
                 }
               >
                 {chOpen ? (
@@ -219,20 +464,17 @@ export const SyllabusHierarchyEditor = ({
               </button>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-slate-900">
-                  Chapter {chapter.chapterNo || cIndex + 1}
-                  {chapter.title ? (
-                    <span className="font-normal text-slate-600">
-                      {" "}
-                      · {chapter.title}
-                    </span>
-                  ) : null}
+                  {formatSectionLabel(kind, sectionNo, chapter.title)}
                 </p>
                 <p className="text-xs text-slate-500">
+                  {kind === "NONE"
+                    ? "No Chapter or Part (optional grouping skipped)"
+                    : kind === "CHAPTER"
+                      ? "Chapter grouping"
+                      : "Part grouping"}
+                  {" · "}
                   {units.length} unit{units.length === 1 ? "" : "s"} ·{" "}
-                  {units.reduce(
-                    (n, u) => n + ((u.subUnits as SubUnitDraft[])?.length ?? 0),
-                    0,
-                  )}{" "}
+                  {units.reduce((n, u) => n + countSubUnits(u.subUnits), 0)}{" "}
                   sub-unit(s)
                 </p>
               </div>
@@ -242,11 +484,12 @@ export const SyllabusHierarchyEditor = ({
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    const unitsList = chapter.units as UnitDraft[];
                     updateChapter(cIndex, {
-                      units: [...unitsList, emptyUnit(unitsList.length + 1)],
+                      units: [...units, emptyUnit(units.length + 1)],
                     });
-                    setExpandedChapters((s) => new Set(s).add(chapter.clientKey));
+                    setExpandedChapters(
+                      (s) => new Set(s).add(chapter.clientKey),
+                    );
                   }}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />
@@ -261,14 +504,20 @@ export const SyllabusHierarchyEditor = ({
                     const clone: ChapterDraft = {
                       ...structuredClone(chapter),
                       clientKey: emptyChapter().clientKey,
-                      title: `${chapter.title || "Chapter"} (copy)`,
-                      units: (chapter.units as UnitDraft[]).map((u) => ({
+                      title: chapter.title
+                        ? `${chapter.title} (copy)`
+                        : "",
+                      units: chapter.units.map((u) => ({
                         ...structuredClone(u),
                         clientKey: emptyUnit().clientKey,
-                        subUnits: (u.subUnits as SubUnitDraft[]).map((s) => ({
-                          ...structuredClone(s),
-                          clientKey: emptySubUnit().clientKey,
-                        })),
+                        subUnits: structuredClone(u.subUnits).map((s) => {
+                          const rekey = (node: SubUnitDraft): SubUnitDraft => ({
+                            ...node,
+                            clientKey: emptySubUnit().clientKey,
+                            children: (node.children ?? []).map(rekey),
+                          });
+                          return rekey(s);
+                        }),
                       })),
                     };
                     const next = [...chapters];
@@ -297,86 +546,125 @@ export const SyllabusHierarchyEditor = ({
             {chOpen ? (
               <div className="space-y-4 p-4">
                 <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label="Chapter title">
-                    <Input
-                      value={chapter.title}
-                      onChange={(e) => updateChapter(cIndex, { title: e.target.value })}
-                      placeholder="e.g. Fundamentals of Nursing"
-                    />
-                  </FormField>
-                  <FormField label="Estimated hours">
-                    <NumberInput
-                      min={0}
-                      value={chapter.estimatedHours ?? 0}
-                      onChange={(e) =>
-                        updateChapter(cIndex, {
-                          estimatedHours: e.target.valueAsNumber || 0,
-                        })
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Weightage %">
-                    <NumberInput
-                      min={0}
-                      max={100}
-                      value={chapter.weightagePercent ?? 0}
-                      onChange={(e) =>
-                        updateChapter(cIndex, {
-                          weightagePercent: e.target.valueAsNumber || 0,
-                        })
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Expected completion month">
+                  <FormField label="Section type (optional — Chapter or Part, not both)">
                     <Select
-                      value={chapter.tentativeCompletionMonth || ""}
-                      onChange={(e) =>
+                      value={kind}
+                      onChange={(e) => {
+                        const nextKind = e.target.value as SectionKind;
                         updateChapter(cIndex, {
-                          tentativeCompletionMonth: e.target.value,
-                        })
-                      }
+                          sectionKind: nextKind,
+                          title: nextKind === "NONE" ? "" : chapter.title,
+                        });
+                      }}
                     >
-                      <option value="">Optional</option>
-                      {NEPALI_MONTHS.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
+                      <option value="NONE">None — units only</option>
+                      <option value="CHAPTER">Chapter</option>
+                      <option value="PART">Part</option>
                     </Select>
                   </FormField>
-                  <div className="md:col-span-2">
-                    <FormField label="Chapter description">
-                      <Textarea
-                        value={chapter.description || ""}
+                  {kind !== "NONE" ? (
+                    <FormField
+                      label={
+                        kind === "CHAPTER" ? "Chapter title" : "Part title"
+                      }
+                    >
+                      <Input
+                        value={chapter.title}
+                        nepali={nepaliText}
                         onChange={(e) =>
-                          updateChapter(cIndex, { description: e.target.value })
+                          updateChapter(cIndex, { title: e.target.value })
                         }
-                        placeholder="Brief chapter overview"
+                        placeholder={
+                          nepaliText
+                            ? kind === "CHAPTER"
+                              ? "अध्यायको शीर्षक"
+                              : "भागको शीर्षक"
+                            : kind === "CHAPTER"
+                              ? "e.g. Human Body"
+                              : "e.g. Fundamentals"
+                        }
                       />
                     </FormField>
-                  </div>
-                  <FormField label="References">
-                    <Textarea
-                      value={chapter.references || ""}
-                      onChange={(e) =>
-                        updateChapter(cIndex, { references: e.target.value })
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Remarks">
-                    <Textarea
-                      value={chapter.remarks || ""}
-                      onChange={(e) =>
-                        updateChapter(cIndex, { remarks: e.target.value })
-                      }
-                    />
-                  </FormField>
+                  ) : (
+                    <div className="flex items-end">
+                      <p className="pb-2 text-xs text-slate-500">
+                        No Chapter or Part selected. Add units directly under
+                        this section.
+                      </p>
+                    </div>
+                  )}
+                  {kind !== "NONE" ? (
+                    <>
+                      <FormField label="Estimated hours">
+                        <NumberInput
+                          min={0}
+                          value={chapter.estimatedHours ?? 0}
+                          onChange={(e) =>
+                            updateChapter(cIndex, {
+                              estimatedHours: e.target.valueAsNumber || 0,
+                            })
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Weightage %">
+                        <NumberInput
+                          min={0}
+                          max={100}
+                          value={chapter.weightagePercent ?? 0}
+                          onChange={(e) =>
+                            updateChapter(cIndex, {
+                              weightagePercent: e.target.valueAsNumber || 0,
+                            })
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Expected completion month">
+                        <Select
+                          value={chapter.tentativeCompletionMonth || ""}
+                          onChange={(e) =>
+                            updateChapter(cIndex, {
+                              tentativeCompletionMonth: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="">Optional</option>
+                          {NEPALI_MONTHS.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormField>
+                      <div className="md:col-span-2">
+                        <FormField
+                          label={
+                            kind === "CHAPTER"
+                              ? "Chapter description (optional)"
+                              : "Part description (optional)"
+                          }
+                        >
+                          <Textarea
+                            value={chapter.description || ""}
+                            nepali={nepaliText}
+                            onChange={(e) =>
+                              updateChapter(cIndex, {
+                                description: e.target.value,
+                              })
+                            }
+                            placeholder={
+                              nepaliText ? "संक्षिप्त विवरण" : "Brief overview"
+                            }
+                          />
+                        </FormField>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
 
                 <div className="space-y-3">
                   {units.map((unit, uIndex) => {
                     const uOpen = expandedUnits.has(unit.clientKey);
-                    const subUnits = unit.subUnits as SubUnitDraft[];
+                    const subUnits = unit.subUnits;
 
                     return (
                       <div
@@ -388,7 +676,11 @@ export const SyllabusHierarchyEditor = ({
                             type="button"
                             className="rounded p-1 text-slate-500 hover:bg-white"
                             onClick={() =>
-                              toggle(expandedUnits, unit.clientKey, setExpandedUnits)
+                              toggle(
+                                expandedUnits,
+                                unit.clientKey,
+                                setExpandedUnits,
+                              )
                             }
                           >
                             {uOpen ? (
@@ -418,7 +710,9 @@ export const SyllabusHierarchyEditor = ({
                                   emptySubUnit(subUnits.length + 1),
                                 ],
                               });
-                              setExpandedUnits((s) => new Set(s).add(unit.clientKey));
+                              setExpandedUnits(
+                                (s) => new Set(s).add(unit.clientKey),
+                              );
                             }}
                           >
                             <Plus className="mr-1 h-3.5 w-3.5" />
@@ -431,14 +725,18 @@ export const SyllabusHierarchyEditor = ({
                             className="h-8"
                             title="Duplicate unit"
                             onClick={() => {
+                              const rekey = (
+                                node: SubUnitDraft,
+                              ): SubUnitDraft => ({
+                                ...structuredClone(node),
+                                clientKey: emptySubUnit().clientKey,
+                                children: (node.children ?? []).map(rekey),
+                              });
                               const clone: UnitDraft = {
                                 ...structuredClone(unit),
                                 clientKey: emptyUnit().clientKey,
                                 title: `${unit.title || "Unit"} (copy)`,
-                                subUnits: subUnits.map((s) => ({
-                                  ...structuredClone(s),
-                                  clientKey: emptySubUnit().clientKey,
-                                })),
+                                subUnits: subUnits.map(rekey),
                               };
                               const next = [...units];
                               next.splice(uIndex + 1, 0, clone);
@@ -497,15 +795,27 @@ export const SyllabusHierarchyEditor = ({
                         {uOpen ? (
                           <div className="space-y-3 border-t border-slate-200 p-3">
                             <div className="grid gap-3 md:grid-cols-2">
+                              <FormField label="Unit number">
+                                <Input
+                                  value={String(unit.unitNo || uIndex + 1)}
+                                  disabled
+                                  className="bg-slate-100"
+                                />
+                              </FormField>
                               <FormField label="Unit title">
                                 <Input
                                   value={unit.title}
+                                  nepali={nepaliText}
                                   onChange={(e) =>
                                     updateUnit(cIndex, uIndex, {
                                       title: e.target.value,
                                     })
                                   }
-                                  placeholder="Topic title"
+                                  placeholder={
+                                    nepaliText
+                                      ? "एकाइको शीर्षक (नेपालीमा)"
+                                      : "e.g. Introduction to Human Anatomy"
+                                  }
                                 />
                               </FormField>
                               <FormField label="Teaching hours">
@@ -514,344 +824,126 @@ export const SyllabusHierarchyEditor = ({
                                   value={unit.teachingHours ?? 0}
                                   onChange={(e) =>
                                     updateUnit(cIndex, uIndex, {
-                                      teachingHours: e.target.valueAsNumber || 0,
+                                      teachingHours:
+                                        e.target.valueAsNumber || 0,
                                     })
                                   }
                                 />
                               </FormField>
+                              <label className="flex items-center gap-2 self-end pb-2 text-sm text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded border-slate-300"
+                                  checked={Boolean(unit.practicalRequired)}
+                                  onChange={(e) =>
+                                    updateUnit(cIndex, uIndex, {
+                                      practicalRequired: e.target.checked,
+                                    })
+                                  }
+                                />
+                                Practical required
+                              </label>
                               <div className="md:col-span-2">
-                                <FormField label="Description">
+                                <FormField label="Description (optional)">
                                   <Textarea
                                     value={unit.description || ""}
+                                    nepali={nepaliText}
                                     onChange={(e) =>
                                       updateUnit(cIndex, uIndex, {
                                         description: e.target.value,
                                       })
                                     }
+                                    placeholder={
+                                      nepaliText ? "विवरण" : undefined
+                                    }
                                   />
                                 </FormField>
                               </div>
-                              <FormField label="Learning objective">
+                              <FormField label="Learning outcomes">
                                 <Textarea
                                   value={unit.learningObjective || ""}
+                                  nepali={nepaliText}
                                   onChange={(e) =>
                                     updateUnit(cIndex, uIndex, {
                                       learningObjective: e.target.value,
                                     })
+                                  }
+                                  placeholder={
+                                    nepaliText
+                                      ? "सिकाइ उपलब्धिहरू…"
+                                      : "Students will be able to…"
                                   }
                                 />
                               </FormField>
                               <FormField label="References">
                                 <Textarea
                                   value={unit.references || ""}
+                                  nepali={nepaliText}
                                   onChange={(e) =>
                                     updateUnit(cIndex, uIndex, {
                                       references: e.target.value,
                                     })
                                   }
+                                  placeholder={
+                                    nepaliText ? "सन्दर्भ सामग्री" : undefined
+                                  }
                                 />
                               </FormField>
                             </div>
 
-                            <div className="space-y-2">
-                              {subUnits.map((sub, sIndex) => {
-                                const sOpen = expandedSubs.has(sub.clientKey);
-                                const displayNo = `${unit.unitNo || uIndex + 1}.${sub.subUnitNo || sIndex + 1}`;
-
-                                return (
-                                  <div
-                                    key={sub.clientKey}
-                                    className="rounded-lg border border-slate-200 bg-white"
-                                  >
-                                    <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                                      <button
-                                        type="button"
-                                        className="rounded p-1 text-slate-500 hover:bg-slate-50"
-                                        onClick={() =>
-                                          toggle(
-                                            expandedSubs,
-                                            sub.clientKey,
-                                            setExpandedSubs,
-                                          )
-                                        }
-                                      >
-                                        {sOpen ? (
-                                          <ChevronDown className="h-4 w-4" />
-                                        ) : (
-                                          <ChevronRight className="h-4 w-4" />
-                                        )}
-                                      </button>
-                                      <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-800">
-                                        {displayNo}
-                                      </span>
-                                      <p className="min-w-0 flex-1 truncate text-sm text-slate-800">
-                                        {sub.heading || "Untitled sub unit"}
-                                      </p>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-8 text-rose-600 border-rose-200"
-                                        disabled={subUnits.length <= 1}
-                                        onClick={() => {
-                                          if (subUnits.length <= 1) return;
-                                          updateUnit(cIndex, uIndex, {
-                                            subUnits: subUnits.filter(
-                                              (_, i) => i !== sIndex,
-                                            ),
-                                          });
-                                        }}
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-8 px-2"
-                                        disabled={sIndex === 0}
-                                        onClick={() =>
-                                          updateUnit(cIndex, uIndex, {
-                                            subUnits: moveItem(
-                                              subUnits,
-                                              sIndex,
-                                              sIndex - 1,
-                                            ),
-                                          })
-                                        }
-                                      >
-                                        ↑
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-8 px-2"
-                                        disabled={sIndex >= subUnits.length - 1}
-                                        onClick={() =>
-                                          updateUnit(cIndex, uIndex, {
-                                            subUnits: moveItem(
-                                              subUnits,
-                                              sIndex,
-                                              sIndex + 1,
-                                            ),
-                                          })
-                                        }
-                                      >
-                                        ↓
-                                      </Button>
-                                    </div>
-
-                                    {sOpen ? (
-                                      <div className="space-y-3 border-t border-slate-100 p-3">
-                                        <FormField label="Heading">
-                                          <Input
-                                            value={sub.heading}
-                                            onChange={(e) =>
-                                              updateSub(cIndex, uIndex, sIndex, {
-                                                heading: e.target.value,
-                                              })
-                                            }
-                                            placeholder="e.g. Measuring Blood Pressure"
-                                          />
-                                        </FormField>
-                                        <FormField label="Description (rich text)">
-                                          <RichTextEditor
-                                            value={sub.description || ""}
-                                            onChange={(html) =>
-                                              updateSub(cIndex, uIndex, sIndex, {
-                                                description: html,
-                                              })
-                                            }
-                                            placeholder="Detailed sub-topic content…"
-                                          />
-                                        </FormField>
-                                        <FormField label="Learning outcomes">
-                                          <Textarea
-                                            value={sub.learningOutcomes || ""}
-                                            onChange={(e) =>
-                                              updateSub(cIndex, uIndex, sIndex, {
-                                                learningOutcomes: e.target.value,
-                                              })
-                                            }
-                                            placeholder={"Students will be able to\n• Measure Pulse\n• Measure Temperature"}
-                                          />
-                                        </FormField>
-                                        <div className="grid gap-3 md:grid-cols-2">
-                                          <FormField label="Internal assessment (optional)">
-                                            <Input
-                                              value={sub.internalAssessment || ""}
-                                              onChange={(e) =>
-                                                updateSub(cIndex, uIndex, sIndex, {
-                                                  internalAssessment: e.target.value,
-                                                })
-                                              }
-                                            />
-                                          </FormField>
-                                          <FormField label="Estimated teaching hours">
-                                            <NumberInput
-                                              min={0}
-                                              value={sub.teachingHours ?? 0}
-                                              onChange={(e) =>
-                                                updateSub(cIndex, uIndex, sIndex, {
-                                                  teachingHours:
-                                                    e.target.valueAsNumber || 0,
-                                                })
-                                              }
-                                            />
-                                          </FormField>
-                                        </div>
-                                        <label className="flex items-center gap-2 text-sm text-slate-700">
-                                          <input
-                                            type="checkbox"
-                                            className="h-4 w-4 rounded border-slate-300"
-                                            checked={Boolean(sub.practicalRequired)}
-                                            onChange={(e) =>
-                                              updateSub(cIndex, uIndex, sIndex, {
-                                                practicalRequired: e.target.checked,
-                                              })
-                                            }
-                                          />
-                                          Practical required
-                                        </label>
-                                        {sub.practicalRequired ? (
-                                          <div className="grid gap-3 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 md:grid-cols-2">
-                                            <FormField label="Lab name">
-                                              <Input
-                                                value={sub.labName || ""}
-                                                onChange={(e) =>
-                                                  updateSub(cIndex, uIndex, sIndex, {
-                                                    labName: e.target.value,
-                                                  })
-                                                }
-                                              />
-                                            </FormField>
-                                            <FormField label="Required equipment">
-                                              <Input
-                                                value={sub.requiredEquipment || ""}
-                                                onChange={(e) =>
-                                                  updateSub(cIndex, uIndex, sIndex, {
-                                                    requiredEquipment: e.target.value,
-                                                  })
-                                                }
-                                              />
-                                            </FormField>
-                                            <FormField label="Hospital posting">
-                                              <Input
-                                                value={sub.hospitalPosting || ""}
-                                                onChange={(e) =>
-                                                  updateSub(cIndex, uIndex, sIndex, {
-                                                    hospitalPosting: e.target.value,
-                                                  })
-                                                }
-                                              />
-                                            </FormField>
-                                            <FormField label="Clinical hours">
-                                              <NumberInput
-                                                min={0}
-                                                value={sub.clinicalHours ?? 0}
-                                                onChange={(e) =>
-                                                  updateSub(cIndex, uIndex, sIndex, {
-                                                    clinicalHours:
-                                                      e.target.valueAsNumber || 0,
-                                                  })
-                                                }
-                                              />
-                                            </FormField>
-                                          </div>
-                                        ) : null}
-                                        <div className="grid gap-3 md:grid-cols-2">
-                                          <FormField label="Textbooks">
-                                            <Textarea
-                                              value={sub.references?.textbooks || ""}
-                                              onChange={(e) =>
-                                                updateSub(cIndex, uIndex, sIndex, {
-                                                  references: {
-                                                    ...sub.references!,
-                                                    textbooks: e.target.value,
-                                                  },
-                                                })
-                                              }
-                                            />
-                                          </FormField>
-                                          <FormField label="Journal">
-                                            <Textarea
-                                              value={sub.references?.journal || ""}
-                                              onChange={(e) =>
-                                                updateSub(cIndex, uIndex, sIndex, {
-                                                  references: {
-                                                    ...sub.references!,
-                                                    journal: e.target.value,
-                                                  },
-                                                })
-                                              }
-                                            />
-                                          </FormField>
-                                          <FormField label="WHO Guidelines">
-                                            <Textarea
-                                              value={
-                                                sub.references?.whoGuidelines || ""
-                                              }
-                                              onChange={(e) =>
-                                                updateSub(cIndex, uIndex, sIndex, {
-                                                  references: {
-                                                    ...sub.references!,
-                                                    whoGuidelines: e.target.value,
-                                                  },
-                                                })
-                                              }
-                                            />
-                                          </FormField>
-                                          <FormField label="Internet resources">
-                                            <Textarea
-                                              value={
-                                                sub.references?.internetResources ||
-                                                ""
-                                              }
-                                              onChange={(e) =>
-                                                updateSub(cIndex, uIndex, sIndex, {
-                                                  references: {
-                                                    ...sub.references!,
-                                                    internetResources: e.target.value,
-                                                  },
-                                                })
-                                              }
-                                            />
-                                          </FormField>
-                                        </div>
-                                        <FormField label="Attachment URL (PDF/Word/Excel/PPT/Image/Video)">
-                                          <Input
-                                            value={sub.attachments?.[0]?.url || ""}
-                                            onChange={(e) =>
-                                              updateSub(cIndex, uIndex, sIndex, {
-                                                attachments: e.target.value
-                                                  ? [
-                                                      {
-                                                        url: e.target.value,
-                                                        name: "Attachment",
-                                                      },
-                                                    ]
-                                                  : [],
-                                              })
-                                            }
-                                            placeholder="https://… or /uploads/…"
-                                          />
-                                        </FormField>
-                                        <FormField label="Remarks">
-                                          <Textarea
-                                            value={sub.remarks || ""}
-                                            onChange={(e) =>
-                                              updateSub(cIndex, uIndex, sIndex, {
-                                                remarks: e.target.value,
-                                              })
-                                            }
-                                          />
-                                        </FormField>
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                );
-                              })}
+                            <div className="space-y-2 rounded-xl border border-dashed border-slate-200 bg-white/70 p-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                                    Sub units &amp; nested children (heading
+                                    only)
+                                  </p>
+                                  <p className="text-[11px] text-slate-500">
+                                    Use{" "}
+                                    <span className="font-medium text-sky-800">
+                                      Same
+                                    </span>{" "}
+                                    for 1.1 → 1.2 or 1.1.1 → 1.1.2. Use{" "}
+                                    <span className="font-medium text-violet-800">
+                                      Nest
+                                    </span>{" "}
+                                    for 1.1 → 1.1.1 → 1.1.1.1. Numbers auto-fill.
+                                  </p>
+                                </div>
+                                <span className="text-xs text-slate-500">
+                                  {countSubUnits(subUnits)} heading
+                                  {countSubUnits(subUnits) === 1 ? "" : "s"}
+                                </span>
+                              </div>
+                              {subUnits.map((sub, sIndex) => (
+                                <SubUnitNodeEditor
+                                  key={sub.clientKey}
+                                  sub={sub}
+                                  path={[sIndex]}
+                                  unitNo={unit.unitNo || uIndex + 1}
+                                  siblingCount={subUnits.length}
+                                  nepaliText={nepaliText}
+                                  onUpdateTree={(mutator) =>
+                                    mutateUnitSubs(cIndex, uIndex, mutator)
+                                  }
+                                />
+                              ))}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="mt-1"
+                                onClick={() =>
+                                  mutateUnitSubs(cIndex, uIndex, (subs) =>
+                                    appendTopLevelSub(subs),
+                                  )
+                                }
+                              >
+                                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                                Add sub unit{" "}
+                                {unit.unitNo || uIndex + 1}.
+                                {subUnits.length + 1}
+                              </Button>
                             </div>
                           </div>
                         ) : null}

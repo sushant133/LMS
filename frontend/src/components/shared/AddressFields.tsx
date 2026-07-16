@@ -81,13 +81,22 @@ export const AddressFields = ({
         </Select>
       </FormField>
 
-      <FormField label={t("municipality")}>
+      <FormField label={`${t("municipality")} / Rural Municipality`}>
         <Select
           key={`municipality-${value.province}-${value.district}`}
           value={effectiveValue.municipality}
           onChange={(event) => onChange({ ...value, municipality: event.target.value, ward: "" })}
+          disabled={!effectiveValue.district}
         >
-          <option value="">Select municipality</option>
+          <option value="">
+            {!value.province
+              ? "Select province first"
+              : !effectiveValue.district
+                ? "Select district first"
+                : municipalities.length === 0
+                  ? "No local levels found"
+                  : `Select local level (${municipalities.length})`}
+          </option>
           {municipalities.map((municipality) => (
             <option key={municipality.en} value={municipality.en}>
               {municipality.en}

@@ -125,6 +125,7 @@ export const defaultEquipmentForm: LaboratoryEquipmentInput = {
   unit: "pcs",
   quantity: 1,
   minimumStockLevel: 0,
+  maximumStockLevel: 0,
   purchaseDateBs: "",
   supplier: "",
   purchaseCost: 0,

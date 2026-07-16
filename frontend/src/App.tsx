@@ -295,8 +295,24 @@ export default function App() {
 
 
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "STUDENT",
+                    "PRINCIPAL",
+                  ]}
+                />
+              }
+            >
               <Route path="/timetable" element={<TimetablePage />} />
+            </Route>
+
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
               <Route path="/academic-management" element={<LazyRoute><AcademicManagementPage /></LazyRoute>} />
             </Route>
 

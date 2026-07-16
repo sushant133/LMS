@@ -13,7 +13,6 @@ import {
   isTimetableAssignmentLinkRequired
 } from "../utils/subjectAssignmentService.js";
 import {
-  assertTeacherQueryScope,
   assertTeacherSubjectAcademicScope,
   getTeacherScope,
   requireTeacherScope
@@ -31,27 +30,35 @@ export const listTimetable = asyncHandler(async (req: Request, res: Response) =>
   if (typeof req.query.batchId === "string") filter.batchId = req.query.batchId;
   if (typeof req.query.yearId === "string") filter.yearId = req.query.yearId;
   if (typeof req.query.academicYearBs === "string") filter.academicYearBs = req.query.academicYearBs;
+  // Optional: only this teacher's periods (default for teachers is full group schedule)
+  if (req.query.mineOnly === "true" || req.query.mineOnly === "1") {
+    const teacherScope = await getTeacherScope(req);
+    if (teacherScope) filter.teacherId = teacherScope.teacherId;
+  }
 
   const teacherScope = await getTeacherScope(req);
   if (teacherScope) {
-    filter.teacherId = teacherScope.teacherId;
-    assertTeacherQueryScope(teacherScope, {
-      classId: typeof req.query.classId === "string" ? req.query.classId : undefined,
-      sectionId: typeof req.query.sectionId === "string" ? req.query.sectionId : undefined,
-      batchId: typeof req.query.batchId === "string" ? req.query.batchId : undefined,
-      yearId: typeof req.query.yearId === "string" ? req.query.yearId : undefined,
-      isCollege: college
-    });
+    /**
+     * Teachers may view full weekly schedules for all years (every teacher's slots),
+     * not only periods they teach — so they can see complete 1st/2nd/3rd year tables.
+     * Optional query filters (batchId/yearId) still apply when provided.
+     */
+    // No teacherId restriction unless mineOnly is set above
   }
 
   const studentProfile = await getStudentProfile(req);
   if (studentProfile) {
+    // Students only see their own class/section or batch/year timetable
     Object.assign(filter, buildStudentAcademicFilter(studentProfile, institutionType));
   }
 
   const slots = await TimetableSlot.find(filter)
     .populate("subjectId", "name code")
-    .populate("teacherId")
+    .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
+    .populate("yearId", "name level")
+    .populate("batchId", "name")
+    .populate("classId", "name")
+    .populate("sectionId", "name")
     .sort({ dayOfWeek: 1, periodNumber: 1 });
 
   return sendSuccess(res, "Timetable fetched", slots);

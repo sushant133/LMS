@@ -7,7 +7,7 @@ import {
   type SubjectRecord,
   canManageInstitution,
 } from "@phit-erp/shared";
-import { Download, Plus, Send, Trash2 } from "lucide-react";
+import { BookOpen, Download, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
@@ -22,8 +22,10 @@ import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
+import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
 import {
   dedupeYearsForSelect,
@@ -88,6 +90,7 @@ const emptyUnit = (unitNo = 1) => ({
   status: "PENDING" as const,
   syllabusId: "",
   syllabusChapterId: "",
+  syllabusUnitId: "",
 });
 
 const blankSessionForm = (
@@ -135,6 +138,8 @@ export const SessionPlanPanel = ({
   const [form, setForm] = useState<AcademicSessionPlanInput>(() =>
     blankSessionForm(filters, teacherId),
   );
+  /** Which syllabus to pull unit names from (linked to selected subject). */
+  const [selectedSyllabusId, setSelectedSyllabusId] = useState("");
 
   // Keep teacherId on the form once teacher scope resolves (async)
   useEffect(() => {
@@ -199,6 +204,7 @@ export const SessionPlanPanel = ({
               attachmentUrl: unit.attachmentUrl,
               syllabusId: unit.syllabusId || "",
               syllabusChapterId: unit.syllabusChapterId || "",
+              syllabusUnitId: unit.syllabusUnitId || "",
             }))
           : [emptyUnit()],
     });
@@ -212,6 +218,12 @@ export const SessionPlanPanel = ({
     }
     return filterSubjectsByClass(subjects, form.classId);
   }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
+
+  const selectedFormSubject = useMemo(
+    () => subjectOptions.find((s) => s._id === form.subjectId),
+    [subjectOptions, form.subjectId],
+  );
+  const formNepaliText = isNepaliSubject(selectedFormSubject);
 
   /** Matching official syllabi for year + subject — used to pre-fill units. */
   const syllabiQuery = useQuery({
@@ -236,61 +248,149 @@ export const SessionPlanPanel = ({
     enabled: showForm && Boolean(form.subjectId),
   });
 
-  const matchedSyllabus = useMemo(() => {
+  const availableSyllabi = useMemo(() => {
     const list = syllabiQuery.data ?? [];
-    if (list.length === 0) return null;
-    // Prefer approved, then any for this subject
-    return (
-      list.find((s) => s.status === "APPROVED") ||
-      list.find((s) => s.status !== "REJECTED") ||
-      list[0] ||
-      null
-    );
+    // Prefer usable syllabi; hide rejected unless nothing else
+    const usable = list.filter((s) => s.status !== "REJECTED");
+    return usable.length > 0 ? usable : list;
   }, [syllabiQuery.data]);
 
-  const importFromSyllabus = (syllabus: AcademicSyllabusRecord, replace = true) => {
+  const matchedSyllabus = useMemo(() => {
+    if (availableSyllabi.length === 0) return null;
+    if (selectedSyllabusId) {
+      const picked = availableSyllabi.find((s) => s._id === selectedSyllabusId);
+      if (picked) return picked;
+    }
+    return (
+      availableSyllabi.find((s) => s.status === "APPROVED") ||
+      availableSyllabi.find((s) => s.status !== "REJECTED") ||
+      availableSyllabi[0] ||
+      null
+    );
+  }, [availableSyllabi, selectedSyllabusId]);
+
+  /** Unit name options from the linked syllabus (for dropdowns). */
+  const syllabusUnitOptions = useMemo(() => {
+    if (!matchedSyllabus) return [] as Array<{
+      key: string;
+      unitNo: number;
+      heading: string;
+      syllabusId: string;
+      syllabusChapterId: string;
+      syllabusUnitId: string;
+      learningOutcomes: string;
+      teachingHours: number;
+      practicalRequired: boolean;
+      references: string;
+      topicsCovered: string;
+    }>;
+    const imported = mapSyllabusHierarchyToSessionUnits(matchedSyllabus);
+    return imported.map((u, index) => ({
+      key: u.syllabusUnitId || `${u.syllabusChapterId}-${index}`,
+      unitNo: u.unitNo || index + 1,
+      heading: u.chapterName,
+      syllabusId: u.syllabusId || matchedSyllabus._id,
+      syllabusChapterId: u.syllabusChapterId || "",
+      syllabusUnitId: u.syllabusUnitId || "",
+      learningOutcomes: u.learningOutcomes || "",
+      teachingHours: u.estimatedTeachingHours ?? 0,
+      practicalRequired: Boolean(u.practicalRequired),
+      references: u.references || "",
+      topicsCovered: u.topicsCovered || "",
+    }));
+  }, [matchedSyllabus]);
+
+  // Keep selected syllabus in sync when subject / list changes
+  useEffect(() => {
+    if (!showForm) return;
+    if (!availableSyllabi.length) {
+      setSelectedSyllabusId("");
+      return;
+    }
+    if (
+      selectedSyllabusId &&
+      availableSyllabi.some((s) => s._id === selectedSyllabusId)
+    ) {
+      return;
+    }
+    const preferred =
+      availableSyllabi.find((s) => s.status === "APPROVED") ||
+      availableSyllabi[0];
+    setSelectedSyllabusId(preferred?._id || "");
+  }, [availableSyllabi, showForm, form.subjectId, selectedSyllabusId]);
+
+  const importFromSyllabus = (
+    syllabus: AcademicSyllabusRecord,
+    replace = true,
+  ) => {
     const hasHierarchy = Boolean(syllabus.chapters?.length);
     const hasLegacy = Boolean(syllabus.units?.length);
     if (!hasHierarchy && !hasLegacy) {
-      toast.message("Selected syllabus has no chapters/units to import");
+      toast.message("Selected syllabus has no units to import");
       return;
     }
     const imported = mapSyllabusHierarchyToSessionUnits(syllabus);
     if (imported.length === 0) {
-      toast.message("Selected syllabus has no chapters/units to import");
+      toast.message("Selected syllabus has no unit headings to import");
       return;
     }
-    setForm((current) => ({
-      ...current,
-      subjectId: syllabus.subjectId || current.subjectId,
-      yearId: syllabus.yearId || current.yearId,
-      classId: syllabus.classId || current.classId,
-      batchId: syllabus.batchId || current.batchId,
-      faculty: syllabus.faculty || current.faculty,
-      academicYearBs: syllabus.academicYearBs || current.academicYearBs,
-      session: syllabus.session || current.session,
-      semesterBs: syllabus.semesterBs || current.semesterBs,
-      units: replace
-        ? imported
-        : [
-            ...current.units.filter((u) => u.chapterName.trim()),
-            ...imported.map((u, i) => ({
-              ...u,
-              unitNo: current.units.length + i + 1,
-            })),
-          ],
-    }));
+    if (replace) {
+      setForm((current) => ({
+        ...current,
+        subjectId: syllabus.subjectId || current.subjectId,
+        yearId: syllabus.yearId || current.yearId,
+        classId: syllabus.classId || current.classId,
+        batchId: syllabus.batchId || current.batchId,
+        faculty: syllabus.faculty || current.faculty,
+        academicYearBs: syllabus.academicYearBs || current.academicYearBs,
+        session: syllabus.session || current.session,
+        semesterBs: syllabus.semesterBs || current.semesterBs,
+        units: imported,
+      }));
+      toast.success(
+        `Loaded ${imported.length} unit name${imported.length === 1 ? "" : "s"} from syllabus`,
+      );
+      return;
+    }
+
+    // Append only units not already present (by syllabusUnitId or heading)
+    const existingKeys = new Set(
+      form.units.flatMap((u) =>
+        [u.syllabusUnitId, u.chapterName.trim().toLowerCase()].filter(
+          Boolean,
+        ) as string[],
+      ),
+    );
+    const toAdd = imported.filter((u) => {
+      const byId = u.syllabusUnitId && existingKeys.has(u.syllabusUnitId);
+      const byName = existingKeys.has(u.chapterName.trim().toLowerCase());
+      return !byId && !byName;
+    });
+    if (toAdd.length === 0) {
+      toast.message("All syllabus unit names are already in this plan");
+      return;
+    }
+    setForm((current) => {
+      const base = current.units.filter((u) => u.chapterName.trim());
+      return {
+        ...current,
+        units: [
+          ...base,
+          ...toAdd.map((u, i) => ({
+            ...u,
+            unitNo: base.length + i + 1,
+          })),
+        ],
+      };
+    });
     toast.success(
-      hasHierarchy
-        ? `Imported ${imported.length} chapter${imported.length === 1 ? "" : "s"} from hierarchical syllabus (topics = sub-units)`
-        : `Imported ${imported.length} unit${imported.length === 1 ? "" : "s"} from syllabus`,
+      `Added ${toAdd.length} unit name${toAdd.length === 1 ? "" : "s"} from syllabus`,
     );
   };
 
-  // Auto-import hierarchical syllabus when creating a new plan and subject is chosen
+  // Auto-import unit names when creating a new plan and subject is chosen
   useEffect(() => {
     if (!showForm || editingId || !matchedSyllabus) return;
-    // Only auto-fill when units are still the blank default
     const onlyBlank =
       form.units.length === 1 &&
       !form.units[0]?.chapterName?.trim() &&
@@ -340,7 +440,7 @@ export const SessionPlanPanel = ({
         (unit) => !unit.chapterName.trim() || !Number.isFinite(unit.unitNo),
       )
     ) {
-      toast.error("Each unit needs a unit number and chapter title");
+      toast.error("Each row needs a unit number and unit heading");
       return;
     }
     const payload: AcademicSessionPlanInput = {
@@ -912,6 +1012,191 @@ export const SessionPlanPanel = ({
                 />
               </FormField>
             </div>
+
+            {formNepaliText ? (
+              <NepaliSubjectBanner
+                subjectName={
+                  selectedFormSubject
+                    ? `${selectedFormSubject.name}${selectedFormSubject.code ? ` (${selectedFormSubject.code})` : ""}`
+                    : undefined
+                }
+              />
+            ) : null}
+
+            {/* Load unit names directly from linked Syllabus */}
+            <div className="rounded-2xl border border-brand-200 bg-brand-50/40 p-4 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  <BookOpen className="mt-0.5 h-5 w-5 shrink-0 text-brand-700" />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Unit names from Syllabus
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Session Plan is linked to the subject syllabus. Load unit
+                      headings only (sub-units stay in Lesson Plan).
+                    </p>
+                  </div>
+                </div>
+                {matchedSyllabus ? (
+                  <Badge className={statusBadgeClass(matchedSyllabus.status)}>
+                    {matchedSyllabus.status.replace(/_/g, " ")}
+                  </Badge>
+                ) : null}
+              </div>
+
+              {!form.subjectId ? (
+                <p className="text-sm text-amber-800">
+                  Select a subject first to load its syllabus unit names.
+                </p>
+              ) : syllabiQuery.isLoading ? (
+                <p className="text-sm text-slate-600">Loading syllabus…</p>
+              ) : availableSyllabi.length === 0 ? (
+                <p className="text-sm text-amber-800">
+                  No syllabus found for this subject. Create a Syllabus first,
+                  then return here to import unit names.
+                </p>
+              ) : (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <FormField label="Syllabus for this subject">
+                      <Select
+                        value={selectedSyllabusId || matchedSyllabus?._id || ""}
+                        onChange={(event) =>
+                          setSelectedSyllabusId(event.target.value)
+                        }
+                      >
+                        {availableSyllabi.map((s) => (
+                          <option key={s._id} value={s._id}>
+                            {s.subject?.name || "Subject"} · {s.academicYearBs}
+                            {s.status === "APPROVED" ? " (Approved)" : ` (${s.status})`}
+                            {" · "}
+                            {s.totalTopics ??
+                              s.chapters?.reduce(
+                                (n, c) => n + c.units.length,
+                                0,
+                              ) ??
+                              s.units?.length ??
+                              0}{" "}
+                            units
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (!matchedSyllabus) {
+                            toast.error("Select a syllabus first");
+                            return;
+                          }
+                          importFromSyllabus(matchedSyllabus, true);
+                        }}
+                        disabled={!matchedSyllabus || syllabusUnitOptions.length === 0}
+                      >
+                        <RefreshCw className="mr-1.5 h-4 w-4" />
+                        Load all unit names
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          if (!matchedSyllabus) {
+                            toast.error("Select a syllabus first");
+                            return;
+                          }
+                          importFromSyllabus(matchedSyllabus, false);
+                        }}
+                        disabled={!matchedSyllabus || syllabusUnitOptions.length === 0}
+                      >
+                        <Plus className="mr-1.5 h-4 w-4" />
+                        Add missing only
+                      </Button>
+                    </div>
+                  </div>
+                  {syllabusUnitOptions.length > 0 ? (
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Available unit names ({syllabusUnitOptions.length})
+                      </p>
+                      <ul className="max-h-36 space-y-1 overflow-y-auto text-sm text-slate-700">
+                        {syllabusUnitOptions.map((opt) => (
+                          <li
+                            key={opt.key}
+                            className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                          >
+                            <span className="min-w-0 truncate">
+                              <span className="mr-2 font-mono text-xs font-semibold text-brand-700">
+                                {opt.unitNo}.
+                              </span>
+                              {opt.heading}
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 shrink-0 text-xs"
+                              title="Add this unit name to the plan"
+                              onClick={() => {
+                                setForm((current) => {
+                                  const already = current.units.some(
+                                    (u) =>
+                                      (opt.syllabusUnitId &&
+                                        u.syllabusUnitId ===
+                                          opt.syllabusUnitId) ||
+                                      u.chapterName.trim().toLowerCase() ===
+                                        opt.heading.trim().toLowerCase(),
+                                  );
+                                  if (already) {
+                                    toast.message(
+                                      "This unit name is already in the plan",
+                                    );
+                                    return current;
+                                  }
+                                  const base = current.units.filter((u) =>
+                                    u.chapterName.trim(),
+                                  );
+                                  return {
+                                    ...current,
+                                    units: [
+                                      ...base,
+                                      {
+                                        ...emptyUnit(base.length + 1),
+                                        unitNo: base.length + 1,
+                                        chapterName: opt.heading,
+                                        estimatedTeachingHours:
+                                          opt.teachingHours,
+                                        learningOutcomes: opt.learningOutcomes,
+                                        topicsCovered: opt.topicsCovered,
+                                        references: opt.references,
+                                        practicalRequired: opt.practicalRequired,
+                                        syllabusId: opt.syllabusId,
+                                        syllabusChapterId:
+                                          opt.syllabusChapterId,
+                                        syllabusUnitId: opt.syllabusUnitId,
+                                      },
+                                    ],
+                                  };
+                                });
+                              }}
+                            >
+                              + Add
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-amber-800">
+                      This syllabus has no unit headings yet. Open Syllabus and
+                      add Units first.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
             {form.units.map((unit, index) => (
               <div
                 key={index}
@@ -920,6 +1205,11 @@ export const SessionPlanPanel = ({
                 <div className="md:col-span-2 flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-800">
                     Unit {unit.unitNo || index + 1}
+                    {unit.syllabusUnitId ? (
+                      <span className="ml-2 text-xs font-normal text-emerald-700">
+                        · linked from syllabus
+                      </span>
+                    ) : null}
                   </p>
                   <Button
                     type="button"
@@ -968,25 +1258,170 @@ export const SessionPlanPanel = ({
                     }
                   />
                 </FormField>
-                <FormField label="Unit / chapter title">
-                  <Input
-                    value={unit.chapterName}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, chapterName: event.target.value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="Chapter / unit title"
-                  />
+                <FormField label="Unit heading (from Syllabus)">
+                  {syllabusUnitOptions.length > 0 ? (
+                    <Select
+                      value={
+                        unit.syllabusUnitId &&
+                        syllabusUnitOptions.some(
+                          (o) => o.syllabusUnitId === unit.syllabusUnitId,
+                        )
+                          ? unit.syllabusUnitId
+                          : syllabusUnitOptions.find(
+                              (o) =>
+                                o.heading.trim().toLowerCase() ===
+                                unit.chapterName.trim().toLowerCase(),
+                            )?.syllabusUnitId ||
+                            (unit.chapterName ? "__custom__" : "")
+                      }
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (value === "__custom__") {
+                          setForm((current) => ({
+                            ...current,
+                            units: current.units.map((row, rowIndex) =>
+                              rowIndex === index
+                                ? {
+                                    ...row,
+                                    syllabusUnitId: "",
+                                    syllabusChapterId: "",
+                                    syllabusId: "",
+                                  }
+                                : row,
+                            ),
+                          }));
+                          return;
+                        }
+                        if (!value) {
+                          setForm((current) => ({
+                            ...current,
+                            units: current.units.map((row, rowIndex) =>
+                              rowIndex === index
+                                ? {
+                                    ...row,
+                                    chapterName: "",
+                                    syllabusUnitId: "",
+                                    syllabusChapterId: "",
+                                    syllabusId: "",
+                                  }
+                                : row,
+                            ),
+                          }));
+                          return;
+                        }
+                        const opt = syllabusUnitOptions.find(
+                          (o) => o.syllabusUnitId === value || o.key === value,
+                        );
+                        if (!opt) return;
+                        setForm((current) => ({
+                          ...current,
+                          units: current.units.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? {
+                                  ...row,
+                                  chapterName: opt.heading,
+                                  unitNo: row.unitNo || opt.unitNo,
+                                  estimatedTeachingHours:
+                                    opt.teachingHours ||
+                                    row.estimatedTeachingHours,
+                                  learningOutcomes:
+                                    opt.learningOutcomes ||
+                                    row.learningOutcomes,
+                                  topicsCovered:
+                                    opt.topicsCovered || row.topicsCovered,
+                                  references:
+                                    opt.references || row.references,
+                                  practicalRequired: opt.practicalRequired,
+                                  syllabusId: opt.syllabusId,
+                                  syllabusChapterId: opt.syllabusChapterId,
+                                  syllabusUnitId: opt.syllabusUnitId,
+                                }
+                              : row,
+                          ),
+                        }));
+                      }}
+                    >
+                      <option value="">Select unit from syllabus…</option>
+                      {syllabusUnitOptions.map((opt) => (
+                        <option
+                          key={opt.key}
+                          value={opt.syllabusUnitId || opt.key}
+                        >
+                          {opt.heading}
+                        </option>
+                      ))}
+                      {unit.chapterName &&
+                      !syllabusUnitOptions.some(
+                        (o) =>
+                          o.syllabusUnitId === unit.syllabusUnitId ||
+                          o.heading.trim().toLowerCase() ===
+                            unit.chapterName.trim().toLowerCase(),
+                      ) ? (
+                        <option value="__custom__">
+                          Custom: {unit.chapterName}
+                        </option>
+                      ) : (
+                        <option value="__custom__">Custom (type below)</option>
+                      )}
+                    </Select>
+                  ) : (
+                    <Input
+                      value={unit.chapterName}
+                      nepali={formNepaliText}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          units: current.units.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? { ...row, chapterName: event.target.value }
+                              : row,
+                          ),
+                        }))
+                      }
+                      placeholder={
+                        formNepaliText
+                          ? "एकाइ १ : शीर्षक (नेपालीमा)"
+                          : "Unit 1 : Introduction to Human Anatomy"
+                      }
+                    />
+                  )}
+                  {syllabusUnitOptions.length > 0 &&
+                  (!unit.syllabusUnitId ||
+                    unit.chapterName === "" ||
+                    !syllabusUnitOptions.some(
+                      (o) => o.syllabusUnitId === unit.syllabusUnitId,
+                    )) ? (
+                    <Input
+                      className="mt-2"
+                      value={unit.chapterName}
+                      nepali={formNepaliText}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          units: current.units.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? {
+                                  ...row,
+                                  chapterName: event.target.value,
+                                  syllabusUnitId: "",
+                                  syllabusChapterId: row.syllabusChapterId,
+                                }
+                              : row,
+                          ),
+                        }))
+                      }
+                      placeholder={
+                        formNepaliText
+                          ? "वा अनुकूल शीर्षक लेख्नुहोस्"
+                          : "Or type a custom unit heading"
+                      }
+                    />
+                  ) : null}
                 </FormField>
-                <FormField label="Topics / subtopics">
+                <FormField label="Sub-unit topics (from syllabus, optional)">
                   <Textarea
                     value={unit.topicsCovered}
+                    nepali={formNepaliText}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -997,7 +1432,7 @@ export const SessionPlanPanel = ({
                         ),
                       }))
                     }
-                    placeholder="List topics covered in this unit"
+                    placeholder="Auto-filled from syllabus for Lesson Plan selection — not shown as Session Plan rows"
                   />
                 </FormField>
                 <FormField label="Estimated teaching hours">
@@ -1023,6 +1458,7 @@ export const SessionPlanPanel = ({
                 <FormField label="Learning outcomes">
                   <Textarea
                     value={unit.learningOutcomes}
+                    nepali={formNepaliText}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -1039,6 +1475,7 @@ export const SessionPlanPanel = ({
                 <FormField label="References">
                   <Textarea
                     value={unit.references}
+                    nepali={formNepaliText}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -1049,7 +1486,11 @@ export const SessionPlanPanel = ({
                         ),
                       }))
                     }
-                    placeholder="Textbooks, articles, resources"
+                    placeholder={
+                      formNepaliText
+                        ? "सन्दर्भ पुस्तक / सामग्री"
+                        : "Textbooks, articles, resources"
+                    }
                   />
                 </FormField>
                 <FormField label="Unit start date (BS)">

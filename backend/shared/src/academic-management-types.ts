@@ -74,6 +74,7 @@ export interface AcademicSessionPlanUnitRecord {
   _id: string;
   sessionPlanId: string;
   unitNo: number;
+  /** Unit heading only (e.g. "Unit 1 : Introduction to Human Anatomy"). */
   chapterName: string;
   estimatedTeachingHours: number;
   learningOutcomes: string;
@@ -87,9 +88,10 @@ export interface AcademicSessionPlanUnitRecord {
   endDateBs?: string;
   status: LessonPlanItemStatus;
   attachmentUrl?: string;
-  /** Optional link to hierarchical syllabus chapter (sync source). */
+  /** Optional link to hierarchical syllabus unit (import source). */
   syllabusId?: string;
   syllabusChapterId?: string;
+  syllabusUnitId?: string;
   /** Months where this unit appears in a Lesson Plan (hierarchical coverage). */
   plannedInMonths?: string[];
   planningStatus?: SyllabusUnitPlanningStatus;
@@ -171,10 +173,14 @@ export interface AcademicSyllabusSubUnitRecord {
   syllabusId: string;
   chapterId: string;
   unitId: string;
-  /** Display number within parent unit (1, 2, 3 → shown as 1.1, 1.2 with unitNo). */
+  /** Parent sub-unit id when nested; empty/undefined for top-level under the unit. */
+  parentSubUnitId?: string;
+  /** Sibling index under the parent (1, 2, 3…). */
   subUnitNo: number;
-  /** Computed display label e.g. "1.1", "2.3". */
+  /** Computed hierarchical label e.g. "1.1", "1.1.1", "1.1.1.1". */
   displayNo: string;
+  /** Nesting depth under the unit (0 = direct child of unit). */
+  depth: number;
   heading: string;
   description: string;
   learningOutcomes: string;
@@ -193,6 +199,8 @@ export interface AcademicSyllabusSubUnitRecord {
   teacherAttachments: SyllabusAttachmentRecord[];
   todaysCoverage: string;
   completedPercent: number;
+  /** Nested child sub-units (unlimited depth). */
+  children: AcademicSyllabusSubUnitRecord[];
 }
 
 export interface AcademicSyllabusTopicRecord {
@@ -206,6 +214,8 @@ export interface AcademicSyllabusTopicRecord {
   learningObjective: string;
   references: string;
   remarks: string;
+  practicalRequired: boolean;
+  /** Top-level sub-units; each may contain nested children. */
   subUnits: AcademicSyllabusSubUnitRecord[];
   completedPercent: number;
   remainingPercent: number;
@@ -214,10 +224,15 @@ export interface AcademicSyllabusTopicRecord {
   totalSubUnits: number;
 }
 
+/** Optional syllabus section type: Chapter OR Part (not both). NONE = no grouping. */
+export type SyllabusSectionKind = "NONE" | "CHAPTER" | "PART";
+
 export interface AcademicSyllabusChapterRecord {
   _id: string;
   syllabusId: string;
   chapterNo: number;
+  /** NONE | CHAPTER | PART — only one kind; optional. */
+  sectionKind: SyllabusSectionKind;
   title: string;
   description: string;
   estimatedHours: number;
@@ -324,7 +339,7 @@ export interface AcademicLessonPlanItemRecord {
   sessionPlanUnitId?: string;
   /** Sub-topic selected from the session plan unit's topics list. */
   subUnitTitle?: string;
-  /** Hierarchical syllabus links (Subject → Chapter → Unit → Sub Unit). */
+  /** Hierarchical syllabus links (Subject → Chapter → Unit → Sub Unit → Child…). */
   syllabusId?: string;
   syllabusChapterId?: string;
   syllabusUnitId?: string;
@@ -356,6 +371,7 @@ export interface AcademicLessonPlanItemRecord {
     | "endDateBs"
     | "syllabusId"
     | "syllabusChapterId"
+    | "syllabusUnitId"
   >;
 }
 
@@ -387,9 +403,13 @@ export interface AcademicLessonPlanRecord extends AcademicManagementScope {
   semesterBs?: string;
   subjectId: string;
   teacherId: string;
-  /** @deprecated Prefer startDateBs / endDateBs. */
+  /** @deprecated Prefer teachingDateBs. */
   month: string;
+  /** Single teaching day (BS YYYY-MM-DD). One lesson plan = one teaching day. */
+  teachingDateBs?: string;
+  /** @deprecated Use teachingDateBs — kept for backward compatibility. */
   startDateBs?: string;
+  /** @deprecated Use teachingDateBs — kept for backward compatibility. */
   endDateBs?: string;
   monthlyDescription?: string;
   status: AcademicPlanStatus;
@@ -437,8 +457,10 @@ export interface AcademicLogBookEntryRecord extends AcademicManagementScope {
   dateBs: string;
   unit: string;
   topicCovered: string;
+  /** What the teacher intended to achieve during that lesson. */
   objectives: string;
   teachingMethod: string;
+  /** @deprecated Replaced by objectives in the Log Book form. */
   teachingAids: string;
   theoryPractical: "THEORY" | "PRACTICAL" | "BOTH";
   periodNumber: number;

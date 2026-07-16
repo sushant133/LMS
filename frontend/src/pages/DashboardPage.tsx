@@ -36,7 +36,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { PageContent } from "components/layout/PageContent";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { api, unwrap } from "lib/api";
-import { getCollegeDisplayName, roleLabelMap } from "lib/auth";
+import {
+  getCollegeDisplayName,
+  getUserDisplayTitle,
+  getUserRoleSubtitle,
+  roleLabelMap,
+} from "lib/auth";
 import { AcademicCalendarWidgets } from "features/dashboard/AcademicCalendarWidgets";
 import { FeeDuesPanel } from "features/dashboard/FeeDuesPanel";
 import { DashboardBannerPopup } from "features/notices/DashboardBannerPopup";
@@ -94,6 +99,7 @@ const DashboardHero = ({
   description,
   userName,
   roleLabel,
+  roleSubtitle,
   institutionName,
   unreadCount
 }: {
@@ -101,6 +107,8 @@ const DashboardHero = ({
   description: string;
   userName: string;
   roleLabel: string;
+  /** System role when roleLabel is a leadership designation (e.g. Teacher under Principal). */
+  roleSubtitle?: string | null;
   institutionName?: string;
   unreadCount: number;
 }) => (
@@ -113,6 +121,11 @@ const DashboardHero = ({
       <div className="min-w-0 space-y-3">
         <div className="flex min-h-7 flex-wrap items-center gap-2">
           <Badge className="shrink-0 bg-brand-600 text-white">{roleLabel}</Badge>
+          {roleSubtitle ? (
+            <Badge className="shrink-0 bg-slate-100 text-slate-700">
+              {roleSubtitle}
+            </Badge>
+          ) : null}
           <Badge
             className={cn(
               "shrink-0 bg-amber-100 text-amber-800 transition-opacity",
@@ -432,6 +445,7 @@ const StaffModuleDashboard = ({
   data,
   statsWithLiveUnread,
   roleLabel,
+  roleSubtitle,
   institutionName,
   unreadCount
 }: {
@@ -439,6 +453,7 @@ const StaffModuleDashboard = ({
   data: DashboardResponse;
   statsWithLiveUnread: DashboardMetric[];
   roleLabel: string;
+  roleSubtitle?: string | null;
   institutionName?: string;
   unreadCount: number;
 }) => {
@@ -505,6 +520,7 @@ const StaffModuleDashboard = ({
         description={heroDescription}
         userName={user.fullName}
         roleLabel={roleLabel}
+        roleSubtitle={roleSubtitle}
         institutionName={institutionName}
         unreadCount={unreadCount}
       />
@@ -576,7 +592,8 @@ export const DashboardPage = () => {
   }
 
   const institutionName = getCollegeDisplayName(availableSchools, user);
-  const roleLabel = roleLabelMap[user.role] ?? user.role;
+  const roleLabel = getUserDisplayTitle(user);
+  const roleSubtitle = getUserRoleSubtitle(user);
   const unreadCount = liveUnreadCount;
   const statsWithLiveUnread = data.stats.map((stat) =>
     stat.label === "Unread Alerts" ? { ...stat, value: liveUnreadCount } : stat
@@ -594,6 +611,7 @@ export const DashboardPage = () => {
         data={data}
         statsWithLiveUnread={statsWithLiveUnread}
         roleLabel={roleLabel}
+        roleSubtitle={roleSubtitle}
         institutionName={institutionName}
         unreadCount={unreadCount}
       />
@@ -609,6 +627,7 @@ export const DashboardPage = () => {
           description="Track your subjects, attendance trend, fee status, assignments, and college alerts in one place."
           userName={user.fullName}
           roleLabel={roleLabel}
+          roleSubtitle={roleSubtitle}
           institutionName={institutionName}
           unreadCount={unreadCount}
         />
@@ -669,6 +688,7 @@ export const DashboardPage = () => {
           description="Monitor your children's attendance, fees, assignments, and college notifications from one professional overview."
           userName={user.fullName}
           roleLabel={roleLabel}
+          roleSubtitle={roleSubtitle}
           institutionName={institutionName}
           unreadCount={unreadCount}
         />
@@ -726,11 +746,14 @@ export const DashboardPage = () => {
           isCollegeAdmin
             ? "Institution-wide overview with student volume, fee health, attendance trends, notices, and the latest operational alerts."
             : isTeacher
-              ? "Your teaching command center for classes, attendance, assignments, exams, and college communication."
+              ? user.designation?.trim()
+                ? `Signed in as ${user.designation.trim()}. Your teaching command center for classes, attendance, assignments, exams, and college communication.`
+                : "Your teaching command center for classes, attendance, assignments, exams, and college communication."
               : "Role-based overview with attendance trends, notices, and the latest notifications."
         }
         userName={user.fullName}
         roleLabel={roleLabel}
+        roleSubtitle={roleSubtitle}
         institutionName={institutionName}
         unreadCount={unreadCount}
       />

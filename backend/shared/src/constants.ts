@@ -369,7 +369,17 @@ export const INSTITUTION_TYPES = ["SCHOOL", "COLLEGE"] as const;
 
 export const CLASS_LEVELS = ["ECD", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12"] as const;
 
-export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year"] as const;
+/**
+ * Curriculum / program year names (HA 1st–3rd). Used for master subjects & syllabus.
+ * Does not include "Ended" (student placement only).
+ */
+export const COLLEGE_PROGRAM_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year"] as const;
+
+/**
+ * All Year options stored on the Year model / student form.
+ * "Ended" = student has finished the program years (not a curriculum year).
+ */
+export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year", "Ended"] as const;
 
 /**
  * Library catalog year levels for HA college books.
@@ -380,6 +390,7 @@ export const LIBRARY_YEAR_LEVELS = ["1st Year", "2nd Year", "3rd Year", "All Yea
 /** Academic lifecycle status for college students. Only ACTIVE students are promoted. */
 export const STUDENT_ACADEMIC_STATUSES = [
   "ACTIVE",
+  "PENDING_NOT_PASSED",
   "PASSED_OUT",
   "ALUMNI",
   "WITHDRAWN",
@@ -389,6 +400,7 @@ export const STUDENT_ACADEMIC_STATUSES = [
 
 export const STUDENT_ACADEMIC_STATUS_LABELS: Record<(typeof STUDENT_ACADEMIC_STATUSES)[number], string> = {
   ACTIVE: "Active",
+  PENDING_NOT_PASSED: "Pending / Not Passed",
   PASSED_OUT: "Passed Out",
   ALUMNI: "Alumni",
   WITHDRAWN: "Withdrawn",
@@ -398,6 +410,7 @@ export const STUDENT_ACADEMIC_STATUS_LABELS: Record<(typeof STUDENT_ACADEMIC_STA
 
 /** Statuses that block academic promotion. */
 export const NON_PROMOTABLE_STUDENT_STATUSES = [
+  "PENDING_NOT_PASSED",
   "PASSED_OUT",
   "ALUMNI",
   "WITHDRAWN",

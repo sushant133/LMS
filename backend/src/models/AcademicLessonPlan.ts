@@ -29,9 +29,13 @@ const lessonPlanSchema = new Schema(
     yearId: { type: Schema.Types.ObjectId, ref: "Year" },
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject", required: true, index: true },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true, index: true },
-    /** Legacy monthly label; new plans use startDateBs/endDateBs. */
+    /** Legacy monthly label; new plans use teachingDateBs. */
     month: { type: String, default: "", index: true },
+    /** Single teaching day (BS). One lesson plan = one teaching day. */
+    teachingDateBs: { type: String, default: "", index: true },
+    /** @deprecated Use teachingDateBs — kept in sync for backward compatibility. */
     startDateBs: { type: String, default: "", index: true },
+    /** @deprecated Use teachingDateBs — kept in sync for backward compatibility. */
     endDateBs: { type: String, default: "" },
     monthlyDescription: { type: String, default: "" },
     status: {

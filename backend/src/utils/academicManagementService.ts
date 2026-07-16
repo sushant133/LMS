@@ -830,7 +830,9 @@ export const serializeSessionPlan = async (planId: string) => {
       attachmentUrl: unit.attachmentUrl,
       syllabusId: (unit as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
       syllabusChapterId:
-        (unit as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ?? ""
+        (unit as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ?? "",
+      syllabusUnitId:
+        (unit as { syllabusUnitId?: { toString(): string } }).syllabusUnitId?.toString?.() ?? ""
     })),
     completedPercent: progress?.completedPercent ?? (total > 0 ? Math.round((completed / total) * 100) : 0),
     remainingPercent: progress?.remainingPercent ?? (total > 0 ? Math.round(((total - completed) / total) * 100) : 100),
@@ -999,7 +1001,9 @@ export const serializeLessonPlan = async (planId: string) => {
               (unit as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
             syllabusChapterId:
               (unit as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ??
-              ""
+              "",
+            syllabusUnitId:
+              (unit as { syllabusUnitId?: { toString(): string } }).syllabusUnitId?.toString?.() ?? ""
           }
         : undefined
     };
@@ -1017,8 +1021,11 @@ export const serializeLessonPlan = async (planId: string) => {
 
   const planStart = (plan as { startDateBs?: string }).startDateBs ?? "";
   const planEnd = (plan as { endDateBs?: string }).endDateBs ?? "";
+  const teachingDateBs =
+    (plan as { teachingDateBs?: string }).teachingDateBs || planStart || planEnd || "";
   const derivedMonth =
     plan.month ||
+    (teachingDateBs ? getNepaliMonthNameFromBsDate(teachingDateBs) : "") ||
     (planStart ? getNepaliMonthNameFromBsDate(planStart) : "") ||
     "";
 
@@ -1037,8 +1044,9 @@ export const serializeLessonPlan = async (planId: string) => {
     subjectId: plan.subjectId?._id?.toString() ?? plan.subjectId?.toString(),
     teacherId: plan.teacherId?._id?.toString() ?? plan.teacherId?.toString(),
     month: derivedMonth,
-    startDateBs: planStart,
-    endDateBs: planEnd,
+    teachingDateBs,
+    startDateBs: teachingDateBs || planStart,
+    endDateBs: teachingDateBs || planEnd,
     monthlyDescription: (plan as { monthlyDescription?: string }).monthlyDescription ?? "",
     status: plan.status,
     preparedBy: plan.preparedBy,

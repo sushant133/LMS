@@ -12,6 +12,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Pencil,
   Plus,
   Send,
   Trash2,
@@ -28,9 +29,11 @@ import { Textarea } from "components/ui/textarea";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
+import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
-import { parseErrorMessage } from "lib/utils";
+import { isNepaliSubject, nepaliTextClass } from "lib/nepaliSubject";
+import { cn, parseErrorMessage } from "lib/utils";
 import {
   dedupeYearsForSelect,
   filterSubjectsByClass,
@@ -59,12 +62,15 @@ import {
 } from "./academicHierarchyUtils";
 import { SyllabusHierarchyEditor } from "./SyllabusHierarchyEditor";
 import {
+  allSubHeadingsFilled,
   blankSyllabusForm,
   formToPayload,
   recordToForm,
   SUB_UNIT_STATUS_OPTIONS,
   subUnitStatusBadgeClass,
+  type ChapterDraft,
   type SyllabusFormState,
+  type UnitDraft,
 } from "./syllabusFormUtils";
 
 interface SyllabusPanelProps {
@@ -124,6 +130,12 @@ export const SyllabusPanel = ({
     return filterSubjectsByClass(subjects, form.classId);
   }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
 
+  const selectedFormSubject = useMemo(
+    () => subjectOptions.find((s) => s._id === form.subjectId),
+    [subjectOptions, form.subjectId],
+  );
+  const formNepaliText = isNepaliSubject(selectedFormSubject);
+
   const queryKey = ["academic-management", "syllabi", filters];
   const plansQuery = useQuery({
     queryKey,
@@ -146,9 +158,31 @@ export const SyllabusPanel = ({
   };
 
   const openEditForm = (plan: AcademicSyllabusRecord) => {
+    if (!canMutate) {
+      toast.error("You do not have write access to edit this syllabus");
+      return;
+    }
+    if (
+      !isAdmin &&
+      plan.status !== "DRAFT" &&
+      plan.status !== "REJECTED"
+    ) {
+      toast.error(
+        plan.status === "APPROVED"
+          ? "This syllabus is approved. Ask an administrator to Unlock it before editing structure."
+          : "This syllabus is submitted. Ask an administrator to unlock or reject it before editing.",
+      );
+      return;
+    }
     setEditingId(plan._id);
     setForm(recordToForm(plan));
     setShowForm(true);
+    // Scroll to the editor so full hierarchy is visible for editing
+    window.setTimeout(() => {
+      document
+        .getElementById("syllabus-edit-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
   };
 
   const createMutation = useMutation({
@@ -212,21 +246,36 @@ export const SyllabusPanel = ({
       toast.error("Subject is required");
       return;
     }
-    if (
-      form.chapters.some(
-        (ch) =>
-          !ch.title.trim() ||
-          (ch.units as { title: string; subUnits: { heading: string }[] }[]).some(
-            (u) =>
-              !u.title.trim() ||
-              u.subUnits.some((s) => !s.heading.trim()),
-          ),
-      )
-    ) {
-      toast.error(
-        "Each chapter, unit, and sub-unit needs a title / heading",
-      );
+    if (!form.chapters.length) {
+      toast.error("Add at least one section with units");
       return;
+    }
+    for (const ch of form.chapters as ChapterDraft[]) {
+      const kind = ch.sectionKind || "NONE";
+      if ((kind === "CHAPTER" || kind === "PART") && !ch.title?.trim()) {
+        toast.error(
+          kind === "CHAPTER"
+            ? "Chapter title is required when section type is Chapter"
+            : "Part title is required when section type is Part",
+        );
+        return;
+      }
+      if (!ch.units?.length) {
+        toast.error("Each section needs at least one unit");
+        return;
+      }
+      for (const u of ch.units as UnitDraft[]) {
+        if (!u.title?.trim()) {
+          toast.error("Every unit needs a title");
+          return;
+        }
+        if (!allSubHeadingsFilled(u.subUnits ?? [])) {
+          toast.error(
+            "Every sub-unit and child heading must be filled (or remove empty rows)",
+          );
+          return;
+        }
+      }
     }
     const optionalTeacher = (form.teacherId || teacherId || "").trim();
     const payload = formToPayload({
@@ -460,6 +509,11 @@ export const SyllabusPanel = ({
     const chapters = plan.chapters ?? [];
     const totalSub = plan.totalSubUnits ?? 0;
     const completedSub = plan.completedSubUnits ?? 0;
+    const editable = canEditStructure(plan);
+    const planNepali = isNepaliSubject({
+      name: plan.subject?.name,
+      code: plan.subjectCode || plan.subject?.code,
+    });
 
     return (
       <Card key={plan._id} className={compact ? "border-slate-200 shadow-none" : undefined}>
@@ -484,17 +538,62 @@ export const SyllabusPanel = ({
               {plan.totalTopics ?? 0} units · {totalSub} sub-units · Completed:{" "}
               {completedSub} · Remaining: {plan.remainingSubUnits ?? totalSub - completedSub}
             </p>
-            <AcademicProgressBar
-              className="mt-2 max-w-md"
-              completedPercent={plan.completedPercent}
-              remainingPercent={plan.remainingPercent}
-            />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 no-print">
+            <Badge className={statusBadgeClass(plan.status)}>
+              {plan.status.replace(/_/g, " ")}
+            </Badge>
+            {editable ? (
+              <Button
+                size="sm"
+                onClick={() => openEditForm(plan)}
+                title="Edit all sections, units, sub-units and nested children"
+              >
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                Edit full syllabus
+              </Button>
+            ) : canMutate && isAdmin ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  unlockMutation.mutate(plan._id, {
+                    onSuccess: () => {
+                      toast.success("Unlocked — opening editor");
+                      // Open edit after unlock; list will refresh
+                      void queryClient
+                        .invalidateQueries({ queryKey: ["academic-management"] })
+                        .then(() => {
+                          openEditForm({ ...plan, status: "DRAFT" });
+                        });
+                    },
+                  });
+                }}
+              >
+                Unlock &amp; edit
+              </Button>
+            ) : canMutate ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled
+                title="Unlock required from administrator to edit structure"
+              >
+                Locked
+              </Button>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <AcademicProgressBar
+            className="max-w-md"
+            completedPercent={plan.completedPercent}
+            remainingPercent={plan.remainingPercent}
+          />
+          <div className="flex flex-wrap items-center gap-2 no-print">
             <Button
               size="sm"
               variant="outline"
-              className="no-print"
               onClick={() => {
                 const next = !globalExpand;
                 setGlobalExpand(next);
@@ -511,19 +610,16 @@ export const SyllabusPanel = ({
               {globalExpand ? (
                 <>
                   <ChevronsDownUp className="mr-1 h-4 w-4" />
-                  Collapse
+                  Collapse tree
                 </>
               ) : (
                 <>
                   <ChevronsUpDown className="mr-1 h-4 w-4" />
-                  Expand
+                  Expand tree
                 </>
               )}
             </Button>
-            <Badge className={statusBadgeClass(plan.status)}>{plan.status}</Badge>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-4 text-sm no-print">
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
               <p className="text-xs text-slate-500">Chapters</p>
@@ -573,8 +669,18 @@ export const SyllabusPanel = ({
                         <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-slate-900">
-                          Chapter {chapter.chapterNo}: {chapter.title}
+                        <p
+                          className={cn(
+                            "text-sm font-semibold text-slate-900",
+                            planNepali && nepaliTextClass,
+                          )}
+                        >
+                          {chapter.sectionKind === "PART"
+                            ? `Part ${chapter.chapterNo}`
+                            : chapter.sectionKind === "NONE" && !chapter.title
+                              ? `Units`
+                              : `Chapter ${chapter.chapterNo}`}
+                          {chapter.title ? `: ${chapter.title}` : ""}
                         </p>
                         <p className="text-xs text-slate-500">
                           {chapter.units.length} unit(s) · {chapter.totalSubUnits}{" "}
@@ -594,7 +700,14 @@ export const SyllabusPanel = ({
                     {chOpen ? (
                       <div className="space-y-2 border-t border-slate-100 p-3">
                         {chapter.description ? (
-                          <p className="text-sm text-slate-600">{chapter.description}</p>
+                          <p
+                            className={cn(
+                              "text-sm text-slate-600",
+                              planNepali && nepaliTextClass,
+                            )}
+                          >
+                            {chapter.description}
+                          </p>
                         ) : null}
                         {chapter.units.map((unit) => {
                           const uKey = `${plan._id}-u-${unit._id}`;
@@ -615,7 +728,12 @@ export const SyllabusPanel = ({
                                   <ChevronRight className="h-4 w-4 text-slate-500" />
                                 )}
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-medium text-slate-800">
+                                  <p
+                                    className={cn(
+                                      "text-sm font-medium text-slate-800",
+                                      planNepali && nepaliTextClass,
+                                    )}
+                                  >
                                     Unit {unit.unitNo}: {unit.title}
                                   </p>
                                   <p className="text-xs text-slate-500">
@@ -626,107 +744,66 @@ export const SyllabusPanel = ({
                               </button>
                               {uOpen ? (
                                 <div className="space-y-2 border-t border-slate-100 p-3">
-                                  {unit.subUnits.map((sub) => (
+                                  {(function flattenView(
+                                    nodes: typeof unit.subUnits,
+                                  ): typeof unit.subUnits {
+                                    const out: typeof unit.subUnits = [];
+                                    const walk = (list: typeof unit.subUnits) => {
+                                      for (const n of list) {
+                                        out.push(n);
+                                        if (n.children?.length) walk(n.children);
+                                      }
+                                    };
+                                    walk(nodes);
+                                    return out;
+                                  })(unit.subUnits).map((sub) => (
                                     <div
                                       key={sub._id}
                                       className="rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2"
+                                      style={{
+                                        marginLeft: Math.min(sub.depth || 0, 6) * 12,
+                                      }}
                                     >
-                                      <div className="flex flex-wrap items-start justify-between gap-2">
-                                        <div className="min-w-0">
-                                          <p className="text-sm font-medium text-slate-900">
-                                            <span className="mr-2 rounded bg-brand-50 px-1.5 py-0.5 text-xs font-semibold text-brand-800">
-                                              {sub.displayNo}
-                                            </span>
-                                            {sub.heading}
-                                          </p>
-                                          {sub.learningOutcomes ? (
-                                            <p className="mt-1 text-xs text-slate-600 whitespace-pre-wrap">
-                                              {sub.learningOutcomes}
-                                            </p>
-                                          ) : null}
-                                          {sub.practicalRequired ? (
-                                            <p className="mt-1 text-xs text-emerald-700">
-                                              Practical
-                                              {sub.labName ? ` · ${sub.labName}` : ""}
-                                              {sub.clinicalHours
-                                                ? ` · ${sub.clinicalHours} clinical hrs`
-                                                : ""}
-                                            </p>
-                                          ) : null}
-                                          {sub.teachingNotes ? (
-                                            <p className="mt-1 text-xs text-slate-500">
-                                              Notes: {sub.teachingNotes}
-                                            </p>
-                                          ) : null}
-                                        </div>
-                                        <div className="flex flex-col items-end gap-1 no-print">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p
+                                          className={cn(
+                                            "min-w-0 text-sm font-medium text-slate-900",
+                                            planNepali && nepaliTextClass,
+                                          )}
+                                        >
+                                          <span className="mr-2 rounded bg-brand-50 px-1.5 py-0.5 text-xs font-semibold text-brand-800">
+                                            {sub.displayNo}
+                                          </span>
+                                          {sub.heading || "—"}
+                                        </p>
+                                        {canUpdateProgress(plan) ? (
+                                          <Select
+                                            className="h-8 w-[160px] shrink-0 text-xs no-print"
+                                            value={sub.status}
+                                            disabled={progressMutation.isPending}
+                                            onChange={(e) => {
+                                              progressMutation.mutate({
+                                                syllabusId: plan._id,
+                                                subUnitId: sub._id,
+                                                status: e.target
+                                                  .value as SyllabusSubUnitStatus,
+                                              });
+                                            }}
+                                          >
+                                            {SUB_UNIT_STATUS_OPTIONS.map((opt) => (
+                                              <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                              </option>
+                                            ))}
+                                          </Select>
+                                        ) : (
                                           <Badge
                                             className={subUnitStatusBadgeClass(sub.status)}
                                           >
                                             {sub.status.replace(/_/g, " ")}
                                           </Badge>
-                                          {canUpdateProgress(plan) ? (
-                                            <Select
-                                              className="h-8 w-[160px] text-xs"
-                                              value={sub.status}
-                                              disabled={progressMutation.isPending}
-                                              onChange={(e) => {
-                                                progressMutation.mutate({
-                                                  syllabusId: plan._id,
-                                                  subUnitId: sub._id,
-                                                  status: e.target
-                                                    .value as SyllabusSubUnitStatus,
-                                                });
-                                              }}
-                                            >
-                                              {SUB_UNIT_STATUS_OPTIONS.map((opt) => (
-                                                <option key={opt.value} value={opt.value}>
-                                                  {opt.label}
-                                                </option>
-                                              ))}
-                                            </Select>
-                                          ) : null}
-                                        </div>
+                                        )}
                                       </div>
-                                      {canUpdateProgress(plan) &&
-                                      (plan.status === "APPROVED" || isAdmin) ? (
-                                        <div className="mt-2 grid gap-2 no-print md:grid-cols-2">
-                                          <Input
-                                            className="h-8 text-xs"
-                                            placeholder="Teaching notes…"
-                                            defaultValue={sub.teachingNotes || ""}
-                                            onBlur={(e) => {
-                                              if (
-                                                e.target.value !==
-                                                (sub.teachingNotes || "")
-                                              ) {
-                                                progressMutation.mutate({
-                                                  syllabusId: plan._id,
-                                                  subUnitId: sub._id,
-                                                  teachingNotes: e.target.value,
-                                                });
-                                              }
-                                            }}
-                                          />
-                                          <Input
-                                            className="h-8 text-xs"
-                                            placeholder="Today's coverage…"
-                                            defaultValue={sub.todaysCoverage || ""}
-                                            onBlur={(e) => {
-                                              if (
-                                                e.target.value !==
-                                                (sub.todaysCoverage || "")
-                                              ) {
-                                                progressMutation.mutate({
-                                                  syllabusId: plan._id,
-                                                  subUnitId: sub._id,
-                                                  todaysCoverage: e.target.value,
-                                                });
-                                              }
-                                            }}
-                                          />
-                                        </div>
-                                      ) : null}
                                     </div>
                                   ))}
                                 </div>
@@ -744,11 +821,26 @@ export const SyllabusPanel = ({
 
           {canMutate ? (
             <div className="flex flex-wrap gap-2 no-print">
-              {canEditStructure(plan) && (
-                <Button size="sm" variant="outline" onClick={() => openEditForm(plan)}>
-                  Edit hierarchy
+              {editable ? (
+                <Button size="sm" onClick={() => openEditForm(plan)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit units &amp; sub-units
                 </Button>
-              )}
+              ) : isAdmin ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    unlockMutation.mutate(plan._id, {
+                      onSuccess: () => {
+                        openEditForm({ ...plan, status: "DRAFT" });
+                      },
+                    });
+                  }}
+                >
+                  Unlock &amp; edit all
+                </Button>
+              ) : null}
               {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
                 <Button size="sm" onClick={() => submitMutation.mutate(plan._id)}>
                   <Send className="mr-2 h-4 w-4" />
@@ -784,7 +876,7 @@ export const SyllabusPanel = ({
                   variant="outline"
                   onClick={() => unlockMutation.mutate(plan._id)}
                 >
-                  Unlock
+                  Unlock only
                 </Button>
               ) : null}
               {(plan.status === "DRAFT" ||
@@ -856,14 +948,17 @@ export const SyllabusPanel = ({
       </div>
 
       {showForm && canMutate ? (
-        <Card className="no-print">
+        <Card id="syllabus-edit-form" className="no-print border-brand-200 shadow-md">
           <CardHeader>
             <CardTitle>
-              {editingId ? "Edit Syllabus" : "Create Complete Syllabus"}
+              {editingId
+                ? "Edit Syllabus — sections, units, sub-units & children"
+                : "Create Complete Syllabus"}
             </CardTitle>
             <p className="text-sm text-slate-600">
-              Define subject metadata, then build unlimited chapters, units, and
-              sub-units. Save as draft anytime; submit when ready for review.
+              {editingId
+                ? "Change any Chapter/Part, Unit title, and every Sub-unit / Child heading. Numbers update automatically. Click Update Syllabus to save."
+                : "Define subject metadata, then build units and nested sub-units. Save as draft anytime; submit when ready for review."}
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -1070,10 +1165,29 @@ export const SyllabusPanel = ({
               </div>
             </div>
 
+            {formNepaliText ? (
+              <NepaliSubjectBanner
+                subjectName={
+                  selectedFormSubject
+                    ? `${selectedFormSubject.name}${selectedFormSubject.code ? ` (${selectedFormSubject.code})` : ""}`
+                    : undefined
+                }
+              />
+            ) : null}
+
             <SyllabusHierarchyEditor
+              key={editingId || "new-syllabus"}
               chapters={form.chapters}
+              defaultExpandAll={Boolean(editingId)}
+              nepaliText={formNepaliText}
               onChange={(chapters) =>
-                setForm((current) => ({ ...current, chapters }))
+                setForm((current) => ({
+                  ...current,
+                  chapters:
+                    typeof chapters === "function"
+                      ? chapters(current.chapters)
+                      : chapters,
+                }))
               }
             />
 
@@ -1208,7 +1322,12 @@ export const SyllabusPanel = ({
             {(plan.chapters ?? []).map((chapter) => (
               <div key={chapter._id} className="mt-2">
                 <p className="font-medium">
-                  Chapter {chapter.chapterNo}: {chapter.title}
+                  {chapter.sectionKind === "PART"
+                    ? `Part ${chapter.chapterNo}`
+                    : chapter.sectionKind === "NONE" && !chapter.title
+                      ? "Units"
+                      : `Chapter ${chapter.chapterNo}`}
+                  {chapter.title ? `: ${chapter.title}` : ""}
                 </p>
                 {chapter.units.map((unit) => (
                   <div key={unit._id} className="ml-3 mt-1">

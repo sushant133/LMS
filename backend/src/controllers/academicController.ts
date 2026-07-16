@@ -1,5 +1,11 @@
 import type { Request, Response } from "express";
-import { COLLEGE_YEAR_NAMES, academicSubjectSchema, batchSchema, classSchema, sectionSchema } from "@phit-erp/shared";
+import {
+  COLLEGE_YEAR_NAMES,
+  academicSubjectSchema,
+  batchSchema,
+  classSchema,
+  sectionSchema
+} from "@phit-erp/shared";
 import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
@@ -339,8 +345,35 @@ export const deleteBatch = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, "Batch deleted successfully");
 });
 
+/** Ensure every batch has the full COLLEGE_YEAR_NAMES set (e.g. new "Ended" option). */
+const ensureCollegeYearsForSchool = async (schoolId: unknown) => {
+  const batches = await Batch.find({ schoolId }).select("_id").lean();
+  if (!batches.length) return;
+
+  for (const batch of batches) {
+    const existing = await Year.find({ schoolId, batchId: batch._id }).lean();
+    const byName = new Set(existing.map((y) => y.name));
+    const missing = COLLEGE_YEAR_NAMES.filter((name) => !byName.has(name));
+    if (!missing.length) continue;
+
+    await Year.insertMany(
+      missing.map((name) => ({
+        schoolId,
+        batchId: batch._id,
+        name,
+        level: COLLEGE_YEAR_NAMES.indexOf(name) + 1,
+        isActive: true
+      }))
+    );
+  }
+};
+
 export const listYears = asyncHandler(async (req: Request, res: Response) => {
   const query: Record<string, unknown> = withTenantScope(req);
+  const schoolId = tenantObjectId(req);
+
+  // Backfill "Ended" (and any future year names) for existing batches
+  await ensureCollegeYearsForSchool(schoolId);
 
   if (typeof req.query.batchId === "string") {
     query.batchId = req.query.batchId;

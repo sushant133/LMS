@@ -21,6 +21,7 @@ export const defaultExamValue: ExamInput = {
 };
 
 export const defaultRoutineValue: ExamRoutineInput = {
+  yearId: "",
   subjectId: "",
   examDateBs: "",
   day: "",

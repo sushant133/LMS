@@ -260,6 +260,7 @@ export const listExams = asyncHandler(async (req: Request, res: Response) => {
   const studentProfile = await getStudentProfile(req);
   if (studentProfile) {
     if (college && studentProfile.batchId) {
+      // Multi-year exams (e.g. Third Term) store several yearIds; match if student's year is included
       filter.batchIds = studentProfile.batchId;
       if (studentProfile.yearId) {
         filter.yearIds = studentProfile.yearId;
@@ -273,12 +274,19 @@ export const listExams = asyncHandler(async (req: Request, res: Response) => {
     const studentIds = await getLinkedStudentIds(req);
     const students = await Student.find({ _id: { $in: studentIds } }).lean();
     if (college) {
-      const batchIds = [...new Set(students.map((s) => s.batchId?.toString()).filter(Boolean))];
-      const yearIds = [...new Set(students.map((s) => s.yearId?.toString()).filter(Boolean))];
+      const batchIds = [
+        ...new Set(students.map((s) => s.batchId?.toString()).filter(Boolean) as string[])
+      ];
+      const yearIds = [
+        ...new Set(students.map((s) => s.yearId?.toString()).filter(Boolean) as string[])
+      ];
+      // Match exams scoped to any linked child's batch/year (supports multi-year exams)
       filter.batchIds = { $in: batchIds };
       filter.yearIds = { $in: yearIds };
     } else {
-      const classIds = [...new Set(students.map((s) => s.classId?.toString()).filter(Boolean))];
+      const classIds = [
+        ...new Set(students.map((s) => s.classId?.toString()).filter(Boolean) as string[])
+      ];
       filter.classIds = { $in: classIds };
     }
   }

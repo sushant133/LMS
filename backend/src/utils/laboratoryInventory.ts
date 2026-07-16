@@ -19,22 +19,43 @@ export const getIssuedQuantity = (total: number, available: number): number =>
   Math.max(0, total - available);
 
 /**
- * Stock status using configured minimum stock level.
- * Falls back to 20% threshold when minimum is not set.
+ * Stock status using configured min/max levels.
+ *
+ * - Prefer explicit minimum as the reorder point.
+ * - When min is unset, derive from maximum capacity (then current total).
+ * - Critical uses half of min without forcing a floor of 1, so a product that
+ *   only stocks e.g. 4 units (max=4, min=1, available=1) is LOW not CRITICAL.
  */
 export const getLabStockStatus = (
   available: number,
   total: number,
-  minimumStockLevel = 0
+  minimumStockLevel = 0,
+  maximumStockLevel = 0
 ): LaboratoryInventoryStockStatus => {
   if (available <= 0) {
     return "OUT_OF_STOCK";
   }
 
-  const minLevel =
-    minimumStockLevel > 0 ? minimumStockLevel : Math.max(1, Math.floor(total * 0.2));
+  // At or above configured capacity → healthy stock.
+  if (maximumStockLevel > 0 && available >= maximumStockLevel) {
+    return "AVAILABLE";
+  }
 
-  if (available <= Math.max(1, Math.floor(minLevel * 0.5))) {
+  const capacity = maximumStockLevel > 0 ? maximumStockLevel : total;
+  const minLevel =
+    minimumStockLevel > 0
+      ? minimumStockLevel
+      : capacity > 0
+        ? Math.max(1, Math.floor(capacity * 0.2))
+        : 0;
+
+  if (minLevel <= 0) {
+    return "AVAILABLE";
+  }
+
+  // Half of min — do not force Math.max(1, …); that wrongly marks 1-of-4 as critical.
+  const criticalLevel = Math.floor(minLevel * 0.5);
+  if (criticalLevel > 0 && available <= criticalLevel) {
     return "CRITICAL_STOCK";
   }
 
@@ -45,27 +66,52 @@ export const getLabStockStatus = (
   return "AVAILABLE";
 };
 
-export const getRequiredQuantity = (available: number, minimumStockLevel: number): number => {
-  if (minimumStockLevel <= 0) {
+/**
+ * Units needed to restock: fill up to maximum when set, otherwise up to minimum.
+ * Returns 0 when stock is still above the reorder point.
+ */
+export const getRequiredQuantity = (
+  available: number,
+  minimumStockLevel: number,
+  maximumStockLevel = 0
+): number => {
+  const capacity = maximumStockLevel > 0 ? maximumStockLevel : 0;
+  const reorderPoint =
+    minimumStockLevel > 0
+      ? minimumStockLevel
+      : capacity > 0
+        ? Math.max(1, Math.floor(capacity * 0.2))
+        : 0;
+
+  if (reorderPoint <= 0 || available > reorderPoint) {
     return 0;
   }
-  return Math.max(0, minimumStockLevel - available);
+
+  const target = capacity > 0 ? capacity : minimumStockLevel;
+  return Math.max(0, target - available);
 };
 
 export const getStockPriority = (
   available: number,
-  minimumStockLevel: number
+  minimumStockLevel: number,
+  maximumStockLevel = 0,
+  total = 0
 ): LaboratoryStockPriority => {
   if (available <= 0) {
     return "CRITICAL";
   }
-  if (minimumStockLevel <= 0) {
-    return "MEDIUM";
-  }
-  if (available <= Math.max(1, Math.floor(minimumStockLevel * 0.5))) {
+  const capacityRef =
+    total > 0 ? total : maximumStockLevel > 0 ? maximumStockLevel : available;
+  const status = getLabStockStatus(
+    available,
+    capacityRef,
+    minimumStockLevel,
+    maximumStockLevel
+  );
+  if (status === "CRITICAL_STOCK") {
     return "HIGH";
   }
-  if (available <= minimumStockLevel) {
+  if (status === "LOW_STOCK") {
     return "MEDIUM";
   }
   return "LOW";
@@ -76,15 +122,27 @@ export function enrichEquipmentInventory<
     quantity: number;
     availableQuantity: number;
     minimumStockLevel?: number;
+    maximumStockLevel?: number;
   }
 >(item: T) {
   const minimumStockLevel = item.minimumStockLevel ?? 0;
+  const maximumStockLevel = item.maximumStockLevel ?? 0;
   return {
     ...item,
     minimumStockLevel,
+    maximumStockLevel,
     issuedQuantity: getIssuedQuantity(item.quantity, item.availableQuantity),
-    requiredQuantity: getRequiredQuantity(item.availableQuantity, minimumStockLevel),
-    status: getLabStockStatus(item.availableQuantity, item.quantity, minimumStockLevel)
+    requiredQuantity: getRequiredQuantity(
+      item.availableQuantity,
+      minimumStockLevel,
+      maximumStockLevel
+    ),
+    status: getLabStockStatus(
+      item.availableQuantity,
+      item.quantity,
+      minimumStockLevel,
+      maximumStockLevel
+    )
   };
 }
 
@@ -202,8 +260,9 @@ export async function syncLowStockRequests(
   requestedByUserId?: string
 ): Promise<void> {
   const min = equipment.minimumStockLevel ?? 0;
+  const max = equipment.maximumStockLevel ?? 0;
+  // Auto restock only when an explicit minimum reorder point is configured.
   if (min <= 0) {
-    // Close open auto requests if min is disabled
     await LaboratoryStockRequest.updateMany(
       {
         schoolId,
@@ -218,7 +277,7 @@ export async function syncLowStockRequests(
 
   const available = equipment.availableQuantity;
   const needsRestock = available <= min;
-  const requiredQty = getRequiredQuantity(available, min);
+  const requiredQty = getRequiredQuantity(available, min, max);
 
   if (!needsRestock) {
     await LaboratoryStockRequest.updateMany(
@@ -247,7 +306,7 @@ export async function syncLowStockRequests(
     openRequest.currentStock = available;
     openRequest.minimumStock = min;
     openRequest.requiredQuantity = Math.max(openRequest.requiredQuantity, requiredQty || 1);
-    openRequest.priority = getStockPriority(available, min);
+    openRequest.priority = getStockPriority(available, min, max, equipment.quantity);
     await openRequest.save();
     return;
   }
@@ -265,29 +324,31 @@ export async function syncLowStockRequests(
     currentStock: available,
     minimumStock: min,
     requiredQuantity: requiredQty || 1,
-    priority: getStockPriority(available, min),
+    priority: getStockPriority(available, min, max, equipment.quantity),
     requestedByUserId,
     requestDateBs: getTodayBs(),
     status: "PENDING",
     autoGenerated: true
   });
 
-  await notifyLowStock(schoolId, equipment, available, min);
+  await notifyLowStock(schoolId, equipment, available, min, max);
 }
 
 async function notifyLowStock(
   schoolId: string,
   equipment: LaboratoryEquipmentDocument,
   available: number,
-  min: number
+  min: number,
+  max = 0
 ): Promise<void> {
   try {
     const lab = await Laboratory.findById(equipment.laboratoryId)
       .select("name inChargeTeacherId")
       .lean();
-    const status = getLabStockStatus(available, equipment.quantity, min);
+    const status = getLabStockStatus(available, equipment.quantity, min, max);
     const title = status === "OUT_OF_STOCK" ? "Laboratory out of stock" : "Laboratory low stock alert";
-    const message = `${equipment.name} in ${lab?.name ?? "laboratory"}: ${available} remaining (min ${min}).`;
+    const maxPart = max > 0 ? `, max ${max}` : "";
+    const message = `${equipment.name} in ${lab?.name ?? "laboratory"}: ${available} remaining (min ${min}${maxPart}).`;
 
     const recipientIds = new Set<string>();
 

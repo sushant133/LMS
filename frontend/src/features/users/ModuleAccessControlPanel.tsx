@@ -129,13 +129,18 @@ export const ModuleAccessControlPanel = ({
     }) =>
       unwrap(api.put(`/users/${userId}/module-access`, payload)),
     onSuccess: async () => {
-      toast.success("Department access & permissions updated");
+      toast.success(
+        "Department access & permissions updated. Designation will appear on the teacher account after they refresh or re-login.",
+      );
       setReason("");
       setActivePreset("");
       await queryClient.invalidateQueries({
         queryKey: ["users", userId, "module-access"],
       });
+      // Refresh current session (if admin edited themselves) and teacher list
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      await queryClient.refetchQueries({ queryKey: ["auth", "me"] });
+      await queryClient.invalidateQueries({ queryKey: ["teachers"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });

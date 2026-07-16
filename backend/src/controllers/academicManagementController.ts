@@ -187,7 +187,8 @@ export const createSessionPlan = asyncHandler(async (req: Request, res: Response
         schoolId: tenantObjectId(req),
         sessionPlanId: createdPlan._id,
         syllabusId: unit.syllabusId?.trim() || undefined,
-        syllabusChapterId: unit.syllabusChapterId?.trim() || undefined
+        syllabusChapterId: unit.syllabusChapterId?.trim() || undefined,
+        syllabusUnitId: unit.syllabusUnitId?.trim() || undefined
       })),
       { session }
     );
@@ -236,7 +237,8 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
             sessionPlanId: existing._id,
             status: preservedStatus,
             syllabusId: unit.syllabusId?.trim() || undefined,
-            syllabusChapterId: unit.syllabusChapterId?.trim() || undefined
+            syllabusChapterId: unit.syllabusChapterId?.trim() || undefined,
+            syllabusUnitId: unit.syllabusUnitId?.trim() || undefined
           });
           await prev.save({ session });
         } else {
@@ -248,7 +250,8 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
                 schoolId: tenantObjectId(req),
                 sessionPlanId: existing._id,
                 syllabusId: unit.syllabusId?.trim() || undefined,
-                syllabusChapterId: unit.syllabusChapterId?.trim() || undefined
+                syllabusChapterId: unit.syllabusChapterId?.trim() || undefined,
+                syllabusUnitId: unit.syllabusUnitId?.trim() || undefined
               }
             ],
             { session }
@@ -746,9 +749,33 @@ export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: R
   const serialized = await serializeSyllabus(existing._id.toString());
   if (serialized?.chapters) {
     const { chaptersToLegacyUnits } = await import("../utils/syllabusHierarchyService.js");
+    const mapSubInput = (
+      s: (typeof serialized.chapters)[number]["units"][number]["subUnits"][number]
+    ): import("@phit-erp/shared").AcademicSyllabusSubUnitInputShape => ({
+      subUnitNo: s.subUnitNo,
+      heading: s.heading,
+      description: s.description,
+      learningOutcomes: s.learningOutcomes,
+      internalAssessment: s.internalAssessment,
+      practicalRequired: s.practicalRequired,
+      labName: s.labName,
+      requiredEquipment: s.requiredEquipment,
+      hospitalPosting: s.hospitalPosting,
+      clinicalHours: s.clinicalHours,
+      references: s.references,
+      teachingHours: s.teachingHours,
+      attachments: s.attachments,
+      remarks: s.remarks,
+      status: s.status,
+      teachingNotes: s.teachingNotes,
+      teacherAttachments: s.teacherAttachments,
+      todaysCoverage: s.todaysCoverage,
+      children: (s.children ?? []).map(mapSubInput)
+    });
     const legacy = chaptersToLegacyUnits(
       serialized.chapters.map((c) => ({
         chapterNo: c.chapterNo,
+        sectionKind: c.sectionKind || (c.title ? "CHAPTER" : "NONE"),
         title: c.title,
         description: c.description,
         estimatedHours: c.estimatedHours,
@@ -764,26 +791,8 @@ export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: R
           learningObjective: u.learningObjective,
           references: u.references,
           remarks: u.remarks,
-          subUnits: u.subUnits.map((s) => ({
-            subUnitNo: s.subUnitNo,
-            heading: s.heading,
-            description: s.description,
-            learningOutcomes: s.learningOutcomes,
-            internalAssessment: s.internalAssessment,
-            practicalRequired: s.practicalRequired,
-            labName: s.labName,
-            requiredEquipment: s.requiredEquipment,
-            hospitalPosting: s.hospitalPosting,
-            clinicalHours: s.clinicalHours,
-            references: s.references,
-            teachingHours: s.teachingHours,
-            attachments: s.attachments,
-            remarks: s.remarks,
-            status: s.status,
-            teachingNotes: s.teachingNotes,
-            teacherAttachments: s.teacherAttachments,
-            todaysCoverage: s.todaysCoverage
-          }))
+          practicalRequired: Boolean(u.practicalRequired),
+          subUnits: u.subUnits.map(mapSubInput)
         }))
       })),
       existing._id.toString()
@@ -960,8 +969,11 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     academicYearBs: payload.academicYearBs
   });
   await assertLessonPlanItemsBelongToSessionPlan(req, payload.sessionPlanId, payload.items);
+  // One lesson plan = one teaching day
+  const teachingDateBs =
+    (payload.teachingDateBs || payload.startDateBs || payload.endDateBs || "").trim();
   const derivedMonth =
-    payload.month || getNepaliMonthNameFromBsDate(payload.startDateBs) || "";
+    payload.month || getNepaliMonthNameFromBsDate(teachingDateBs) || "";
   await assertNoDuplicateLessonPlanUnitsInMonth(req, {
     sessionPlanId: payload.sessionPlanId,
     teacherId: payload.teacherId,
@@ -976,6 +988,9 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
       [
         {
           ...payload,
+          teachingDateBs,
+          startDateBs: teachingDateBs,
+          endDateBs: teachingDateBs,
           month: derivedMonth,
           schoolId: tenantObjectId(req),
           status: "DRAFT",
@@ -1023,14 +1038,17 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
           estimatedClasses:
             item.estimatedClasses ||
             Math.max(1, Math.round(unit?.estimatedTeachingHours || 1)),
-          // Inherit syllabus chapter link from session unit when client omits hierarchy ids
+          // Inherit syllabus unit link from session unit when client omits hierarchy ids
           syllabusId:
             item.syllabusId?.trim() || unitAny?.syllabusId?.toString?.() || undefined,
           syllabusChapterId:
             item.syllabusChapterId?.trim() ||
             unitAny?.syllabusChapterId?.toString?.() ||
             undefined,
-          syllabusUnitId: item.syllabusUnitId?.trim() || undefined,
+          syllabusUnitId:
+            item.syllabusUnitId?.trim() ||
+            (unitAny as { syllabusUnitId?: { toString(): string } })?.syllabusUnitId?.toString?.() ||
+            undefined,
           syllabusSubUnitId: item.syllabusSubUnitId?.trim() || undefined,
           schoolId: tenantObjectId(req),
           lessonPlanId: createdPlan._id
@@ -1065,14 +1083,16 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   const subjectId = payload.subjectId ?? existing.subjectId.toString();
   const teacherId = payload.teacherId ?? existing.teacherId.toString();
   const academicYearBs = payload.academicYearBs ?? existing.academicYearBs;
-  const startDateBs =
-    payload.startDateBs ??
-    (existing as { startDateBs?: string }).startDateBs ??
-    "";
+  const teachingDateBs =
+    (payload.teachingDateBs ||
+      payload.startDateBs ||
+      (existing as { teachingDateBs?: string }).teachingDateBs ||
+      (existing as { startDateBs?: string }).startDateBs ||
+      "").trim();
   const month =
     payload.month ||
     existing.month ||
-    (startDateBs ? getNepaliMonthNameFromBsDate(startDateBs) : "");
+    (teachingDateBs ? getNepaliMonthNameFromBsDate(teachingDateBs) : "");
 
   await assertApprovedSessionPlanForLesson(req, sessionPlanId, {
     subjectId,
@@ -1099,6 +1119,9 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
     Object.assign(existing, safePayload, {
       sessionPlanId,
       month,
+      teachingDateBs,
+      startDateBs: teachingDateBs,
+      endDateBs: teachingDateBs,
       audit: { ...existing.audit, updatedBy: actorObjectId(req) }
     });
     await existing.save({ session });

@@ -149,6 +149,20 @@ export const libraryBookCopyInputSchema = z.object({
   priceNpr: z.coerce.number().min(0, "Price cannot be negative").optional().default(0)
 });
 
+/**
+ * Update fields for an existing physical copy.
+ * ISSUED status is managed only via issue/return flows — inventory may set
+ * AVAILABLE / LOST / DAMAGED / MAINTENANCE when the copy is not currently issued.
+ */
+export const libraryBookCopyUpdateSchema = z.object({
+  bookCode: z.string().trim().min(1, "Book code is required").optional(),
+  shelfLocation: z.string().optional().or(z.literal("")),
+  condition: z.string().optional().or(z.literal("")),
+  publication: z.string().trim().optional().or(z.literal("")),
+  priceNpr: z.coerce.number().min(0, "Price cannot be negative").optional(),
+  status: z.enum(["AVAILABLE", "LOST", "DAMAGED", "MAINTENANCE"]).optional()
+});
+
 export const libraryYearLevelSchema = z.enum(LIBRARY_YEAR_LEVELS);
 
 export const libraryBookSchema = z
@@ -318,6 +332,7 @@ export type SendNotificationInput = z.infer<typeof sendNotificationSchema>;
 export type LibraryBookInput = z.infer<typeof libraryBookSchema>;
 export type LibraryBookUpdateInput = z.infer<typeof libraryBookUpdateSchema>;
 export type LibraryBookCopyInput = z.infer<typeof libraryBookCopyInputSchema>;
+export type LibraryBookCopyUpdateInput = z.infer<typeof libraryBookCopyUpdateSchema>;
 export type LibraryIssueInput = z.infer<typeof libraryIssueSchema>;
 export type ModuleStaffInput = z.infer<typeof moduleStaffSchema>;
 export type TransportRouteInput = z.infer<typeof transportRouteSchema>;

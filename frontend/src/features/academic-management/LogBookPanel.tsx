@@ -25,8 +25,10 @@ import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
+import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
 import {
   dedupeYearsForSelect,
@@ -166,6 +168,12 @@ export const LogBookPanel = ({
     }
     return filterSubjectsByClass(subjects, form.classId);
   }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
+
+  const selectedFormSubject = useMemo(
+    () => subjectOptions.find((s) => s._id === form.subjectId),
+    [subjectOptions, form.subjectId],
+  );
+  const formNepaliText = isNepaliSubject(selectedFormSubject);
 
   const effectiveTeacherId =
     teacherId || form.teacherId || filters.teacherId || "";
@@ -888,6 +896,17 @@ export const LogBookPanel = ({
               </FormField>
             </div>
 
+            {formNepaliText ? (
+              <NepaliSubjectBanner
+                compact
+                subjectName={
+                  selectedFormSubject
+                    ? `${selectedFormSubject.name}${selectedFormSubject.code ? ` (${selectedFormSubject.code})` : ""}`
+                    : undefined
+                }
+              />
+            ) : null}
+
             {isTeacher && (timetableQuery.data?.length ?? 0) > 0 ? (
               <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
                 <p className="mb-2 text-sm font-medium text-brand-900">
@@ -955,16 +974,6 @@ export const LogBookPanel = ({
                       className="bg-slate-50"
                     />
                   </FormField>
-                  <div className="sm:col-span-2">
-                    <FormField label="Objectives">
-                      <Textarea
-                        value={form.objectives}
-                        readOnly
-                        rows={2}
-                        className="bg-slate-50"
-                      />
-                    </FormField>
-                  </div>
                 </div>
               ) : null}
             </div>
@@ -1020,13 +1029,16 @@ export const LogBookPanel = ({
                   ) : (
                     <Input
                       value={form.topicCovered}
+                      nepali={formNepaliText}
                       onChange={(event) =>
                         setForm((current) => ({
                           ...current,
                           topicCovered: event.target.value,
                         }))
                       }
-                      placeholder="Topic taught"
+                      placeholder={
+                        formNepaliText ? "पढाइएको विषय" : "Topic taught"
+                      }
                     />
                   )}
                 </FormField>
@@ -1037,66 +1049,88 @@ export const LogBookPanel = ({
               <FormField label="Teaching method">
                 <Input
                   value={form.teachingMethod}
+                  nepali={formNepaliText}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
                       teachingMethod: event.target.value,
                     }))
                   }
-                  placeholder="Lecture, discussion, demo…"
+                  placeholder={
+                    formNepaliText
+                      ? "प्रवचन, छलफल…"
+                      : "Lecture, discussion, demo…"
+                  }
                 />
               </FormField>
-              <FormField label="Teaching aids">
-                <Input
-                  value={form.teachingAids}
+              <FormField label="Objectives">
+                <Textarea
+                  value={form.objectives}
+                  nepali={formNepaliText}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      teachingAids: event.target.value,
+                      objectives: event.target.value,
                     }))
                   }
-                  placeholder="Board, projector, models…"
+                  placeholder={
+                    formNepaliText
+                      ? "विद्यार्थीहरू सक्षम हुनेछन्:\n• …"
+                      : "Students will be able to:\n• Explain the skeletal system.\n• Identify different bones.\n• Understand bone functions."
+                  }
                 />
               </FormField>
               <FormField label="Feedback">
                 <Textarea
                   value={form.feedback}
+                  nepali={formNepaliText}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
                       feedback: event.target.value,
                     }))
                   }
-                  placeholder="Student feedback / class response"
+                  placeholder={
+                    formNepaliText
+                      ? "विद्यार्थी प्रतिक्रिया"
+                      : "Student feedback / class response"
+                  }
                 />
               </FormField>
               <FormField label="Additional remarks (optional)">
                 <Textarea
                   value={form.difficultiesFaced}
+                  nepali={formNepaliText}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
                       difficultiesFaced: event.target.value,
                     }))
                   }
-                  placeholder="Difficulties or extra notes"
+                  placeholder={
+                    formNepaliText
+                      ? "अतिरिक्त टिप्पणी"
+                      : "Difficulties or extra notes"
+                  }
                 />
               </FormField>
               <FormField label="Homework given">
                 <Textarea
                   value={form.homeworkGiven}
+                  nepali={formNepaliText}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
                       homeworkGiven: event.target.value,
                     }))
                   }
-                  placeholder="Optional"
+                  placeholder={formNepaliText ? "गृहकार्य" : "Optional"}
                 />
               </FormField>
               <FormField label="Next class plan">
                 <Textarea
                   value={form.nextClassPlan}
+                  nepali={formNepaliText}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,

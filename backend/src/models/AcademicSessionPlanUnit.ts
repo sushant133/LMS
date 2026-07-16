@@ -21,9 +21,10 @@ const unitSchema = new Schema(
       default: "PENDING"
     },
     attachmentUrl: { type: String },
-    /** Optional link to hierarchical syllabus (Chapter level). */
+    /** Optional link to hierarchical syllabus unit (import source). */
     syllabusId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabus" },
-    syllabusChapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter" }
+    syllabusChapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter" },
+    syllabusUnitId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusTopic" }
   },
   { timestamps: true }
 );

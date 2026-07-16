@@ -499,6 +499,8 @@ export const examSchema = z.object({
 });
 
 export const examRoutineSchema = z.object({
+  /** College: year this routine entry belongs to (1st / 2nd / 3rd). */
+  yearId: optionalObjectIdSchema,
   subjectId: objectIdSchema,
   examDateBs: bsDateSchema,
   day: z.string().min(1),

@@ -17,9 +17,16 @@
 
 :root {
   --app-sidebar-width: 18rem;
-  font-family: "Noto Sans Devanagari", "IBM Plex Sans", sans-serif;
+  font-family: "IBM Plex Sans", "Noto Sans Devanagari", system-ui, sans-serif;
   color: #0f172a;
   background: #f8fafc;
+}
+
+/* Nepali / Devanagari content fields (Nepali subjects only) */
+.font-nepali {
+  font-family: "Noto Sans Devanagari", "Noto Sans", "IBM Plex Sans", sans-serif;
+  font-feature-settings: "kern" 1, "liga" 1;
+  line-height: 1.65;
 }
 
 * {

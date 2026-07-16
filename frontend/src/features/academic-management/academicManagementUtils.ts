@@ -239,6 +239,7 @@ export const mapSourceUnitToSessionUnit = (
     status?: string;
     syllabusId?: string;
     syllabusChapterId?: string;
+    syllabusUnitId?: string;
   },
   index: number,
 ) => ({
@@ -256,11 +257,42 @@ export const mapSourceUnitToSessionUnit = (
   status: (unit.status as "PENDING" | "IN_PROGRESS" | "COMPLETED" | "DELAYED") || "PENDING",
   syllabusId: unit.syllabusId || "",
   syllabusChapterId: unit.syllabusChapterId || "",
+  syllabusUnitId: unit.syllabusUnitId || "",
 });
 
+type NestedSubLike = {
+  _id: string;
+  heading: string;
+  learningOutcomes?: string;
+  practicalRequired?: boolean;
+  internalAssessment?: string;
+  teachingHours?: number;
+  children?: NestedSubLike[];
+};
+
+const flattenNestedSubs = (subs: NestedSubLike[]): NestedSubLike[] => {
+  const out: NestedSubLike[] = [];
+  const walk = (nodes: NestedSubLike[]) => {
+    for (const n of nodes) {
+      out.push(n);
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(subs);
+  return out;
+};
+
+const formatSessionUnitHeading = (unitNo: number, title: string): string => {
+  const trimmed = (title || "").trim();
+  if (!trimmed) return `Unit ${unitNo}`;
+  if (/^unit\s*\d+/i.test(trimmed)) return trimmed;
+  return `Unit ${unitNo} : ${trimmed}`;
+};
+
 /**
- * Import hierarchical syllabus (Chapter → Unit → Sub Unit) into Session Plan units.
- * Each syllabus Chapter becomes one Session Plan unit; sub-unit headings become topicsCovered lines.
+ * Import hierarchical syllabus into Session Plan units.
+ * Only Unit headings appear (Sub Units are not listed as Session Plan rows).
+ * Workflow: Syllabus Units → Session Plan schedule.
  */
 export const mapSyllabusHierarchyToSessionUnits = (
   syllabus: {
@@ -275,17 +307,14 @@ export const mapSyllabusHierarchyToSessionUnits = (
       tentativeCompletionMonth?: string;
       units: Array<{
         _id: string;
+        unitNo?: number;
         title: string;
+        description?: string;
         learningObjective?: string;
         teachingHours?: number;
-        subUnits: Array<{
-          _id: string;
-          heading: string;
-          learningOutcomes?: string;
-          practicalRequired?: boolean;
-          internalAssessment?: string;
-          teachingHours?: number;
-        }>;
+        practicalRequired?: boolean;
+        references?: string;
+        subUnits: NestedSubLike[];
       }>;
     }>;
     units?: Array<{
@@ -303,50 +332,64 @@ export const mapSyllabusHierarchyToSessionUnits = (
   },
 ) => {
   if (syllabus.chapters && syllabus.chapters.length > 0) {
-    return syllabus.chapters.map((chapter, index) => {
-      const allSubs = chapter.units.flatMap((u) => u.subUnits);
-      const topicsCovered = allSubs.map((s) => s.heading).filter(Boolean).join("\n");
-      const learningOutcomes =
-        chapter.units
-          .map((u) => u.learningObjective)
-          .filter(Boolean)
-          .join("\n") ||
-        allSubs
-          .map((s) => s.learningOutcomes)
-          .filter(Boolean)
-          .join("\n");
-      const estimatedTeachingHours =
-        chapter.estimatedHours ||
-        chapter.units.reduce(
-          (sum, u) =>
-            sum +
-            (u.teachingHours ||
-              u.subUnits.reduce((s, su) => s + (su.teachingHours || 0), 0)),
-          0,
-        );
-      const practicalRequired = allSubs.some((s) => s.practicalRequired);
-      const internalAssessment = allSubs
-        .map((s) => s.internalAssessment)
-        .filter(Boolean)
-        .join("; ");
+    const rows: Array<ReturnType<typeof mapSourceUnitToSessionUnit> & {
+      syllabusUnitId: string;
+    }> = [];
+    let sequential = 0;
 
-      return {
-        unitNo: chapter.chapterNo || index + 1,
-        chapterName: chapter.title,
-        estimatedTeachingHours,
-        learningOutcomes,
-        topicsCovered: topicsCovered || chapter.description || "",
-        references: chapter.references || "",
-        practicalRequired,
-        internalAssessment,
-        tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
-        startDateBs: "",
-        endDateBs: "",
-        status: "PENDING" as const,
-        syllabusId: syllabus._id,
-        syllabusChapterId: chapter._id,
-      };
-    });
+    for (const chapter of syllabus.chapters) {
+      for (const unit of chapter.units) {
+        sequential += 1;
+        const unitNo = unit.unitNo || sequential;
+        const allSubs = flattenNestedSubs(unit.subUnits ?? []);
+        // Store nested headings for Lesson Plan sub-unit pickers only (not shown as SP rows)
+        const topicsCovered = allSubs.map((s) => s.heading).filter(Boolean).join("\n");
+        const learningOutcomes =
+          unit.learningObjective ||
+          allSubs
+            .map((s) => s.learningOutcomes)
+            .filter(Boolean)
+            .join("\n");
+        const estimatedTeachingHours =
+          unit.teachingHours ||
+          allSubs.reduce((sum, su) => sum + (su.teachingHours || 0), 0);
+        const practicalRequired =
+          Boolean(unit.practicalRequired) ||
+          allSubs.some((s) => s.practicalRequired);
+        const internalAssessment = allSubs
+          .map((s) => s.internalAssessment)
+          .filter(Boolean)
+          .join("; ");
+
+        rows.push({
+          unitNo: sequential,
+          chapterName: formatSessionUnitHeading(unitNo, unit.title),
+          estimatedTeachingHours,
+          learningOutcomes,
+          // Keep topics for downstream Lesson Plan pickers; UI shows heading only
+          topicsCovered: topicsCovered || unit.description || "",
+          references: unit.references || chapter.references || "",
+          practicalRequired,
+          internalAssessment,
+          tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
+          startDateBs: "",
+          endDateBs: "",
+          status: "PENDING" as const,
+          syllabusId: syllabus._id,
+          syllabusChapterId: chapter._id,
+          syllabusUnitId: unit._id,
+        });
+      }
+    }
+
+    return rows.length > 0
+      ? rows
+      : (syllabus.units ?? []).map((unit, index) =>
+          mapSourceUnitToSessionUnit(
+            { ...unit, syllabusId: syllabus._id },
+            index,
+          ),
+        );
   }
 
   // Legacy flat units
@@ -357,14 +400,28 @@ export const mapSyllabusHierarchyToSessionUnits = (
 
 /**
  * Find a syllabus sub-unit matching a topic heading under a chapter/session unit.
+ * Walks unlimited nested children.
  */
 export const matchSyllabusSubUnit = (
   syllabus: {
+    _id?: string;
     chapters?: Array<{
       _id: string;
       units: Array<{
         _id: string;
-        subUnits: Array<{ _id: string; heading: string; learningOutcomes?: string; description?: string }>;
+        subUnits: Array<{
+          _id: string;
+          heading: string;
+          learningOutcomes?: string;
+          description?: string;
+          children?: Array<{
+            _id: string;
+            heading: string;
+            learningOutcomes?: string;
+            description?: string;
+            children?: unknown[];
+          }>;
+        }>;
       }>;
     }>;
   } | null | undefined,
@@ -383,21 +440,45 @@ export const matchSyllabusSubUnit = (
 } | null => {
   if (!syllabus?.chapters?.length || !opts.heading?.trim()) return null;
   const needle = opts.heading.trim().toLowerCase();
+
+  type Nested = {
+    _id: string;
+    heading: string;
+    learningOutcomes?: string;
+    description?: string;
+    children?: Nested[];
+  };
+
+  const findInTree = (
+    nodes: Nested[],
+    chapterId: string,
+    unitId: string,
+  ): ReturnType<typeof matchSyllabusSubUnit> => {
+    for (const sub of nodes) {
+      if (sub.heading.trim().toLowerCase() === needle) {
+        return {
+          syllabusId: syllabus._id,
+          syllabusChapterId: chapterId,
+          syllabusUnitId: unitId,
+          syllabusSubUnitId: sub._id,
+          heading: sub.heading,
+          learningOutcomes: sub.learningOutcomes,
+          description: sub.description,
+        };
+      }
+      if (sub.children?.length) {
+        const found = findInTree(sub.children, chapterId, unitId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
   for (const chapter of syllabus.chapters) {
     if (opts.syllabusChapterId && chapter._id !== opts.syllabusChapterId) continue;
     for (const unit of chapter.units) {
-      for (const sub of unit.subUnits) {
-        if (sub.heading.trim().toLowerCase() === needle) {
-          return {
-            syllabusChapterId: chapter._id,
-            syllabusUnitId: unit._id,
-            syllabusSubUnitId: sub._id,
-            heading: sub.heading,
-            learningOutcomes: sub.learningOutcomes,
-            description: sub.description,
-          };
-        }
-      }
+      const found = findInTree(unit.subUnits as Nested[], chapter._id, unit._id);
+      if (found) return found;
     }
   }
   return null;
@@ -405,6 +486,22 @@ export const matchSyllabusSubUnit = (
 
 export const remainingPercentOf = (completedPercent: number): number =>
   Math.max(0, 100 - Math.min(100, completedPercent));
+
+const flattenExportSubs = <
+  T extends { children?: T[]; displayNo?: string; heading?: string },
+>(
+  subs: T[],
+): T[] => {
+  const out: T[] = [];
+  const walk = (nodes: T[]) => {
+    for (const n of nodes) {
+      out.push(n);
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(subs);
+  return out;
+};
 
 const exportUnitBasedPlansExcel = (
   plans: AcademicSessionPlanRecord[] | AcademicSyllabusRecord[],
@@ -417,8 +514,9 @@ const exportUnitBasedPlansExcel = (
     if (syllabus.chapters && syllabus.chapters.length > 0) {
       for (const chapter of syllabus.chapters) {
         for (const unit of chapter.units) {
-          if (unit.subUnits.length > 0) {
-            for (const sub of unit.subUnits) {
+          const flatSubs = flattenExportSubs(unit.subUnits ?? []);
+          if (flatSubs.length > 0) {
+            for (const sub of flatSubs) {
               rows.push({
                 "Academic Year": plan.academicYearBs,
                 Faculty: plan.faculty ?? "",
@@ -458,7 +556,7 @@ const exportUnitBasedPlansExcel = (
               Heading: "",
               "Teaching Hours": unit.teachingHours,
               "Learning Outcomes": unit.learningObjective,
-              Practical: "",
+              Practical: unit.practicalRequired ? "Yes" : "No",
               Status: "",
             });
           }

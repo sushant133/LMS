@@ -1,5 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import type { AcademicSyllabusRecord } from "@phit-erp/shared";
+import type {
+  AcademicSyllabusRecord,
+  AcademicSyllabusSubUnitRecord,
+} from "@phit-erp/shared";
 import { useMemo } from "react";
 import { Select } from "components/ui/select";
 import { FormField } from "components/shared/FormField";
@@ -14,6 +17,8 @@ export interface SyllabusHierarchySelection {
   unitTitle?: string;
   subUnitHeading?: string;
   displayNo?: string;
+  learningOutcomes?: string;
+  description?: string;
 }
 
 interface SyllabusHierarchyPickerProps {
@@ -24,6 +29,11 @@ interface SyllabusHierarchyPickerProps {
   disabled?: boolean;
   /** Compact single-row layout for dialogs. */
   compact?: boolean;
+  /**
+   * When true, only show Chapter + Unit (no sub-units).
+   * Used when selecting a Session Plan unit heading.
+   */
+  unitsOnly?: boolean;
 }
 
 const emptySelection = (): SyllabusHierarchySelection => ({
@@ -33,8 +43,23 @@ const emptySelection = (): SyllabusHierarchySelection => ({
   subUnitId: "",
 });
 
+/** Flatten nested sub-units for a single select (path labels preserved via displayNo). */
+const flattenSubs = (
+  subs: AcademicSyllabusSubUnitRecord[],
+): AcademicSyllabusSubUnitRecord[] => {
+  const out: AcademicSyllabusSubUnitRecord[] = [];
+  const walk = (nodes: AcademicSyllabusSubUnitRecord[]) => {
+    for (const n of nodes) {
+      out.push(n);
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(subs);
+  return out;
+};
+
 /**
- * Cascading picker: Syllabus → Chapter → Unit → Sub Unit.
+ * Cascading picker: Chapter (optional) → Unit → Sub Unit (incl. nested children).
  * Used by Lesson Plan, Homework, and Attendance coverage flows.
  */
 export const SyllabusHierarchyPicker = ({
@@ -44,6 +69,7 @@ export const SyllabusHierarchyPicker = ({
   onChange,
   disabled = false,
   compact = false,
+  unitsOnly = false,
 }: SyllabusHierarchyPickerProps) => {
   const syllabiQuery = useQuery({
     queryKey: ["academic-management", "syllabi-picker", subjectId, academicYearBs],
@@ -68,7 +94,13 @@ export const SyllabusHierarchyPicker = ({
   const selectedChapter = chapters.find((c) => c._id === value.chapterId);
   const units = selectedChapter?.units ?? [];
   const selectedUnit = units.find((u) => u._id === value.unitId);
-  const subUnits = selectedUnit?.subUnits ?? [];
+  const flatSubUnits = useMemo(
+    () => flattenSubs(selectedUnit?.subUnits ?? []),
+    [selectedUnit],
+  );
+
+  // When only one chapter (or ungrouped), auto-expose its units
+  const chaptersWithUnits = chapters.filter((c) => c.units.length > 0);
 
   const gridClass = compact
     ? "grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
@@ -84,7 +116,7 @@ export const SyllabusHierarchyPicker = ({
 
   return (
     <div className={gridClass}>
-      <FormField label="Chapter">
+      <FormField label="Chapter or Part (optional)">
         <Select
           disabled={disabled || syllabiQuery.isLoading}
           value={value.chapterId}
@@ -99,12 +131,25 @@ export const SyllabusHierarchyPicker = ({
             });
           }}
         >
-          <option value="">Select chapter</option>
-          {chapters.map((ch) => (
-            <option key={ch._id} value={ch._id}>
-              Ch {ch.chapterNo}: {ch.title}
-            </option>
-          ))}
+          <option value="">Select section</option>
+          {chaptersWithUnits.map((ch) => {
+            const kind = ch.sectionKind || (ch.title ? "CHAPTER" : "NONE");
+            const label =
+              kind === "CHAPTER"
+                ? ch.title
+                  ? `Chapter ${ch.chapterNo}: ${ch.title}`
+                  : `Chapter ${ch.chapterNo}`
+                : kind === "PART"
+                  ? ch.title
+                    ? `Part ${ch.chapterNo}: ${ch.title}`
+                    : `Part ${ch.chapterNo}`
+                  : ch.title || `Units (section ${ch.chapterNo})`;
+            return (
+              <option key={ch._id} value={ch._id}>
+                {label}
+              </option>
+            );
+          })}
         </Select>
       </FormField>
       <FormField label="Unit">
@@ -116,11 +161,14 @@ export const SyllabusHierarchyPicker = ({
             const unit = units.find((u) => u._id === unitId);
             onChange({
               ...value,
+              syllabusId: selectedSyllabus?._id || value.syllabusId,
               unitId,
               unitTitle: unit?.title,
               subUnitId: "",
               subUnitHeading: undefined,
               displayNo: undefined,
+              learningOutcomes: unit?.learningObjective,
+              description: unit?.description,
             });
           }}
         >
@@ -132,36 +180,42 @@ export const SyllabusHierarchyPicker = ({
           ))}
         </Select>
       </FormField>
-      <FormField label="Sub Unit">
-        <Select
-          disabled={disabled || !value.unitId}
-          value={value.subUnitId}
-          onChange={(e) => {
-            const subUnitId = e.target.value;
-            const sub = subUnits.find((s) => s._id === subUnitId);
-            onChange({
-              ...value,
-              syllabusId: selectedSyllabus?._id || value.syllabusId,
-              subUnitId,
-              subUnitHeading: sub?.heading,
-              displayNo: sub?.displayNo,
-            });
-          }}
-        >
-          <option value="">Select sub unit</option>
-          {subUnits.map((s) => (
-            <option key={s._id} value={s._id}>
-              {s.displayNo} {s.heading}
-            </option>
-          ))}
-        </Select>
-      </FormField>
-      {value.subUnitHeading ? (
-        <div className="flex items-end">
-          <p className="rounded-xl border border-brand-100 bg-brand-50/50 px-3 py-2 text-xs text-brand-900">
-            Linked: {value.displayNo} {value.subUnitHeading}
-          </p>
-        </div>
+      {!unitsOnly ? (
+        <FormField label="Sub Unit / Child">
+          <Select
+            disabled={disabled || !value.unitId}
+            value={value.subUnitId}
+            onChange={(e) => {
+              const subUnitId = e.target.value;
+              const sub = flatSubUnits.find((s) => s._id === subUnitId);
+              onChange({
+                ...value,
+                syllabusId: selectedSyllabus?._id || value.syllabusId,
+                subUnitId,
+                subUnitHeading: sub?.heading,
+                displayNo: sub?.displayNo,
+                learningOutcomes:
+                  sub?.learningOutcomes || value.learningOutcomes,
+                description: sub?.description || value.description,
+              });
+            }}
+          >
+            <option value="">Whole unit (optional sub-unit)</option>
+            {flatSubUnits.map((s) => (
+              <option key={s._id} value={s._id}>
+                {s.displayNo} {s.heading}
+                {s.depth > 0 ? ` (depth ${s.depth})` : ""}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+      ) : null}
+      {value.unitId || value.subUnitId ? (
+        <p className="text-xs text-slate-600 sm:col-span-2">
+          Linked:{" "}
+          {value.displayNo ? `${value.displayNo} ` : ""}
+          {value.subUnitHeading || value.unitTitle || "Selected"}
+        </p>
       ) : null}
     </div>
   );

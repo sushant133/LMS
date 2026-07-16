@@ -1,9 +1,9 @@
-import { COLLEGE_YEAR_NAMES, type MasterSubjectRecord } from "@phit-erp/shared";
+import { COLLEGE_PROGRAM_YEAR_NAMES, type MasterSubjectRecord } from "@phit-erp/shared";
 import { saveAs } from "file-saver";
 import * as XLSX from "xlsx";
 
 const yearLevelLabel = (level: number): string =>
-  COLLEGE_YEAR_NAMES[level - 1] ?? `Year ${level}`;
+  COLLEGE_PROGRAM_YEAR_NAMES[level - 1] ?? `Year ${level}`;
 
 const HEADERS = [
   "S.N.",

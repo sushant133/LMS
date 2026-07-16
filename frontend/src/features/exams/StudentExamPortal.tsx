@@ -130,13 +130,17 @@ export const StudentExamPortal = ({
     <PageContent className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Upcoming Exam Routines</CardTitle>
+          <CardTitle>My year — exam schedule</CardTitle>
+          <p className="text-sm text-slate-600">
+            Only routines for your enrolled year are shown (1st year students
+            see 1st year only, etc.).
+          </p>
         </CardHeader>
         <CardContent>
           {upcomingRoutines.length === 0 ? (
             <EmptyState
               title="No published routines"
-              description="Your exam schedule will appear here once the college admin publishes the routine."
+              description="Your exam schedule will appear here once the college admin publishes the routine for your year."
             />
           ) : (
             <div className="overflow-x-auto">

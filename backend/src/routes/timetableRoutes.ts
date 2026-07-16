@@ -6,9 +6,25 @@ import { tenantGuard } from "../middleware/tenant.js";
 const router = Router();
 
 router.use(protect, tenantGuard);
-router.get("/", listTimetable);
-router.post("/", authorize("COLLEGE_ADMIN", "TEACHER"), createTimetableSlot);
-router.put("/:id", authorize("COLLEGE_ADMIN", "TEACHER"), updateTimetableSlot);
-router.delete("/:id", authorizeInstitutionAdmin, deleteTimetableSlot);
+router.get(
+  "/",
+  authorize(
+    "SUPER_ADMIN",
+    "COLLEGE_ADMIN",
+    "COLLEGE_VIEWER",
+    "TEACHER",
+    "STUDENT",
+    "PRINCIPAL"
+  ),
+  listTimetable
+);
+router.post("/", authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER"), createTimetableSlot);
+router.put("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER"), updateTimetableSlot);
+// Admin may delete any slot; teachers delete only own (enforced in controller)
+router.delete(
+  "/:id",
+  authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER"),
+  deleteTimetableSlot
+);
 
 export default router;

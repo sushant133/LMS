@@ -91,6 +91,8 @@ export interface LaboratoryEquipmentRecord {
   availableQuantity: number;
   issuedQuantity: number;
   minimumStockLevel: number;
+  /** Full / target capacity for this item (0 = not set). */
+  maximumStockLevel: number;
   requiredQuantity: number;
   purchaseDateBs?: string;
   supplier?: string;

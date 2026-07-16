@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  libraryBookCopyUpdateSchema,
   libraryBookSchema,
   libraryBookUpdateSchema,
   libraryInventoryAccessSchema,
@@ -397,6 +398,107 @@ export const deleteBook = asyncHandler(async (req: Request, res: Response) => {
   await LibraryIssue.deleteMany(withTenantScope(req, { bookId, status: "RETURNED" }));
 
   return sendSuccess(res, "Book deleted");
+});
+
+export const updateBookCopy = asyncHandler(async (req: Request, res: Response) => {
+  await assertLibraryInventoryWriteAccess(req);
+  const payload = libraryBookCopyUpdateSchema.parse(req.body);
+  const schoolId = req.tenantSchoolId!;
+  const copyId = req.params.id;
+
+  const copy = await LibraryBookCopy.findOne({ _id: copyId, schoolId });
+  if (!copy) {
+    throw new ApiError(404, "Physical book copy not found");
+  }
+
+  if (copy.status === "ISSUED" && payload.status !== undefined) {
+    throw new ApiError(
+      400,
+      "This copy is currently issued. Return it first before changing status in inventory."
+    );
+  }
+
+  if (payload.bookCode !== undefined) {
+    const nextCode = normalizeBookCode(payload.bookCode);
+    if (nextCode !== copy.bookCode) {
+      await assertCodesUniqueInSchool(schoolId, [nextCode], [copy._id.toString()]);
+      copy.bookCode = nextCode;
+    }
+  }
+
+  if (payload.shelfLocation !== undefined) {
+    copy.shelfLocation = payload.shelfLocation.trim() || undefined;
+  }
+  if (payload.condition !== undefined) {
+    copy.condition = payload.condition.trim() || undefined;
+  }
+  if (payload.publication !== undefined) {
+    copy.publication = payload.publication.trim() || undefined;
+  }
+  if (payload.priceNpr !== undefined) {
+    copy.priceNpr = payload.priceNpr >= 0 ? payload.priceNpr : 0;
+  }
+  if (payload.status !== undefined) {
+    copy.status = payload.status;
+  }
+
+  try {
+    await copy.save();
+  } catch (error: unknown) {
+    const isDup =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: number }).code === 11000;
+    if (isDup) {
+      throw new ApiError(409, "Book code already exists. Each physical copy needs a unique code.");
+    }
+    throw error;
+  }
+
+  await syncBookCopyCounts(copy.bookId, schoolId);
+
+  return sendSuccess(res, "Book copy updated", {
+    _id: copy._id.toString(),
+    schoolId: copy.schoolId.toString(),
+    bookId: copy.bookId.toString(),
+    bookCode: copy.bookCode,
+    status: copy.status,
+    shelfLocation: copy.shelfLocation,
+    condition: copy.condition,
+    publication: copy.publication,
+    priceNpr: copy.priceNpr ?? 0
+  });
+});
+
+export const deleteBookCopy = asyncHandler(async (req: Request, res: Response) => {
+  await assertLibraryInventoryWriteAccess(req);
+  const schoolId = req.tenantSchoolId!;
+  const copyId = req.params.id;
+
+  const copy = await LibraryBookCopy.findOne({ _id: copyId, schoolId });
+  if (!copy) {
+    throw new ApiError(404, "Physical book copy not found");
+  }
+
+  if (copy.status === "ISSUED") {
+    throw new ApiError(400, "Cannot delete a copy that is currently issued. Return it first.");
+  }
+
+  const activeIssues = await LibraryIssue.countDocuments(
+    withTenantScope(req, { copyId: copy._id, status: { $in: ["ISSUED", "OVERDUE"] } })
+  );
+  if (activeIssues > 0) {
+    throw new ApiError(400, "Cannot delete a copy with active issues. Return it first.");
+  }
+
+  const bookId = copy.bookId;
+  await LibraryBookCopy.deleteOne({ _id: copy._id, schoolId });
+  // Keep historical returned issues; clear only returned rows for this copy is optional —
+  // leave history, just drop the physical inventory row.
+  await syncBookCopyCounts(bookId, schoolId);
+
+  return sendSuccess(res, "Book copy deleted");
 });
 
 export const listIssues = asyncHandler(async (req: Request, res: Response) => {
