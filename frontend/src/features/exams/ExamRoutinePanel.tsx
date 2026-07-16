@@ -64,6 +64,15 @@ const isProgramYear = (year: YearOption) => {
   return true;
 };
 
+const idStr = (value: unknown): string => {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null && "_id" in value) {
+    return String((value as { _id: unknown })._id ?? "");
+  }
+  return String(value);
+};
+
 export const ExamRoutinePanel = ({
   exam,
   subjects,
@@ -82,38 +91,89 @@ export const ExamRoutinePanel = ({
   const batchNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const batch of batches) {
-      map.set(batch._id, batch.name);
+      map.set(idStr(batch._id), batch.name);
     }
     return map;
   }, [batches]);
 
+  const yearById = useMemo(() => {
+    const map = new Map<string, YearOption>();
+    for (const year of years) {
+      map.set(idStr(year._id), {
+        ...year,
+        _id: idStr(year._id),
+        batchId: year.batchId ? idStr(year.batchId) : undefined,
+      });
+    }
+    return map;
+  }, [years]);
+
   const yearLabel = (year: YearOption) => {
-    const batchName = year.batchId
-      ? batchNameById.get(year.batchId)
-      : undefined;
-    return batchName ? `${year.name} · ${batchName}` : year.name;
+    const batchId = year.batchId ? idStr(year.batchId) : "";
+    const batchName = batchId ? batchNameById.get(batchId) : undefined;
+    const name = year.name?.trim() || "Year";
+    return batchName ? `${name} · ${batchName}` : name;
   };
 
+  /**
+   * One table per exam year cohort (1st / 2nd / 3rd).
+   * Built from exam.yearIds first so tables still appear even if the years
+   * catalogue is slow/empty, then enriched with year/batch names when available.
+   */
   const programYears = useMemo(() => {
-    const examYearIds = new Set(exam.yearIds ?? []);
-    let list = years.filter(isProgramYear);
-    // Scope is explicit year IDs (each year is already tied to its intake batch)
-    if (examYearIds.size > 0) {
-      list = list.filter((y) => examYearIds.has(y._id));
-    } else if ((exam.batchIds ?? []).length > 0) {
-      // Legacy exams: only batchIds — show program years under those batches
-      const examBatchIds = new Set(exam.batchIds ?? []);
-      list = list.filter((y) => y.batchId && examBatchIds.has(y.batchId));
-    }
-    const byKey = new Map<string, YearOption>();
-    for (const y of list) {
-      const key = `${y.level ?? y.name}-${y.batchId ?? ""}`;
-      if (!byKey.has(key)) byKey.set(key, y);
-    }
-    return Array.from(byKey.values()).sort(
-      (a, b) => (a.level ?? 99) - (b.level ?? 99),
+    const examYearIds = (exam.yearIds ?? []).map(idStr).filter(Boolean);
+    const examBatchIds = new Set(
+      (exam.batchIds ?? []).map(idStr).filter(Boolean),
     );
-  }, [exam.batchIds, exam.yearIds, years]);
+
+    if (examYearIds.length > 0) {
+      return examYearIds
+        .map((yearId, index) => {
+          const known = yearById.get(yearId);
+          if (known) return known;
+          // Fallback so a table still renders for every linked yearId
+          return {
+            _id: yearId,
+            name: `Year cohort ${index + 1}`,
+            level: index + 1,
+          } satisfies YearOption;
+        })
+        .filter((year) => isProgramYear(year) || !yearById.has(idStr(year._id)))
+        .sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
+    }
+
+    // Legacy exams: only batchIds — program years under those batches
+    if (examBatchIds.size > 0) {
+      return years
+        .filter(isProgramYear)
+        .filter((y) => y.batchId && examBatchIds.has(idStr(y.batchId)))
+        .map((y) => ({
+          ...y,
+          _id: idStr(y._id),
+          batchId: y.batchId ? idStr(y.batchId) : undefined,
+        }))
+        .sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
+    }
+
+    // No scope on exam: still show active 1st/2nd/3rd years for college admin
+    if (isCollege) {
+      const byKey = new Map<string, YearOption>();
+      for (const y of years.filter(isProgramYear)) {
+        const normalized: YearOption = {
+          ...y,
+          _id: idStr(y._id),
+          batchId: y.batchId ? idStr(y.batchId) : undefined,
+        };
+        const key = idStr(normalized._id);
+        if (!byKey.has(key)) byKey.set(key, normalized);
+      }
+      return Array.from(byKey.values()).sort(
+        (a, b) => (a.level ?? 99) - (b.level ?? 99),
+      );
+    }
+
+    return [];
+  }, [exam.batchIds, exam.yearIds, isCollege, yearById, years]);
 
   const routinesQuery = useQuery({
     queryKey: ["exam-routines", exam._id],
@@ -197,46 +257,93 @@ export const ExamRoutinePanel = ({
 
   /** Subjects for a given year (prefer year match; fall back to all exam subjects). */
   const subjectsForYear = (yearId: string) => {
+    const target = idStr(yearId);
     const yearSubjects = subjects.filter((subject) =>
-      (subject.yearIds ?? []).includes(yearId),
+      (subject.yearIds ?? []).map(idStr).includes(target),
     );
     if (yearSubjects.length > 0) return yearSubjects;
-    const yearIdSet = new Set(exam.yearIds ?? []);
+    const yearIdSet = new Set((exam.yearIds ?? []).map(idStr));
     if (yearIdSet.size === 0) return subjects;
     return subjects.filter((subject) =>
-      (subject.yearIds ?? []).some((id) => yearIdSet.has(id)),
+      (subject.yearIds ?? []).map(idStr).some((id) => yearIdSet.has(id)),
     );
   };
 
   const tables = useMemo(() => {
+    const sortSlots = (slots: EnrichedRoutine[]) =>
+      [...slots].sort((a, b) =>
+        a.examDateBs === b.examDateBs
+          ? a.startTime.localeCompare(b.startTime)
+          : a.examDateBs.localeCompare(b.examDateBs),
+      );
+
+    // College: always one separate table per linked year cohort (even if empty)
     if (isCollege && programYears.length > 0) {
-      return programYears.map((year) => ({
-        key: year._id,
-        yearId: year._id,
-        title: yearLabel(year) || `Year ${year.level ?? ""}`,
-        level: year.level,
-        slots: routines
-          .filter((r) => r.yearId === year._id)
-          .sort((a, b) =>
-            a.examDateBs === b.examDateBs
-              ? a.startTime.localeCompare(b.startTime)
-              : a.examDateBs.localeCompare(b.examDateBs),
+      const covered = new Set(programYears.map((y) => idStr(y._id)));
+      const yearTables = programYears.map((year) => {
+        const yearId = idStr(year._id);
+        return {
+          key: yearId,
+          yearId,
+          title: yearLabel(year) || `Year ${year.level ?? ""}`,
+          level: year.level,
+          slots: sortSlots(
+            routines.filter((r) => idStr(r.yearId) === yearId),
           ),
-      }));
+        };
+      });
+
+      // Routines whose year is not in exam scope still get their own table
+      const orphanByYear = new Map<string, EnrichedRoutine[]>();
+      for (const r of routines) {
+        const yid = idStr(r.yearId);
+        if (!yid || covered.has(yid)) continue;
+        const list = orphanByYear.get(yid) ?? [];
+        list.push(r);
+        orphanByYear.set(yid, list);
+      }
+      for (const [yid, slots] of orphanByYear) {
+        const known = yearById.get(yid);
+        yearTables.push({
+          key: yid,
+          yearId: yid,
+          title: known
+            ? yearLabel(known)
+            : slots[0]?.yearName || "Other year",
+          level: known?.level ?? slots[0]?.yearLevel ?? 99,
+          slots: sortSlots(slots),
+        });
+      }
+
+      // Legacy rows without yearId
+      const legacy = routines.filter((r) => !idStr(r.yearId));
+      if (legacy.length > 0) {
+        yearTables.push({
+          key: "__legacy__",
+          yearId: "",
+          title: "Unassigned year",
+          level: 999,
+          slots: sortSlots(legacy),
+        });
+      }
+
+      return yearTables.sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
     }
 
-    // Group by yearId present on routines, or single table for school / legacy
+    // School / no year cohorts: group by yearId on routines, or single table
     const byYear = new Map<
       string,
       { title: string; yearId: string; level?: number; slots: EnrichedRoutine[] }
     >();
     for (const r of routines) {
-      const key = r.yearId || "__legacy__";
+      const key = idStr(r.yearId) || "__legacy__";
       const matched = r.yearId
-        ? programYears.find((y) => y._id === r.yearId)
+        ? programYears.find((y) => idStr(y._id) === idStr(r.yearId))
         : undefined;
+      const known = r.yearId ? yearById.get(idStr(r.yearId)) : undefined;
       const title =
         (matched ? yearLabel(matched) : null) ||
+        (known ? yearLabel(known) : null) ||
         r.yearName ||
         (isCollege ? "Unassigned year" : "Exam schedule");
       const existing = byYear.get(key);
@@ -244,15 +351,15 @@ export const ExamRoutinePanel = ({
       else
         byYear.set(key, {
           title,
-          yearId: r.yearId || "",
-          level: r.yearLevel,
+          yearId: idStr(r.yearId),
+          level: r.yearLevel ?? known?.level,
           slots: [r],
         });
     }
     return Array.from(byYear.entries())
-      .map(([key, value]) => ({ key, ...value }))
+      .map(([key, value]) => ({ key, ...value, slots: sortSlots(value.slots) }))
       .sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
-  }, [batchNameById, isCollege, programYears, routines]);
+  }, [batchNameById, isCollege, programYears, routines, yearById]);
 
   const openAddForYear = (yearId: string) => {
     setEditingRoutineId(null);
@@ -300,7 +407,7 @@ export const ExamRoutinePanel = ({
   );
 
   return (
-    <div className="space-y-4">
+    <div id="exam-routine-panel" className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge
           className={
@@ -311,13 +418,29 @@ export const ExamRoutinePanel = ({
         >
           {exam.routinePublished ? "Routine Published" : "Routine Draft"}
         </Badge>
+        {isCollege ? (
+          <Badge className="bg-indigo-100 text-indigo-800">
+            {programYears.length} year table
+            {programYears.length === 1 ? "" : "s"}
+          </Badge>
+        ) : null}
         <p className="text-xs text-slate-500">
           {isCollege
-            ? "Create a separate exam routine for each year cohort (e.g. 1st Year · Batch 2083, 2nd Year · Batch 2082). Students only see their year; teachers see all years."
+            ? "Each year cohort has its own routine table below (1st / 2nd / 3rd). Add subjects per year, then publish."
             : "Add subject-wise exam schedules below."}
         </p>
         {isAdmin && !readOnly ? (
           <div className="ml-auto flex flex-wrap gap-2">
+            {isCollege && programYears.length > 0 && !showForm ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => openAddForYear(programYears[0]!._id)}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                Add entry
+              </Button>
+            ) : null}
             {exam.routinePublished ? (
               <Button
                 size="sm"
@@ -573,31 +696,55 @@ export const ExamRoutinePanel = ({
       ) : null}
 
       {/* Per-year schedule tables */}
-      {tables.length === 0 && routines.length === 0 ? (
+      {isCollege && programYears.length === 0 && tables.length === 0 ? (
+        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+          <p className="text-sm font-medium text-amber-900">
+            No year cohorts linked to this exam
+          </p>
+          <p className="text-sm text-amber-800">
+            Edit the exam and add year cohorts (e.g. 1st Year · Batch 2083, 2nd
+            Year · Batch 2082, 3rd Year · Batch 2081). Each cohort gets its own
+            routine table.
+          </p>
+          {routines.length > 0 ? (
+            <p className="text-xs text-amber-700">
+              {routines.length} routine entr
+              {routines.length === 1 ? "y exists" : "ies exist"} without a year
+              split — re-link cohorts, then re-assign years on each entry.
+            </p>
+          ) : null}
+        </div>
+      ) : tables.length === 0 && routines.length === 0 ? (
         <EmptyState
           title="No routine entries"
           description={
             isAdmin
-              ? isCollege
-                ? "Add exam schedules separately for 1st, 2nd, and 3rd year below."
-                : "Add subject-wise exam schedules below."
+              ? "Add subject-wise exam schedules below."
               : "The exam routine will appear here once published."
           }
         />
       ) : (
         <div className="space-y-6">
+          {isCollege && tables.length > 1 ? (
+            <p className="text-sm font-medium text-slate-700">
+              Year-wise exam routines ({tables.length} tables)
+            </p>
+          ) : null}
           {tables.map((table) => (
-            <Card key={table.key} className="border-slate-200">
-              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-2">
+            <Card
+              key={table.key}
+              className="border-slate-200 shadow-sm ring-1 ring-slate-100"
+            >
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 pb-3">
                 <div>
-                  <CardTitle className="text-base">
+                  <CardTitle className="text-base text-slate-900">
                     {isCollege
                       ? `${table.title} — exam routine`
                       : table.title}
                   </CardTitle>
                   <p className="text-xs text-slate-500">
                     {table.slots.length} subject
-                    {table.slots.length === 1 ? "" : "s"}
+                    {table.slots.length === 1 ? "" : "s"} scheduled
                     {isCollege
                       ? " · Visible to students of this year only"
                       : ""}
@@ -626,12 +773,12 @@ export const ExamRoutinePanel = ({
                   </Button>
                 ) : null}
               </CardHeader>
-              <CardContent>
+              <CardContent className="pt-4">
                 {table.slots.length === 0 ? (
-                  <p className="text-sm text-slate-500">
+                  <p className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-500">
                     No subjects scheduled for this year yet.
                     {isAdmin && !readOnly
-                      ? " Use Add to create this year&apos;s exam routine."
+                      ? " Use “Add for …” to build this year’s exam routine."
                       : ""}
                   </p>
                 ) : (
@@ -714,18 +861,6 @@ export const ExamRoutinePanel = ({
           ))}
         </div>
       )}
-
-      {/* College: years with zero slots still show as empty tables from programYears */}
-      {isAdmin &&
-      !readOnly &&
-      isCollege &&
-      programYears.length === 0 &&
-      !showForm ? (
-        <p className="text-sm text-amber-800">
-          No year cohorts linked to this exam. Edit the exam and select year
-          cohorts (e.g. 1st Year · Batch 2083, 2nd Year · Batch 2082).
-        </p>
-      ) : null}
     </div>
   );
 };

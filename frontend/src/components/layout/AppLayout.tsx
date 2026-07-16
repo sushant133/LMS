@@ -36,8 +36,10 @@ const institutionRoles: UserRole[] = [
   "COLLEGE_VIEWER",
 ];
 
-const leadershipRoles: UserRole[] = ["PRINCIPAL", "COLLEGE_STAFF", "AUDITOR"];
-
+/**
+ * Roles that may appear in staff shell / general nav, but must NOT be bulk-added
+ * to administration links they cannot open (ProtectedRoute / API would bounce them).
+ */
 const staffPortalRoles: UserRole[] = [
   ...institutionRoles,
   "TEACHER",
@@ -99,7 +101,6 @@ const navItems: NavItem[] = [
       "STUDENT",
       "PARENT",
       "COLLEGE_STAFF",
-      "PRINCIPAL",
     ],
     section: "general",
   },
@@ -190,65 +191,65 @@ const navItems: NavItem[] = [
     section: "myWork",
   },
 
-  // —— Administration (management; only if role + module access) ——
+  // —— Administration (roles must match App.tsx ProtectedRoute + backend authorize) ——
   {
     labelKey: "studentManagement",
     path: "/students",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "staffManagement",
     path: "/college-staff",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "academicStructure",
     path: "/academics",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "subjectAssignmentManagement",
     path: "/academics/subject-assignments",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "academicManagementAdmin",
     path: "/academic-management",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "timetableManagement",
     path: "/timetable",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles, "PRINCIPAL"],
     section: "administration",
   },
   {
     labelKey: "attendanceManagement",
     path: "/attendance-view",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "examinationManagement",
     path: "/exams-view",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "libraryManagement",
     path: "/library",
-    roles: [...institutionRoles, "LIBRARY_STAFF", ...leadershipRoles],
+    roles: [...institutionRoles, "LIBRARY_STAFF"],
     section: "administration",
   },
   {
     labelKey: "laboratoryManagement",
     path: "/laboratory",
-    roles: [...institutionRoles, "LABORATORY_STAFF", ...leadershipRoles],
+    roles: [...institutionRoles, "LABORATORY_STAFF"],
     section: "administration",
   },
   {
@@ -260,38 +261,37 @@ const navItems: NavItem[] = [
       "CASHIER",
       "AUDITOR",
       "PRINCIPAL",
-      "COLLEGE_STAFF",
     ],
     section: "administration",
   },
   {
     labelKey: "transportManagement",
     path: "/transport",
-    roles: [...institutionRoles, "COLLEGE_STAFF", ...leadershipRoles],
+    roles: [...institutionRoles, "COLLEGE_STAFF"],
     section: "administration",
   },
   {
     labelKey: "hrPayroll",
     path: "/hr",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "parentManagement",
     path: "/parent-links",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "reportsAnalytics",
     path: "/reports",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "settings",
     path: "/settings",
-    roles: [...institutionRoles, ...leadershipRoles],
+    roles: [...institutionRoles],
     section: "administration",
   },
 ];
@@ -409,6 +409,7 @@ export const AppLayout = () => {
     effectiveRoles.has("ACCOUNTANT") ||
     effectiveRoles.has("CASHIER") ||
     effectiveRoles.has("AUDITOR");
+  // hasAdminCapability still used for myWork vs administration path de-dupe only
 
   const isModuleAllowedForNav = (path: string): boolean => {
     if (isAdmin) return true;

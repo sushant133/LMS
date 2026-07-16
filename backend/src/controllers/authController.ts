@@ -45,12 +45,16 @@ const getRedirectPath = (role: UserRole | string): string => {
     case "LABORATORY_STAFF":
       return "/laboratory";
     case "ACCOUNTANT":
+    case "CASHIER":
+    case "AUDITOR":
+    case "PRINCIPAL":
       return "/accounting";
     case "COLLEGE_STAFF":
       return "/dashboard/college_staff";
     case "PARENT":
-    default:
       return "/dashboard/parent";
+    default:
+      return "/dashboard/college_admin";
   }
 };
 
@@ -162,32 +166,31 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(404, "No student found with this registration number. Please verify and try again.");
   }
 
-  // Never overwrite non-parent accounts (staff/teacher/student) — even if inactive.
+  // Never reuse or mutate an existing account from public registration.
+  // Overwriting an inactive PARENT password was an account-takeover vector.
   if (existingUser) {
     const existingRole = normalizeUserRole(existingUser.role as string);
-    if (existingRole !== "PARENT") {
+    if (existingRole === "PARENT") {
+      const pendingLink = await ParentChildLink.findOne({
+        schoolId: school._id,
+        parentUserId: existingUser._id,
+        status: "PENDING"
+      }).lean();
+
+      if (pendingLink) {
+        throw new ApiError(409, "A registration with this login ID is already pending admin approval.");
+      }
+
       throw new ApiError(
         409,
-        "An account with this login ID already exists. Please sign in or use a different login ID."
+        "An account with this login ID already exists. Please sign in, or contact the college administrator if your registration was rejected."
       );
     }
 
-    if (existingUser.isActive) {
-      throw new ApiError(
-        409,
-        "An account with this login ID already exists. Please sign in or use a different login ID."
-      );
-    }
-
-    const pendingLink = await ParentChildLink.findOne({
-      schoolId: school._id,
-      parentUserId: existingUser._id,
-      status: "PENDING"
-    }).lean();
-
-    if (pendingLink) {
-      throw new ApiError(409, "A registration with this login ID is already pending admin approval.");
-    }
+    throw new ApiError(
+      409,
+      "An account with this login ID already exists. Please sign in or use a different login ID."
+    );
   }
 
   const existingPendingForStudent = await ParentChildLink.findOne({
@@ -212,30 +215,15 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(409, "A parent is already linked for this student with the selected relationship.");
   }
 
-  let user = existingUser;
-
-  if (!user) {
-    user = await User.create({
-      schoolId: school._id,
-      fullName: payload.fullName,
-      email: loginId,
-      password: payload.password,
-      phone: payload.phone,
-      role: "PARENT",
-      isActive: false
-    });
-  } else {
-    // Only inactive PARENT accounts may be updated for a new pending registration
-    user.fullName = payload.fullName;
-    user.phone = payload.phone;
-    user.password = payload.password;
-    user.isActive = false;
-    user.role = "PARENT";
-    if (!user.schoolId) {
-      user.schoolId = school._id;
-    }
-    await user.save();
-  }
+  const user = await User.create({
+    schoolId: school._id,
+    fullName: payload.fullName,
+    email: loginId,
+    password: payload.password,
+    phone: payload.phone,
+    role: "PARENT",
+    isActive: false
+  });
 
   await ParentChildLink.create({
     schoolId: school._id,

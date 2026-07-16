@@ -325,15 +325,28 @@ export const ExamManager = () => {
       editingExamId
         ? unwrap<ExamRecord>(api.put(`/exams/${editingExamId}`, payload))
         : unwrap<ExamRecord>(api.post("/exams", payload)),
-    onSuccess: async () => {
-      toast.success(editingExamId ? "Exam updated" : "Exam created");
+    onSuccess: async (exam) => {
+      const wasEdit = Boolean(editingExamId);
+      toast.success(wasEdit ? "Exam updated" : "Exam created");
       setExamForm(defaultExamValue);
       setExamYearIds([]);
       setScopeAddBatchId("");
       setScopeAddYearId("");
       setExamClassId("");
       setEditingExamId(null);
+      // Open the routine panel so year-wise tables are visible right away
+      if (exam?._id) {
+        setSelectedExamId(exam._id);
+        setAdminTab("routine");
+      }
       await queryClient.invalidateQueries({ queryKey: ["exams"] });
+      if (!wasEdit) {
+        requestAnimationFrame(() => {
+          document
+            .getElementById("exam-detail-panel")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -1373,9 +1386,17 @@ export const ExamManager = () => {
                               onClick={() => {
                                 setSelectedExamId(exam._id);
                                 setAdminTab("routine");
+                                requestAnimationFrame(() => {
+                                  document
+                                    .getElementById("exam-detail-panel")
+                                    ?.scrollIntoView({
+                                      behavior: "smooth",
+                                      block: "start",
+                                    });
+                                });
                               }}
                             >
-                              {canManage ? "Manage" : "View"}
+                              {canManage ? "Manage routine" : "View routine"}
                             </Button>
                             {canManage ? (
                               <Button
@@ -1470,10 +1491,18 @@ export const ExamManager = () => {
               </Card>
 
               {selectedExam ? (
-                <Card>
+                <Card id="exam-detail-panel">
                   <CardHeader>
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <CardTitle>{selectedExam.name}</CardTitle>
+                      <div>
+                        <CardTitle>{selectedExam.name}</CardTitle>
+                        {isCollege ? (
+                          <p className="mt-1 text-sm text-slate-500">
+                            Year-wise exam routines — each linked year has its
+                            own table under the Routine tab.
+                          </p>
+                        ) : null}
+                      </div>
                       <div className="flex gap-2">
                         {(
                           ["routine", "analytics", "review", "results"] as const
@@ -1500,10 +1529,23 @@ export const ExamManager = () => {
                     {adminTab === "routine" ? (
                       <Suspense fallback={<LoadingState />}>
                         <ExamRoutinePanel
-                          exam={selectedExam}
+                          exam={{
+                            ...selectedExam,
+                            yearIds: (selectedExam.yearIds ?? []).map(String),
+                            batchIds: (selectedExam.batchIds ?? []).map(String),
+                          }}
                           subjects={subjectsQuery.data ?? []}
-                          years={yearsQuery.data ?? []}
-                          batches={batchesQuery.data ?? []}
+                          years={(yearsQuery.data ?? []).map((year) => ({
+                            ...year,
+                            _id: String(year._id),
+                            batchId: year.batchId
+                              ? String(year.batchId)
+                              : undefined,
+                          }))}
+                          batches={(batchesQuery.data ?? []).map((batch) => ({
+                            ...batch,
+                            _id: String(batch._id),
+                          }))}
                           isCollege={isCollege}
                           isAdmin={canManage}
                           readOnly={!canManage}

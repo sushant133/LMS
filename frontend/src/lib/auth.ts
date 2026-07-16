@@ -39,12 +39,13 @@ export const getUserRoleSubtitle = (
   return role;
 };
 
+/** Keep in sync with backend authController getRedirectPath. */
 export const roleRedirectMap: Record<UserRole, string> = {
   SUPER_ADMIN: "/dashboard/super_admin",
   COLLEGE_ADMIN: "/dashboard/college_admin",
   COLLEGE_VIEWER: "/dashboard/college_admin",
   TEACHER: "/dashboard/teacher",
-  STUDENT: "/dashboard/student",
+  STUDENT: "/my-subjects",
   PARENT: "/dashboard/parent",
   LIBRARY_STAFF: "/library",
   LABORATORY_STAFF: "/laboratory",

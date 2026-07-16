@@ -4,7 +4,8 @@ const BASE = process.env.BASE_URL ?? "http://localhost:5173";
 
 const login = async (page, email, urlPattern) => {
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-  await page.fill('input[type="email"]', email);
+  // Login ID field is type="text" (supports username / email style IDs)
+  await page.fill('input[autocomplete="username"], input[type="text"]', email);
   await page.fill('input[type="password"]', "Demo@123456");
   await page.click('button[type="submit"]');
   await page.waitForURL(urlPattern, { timeout: 20000 });

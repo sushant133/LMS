@@ -81,7 +81,8 @@ export const LoginPage = () => {
     setSubmitting(true);
     try {
       const result = await login(parsed.data);
-      const target = getRoleRedirectPath(result.user.role);
+      // Prefer server redirectTo so FE/BE stay aligned
+      const target = result.redirectTo || getRoleRedirectPath(result.user.role);
       toast.success(t("login"));
       navigate(target ?? "/dashboard/college_admin", { replace: true });
     } catch (error) {

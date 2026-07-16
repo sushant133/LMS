@@ -36,8 +36,11 @@ const getReadableStudentFilter = async (req: Request): Promise<Record<string, un
   return getStudentScopeFilter(req);
 };
 
-/** Teachers only need roster fields — not full personal / guardian / fee data. */
-const sanitizeStudentForTeacherList = (student: {
+/**
+ * Limited roster fields for teachers / library staff — not full personal / guardian / fee data.
+ * Library staff need this for the issue-book borrower picker only.
+ */
+const sanitizeStudentForLimitedStaffList = (student: {
   toObject?: () => Record<string, unknown>;
   _id: { toString(): string };
   admissionNumber: string;
@@ -75,8 +78,12 @@ const sanitizeStudentForTeacherList = (student: {
   };
 };
 
+const usesLimitedStudentView = (role: string | undefined): boolean =>
+  role === "TEACHER" || role === "LIBRARY_STAFF";
+
 export const listStudents = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
+  const limitedView = usesLimitedStudentView(req.user?.role);
   const isTeacher = req.user?.role === "TEACHER";
 
   // Teachers: only active students in their assigned batch/year (or class/section)
@@ -85,17 +92,17 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
   }
 
   const students = await Student.find(filter)
-    .populate("user", isTeacher ? "fullName role" : "-password")
+    .populate("user", limitedView ? "fullName role" : "-password")
     .sort(isTeacher ? { rollNumber: 1, createdAt: -1 } : { createdAt: -1 });
 
   // Drop orphaned rows where the linked User was deleted (populate returns null)
   const linked = students.filter((student) => Boolean(student.user));
 
-  if (isTeacher) {
+  if (limitedView) {
     return sendSuccess(
       res,
       "Students fetched",
-      linked.map((s) => sanitizeStudentForTeacherList(s as never))
+      linked.map((s) => sanitizeStudentForLimitedStaffList(s as never))
     );
   }
 
@@ -104,17 +111,18 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
 
 export const getStudentById = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
+  const limitedView = usesLimitedStudentView(req.user?.role);
   const student = await Student.findOne({ ...filter, _id: req.params.id }).populate(
     "user",
-    req.user?.role === "TEACHER" ? "fullName role" : "-password"
+    limitedView ? "fullName role" : "-password"
   );
 
   if (!student) {
     throw new ApiError(404, "Student not found");
   }
 
-  if (req.user?.role === "TEACHER") {
-    return sendSuccess(res, "Student fetched", sanitizeStudentForTeacherList(student as never));
+  if (limitedView) {
+    return sendSuccess(res, "Student fetched", sanitizeStudentForLimitedStaffList(student as never));
   }
 
   return sendSuccess(res, "Student fetched", student);

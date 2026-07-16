@@ -395,6 +395,15 @@ export const listYears = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  const years = await Year.find(query).sort({ level: 1 });
-  return sendSuccess(res, "Years fetched", years);
+  const years = await Year.find(query).sort({ level: 1 }).lean();
+  return sendSuccess(
+    res,
+    "Years fetched",
+    years.map((year) => ({
+      ...year,
+      _id: year._id.toString(),
+      schoolId: year.schoolId.toString(),
+      batchId: year.batchId?.toString()
+    }))
+  );
 });

@@ -10,6 +10,7 @@ import { validateAttendanceScope } from "../utils/academicValidation.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { notifyParentsOfStudent } from "../utils/notificationService.js";
+import { getLinkedStudentIds } from "../utils/parentScope.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import {
   assertTeacherQueryScope,
@@ -82,6 +83,16 @@ export const listAttendance = asyncHandler(async (req: Request, res: Response) =
     query["entries.studentId"] = studentProfile.studentId;
   }
 
+  // Parents may only see attendance for their linked children (IDOR prevention)
+  let parentLinkedStudentIds: string[] | null = null;
+  if (role === "PARENT" && !studentProfile) {
+    parentLinkedStudentIds = await getLinkedStudentIds(req);
+    if (parentLinkedStudentIds.length === 0) {
+      return sendSuccess(res, "Attendance fetched", []);
+    }
+    query["entries.studentId"] = { $in: parentLinkedStudentIds };
+  }
+
   const records = await Attendance.find(query).sort({ dateBs: -1 });
   const recordIds = records.map((record) => record._id);
   const linkedDailyRecords = await DailyAttendance.find({
@@ -107,6 +118,15 @@ export const listAttendance = asyncHandler(async (req: Request, res: Response) =
     const scoped = enrichedRecords.map((record) => ({
       ...record,
       entries: record.entries.filter((entry) => entry.studentId.toString() === studentProfile.studentId)
+    }));
+    return sendSuccess(res, "Attendance fetched", scoped);
+  }
+
+  if (parentLinkedStudentIds) {
+    const allowed = new Set(parentLinkedStudentIds);
+    const scoped = enrichedRecords.map((record) => ({
+      ...record,
+      entries: record.entries.filter((entry) => allowed.has(entry.studentId.toString()))
     }));
     return sendSuccess(res, "Attendance fetched", scoped);
   }

@@ -181,7 +181,9 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
       schoolId,
       studentId: profile.studentId,
       ...academicFilter,
-      "marks.subjectId": subject._id.toString()
+      "marks.subjectId": subject._id.toString(),
+      // Never expose draft / unpublished marks to students
+      publishedAtBs: { $exists: true, $nin: [null, ""] }
     })
       .sort({ updatedAt: -1 })
       .lean()

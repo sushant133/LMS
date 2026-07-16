@@ -292,7 +292,18 @@ export const listExams = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const exams = await Exam.find(filter).sort({ startDateBs: -1 }).lean();
-  return sendSuccess(res, "Exams fetched", exams);
+  return sendSuccess(
+    res,
+    "Exams fetched",
+    exams.map((exam) => ({
+      ...exam,
+      _id: exam._id.toString(),
+      schoolId: exam.schoolId.toString(),
+      classIds: (exam.classIds ?? []).map((id) => id.toString()),
+      batchIds: (exam.batchIds ?? []).map((id) => id.toString()),
+      yearIds: (exam.yearIds ?? []).map((id) => id.toString())
+    }))
+  );
 });
 
 export const createExam = asyncHandler(async (req: Request, res: Response) => {
@@ -311,7 +322,20 @@ export const createExam = asyncHandler(async (req: Request, res: Response) => {
     resultsPublished: false,
     resultsLocked: false
   });
-  return sendSuccess(res, "Exam created successfully", exam, 201);
+  const created = exam.toObject();
+  return sendSuccess(
+    res,
+    "Exam created successfully",
+    {
+      ...created,
+      _id: exam._id.toString(),
+      schoolId: exam.schoolId.toString(),
+      classIds: (exam.classIds ?? []).map((id) => id.toString()),
+      batchIds: (exam.batchIds ?? []).map((id) => id.toString()),
+      yearIds: (exam.yearIds ?? []).map((id) => id.toString())
+    },
+    201
+  );
 });
 
 export const updateExam = asyncHandler(async (req: Request, res: Response) => {

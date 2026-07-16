@@ -44,7 +44,8 @@ import {
   calculateNetSalary,
   calculateSuggestedLateFee,
   computeBalanceAfterEntry,
-  generateReceiptNumber
+  generateReceiptNumber,
+  recalculateStudentFeesDue
 } from "../utils/accountingCalculations.js";
 import { getLatestCashBalance, recordCashEntry, reverseCashEntry } from "../utils/accountingCashBook.js";
 import { getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
@@ -362,8 +363,8 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
   await assertFiscalPeriodOpen(schoolId, payload.paidDateBs);
 
   const settings = await getOrCreateSettings(schoolId);
-  const student = await Student.findOne({ _id: payload.studentId, schoolId });
-  if (!student) throw new ApiError(404, "Student not found");
+  const studentExists = await Student.findOne({ _id: payload.studentId, schoolId }).select("_id").lean();
+  if (!studentExists) throw new ApiError(404, "Student not found");
 
   let structure = null;
   if (payload.feeStructureId) {
@@ -371,28 +372,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     if (!structure) throw new ApiError(404, "Fee structure not found");
   }
 
-  const previousDueNpr = student.feesDueNpr ?? 0;
   const currentChargesNpr = payload.currentChargesNpr || structure?.amountNpr || 0;
-  const lateFeeNpr =
-    payload.lateFeeNpr > 0
-      ? payload.lateFeeNpr
-      : calculateSuggestedLateFee(previousDueNpr, settings.lateFinePercent);
-  const totals = calculateFeeTotals({
-    previousDueNpr,
-    currentChargesNpr,
-    amountPaidNpr: payload.amountPaidNpr,
-    discountNpr: payload.discountNpr,
-    scholarshipNpr: payload.scholarshipNpr,
-    lateFeeNpr
-  });
-
-  const receiptCount = await FeeCollection.countDocuments({ schoolId });
-  const receiptNumber =
-    payload.receiptNumber?.trim() ||
-    (settings.autoReceiptNumber
-      ? generateReceiptNumber(settings.receiptPrefix, receiptCount + 1)
-      : `RCPT-${Date.now()}`);
-
   const accountantName = await getActorName(req);
   const feeBreakdown =
     payload.feeBreakdown.length > 0
@@ -402,14 +382,46 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
         : [];
 
   const fiscalYearBs = getFiscalYearFromBsDate(payload.paidDateBs, settings.currentFiscalYearBs);
-  const verificationCode = generateReceiptVerificationCode(
-    schoolId.toString(),
-    receiptNumber,
-    payload.amountPaidNpr,
-    payload.paidDateBs
-  );
+  const paymentMethod = payload.paymentMethod ?? settings.defaultPaymentMethod;
 
   const collection = await withFinancialTransaction(async (session) => {
+    // Reload student inside the transaction to reduce lost-update races on feesDueNpr
+    const studentQuery = Student.findOne({ _id: payload.studentId, schoolId });
+    if (session) studentQuery.session(session);
+    const student = await studentQuery;
+    if (!student) throw new ApiError(404, "Student not found");
+
+    const previousDueNpr = student.feesDueNpr ?? 0;
+    const lateFeeNpr =
+      payload.lateFeeNpr > 0
+        ? payload.lateFeeNpr
+        : calculateSuggestedLateFee(previousDueNpr, settings.lateFinePercent);
+    const totals = calculateFeeTotals({
+      previousDueNpr,
+      currentChargesNpr,
+      amountPaidNpr: payload.amountPaidNpr,
+      discountNpr: payload.discountNpr,
+      scholarshipNpr: payload.scholarshipNpr,
+      lateFeeNpr
+    });
+
+    const receiptCountQuery = FeeCollection.countDocuments({ schoolId });
+    if (session) receiptCountQuery.session(session);
+    const receiptCount = await receiptCountQuery;
+    // Random suffix reduces duplicate receipt numbers under concurrent cashiers
+    const receiptNumber =
+      payload.receiptNumber?.trim() ||
+      (settings.autoReceiptNumber
+        ? `${generateReceiptNumber(settings.receiptPrefix, receiptCount + 1)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+        : `RCPT-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`);
+
+    const verificationCode = generateReceiptVerificationCode(
+      schoolId.toString(),
+      receiptNumber,
+      payload.amountPaidNpr,
+      payload.paidDateBs
+    );
+
     const [created] = await FeeCollection.create(
       [
         {
@@ -429,7 +441,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           lateFeeNpr,
           advancePaymentNpr: totals.advancePaymentNpr,
           remainingDueNpr: totals.remainingDueNpr,
-          paymentMethod: payload.paymentMethod ?? settings.defaultPaymentMethod,
+          paymentMethod,
           bankAccountId: payload.bankAccountId,
           transactionNumber: payload.transactionNumber,
           verificationCode,
@@ -446,20 +458,24 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     );
     if (!created) throw new ApiError(500, "Failed to create fee collection");
 
-    student.feesDueNpr = totals.remainingDueNpr;
-    await student.save(session ? { session } : undefined);
+    // Replay all collections for authoritative outstanding balance (handles concurrent cashiers better)
+    await recalculateStudentFeesDue(payload.studentId, schoolId, session);
 
-    await recordCashEntry(req, {
-      dateBs: payload.paidDateBs,
-      entryType: "CREDIT",
-      category: "Fee Collection",
-      description: `Fee receipt ${receiptNumber}`,
-      amountNpr: payload.amountPaidNpr,
-      paymentMethod: payload.paymentMethod ?? settings.defaultPaymentMethod,
-      referenceType: "FeeCollection",
-      referenceId: created._id.toString(),
-      bankAccountId: payload.bankAccountId
-    });
+    await recordCashEntry(
+      req,
+      {
+        dateBs: payload.paidDateBs,
+        entryType: "CREDIT",
+        category: "Fee Collection",
+        description: `Fee receipt ${receiptNumber}`,
+        amountNpr: payload.amountPaidNpr,
+        paymentMethod,
+        referenceType: "FeeCollection",
+        referenceId: created._id.toString(),
+        bankAccountId: payload.bankAccountId
+      },
+      session
+    );
 
     await postFeeCollectionJournal({
       schoolId,
@@ -471,10 +487,11 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       discountNpr: payload.discountNpr,
       scholarshipNpr: payload.scholarshipNpr,
       lateFeeNpr,
-      paymentMethod: payload.paymentMethod ?? settings.defaultPaymentMethod,
+      paymentMethod,
       bankAccountId: payload.bankAccountId,
       receiptNumber,
-      feeBreakdown
+      feeBreakdown,
+      session
     });
 
     return created;

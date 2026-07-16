@@ -1,4 +1,4 @@
-import type { Types } from "mongoose";
+import type { ClientSession, Types } from "mongoose";
 import {
   DEFAULT_CHART_OF_ACCOUNTS,
   EXPENSE_CATEGORY_ACCOUNT_MAP,
@@ -35,6 +35,7 @@ interface PostJournalParams {
   bankAccountId?: Types.ObjectId | string;
   isReversal?: boolean;
   reversedEntryId?: Types.ObjectId | string;
+  session?: ClientSession | null;
 }
 
 const getPaymentAccountCode = (paymentMethod: string): string => {
@@ -61,16 +62,26 @@ const getAccountName = async (schoolId: Types.ObjectId, code: string): Promise<s
   return account?.name ?? code;
 };
 
-const generateVoucherNumber = async (schoolId: Types.ObjectId, prefix: string): Promise<string> => {
-  const count = await JournalEntry.countDocuments({ schoolId });
+const generateVoucherNumber = async (
+  schoolId: Types.ObjectId,
+  prefix: string,
+  session?: ClientSession | null
+): Promise<string> => {
+  const countQuery = JournalEntry.countDocuments({ schoolId });
+  if (session) countQuery.session(session);
+  const count = await countQuery;
   const year = new Date().getFullYear();
-  return `${prefix}-${year}-${String(count + 1).padStart(5, "0")}`;
+  // Suffix reduces collision under concurrent cashiers even if count races
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${prefix}-${year}-${String(count + 1).padStart(5, "0")}-${suffix}`;
 };
 
 export const postJournalEntry = async (params: PostJournalParams): Promise<typeof JournalEntry.prototype> => {
   await ensureDefaultChartOfAccounts(params.schoolId);
 
-  const settings = await AccountingSettings.findOne({ schoolId: params.schoolId }).lean();
+  const settingsQuery = AccountingSettings.findOne({ schoolId: params.schoolId });
+  if (params.session) settingsQuery.session(params.session);
+  const settings = await settingsQuery.lean();
   const fiscalYearBs = getFiscalYearFromBsDate(params.dateBs, settings?.currentFiscalYearBs);
 
   const resolvedLines = await Promise.all(
@@ -88,27 +99,33 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
   }
 
   const voucherPrefix = settings?.voucherPrefix ?? "JV";
-  const voucherNumber = await generateVoucherNumber(params.schoolId, voucherPrefix);
+  const voucherNumber = await generateVoucherNumber(params.schoolId, voucherPrefix, params.session);
 
-  return JournalEntry.create({
-    schoolId: params.schoolId,
-    voucherNumber,
-    voucherType: params.voucherType ?? "JOURNAL",
-    dateBs: params.dateBs,
-    fiscalYearBs,
-    narration: params.narration,
-    lines: resolvedLines,
-    totalDebitNpr,
-    totalCreditNpr,
-    referenceType: params.referenceType,
-    referenceId: params.referenceId,
-    studentId: params.studentId,
-    bankAccountId: params.bankAccountId,
-    isReversal: params.isReversal ?? false,
-    reversedEntryId: params.reversedEntryId,
-    isPosted: true,
-    createdBy: params.userId
-  });
+  const [created] = await JournalEntry.create(
+    [
+      {
+        schoolId: params.schoolId,
+        voucherNumber,
+        voucherType: params.voucherType ?? "JOURNAL",
+        dateBs: params.dateBs,
+        fiscalYearBs,
+        narration: params.narration,
+        lines: resolvedLines,
+        totalDebitNpr,
+        totalCreditNpr,
+        referenceType: params.referenceType,
+        referenceId: params.referenceId,
+        studentId: params.studentId,
+        bankAccountId: params.bankAccountId,
+        isReversal: params.isReversal ?? false,
+        reversedEntryId: params.reversedEntryId,
+        isPosted: true,
+        createdBy: params.userId
+      }
+    ],
+    params.session ? { session: params.session } : undefined
+  );
+  return created;
 };
 
 /**
@@ -240,6 +257,7 @@ export const postFeeCollectionJournal = async (params: {
   bankAccountId?: Types.ObjectId | string;
   receiptNumber: string;
   feeBreakdown: Array<{ feeType: string; title: string; amountNpr: number }>;
+  session?: ClientSession | null;
 }): Promise<void> => {
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
   const paymentName = await getAccountName(params.schoolId, paymentAccount);
@@ -355,7 +373,8 @@ export const postFeeCollectionJournal = async (params: {
     referenceType: "FeeCollection",
     referenceId: params.collectionId,
     studentId: params.studentId,
-    bankAccountId: params.bankAccountId
+    bankAccountId: params.bankAccountId,
+    session: params.session
   });
 };
 
