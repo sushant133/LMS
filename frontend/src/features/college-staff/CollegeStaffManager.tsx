@@ -743,7 +743,7 @@ export const CollegeStaffManager = ({
                   onChange={setEditDocuments}
                   canManage
                   title="Staff documents"
-                  description="Upload CV, degree, certificates and other staff documents (PDF, JPG, PNG — max 500 KB). You can also manage these from the staff profile."
+                  description="Upload CV, degree, certificates and other staff documents (PDF, JPG, PNG, DOC — max 600 KB each). You can also manage these from the staff profile."
                   onAfterMutation={async () => {
                     await queryClient.invalidateQueries({ queryKey: ["college-staff"] });
                   }}

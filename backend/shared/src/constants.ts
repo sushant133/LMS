@@ -560,7 +560,15 @@ export const STUDENT_DOCUMENT_MIME_TYPES = [
   "image/png"
 ] as const;
 
-export const STUDENT_DOCUMENT_MAX_SIZE_BYTES = 500 * 1024;
+/**
+ * Global max size for document uploads across the LMS (student docs, HR docs,
+ * library docs, complaints, academic attachments, results, etc.).
+ * Photos / banners / ebooks / video assignments use separate limits.
+ */
+export const DOCUMENT_MAX_SIZE_BYTES = 600 * 1024;
+
+/** @deprecated Use DOCUMENT_MAX_SIZE_BYTES — kept as alias for existing imports. */
+export const STUDENT_DOCUMENT_MAX_SIZE_BYTES = DOCUMENT_MAX_SIZE_BYTES;
 
 /** Required document categories for admissions (must be submitted or left PENDING). */
 export const getRequiredStudentDocumentCategories = () =>
@@ -652,8 +660,8 @@ export const HR_DOCUMENT_MIME_TYPES = [
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ] as const;
-/** 10 MB — matches FILE_SIZE_LIMITS.document on the backend. */
-export const HR_DOCUMENT_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+/** Same global document cap as DOCUMENT_MAX_SIZE_BYTES (600 KB). */
+export const HR_DOCUMENT_MAX_SIZE_BYTES = DOCUMENT_MAX_SIZE_BYTES;
 
 /** Default designation when a teacher is created without one. */
 export const DEFAULT_TEACHER_DESIGNATION = "Teacher";

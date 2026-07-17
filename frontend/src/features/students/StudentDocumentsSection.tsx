@@ -238,7 +238,7 @@ export const StudentDocumentsSection = ({
       <div>
         <h3 className="text-base font-semibold text-slate-900">Documents</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Upload student documents (PDF, JPG, JPEG, PNG — max 500 KB each).
+          Upload student documents (PDF, JPG, JPEG, PNG — max 600 KB each).
           Documents can be added later; the student can still be created without
           them.
           {!studentId

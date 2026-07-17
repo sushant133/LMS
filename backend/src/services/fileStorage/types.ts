@@ -41,13 +41,20 @@ export interface FileSizeLimit {
   label: string;
 }
 
+/** Global document upload cap (student, HR, library, complaints, academic, etc.). */
+const DOCUMENT_MAX_BYTES = 600 * 1024;
+
 export const FILE_SIZE_LIMITS = {
   photo: { maxBytes: 2 * 1024 * 1024, label: "2MB" } satisfies FileSizeLimit,
-  studentDocument: { maxBytes: 500 * 1024, label: "500KB" } satisfies FileSizeLimit,
-  document: { maxBytes: 10 * 1024 * 1024, label: "10MB" } satisfies FileSizeLimit,
+  studentDocument: { maxBytes: DOCUMENT_MAX_BYTES, label: "600KB" } satisfies FileSizeLimit,
+  /** Teacher / staff HR docs (CV, degree, certificates) */
+  hrDocument: { maxBytes: DOCUMENT_MAX_BYTES, label: "600KB" } satisfies FileSizeLimit,
+  /** Generic document attachments (library, results, lab, inventory, accounting, academic) */
+  document: { maxBytes: DOCUMENT_MAX_BYTES, label: "600KB" } satisfies FileSizeLimit,
+  /** Classroom / homework may include video — keep higher limit */
   assignment: { maxBytes: 25 * 1024 * 1024, label: "25MB" } satisfies FileSizeLimit,
   banner: { maxBytes: 5 * 1024 * 1024, label: "5MB" } satisfies FileSizeLimit,
-  complaint: { maxBytes: 10 * 1024 * 1024, label: "10MB" } satisfies FileSizeLimit,
+  complaint: { maxBytes: DOCUMENT_MAX_BYTES, label: "600KB" } satisfies FileSizeLimit,
   ebook: { maxBytes: 50 * 1024 * 1024, label: "50MB" } satisfies FileSizeLimit,
-  general: { maxBytes: 15 * 1024 * 1024, label: "15MB" } satisfies FileSizeLimit
+  general: { maxBytes: DOCUMENT_MAX_BYTES, label: "600KB" } satisfies FileSizeLimit
 } as const;

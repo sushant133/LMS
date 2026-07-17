@@ -35,7 +35,7 @@ export const validateHrDocumentFile = (file: File): string | null => {
     return "Only PDF, JPG, PNG, WEBP, DOC, and DOCX files are allowed";
   }
   if (file.size > HR_DOCUMENT_MAX_SIZE_BYTES) {
-    return "File size must be less than 10 MB";
+    return "File size must be less than 600 KB";
   }
   if (file.size <= 0) {
     return "File is empty";

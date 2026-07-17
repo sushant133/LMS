@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { DOCUMENT_MAX_SIZE_BYTES, type AssignmentAttachment } from "@phit-erp/shared";
 import { FileText, Image as ImageIcon, Upload, X } from "lucide-react";
-import type { AssignmentAttachment } from "@phit-erp/shared";
 import { Button } from "components/ui/button";
 import { resolveApiUrl } from "lib/api";
 
@@ -24,6 +24,15 @@ export const ComplaintAttachmentUpload = ({
 
     if (attachments.length + files.length > 5) {
       setError("You can attach up to 5 files.");
+      event.target.value = "";
+      return;
+    }
+
+    const oversized = Array.from(files).find(
+      (file) => file.size > DOCUMENT_MAX_SIZE_BYTES,
+    );
+    if (oversized) {
+      setError(`Each file must be less than 600 KB (${oversized.name} is too large).`);
       event.target.value = "";
       return;
     }
@@ -63,7 +72,7 @@ export const ComplaintAttachmentUpload = ({
   return (
     <div className="space-y-2">
       <p className="text-xs text-slate-500">
-        Attach images or PDFs as supporting evidence (max 5 files, 10 MB each).
+        Attach images or PDFs as supporting evidence (max 5 files, 600 KB each).
       </p>
       <label className="cursor-pointer">
         <div className="inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 hover:border-brand-400 hover:bg-brand-50/50">

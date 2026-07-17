@@ -27,7 +27,7 @@ export const validateDocumentFile = (file: File): string | null => {
     return "Only PDF, JPG, JPEG, and PNG files are allowed";
   }
   if (file.size > STUDENT_DOCUMENT_MAX_SIZE_BYTES) {
-    return "File size must be less than 500 KB";
+    return "File size must be less than 600 KB";
   }
   return null;
 };

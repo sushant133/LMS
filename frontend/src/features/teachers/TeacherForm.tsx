@@ -289,7 +289,7 @@ export const TeacherForm = ({
           onChange={onDocumentsChange}
           canManage={canManageDocuments}
           title="Teacher documents"
-          description="Upload CV, degree, certificates and other teacher documents (PDF, JPG, PNG — max 500 KB). You can also manage these from the teacher profile."
+          description="Upload CV, degree, certificates and other teacher documents (PDF, JPG, PNG, DOC — max 600 KB each). You can also manage these from the teacher profile."
         />
       ) : canManageDocuments && !teacherId ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">

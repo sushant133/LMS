@@ -116,7 +116,7 @@ export const uploadStaffPhoto = uploadTeacherPhoto;
 
 export const uploadTeacherDocuments = multer({
   storage: createModuleStorage(UPLOAD_MODULES.TEACHERS_DOCUMENTS),
-  limits: { fileSize: FILE_SIZE_LIMITS.document.maxBytes },
+  limits: { fileSize: FILE_SIZE_LIMITS.hrDocument.maxBytes },
   fileFilter: documentFilter
 }).array("documents", 10);
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { DOCUMENT_MAX_SIZE_BYTES, type AssignmentAttachment } from "@phit-erp/shared";
 import { FileText, Upload, X } from "lucide-react";
-import type { AssignmentAttachment } from "@phit-erp/shared";
 import { Button } from "components/ui/button";
 import { resolveApiUrl } from "lib/api";
 
@@ -23,10 +23,17 @@ export const AcademicAttachmentUpload = ({
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
+    const file = files[0]!;
+    if (file.size > DOCUMENT_MAX_SIZE_BYTES) {
+      setError("File size must be less than 600 KB");
+      event.target.value = "";
+      return;
+    }
+
     setError(null);
     setIsUploading(true);
     const formData = new FormData();
-    formData.append("files", files[0]!);
+    formData.append("files", file);
 
     try {
       const response = await fetch(
@@ -62,14 +69,14 @@ export const AcademicAttachmentUpload = ({
       <label className="cursor-pointer">
         <div className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50">
           <Upload className="h-4 w-4" />
-          {isUploading ? "Uploading..." : "Attach PDF / Document"}
+          {isUploading ? "Uploading..." : "Attach PDF / Document (max 600 KB)"}
         </div>
         <input
           type="file"
           accept=".pdf,.doc,.docx,image/*"
           className="hidden"
           disabled={disabled || isUploading}
-          onChange={handleUpload}
+          onChange={(e) => void handleUpload(e)}
         />
       </label>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}

@@ -53,7 +53,7 @@ export const HrDocumentsSection = ({
   pendingDocuments = [],
   onPendingChange,
   title = "Documents",
-  description = "Upload CV, degree, certificates and other documents (PDF, JPG, PNG, DOC — max 10 MB each).",
+  description = "Upload CV, degree, certificates and other documents (PDF, JPG, PNG, DOC — max 600 KB each).",
   onAfterMutation,
 }: HrDocumentsSectionProps) => {
   const [selectedCategory, setSelectedCategory] = useState<string>(
