@@ -14,7 +14,12 @@ router.get(
     "COLLEGE_VIEWER",
     "TEACHER",
     "STUDENT",
-    "PRINCIPAL"
+    "PRINCIPAL",
+    "PARENT",
+    "COLLEGE_STAFF",
+    "LIBRARY_STAFF",
+    "LABORATORY_STAFF",
+    "ACCOUNTANT"
   ),
   listTimetable
 );

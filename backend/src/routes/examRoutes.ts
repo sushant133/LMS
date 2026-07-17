@@ -44,7 +44,18 @@ import { tenantGuard } from "../middleware/tenant.js";
 const router = Router();
 
 /** COLLEGE_VIEWER inherits GET when COLLEGE_ADMIN is listed. */
-const examReaders = authorize("COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT");
+const examReaders = authorize(
+  "COLLEGE_ADMIN",
+  "SUPER_ADMIN",
+  "TEACHER",
+  "STUDENT",
+  "PARENT",
+  "PRINCIPAL",
+  "COLLEGE_STAFF",
+  "LIBRARY_STAFF",
+  "LABORATORY_STAFF",
+  "ACCOUNTANT"
+);
 const resultReaders = authorize("COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT");
 const submissionReaders = authorize("COLLEGE_ADMIN", "TEACHER");
 

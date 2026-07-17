@@ -43,6 +43,7 @@ import {
   roleLabelMap,
 } from "lib/auth";
 import { AcademicCalendarWidgets } from "features/dashboard/AcademicCalendarWidgets";
+import { DashboardSchedulePanels } from "features/dashboard/DashboardSchedulePanels";
 import { FeeDuesPanel } from "features/dashboard/FeeDuesPanel";
 import { DashboardBannerPopup } from "features/notices/DashboardBannerPopup";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
@@ -527,6 +528,7 @@ const StaffModuleDashboard = ({
       <StatGrid stats={statsWithLiveUnread} />
       <QuickActions actions={staffQuickActions} />
       <AcademicCalendarWidgets />
+      <DashboardSchedulePanels />
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <NotificationsPanel notifications={data.notifications} unreadCount={unreadCount} />
         <NoticesPanel notices={data.notices} />
@@ -633,6 +635,7 @@ export const DashboardPage = () => {
         />
         <StatGrid stats={statsWithLiveUnread} />
         <AcademicCalendarWidgets />
+        <DashboardSchedulePanels />
         <HighlightsRow highlights={data.highlights} />
         <QuickActions
           actions={[
@@ -640,7 +643,8 @@ export const DashboardPage = () => {
             { label: "Assignments", href: "/homework-view" },
             { label: "My Fees", href: "/my-fees" },
             { label: "My Library", href: "/my-library" },
-            { label: "Exams", href: "/exams" }
+            { label: "Exams", href: "/exams" },
+            { label: "Timetable", href: "/timetable" }
           ]}
         />
         <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
@@ -760,6 +764,7 @@ export const DashboardPage = () => {
 
       <StatGrid stats={statsWithLiveUnread} />
       <AcademicCalendarWidgets />
+      <DashboardSchedulePanels />
       <HighlightsRow highlights={data.highlights} onAction={isCollegeAdmin ? handleHighlightAction : undefined} />
       <FeeDuesPanel open={feeDuesOpen && isCollegeAdmin} onClose={() => setFeeDuesOpen(false)} />
 
@@ -770,6 +775,7 @@ export const DashboardPage = () => {
             { label: "Attendance", href: "/attendance-view" },
             { label: "Fee Collection", href: "/accounting" },
             { label: "Exams & Results", href: "/exams-view" },
+            { label: "Timetable", href: "/timetable" },
             { label: "IEMIS Reports", href: "/reports" },
             { label: "Parent Links", href: "/parent-links" }
           ]}
