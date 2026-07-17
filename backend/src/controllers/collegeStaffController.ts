@@ -40,6 +40,8 @@ type CollegeStaffLean = {
   staffId: string;
   fullName: string;
   photoUrl?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  documents?: any[];
   gender: string;
   dateOfBirthBs?: string;
   phone: string;
@@ -97,12 +99,15 @@ const serializeStaff = async (staff: CollegeStaffLean) => {
           role: user.role,
           phone: user.phone,
           isActive: user.isActive,
-          mustChangePassword: user.mustChangePassword
+          mustChangePassword: user.mustChangePassword,
+          designation: user.designation,
+          department: user.department
         }
       : undefined,
     staffId: staff.staffId,
     fullName: staff.fullName,
     photoUrl: staff.photoUrl,
+    documents: staff.documents ?? [],
     gender: staff.gender,
     dateOfBirthBs: staff.dateOfBirthBs,
     phone: staff.phone,
@@ -329,6 +334,8 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
           phone: payload.phone,
           password: resolved.password,
           role,
+          designation: payload.designation,
+          department: emptyToUndef(payload.department),
           isActive: payload.status === "ACTIVE",
           mustChangePassword: resolved.wasGenerated
         }
@@ -344,6 +351,7 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
           staffId: payload.staffId,
           fullName: payload.fullName,
           photoUrl: emptyToUndef(payload.photoUrl),
+          documents: [],
           gender: payload.gender,
           dateOfBirthBs: emptyToUndef(payload.dateOfBirthBs),
           phone: payload.phone,
@@ -470,6 +478,10 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
         if (duplicate) throw new ApiError(409, "A user with this email already exists");
         user.email = email;
       }
+      if (payload.designation) user.designation = payload.designation;
+      if (payload.department !== undefined) {
+        user.department = emptyToUndef(payload.department);
+      }
       user.role = nextRole;
       if (payload.status) {
         user.isActive = payload.status === "ACTIVE";
@@ -501,6 +513,8 @@ export const updateCollegeStaff = asyncHandler(async (req: Request, res: Respons
       phone: payload.phone ?? existing.phone,
       password: resolved.password,
       role: nextRole,
+      designation: payload.designation ?? existing.designation,
+      department: emptyToUndef(payload.department) ?? existing.department,
       isActive: (payload.status ?? existing.status) === "ACTIVE",
       mustChangePassword: resolved.wasGenerated
     });

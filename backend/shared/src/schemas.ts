@@ -236,6 +236,21 @@ export const studentSchema = z.object({
  * PENDING teachers and backwards-compatible clients. Subject Assignment is
  * the source of truth once teachers are ACCEPTED/NA.
  */
+const hrDocumentSchema = z.object({
+  _id: z.string().optional(),
+  type: z.string(),
+  name: z.string(),
+  url: z.string().optional().default(""),
+  originalName: z.string().optional().default(""),
+  mimeType: z.string().optional(),
+  size: z.number().min(0).optional().default(0),
+  status: z.enum(["UPLOADED", "VERIFIED", "REJECTED", "PENDING"]).default("UPLOADED"),
+  uploadedAt: z.string().optional().default(""),
+  uploadedBy: z.string().optional().default(""),
+  uploadedByName: z.string().optional(),
+  notes: z.string().optional()
+});
+
 export const teacherSchema = z.object({
   fullName: z.string().min(2),
   email: portalLoginIdSchema,
@@ -243,6 +258,8 @@ export const teacherSchema = z.object({
   password: optionalPortalPasswordSchema,
   teacherCode: z.string().min(1),
   qualification: z.string().min(2),
+  /** Position title — defaults to "Teacher" on the server when empty. */
+  designation: z.string().optional().or(z.literal("")),
   joinedDateBs: bsDateSchema,
   address: addressSchema,
   subjects: z.array(objectIdSchema).default([]),
@@ -250,7 +267,9 @@ export const teacherSchema = z.object({
   assignedSectionIds: z.array(objectIdSchema).default([]),
   assignedBatchIds: z.array(objectIdSchema).default([]),
   assignedYearIds: z.array(objectIdSchema).default([]),
-  basicSalaryNpr: moneySchema
+  basicSalaryNpr: moneySchema,
+  photoUrl: z.string().optional().or(z.literal("")),
+  documents: z.array(hrDocumentSchema).optional()
 });
 
 const optionalNonNegNumber = z.preprocess((value) => {
@@ -291,7 +310,8 @@ export const collegeStaffSchema = z
     employmentType: z.enum(EMPLOYMENT_TYPES).default("FULL_TIME"),
     basicSalaryNpr: optionalMoney,
     remarks: z.string().trim().max(2000).optional().or(z.literal("")),
-    status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE")
+    status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
+    documents: z.array(hrDocumentSchema).optional()
   })
   .superRefine((value, ctx) => {
     if (value.category === "OTHER" && !value.customRoleLabel?.trim()) {

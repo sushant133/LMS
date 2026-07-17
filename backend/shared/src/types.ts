@@ -132,11 +132,22 @@ export type DocumentType =
   | "ADMISSION_FORM"
   | "CTEVT_REGISTRATION"
   | "SCHOLARSHIP"
-  | "FEE_AGREEMENT";
+  | "FEE_AGREEMENT"
+  | "PROFILE_PHOTOGRAPH"
+  | "CV"
+  | "DEGREE"
+  | "CERTIFICATE"
+  | "EXPERIENCE_LETTER"
+  | "APPOINTMENT_LETTER";
 
 export type StudentDocumentStatus = "UPLOADED" | "VERIFIED" | "REJECTED" | "PENDING";
 
 export type StudentDocumentCategory = (typeof import("./constants.js").STUDENT_DOCUMENT_CATEGORIES)[number]["key"];
+
+export type HrDocumentCategory = (typeof import("./constants.js").HR_DOCUMENT_CATEGORIES)[number]["key"];
+
+/** Alias — same shape as student documents for teacher/staff file records. */
+export type HrDocument = StudentDocument;
 
 export type GradeSymbol = "A+" | "A" | "B+" | "B" | "C+" | "C" | "D" | "E";
 
@@ -388,8 +399,18 @@ export interface TeacherRecord {
   /** Dual-read migration marker — NA | PENDING | NEEDS_REVIEW | ACCEPTED */
   assignmentMigrationStatus?: "NA" | "PENDING" | "NEEDS_REVIEW" | "ACCEPTED";
   basicSalaryNpr: number;
+  photoUrl?: string;
+  documents?: HrDocument[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface TeacherProfileData {
+  teacher: TeacherRecord;
+  permissions: {
+    canManageDocuments: boolean;
+    canViewDocuments: boolean;
+  };
 }
 
 export interface CollegeStaffRecord {
@@ -399,6 +420,7 @@ export interface CollegeStaffRecord {
   staffId: string;
   fullName: string;
   photoUrl?: string;
+  documents?: HrDocument[];
   gender: string;
   dateOfBirthBs?: string;
   phone: string;
@@ -423,6 +445,14 @@ export interface CollegeStaffRecord {
   credentialsEmailSentAt?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface CollegeStaffProfileData {
+  staff: CollegeStaffRecord;
+  permissions: {
+    canManageDocuments: boolean;
+    canViewDocuments: boolean;
+  };
 }
 
 export interface CollegeStaffReportResponse {

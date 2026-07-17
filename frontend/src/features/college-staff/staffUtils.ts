@@ -3,6 +3,7 @@ import {
   COLLEGE_STAFF_CATEGORY_LABELS,
   COLLEGE_STAFF_CATEGORY_ROLES,
 } from "@phit-erp/shared";
+import { resolveMediaUrl } from "lib/api";
 
 export const emptyAddress = {
   province: "",
@@ -84,25 +85,9 @@ export const sanitizeStaffFormNumbers = <
       : form.basicSalaryNpr,
 });
 
-export const staffPhotoSrc = (photoUrl?: string | null): string | undefined => {
-  if (!photoUrl) return undefined;
-  const trimmed = photoUrl.trim();
-  // Block javascript:, data:, and other non-image schemes (stored XSS / phishing)
-  if (/^(javascript|data|vbscript|file):/i.test(trimmed)) {
-    return undefined;
-  }
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    return trimmed;
-  }
-  if (trimmed.startsWith("/uploads/")) {
-    return trimmed;
-  }
-  // Relative upload paths only
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
-    return trimmed;
-  }
-  return `/${trimmed}`;
-};
+/** Resolve staff/teacher photo for <img src> (never under /api). */
+export const staffPhotoSrc = (photoUrl?: string | null): string | undefined =>
+  resolveMediaUrl(photoUrl);
 
 export const emailStatusStyle: Record<string, string> = {
   SENT: "bg-emerald-100 text-emerald-800",

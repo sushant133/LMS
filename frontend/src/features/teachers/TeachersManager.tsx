@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { TeacherInput, TeacherRecord } from "@phit-erp/shared";
+import {
+  DEFAULT_TEACHER_DESIGNATION,
+  type HrDocument,
+  type TeacherInput,
+  type TeacherRecord,
+} from "@phit-erp/shared";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
@@ -62,6 +68,8 @@ const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   phone: teacher.user.phone ?? "",
   teacherCode: teacher.teacherCode,
   qualification: teacher.qualification,
+  designation:
+    teacher.user?.designation?.trim() || DEFAULT_TEACHER_DESIGNATION,
   joinedDateBs: teacher.joinedDateBs,
   address: teacher.address,
   subjects: [],
@@ -70,6 +78,7 @@ const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   assignedBatchIds: [],
   assignedYearIds: [],
   basicSalaryNpr: teacher.basicSalaryNpr,
+  photoUrl: teacher.photoUrl ?? "",
 });
 
 interface TeachersManagerProps {
@@ -80,6 +89,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const canManage = useIsTenantAdmin();
   const isCollege = useIsCollege();
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
+  const [editDocuments, setEditDocuments] = useState<HrDocument[]>([]);
   const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
   const [assignmentsTeacher, setAssignmentsTeacher] =
     useState<TeacherRecord | null>(null);
@@ -107,6 +117,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
         toast.success("Teacher updated");
       }
       setEditing(null);
+      setEditDocuments([]);
       await queryClient.invalidateQueries({ queryKey: ["teachers"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -173,8 +184,18 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
               isEditing={Boolean(editing)}
               teacherId={editing?._id}
               initialValue={editing ? mapTeacherToInput(editing) : undefined}
+              documents={editDocuments}
+              canManageDocuments={canManage}
+              onDocumentsChange={setEditDocuments}
               submitting={teacherMutation.isPending}
-              onCancel={editing ? () => setEditing(null) : undefined}
+              onCancel={
+                editing
+                  ? () => {
+                      setEditing(null);
+                      setEditDocuments([]);
+                    }
+                  : undefined
+              }
               onSubmit={async (value) => {
                 await teacherMutation.mutateAsync(value);
               }}
@@ -238,27 +259,27 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     const status =
                       teacher.assignmentMigrationStatus ?? "PENDING";
                     const designation =
-                      teacher.user?.designation?.trim() || "";
+                      teacher.user?.designation?.trim() ||
+                      DEFAULT_TEACHER_DESIGNATION;
                     return (
                     <tr key={teacher._id}>
                       <Td>
                         <div>
-                          <div className="font-medium text-slate-900">
+                          <Link
+                            to={`/teachers/${teacher._id}/profile`}
+                            className="font-medium text-brand-700 hover:underline"
+                          >
                             {teacher.user.fullName}
-                          </div>
+                          </Link>
                           <div className="text-xs text-slate-500">
                             {teacher.user.email}
                           </div>
                         </div>
                       </Td>
                       <Td>
-                        {designation ? (
-                          <Badge className="bg-brand-100 text-brand-900">
-                            {designation}
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-slate-400">—</span>
-                        )}
+                        <Badge className="bg-brand-100 text-brand-900">
+                          {designation}
+                        </Badge>
                       </Td>
                       <Td>{teacher.teacherCode}</Td>
                       <Td className="max-w-[14rem] text-xs text-slate-600">
@@ -273,6 +294,11 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                       {canManage ? (
                         <Td className="text-right">
                           <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="outline" asChild>
+                              <Link to={`/teachers/${teacher._id}/profile`}>
+                                Profile
+                              </Link>
+                            </Button>
                             <Button
                               size="sm"
                               onClick={() => {
@@ -291,6 +317,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                                 setAccessTeacher(null);
                                 setAssignmentsTeacher(null);
                                 setEditing(teacher);
+                                setEditDocuments(teacher.documents ?? []);
                               }}
                             >
                               Edit

@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
-import { teacherSchema } from "@phit-erp/shared";
+import { DEFAULT_TEACHER_DESIGNATION, teacherSchema } from "@phit-erp/shared";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Subject } from "../models/Subject.js";
@@ -17,6 +17,7 @@ import {
 } from "../utils/credentialEmail.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
+import { deleteReplacedMedia } from "../utils/mediaCleanup.js";
 import { sendSuccess } from "../utils/response.js";
 import { updatePortalUser } from "../utils/userPassword.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
@@ -28,6 +29,11 @@ import {
   getSessionOption
 } from "../utils/transaction.js";
 import { hardDeleteTeacherAccount } from "../utils/deletePersonCascade.js";
+
+const resolveTeacherDesignation = (value?: string | null): string => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : DEFAULT_TEACHER_DESIGNATION;
+};
 
 const validateCollegeTeacherSubjects = async (
   schoolId: mongoose.Types.ObjectId,
@@ -247,6 +253,9 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
   const session = await createSession();
   const { password: portalPassword, wasGenerated } = resolvePortalPassword(payload.password);
 
+  const designation = resolveTeacherDesignation(payload.designation);
+  const photoUrl = payload.photoUrl?.trim() || undefined;
+
   try {
     const createdUsers = await User.create(
       [
@@ -257,6 +266,7 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
           phone: payload.phone,
           password: portalPassword,
           role: "TEACHER",
+          designation,
           mustChangePassword: wasGenerated
         }
       ],
@@ -272,7 +282,9 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
           schoolId,
           user: user._id,
           ...buildTeacherAssignmentFields(institutionType, payload),
-          assignmentMigrationStatus: "NA"
+          assignmentMigrationStatus: "NA",
+          photoUrl,
+          documents: []
         }
       ],
       getSessionOption(session)
@@ -357,12 +369,17 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
     }
   }
 
+  const designation = resolveTeacherDesignation(payload.designation);
+
   await updatePortalUser(teacher.user, {
     fullName: payload.fullName,
     email: loginEmail,
     phone: payload.phone,
     password: payload.password
   });
+
+  // Keep designation on the linked login user (shown in staff list / profile)
+  await User.findByIdAndUpdate(teacher.user, { designation });
 
   // HR fields always; assignment arrays only when PENDING/NEEDS_REVIEW and payload has them
   // Empty/omitted assignment fields for ACCEPTED/NA: leave existing arrays untouched
@@ -371,6 +388,13 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
   teacher.joinedDateBs = payload.joinedDateBs;
   teacher.address = payload.address;
   teacher.basicSalaryNpr = payload.basicSalaryNpr;
+
+  if (payload.photoUrl !== undefined) {
+    const previousPhoto = teacher.photoUrl;
+    const nextPhoto = payload.photoUrl?.trim() || undefined;
+    teacher.photoUrl = nextPhoto;
+    await deleteReplacedMedia(previousPhoto, nextPhoto);
+  }
 
   // Only rewrite legacy assignment arrays when the client intentionally sent them.
   // HR-only UI always sends empty arrays — must not wipe PENDING/NEEDS_REVIEW loads.

@@ -55,6 +55,12 @@ const StudentMyProfilePage = lazy(() =>
   import("pages/StudentMyProfilePage").then((module) => ({ default: module.StudentMyProfilePage }))
 );
 const StudentProfilePage = lazy(() => import("pages/StudentProfilePage").then((module) => ({ default: module.StudentProfilePage })));
+const TeacherProfilePage = lazy(() =>
+  import("pages/TeacherProfilePage").then((module) => ({ default: module.TeacherProfilePage })),
+);
+const StaffProfilePage = lazy(() =>
+  import("pages/StaffProfilePage").then((module) => ({ default: module.StaffProfilePage })),
+);
 
 /** App entry always opens the login page — no silent auto-login from a leftover cookie. */
 const RootRedirect = () => {
@@ -265,7 +271,23 @@ export default function App() {
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
               <Route path="/college-staff" element={<CollegeStaffPage />} />
+              <Route
+                path="/college-staff/:staffId/profile"
+                element={
+                  <LazyRoute>
+                    <StaffProfilePage />
+                  </LazyRoute>
+                }
+              />
               <Route path="/teachers" element={<TeachersPage />} />
+              <Route
+                path="/teachers/:teacherId/profile"
+                element={
+                  <LazyRoute>
+                    <TeacherProfilePage />
+                  </LazyRoute>
+                }
+              />
               <Route path="/academics" element={<AcademicsPage />} />
               <Route
                 path="/academics/subject-assignments"

@@ -1,5 +1,6 @@
+import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { COLLEGE_STAFF_CATEGORIES, EMPLOYMENT_TYPES } from "@phit-erp/shared";
+import { COLLEGE_STAFF_CATEGORIES, EMPLOYMENT_TYPES, HR_DOCUMENT_STATUSES } from "@phit-erp/shared";
 
 const addressSchema = new Schema(
   {
@@ -12,6 +13,24 @@ const addressSchema = new Schema(
   { _id: false }
 );
 
+const hrDocumentSchema = new Schema(
+  {
+    _id: { type: String, default: () => crypto.randomUUID() },
+    type: { type: String, required: true },
+    name: { type: String, required: true },
+    url: { type: String, default: "" },
+    originalName: { type: String, default: "" },
+    mimeType: { type: String },
+    size: { type: Number, default: 0 },
+    status: { type: String, enum: HR_DOCUMENT_STATUSES, default: "UPLOADED" },
+    uploadedAt: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedByName: { type: String },
+    notes: { type: String }
+  },
+  { _id: false }
+);
+
 const collegeStaffSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
@@ -19,6 +38,7 @@ const collegeStaffSchema = new Schema(
     staffId: { type: String, required: true, trim: true },
     fullName: { type: String, required: true },
     photoUrl: { type: String },
+    documents: { type: [hrDocumentSchema], default: [] },
     gender: { type: String, required: true },
     dateOfBirthBs: { type: String },
     phone: { type: String, required: true },

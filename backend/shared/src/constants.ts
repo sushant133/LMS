@@ -625,3 +625,38 @@ export const countPendingRequiredDocuments = (
     return ofType.every((doc) => isPendingStudentDocument(doc));
   }).length;
 };
+
+/**
+ * Document categories for teachers and non-teaching college staff (CV, degree, etc.).
+ * All optional — records can be created without files and documents uploaded later.
+ */
+export const HR_DOCUMENT_CATEGORIES = [
+  { key: "PROFILE_PHOTOGRAPH", label: "Profile Photograph", required: false, allowMultiple: false, allowCustomName: false },
+  { key: "CV", label: "CV / Resume", required: false, allowMultiple: false, allowCustomName: false },
+  { key: "DEGREE", label: "Degree Certificate", required: false, allowMultiple: true, allowCustomName: false },
+  { key: "CERTIFICATE", label: "Certificate", required: false, allowMultiple: true, allowCustomName: false },
+  { key: "EXPERIENCE_LETTER", label: "Experience Letter", required: false, allowMultiple: true, allowCustomName: false },
+  { key: "CITIZENSHIP_NATIONAL_ID", label: "Citizenship / National ID", required: false, allowMultiple: false, allowCustomName: false },
+  { key: "APPOINTMENT_LETTER", label: "Appointment Letter", required: false, allowMultiple: false, allowCustomName: false },
+  { key: "OTHER", label: "Other Documents", required: false, allowMultiple: true, allowCustomName: true }
+] as const;
+
+export const HR_DOCUMENT_STATUSES = STUDENT_DOCUMENT_STATUSES;
+/** Align with backend teacher/staff document multer limit (PDF + Office + images). */
+export const HR_DOCUMENT_MIME_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+] as const;
+/** 10 MB — matches FILE_SIZE_LIMITS.document on the backend. */
+export const HR_DOCUMENT_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+
+/** Default designation when a teacher is created without one. */
+export const DEFAULT_TEACHER_DESIGNATION = "Teacher";
+
+export const getHrDocumentCategoryLabel = (type: string): string =>
+  HR_DOCUMENT_CATEGORIES.find((item) => item.key === type)?.label ?? type;

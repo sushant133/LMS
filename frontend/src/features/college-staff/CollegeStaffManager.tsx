@@ -9,8 +9,10 @@ import {
   type CollegeStaffInput,
   type CollegeStaffRecord,
   type CollegeStaffReportResponse,
+  type HrDocument,
 } from "@phit-erp/shared";
 import { Eye, Upload } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { EmptyState } from "components/shared/EmptyState";
@@ -24,6 +26,7 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { HrDocumentsSection } from "features/hr-documents/HrDocumentsSection";
 import { api, resolveApiUrl, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
@@ -75,6 +78,7 @@ export const CollegeStaffManager = ({
   const [password, setPassword] = useState("");
   const [autoGeneratePassword, setAutoGeneratePassword] = useState(true);
   const [editing, setEditing] = useState<CollegeStaffRecord | null>(null);
+  const [editDocuments, setEditDocuments] = useState<HrDocument[]>([]);
   const [viewing, setViewing] = useState<CollegeStaffRecord | null>(null);
   /** Separate from edit form — open Module Access from list without full edit. */
   const [accessStaff, setAccessStaff] = useState<CollegeStaffRecord | null>(null);
@@ -271,12 +275,24 @@ export const CollegeStaffManager = ({
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file (JPG, PNG, or WEBP)");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Photo must be less than 2 MB");
+      event.target.value = "";
+      return;
+    }
+
     setIsUploading(true);
     const formData = new FormData();
     formData.append("photo", file);
 
     try {
-      const response = await fetch(resolveApiUrl("/uploads/staff/photo"), {
+      // Same storage module as teachers (teachers/photos) — staff/photo is an alias
+      const response = await fetch(resolveApiUrl("/uploads/teachers/photo"), {
         method: "POST",
         body: formData,
         credentials: "include",
@@ -286,8 +302,19 @@ export const CollegeStaffManager = ({
         throw new Error(body.message ?? "Upload failed");
       }
       const body = await response.json();
-      setForm((current) => ({ ...current, photoUrl: body.data?.url ?? "" }));
-      toast.success("Photo uploaded");
+      const photoUrl = (body.data?.url as string | undefined) ?? "";
+      if (!photoUrl) throw new Error("Upload response missing file URL");
+
+      setForm((current) => ({ ...current, photoUrl }));
+
+      // Persist immediately when editing existing staff
+      if (editing?._id) {
+        await unwrap(api.put(`/college-staff/${editing._id}/photo`, { photoUrl }));
+        toast.success("Photo uploaded and saved");
+        await queryClient.invalidateQueries({ queryKey: ["college-staff"] });
+      } else {
+        toast.success("Photo uploaded — click Save to keep it on the new staff record");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed");
     } finally {
@@ -299,6 +326,7 @@ export const CollegeStaffManager = ({
   const loadStaff = (staff: CollegeStaffRecord) => {
     setEditing(staff);
     setViewing(null);
+    setEditDocuments(staff.documents ?? []);
     setForm({
       fullName: staff.fullName,
       email: staff.email ?? staff.user?.email ?? "",
@@ -565,10 +593,10 @@ export const CollegeStaffManager = ({
                   {isUploading ? "Uploading..." : "Upload photo"}
                   <input
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/jpeg,image/jpg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                     className="hidden"
                     disabled={isUploading}
-                    onChange={handlePhotoUpload}
+                    onChange={(e) => void handlePhotoUpload(e)}
                   />
                 </label>
                 {staffPhotoSrc(form.photoUrl) ? (
@@ -705,6 +733,29 @@ export const CollegeStaffManager = ({
                 />
               </FormField>
             </div>
+
+            {canManage && editing?._id ? (
+              <div className="md:col-span-2 xl:col-span-3">
+                <HrDocumentsSection
+                  entityKind="staff"
+                  entityId={editing._id}
+                  documents={editDocuments}
+                  onChange={setEditDocuments}
+                  canManage
+                  title="Staff documents"
+                  description="Upload CV, degree, certificates and other staff documents (PDF, JPG, PNG — max 500 KB). You can also manage these from the staff profile."
+                  onAfterMutation={async () => {
+                    await queryClient.invalidateQueries({ queryKey: ["college-staff"] });
+                  }}
+                />
+              </div>
+            ) : canManage && !editing ? (
+              <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                After creating this staff member, open their{" "}
+                <strong>Profile</strong> to upload CV, certificates, degree, and other
+                documents.
+              </div>
+            ) : null}
 
             <div className="md:col-span-2 xl:col-span-3 pt-2">
               <p className="text-sm font-medium text-slate-700">Login information</p>
@@ -913,7 +964,14 @@ export const CollegeStaffManager = ({
                         )}
                       </Td>
                       <Td>{staff.staffId}</Td>
-                      <Td className="font-medium">{staff.fullName}</Td>
+                      <Td className="font-medium">
+                        <Link
+                          to={`/college-staff/${staff._id}/profile`}
+                          className="text-brand-700 hover:underline"
+                        >
+                          {staff.fullName}
+                        </Link>
+                      </Td>
                       <Td className="text-xs">
                         {categoryDisplayLabel(staff.category, staff.customRoleLabel)}
                       </Td>
@@ -956,16 +1014,11 @@ export const CollegeStaffManager = ({
                       {canManage ? (
                         <Td>
                           <div className="flex flex-wrap justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setViewing(staff);
-                                setEditing(null);
-                              }}
-                            >
-                              <Eye className="mr-1 h-3.5 w-3.5" />
-                              View
+                            <Button size="sm" variant="outline" asChild>
+                              <Link to={`/college-staff/${staff._id}/profile`}>
+                                <Eye className="mr-1 h-3.5 w-3.5" />
+                                Profile
+                              </Link>
                             </Button>
                             <Button
                               size="sm"

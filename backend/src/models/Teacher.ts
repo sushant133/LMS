@@ -1,4 +1,6 @@
+import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { HR_DOCUMENT_STATUSES } from "@phit-erp/shared";
 
 const addressSchema = new Schema(
   {
@@ -7,6 +9,24 @@ const addressSchema = new Schema(
     municipality: { type: String, required: true },
     ward: { type: String, required: true },
     streetAddress: { type: String, required: true }
+  },
+  { _id: false }
+);
+
+const hrDocumentSchema = new Schema(
+  {
+    _id: { type: String, default: () => crypto.randomUUID() },
+    type: { type: String, required: true },
+    name: { type: String, required: true },
+    url: { type: String, default: "" },
+    originalName: { type: String, default: "" },
+    mimeType: { type: String },
+    size: { type: Number, default: 0 },
+    status: { type: String, enum: HR_DOCUMENT_STATUSES, default: "UPLOADED" },
+    uploadedAt: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedByName: { type: String },
+    notes: { type: String }
   },
   { _id: false }
 );
@@ -35,7 +55,9 @@ const teacherSchema = new Schema(
       default: "PENDING",
       index: true
     },
-    basicSalaryNpr: { type: Number, default: 0 }
+    basicSalaryNpr: { type: Number, default: 0 },
+    photoUrl: { type: String },
+    documents: { type: [hrDocumentSchema], default: [] }
   },
   { timestamps: true }
 );
