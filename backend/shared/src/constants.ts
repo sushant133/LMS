@@ -498,6 +498,30 @@ export const ETHNICITY_CATEGORIES = [
 // Document types for student/teacher records and admissions
 export const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
+/** Timetable session kinds (optional on slot; default THEORY for legacy rows). */
+export const TIMETABLE_SESSION_TYPES = [
+  "THEORY",
+  "PRACTICAL",
+  "BREAK",
+  "HOLIDAY",
+  "EXAM",
+  "SPECIAL",
+  "ONLINE",
+  "GUEST"
+] as const;
+
+export const TIMETABLE_ROOM_KINDS = ["CLASSROOM", "LABORATORY", "OTHER"] as const;
+
+/** Common break labels for Nepali college schedules. */
+export const TIMETABLE_BREAK_LABELS = [
+  "Tiffin Break",
+  "Lunch Break",
+  "Tea Break",
+  "Assembly",
+  "Prayer",
+  "Custom"
+] as const;
+
 export const DAILY_ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"] as const;
 
 export const DAILY_ATTENDANCE_RECORD_STATUSES = ["DRAFT", "SUBMITTED", "LOCKED"] as const;

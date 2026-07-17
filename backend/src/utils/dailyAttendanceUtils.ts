@@ -161,8 +161,9 @@ type TimetableSlotLean = {
   sectionId?: { toString(): string } | null;
   batchId?: { toString(): string } | null;
   yearId?: { toString(): string } | null;
-  subjectId: { toString(): string };
-  teacherId: { toString(): string };
+  /** Optional on break/holiday periods */
+  subjectId?: { toString(): string } | null;
+  teacherId?: { toString(): string } | null;
   periodNumber: number;
   startTime: string;
   endTime: string;
@@ -274,7 +275,13 @@ export const getDailyAttendanceSlots = async (
   const firstPeriodTeacherMap = new Map<string, string>();
   const firstPeriodSlots = (await TimetableSlot.find({ ...baseQuery, periodNumber: 1 }).lean()) as TimetableSlotLean[];
   if (firstPeriodSlots.length) {
-    const firstPeriodTeacherIds = [...new Set(firstPeriodSlots.map((slot) => slot.teacherId.toString()))];
+    const firstPeriodTeacherIds = [
+      ...new Set(
+        firstPeriodSlots
+          .map((slot) => slot.teacherId?.toString())
+          .filter((id): id is string => Boolean(id))
+      )
+    ];
     const firstPeriodTeachers = await Teacher.find({ _id: { $in: firstPeriodTeacherIds } })
       .populate("user", "fullName")
       .lean();
@@ -285,6 +292,7 @@ export const getDailyAttendanceSlots = async (
       ])
     );
     firstPeriodSlots.forEach((slot) => {
+      if (!slot.teacherId) return;
       firstPeriodTeacherMap.set(
         getAcademicGroupKey(slot, college),
         fpTeacherMap.get(slot.teacherId.toString()) ?? "Teacher"
@@ -308,18 +316,20 @@ export const getDailyAttendanceSlots = async (
   }
   const uniqueSlots = [...byGroup.values()];
 
-  return uniqueSlots.map((slot) => ({
-    slot,
-    className: slot.classId ? classMap.get(slot.classId.toString()) : undefined,
-    sectionName: slot.sectionId ? sectionMap.get(slot.sectionId.toString()) : undefined,
-    batchName: slot.batchId ? batchMap.get(slot.batchId.toString()) : undefined,
-    yearName: slot.yearId ? yearMap.get(slot.yearId.toString()) : undefined,
-    subject: subjectMap.get(slot.subjectId.toString()),
-    teacherName: teacherMap.get(slot.teacherId.toString()) ?? "Teacher",
-    firstPeriodTeacherName: firstPeriodTeacherMap.get(getAcademicGroupKey(slot, college)),
-    firstPeriodEndTime: firstPeriodEndMap.get(getAcademicGroupKey(slot, college)) ?? slot.endTime,
-    isSubstituteSlot: slot.periodNumber > 1
-  }));
+  return uniqueSlots
+    .filter((slot) => Boolean(slot.teacherId && slot.subjectId))
+    .map((slot) => ({
+      slot,
+      className: slot.classId ? classMap.get(slot.classId.toString()) : undefined,
+      sectionName: slot.sectionId ? sectionMap.get(slot.sectionId.toString()) : undefined,
+      batchName: slot.batchId ? batchMap.get(slot.batchId.toString()) : undefined,
+      yearName: slot.yearId ? yearMap.get(slot.yearId.toString()) : undefined,
+      subject: subjectMap.get(slot.subjectId!.toString()),
+      teacherName: teacherMap.get(slot.teacherId!.toString()) ?? "Teacher",
+      firstPeriodTeacherName: firstPeriodTeacherMap.get(getAcademicGroupKey(slot, college)),
+      firstPeriodEndTime: firstPeriodEndMap.get(getAcademicGroupKey(slot, college)) ?? slot.endTime,
+      isSubstituteSlot: slot.periodNumber > 1
+    }));
 };
 
 /** @deprecated Use getDailyAttendanceSlots */

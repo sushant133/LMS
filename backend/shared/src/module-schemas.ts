@@ -3,6 +3,8 @@ import {
   COMPLAINT_CATEGORIES,
   COMPLAINT_STATUSES,
   LIBRARY_YEAR_LEVELS,
+  TIMETABLE_ROOM_KINDS,
+  TIMETABLE_SESSION_TYPES,
   USER_ROLES
 } from "./constants.js";
 import {
@@ -17,22 +19,41 @@ import {
 
 export const dayOfWeekSchema = z.coerce.number().int().min(0).max(6);
 
-export const timetableSlotSchema = z.object({
-  classId: optionalObjectIdSchema,
-  sectionId: optionalObjectIdSchema,
-  batchId: optionalObjectIdSchema,
-  yearId: optionalObjectIdSchema,
-  dayOfWeek: dayOfWeekSchema,
-  periodNumber: z.coerce.number().int().min(1).max(12),
-  subjectId: objectIdSchema,
-  teacherId: objectIdSchema,
-  /** Optional link to SubjectAssignment for multi-teacher subjects */
-  subjectAssignmentId: optionalObjectIdSchema,
-  room: z.string().optional().or(z.literal("")),
-  startTime: z.string().regex(/^\d{2}:\d{2}$/),
-  endTime: z.string().regex(/^\d{2}:\d{2}$/),
-  academicYearBs: academicYearSchema
-});
+export const timetableSlotSchema = z
+  .object({
+    classId: optionalObjectIdSchema,
+    sectionId: optionalObjectIdSchema,
+    batchId: optionalObjectIdSchema,
+    yearId: optionalObjectIdSchema,
+    dayOfWeek: dayOfWeekSchema,
+    periodNumber: z.coerce.number().int().min(1).max(12),
+    /** Required for teaching slots; optional for BREAK / HOLIDAY */
+    subjectId: optionalObjectIdSchema,
+    teacherId: optionalObjectIdSchema,
+    /** Optional link to SubjectAssignment for multi-teacher subjects */
+    subjectAssignmentId: optionalObjectIdSchema,
+    room: z.string().optional().or(z.literal("")),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/),
+    academicYearBs: academicYearSchema,
+    /** THEORY (default) | PRACTICAL | BREAK | HOLIDAY | EXAM | SPECIAL | ONLINE | GUEST */
+    sessionType: z.enum(TIMETABLE_SESSION_TYPES).optional().default("THEORY"),
+    /** When sessionType is BREAK: Tiffin, Lunch, etc. */
+    breakLabel: z.string().trim().max(80).optional().or(z.literal("")),
+    remarks: z.string().trim().max(500).optional().or(z.literal("")),
+    roomKind: z.enum(TIMETABLE_ROOM_KINDS).optional()
+  })
+  .superRefine((data, ctx) => {
+    const soft = data.sessionType === "BREAK" || data.sessionType === "HOLIDAY";
+    if (!soft) {
+      if (!data.subjectId) {
+        ctx.addIssue({ code: "custom", message: "Subject is required", path: ["subjectId"] });
+      }
+      if (!data.teacherId) {
+        ctx.addIssue({ code: "custom", message: "Teacher is required", path: ["teacherId"] });
+      }
+    }
+  });
 
 export const assignmentAttachmentSchema = z.object({
   url: z.string().min(1),

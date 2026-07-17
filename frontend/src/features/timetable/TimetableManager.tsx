@@ -3,26 +3,36 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   canManageInstitution,
   DAYS_OF_WEEK,
+  TIMETABLE_BREAK_LABELS,
+  TIMETABLE_ROOM_KINDS,
+  TIMETABLE_SESSION_TYPES,
   timetableSlotSchema,
   type TimetableSlotInput,
 } from "@phit-erp/shared";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Download,
+  Image as ImageIcon,
+  Plus,
+  Printer,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "features/auth/AuthProvider";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
+import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
-import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
+import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import {
   filterSectionsByClass,
@@ -31,62 +41,41 @@ import {
   filterYearsByBatch,
   type ScopeOption,
 } from "lib/teacherScopeUtils";
-import { cn, parseErrorMessage } from "lib/utils";
+import { parseErrorMessage } from "lib/utils";
+import { SESSION_COLORS, SESSION_LABELS } from "./timetableColors";
+import { TimetablePrintView } from "./TimetablePrintView";
+import {
+  buildWeeklyMatrix,
+  filterSlotsByView,
+  idOf,
+  nameOf,
+  uniqueRooms,
+  type TimetableSlotRow,
+} from "./timetableMatrixUtils";
+import { WeeklyTimetableGrid } from "./WeeklyTimetableGrid";
 
-type SlotRow = {
-  _id: string;
-  dayOfWeek: number;
-  periodNumber: number;
-  subjectId?: { _id?: string; name?: string } | string;
-  teacherId?:
-    | { _id?: string; user?: { fullName?: string } }
-    | string;
-  startTime: string;
-  endTime: string;
-  room?: string;
-  academicYearBs?: string;
-  batchId?: { _id?: string; name?: string } | string;
-  yearId?: { _id?: string; name?: string; level?: number } | string;
-  classId?: { _id?: string; name?: string } | string;
-  sectionId?: { _id?: string; name?: string } | string;
-};
+type ViewMode = "group" | "mine" | "teacher" | "room" | "lab";
+
+const SATURDAY_KEY = "phit-timetable-saturday-holiday";
 
 const defaultSlot = (): TimetableSlotInput => ({
   classId: "",
   sectionId: "",
   batchId: "",
   yearId: "",
-  dayOfWeek: 1,
+  dayOfWeek: 0,
   periodNumber: 1,
   subjectId: "",
   teacherId: "",
   room: "",
-  startTime: "10:00",
-  endTime: "10:45",
+  startTime: "06:30",
+  endTime: "07:20",
   academicYearBs: "2083/2084",
+  sessionType: "THEORY",
+  breakLabel: "",
+  remarks: "",
+  roomKind: undefined,
 });
-
-const idOf = (value: unknown): string => {
-  if (!value) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value !== null && "_id" in value) {
-    return String((value as { _id?: string })._id ?? "");
-  }
-  return "";
-};
-
-const nameOf = (value: unknown, fallback = "—"): string => {
-  if (!value) return fallback;
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value !== null) {
-    const obj = value as {
-      name?: string;
-      user?: { fullName?: string };
-    };
-    return obj.name || obj.user?.fullName || fallback;
-  }
-  return fallback;
-};
 
 /** Program years only for weekly tables (exclude Ended). */
 const isProgramYear = (year: ScopeOption & { level?: number; name?: string }) => {
@@ -109,8 +98,40 @@ export const TimetableManager = () => {
   const [form, setForm] = useState<TimetableSlotInput>(defaultSlot);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  /** Which year table is active for adding slots (college). */
   const [activeYearId, setActiveYearId] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    isTeacher ? "mine" : isStudent ? "group" : "group",
+  );
+  const [filterTeacherId, setFilterTeacherId] = useState("");
+  const [filterRoom, setFilterRoom] = useState("");
+  const [saturdayIsHoliday, setSaturdayIsHoliday] = useState(() => {
+    try {
+      const v = localStorage.getItem(SATURDAY_KEY);
+      return v === null ? true : v === "1";
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SATURDAY_KEY, saturdayIsHoliday ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [saturdayIsHoliday]);
+
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () =>
+      unwrap<{
+        schoolName?: string;
+        schoolNameNp?: string;
+        principalName?: string;
+        academicYearBs?: string;
+      }>(api.get("/settings")),
+    enabled: !isStudent,
+  });
 
   const classesQuery = useQuery({
     queryKey: ["classes"],
@@ -149,7 +170,7 @@ export const TimetableManager = () => {
       unwrap<Array<{ _id: string; user: { fullName: string } }>>(
         api.get("/teachers"),
       ),
-    enabled: isAdmin,
+    enabled: isAdmin || viewMode === "teacher",
   });
 
   const primaryOptions: ScopeOption[] = isCollege
@@ -174,8 +195,6 @@ export const TimetableManager = () => {
   const teacherId = isTeacher
     ? (teacherScopeQuery.data?.scope.teacherId ?? "")
     : form.teacherId;
-
-  const primaryId = isCollege ? (form.batchId ?? "") : (form.classId ?? "");
 
   const filteredSections = useMemo(
     () => filterSectionsByClass(secondaryOptions, form.classId ?? ""),
@@ -206,24 +225,44 @@ export const TimetableManager = () => {
     }));
   }, [isTeacher, teacherScopeQuery.data]);
 
-  // Timetable fetch
   const timetableParams = useMemo(() => {
-    if (isStudent) return {}; // backend scopes to student batch/year
+    if (isStudent) return {};
     if (isCollege) {
       const params: Record<string, string> = {};
       if (form.batchId) params.batchId = form.batchId;
-      return params; // all years for batch (or all if no batch)
+      if (viewMode === "mine") params.mineOnly = "1";
+      if (viewMode === "teacher" && filterTeacherId) {
+        params.teacherId = filterTeacherId;
+      }
+      if (viewMode === "room" && filterRoom) params.room = filterRoom;
+      if (viewMode === "lab") params.labOnly = "1";
+      return params;
     }
     const params: Record<string, string> = {};
     if (form.classId) params.classId = form.classId;
     if (form.sectionId) params.sectionId = form.sectionId;
+    if (viewMode === "mine") params.mineOnly = "1";
+    if (viewMode === "teacher" && filterTeacherId) {
+      params.teacherId = filterTeacherId;
+    }
+    if (viewMode === "room" && filterRoom) params.room = filterRoom;
+    if (viewMode === "lab") params.labOnly = "1";
     return params;
-  }, [form.batchId, form.classId, form.sectionId, isCollege, isStudent]);
+  }, [
+    filterRoom,
+    filterTeacherId,
+    form.batchId,
+    form.classId,
+    form.sectionId,
+    isCollege,
+    isStudent,
+    viewMode,
+  ]);
 
   const timetableQuery = useQuery({
-    queryKey: ["timetable", timetableParams, isStudent, isTeacher],
+    queryKey: ["timetable", timetableParams, isStudent, isTeacher, viewMode],
     queryFn: () =>
-      unwrap<SlotRow[]>(
+      unwrap<TimetableSlotRow[]>(
         api.get("/timetable", {
           params: Object.keys(timetableParams).length
             ? timetableParams
@@ -234,28 +273,33 @@ export const TimetableManager = () => {
   });
 
   const slots = timetableQuery.data ?? [];
+  const mineTeacherId = teacherScopeQuery.data?.scope.teacherId ?? "";
 
-  /** Group slots by year (college) or section (school). */
   const tables = useMemo(() => {
+    const scoped = filterSlotsByView(slots, {
+      mode: viewMode === "group" ? "group" : viewMode,
+      teacherId: filterTeacherId,
+      room: filterRoom,
+      mineTeacherId,
+    });
+
     if (isCollege) {
-      // Prefer known program years for the selected batch
-      if (filteredYears.length > 0) {
+      if (filteredYears.length > 0 && viewMode === "group") {
         return filteredYears.map((year) => ({
           key: year._id,
           title: year.name || `Year ${year.level ?? ""}`,
           yearId: year._id,
           batchId: form.batchId ?? "",
-          slots: slots.filter((s) => idOf(s.yearId) === year._id),
+          slots: scoped.filter((s) => idOf(s.yearId) === year._id),
         }));
       }
-      // Fall back: group whatever years appear in slots
       const byYear = new Map<
         string,
-        { title: string; yearId: string; batchId: string; slots: SlotRow[] }
+        { title: string; yearId: string; batchId: string; slots: TimetableSlotRow[] }
       >();
-      for (const slot of slots) {
-        const yid = idOf(slot.yearId) || "unknown";
-        const title = nameOf(slot.yearId, "Year");
+      for (const slot of scoped) {
+        const yid = idOf(slot.yearId) || "all";
+        const title = nameOf(slot.yearId, "All years");
         if (title.toLowerCase() === "ended") continue;
         const existing = byYear.get(yid);
         if (existing) existing.slots.push(slot);
@@ -263,9 +307,18 @@ export const TimetableManager = () => {
           byYear.set(yid, {
             title,
             yearId: yid,
-            batchId: idOf(slot.batchId),
+            batchId: idOf(slot.batchId) || form.batchId || "",
             slots: [slot],
           });
+      }
+      if (byYear.size === 0 && scoped.length === 0) {
+        return filteredYears.map((year) => ({
+          key: year._id,
+          title: year.name || `Year ${year.level ?? ""}`,
+          yearId: year._id,
+          batchId: form.batchId ?? "",
+          slots: [] as TimetableSlotRow[],
+        }));
       }
       return Array.from(byYear.entries()).map(([key, value]) => ({
         key,
@@ -273,16 +326,15 @@ export const TimetableManager = () => {
       }));
     }
 
-    // School mode: single table for selected class/section
     if (!form.classId || !form.sectionId) {
-      return slots.length
+      return scoped.length
         ? [
             {
               key: "all",
               title: "Weekly timetable",
               yearId: "",
               batchId: "",
-              slots,
+              slots: scoped,
             },
           ]
         : [];
@@ -293,14 +345,27 @@ export const TimetableManager = () => {
         title: "Weekly timetable",
         yearId: form.sectionId ?? "",
         batchId: form.classId ?? "",
-        slots: slots.filter(
+        slots: scoped.filter(
           (s) =>
             idOf(s.classId) === form.classId &&
             idOf(s.sectionId) === form.sectionId,
         ),
       },
     ];
-  }, [filteredYears, form.batchId, form.classId, form.sectionId, isCollege, slots]);
+  }, [
+    filterRoom,
+    filterTeacherId,
+    filteredYears,
+    form.batchId,
+    form.classId,
+    form.sectionId,
+    isCollege,
+    mineTeacherId,
+    slots,
+    viewMode,
+  ]);
+
+  const allRooms = useMemo(() => uniqueRooms(slots), [slots]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: TimetableSlotInput) =>
@@ -347,16 +412,22 @@ export const TimetableManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const isBreak = form.sessionType === "BREAK" || form.sessionType === "HOLIDAY";
+
   const buildPayload = (): TimetableSlotInput => {
     const base: TimetableSlotInput = {
       dayOfWeek: form.dayOfWeek,
       periodNumber: form.periodNumber,
-      subjectId: form.subjectId,
-      teacherId: isTeacher ? teacherId : form.teacherId,
+      subjectId: isBreak ? "" : form.subjectId,
+      teacherId: isBreak ? "" : isTeacher ? teacherId : form.teacherId,
       room: form.room?.trim() ? form.room : undefined,
       startTime: form.startTime,
       endTime: form.endTime,
       academicYearBs: form.academicYearBs,
+      sessionType: form.sessionType ?? "THEORY",
+      breakLabel: form.breakLabel ?? "",
+      remarks: form.remarks ?? "",
+      roomKind: form.roomKind,
     };
     if (isCollege) {
       return {
@@ -379,7 +450,12 @@ export const TimetableManager = () => {
     saveMutation.mutate(parsed.data);
   };
 
-  const startEdit = (slot: SlotRow) => {
+  const startEdit = (slot: TimetableSlotRow) => {
+    if (!canWrite) return;
+    if (isTeacher && idOf(slot.teacherId) !== teacherId && !isAdmin) {
+      toast.error("You can only edit your own periods");
+      return;
+    }
     setEditingId(slot._id);
     setShowForm(true);
     setActiveYearId(idOf(slot.yearId));
@@ -396,6 +472,10 @@ export const TimetableManager = () => {
       startTime: slot.startTime,
       endTime: slot.endTime,
       academicYearBs: slot.academicYearBs || form.academicYearBs,
+      sessionType: (slot.sessionType as TimetableSlotInput["sessionType"]) ?? "THEORY",
+      breakLabel: slot.breakLabel ?? "",
+      remarks: slot.remarks ?? "",
+      roomKind: slot.roomKind as TimetableSlotInput["roomKind"],
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -414,10 +494,45 @@ export const TimetableManager = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const canEditSlot = (slot: SlotRow) => {
-    if (isAdmin) return true;
-    if (!isTeacher) return false;
-    return idOf(slot.teacherId) === teacherId;
+  const batchName =
+    primaryOptions.find((b) => b._id === form.batchId)?.name ??
+    nameOf(slots[0]?.batchId, "");
+
+  const handlePrint = (printId: string) => {
+    void printElementById(printId, "timetable-print");
+  };
+
+  const handlePdf = async (printId: string, title: string) => {
+    try {
+      await downloadPdfFromElementById(printId, `${title}.pdf`);
+      toast.success("PDF downloaded");
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    }
+  };
+
+  const handleImage = async (printId: string, filename: string) => {
+    try {
+      const el = document.getElementById(printId);
+      if (!el) {
+        toast.error("Print view not ready");
+        return;
+      }
+      // Temporary unhide for capture
+      const prev = el.className;
+      el.className = el.className.replace("hidden", "").replace("print:block", "");
+      el.classList.add("block");
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true });
+      el.className = prev;
+      const link = document.createElement("a");
+      link.download = `${filename}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      toast.success("Image downloaded");
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    }
   };
 
   if (timetableQuery.isLoading && isStudent) {
@@ -427,25 +542,55 @@ export const TimetableManager = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Timetable Management"
+        title={isStudent || isTeacher ? "My Timetable" : "Timetable Management"}
         description={
           isStudent
-            ? "Your weekly class schedule for your academic year."
+            ? "Your weekly class schedule (Nepali college format)."
             : isTeacher
-              ? "View weekly timetables for 1st, 2nd, and 3rd year. Edit or delete periods you teach."
-              : `Create a separate weekly timetable for each year (1st / 2nd / 3rd). Students only see their own year; teachers see all years.`
+              ? "Your teaching periods and full year weekly matrices. Create/edit your own slots."
+              : "Create periods as before; the weekly matrix updates automatically for print-ready display."
         }
       />
 
-      {/* Scope selectors for admin / teacher (not student) */}
+      {/* Legend + Saturday toggle */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 py-3">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Legend
+          </span>
+          {(Object.keys(SESSION_LABELS) as Array<keyof typeof SESSION_LABELS>).map(
+            (key) => (
+              <Badge
+                key={key}
+                className={`${SESSION_COLORS[key].badge} border ${SESSION_COLORS[key].border}`}
+              >
+                {SESSION_LABELS[key]}
+              </Badge>
+            ),
+          )}
+          <Badge className={`${SESSION_COLORS.HOLIDAY_ROW.badge} border`}>
+            Saturday holiday
+          </Badge>
+          {!isStudent ? (
+            <label className="ml-auto flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={saturdayIsHoliday}
+                onChange={(e) => setSaturdayIsHoliday(e.target.checked)}
+              />
+              Saturday is holiday
+            </label>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* Scope + view mode */}
       {!isStudent ? (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">
-              {isCollege ? "Select batch" : "Select class & section"}
-            </CardTitle>
+            <CardTitle className="text-base">Filters & view</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-3">
+          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {isCollege ? (
               <FormField label="Batch">
                 <Select
@@ -520,6 +665,50 @@ export const TimetableManager = () => {
                 }
               />
             </FormField>
+            <FormField label="View mode">
+              <Select
+                value={viewMode}
+                onChange={(e) => setViewMode(e.target.value as ViewMode)}
+              >
+                <option value="group">
+                  {isCollege ? "By year (class timetable)" : "Class timetable"}
+                </option>
+                {isTeacher ? <option value="mine">My timetable only</option> : null}
+                {isAdmin ? <option value="teacher">By teacher</option> : null}
+                <option value="room">By classroom</option>
+                <option value="lab">By laboratory</option>
+              </Select>
+            </FormField>
+            {viewMode === "teacher" ? (
+              <FormField label="Teacher">
+                <Select
+                  value={filterTeacherId}
+                  onChange={(e) => setFilterTeacherId(e.target.value)}
+                >
+                  <option value="">All teachers</option>
+                  {(teachersQuery.data ?? []).map((t) => (
+                    <option key={t._id} value={t._id}>
+                      {t.user.fullName}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            ) : null}
+            {viewMode === "room" ? (
+              <FormField label="Room">
+                <Select
+                  value={filterRoom}
+                  onChange={(e) => setFilterRoom(e.target.value)}
+                >
+                  <option value="">All rooms</option>
+                  {allRooms.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -577,25 +766,61 @@ export const TimetableManager = () => {
                   </Select>
                 </FormField>
               ) : null}
-              <FormField label="Subject">
+              <FormField label="Session type">
                 <Select
-                  value={form.subjectId}
+                  value={form.sessionType ?? "THEORY"}
                   onChange={(e) =>
-                    setForm((c) => ({ ...c, subjectId: e.target.value }))
+                    setForm((c) => ({
+                      ...c,
+                      sessionType: e.target
+                        .value as TimetableSlotInput["sessionType"],
+                    }))
                   }
                 >
-                  <option value="">Select subject</option>
-                  {filteredSubjects.map((item) => (
-                    <option key={item._id} value={item._id}>
-                      {item.name}
+                  {TIMETABLE_SESSION_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {SESSION_LABELS[t] ?? t}
                     </option>
                   ))}
                 </Select>
               </FormField>
-              {isAdmin ? (
+              {isBreak ? (
+                <FormField label="Break label">
+                  <Select
+                    value={form.breakLabel || ""}
+                    onChange={(e) =>
+                      setForm((c) => ({ ...c, breakLabel: e.target.value }))
+                    }
+                  >
+                    <option value="">Select break</option>
+                    {TIMETABLE_BREAK_LABELS.map((b) => (
+                      <option key={b} value={b === "Custom" ? "" : b}>
+                        {b}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              ) : (
+                <FormField label="Subject">
+                  <Select
+                    value={form.subjectId ?? ""}
+                    onChange={(e) =>
+                      setForm((c) => ({ ...c, subjectId: e.target.value }))
+                    }
+                  >
+                    <option value="">Select subject</option>
+                    {filteredSubjects.map((item) => (
+                      <option key={item._id} value={item._id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              )}
+              {isAdmin && !isBreak ? (
                 <FormField label="Teacher">
                   <Select
-                    value={form.teacherId}
+                    value={form.teacherId ?? ""}
                     onChange={(e) =>
                       setForm((c) => ({ ...c, teacherId: e.target.value }))
                     }
@@ -657,11 +882,39 @@ export const TimetableManager = () => {
                   }
                 />
               </FormField>
-              <FormField label="Room">
+              <FormField label="Room / Lab">
                 <Input
                   value={form.room ?? ""}
                   onChange={(e) =>
                     setForm((c) => ({ ...c, room: e.target.value }))
+                  }
+                  placeholder="e.g. Room 204 or Computer Lab"
+                />
+              </FormField>
+              <FormField label="Room kind">
+                <Select
+                  value={form.roomKind ?? ""}
+                  onChange={(e) =>
+                    setForm((c) => ({
+                      ...c,
+                      roomKind: (e.target.value ||
+                        undefined) as TimetableSlotInput["roomKind"],
+                    }))
+                  }
+                >
+                  <option value="">Auto / not set</option>
+                  {TIMETABLE_ROOM_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Remarks">
+                <Input
+                  value={form.remarks ?? ""}
+                  onChange={(e) =>
+                    setForm((c) => ({ ...c, remarks: e.target.value }))
                   }
                 />
               </FormField>
@@ -685,88 +938,123 @@ export const TimetableManager = () => {
         </Card>
       ) : null}
 
-      {/* Weekly tables — one per year (college) or one for class/section */}
+      {/* Weekly matrices */}
       {timetableQuery.isLoading ? (
         <LoadingState />
       ) : isStudent ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>My weekly timetable</CardTitle>
-            <p className="text-sm text-slate-600">
-              Schedule for your enrolled year only.
-            </p>
-          </CardHeader>
-          <CardContent>
-            {slots.length === 0 ? (
-              <EmptyState
-                title="No timetable yet"
-                description="Your year timetable has not been published. Contact the college office."
-              />
-            ) : (
-              <SlotTable
-                slots={slots}
-                canWrite={false}
-                onEdit={() => undefined}
-                onDelete={() => undefined}
-              />
-            )}
-          </CardContent>
-        </Card>
-      ) : isCollege && !form.batchId ? (
+        <StudentMatrix
+          slots={slots}
+          saturdayIsHoliday={saturdayIsHoliday}
+          settings={settingsQuery.data}
+          academicYearBs={form.academicYearBs}
+          onPrint={handlePrint}
+          onPdf={handlePdf}
+          onImage={handleImage}
+        />
+      ) : isCollege && !form.batchId && viewMode === "group" ? (
         <EmptyState
           title="Select a batch"
-          description="Choose a batch to view separate weekly timetables for 1st, 2nd, and 3rd year."
+          description="Choose a batch to view weekly timetables for each program year."
         />
-      ) : !isCollege && (!form.classId || !form.sectionId) ? (
+      ) : !isCollege &&
+        (!form.classId || !form.sectionId) &&
+        viewMode === "group" ? (
         <EmptyState
           title={`Select ${labels.primary.toLowerCase()} and ${labels.secondary.toLowerCase()}`}
-          description="Then view or edit the weekly timetable."
+          description="Then view the weekly matrix."
         />
       ) : (
         <div className="space-y-6">
-          {tables.map((table) => (
-            <Card key={table.key} className="border-slate-200">
-              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-lg">
-                    {isCollege
-                      ? `${table.title} — weekly timetable`
-                      : "Weekly timetable"}
-                  </CardTitle>
-                  <p className="text-xs text-slate-500">
-                    {table.slots.length} period
-                    {table.slots.length === 1 ? "" : "s"}
-                    {isCollege
-                      ? " · Visible to students of this year only"
-                      : ""}
-                  </p>
-                </div>
-                {canWrite ? (
+          {tables.map((table) => {
+            const matrix = buildWeeklyMatrix(table.slots, { saturdayIsHoliday });
+            const printId = `timetable-print-${table.key}`;
+            const viewTitle =
+              viewMode === "mine"
+                ? "My teaching timetable"
+                : viewMode === "teacher"
+                  ? `Teacher: ${
+                      (teachersQuery.data ?? []).find(
+                        (t) => t._id === filterTeacherId,
+                      )?.user.fullName ?? "All"
+                    }`
+                  : viewMode === "room"
+                    ? `Room: ${filterRoom || "All"}`
+                    : viewMode === "lab"
+                      ? "Laboratory timetable"
+                      : isCollege
+                        ? `${batchName} · ${table.title}`
+                        : table.title;
+
+            return (
+              <Card key={table.key} className="border-slate-200">
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg">{viewTitle}</CardTitle>
+                    <p className="text-xs text-slate-500">
+                      {table.slots.length} period
+                      {table.slots.length === 1 ? "" : "s"} · Matrix generated
+                      from existing slots · Click a cell to edit
+                    </p>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      onClick={() => {
-                        if (isCollege) {
-                          startAddForYear(table.yearId);
-                          return;
-                        }
-                        setEditingId(null);
-                        setShowForm(true);
-                      }}
+                      variant="outline"
+                      className="no-print"
+                      onClick={() => handlePrint(printId)}
                     >
-                      <Plus className="mr-1.5 h-4 w-4" />
-                      Add period
+                      <Printer className="mr-1.5 h-4 w-4" />
+                      Print
                     </Button>
-                    {isAdmin && table.slots.length > 0 ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="no-print"
+                      onClick={() =>
+                        void handlePdf(printId, `timetable-${table.key}`)
+                      }
+                    >
+                      <Download className="mr-1.5 h-4 w-4" />
+                      PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="no-print"
+                      onClick={() =>
+                        void handleImage(printId, `timetable-${table.key}`)
+                      }
+                    >
+                      <ImageIcon className="mr-1.5 h-4 w-4" />
+                      Image
+                    </Button>
+                    {canWrite && viewMode === "group" ? (
+                      <Button
+                        size="sm"
+                        className="no-print"
+                        onClick={() => {
+                          if (isCollege) {
+                            startAddForYear(table.yearId);
+                            return;
+                          }
+                          setEditingId(null);
+                          setShowForm(true);
+                        }}
+                      >
+                        <Plus className="mr-1.5 h-4 w-4" />
+                        Add period
+                      </Button>
+                    ) : null}
+                    {isAdmin && table.slots.length > 0 && viewMode === "group" ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        className="text-rose-700 border-rose-200"
+                        className="no-print text-rose-700 border-rose-200"
                         disabled={deleteYearMutation.isPending}
                         onClick={() => {
                           if (
                             !window.confirm(
-                              `Delete all ${table.slots.length} slots for ${table.title}? This cannot be undone.`,
+                              `Delete all ${table.slots.length} slots for ${table.title}?`,
                             )
                           ) {
                             return;
@@ -777,128 +1065,147 @@ export const TimetableManager = () => {
                         }}
                       >
                         <Trash2 className="mr-1.5 h-4 w-4" />
-                        Clear timetable
+                        Clear
                       </Button>
                     ) : null}
                   </div>
-                ) : null}
-              </CardHeader>
-              <CardContent>
-                {table.slots.length === 0 ? (
-                  <p className="text-sm text-slate-500">
-                    No periods scheduled for this year yet.
-                    {canWrite ? " Use Add period to build the weekly timetable." : ""}
-                  </p>
-                ) : (
-                  <SlotTable
-                    slots={table.slots}
-                    canWrite={canWrite}
-                    canEditSlot={canEditSlot}
-                    onEdit={startEdit}
-                    onDelete={(id) => {
-                      if (!window.confirm("Delete this timetable period?")) {
-                        return;
-                      }
-                      deleteMutation.mutate(id);
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {table.slots.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No periods scheduled yet.
+                      {canWrite
+                        ? " Use Add period — the weekly matrix builds automatically."
+                        : ""}
+                    </p>
+                  ) : (
+                    <WeeklyTimetableGrid
+                      matrix={matrix}
+                      onCellClick={canWrite ? startEdit : undefined}
+                    />
+                  )}
+                  <TimetablePrintView
+                    printId={printId}
+                    matrix={matrix}
+                    meta={{
+                      collegeName:
+                        settingsQuery.data?.schoolName ?? "College",
+                      collegeNameNp: settingsQuery.data?.schoolNameNp,
+                      principalName: settingsQuery.data?.principalName,
+                      batchName: isCollege ? batchName : undefined,
+                      yearName: isCollege ? table.title : undefined,
+                      className: !isCollege
+                        ? nameOf(
+                            primaryOptions.find((c) => c._id === form.classId),
+                            form.classId ?? "",
+                          )
+                        : undefined,
+                      sectionName: !isCollege
+                        ? nameOf(
+                            filteredSections.find(
+                              (s) => s._id === form.sectionId,
+                            ),
+                            form.sectionId ?? "",
+                          )
+                        : undefined,
+                      academicYearBs: form.academicYearBs,
+                      generatedAt: new Date().toLocaleDateString(),
+                      viewTitle,
                     }}
                   />
-                )}
-              </CardContent>
-            </Card>
-          ))}
-          {isCollege && tables.length === 0 ? (
-            <EmptyState
-              title="No program years"
-              description="This batch has no 1st/2nd/3rd year configured. Create years under Academic Structure."
-            />
-          ) : null}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
   );
 };
 
-const SlotTable = ({
+const StudentMatrix = ({
   slots,
-  canWrite,
-  canEditSlot,
-  onEdit,
-  onDelete,
+  saturdayIsHoliday,
+  settings,
+  academicYearBs,
+  onPrint,
+  onPdf,
+  onImage,
 }: {
-  slots: SlotRow[];
-  canWrite: boolean;
-  canEditSlot?: (slot: SlotRow) => boolean;
-  onEdit: (slot: SlotRow) => void;
-  onDelete: (id: string) => void;
+  slots: TimetableSlotRow[];
+  saturdayIsHoliday: boolean;
+  settings?: {
+    schoolName?: string;
+    schoolNameNp?: string;
+    principalName?: string;
+  };
+  academicYearBs: string;
+  onPrint: (id: string) => void;
+  onPdf: (id: string, title: string) => Promise<void>;
+  onImage: (id: string, filename: string) => Promise<void>;
 }) => {
-  const sorted = [...slots].sort(
-    (a, b) => a.dayOfWeek - b.dayOfWeek || a.periodNumber - b.periodNumber,
-  );
+  const matrix = buildWeeklyMatrix(slots, { saturdayIsHoliday });
+  const printId = "timetable-print-student";
+  const yearName = nameOf(slots[0]?.yearId, "");
+  const batchName = nameOf(slots[0]?.batchId, "");
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHead>
-          <tr>
-            <Th>Day</Th>
-            <Th>Period</Th>
-            <Th>Subject</Th>
-            <Th>Teacher</Th>
-            <Th>Time</Th>
-            <Th>Room</Th>
-            {canWrite ? <Th className="text-right">Actions</Th> : null}
-          </tr>
-        </TableHead>
-        <TableBody>
-          {sorted.map((slot) => {
-            const editable = canEditSlot ? canEditSlot(slot) : canWrite;
-            return (
-              <tr
-                key={slot._id}
-                className={cn(editable ? "" : canWrite ? "opacity-90" : "")}
-              >
-                <Td className="font-medium">
-                  {DAYS_OF_WEEK[slot.dayOfWeek] ?? slot.dayOfWeek}
-                </Td>
-                <Td>{slot.periodNumber}</Td>
-                <Td>{nameOf(slot.subjectId)}</Td>
-                <Td>{nameOf(slot.teacherId)}</Td>
-                <Td className="whitespace-nowrap text-sm">
-                  {slot.startTime} – {slot.endTime}
-                </Td>
-                <Td>{slot.room || "—"}</Td>
-                {canWrite ? (
-                  <Td className="text-right">
-                    {editable ? (
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onEdit(slot)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="text-rose-700 border-rose-200"
-                          onClick={() => onDelete(slot._id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-slate-400">—</span>
-                    )}
-                  </Td>
-                ) : null}
-              </tr>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+        <div>
+          <CardTitle>My weekly timetable</CardTitle>
+          <p className="text-sm text-slate-600">
+            Schedule for your enrolled year only.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 no-print">
+          <Button size="sm" variant="outline" onClick={() => onPrint(printId)}>
+            <Printer className="mr-1.5 h-4 w-4" />
+            Print
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void onPdf(printId, "my-timetable")}
+          >
+            <Download className="mr-1.5 h-4 w-4" />
+            PDF
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void onImage(printId, "my-timetable")}
+          >
+            <ImageIcon className="mr-1.5 h-4 w-4" />
+            Image
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {slots.length === 0 ? (
+          <EmptyState
+            title="No timetable yet"
+            description="Your year timetable has not been published. Contact the college office."
+          />
+        ) : (
+          <WeeklyTimetableGrid matrix={matrix} />
+        )}
+        <TimetablePrintView
+          printId={printId}
+          matrix={matrix}
+          meta={{
+            collegeName: settings?.schoolName ?? "College",
+            collegeNameNp: settings?.schoolNameNp,
+            principalName: settings?.principalName,
+            batchName,
+            yearName,
+            academicYearBs,
+            generatedAt: new Date().toLocaleDateString(),
+            viewTitle: "Student weekly timetable",
+          }}
+        />
+      </CardContent>
+    </Card>
   );
 };
+

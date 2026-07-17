@@ -95,7 +95,7 @@ const resolveAdminOverride = (req: Request, explicit?: boolean): boolean =>
 const assertTeacherSlotAccess = async (
   req: Request,
   slot: {
-    teacherId: { toString(): string };
+    teacherId?: { toString(): string } | null;
     periodNumber: number;
     classId?: { toString(): string } | null;
     sectionId?: { toString(): string } | null;
@@ -117,6 +117,10 @@ const assertTeacherSlotAccess = async (
 
   if (req.user?.role !== "TEACHER") {
     throw new ApiError(403, "Only assigned teachers can mark daily attendance");
+  }
+
+  if (!slot.teacherId) {
+    throw new ApiError(400, "This timetable period has no teacher assigned (break/holiday)");
   }
 
   const teacherScope = await getTeacherScope(req);
@@ -304,9 +308,9 @@ export const listDailyAttendanceAssignments = asyncHandler(async (req: Request, 
       dateBs,
       dayOfWeek,
       dayName: getDayName(dayOfWeek),
-      teacherId: slot.teacherId.toString(),
+      teacherId: slot.teacherId?.toString() ?? "",
       teacherName,
-      subjectId: slot.subjectId.toString(),
+      subjectId: slot.subjectId?.toString() ?? "",
       subjectName: subject?.name ?? "Subject",
       subjectCode: subject?.code,
       timetableSlotId: slot._id.toString(),
@@ -367,7 +371,7 @@ export const listDailyAttendanceAssignments = asyncHandler(async (req: Request, 
         let endTime = config.endTime;
         let periodNumber = 1;
 
-        if (fallback) {
+        if (fallback?.teacherId && fallback.subjectId) {
           teacherId = fallback.teacherId.toString();
           subjectId = fallback.subjectId.toString();
           startTime = fallback.startTime;
@@ -513,6 +517,10 @@ export const getDailyAttendanceContext = asyncHandler(async (req: Request, res: 
       throw new ApiError(404, "Timetable slot not found");
     }
 
+    if (!slot.teacherId || !slot.subjectId) {
+      throw new ApiError(400, "Cannot mark attendance on a break/holiday period without teacher and subject");
+    }
+
     await assertTeacherSlotAccess(req, slot, {
       adminOverride,
       forWrite: false,
@@ -561,7 +569,7 @@ export const getDailyAttendanceContext = asyncHandler(async (req: Request, res: 
       college,
       getDayOfWeekFromDate(dateBs)
     );
-    if (fallback) {
+    if (fallback?.teacherId && fallback.subjectId) {
       teacherId = fallback.teacherId.toString();
       subjectId = fallback.subjectId.toString();
       startTime = fallback.startTime;
@@ -655,8 +663,8 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
     sectionId?: { toString(): string } | null;
     batchId?: { toString(): string } | null;
     yearId?: { toString(): string } | null;
-    teacherId: { toString(): string };
-    subjectId: { toString(): string };
+    teacherId?: { toString(): string } | null;
+    subjectId?: { toString(): string } | null;
     academicYearBs: string;
     dayOfWeek: number;
     periodNumber: number;
@@ -668,6 +676,9 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
     slot = await TimetableSlot.findOne({ _id: payload.timetableSlotId, schoolId }).lean();
     if (!slot) {
       throw new ApiError(400, "Invalid timetable slot");
+    }
+    if (!slot.teacherId || !slot.subjectId) {
+      throw new ApiError(400, "Cannot mark attendance on a break/holiday period without teacher and subject");
     }
 
     const dateDayOfWeek = getDayOfWeekFromDate(payload.dateBs);

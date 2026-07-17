@@ -17,20 +17,40 @@ import {
   getTeacherScope,
   requireTeacherScope
 } from "../utils/teacherScope.js";
+import { assertNoTimetableConflicts } from "../utils/timetableConflicts.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+
+const isSoftSession = (sessionType?: string) =>
+  sessionType === "BREAK" || sessionType === "HOLIDAY";
 
 export const listTimetable = asyncHandler(async (req: Request, res: Response) => {
   const filter: Record<string, unknown> = withTenantScope(req);
   const institutionType = await getInstitutionType(req);
-  const college = isCollege(institutionType);
 
   if (typeof req.query.classId === "string") filter.classId = req.query.classId;
   if (typeof req.query.sectionId === "string") filter.sectionId = req.query.sectionId;
   if (typeof req.query.batchId === "string") filter.batchId = req.query.batchId;
   if (typeof req.query.yearId === "string") filter.yearId = req.query.yearId;
-  if (typeof req.query.academicYearBs === "string") filter.academicYearBs = req.query.academicYearBs;
-  // Optional: only this teacher's periods (default for teachers is full group schedule)
+  if (typeof req.query.academicYearBs === "string") {
+    filter.academicYearBs = req.query.academicYearBs;
+  }
+  if (typeof req.query.teacherId === "string" && req.query.teacherId.trim()) {
+    filter.teacherId = req.query.teacherId.trim();
+  }
+  if (typeof req.query.subjectId === "string" && req.query.subjectId.trim()) {
+    filter.subjectId = req.query.subjectId.trim();
+  }
+  if (typeof req.query.room === "string" && req.query.room.trim()) {
+    filter.room = { $regex: new RegExp(`^${req.query.room.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") };
+  }
+  if (typeof req.query.dayOfWeek === "string" && req.query.dayOfWeek !== "") {
+    const day = Number(req.query.dayOfWeek);
+    if (!Number.isNaN(day)) filter.dayOfWeek = day;
+  }
+  if (typeof req.query.sessionType === "string" && req.query.sessionType.trim()) {
+    filter.sessionType = req.query.sessionType.trim();
+  }
   if (req.query.mineOnly === "true" || req.query.mineOnly === "1") {
     const teacherScope = await getTeacherScope(req);
     if (teacherScope) filter.teacherId = teacherScope.teacherId;
@@ -43,13 +63,20 @@ export const listTimetable = asyncHandler(async (req: Request, res: Response) =>
      * not only periods they teach — so they can see complete 1st/2nd/3rd year tables.
      * Optional query filters (batchId/yearId) still apply when provided.
      */
-    // No teacherId restriction unless mineOnly is set above
   }
 
   const studentProfile = await getStudentProfile(req);
   if (studentProfile) {
-    // Students only see their own class/section or batch/year timetable
     Object.assign(filter, buildStudentAcademicFilter(studentProfile, institutionType));
+  }
+
+  // Lab-only view: practical sessions or room name containing "lab"
+  if (req.query.labOnly === "true" || req.query.labOnly === "1") {
+    filter.$or = [
+      { sessionType: "PRACTICAL" },
+      { roomKind: "LABORATORY" },
+      { room: { $regex: /lab/i } }
+    ];
   }
 
   const slots = await TimetableSlot.find(filter)
@@ -59,7 +86,7 @@ export const listTimetable = asyncHandler(async (req: Request, res: Response) =>
     .populate("batchId", "name")
     .populate("classId", "name")
     .populate("sectionId", "name")
-    .sort({ dayOfWeek: 1, periodNumber: 1 });
+    .sort({ dayOfWeek: 1, periodNumber: 1, startTime: 1 });
 
   return sendSuccess(res, "Timetable fetched", slots);
 });
@@ -70,8 +97,16 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
   const college = isCollege(institutionType);
   validateTimetableScope(institutionType, payload);
   const schoolId = tenantObjectId(req);
+  const sessionType = payload.sessionType ?? "THEORY";
+  const soft = isSoftSession(sessionType);
 
   if (req.user?.role === "TEACHER") {
+    if (soft) {
+      throw new ApiError(403, "Teachers cannot create break or holiday periods");
+    }
+    if (!payload.subjectId || !payload.teacherId) {
+      throw new ApiError(400, "Subject and teacher are required");
+    }
     const scope = await assertTeacherSubjectAcademicScope(req, payload.subjectId, payload);
     if (payload.teacherId !== scope.teacherId) {
       throw new ApiError(403, "Teachers can only create timetable slots for themselves");
@@ -85,16 +120,18 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
     yearId: payload.yearId
   };
 
-  await assertPercentageCompleteForTimetable(
-    schoolId,
-    payload.academicYearBs,
-    payload.subjectId,
-    group,
-    college
-  );
+  if (!soft && payload.subjectId) {
+    await assertPercentageCompleteForTimetable(
+      schoolId,
+      payload.academicYearBs,
+      payload.subjectId,
+      group,
+      college
+    );
+  }
 
   let subjectAssignmentId = payload.subjectAssignmentId;
-  if (!subjectAssignmentId) {
+  if (!soft && payload.subjectId && payload.teacherId && !subjectAssignmentId) {
     const match = await findMatchingAssignment(
       schoolId,
       payload.academicYearBs,
@@ -108,16 +145,59 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
     }
   }
 
-  const requireLink = await isTimetableAssignmentLinkRequired(schoolId);
-  if (requireLink && !subjectAssignmentId) {
-    throw new ApiError(
-      400,
-      "subjectAssignmentId is required: no active Subject Assignment found for this teacher, subject, and group"
-    );
+  if (!soft) {
+    const requireLink = await isTimetableAssignmentLinkRequired(schoolId);
+    if (requireLink && !subjectAssignmentId) {
+      throw new ApiError(
+        400,
+        "subjectAssignmentId is required: no active Subject Assignment found for this teacher, subject, and group"
+      );
+    }
+  }
+
+  if (payload.teacherId || payload.room) {
+    await assertNoTimetableConflicts({
+      schoolId,
+      academicYearBs: payload.academicYearBs,
+      dayOfWeek: payload.dayOfWeek,
+      periodNumber: payload.periodNumber,
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+      teacherId: payload.teacherId ?? "",
+      subjectId: payload.subjectId,
+      room: payload.room,
+      roomKind: payload.roomKind,
+      sessionType,
+      classId: payload.classId,
+      sectionId: payload.sectionId,
+      batchId: payload.batchId,
+      yearId: payload.yearId
+    });
+  } else {
+    // Still check group conflicts for breaks
+    await assertNoTimetableConflicts({
+      schoolId,
+      academicYearBs: payload.academicYearBs,
+      dayOfWeek: payload.dayOfWeek,
+      periodNumber: payload.periodNumber,
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+      teacherId: "",
+      room: payload.room,
+      roomKind: payload.roomKind,
+      sessionType,
+      classId: payload.classId,
+      sectionId: payload.sectionId,
+      batchId: payload.batchId,
+      yearId: payload.yearId
+    });
   }
 
   const slot = await TimetableSlot.create({
     ...payload,
+    sessionType,
+    subjectId: payload.subjectId || undefined,
+    teacherId: payload.teacherId || undefined,
     subjectAssignmentId: subjectAssignmentId || null,
     schoolId: req.tenantSchoolId
   });
@@ -162,10 +242,32 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
     batchId: payload.batchId ?? existing.batchId?.toString(),
     yearId: payload.yearId ?? existing.yearId?.toString()
   };
+  const sessionType =
+    payload.sessionType ?? (existing as { sessionType?: string }).sessionType ?? "THEORY";
+  const soft = isSoftSession(sessionType);
 
-  if (subjectId && academicYearBs) {
+  if (!soft && subjectId && academicYearBs) {
     await assertPercentageCompleteForTimetable(schoolId, academicYearBs, subjectId, group, college);
   }
+
+  await assertNoTimetableConflicts({
+    schoolId,
+    academicYearBs: academicYearBs ?? "",
+    dayOfWeek: payload.dayOfWeek ?? existing.dayOfWeek,
+    periodNumber: payload.periodNumber ?? existing.periodNumber,
+    startTime: payload.startTime ?? existing.startTime,
+    endTime: payload.endTime ?? existing.endTime,
+    teacherId: payload.teacherId ?? existing.teacherId?.toString() ?? "",
+    subjectId,
+    room: payload.room ?? existing.room ?? undefined,
+    roomKind: payload.roomKind ?? (existing as { roomKind?: string }).roomKind,
+    sessionType,
+    classId: group.classId,
+    sectionId: group.sectionId,
+    batchId: group.batchId,
+    yearId: group.yearId,
+    excludeId: String(existing._id)
+  });
 
   const slot = await TimetableSlot.findOneAndUpdate(withTenantScope(req, { _id: req.params.id }), payload, {
     new: true

@@ -78,6 +78,18 @@ export type ParentRelationship = "FATHER" | "MOTHER" | "GUARDIAN" | "OTHER";
 
 export type ParentFromStudentRelationship = "FATHER" | "MOTHER" | "GUARDIAN";
 
+export type TimetableSessionType =
+  | "THEORY"
+  | "PRACTICAL"
+  | "BREAK"
+  | "HOLIDAY"
+  | "EXAM"
+  | "SPECIAL"
+  | "ONLINE"
+  | "GUEST";
+
+export type TimetableRoomKind = "CLASSROOM" | "LABORATORY" | "OTHER";
+
 export interface TimetableSlotRecord {
   _id: string;
   schoolId: string;
@@ -93,6 +105,12 @@ export interface TimetableSlotRecord {
   startTime: string;
   endTime: string;
   academicYearBs: string;
+  /** Optional; missing on legacy rows → treat as THEORY */
+  sessionType?: TimetableSessionType;
+  breakLabel?: string;
+  remarks?: string;
+  roomKind?: TimetableRoomKind;
+  subjectAssignmentId?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
