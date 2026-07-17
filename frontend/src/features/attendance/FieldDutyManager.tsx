@@ -2,13 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   canManageInstitution,
   type BatchRecord,
+  type CollegeStaffRecord,
   type FieldDutyAttendanceRecord,
   type FieldDutyDashboard,
   type FieldDutyRosterStudent,
   type FieldDutyScheduleRecord,
   type FieldDutyShift,
   type FieldDutyStudentStatus,
-  type TeacherRecord,
   type YearRecord,
 } from "@phit-erp/shared";
 import {
@@ -90,7 +90,7 @@ const defaultScheduleForm = {
   hospitalName: "",
   department: "",
   ward: "",
-  supervisorTeacherId: "",
+  supervisorStaffId: "",
   clinicalInstructorName: "",
   hospitalSupervisorName: "",
   startDateBs: "",
@@ -138,9 +138,12 @@ export const FieldDutyManager = () => {
     enabled: isAdmin,
   });
 
-  const teachersQuery = useQuery({
-    queryKey: ["teachers"],
-    queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers")),
+  const staffQuery = useQuery({
+    queryKey: ["college-staff", "field-duty-supervisors"],
+    queryFn: () =>
+      unwrap<CollegeStaffRecord[]>(
+        api.get("/college-staff", { params: { status: "ACTIVE" } }),
+      ),
     enabled: isAdmin,
   });
 
@@ -546,20 +549,22 @@ export const FieldDutyManager = () => {
                   }
                 />
               </FormField>
-              <FormField label="Field supervisor (teacher)">
+              <FormField label="Field supervisor (staff)">
                 <Select
-                  value={scheduleForm.supervisorTeacherId}
+                  value={scheduleForm.supervisorStaffId}
                   onChange={(e) =>
                     setScheduleForm((c) => ({
                       ...c,
-                      supervisorTeacherId: e.target.value,
+                      supervisorStaffId: e.target.value,
                     }))
                   }
                 >
-                  <option value="">Select teacher</option>
-                  {(teachersQuery.data ?? []).map((t) => (
-                    <option key={t._id} value={t._id}>
-                      {t.user?.fullName ?? t.teacherCode}
+                  <option value="">Select staff</option>
+                  {(staffQuery.data ?? []).map((s) => (
+                    <option key={s._id} value={s._id}>
+                      {s.fullName}
+                      {s.designation ? ` · ${s.designation}` : ""}
+                      {s.staffId ? ` (${s.staffId})` : ""}
                     </option>
                   ))}
                 </Select>
@@ -634,7 +639,7 @@ export const FieldDutyManager = () => {
                     !scheduleForm.batchId ||
                     !scheduleForm.yearId ||
                     !scheduleForm.hospitalName ||
-                    !scheduleForm.supervisorTeacherId
+                    !scheduleForm.supervisorStaffId
                   ) {
                     toast.error("Fill required fields");
                     return;
@@ -686,7 +691,9 @@ export const FieldDutyManager = () => {
                             {s.batch?.name} · {s.year?.name}
                           </Td>
                           <Td className="text-sm">
-                            {s.supervisor?.user?.fullName ?? "—"}
+                            {s.supervisor?.fullName ??
+                              s.supervisor?.user?.fullName ??
+                              "—"}
                           </Td>
                           <Td className="text-xs whitespace-nowrap">
                             {s.startDateBs} → {s.endDateBs}

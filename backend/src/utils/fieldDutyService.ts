@@ -8,6 +8,7 @@ import type {
 } from "@phit-erp/shared";
 import { canManageInstitution } from "@phit-erp/shared";
 import { Batch } from "../models/Batch.js";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import { FieldDutyAttendance } from "../models/FieldDutyAttendance.js";
 import { FieldDutySchedule } from "../models/FieldDutySchedule.js";
 import { Student } from "../models/Student.js";
@@ -16,8 +17,51 @@ import { Year } from "../models/Year.js";
 import { ApiError } from "./apiError.js";
 import { compareBsDates, ensureValidBsDate, getTodayBs } from "./nepaliDate.js";
 import { sendNotification } from "./notificationService.js";
-import { getTeacherScope } from "./teacherScope.js";
 import { tenantObjectId } from "./tenant.js";
+
+/** Resolve college staff record linked to the logged-in user (field supervisor). */
+export const getFieldSupervisorStaffScope = async (
+  req: Request
+): Promise<{ staffId: string; fullName: string } | null> => {
+  if (!req.user?.userId) return null;
+  const staff = await CollegeStaff.findOne({
+    schoolId: tenantObjectId(req),
+    user: req.user.userId,
+    status: "ACTIVE"
+  })
+    .select("_id fullName staffId")
+    .lean();
+  if (!staff) return null;
+  return {
+    staffId: staff._id.toString(),
+    fullName: staff.fullName || staff.staffId || "Staff"
+  };
+};
+
+const scheduleSupervisorId = (schedule: {
+  supervisorStaffId?: unknown;
+  supervisorTeacherId?: unknown;
+}): string => {
+  if (schedule.supervisorStaffId) {
+    return String(
+      typeof schedule.supervisorStaffId === "object" &&
+        schedule.supervisorStaffId &&
+        "toString" in schedule.supervisorStaffId
+        ? (schedule.supervisorStaffId as { toString(): string }).toString()
+        : schedule.supervisorStaffId
+    );
+  }
+  if (schedule.supervisorTeacherId) {
+    return String(
+      typeof schedule.supervisorTeacherId === "object" &&
+        schedule.supervisorTeacherId &&
+        "toString" in schedule.supervisorTeacherId
+        ? (schedule.supervisorTeacherId as { toString(): string }).toString()
+        : schedule.supervisorTeacherId
+    );
+  }
+  return "";
+};
 
 export const emptyToUndef = (value?: string | null) => {
   const t = value?.trim();
@@ -74,15 +118,18 @@ export const getEligibleStudentsForDuty = async (
   });
 };
 
-export const assertScheduleAccess = async (req: Request, schedule: { supervisorTeacherId: unknown }) => {
+export const assertScheduleAccess = async (
+  req: Request,
+  schedule: { supervisorStaffId?: unknown; supervisorTeacherId?: unknown }
+) => {
   if (canManageInstitution(req.user?.role ?? "")) return;
-  if (req.user?.role !== "TEACHER") {
-    throw new ApiError(403, "Only field supervisors or administrators can access this duty");
-  }
-  const scope = await getTeacherScope(req);
-  if (!scope || scope.teacherId !== String(schedule.supervisorTeacherId)) {
-    throw new ApiError(403, "You are not the assigned field supervisor for this duty");
-  }
+  const staffScope = await getFieldSupervisorStaffScope(req);
+  const assignedId = scheduleSupervisorId(schedule);
+  if (staffScope && assignedId && staffScope.staffId === assignedId) return;
+  throw new ApiError(
+    403,
+    "Only the assigned field supervisor (staff) or an administrator can access this duty"
+  );
 };
 
 export const serializeSchedule = async (
@@ -91,13 +138,22 @@ export const serializeSchedule = async (
 ): Promise<FieldDutyScheduleRecord> => {
   const batchId = schedule.batchId?.toString?.() ?? String(schedule.batchId ?? "");
   const yearId = schedule.yearId?.toString?.() ?? String(schedule.yearId ?? "");
-  const supervisorId =
-    schedule.supervisorTeacherId?.toString?.() ?? String(schedule.supervisorTeacherId ?? "");
+  const staffId =
+    schedule.supervisorStaffId?.toString?.() ??
+    (schedule.supervisorStaffId ? String(schedule.supervisorStaffId) : "");
+  const legacyTeacherId =
+    schedule.supervisorTeacherId?.toString?.() ??
+    (schedule.supervisorTeacherId ? String(schedule.supervisorTeacherId) : "");
 
-  const [batch, year, supervisor, studentCount] = await Promise.all([
+  const [batch, year, staff, legacyTeacher, studentCount] = await Promise.all([
     Batch.findById(batchId).select("name").lean(),
     Year.findById(yearId).select("name level").lean(),
-    Teacher.findById(supervisorId).populate("user", "fullName").lean(),
+    staffId
+      ? CollegeStaff.findById(staffId).populate("user", "fullName").lean()
+      : Promise.resolve(null),
+    !staffId && legacyTeacherId
+      ? Teacher.findById(legacyTeacherId).populate("user", "fullName").lean()
+      : Promise.resolve(null),
     options?.includeStudentCount
       ? Student.countDocuments({
           schoolId: schedule.schoolId,
@@ -108,7 +164,14 @@ export const serializeSchedule = async (
       : Promise.resolve(undefined)
   ]);
 
-  const supUser = supervisor?.user as unknown as { fullName?: string } | undefined;
+  const staffUser = staff?.user as unknown as { fullName?: string } | undefined;
+  const teacherUser = legacyTeacher?.user as unknown as { fullName?: string } | undefined;
+  const supervisorName =
+    staff?.fullName ||
+    staffUser?.fullName ||
+    teacherUser?.fullName ||
+    legacyTeacher?.teacherCode ||
+    "Supervisor";
 
   return {
     _id: schedule._id.toString(),
@@ -121,7 +184,8 @@ export const serializeSchedule = async (
     hospitalName: String(schedule.hospitalName ?? ""),
     department: String(schedule.department ?? ""),
     ward: (schedule.ward as string) || undefined,
-    supervisorTeacherId: supervisorId,
+    supervisorStaffId: staffId || legacyTeacherId,
+    supervisorTeacherId: legacyTeacherId || undefined,
     clinicalInstructorName: (schedule.clinicalInstructorName as string) || undefined,
     hospitalSupervisorName: (schedule.hospitalSupervisorName as string) || undefined,
     startDateBs: String(schedule.startDateBs ?? ""),
@@ -140,13 +204,21 @@ export const serializeSchedule = async (
     year: year
       ? { _id: year._id.toString(), name: year.name, level: year.level }
       : undefined,
-    supervisor: supervisor
+    supervisor: staff
       ? {
-          _id: supervisor._id.toString(),
-          teacherCode: supervisor.teacherCode,
-          user: { fullName: supUser?.fullName ?? "Supervisor" }
+          _id: staff._id.toString(),
+          staffId: staff.staffId,
+          designation: staff.designation,
+          fullName: staff.fullName,
+          user: { fullName: supervisorName }
         }
-      : undefined,
+      : legacyTeacher
+        ? {
+            _id: legacyTeacher._id.toString(),
+            fullName: supervisorName,
+            user: { fullName: supervisorName }
+          }
+        : undefined,
     studentCount
   };
 };
@@ -192,7 +264,12 @@ export const serializeAttendance = async (
     shift: doc.shift as FieldDutyAttendanceRecord["shift"],
     batchId: String(doc.batchId),
     yearId: String(doc.yearId),
-    supervisorTeacherId: String(doc.supervisorTeacherId),
+    supervisorStaffId: String(
+      doc.supervisorStaffId ?? doc.supervisorTeacherId ?? ""
+    ),
+    supervisorTeacherId: doc.supervisorTeacherId
+      ? String(doc.supervisorTeacherId)
+      : undefined,
     entries: mappedEntries,
     notes: (doc.notes as string) || undefined,
     status: doc.status as FieldDutyAttendanceRecord["status"],
@@ -285,7 +362,7 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
   const schoolId = tenantObjectId(req);
   const todayBs = getTodayBs();
   const isAdmin = canManageInstitution(req.user?.role ?? "");
-  const teacherScope = req.user?.role === "TEACHER" ? await getTeacherScope(req) : null;
+  const staffScope = !isAdmin ? await getFieldSupervisorStaffScope(req) : null;
 
   const scheduleFilter: Record<string, unknown> = {
     schoolId,
@@ -294,8 +371,8 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
     startDateBs: { $lte: todayBs },
     endDateBs: { $gte: todayBs }
   };
-  if (!isAdmin && teacherScope) {
-    scheduleFilter.supervisorTeacherId = teacherScope.teacherId;
+  if (!isAdmin && staffScope) {
+    scheduleFilter.supervisorStaffId = staffScope.staffId;
   }
 
   const activeSchedules = await FieldDutySchedule.find(scheduleFilter).lean();
@@ -335,7 +412,8 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
     h.total += sum.total;
     hospitalMap.set(rec.hospitalName, h);
 
-    const sid = rec.supervisorTeacherId.toString();
+    const sid = String(rec.supervisorStaffId ?? rec.supervisorTeacherId ?? "");
+    if (!sid) continue;
     const s = supervisorMap.get(sid) ?? { present: 0, absent: 0, total: 0, name: sid };
     s.present += sum.present;
     s.absent += sum.absent;
@@ -343,26 +421,38 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
     supervisorMap.set(sid, s);
   }
 
-  // Enrich supervisor names
-  const supervisors = await Teacher.find({
-    _id: { $in: [...supervisorMap.keys()] }
-  })
-    .populate("user", "fullName")
+  // Enrich supervisor names from college staff (and legacy teachers)
+  const supervisorIds = [...supervisorMap.keys()];
+  const staffRows = await CollegeStaff.find({ _id: { $in: supervisorIds } })
+    .select("_id fullName staffId")
     .lean();
-  for (const t of supervisors) {
-    const row = supervisorMap.get(t._id.toString());
-    if (row) {
-      const u = t.user as unknown as { fullName?: string } | undefined;
-      row.name = u?.fullName ?? t.teacherCode;
+  for (const st of staffRows) {
+    const row = supervisorMap.get(st._id.toString());
+    if (row) row.name = st.fullName || st.staffId;
+  }
+  const missingIds = supervisorIds.filter((id) => {
+    const row = supervisorMap.get(id);
+    return row && row.name === id;
+  });
+  if (missingIds.length) {
+    const legacyTeachers = await Teacher.find({ _id: { $in: missingIds } })
+      .populate("user", "fullName")
+      .lean();
+    for (const t of legacyTeachers) {
+      const row = supervisorMap.get(t._id.toString());
+      if (row) {
+        const u = t.user as unknown as { fullName?: string } | undefined;
+        row.name = u?.fullName ?? t.teacherCode;
+      }
     }
   }
 
   const submittedToday = todayRecords.filter((r) => r.status === "SUBMITTED" || r.status === "LOCKED").length;
   const pendingSubmissions = Math.max(activeSchedules.length - submittedToday, 0);
 
-  // Teacher my-assignments
+  // Staff supervisor my-assignments
   let myAssignments: FieldDutyDashboard["myAssignments"];
-  if (teacherScope) {
+  if (staffScope) {
     myAssignments = await Promise.all(
       activeSchedules.map(async (sch) => {
         const count = await Student.countDocuments({
@@ -422,16 +512,29 @@ export const buildStudentFieldDutyPortal = async (
     .limit(200)
     .lean();
 
-  const teacherIds = [...new Set(records.map((r) => r.supervisorTeacherId.toString()))];
-  const teachers = await Teacher.find({ _id: { $in: teacherIds } })
-    .populate("user", "fullName")
+  const supervisorIds = [
+    ...new Set(
+      records.map((r) =>
+        String(r.supervisorStaffId ?? r.supervisorTeacherId ?? "")
+      ).filter(Boolean)
+    )
+  ];
+  const staffRows = await CollegeStaff.find({ _id: { $in: supervisorIds } })
+    .select("_id fullName staffId")
     .lean();
-  const teacherName = new Map(
-    teachers.map((t) => {
-      const u = t.user as unknown as { fullName?: string } | undefined;
-      return [t._id.toString(), u?.fullName ?? t.teacherCode];
-    })
+  const supervisorName = new Map(
+    staffRows.map((s) => [s._id.toString(), s.fullName || s.staffId])
   );
+  const missing = supervisorIds.filter((id) => !supervisorName.has(id));
+  if (missing.length) {
+    const teachers = await Teacher.find({ _id: { $in: missing } })
+      .populate("user", "fullName")
+      .lean();
+    for (const t of teachers) {
+      const u = t.user as unknown as { fullName?: string } | undefined;
+      supervisorName.set(t._id.toString(), u?.fullName ?? t.teacherCode);
+    }
+  }
 
   const rows = [];
   let present = 0;
@@ -459,7 +562,9 @@ export const buildStudentFieldDutyPortal = async (
       department: rec.department,
       ward: rec.ward || undefined,
       shift: rec.shift as FieldDutyPortalSummary["rows"][0]["shift"],
-      supervisorName: teacherName.get(rec.supervisorTeacherId.toString()),
+      supervisorName: supervisorName.get(
+        String(rec.supervisorStaffId ?? rec.supervisorTeacherId ?? "")
+      ),
       status: entry.status as FieldDutyStudentStatus,
       remarks: entry.remarks || undefined,
       attendanceRecordStatus: rec.status as FieldDutyPortalSummary["rows"][0]["attendanceRecordStatus"]

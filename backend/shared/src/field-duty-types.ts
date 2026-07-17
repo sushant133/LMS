@@ -22,7 +22,10 @@ export interface FieldDutyScheduleRecord {
   hospitalName: string;
   department: string;
   ward?: string;
-  supervisorTeacherId: string;
+  /** College staff assigned as field supervisor (not Teacher). */
+  supervisorStaffId: string;
+  /** @deprecated Legacy teacher-based supervisor id if present on old rows */
+  supervisorTeacherId?: string;
   clinicalInstructorName?: string;
   hospitalSupervisorName?: string;
   startDateBs: string;
@@ -35,7 +38,13 @@ export interface FieldDutyScheduleRecord {
   updatedAt?: string;
   batch?: { _id: string; name: string };
   year?: { _id: string; name: string; level?: number };
-  supervisor?: { _id: string; teacherCode?: string; user?: { fullName: string } };
+  supervisor?: {
+    _id: string;
+    staffId?: string;
+    designation?: string;
+    fullName?: string;
+    user?: { fullName: string };
+  };
   studentCount?: number;
 }
 
@@ -62,7 +71,9 @@ export interface FieldDutyAttendanceRecord {
   shift: FieldDutyShift;
   batchId: string;
   yearId: string;
-  supervisorTeacherId: string;
+  supervisorStaffId: string;
+  /** @deprecated Legacy teacher-based supervisor id if present on old rows */
+  supervisorTeacherId?: string;
   entries: FieldDutyAttendanceEntryRecord[];
   notes?: string;
   status: FieldDutyAttendanceStatus;

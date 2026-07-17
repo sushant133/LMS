@@ -28,7 +28,10 @@ const fieldDutyAttendanceSchema = new Schema(
     },
     batchId: { type: Schema.Types.ObjectId, ref: "Batch", required: true, index: true },
     yearId: { type: Schema.Types.ObjectId, ref: "Year", required: true, index: true },
-    supervisorTeacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true, index: true },
+    /** Field supervisor is college staff (not Teacher). */
+    supervisorStaffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff", required: true, index: true },
+    /** @deprecated Legacy teacher supervisor */
+    supervisorTeacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: false, index: true },
     entries: { type: [entrySchema], default: [] },
     notes: { type: String, default: "" },
     status: {

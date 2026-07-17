@@ -18,6 +18,7 @@ import {
   buildStudentFieldDutyPortal,
   emptyToUndef,
   getEligibleStudentsForDuty,
+  getFieldSupervisorStaffScope,
   isDateWithinDuty,
   notifyFieldDutyAttendance,
   serializeAttendance,
@@ -27,7 +28,6 @@ import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { getLinkedStudentIds } from "../utils/parentScope.js";
 import { sendSuccess } from "../utils/response.js";
 import { getStudentProfile } from "../utils/studentScope.js";
-import { getTeacherScope } from "../utils/teacherScope.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
 const actorId = (req: Request) => req.user!.userId;
@@ -44,15 +44,13 @@ export const listFieldDutySchedules = asyncHandler(async (req: Request, res: Res
   }
 
   if (!canManageInstitution(req.user?.role ?? "")) {
-    if (req.user?.role === "TEACHER") {
-      const scope = await getTeacherScope(req);
-      if (!scope) throw new ApiError(403, "Teacher scope required");
-      filter.supervisorTeacherId = scope.teacherId;
-    } else {
+    const staffScope = await getFieldSupervisorStaffScope(req);
+    if (!staffScope) {
       throw new ApiError(403, "Not allowed to list field duty schedules");
     }
-  } else if (typeof req.query.supervisorTeacherId === "string" && req.query.supervisorTeacherId) {
-    filter.supervisorTeacherId = req.query.supervisorTeacherId;
+    filter.supervisorStaffId = staffScope.staffId;
+  } else if (typeof req.query.supervisorStaffId === "string" && req.query.supervisorStaffId) {
+    filter.supervisorStaffId = req.query.supervisorStaffId;
   }
 
   const schedules = await FieldDutySchedule.find(filter).sort({ startDateBs: -1 }).lean();
@@ -80,7 +78,7 @@ export const createFieldDutySchedule = asyncHandler(async (req: Request, res: Re
     hospitalName: payload.hospitalName.trim(),
     department: payload.department.trim(),
     ward: emptyToUndef(payload.ward) ?? "",
-    supervisorTeacherId: payload.supervisorTeacherId,
+    supervisorStaffId: payload.supervisorStaffId,
     clinicalInstructorName: emptyToUndef(payload.clinicalInstructorName) ?? "",
     hospitalSupervisorName: emptyToUndef(payload.hospitalSupervisorName) ?? "",
     startDateBs: payload.startDateBs,
@@ -194,13 +192,9 @@ export const listFieldDutyAttendance = asyncHandler(async (req: Request, res: Re
   if (typeof req.query.status === "string" && req.query.status) filter.status = req.query.status;
 
   if (!canManageInstitution(req.user?.role ?? "")) {
-    if (req.user?.role === "TEACHER") {
-      const scope = await getTeacherScope(req);
-      if (!scope) throw new ApiError(403, "Teacher scope required");
-      filter.supervisorTeacherId = scope.teacherId;
-    } else {
-      throw new ApiError(403, "Not allowed");
-    }
+    const staffScope = await getFieldSupervisorStaffScope(req);
+    if (!staffScope) throw new ApiError(403, "Not allowed");
+    filter.supervisorStaffId = staffScope.staffId;
   }
 
   const rows = await FieldDutyAttendance.find(filter).sort({ dateBs: -1 }).limit(100).lean();
@@ -269,7 +263,8 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     shift: schedule.shift,
     batchId: schedule.batchId,
     yearId: schedule.yearId,
-    supervisorTeacherId: schedule.supervisorTeacherId,
+    supervisorStaffId:
+      schedule.supervisorStaffId ?? schedule.supervisorTeacherId,
     entries: payload.entries.map((e) => ({
       studentId: e.studentId,
       status: e.status,
@@ -394,9 +389,9 @@ export const getFieldDutyReports = asyncHandler(async (req: Request, res: Respon
   if (typeof req.query.scheduleId === "string" && req.query.scheduleId) {
     filter.scheduleId = req.query.scheduleId;
   }
-  if (req.user?.role === "TEACHER") {
-    const scope = await getTeacherScope(req);
-    if (scope) filter.supervisorTeacherId = scope.teacherId;
+  if (!canManageInstitution(req.user?.role ?? "")) {
+    const staffScope = await getFieldSupervisorStaffScope(req);
+    if (staffScope) filter.supervisorStaffId = staffScope.staffId;
   }
 
   const rows = await FieldDutyAttendance.find(filter).sort({ dateBs: -1 }).limit(500).lean();
@@ -469,9 +464,9 @@ export const getTodayFieldDutyContext = asyncHandler(async (req: Request, res: R
   };
 
   if (!canManageInstitution(req.user?.role ?? "")) {
-    const scope = await getTeacherScope(req);
-    if (!scope) throw new ApiError(403, "Teacher scope required");
-    filter.supervisorTeacherId = scope.teacherId;
+    const staffScope = await getFieldSupervisorStaffScope(req);
+    if (!staffScope) throw new ApiError(403, "Field supervisor staff scope required");
+    filter.supervisorStaffId = staffScope.staffId;
   }
 
   const schedules = await FieldDutySchedule.find(filter).lean();

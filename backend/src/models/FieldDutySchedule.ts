@@ -11,7 +11,10 @@ const fieldDutyScheduleSchema = new Schema(
     hospitalName: { type: String, required: true, trim: true },
     department: { type: String, required: true, trim: true },
     ward: { type: String, default: "" },
-    supervisorTeacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: true, index: true },
+    /** Field supervisor is college staff (not Teacher). */
+    supervisorStaffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff", required: true, index: true },
+    /** @deprecated Kept only so legacy rows still load until reassigned */
+    supervisorTeacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: false, index: true },
     clinicalInstructorName: { type: String, default: "" },
     hospitalSupervisorName: { type: String, default: "" },
     startDateBs: { type: String, required: true },
@@ -34,7 +37,7 @@ const fieldDutyScheduleSchema = new Schema(
   { timestamps: true }
 );
 
-fieldDutyScheduleSchema.index({ schoolId: 1, supervisorTeacherId: 1, status: 1 });
+fieldDutyScheduleSchema.index({ schoolId: 1, supervisorStaffId: 1, status: 1 });
 fieldDutyScheduleSchema.index({ schoolId: 1, batchId: 1, yearId: 1, status: 1 });
 
 export type FieldDutyScheduleDocument = InferSchemaType<typeof fieldDutyScheduleSchema>;

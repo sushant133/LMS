@@ -27,7 +27,8 @@ export const fieldDutyScheduleSchema = z.object({
   hospitalName: z.string().min(1),
   department: z.string().min(1),
   ward: z.string().optional().or(z.literal("")),
-  supervisorTeacherId: objectId,
+  /** Field supervisor is college staff (not a teacher). */
+  supervisorStaffId: objectId,
   clinicalInstructorName: z.string().optional().or(z.literal("")),
   hospitalSupervisorName: z.string().optional().or(z.literal("")),
   startDateBs: z.string().min(1),

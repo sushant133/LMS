@@ -26,6 +26,8 @@ import {
 import {
   AlertTriangle,
   Beaker,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   FileBarChart2,
   FlaskConical,
@@ -132,6 +134,8 @@ export const LaboratoryManager = () => {
     quantity: 1,
     notes: "",
   });
+  /** 0 = Update stock, 1 = Equipment inventory — left/right slider panels */
+  const [inventorySlide, setInventorySlide] = useState<0 | 1>(1);
   const [reportType, setReportType] = useState<LaboratoryReportType>("LABORATORY_INVENTORY");
   const [reportLabId, setReportLabId] = useState("");
   const [reportData, setReportData] = useState<LaboratoryReportResponse | null>(null);
@@ -481,10 +485,13 @@ export const LaboratoryManager = () => {
       quantity: 1,
       notes: "",
     });
-    // Scroll stock panel into view on smaller screens
-    document.getElementById("lab-update-stock")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
+    // Open Update stock panel in the left–right slider
+    setInventorySlide(0);
+    requestAnimationFrame(() => {
+      document.getElementById("lab-inventory-slider")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     });
   };
 
@@ -1298,320 +1305,459 @@ export const LaboratoryManager = () => {
               </CardContent>
             </Card>
 
-            <div className="space-y-6">
-              {/* Update stock */}
-              <Card id="lab-update-stock" className="border-brand-100 shadow-sm">
-                <CardHeader className="border-b border-slate-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_white_100%)] pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Package className="h-5 w-5 text-brand-600" />
+            {/* Left–right slider: Update stock ↔ Equipment inventory */}
+            <div
+              id="lab-inventory-slider"
+              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-1 rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setInventorySlide(0)}
+                    className={cn(
+                      "rounded-lg px-3 py-1.5 text-xs font-semibold transition",
+                      inventorySlide === 0
+                        ? "bg-brand-600 text-white shadow-sm"
+                        : "text-slate-600 hover:bg-slate-100",
+                    )}
+                  >
                     Update stock
-                  </CardTitle>
-                  <p className="text-xs text-slate-500">
-                    Increase, reduce, consume, or mark damaged / lost / maintenance for an item.
-                    Tip: click <strong>Stock</strong> on a row below to pre-select it.
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-4 pt-4">
-                  {selectedStockItem ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="font-medium text-slate-900">{selectedStockItem.name}</p>
-                        <p className="text-xs text-slate-600">
-                          {selectedStockItem.itemCode} ·{" "}
-                          {selectedStockItem.laboratoryName ?? "Lab"} ·{" "}
-                          {selectedStockItem.categoryName ?? "—"}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-3 text-center text-sm">
-                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
-                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                            Total
-                          </p>
-                          <p className="font-semibold text-slate-900">
-                            {selectedStockItem.quantity}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
-                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                            Available
-                          </p>
-                          <p className="font-semibold text-emerald-700">
-                            {selectedStockItem.availableQuantity}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
-                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                            Issued
-                          </p>
-                          <p className="font-semibold text-sky-700">
-                            {selectedStockItem.issuedQuantity ?? 0}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
-                          <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                            Min / Max
-                          </p>
-                          <p className="font-semibold text-slate-900">
-                            {selectedStockItem.minimumStockLevel ?? 0}
-                            {" / "}
-                            {(selectedStockItem.maximumStockLevel ?? 0) > 0
-                              ? selectedStockItem.maximumStockLevel
-                              : "—"}
-                          </p>
-                        </div>
-                        <div className="flex items-center">
-                          <StockStatusBadge status={selectedStockItem.status} />
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                      Select equipment below or from the dropdown to update stock.
-                    </div>
-                  )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInventorySlide(1)}
+                    className={cn(
+                      "rounded-lg px-3 py-1.5 text-xs font-semibold transition",
+                      inventorySlide === 1
+                        ? "bg-brand-600 text-white shadow-sm"
+                        : "text-slate-600 hover:bg-slate-100",
+                    )}
+                  >
+                    Equipment inventory
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    title="Previous panel"
+                    aria-label="Previous panel"
+                    disabled={inventorySlide === 0}
+                    onClick={() => setInventorySlide(0)}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="min-w-[4.5rem] text-center text-[11px] font-medium tabular-nums text-slate-500">
+                    {inventorySlide + 1} / 2
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    title="Next panel"
+                    aria-label="Next panel"
+                    disabled={inventorySlide === 1}
+                    onClick={() => setInventorySlide(1)}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <FormField label="Equipment *">
-                      <Select
-                        value={stockAction.equipmentId}
-                        onChange={(e) =>
-                          setStockAction((c) => ({ ...c, equipmentId: e.target.value }))
-                        }
-                      >
-                        <option value="">Select item</option>
-                        {equipment.map((item) => (
-                          <option key={item._id} value={item._id}>
-                            {item.name} · {item.availableQuantity} avail.
-                          </option>
-                        ))}
-                      </Select>
-                    </FormField>
-                    <FormField label="Action *">
-                      <Select
-                        value={stockAction.type}
-                        onChange={(e) =>
-                          setStockAction((c) => ({ ...c, type: e.target.value }))
-                        }
-                      >
-                        {stockActionOptions.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </Select>
-                    </FormField>
-                    <FormField label="Quantity *">
-                      <NumberInput
-                        min={1}
-                        value={
-                          Number.isFinite(stockAction.quantity) ? stockAction.quantity : 1
-                        }
-                        onChange={(e) =>
-                          setStockAction((c) => ({
-                            ...c,
-                            quantity: Number.isFinite(e.target.valueAsNumber)
-                              ? Math.max(1, e.target.valueAsNumber)
-                              : 1,
-                          }))
-                        }
-                      />
-                    </FormField>
-                    <FormField label="Notes">
-                      <Input
-                        value={stockAction.notes}
-                        onChange={(e) =>
-                          setStockAction((c) => ({ ...c, notes: e.target.value }))
-                        }
-                        placeholder="Optional reason"
-                      />
-                    </FormField>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      disabled={
-                        !stockAction.equipmentId ||
-                        stockAction.quantity < 1 ||
-                        adjustStock.isPending
-                      }
-                      onClick={() => adjustStock.mutate()}
+              <div className="relative overflow-hidden">
+                <div
+                  className="flex w-[200%] transition-transform duration-300 ease-out"
+                  style={{
+                    transform: `translateX(-${inventorySlide * 50}%)`,
+                  }}
+                >
+                  {/* Panel 1: Update stock */}
+                  <div className="w-1/2 shrink-0 px-1 sm:px-0">
+                    <Card
+                      id="lab-update-stock"
+                      className="border-0 shadow-none"
                     >
-                      {adjustStock.isPending ? "Updating…" : "Apply stock change"}
-                    </Button>
-                    {stockAction.equipmentId ? (
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          setStockAction({
-                            equipmentId: "",
-                            type: "INCREASE",
-                            quantity: 1,
-                            notes: "",
-                          })
-                        }
-                      >
-                        Clear selection
-                      </Button>
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Equipment inventory table */}
-              <Card>
-                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                  <div>
-                    <CardTitle className="text-base">Equipment inventory</CardTitle>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {equipmentQuery.isLoading
-                        ? "Loading…"
-                        : `${equipment.length} item${equipment.length === 1 ? "" : "s"}`}
-                      {labFilter
-                        ? ` · filtered by laboratory`
-                        : ""}
-                    </p>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                  {equipmentQuery.isLoading ? (
-                    <div className="px-6 py-12 text-center text-sm text-slate-500">
-                      Loading equipment…
-                    </div>
-                  ) : equipment.length === 0 ? (
-                    <div className="px-6 py-12 text-center">
-                      <Package className="mx-auto h-10 w-10 text-slate-300" />
-                      <p className="mt-3 font-medium text-slate-700">No equipment found</p>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Add equipment using the form on the left, or clear filters.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <Table>
-                        <TableHead>
-                          <tr className="bg-slate-50/80">
-                            <Th>Item</Th>
-                            <Th>Lab</Th>
-                            <Th>Code</Th>
-                            <Th className="text-right">Total</Th>
-                            <Th className="text-right">Avail.</Th>
-                            <Th className="text-right">Min</Th>
-                            <Th className="text-right">Max</Th>
-                            <Th>Condition</Th>
-                            <Th>Stock</Th>
-                            <Th className="text-right">Actions</Th>
-                          </tr>
-                        </TableHead>
-                        <TableBody>
-                          {equipment.map((item) => {
-                            const isSelected = stockAction.equipmentId === item._id;
-                            return (
-                              <tr
-                                key={item._id}
-                                className={cn(
-                                  "transition-colors",
-                                  isSelected && "bg-brand-50/70",
-                                )}
-                              >
-                                <Td className="min-w-[160px]">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-medium text-slate-900">
-                                      {item.name}
-                                    </span>
-                                    <Badge className="bg-indigo-100 text-indigo-800">
-                                      {item.yearLevel ?? "All Years"}
-                                    </Badge>
-                                  </div>
-                                  <div className="mt-0.5 text-xs text-slate-500">
-                                    {item.itemKind === "DISPOSABLE"
-                                      ? "Disposable / Destroyable"
-                                      : "Non-Disposable / Non-Destroyable"}
-                                    {item.categoryName ? ` · ${item.categoryName}` : ""}
-                                    {item.storageLocation
-                                      ? ` · ${item.storageLocation}`
-                                      : ""}
-                                  </div>
-                                </Td>
-                                <Td className="text-sm text-slate-700">
-                                  {item.laboratoryName ?? "—"}
-                                </Td>
-                                <Td className="font-mono text-xs text-slate-600">
-                                  {item.itemCode || "—"}
-                                </Td>
-                                <Td className="text-right tabular-nums">{item.quantity}</Td>
-                                <Td className="text-right tabular-nums font-medium text-emerald-700">
-                                  {item.availableQuantity}
-                                </Td>
-                                <Td className="text-right tabular-nums text-slate-600">
-                                  {item.minimumStockLevel ?? 0}
-                                </Td>
-                                <Td className="text-right tabular-nums text-slate-600">
-                                  {(item.maximumStockLevel ?? 0) > 0
-                                    ? item.maximumStockLevel
+                      <CardHeader className="border-b border-slate-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_white_100%)] pb-3">
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <Package className="h-5 w-5 text-brand-600" />
+                          Update stock
+                        </CardTitle>
+                        <p className="text-xs text-slate-500">
+                          Increase, reduce, consume, or mark damaged / lost /
+                          maintenance. Use the arrow or open{" "}
+                          <strong>Equipment inventory</strong> to pick an item,
+                          then click <strong>Stock</strong>.
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4 pt-4">
+                        {selectedStockItem ? (
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3">
+                            <div className="min-w-0">
+                              <p className="font-medium text-slate-900">
+                                {selectedStockItem.name}
+                              </p>
+                              <p className="text-xs text-slate-600">
+                                {selectedStockItem.itemCode} ·{" "}
+                                {selectedStockItem.laboratoryName ?? "Lab"} ·{" "}
+                                {selectedStockItem.categoryName ?? "—"}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-3 text-center text-sm">
+                              <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                                <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                                  Total
+                                </p>
+                                <p className="font-semibold text-slate-900">
+                                  {selectedStockItem.quantity}
+                                </p>
+                              </div>
+                              <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                                <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                                  Available
+                                </p>
+                                <p className="font-semibold text-emerald-700">
+                                  {selectedStockItem.availableQuantity}
+                                </p>
+                              </div>
+                              <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                                <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                                  Issued
+                                </p>
+                                <p className="font-semibold text-sky-700">
+                                  {selectedStockItem.issuedQuantity ?? 0}
+                                </p>
+                              </div>
+                              <div className="rounded-lg bg-white px-3 py-1.5 shadow-sm">
+                                <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                                  Min / Max
+                                </p>
+                                <p className="font-semibold text-slate-900">
+                                  {selectedStockItem.minimumStockLevel ?? 0}
+                                  {" / "}
+                                  {(selectedStockItem.maximumStockLevel ?? 0) > 0
+                                    ? selectedStockItem.maximumStockLevel
                                     : "—"}
-                                </Td>
-                                <Td className="text-sm">{item.condition ?? "—"}</Td>
-                                <Td>
-                                  <StockStatusBadge status={item.status} />
-                                </Td>
-                                <Td className="text-right">
-                                  <div className="flex flex-wrap justify-end gap-1">
-                                    <Button
-                                      size="sm"
-                                      variant={isSelected ? "default" : "secondary"}
-                                      title="Adjust stock"
-                                      onClick={() => beginStockAdjust(item)}
+                                </p>
+                              </div>
+                              <div className="flex items-center">
+                                <StockStatusBadge
+                                  status={selectedStockItem.status}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                            Select equipment from the dropdown, or slide right to{" "}
+                            <button
+                              type="button"
+                              className="font-semibold text-brand-700 underline-offset-2 hover:underline"
+                              onClick={() => setInventorySlide(1)}
+                            >
+                              Equipment inventory
+                            </button>{" "}
+                            and click Stock.
+                          </div>
+                        )}
+
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                          <FormField label="Equipment *">
+                            <Select
+                              value={stockAction.equipmentId}
+                              onChange={(e) =>
+                                setStockAction((c) => ({
+                                  ...c,
+                                  equipmentId: e.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">Select item</option>
+                              {equipment.map((item) => (
+                                <option key={item._id} value={item._id}>
+                                  {item.name} · {item.availableQuantity} avail.
+                                </option>
+                              ))}
+                            </Select>
+                          </FormField>
+                          <FormField label="Action *">
+                            <Select
+                              value={stockAction.type}
+                              onChange={(e) =>
+                                setStockAction((c) => ({
+                                  ...c,
+                                  type: e.target.value,
+                                }))
+                              }
+                            >
+                              {stockActionOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </Select>
+                          </FormField>
+                          <FormField label="Quantity *">
+                            <NumberInput
+                              min={1}
+                              value={
+                                Number.isFinite(stockAction.quantity)
+                                  ? stockAction.quantity
+                                  : 1
+                              }
+                              onChange={(e) =>
+                                setStockAction((c) => ({
+                                  ...c,
+                                  quantity: Number.isFinite(e.target.valueAsNumber)
+                                    ? Math.max(1, e.target.valueAsNumber)
+                                    : 1,
+                                }))
+                              }
+                            />
+                          </FormField>
+                          <FormField label="Notes">
+                            <Input
+                              value={stockAction.notes}
+                              onChange={(e) =>
+                                setStockAction((c) => ({
+                                  ...c,
+                                  notes: e.target.value,
+                                }))
+                              }
+                              placeholder="Optional reason"
+                            />
+                          </FormField>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            disabled={
+                              !stockAction.equipmentId ||
+                              stockAction.quantity < 1 ||
+                              adjustStock.isPending
+                            }
+                            onClick={() => adjustStock.mutate()}
+                          >
+                            {adjustStock.isPending
+                              ? "Updating…"
+                              : "Apply stock change"}
+                          </Button>
+                          {stockAction.equipmentId ? (
+                            <Button
+                              variant="secondary"
+                              onClick={() =>
+                                setStockAction({
+                                  equipmentId: "",
+                                  type: "INCREASE",
+                                  quantity: 1,
+                                  notes: "",
+                                })
+                              }
+                            >
+                              Clear selection
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="ml-auto"
+                            onClick={() => setInventorySlide(1)}
+                          >
+                            Equipment inventory
+                            <ChevronRight className="ml-1 h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Panel 2: Equipment inventory */}
+                  <div className="w-1/2 shrink-0 px-1 sm:px-0">
+                    <Card className="border-0 shadow-none">
+                      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                        <div>
+                          <CardTitle className="text-base">
+                            Equipment inventory
+                          </CardTitle>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {equipmentQuery.isLoading
+                              ? "Loading…"
+                              : `${equipment.length} item${equipment.length === 1 ? "" : "s"}`}
+                            {labFilter ? ` · filtered by laboratory` : ""}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setInventorySlide(0)}
+                        >
+                          <ChevronLeft className="mr-1 h-4 w-4" />
+                          Update stock
+                        </Button>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        {equipmentQuery.isLoading ? (
+                          <div className="px-6 py-12 text-center text-sm text-slate-500">
+                            Loading equipment…
+                          </div>
+                        ) : equipment.length === 0 ? (
+                          <div className="px-6 py-12 text-center">
+                            <Package className="mx-auto h-10 w-10 text-slate-300" />
+                            <p className="mt-3 font-medium text-slate-700">
+                              No equipment found
+                            </p>
+                            <p className="mt-1 text-sm text-slate-500">
+                              Add equipment using the form on the left, or clear
+                              filters.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <Table>
+                              <TableHead>
+                                <tr className="bg-slate-50/80">
+                                  <Th>Item</Th>
+                                  <Th>Lab</Th>
+                                  <Th>Code</Th>
+                                  <Th className="text-right">Total</Th>
+                                  <Th className="text-right">Avail.</Th>
+                                  <Th className="text-right">Min</Th>
+                                  <Th className="text-right">Max</Th>
+                                  <Th>Condition</Th>
+                                  <Th>Stock</Th>
+                                  <Th className="text-right">Actions</Th>
+                                </tr>
+                              </TableHead>
+                              <TableBody>
+                                {equipment.map((item) => {
+                                  const isSelected =
+                                    stockAction.equipmentId === item._id;
+                                  return (
+                                    <tr
+                                      key={item._id}
+                                      className={cn(
+                                        "transition-colors",
+                                        isSelected && "bg-brand-50/70",
+                                      )}
                                     >
-                                      <Package className="mr-1 h-3.5 w-3.5" />
-                                      Stock
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      title="Edit equipment"
-                                      onClick={() => beginEditEquipment(item)}
-                                    >
-                                      <Pencil className="mr-1 h-3.5 w-3.5" />
-                                      Edit
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      title="Create purchase request"
-                                      onClick={() => fillRequestFromEquipment(item)}
-                                    >
-                                      <ShoppingCart className="mr-1 h-3.5 w-3.5" />
-                                      Request
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                                      title="Delete equipment"
-                                      disabled={deleteEquipment.isPending}
-                                      onClick={() => {
-                                        if (
-                                          confirm(
-                                            `Delete equipment "${item.name}" (${item.itemCode || "no code"})?\n\nThis cannot be undone. Items with active issues cannot be deleted.`,
-                                          )
-                                        ) {
-                                          deleteEquipment.mutate(item._id);
-                                        }
-                                      }}
-                                    >
-                                      <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                      Delete
-                                    </Button>
-                                  </div>
-                                </Td>
-                              </tr>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                                      <Td className="min-w-[160px]">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="font-medium text-slate-900">
+                                            {item.name}
+                                          </span>
+                                          <Badge className="bg-indigo-100 text-indigo-800">
+                                            {item.yearLevel ?? "All Years"}
+                                          </Badge>
+                                        </div>
+                                        <div className="mt-0.5 text-xs text-slate-500">
+                                          {item.itemKind === "DISPOSABLE"
+                                            ? "Disposable / Destroyable"
+                                            : "Non-Disposable / Non-Destroyable"}
+                                          {item.categoryName
+                                            ? ` · ${item.categoryName}`
+                                            : ""}
+                                          {item.storageLocation
+                                            ? ` · ${item.storageLocation}`
+                                            : ""}
+                                        </div>
+                                      </Td>
+                                      <Td className="text-sm text-slate-700">
+                                        {item.laboratoryName ?? "—"}
+                                      </Td>
+                                      <Td className="font-mono text-xs text-slate-600">
+                                        {item.itemCode || "—"}
+                                      </Td>
+                                      <Td className="text-right tabular-nums">
+                                        {item.quantity}
+                                      </Td>
+                                      <Td className="text-right tabular-nums font-medium text-emerald-700">
+                                        {item.availableQuantity}
+                                      </Td>
+                                      <Td className="text-right tabular-nums text-slate-600">
+                                        {item.minimumStockLevel ?? 0}
+                                      </Td>
+                                      <Td className="text-right tabular-nums text-slate-600">
+                                        {(item.maximumStockLevel ?? 0) > 0
+                                          ? item.maximumStockLevel
+                                          : "—"}
+                                      </Td>
+                                      <Td className="text-sm">
+                                        {item.condition ?? "—"}
+                                      </Td>
+                                      <Td>
+                                        <StockStatusBadge status={item.status} />
+                                      </Td>
+                                      <Td className="text-right">
+                                        <div className="flex flex-wrap justify-end gap-1">
+                                          <Button
+                                            size="sm"
+                                            variant={
+                                              isSelected ? "default" : "secondary"
+                                            }
+                                            title="Adjust stock"
+                                            onClick={() => beginStockAdjust(item)}
+                                          >
+                                            <Package className="mr-1 h-3.5 w-3.5" />
+                                            Stock
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            title="Edit equipment"
+                                            onClick={() =>
+                                              beginEditEquipment(item)
+                                            }
+                                          >
+                                            <Pencil className="mr-1 h-3.5 w-3.5" />
+                                            Edit
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            title="Create purchase request"
+                                            onClick={() =>
+                                              fillRequestFromEquipment(item)
+                                            }
+                                          >
+                                            <ShoppingCart className="mr-1 h-3.5 w-3.5" />
+                                            Request
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                            title="Delete equipment"
+                                            disabled={deleteEquipment.isPending}
+                                            onClick={() => {
+                                              if (
+                                                confirm(
+                                                  `Delete equipment "${item.name}" (${item.itemCode || "no code"})?\n\nThis cannot be undone. Items with active issues cannot be deleted.`,
+                                                )
+                                              ) {
+                                                deleteEquipment.mutate(item._id);
+                                              }
+                                            }}
+                                          >
+                                            <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                            Delete
+                                          </Button>
+                                        </div>
+                                      </Td>
+                                    </tr>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
