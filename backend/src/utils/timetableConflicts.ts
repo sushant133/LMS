@@ -19,11 +19,11 @@ export type TimetableConflictInput = {
   sectionId?: string;
   batchId?: string;
   yearId?: string;
-  /** Exclude self on update */
+  /** Exclude self on update (required for edits) */
   excludeId?: string;
 };
 
-/** Sessions that may share the day/time with normal teaching (exam overlay, breaks). */
+/** Exam / break / holiday may overlay regular teaching slots. */
 const NON_TEACHING_SESSION_TYPES = new Set(["EXAM", "BREAK", "HOLIDAY"]);
 
 const isTeachingSession = (sessionType?: string): boolean => {
@@ -31,10 +31,11 @@ const isTeachingSession = (sessionType?: string): boolean => {
   return !NON_TEACHING_SESSION_TYPES.has(t);
 };
 
-/** "HH:MM" → minutes since midnight for overlap checks. */
 const toMinutes = (time: string): number => {
-  const [h, m] = time.split(":").map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
+  const parts = String(time ?? "").trim().split(":");
+  const h = Number(parts[0]);
+  const m = Number(parts[1] ?? 0);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 };
 
 const timesOverlap = (
@@ -47,9 +48,6 @@ const timesOverlap = (
   const ae = toMinutes(aEnd);
   const bs = toMinutes(bStart);
   const be = toMinutes(bEnd);
-  if (Number.isNaN(as) || Number.isNaN(ae) || Number.isNaN(bs) || Number.isNaN(be)) {
-    return false;
-  }
   return as < be && bs < ae;
 };
 
@@ -57,45 +55,81 @@ const dayLabel = (dayOfWeek: number): string =>
   DAYS_OF_WEEK[dayOfWeek] ?? `Day ${dayOfWeek}`;
 
 const idString = (value: unknown): string => {
-  if (!value) return "";
+  if (value == null || value === "") return "";
   if (typeof value === "string") return value;
-  if (typeof value === "object" && value !== null && "_id" in value) {
-    return String((value as { _id: unknown })._id);
+  if (typeof value === "object" && value !== null) {
+    if ("_id" in value) return String((value as { _id: unknown })._id);
+    if (typeof (value as { toString?: () => string }).toString === "function") {
+      const s = String(value);
+      // Avoid "[object Object]"
+      if (s && !s.startsWith("[object")) return s;
+    }
   }
   return String(value);
 };
 
+const sameAcademicGroup = (
+  a: {
+    batchId?: string;
+    yearId?: string;
+    classId?: string;
+    sectionId?: string;
+  },
+  b: {
+    batchId?: unknown;
+    yearId?: unknown;
+    classId?: unknown;
+    sectionId?: unknown;
+  }
+): boolean => {
+  const bBatch = idString(b.batchId);
+  const bYear = idString(b.yearId);
+  const bClass = idString(b.classId);
+  const bSection = idString(b.sectionId);
+
+  if (a.batchId && a.yearId && bBatch && bYear) {
+    return a.batchId === bBatch && a.yearId === bYear;
+  }
+  if (a.classId && a.sectionId && bClass && bSection) {
+    return a.classId === bClass && a.sectionId === bSection;
+  }
+  return false;
+};
+
 /**
- * Prevent teacher / room / lab / batch double-booking for the same day & overlapping time.
+ * Conflict rules (practical for multi-year college schedules):
  *
- * Rules:
- * - EXAM / BREAK / HOLIDAY do not block THEORY / PRACTICAL (and reverse).
- *   Class timetable stays valid during exam periods; exams can be overlaid separately.
- * - Only real clock-time overlaps count (not periodNumber alone).
- * - On update, excludeId is always ignored (ObjectId-safe).
+ * 1. Never conflict with EXAM / BREAK / HOLIDAY vs teaching (overlays allowed).
+ * 2. Never treat the document being edited as a conflict (excludeId).
+ * 3. Teacher double-book only within the **same** batch+year (or class+section).
+ *    The same teacher may appear at the same clock time on different year tables
+ *    (common in existing data; admins can still edit those slots).
+ * 4. Room / group still use real time overlap.
  */
 export const assertNoTimetableConflicts = async (
   input: TimetableConflictInput
 ): Promise<void> => {
   const filter: Record<string, unknown> = {
     schoolId: input.schoolId,
-    academicYearBs: input.academicYearBs,
     dayOfWeek: input.dayOfWeek
   };
 
-  if (input.excludeId) {
-    // Ensure ObjectId comparison works (string $ne can fail to exclude self)
-    if (mongoose.Types.ObjectId.isValid(input.excludeId)) {
-      filter._id = { $ne: new mongoose.Types.ObjectId(input.excludeId) };
-    } else {
-      filter._id = { $ne: input.excludeId };
-    }
+  // academicYearBs is optional filter — empty string would match nothing useful
+  if (input.academicYearBs?.trim()) {
+    filter.academicYearBs = input.academicYearBs.trim();
   }
 
   const candidates = await TimetableSlot.find(filter)
     .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
     .populate("subjectId", "name")
     .lean();
+
+  const exclude =
+    input.excludeId && mongoose.Types.ObjectId.isValid(input.excludeId)
+      ? String(input.excludeId)
+      : input.excludeId
+        ? String(input.excludeId)
+        : "";
 
   const inputType = (input.sessionType ?? "THEORY").toUpperCase();
   const inputIsTeaching = isTeachingSession(inputType);
@@ -105,16 +139,16 @@ export const assertNoTimetableConflicts = async (
     inputType === "PRACTICAL" ||
     (roomNorm.length > 0 && /lab/i.test(roomNorm));
 
+  const inputTeacher = String(input.teacherId ?? "").trim();
+
   for (const other of candidates) {
-    // Double-check self-exclusion (populate / type edge cases)
-    if (input.excludeId && String(other._id) === String(input.excludeId)) {
+    // Always skip the slot being edited
+    if (exclude && String(other._id) === exclude) {
       continue;
     }
 
     const otherStart = other.startTime;
     const otherEnd = other.endTime;
-    // Real time overlap only — same periodNumber alone is not enough
-    // (different years can reuse period numbers with different clocks).
     if (!timesOverlap(input.startTime, input.endTime, otherStart, otherEnd)) {
       continue;
     }
@@ -124,11 +158,10 @@ export const assertNoTimetableConflicts = async (
     ).toUpperCase();
     const otherIsTeaching = isTeachingSession(otherType);
 
-    // Exam / break / holiday may coexist with regular class timetable
+    // Exam / break / holiday may share time with class timetable
     if (inputIsTeaching !== otherIsTeaching) {
       continue;
     }
-    // Two non-teaching types (e.g. BREAK vs EXAM) also allowed to overlap
     if (!inputIsTeaching && !otherIsTeaching && inputType !== otherType) {
       continue;
     }
@@ -137,12 +170,23 @@ export const assertNoTimetableConflicts = async (
     const otherRoom = (other.room ?? "").trim().toLowerCase();
     const timeLabel = `${input.startTime}–${input.endTime}`;
     const day = dayLabel(input.dayOfWeek);
+    const sameGroup = sameAcademicGroup(
+      {
+        batchId: input.batchId,
+        yearId: input.yearId,
+        classId: input.classId,
+        sectionId: input.sectionId
+      },
+      other
+    );
 
-    // Teacher conflict (only when both are teaching sessions, or same non-teaching type)
+    // Teacher conflict ONLY inside the same academic group
+    // (allows same teacher on Year-1 and Year-2 tables at the same clock time)
     if (
-      input.teacherId &&
+      inputTeacher &&
       otherTeacherId &&
-      otherTeacherId === String(input.teacherId)
+      otherTeacherId === inputTeacher &&
+      sameGroup
     ) {
       const teacherName =
         typeof other.teacherId === "object" &&
@@ -153,11 +197,11 @@ export const assertNoTimetableConflicts = async (
           : "Teacher";
       throw new ApiError(
         400,
-        `Teacher conflict: ${teacherName} is already scheduled on ${day} ${otherStart}–${otherEnd}`
+        `Teacher conflict: ${teacherName} is already scheduled for this class on ${day} ${otherStart}–${otherEnd}`
       );
     }
 
-    // Room / lab conflict
+    // Room conflict (any group) — physical room can't hold two classes
     if (roomNorm && otherRoom && roomNorm === otherRoom) {
       const kind = isLab || /lab/i.test(otherRoom) ? "Laboratory" : "Classroom";
       throw new ApiError(
@@ -166,19 +210,8 @@ export const assertNoTimetableConflicts = async (
       );
     }
 
-    // Same academic group already has a teaching period at this time
-    const sameGroupCollege =
-      Boolean(input.batchId) &&
-      Boolean(input.yearId) &&
-      other.batchId?.toString() === String(input.batchId) &&
-      other.yearId?.toString() === String(input.yearId);
-    const sameGroupSchool =
-      Boolean(input.classId) &&
-      Boolean(input.sectionId) &&
-      other.classId?.toString() === String(input.classId) &&
-      other.sectionId?.toString() === String(input.sectionId);
-
-    if (sameGroupCollege || sameGroupSchool) {
+    // Same group already has another teaching period at this time
+    if (sameGroup) {
       const subjectName =
         typeof other.subjectId === "object" &&
         other.subjectId !== null &&
@@ -187,7 +220,7 @@ export const assertNoTimetableConflicts = async (
           : "Subject";
       throw new ApiError(
         400,
-        `Batch/class conflict: this group already has ${subjectName} on ${day} ${timeLabel} (overlaps ${otherStart}–${otherEnd})`
+        `Class conflict: this group already has ${subjectName} on ${day} ${timeLabel} (overlaps ${otherStart}–${otherEnd})`
       );
     }
   }

@@ -250,24 +250,52 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
     await assertPercentageCompleteForTimetable(schoolId, academicYearBs, subjectId, group, college);
   }
 
-  await assertNoTimetableConflicts({
-    schoolId,
-    academicYearBs: academicYearBs ?? "",
-    dayOfWeek: payload.dayOfWeek ?? existing.dayOfWeek,
-    periodNumber: payload.periodNumber ?? existing.periodNumber,
-    startTime: payload.startTime ?? existing.startTime,
-    endTime: payload.endTime ?? existing.endTime,
-    teacherId: payload.teacherId ?? existing.teacherId?.toString() ?? "",
-    subjectId,
-    room: payload.room ?? existing.room ?? undefined,
-    roomKind: payload.roomKind ?? (existing as { roomKind?: string }).roomKind,
-    sessionType,
-    classId: group.classId,
-    sectionId: group.sectionId,
-    batchId: group.batchId,
-    yearId: group.yearId,
-    excludeId: String(existing._id)
-  });
+  const nextDay = payload.dayOfWeek ?? existing.dayOfWeek;
+  const nextPeriod = payload.periodNumber ?? existing.periodNumber;
+  const nextStart = payload.startTime ?? existing.startTime;
+  const nextEnd = payload.endTime ?? existing.endTime;
+  const nextTeacher =
+    payload.teacherId !== undefined
+      ? payload.teacherId || ""
+      : (existing.teacherId?.toString() ?? "");
+  const nextRoom =
+    payload.room !== undefined ? payload.room || undefined : (existing.room ?? undefined);
+  const nextRoomKind =
+    payload.roomKind ?? (existing as { roomKind?: string }).roomKind;
+
+  // Skip conflict checks when schedule placement is unchanged (subject/remarks-only edits)
+  const scheduleChanged =
+    nextDay !== existing.dayOfWeek ||
+    nextPeriod !== existing.periodNumber ||
+    nextStart !== existing.startTime ||
+    nextEnd !== existing.endTime ||
+    nextTeacher !== (existing.teacherId?.toString() ?? "") ||
+    (nextRoom ?? "").trim().toLowerCase() !== (existing.room ?? "").trim().toLowerCase() ||
+    (group.batchId ?? "") !== (existing.batchId?.toString() ?? "") ||
+    (group.yearId ?? "") !== (existing.yearId?.toString() ?? "") ||
+    (group.classId ?? "") !== (existing.classId?.toString() ?? "") ||
+    (group.sectionId ?? "") !== (existing.sectionId?.toString() ?? "");
+
+  if (scheduleChanged) {
+    await assertNoTimetableConflicts({
+      schoolId,
+      academicYearBs: academicYearBs ?? "",
+      dayOfWeek: nextDay,
+      periodNumber: nextPeriod,
+      startTime: nextStart,
+      endTime: nextEnd,
+      teacherId: nextTeacher,
+      subjectId,
+      room: nextRoom,
+      roomKind: nextRoomKind,
+      sessionType,
+      classId: group.classId,
+      sectionId: group.sectionId,
+      batchId: group.batchId,
+      yearId: group.yearId,
+      excludeId: existing._id.toString()
+    });
+  }
 
   const slot = await TimetableSlot.findOneAndUpdate(withTenantScope(req, { _id: req.params.id }), payload, {
     new: true
