@@ -54,6 +54,36 @@ const SlotContent = ({
     );
   }
 
+  if (type === "SPORTS") {
+    return (
+      <div
+        className={cn(
+          "flex h-full flex-col items-center justify-center gap-0.5 p-1 text-center",
+          colors.text,
+        )}
+      >
+        <span
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase",
+            colors.badge,
+          )}
+        >
+          Sports
+        </span>
+        {slot.subjectId ? (
+          <span className={cn("leading-tight", compact ? "text-[10px]" : "text-[11px]")}>
+            {nameOf(slot.subjectId)}
+          </span>
+        ) : null}
+        {slot.teacherId ? (
+          <span className={cn("leading-tight text-slate-600", compact ? "text-[10px]" : "text-[11px]")}>
+            {nameOf(slot.teacherId)}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex h-full flex-col gap-0.5 p-1.5 text-left", colors.text)}>
       <div

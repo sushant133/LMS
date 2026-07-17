@@ -51,7 +51,7 @@ export const timetableSlotSchema = z
     startTime: z.string().regex(/^\d{2}:\d{2}$/, "Start time is required (HH:MM)"),
     endTime: z.string().regex(/^\d{2}:\d{2}$/, "End time is required (HH:MM)"),
     academicYearBs: academicYearSchema,
-    /** THEORY (default) | PRACTICAL | BREAK | HOLIDAY | EXAM | SPECIAL | ONLINE | GUEST */
+    /** THEORY (default) | PRACTICAL | SPORTS | BREAK | HOLIDAY | EXAM | SPECIAL | ONLINE | GUEST */
     sessionType: z.enum(TIMETABLE_SESSION_TYPES).optional().default("THEORY"),
     /** When sessionType is BREAK: Tiffin, Lunch, etc. */
     breakLabel: z.string().trim().max(80).optional().or(z.literal("")),
@@ -59,7 +59,11 @@ export const timetableSlotSchema = z
     roomKind: z.enum(TIMETABLE_ROOM_KINDS).optional()
   })
   .superRefine((data, ctx) => {
-    const soft = data.sessionType === "BREAK" || data.sessionType === "HOLIDAY";
+    const type = data.sessionType ?? "THEORY";
+    /** Break/holiday: time only (no period, subject, teacher). */
+    const isBreakLike = type === "BREAK" || type === "HOLIDAY";
+    /** Sports: day + period + time only — subject/teacher optional. */
+    const isSports = type === "SPORTS";
     const toMin = (t: string) => {
       const [h, m] = t.split(":").map(Number);
       return (h || 0) * 60 + (m || 0);
@@ -71,23 +75,28 @@ export const timetableSlotSchema = z
         path: ["endTime"]
       });
     }
-    if (!soft) {
-      const p = data.periodNumber;
-      if (p == null || p < 1 || p > 12) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Period number (1–12) is required for teaching slots",
-          path: ["periodNumber"]
-        });
-      }
-      if (!data.subjectId) {
-        ctx.addIssue({ code: "custom", message: "Subject is required", path: ["subjectId"] });
-      }
-      if (!data.teacherId) {
-        ctx.addIssue({ code: "custom", message: "Teacher is required", path: ["teacherId"] });
-      }
+    if (isBreakLike) {
+      // Only start + end time required
+      return;
     }
-    // BREAK / HOLIDAY: only start + end time required (period is not a teaching period)
+    const p = data.periodNumber;
+    if (p == null || p < 1 || p > 12) {
+      ctx.addIssue({
+        code: "custom",
+        message: isSports
+          ? "Period number (1–12) is required for Sports"
+          : "Period number (1–12) is required for teaching slots",
+        path: ["periodNumber"]
+      });
+    }
+    // SPORTS: no subject / teacher required
+    if (isSports) return;
+    if (!data.subjectId) {
+      ctx.addIssue({ code: "custom", message: "Subject is required", path: ["subjectId"] });
+    }
+    if (!data.teacherId) {
+      ctx.addIssue({ code: "custom", message: "Teacher is required", path: ["teacherId"] });
+    }
   });
 
 export const assignmentAttachmentSchema = z.object({

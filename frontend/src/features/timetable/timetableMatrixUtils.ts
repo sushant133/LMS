@@ -73,6 +73,7 @@ export const resolveSessionType = (
   const allowed: TimetableSessionType[] = [
     "THEORY",
     "PRACTICAL",
+    "SPORTS",
     "BREAK",
     "HOLIDAY",
     "EXAM",

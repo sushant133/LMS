@@ -81,6 +81,7 @@ export type ParentFromStudentRelationship = "FATHER" | "MOTHER" | "GUARDIAN";
 export type TimetableSessionType =
   | "THEORY"
   | "PRACTICAL"
+  | "SPORTS"
   | "BREAK"
   | "HOLIDAY"
   | "EXAM"

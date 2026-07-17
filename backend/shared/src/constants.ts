@@ -502,6 +502,7 @@ export const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursd
 export const TIMETABLE_SESSION_TYPES = [
   "THEORY",
   "PRACTICAL",
+  "SPORTS",
   "BREAK",
   "HOLIDAY",
   "EXAM",

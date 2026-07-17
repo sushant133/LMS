@@ -17,6 +17,12 @@ export const SESSION_COLORS: Record<
     text: "text-violet-950",
     badge: "bg-violet-200 text-violet-900",
   },
+  SPORTS: {
+    bg: "bg-lime-50",
+    border: "border-lime-300",
+    text: "text-lime-950",
+    badge: "bg-lime-200 text-lime-900",
+  },
   BREAK: {
     bg: "bg-amber-50",
     border: "border-amber-200",
@@ -70,6 +76,7 @@ export const SESSION_COLORS: Record<
 export const SESSION_LABELS: Record<TimetableSessionType, string> = {
   THEORY: "Theory",
   PRACTICAL: "Lab",
+  SPORTS: "Sports",
   BREAK: "Break",
   HOLIDAY: "Holiday",
   EXAM: "Exam",

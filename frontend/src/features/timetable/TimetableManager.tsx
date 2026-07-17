@@ -413,6 +413,9 @@ export const TimetableManager = () => {
   });
 
   const isBreak = form.sessionType === "BREAK" || form.sessionType === "HOLIDAY";
+  /** Sports = play period: only session type, day, period, and times required */
+  const isSports = form.sessionType === "SPORTS";
+  const staffOptional = isBreak || isSports;
 
   const buildPayload = (): TimetableSlotInput => {
     const base: TimetableSlotInput = {
@@ -421,8 +424,8 @@ export const TimetableManager = () => {
       ...(isBreak
         ? {}
         : { periodNumber: form.periodNumber }),
-      subjectId: isBreak ? "" : form.subjectId,
-      teacherId: isBreak ? "" : isTeacher ? teacherId : form.teacherId,
+      subjectId: staffOptional ? "" : form.subjectId,
+      teacherId: staffOptional ? "" : isTeacher ? teacherId : form.teacherId,
       room: form.room?.trim() ? form.room : undefined,
       startTime: form.startTime,
       endTime: form.endTime,
@@ -462,9 +465,24 @@ export const TimetableManager = () => {
       form.periodNumber < 1 ||
       form.periodNumber > 12
     ) {
-      toast.error("Period number (1–12) is required for teaching slots");
+      toast.error(
+        isSports
+          ? "Period number (1–12) is required for Sports"
+          : "Period number (1–12) is required for teaching slots",
+      );
       return;
+    } else if (!isSports) {
+      // Normal teaching slots require subject and teacher
+      if (!form.subjectId?.trim()) {
+        toast.error("Subject is required");
+        return;
+      }
+      if (!isTeacher && !form.teacherId?.trim()) {
+        toast.error("Teacher is required");
+        return;
+      }
     }
+    // Sports: subject & teacher not required — only type, day, period, times
     const payload = buildPayload();
     const parsed = timetableSlotSchema.safeParse(payload);
     if (!parsed.success) {
@@ -853,6 +871,12 @@ export const TimetableManager = () => {
                     ))}
                   </Select>
                 </FormField>
+              ) : isSports ? (
+                <div className="flex items-end md:col-span-1">
+                  <p className="pb-2 text-xs text-lime-800">
+                    Sports: subject and teacher are not required.
+                  </p>
+                </div>
               ) : (
                 <FormField label="Subject">
                   <Select
@@ -870,7 +894,7 @@ export const TimetableManager = () => {
                   </Select>
                 </FormField>
               )}
-              {isAdmin && !isBreak ? (
+              {isAdmin && !isBreak && !isSports ? (
                 <FormField label="Teacher">
                   <Select
                     value={form.teacherId ?? ""}
@@ -886,6 +910,12 @@ export const TimetableManager = () => {
                     ))}
                   </Select>
                 </FormField>
+              ) : null}
+              {isSports ? (
+                <div className="md:col-span-2 rounded-lg border border-lime-200 bg-lime-50 px-3 py-2 text-xs text-lime-900">
+                  Sports period: only set day, period, and start/end time.
+                  Students play sports in this slot.
+                </div>
               ) : null}
               <FormField label="Day">
                 <Select

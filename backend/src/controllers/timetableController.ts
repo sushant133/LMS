@@ -21,12 +21,18 @@ import { assertNoTimetableConflicts } from "../utils/timetableConflicts.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
+/** BREAK / HOLIDAY: no period, subject, or teacher. */
 const isSoftSession = (sessionType?: string) =>
   sessionType === "BREAK" || sessionType === "HOLIDAY";
+
+/** SPORTS / BREAK / HOLIDAY: subject & teacher not required. */
+const staffOptionalSession = (sessionType?: string) =>
+  isSoftSession(sessionType) || sessionType === "SPORTS";
 
 /**
  * BREAK / HOLIDAY are not teaching periods — never require user period numbers.
  * Store a synthetic period key from start time (≥1000) so unique indexes still work.
+ * SPORTS uses a normal period number (1–12).
  */
 const resolvePeriodNumber = (
   sessionType: string | undefined,
@@ -39,7 +45,12 @@ const resolvePeriodNumber = (
   if (provided != null && provided >= 1 && provided <= 12) {
     return provided;
   }
-  throw new ApiError(400, "Period number (1–12) is required for teaching slots");
+  throw new ApiError(
+    400,
+    sessionType === "SPORTS"
+      ? "Period number (1–12) is required for Sports"
+      : "Period number (1–12) is required for teaching slots"
+  );
 };
 
 export const listTimetable = asyncHandler(async (req: Request, res: Response) => {
@@ -117,6 +128,7 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
   const schoolId = tenantObjectId(req);
   const sessionType = payload.sessionType ?? "THEORY";
   const soft = isSoftSession(sessionType);
+  const noStaff = staffOptionalSession(sessionType);
   const periodNumber = resolvePeriodNumber(
     sessionType,
     payload.startTime,
@@ -126,6 +138,10 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
   if (req.user?.role === "TEACHER") {
     if (soft) {
       throw new ApiError(403, "Teachers cannot create break or holiday periods");
+    }
+    if (sessionType === "SPORTS") {
+      // Sports slots are admin-style group periods; teachers need not create them without subject
+      throw new ApiError(403, "Teachers cannot create Sports periods — ask an administrator");
     }
     if (!payload.subjectId || !payload.teacherId) {
       throw new ApiError(400, "Subject and teacher are required");
@@ -143,7 +159,8 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
     yearId: payload.yearId
   };
 
-  if (!soft && payload.subjectId) {
+  // Sports has no subject — skip syllabus % / assignment linking
+  if (!noStaff && payload.subjectId) {
     await assertPercentageCompleteForTimetable(
       schoolId,
       payload.academicYearBs,
@@ -154,7 +171,7 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
   }
 
   let subjectAssignmentId = payload.subjectAssignmentId;
-  if (!soft && payload.subjectId && payload.teacherId && !subjectAssignmentId) {
+  if (!noStaff && payload.subjectId && payload.teacherId && !subjectAssignmentId) {
     const match = await findMatchingAssignment(
       schoolId,
       payload.academicYearBs,
@@ -168,7 +185,7 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
     }
   }
 
-  if (!soft) {
+  if (!noStaff) {
     const requireLink = await isTimetableAssignmentLinkRequired(schoolId);
     if (requireLink && !subjectAssignmentId) {
       throw new ApiError(
@@ -197,7 +214,7 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
       yearId: payload.yearId
     });
   } else {
-    // Still check group conflicts for breaks (time interval only)
+    // Breaks / Sports without teacher — still check group time conflicts
     await assertNoTimetableConflicts({
       schoolId,
       academicYearBs: payload.academicYearBs,
@@ -220,9 +237,9 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
     ...payload,
     periodNumber,
     sessionType,
-    subjectId: soft ? undefined : payload.subjectId || undefined,
-    teacherId: soft ? undefined : payload.teacherId || undefined,
-    subjectAssignmentId: soft ? null : subjectAssignmentId || null,
+    subjectId: payload.subjectId?.trim() ? payload.subjectId : undefined,
+    teacherId: payload.teacherId?.trim() ? payload.teacherId : undefined,
+    subjectAssignmentId: noStaff ? null : subjectAssignmentId || null,
     schoolId: req.tenantSchoolId
   });
   return sendSuccess(res, "Timetable slot created", slot, 201);
@@ -269,8 +286,9 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
   const sessionType =
     payload.sessionType ?? (existing as { sessionType?: string }).sessionType ?? "THEORY";
   const soft = isSoftSession(sessionType);
+  const noStaff = staffOptionalSession(sessionType);
 
-  if (!soft && subjectId && academicYearBs) {
+  if (!noStaff && subjectId && academicYearBs) {
     await assertPercentageCompleteForTimetable(schoolId, academicYearBs, subjectId, group, college);
   }
 
@@ -288,7 +306,9 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
     ? ""
     : payload.teacherId !== undefined
       ? payload.teacherId || ""
-      : (existing.teacherId?.toString() ?? "");
+      : sessionType === "SPORTS" && payload.teacherId === ""
+        ? ""
+        : (existing.teacherId?.toString() ?? "");
   const nextRoom =
     payload.room !== undefined ? payload.room || undefined : (existing.room ?? undefined);
   const nextRoomKind =
@@ -316,7 +336,7 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
       startTime: nextStart,
       endTime: nextEnd,
       teacherId: nextTeacher,
-      subjectId: soft ? undefined : subjectId,
+      subjectId: noStaff ? undefined : subjectId,
       room: nextRoom,
       roomKind: nextRoomKind,
       sessionType,
@@ -328,18 +348,25 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
     });
   }
 
-  const updateDoc = {
+  const updateDoc: Record<string, unknown> = {
     ...payload,
     periodNumber: nextPeriod,
-    sessionType,
-    ...(soft
-      ? {
-          subjectId: null,
-          teacherId: null,
-          subjectAssignmentId: null
-        }
-      : {})
+    sessionType
   };
+  if (soft) {
+    updateDoc.subjectId = null;
+    updateDoc.teacherId = null;
+    updateDoc.subjectAssignmentId = null;
+  } else if (sessionType === "SPORTS") {
+    // Keep staff optional — empty string clears
+    if (payload.subjectId !== undefined) {
+      updateDoc.subjectId = payload.subjectId?.trim() ? payload.subjectId : null;
+    }
+    if (payload.teacherId !== undefined) {
+      updateDoc.teacherId = payload.teacherId?.trim() ? payload.teacherId : null;
+    }
+    updateDoc.subjectAssignmentId = null;
+  }
 
   const slot = await TimetableSlot.findOneAndUpdate(
     withTenantScope(req, { _id: req.params.id }),
