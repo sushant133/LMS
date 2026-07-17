@@ -5,15 +5,16 @@ import type {
   AcademicReportType,
 } from "@phit-erp/shared";
 import { Download, FileBarChart } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { LoadingState } from "components/shared/LoadingState";
+import { useIsCollege } from "hooks/useInstitutionType";
 import { api, resolveApiUrl, unwrap } from "lib/api";
-import { filtersToParams } from "./academicManagementUtils";
+import { academicListApiParams } from "./academicManagementUtils";
 
 const reportOptions: Array<{ id: AcademicReportType; label: string }> = [
   { id: "session-plan", label: "Session Plan Report" },
@@ -39,15 +40,21 @@ interface AcademicReportsPanelProps {
 export const AcademicReportsPanel = ({
   filters,
 }: AcademicReportsPanelProps) => {
+  const isCollege = useIsCollege();
   const [reportType, setReportType] =
     useState<AcademicReportType>("session-plan");
 
+  const reportParams = useMemo(
+    () => academicListApiParams(filters, { isCollege }),
+    [filters, isCollege],
+  );
+
   const reportQuery = useQuery({
-    queryKey: ["academic-management", "reports", reportType, filters],
+    queryKey: ["academic-management", "reports", reportType, reportParams],
     queryFn: () =>
       unwrap<AcademicReportResponse>(
         api.get(`/academic-management/reports/${reportType}`, {
-          params: filtersToParams(filters),
+          params: reportParams,
         }),
       ),
   });
@@ -57,7 +64,7 @@ export const AcademicReportsPanel = ({
       const response = await api.get(
         `/academic-management/reports/${reportType}/export`,
         {
-          params: filtersToParams(filters),
+          params: reportParams,
           responseType: "blob",
         },
       );
@@ -112,7 +119,7 @@ export const AcademicReportsPanel = ({
             onClick={() =>
               window.open(
                 resolveApiUrl(
-                  `/academic-management/reports/${reportType}/export?${new URLSearchParams(filtersToParams(filters)).toString()}`,
+                  `/academic-management/reports/${reportType}/export?${new URLSearchParams(reportParams).toString()}`,
                 ),
                 "_blank",
               )

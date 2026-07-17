@@ -28,12 +28,15 @@ import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
 import {
+  academicListApiParams,
   dedupeYearsForSelect,
+  ensureSubjectInOptions,
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
   mapSyllabusHierarchyToSessionUnits,
   NEPALI_MONTHS,
+  resolveSubjectSelectValue,
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
@@ -151,13 +154,41 @@ export const SessionPlanPanel = ({
     );
   }, [teacherId]);
 
-  const queryKey = ["academic-management", "session-plans", filters];
+  // Admin: auto-select the only teacher so Save is not left disabled with no feedback
+  useEffect(() => {
+    if (teacherId) return;
+    if (teachers.length !== 1) return;
+    const onlyId = teachers[0]!._id;
+    setForm((current) =>
+      current.teacherId ? current : { ...current, teacherId: onlyId },
+    );
+  }, [teacherId, teachers]);
+
+  // Sync academic year from filter bar when settings load
+  useEffect(() => {
+    if (!filters.academicYearBs) return;
+    setForm((current) => {
+      if (current.academicYearBs?.trim()) return current;
+      return {
+        ...current,
+        academicYearBs: filters.academicYearBs!,
+        session: filters.session || filters.academicYearBs!,
+      };
+    });
+  }, [filters.academicYearBs, filters.session]);
+
+  const listParams = useMemo(
+    () => academicListApiParams(filters, { isCollege }),
+    [filters, isCollege],
+  );
+
+  const queryKey = ["academic-management", "session-plans", listParams];
   const plansQuery = useQuery({
     queryKey,
     queryFn: () =>
       unwrap<AcademicSessionPlanRecord[]>(
         api.get("/academic-management/session-plans", {
-          params: filtersToParams(filters),
+          params: listParams,
         }),
       ),
   });
@@ -213,38 +244,73 @@ export const SessionPlanPanel = ({
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
-    if (isCollege || yearOptions.length > 0) {
-      return filterSubjectsByYear(subjects, years, form.yearId);
-    }
-    return filterSubjectsByClass(subjects, form.classId);
-  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
+    const base =
+      isCollege || yearOptions.length > 0
+        ? filterSubjectsByYear(subjects, years, form.yearId)
+        : filterSubjectsByClass(subjects, form.classId);
+    return ensureSubjectInOptions(base, form.subjectId, subjects);
+  }, [
+    subjects,
+    years,
+    form.yearId,
+    form.classId,
+    form.subjectId,
+    isCollege,
+    yearOptions.length,
+  ]);
 
-  const selectedFormSubject = useMemo(
-    () => subjectOptions.find((s) => s._id === form.subjectId),
+  const subjectSelectValue = useMemo(
+    () => resolveSubjectSelectValue(subjectOptions, form.subjectId),
     [subjectOptions, form.subjectId],
   );
+
+  const selectedFormSubject = useMemo(() => {
+    if (!form.subjectId) return undefined;
+    return (
+      subjectOptions.find(
+        (s) =>
+          s._id === form.subjectId ||
+          ((s as { subjectIds?: string[] }).subjectIds ?? []).includes(
+            form.subjectId,
+          ),
+      ) ?? subjects.find((s) => s._id === form.subjectId)
+    );
+  }, [subjectOptions, form.subjectId, subjects]);
   const formNepaliText = isNepaliSubject(selectedFormSubject);
 
-  /** Matching official syllabi for year + subject — used to pre-fill units. */
+  /**
+   * Matching official syllabi for subject — curriculum-shared (do not pin yearId
+   * so batch-independent syllabi still load for import).
+   */
   const syllabiQuery = useQuery({
     queryKey: [
       "academic-management",
       "syllabi-for-session",
       form.subjectId,
-      form.yearId,
       form.academicYearBs,
+      selectedFormSubject
+        ? ((selectedFormSubject as { subjectIds?: string[] }).subjectIds ?? [
+            form.subjectId,
+          ]).join(",")
+        : form.subjectId,
     ],
-    queryFn: () =>
-      unwrap<AcademicSyllabusRecord[]>(
+    queryFn: async () => {
+      // Fetch by academic year only; match subject client-side across curriculum ids
+      const list = await unwrap<AcademicSyllabusRecord[]>(
         api.get("/academic-management/syllabi", {
           params: filtersToParams({
-            subjectId: form.subjectId,
-            yearId: form.yearId,
-            classId: form.classId,
             academicYearBs: form.academicYearBs,
+            classId: form.classId,
           }),
         }),
-      ),
+      );
+      const subjectIds = new Set(
+        (selectedFormSubject as { subjectIds?: string[] } | undefined)
+          ?.subjectIds ?? [form.subjectId],
+      );
+      subjectIds.add(form.subjectId);
+      return list.filter((s) => subjectIds.has(s.subjectId));
+    },
     enabled: showForm && Boolean(form.subjectId),
   });
 
@@ -430,28 +496,76 @@ export const SessionPlanPanel = ({
   });
 
   const saveSessionPlan = () => {
-    const resolvedTeacherId = teacherId || form.teacherId;
-    if (!form.subjectId || !resolvedTeacherId) {
-      toast.error("Subject and teacher are required");
+    const resolvedTeacherId = (teacherId || form.teacherId || "").trim();
+    if (!form.subjectId?.trim()) {
+      toast.error("Select a subject before saving");
       return;
     }
-    if (
-      form.units.some(
-        (unit) => !unit.chapterName.trim() || !Number.isFinite(unit.unitNo),
-      )
-    ) {
-      toast.error("Each row needs a unit number and unit heading");
+    if (!resolvedTeacherId) {
+      toast.error(
+        isAdmin
+          ? "Select a teacher before saving"
+          : "Teacher profile is still loading — wait a moment and try again",
+      );
       return;
     }
+    if (!form.academicYearBs?.trim()) {
+      toast.error("Academic year (BS) is required — set it in filters or form");
+      return;
+    }
+    const unitsWithHeadings = form.units.filter((unit) =>
+      Boolean(unit.chapterName?.trim()),
+    );
+    if (unitsWithHeadings.length === 0) {
+      toast.error(
+        "Add at least one unit with a heading (load from Syllabus or type a unit name)",
+      );
+      return;
+    }
+    // Omit empty ObjectId-like fields so Mongo does not reject "" casts
+    const emptyToUndef = (value?: string) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : undefined;
+    };
     const payload: AcademicSessionPlanInput = {
-      ...form,
+      academicYearBs: form.academicYearBs.trim(),
+      session: (form.session || form.academicYearBs).trim(),
+      faculty: form.faculty?.trim() || undefined,
+      semesterBs: form.semesterBs?.trim() || undefined,
+      classId: emptyToUndef(form.classId),
+      sectionId: emptyToUndef(form.sectionId),
+      // Curriculum-shared: do not pin empty batch; only send when explicitly set
+      batchId: emptyToUndef(form.batchId),
+      yearId: emptyToUndef(form.yearId),
+      subjectId: form.subjectId.trim(),
       teacherId: resolvedTeacherId,
-      session: form.session || form.academicYearBs,
-      units: form.units.map((unit, index) => ({
-        ...unit,
-        unitNo: unit.unitNo || index + 1,
-        chapterName: unit.chapterName.trim(),
-      })),
+      attachmentUrl: emptyToUndef(form.attachmentUrl),
+      units: unitsWithHeadings.map((unit, index) => {
+        const unitNo =
+          Number.isFinite(unit.unitNo) && unit.unitNo >= 1
+            ? Math.floor(unit.unitNo)
+            : index + 1;
+        return {
+          unitNo,
+          chapterName: unit.chapterName.trim(),
+          estimatedTeachingHours: Number.isFinite(unit.estimatedTeachingHours)
+            ? unit.estimatedTeachingHours
+            : 0,
+          learningOutcomes: unit.learningOutcomes || "",
+          topicsCovered: unit.topicsCovered || "",
+          references: unit.references || "",
+          practicalRequired: Boolean(unit.practicalRequired),
+          internalAssessment: unit.internalAssessment || "",
+          tentativeCompletionMonth: unit.tentativeCompletionMonth || "",
+          startDateBs: unit.startDateBs || "",
+          endDateBs: unit.endDateBs || "",
+          status: unit.status || "PENDING",
+          attachmentUrl: emptyToUndef(unit.attachmentUrl),
+          syllabusId: emptyToUndef(unit.syllabusId) || "",
+          syllabusChapterId: emptyToUndef(unit.syllabusChapterId) || "",
+          syllabusUnitId: emptyToUndef(unit.syllabusUnitId) || "",
+        };
+      }),
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, payload });
@@ -703,8 +817,6 @@ export const SessionPlanPanel = ({
                 <Th>Start (BS)</Th>
                 <Th>End (BS)</Th>
                 <Th>Hours</Th>
-                <Th>Outcomes</Th>
-                <Th>References</Th>
                 <Th>Status</Th>
               </tr>
             </TableHead>
@@ -717,8 +829,6 @@ export const SessionPlanPanel = ({
                   <Td>{unit.startDateBs || "—"}</Td>
                   <Td>{unit.endDateBs || "—"}</Td>
                   <Td>{unit.estimatedTeachingHours}</Td>
-                  <Td className="max-w-xs truncate">{unit.learningOutcomes || "—"}</Td>
-                  <Td className="max-w-xs truncate">{unit.references || "—"}</Td>
                   <Td>
                     <Badge className={statusBadgeClass(unit.status)}>
                       {unit.status}
@@ -920,7 +1030,7 @@ export const SessionPlanPanel = ({
               ) : null}
               <FormField label="Subject">
                 <Select
-                  value={form.subjectId}
+                  value={subjectSelectValue}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
@@ -954,10 +1064,10 @@ export const SessionPlanPanel = ({
                   ))}
                 </Select>
               </FormField>
-              {isAdmin && teachers.length > 0 ? (
-                <FormField label="Teacher">
+              {!teacherId && teachers.length > 0 ? (
+                <FormField label="Teacher *">
                   <Select
-                    value={form.teacherId}
+                    value={form.teacherId || ""}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -1438,7 +1548,11 @@ export const SessionPlanPanel = ({
                 <FormField label="Estimated teaching hours">
                   <NumberInput
                     min={0}
-                    value={unit.estimatedTeachingHours}
+                    value={
+                      Number.isFinite(unit.estimatedTeachingHours)
+                        ? unit.estimatedTeachingHours
+                        : 0
+                    }
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -1446,50 +1560,15 @@ export const SessionPlanPanel = ({
                           rowIndex === index
                             ? {
                                 ...row,
-                                estimatedTeachingHours:
+                                estimatedTeachingHours: Number.isFinite(
                                   event.target.valueAsNumber,
+                                )
+                                  ? event.target.valueAsNumber
+                                  : 0,
                               }
                             : row,
                         ),
                       }))
-                    }
-                  />
-                </FormField>
-                <FormField label="Learning outcomes">
-                  <Textarea
-                    value={unit.learningOutcomes}
-                    nepali={formNepaliText}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, learningOutcomes: event.target.value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="What students should achieve"
-                  />
-                </FormField>
-                <FormField label="References">
-                  <Textarea
-                    value={unit.references}
-                    nepali={formNepaliText}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, references: event.target.value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder={
-                      formNepaliText
-                        ? "सन्दर्भ पुस्तक / सामग्री"
-                        : "Textbooks, articles, resources"
                     }
                   />
                 </FormField>
@@ -1605,8 +1684,9 @@ export const SessionPlanPanel = ({
                 setForm((current) => ({ ...current, attachmentUrl: url }))
               }
             />
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
+                type="button"
                 variant="outline"
                 onClick={() =>
                   setForm((current) => ({
@@ -1622,17 +1702,24 @@ export const SessionPlanPanel = ({
                 Add Unit
               </Button>
               <Button
-                onClick={saveSessionPlan}
-                disabled={
-                  !form.subjectId ||
-                  !(form.teacherId || teacherId) ||
-                  createMutation.isPending ||
-                  updateMutation.isPending
-                }
+                type="button"
+                onClick={() => {
+                  try {
+                    saveSessionPlan();
+                  } catch (error) {
+                    toast.error(parseErrorMessage(error));
+                  }
+                }}
+                disabled={createMutation.isPending || updateMutation.isPending}
               >
-                {editingId ? "Update Session Plan" : "Save Complete Session Plan"}
+                {createMutation.isPending || updateMutation.isPending
+                  ? "Saving…"
+                  : editingId
+                    ? "Update Session Plan"
+                    : "Save Complete Session Plan"}
               </Button>
               <Button
+                type="button"
                 variant="outline"
                 onClick={() => {
                   setShowForm(false);
@@ -1642,6 +1729,13 @@ export const SessionPlanPanel = ({
                 Cancel
               </Button>
             </div>
+            {!form.subjectId || !(form.teacherId || teacherId) ? (
+              <p className="text-xs text-amber-700">
+                {!form.subjectId
+                  ? "Select a subject to enable a complete save."
+                  : "Select a teacher to enable a complete save."}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -1765,7 +1859,6 @@ export const SessionPlanPanel = ({
                         <th className="border p-1 text-left">Title</th>
                         <th className="border p-1 text-left">Topics</th>
                         <th className="border p-1 text-left">Hours</th>
-                        <th className="border p-1 text-left">References</th>
                         <th className="border p-1 text-left">Status</th>
                       </tr>
                     </thead>
@@ -1778,7 +1871,6 @@ export const SessionPlanPanel = ({
                           <td className="border p-1">
                             {unit.estimatedTeachingHours}
                           </td>
-                          <td className="border p-1">{unit.references}</td>
                           <td className="border p-1">{unit.status}</td>
                         </tr>
                       ))}

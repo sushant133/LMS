@@ -9,9 +9,11 @@ import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
 import { ApiError } from "./apiError.js";
 import {
+  applyCurriculumSubjectFilter,
   applyTeacherScopeToFilter,
   buildAcademicFilter,
   computeItemStatus,
+  expandCurriculumSubjectIds,
   serializeLessonPlan,
   serializeLogBookEntry,
   serializeSessionPlan
@@ -74,14 +76,22 @@ const subjectNameMap = async (subjectIds: string[]): Promise<Map<string, string>
 export const generateAcademicReport = async (req: Request, reportType: AcademicReportType) => {
   const filters = parseFilters(req.query as Record<string, unknown>);
   const baseFilter = buildAcademicFilter(req, filters);
+  await applyCurriculumSubjectFilter(req, baseFilter, filters.subjectId);
   await applyTeacherScopeToFilter(req, baseFilter);
   const schoolId = tenantObjectId(req);
+
+  const subjectFilter =
+    filters.subjectId != null
+      ? await expandCurriculumSubjectIds(schoolId, filters.subjectId).then((ids) =>
+          ids.length === 1 ? ids[0] : { $in: ids }
+        )
+      : undefined;
 
   /** Progress rows only for non-deleted session plans, respecting teacher scope / filters. */
   const liveSessionFilter: Record<string, unknown> = { schoolId, isDeleted: false };
   if (baseFilter.teacherId) liveSessionFilter.teacherId = baseFilter.teacherId;
   if (filters.academicYearBs) liveSessionFilter.academicYearBs = filters.academicYearBs;
-  if (filters.subjectId) liveSessionFilter.subjectId = filters.subjectId;
+  if (subjectFilter !== undefined) liveSessionFilter.subjectId = subjectFilter;
   const liveSessionIds = (await AcademicSessionPlan.find(liveSessionFilter).select("_id").lean()).map((p) => p._id);
   const progressFilter: Record<string, unknown> = {
     schoolId,
@@ -89,7 +99,7 @@ export const generateAcademicReport = async (req: Request, reportType: AcademicR
   };
   if (baseFilter.teacherId) progressFilter.teacherId = baseFilter.teacherId;
   if (filters.academicYearBs) progressFilter.academicYearBs = filters.academicYearBs;
-  if (filters.subjectId) progressFilter.subjectId = filters.subjectId;
+  if (subjectFilter !== undefined) progressFilter.subjectId = subjectFilter;
 
   switch (reportType) {
     case "session-plan": {

@@ -35,10 +35,12 @@ import { api, unwrap } from "lib/api";
 import { isNepaliSubject, nepaliTextClass } from "lib/nepaliSubject";
 import { cn, parseErrorMessage } from "lib/utils";
 import {
+  academicListApiParams,
   dedupeYearsForSelect,
+  ensureSubjectInOptions,
   filterSubjectsByClass,
   filterSubjectsByYear,
-  filtersToParams,
+  resolveSubjectSelectValue,
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
@@ -124,25 +126,71 @@ export const SyllabusPanel = ({
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
-    if (isCollege || yearOptions.length > 0) {
-      return filterSubjectsByYear(subjects, years, form.yearId);
-    }
-    return filterSubjectsByClass(subjects, form.classId);
-  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
+    const base =
+      isCollege || yearOptions.length > 0
+        ? filterSubjectsByYear(subjects, years, form.yearId)
+        : filterSubjectsByClass(subjects, form.classId);
+    return ensureSubjectInOptions(base, form.subjectId, subjects);
+  }, [
+    subjects,
+    years,
+    form.yearId,
+    form.classId,
+    form.subjectId,
+    isCollege,
+    yearOptions.length,
+  ]);
 
-  const selectedFormSubject = useMemo(
-    () => subjectOptions.find((s) => s._id === form.subjectId),
-    [subjectOptions, form.subjectId],
+  /** Value for <Select> so a sibling subject instance still shows the right option. */
+  const subjectSelectValue = useMemo(
+    () => resolveSubjectSelectValue(subjectOptions, form.subjectId),
+    [form.subjectId, subjectOptions],
   );
+
+  const selectedFormSubject = useMemo(() => {
+    if (!form.subjectId) return undefined;
+    return (
+      subjectOptions.find(
+        (s) =>
+          s._id === form.subjectId ||
+          ((s as { subjectIds?: string[] }).subjectIds ?? []).includes(
+            form.subjectId,
+          ),
+      ) ?? subjects.find((s) => s._id === form.subjectId)
+    );
+  }, [subjectOptions, form.subjectId, subjects]);
   const formNepaliText = isNepaliSubject(selectedFormSubject);
 
-  const queryKey = ["academic-management", "syllabi", filters];
+  // Keep academic year on the form when hub filters load settings after first paint
+  useEffect(() => {
+    if (!filters.academicYearBs) return;
+    setForm((current) => {
+      if (current.academicYearBs?.trim()) return current;
+      return {
+        ...current,
+        academicYearBs: filters.academicYearBs!,
+        session: filters.session || filters.academicYearBs!,
+      };
+    });
+  }, [filters.academicYearBs, filters.session]);
+
+  /**
+   * Syllabus is curriculum-scoped (shared across batches of the same year level).
+   * Do not send batchId / yearId to the list API — those hide valid plans from
+   * other batch year instances. Hierarchy filtering stays client-side.
+   */
+  const listParams = useMemo(
+    () => academicListApiParams(filters, { isCollege }),
+    [filters, isCollege],
+  );
+
+  const queryKey = ["academic-management", "syllabi", listParams];
   const plansQuery = useQuery({
     queryKey,
     queryFn: () =>
       unwrap<AcademicSyllabusRecord[]>(
         api.get("/academic-management/syllabi", {
-          params: filtersToParams(filters),
+          params: listParams,
         }),
       ),
   });
@@ -153,7 +201,45 @@ export const SyllabusPanel = ({
   };
 
   const openCreateSyllabusForm = () => {
-    resetForm();
+    const base = blankSyllabusForm(filters);
+    // Prefill from tree selection when available
+    if (selectedSubject) {
+      const firstSubjectId = selectedSubject.subjectIds[0] || "";
+      const yearMap = buildYearIdToLevelKeyMap(years);
+      const matchedYear = years.find((y) => {
+        if (!selectedYearKey) return false;
+        if (selectedYearKey === y._id || selectedYearKey === `class:${y._id}`) {
+          return true;
+        }
+        return yearMap.get(y._id) === selectedYearKey;
+      });
+      // Prefer a subject instance linked to the matched year when possible
+      const yearSubjectId =
+        matchedYear &&
+        subjects.find(
+          (s) =>
+            selectedSubject.subjectIds.includes(s._id) &&
+            (s.yearIds ?? []).includes(matchedYear._id),
+        )?._id;
+
+      setForm({
+        ...base,
+        faculty:
+          selectedSubject.facultyLabel &&
+          selectedSubject.facultyLabel !== "General / All Programs"
+            ? selectedSubject.facultyLabel
+            : base.faculty,
+        yearId: matchedYear?._id || base.yearId || "",
+        subjectId: yearSubjectId || firstSubjectId,
+        subjectCode: selectedSubject.subjectCode || "",
+        teacherId: selectedSubject.teacherIds[0] || base.teacherId || "",
+        // Curriculum syllabus is not batch-bound
+        batchId: "",
+      });
+    } else {
+      setForm(base);
+    }
+    setEditingId(null);
     setShowForm(true);
   };
 
@@ -246,10 +332,16 @@ export const SyllabusPanel = ({
       toast.error("Subject is required");
       return;
     }
+    if (!form.academicYearBs?.trim()) {
+      toast.error("Academic year (BS) is required — set it in filters or form");
+      return;
+    }
     if (!form.chapters.length) {
       toast.error("Add at least one section with units");
       return;
     }
+
+    let hasUnit = false;
     for (const ch of form.chapters as ChapterDraft[]) {
       const kind = ch.sectionKind || "NONE";
       if ((kind === "CHAPTER" || kind === "PART") && !ch.title?.trim()) {
@@ -260,28 +352,48 @@ export const SyllabusPanel = ({
         );
         return;
       }
-      if (!ch.units?.length) {
-        toast.error("Each section needs at least one unit");
-        return;
-      }
       for (const u of ch.units as UnitDraft[]) {
-        if (!u.title?.trim()) {
-          toast.error("Every unit needs a title");
-          return;
-        }
-        if (!allSubHeadingsFilled(u.subUnits ?? [])) {
+        if (!u.title?.trim()) continue;
+        hasUnit = true;
+        // Sub-units are optional. Only validate headings on rows the user started.
+        if (
+          (u.subUnits ?? []).some((s) => s.heading?.trim() || s.children?.length) &&
+          !allSubHeadingsFilled(u.subUnits ?? [])
+        ) {
           toast.error(
-            "Every sub-unit and child heading must be filled (or remove empty rows)",
+            "If you add a sub-unit, fill its heading (or remove the empty row)",
           );
           return;
         }
       }
     }
+    if (!hasUnit) {
+      toast.error("Add at least one unit with a title");
+      return;
+    }
+
     const optionalTeacher = (form.teacherId || teacherId || "").trim();
     const payload = formToPayload({
       ...form,
+      academicYearBs: form.academicYearBs || filters.academicYearBs || "",
+      session:
+        form.session ||
+        form.academicYearBs ||
+        filters.session ||
+        filters.academicYearBs ||
+        "",
       teacherId: optionalTeacher,
     });
+    if (!payload.academicYearBs?.trim() || !payload.session?.trim()) {
+      toast.error(
+        "Academic year (BS) is required. Set it in the filter bar or on the form.",
+      );
+      return;
+    }
+    if (!payload.chapters?.length) {
+      toast.error("Add at least one unit with a title before saving");
+      return;
+    }
     if (editingId) {
       updateMutation.mutate({ id: editingId, payload });
     } else {
@@ -957,8 +1069,8 @@ export const SyllabusPanel = ({
             </CardTitle>
             <p className="text-sm text-slate-600">
               {editingId
-                ? "Change any Chapter/Part, Unit title, and every Sub-unit / Child heading. Numbers update automatically. Click Update Syllabus to save."
-                : "Define subject metadata, then build units and nested sub-units. Save as draft anytime; submit when ready for review."}
+                ? "Edit chapters/parts and unit titles. Sub-units are optional — add them only when needed. Click Update Syllabus to save."
+                : "Define subject metadata and unit titles. Sub-units (headings) are optional and not required to save. Save as draft anytime; submit when ready for review."}
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -1009,7 +1121,7 @@ export const SyllabusPanel = ({
               ) : null}
               <FormField label="Subject">
                 <Select
-                  value={form.subjectId}
+                  value={subjectSelectValue}
                   onChange={(event) => {
                     const subjectId = event.target.value;
                     const subject = subjectOptions.find((s) => s._id === subjectId);

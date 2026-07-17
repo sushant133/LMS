@@ -44,12 +44,12 @@ import { AcademicReportsPanel } from "./AcademicReportsPanel";
 import { SessionPlanPanel } from "./SessionPlanPanel";
 import { SyllabusPanel } from "./SyllabusPanel";
 import {
+  academicListApiParams,
   defaultAcademicFilters,
   exportLessonPlansExcel,
   exportLogBookExcel,
   exportSessionPlansExcel,
   exportSyllabiExcel,
-  filtersToParams,
 } from "./academicManagementUtils";
 
 type Tab =
@@ -174,14 +174,10 @@ export const AcademicManagementHub = () => {
    * yearId is kept for client hierarchy level filtering but omitted from API so
    * plans from every batch of the same year level are returned and merged.
    */
-  const academicListParams = useMemo(() => {
-    const params = filtersToParams(appliedFilters);
-    delete params.batchId;
-    if (isCollege) {
-      delete params.yearId;
-    }
-    return params;
-  }, [appliedFilters, isCollege]);
+  const academicListParams = useMemo(
+    () => academicListApiParams(appliedFilters, { isCollege }),
+    [appliedFilters, isCollege],
+  );
 
   const dashboardQuery = useQuery({
     queryKey: ["academic-management", "dashboard", academicListParams],

@@ -703,6 +703,7 @@ export const SyllabusHierarchyEditor = ({
                             size="sm"
                             variant="outline"
                             className="h-8"
+                            title="Optional — not required to save the syllabus"
                             onClick={() => {
                               updateUnit(cIndex, uIndex, {
                                 subUnits: [
@@ -716,7 +717,7 @@ export const SyllabusHierarchyEditor = ({
                             }}
                           >
                             <Plus className="mr-1 h-3.5 w-3.5" />
-                            Sub Unit
+                            Sub Unit (optional)
                           </Button>
                           <Button
                             type="button"
@@ -895,20 +896,26 @@ export const SyllabusHierarchyEditor = ({
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                   <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                                    Sub units &amp; nested children (heading
-                                    only)
+                                    Sub units (optional) — headings only
                                   </p>
                                   <p className="text-[11px] text-slate-500">
-                                    Use{" "}
+                                    Not required to save. Leave empty if you only
+                                    need unit titles. Use{" "}
                                     <span className="font-medium text-sky-800">
                                       Same
                                     </span>{" "}
-                                    for 1.1 → 1.2 or 1.1.1 → 1.1.2. Use{" "}
+                                    for 1.1 → 1.2 or{" "}
                                     <span className="font-medium text-violet-800">
                                       Nest
                                     </span>{" "}
-                                    for 1.1 → 1.1.1 → 1.1.1.1. Numbers auto-fill.
+                                    for 1.1 → 1.1.1. Numbers auto-fill.
                                   </p>
+                                  {subUnits.length === 0 ? (
+                                    <p className="mt-1 text-[11px] text-emerald-700">
+                                      No sub-units — unit title alone is enough to
+                                      save.
+                                    </p>
+                                  ) : null}
                                 </div>
                                 <span className="text-xs text-slate-500">
                                   {countSubUnits(subUnits)} heading

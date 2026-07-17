@@ -35,8 +35,10 @@ import {
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
+import { getSessionOption, withTransaction } from "../utils/transaction.js";
 import {
   addAcademicComment,
+  applyCurriculumSubjectFilter,
   applyTeacherScopeToFilter,
   applyTeacherSubjectScopeToFilter,
   assertApprovableStatus,
@@ -100,31 +102,17 @@ const parseFilters = (req: Request): AcademicManagementFilters => ({
   yearId: typeof req.query.yearId === "string" ? req.query.yearId : undefined
 });
 
-const withTransaction = async <T>(callback: (session: mongoose.ClientSession) => Promise<T>): Promise<T> => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    const result = await callback(session);
-    await session.commitTransaction();
-    return result;
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
-  }
-};
-
 export const getAcademicDashboard = asyncHandler(async (req: Request, res: Response) => {
   const dashboard = await buildDashboard(req, parseFilters(req));
   return sendSuccess(res, "Academic management dashboard fetched", dashboard);
 });
 
 export const listSessionPlans = asyncHandler(async (req: Request, res: Response) => {
-  const filter = buildAcademicFilter(req, parseFilters(req));
+  const filters = parseFilters(req);
+  const filter = buildAcademicFilter(req, filters);
+  await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
   await applyTeacherScopeToFilter(req, filter);
 
-  const filters = parseFilters(req);
   const plans = await AcademicSessionPlan.find(filter).sort({ updatedAt: -1 }).lean();
   const serialized = (await Promise.all(plans.map((plan) => serializeSessionPlan(plan._id.toString())))).filter(Boolean);
   const rows = serialized.filter((plan) =>
@@ -153,6 +141,65 @@ export const getSessionPlan = asyncHandler(async (req: Request, res: Response) =
   return sendSuccess(res, "Session plan fetched", serialized);
 });
 
+/** Strip empty strings so Mongoose does not CastError on optional ObjectId fields. */
+const sanitizeSessionPlanScope = <
+  T extends {
+    classId?: string;
+    sectionId?: string;
+    batchId?: string;
+    yearId?: string;
+    attachmentUrl?: string;
+    faculty?: string;
+    semesterBs?: string;
+  }
+>(
+  fields: T
+) => ({
+  ...fields,
+  classId: fields.classId?.trim() || undefined,
+  sectionId: fields.sectionId?.trim() || undefined,
+  batchId: fields.batchId?.trim() || undefined,
+  yearId: fields.yearId?.trim() || undefined,
+  attachmentUrl: fields.attachmentUrl?.trim() || undefined,
+  faculty: fields.faculty?.trim() || undefined,
+  semesterBs: fields.semesterBs?.trim() || undefined
+});
+
+const sanitizeSessionPlanUnit = <
+  T extends {
+    estimatedTeachingHours?: number;
+    learningOutcomes?: string;
+    topicsCovered?: string;
+    references?: string;
+    internalAssessment?: string;
+    tentativeCompletionMonth?: string;
+    startDateBs?: string;
+    endDateBs?: string;
+    attachmentUrl?: string;
+    syllabusId?: string;
+    syllabusChapterId?: string;
+    syllabusUnitId?: string;
+  }
+>(
+  unit: T
+) => ({
+  ...unit,
+  estimatedTeachingHours: Number.isFinite(unit.estimatedTeachingHours)
+    ? unit.estimatedTeachingHours
+    : 0,
+  learningOutcomes: unit.learningOutcomes ?? "",
+  topicsCovered: unit.topicsCovered ?? "",
+  references: unit.references ?? "",
+  internalAssessment: unit.internalAssessment ?? "",
+  tentativeCompletionMonth: unit.tentativeCompletionMonth ?? "",
+  startDateBs: unit.startDateBs?.trim() || "",
+  endDateBs: unit.endDateBs?.trim() || "",
+  attachmentUrl: unit.attachmentUrl?.trim() || undefined,
+  syllabusId: unit.syllabusId?.trim() || undefined,
+  syllabusChapterId: unit.syllabusChapterId?.trim() || undefined,
+  syllabusUnitId: unit.syllabusUnitId?.trim() || undefined
+});
+
 export const createSessionPlan = asyncHandler(async (req: Request, res: Response) => {
   const payload = academicSessionPlanSchema.parse(req.body);
 
@@ -163,40 +210,56 @@ export const createSessionPlan = asyncHandler(async (req: Request, res: Response
     }
   }
 
-  const result = await withTransaction(async (session) => {
-    const plan = await AcademicSessionPlan.create(
-      [
-        {
-          ...payload,
+  const header = sanitizeSessionPlanScope(payload);
+
+  let result: string;
+  try {
+    result = await withTransaction(async (session) => {
+      const sessionOpt = getSessionOption(session);
+      // Destructure so nested units never hit the plan schema
+      const { units: _units, ...planFields } = header as typeof header & {
+        units?: unknown;
+      };
+      const plan = await AcademicSessionPlan.create(
+        [
+          {
+            ...planFields,
+            schoolId: tenantObjectId(req),
+            status: "DRAFT",
+            audit: { createdBy: actorObjectId(req) }
+          }
+        ],
+        sessionOpt
+      );
+
+      const createdPlan = plan[0];
+      if (!createdPlan) throw new ApiError(500, "Failed to create session plan");
+
+      await AcademicSessionPlanUnit.insertMany(
+        payload.units.map((unit) => ({
+          ...sanitizeSessionPlanUnit(unit),
+          // Progress is driven by Log Book → Lesson Plan sync only (never manual COMPLETED)
+          status: "PENDING",
           schoolId: tenantObjectId(req),
-          status: "DRAFT",
-          audit: { createdBy: actorObjectId(req) }
-        }
-      ],
-      { session }
-    );
+          sessionPlanId: createdPlan._id
+        })),
+        sessionOpt
+      );
 
-    const createdPlan = plan[0];
-    if (!createdPlan) throw new ApiError(500, "Failed to create session plan");
-
-    await AcademicSessionPlanUnit.insertMany(
-      payload.units.map((unit) => ({
-        ...unit,
-        // Progress is driven by Log Book → Lesson Plan sync only (never manual COMPLETED)
-        status: "PENDING",
-        schoolId: tenantObjectId(req),
-        sessionPlanId: createdPlan._id,
-        syllabusId: unit.syllabusId?.trim() || undefined,
-        syllabusChapterId: unit.syllabusChapterId?.trim() || undefined,
-        syllabusUnitId: unit.syllabusUnitId?.trim() || undefined
-      })),
-      { session }
-    );
-
-    await syncSessionPlanProgress(createdPlan._id.toString());
-    await recordAudit(req, { action: "academic.session_plan.create", entity: "SESSION_PLAN", entityId: createdPlan._id.toString(), after: createdPlan });
-    return createdPlan._id.toString();
-  });
+      await syncSessionPlanProgress(createdPlan._id.toString());
+      await recordAudit(req, {
+        action: "academic.session_plan.create",
+        entity: "SESSION_PLAN",
+        entityId: createdPlan._id.toString(),
+        after: createdPlan
+      });
+      return createdPlan._id.toString();
+    });
+  } catch (error) {
+    const { throwIfDuplicateKey } = await import("../utils/mongoErrors.js");
+    throwIfDuplicateKey(error);
+    throw error;
+  }
 
   const serialized = await serializeSessionPlan(result);
   return sendSuccess(res, "Session plan created", serialized, 201);
@@ -214,74 +277,93 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
   await assertTeacherOwnership(req, existing.teacherId.toString());
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
-  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+  const safePayload = sanitizeTeacherOwnedUpdate(
+    req,
+    sanitizeSessionPlanScope(payload as Record<string, unknown> & {
+      classId?: string;
+      sectionId?: string;
+      batchId?: string;
+      yearId?: string;
+      attachmentUrl?: string;
+      faculty?: string;
+      semesterBs?: string;
+    }) as Record<string, unknown>
+  );
+  // units are handled separately below
+  delete safePayload.units;
 
-  await withTransaction(async (session) => {
-    Object.assign(existing, safePayload, {
-      audit: { ...existing.audit, updatedBy: actorObjectId(req) }
-    });
-    await existing.save({ session });
+  try {
+    await withTransaction(async (session) => {
+      const sessionOpt = getSessionOption(session);
+      Object.assign(existing, safePayload, {
+        audit: { ...existing.audit, updatedBy: actorObjectId(req) }
+      });
+      await existing.save(sessionOpt);
 
-    if (payload.units) {
-      const existingUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: existing._id }).session(session);
-      const byUnitNo = new Map(existingUnits.map((unit) => [unit.unitNo, unit]));
-      const kept = new Set<number>();
+      if (payload.units) {
+        const unitsQuery = AcademicSessionPlanUnit.find({ sessionPlanId: existing._id });
+        if (session) unitsQuery.session(session);
+        const existingUnits = await unitsQuery;
+        const byUnitNo = new Map(existingUnits.map((unit) => [unit.unitNo, unit]));
+        const kept = new Set<number>();
 
-      for (const unit of payload.units) {
-        kept.add(unit.unitNo);
-        const prev = byUnitNo.get(unit.unitNo);
-        if (prev) {
-          const preservedStatus = prev.status;
-          Object.assign(prev, unit, {
-            schoolId: tenantObjectId(req),
-            sessionPlanId: existing._id,
-            status: preservedStatus,
-            syllabusId: unit.syllabusId?.trim() || undefined,
-            syllabusChapterId: unit.syllabusChapterId?.trim() || undefined,
-            syllabusUnitId: unit.syllabusUnitId?.trim() || undefined
+        for (const unit of payload.units) {
+          kept.add(unit.unitNo);
+          const prev = byUnitNo.get(unit.unitNo);
+          const cleanUnit = sanitizeSessionPlanUnit(unit);
+          if (prev) {
+            const preservedStatus = prev.status;
+            Object.assign(prev, cleanUnit, {
+              schoolId: tenantObjectId(req),
+              sessionPlanId: existing._id,
+              status: preservedStatus
+            });
+            await prev.save(sessionOpt);
+          } else {
+            await AcademicSessionPlanUnit.create(
+              [
+                {
+                  ...cleanUnit,
+                  status: "PENDING",
+                  schoolId: tenantObjectId(req),
+                  sessionPlanId: existing._id
+                }
+              ],
+              sessionOpt
+            );
+          }
+        }
+
+        for (const prev of existingUnits) {
+          if (kept.has(prev.unitNo)) continue;
+          const linkedQuery = AcademicLessonPlanItem.countDocuments({
+            sessionPlanUnitId: prev._id
           });
-          await prev.save({ session });
-        } else {
-          await AcademicSessionPlanUnit.create(
-            [
-              {
-                ...unit,
-                status: "PENDING",
-                schoolId: tenantObjectId(req),
-                sessionPlanId: existing._id,
-                syllabusId: unit.syllabusId?.trim() || undefined,
-                syllabusChapterId: unit.syllabusChapterId?.trim() || undefined,
-                syllabusUnitId: unit.syllabusUnitId?.trim() || undefined
-              }
-            ],
-            { session }
-          );
+          if (session) linkedQuery.session(session);
+          const linkedItems = await linkedQuery;
+          if (linkedItems > 0) {
+            throw new ApiError(
+              400,
+              `Cannot remove unit ${prev.unitNo} ("${prev.chapterName}") because lesson plan topics are linked to it.`
+            );
+          }
+          await prev.deleteOne(sessionOpt);
         }
       }
 
-      for (const prev of existingUnits) {
-        if (kept.has(prev.unitNo)) continue;
-        const linkedItems = await AcademicLessonPlanItem.countDocuments({
-          sessionPlanUnitId: prev._id
-        }).session(session);
-        if (linkedItems > 0) {
-          throw new ApiError(
-            400,
-            `Cannot remove unit ${prev.unitNo} ("${prev.chapterName}") because lesson plan topics are linked to it.`
-          );
-        }
-        await prev.deleteOne({ session });
-      }
-    }
-
-    await syncSessionPlanProgress(existing._id.toString());
-    await recordAudit(req, {
-      action: "academic.session_plan.update",
-      entity: "SESSION_PLAN",
-      entityId: existing._id.toString(),
-      after: existing
+      await syncSessionPlanProgress(existing._id.toString());
+      await recordAudit(req, {
+        action: "academic.session_plan.update",
+        entity: "SESSION_PLAN",
+        entityId: existing._id.toString(),
+        after: existing
+      });
     });
-  });
+  } catch (error) {
+    const { throwIfDuplicateKey } = await import("../utils/mongoErrors.js");
+    throwIfDuplicateKey(error);
+    throw error;
+  }
 
   const serialized = await serializeSessionPlan(existing._id.toString());
   return sendSuccess(res, "Session plan updated", serialized);
@@ -395,11 +477,12 @@ export const unlockSessionPlan = asyncHandler(async (req: Request, res: Response
 // ─── Syllabus (official subject units; same box UI as Session Plan) ─────────
 
 export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
-  const filter = buildAcademicFilter(req, parseFilters(req));
+  const filters = parseFilters(req);
+  const filter = buildAcademicFilter(req, filters);
+  await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
   // Teachers see syllabi for subjects they are assigned (not only their teacherId)
   await applyTeacherSubjectScopeToFilter(req, filter);
 
-  const filters = parseFilters(req);
   const rows = await AcademicSyllabus.find(filter).sort({ updatedAt: -1 }).lean();
   const serialized = (await Promise.all(rows.map((row) => serializeSyllabus(row._id.toString())))).filter(Boolean);
   const filtered = serialized.filter((plan) => {
@@ -447,7 +530,13 @@ const resolveSyllabusChapters = (payload: {
   }>;
 }): AcademicSyllabusChapterInput[] => {
   if (payload.chapters && payload.chapters.length > 0) {
-    return payload.chapters;
+    // Drop empty draft sections; sub-units are optional
+    return payload.chapters
+      .map((chapter) => ({
+        ...chapter,
+        units: (chapter.units ?? []).filter((u) => (u.title ?? "").trim().length > 0)
+      }))
+      .filter((chapter) => (chapter.units ?? []).length > 0);
   }
   if (payload.units && payload.units.length > 0) {
     return legacyUnitsToChapters(payload.units);
@@ -491,48 +580,66 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
     }
   }
 
-  const result = await withTransaction(async (session) => {
-    const {
-      units: _legacyUnits,
-      chapters: _chapterPayload,
-      teacherId: _teacherId,
-      ...headerFields
-    } = payload;
+  let result: string;
+  try {
+    result = await withTransaction(async (session) => {
+      const sessionOpt = getSessionOption(session);
+      const {
+        units: _legacyUnits,
+        chapters: _chapterPayload,
+        teacherId: _teacherId,
+        ...headerFields
+      } = payload;
 
-    const created = await AcademicSyllabus.create(
-      [
+      // Avoid empty strings for ObjectId fields
+      const yearId = headerFields.yearId?.trim() || undefined;
+      const batchId = headerFields.batchId?.trim() || undefined;
+      const classId = headerFields.classId?.trim() || undefined;
+      const sectionId = headerFields.sectionId?.trim() || undefined;
+
+      const created = await AcademicSyllabus.create(
+        [
+          {
+            ...headerFields,
+            yearId,
+            batchId,
+            classId,
+            sectionId,
+            teacherId: optionalTeacherId || undefined,
+            schoolId: tenantObjectId(req),
+            status: "DRAFT",
+            hierarchyMigratedAt: new Date(),
+            audit: { createdBy: actorObjectId(req) }
+          }
+        ],
+        sessionOpt
+      );
+
+      const doc = created[0];
+      if (!doc) throw new ApiError(500, "Failed to create syllabus");
+
+      await saveSyllabusHierarchy(
         {
-          ...headerFields,
-          teacherId: optionalTeacherId || undefined,
-          schoolId: tenantObjectId(req),
-          status: "DRAFT",
-          hierarchyMigratedAt: new Date(),
-          audit: { createdBy: actorObjectId(req) }
-        }
-      ],
-      { session }
-    );
+          schoolId: tenantObjectId(req).toString(),
+          syllabusId: doc._id.toString(),
+          chapters
+        },
+        session ?? undefined
+      );
 
-    const doc = created[0];
-    if (!doc) throw new ApiError(500, "Failed to create syllabus");
-
-    await saveSyllabusHierarchy(
-      {
-        schoolId: tenantObjectId(req).toString(),
-        syllabusId: doc._id.toString(),
-        chapters
-      },
-      session
-    );
-
-    await recordAudit(req, {
-      action: "academic.syllabus.create",
-      entity: "SYLLABUS",
-      entityId: doc._id.toString(),
-      after: doc
+      await recordAudit(req, {
+        action: "academic.syllabus.create",
+        entity: "SYLLABUS",
+        entityId: doc._id.toString(),
+        after: doc
+      });
+      return doc._id.toString();
     });
-    return doc._id.toString();
-  });
+  } catch (error) {
+    const { throwIfDuplicateKey } = await import("../utils/mongoErrors.js");
+    throwIfDuplicateKey(error);
+    throw error;
+  }
 
   const serialized = await serializeSyllabus(result);
   return sendSuccess(res, "Syllabus created", serialized, 201);
@@ -575,13 +682,14 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
   delete safePayload.chapters;
 
   await withTransaction(async (session) => {
+    const sessionOpt = getSessionOption(session);
     Object.assign(existing, safePayload, {
       audit: { ...existing.audit, updatedBy: actorObjectId(req) }
     });
     if (payload.teacherId !== undefined && !payload.teacherId?.trim()) {
       existing.teacherId = undefined;
     }
-    await existing.save({ session });
+    await existing.save(sessionOpt);
 
     if (structureChanging) {
       const chapters = resolveSyllabusChapters({
@@ -597,7 +705,7 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
           syllabusId: existing._id.toString(),
           chapters
         },
-        session
+        session ?? undefined
       );
     }
 
@@ -710,12 +818,13 @@ export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: R
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
   await withTransaction(async (session) => {
+    const sessionOpt = getSessionOption(session);
     if (payload.chapterIds?.length) {
       for (let i = 0; i < payload.chapterIds.length; i++) {
         await AcademicSyllabusChapter.updateOne(
           { _id: payload.chapterIds[i], syllabusId: existing._id },
           { $set: { sortOrder: i } },
-          { session }
+          sessionOpt
         );
       }
     }
@@ -725,7 +834,7 @@ export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: R
           await AcademicSyllabusTopic.updateOne(
             { _id: unitIds[i], chapterId, syllabusId: existing._id },
             { $set: { sortOrder: i } },
-            { session }
+            sessionOpt
           );
         }
       }
@@ -736,12 +845,12 @@ export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: R
           await AcademicSyllabusSubUnit.updateOne(
             { _id: subIds[i], unitId, syllabusId: existing._id },
             { $set: { sortOrder: i } },
-            { session }
+            sessionOpt
           );
         }
       }
     }
-    await renumberAfterReorder(existing._id.toString(), session);
+    await renumberAfterReorder(existing._id.toString(), session ?? undefined);
     // Rebuild legacy units from current hierarchy numbers via serialize path after commit
   });
 
@@ -936,10 +1045,11 @@ export const unlockSyllabus = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const listLessonPlans = asyncHandler(async (req: Request, res: Response) => {
-  const filter = buildAcademicFilter(req, parseFilters(req));
+  const filters = parseFilters(req);
+  const filter = buildAcademicFilter(req, filters);
+  await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
   await applyTeacherScopeToFilter(req, filter);
 
-  const filters = parseFilters(req);
   const plans = await AcademicLessonPlan.find(filter).sort({ updatedAt: -1 }).lean();
   const serialized = (await Promise.all(plans.map((plan) => serializeLessonPlan(plan._id.toString())))).filter(Boolean);
   const rows = serialized.filter((plan) =>
@@ -984,6 +1094,7 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
   });
 
   const result = await withTransaction(async (session) => {
+    const sessionOpt = getSessionOption(session);
     const plan = await AcademicLessonPlan.create(
       [
         {
@@ -998,7 +1109,7 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
           audit: { createdBy: actorObjectId(req) }
         }
       ],
-      { session }
+      sessionOpt
     );
 
     const createdPlan = plan[0];
@@ -1006,12 +1117,12 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
 
     // Inherit unit title / topics from Session Plan when client omits free text
     const unitIds = payload.items.map((item) => item.sessionPlanUnitId);
-    const units = await AcademicSessionPlanUnit.find({
+    const unitsQuery = AcademicSessionPlanUnit.find({
       _id: { $in: unitIds },
       sessionPlanId: payload.sessionPlanId
-    })
-      .session(session)
-      .lean();
+    });
+    if (session) unitsQuery.session(session);
+    const units = await unitsQuery.lean();
     const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
 
     await AcademicLessonPlanItem.insertMany(
@@ -1054,7 +1165,7 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
           lessonPlanId: createdPlan._id
         };
       }),
-      { session }
+      sessionOpt
     );
 
     await syncSessionPlanProgress(createdPlan.sessionPlanId!.toString());
@@ -1116,6 +1227,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
 
   await withTransaction(async (session) => {
+    const sessionOpt = getSessionOption(session);
     Object.assign(existing, safePayload, {
       sessionPlanId,
       month,
@@ -1124,10 +1236,12 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
       endDateBs: teachingDateBs,
       audit: { ...existing.audit, updatedBy: actorObjectId(req) }
     });
-    await existing.save({ session });
+    await existing.save(sessionOpt);
 
     if (payload.items) {
-      const existingItems = await AcademicLessonPlanItem.find({ lessonPlanId: existing._id }).session(session);
+      const itemsQuery = AcademicLessonPlanItem.find({ lessonPlanId: existing._id });
+      if (session) itemsQuery.session(session);
+      const existingItems = await itemsQuery;
       const bySerial = new Map(existingItems.map((item) => [item.serialNo, item]));
       const keptSerials = new Set<number>();
 
@@ -1144,28 +1258,30 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
             completedClasses,
             completionStatus
           });
-          await prev.save({ session });
+          await prev.save(sessionOpt);
         } else {
           await AcademicLessonPlanItem.create(
             [{ ...item, schoolId: tenantObjectId(req), lessonPlanId: existing._id }],
-            { session }
+            sessionOpt
           );
         }
       }
 
       for (const prev of existingItems) {
         if (keptSerials.has(prev.serialNo)) continue;
-        const linkedLogs = await AcademicLogBookEntry.countDocuments({
+        const linkedQuery = AcademicLogBookEntry.countDocuments({
           lessonPlanItemId: prev._id,
           isDeleted: false
-        }).session(session);
+        });
+        if (session) linkedQuery.session(session);
+        const linkedLogs = await linkedQuery;
         if (linkedLogs > 0) {
           throw new ApiError(
             400,
             `Cannot remove topic "${prev.plannedTopic}" (SN ${prev.serialNo}) because log book entries are linked to it.`
           );
         }
-        await prev.deleteOne({ session });
+        await prev.deleteOne(sessionOpt);
       }
     }
 
@@ -1260,6 +1376,7 @@ export const rejectLessonPlan = asyncHandler(async (req: Request, res: Response)
 export const listLogBookEntries = asyncHandler(async (req: Request, res: Response) => {
   const filters = parseFilters(req);
   const filter = buildAcademicFilter(req, filters);
+  await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
   if (filters.status) {
     filter.reviewStatus = filters.status;
   }

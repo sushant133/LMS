@@ -149,6 +149,51 @@ const APPROVABLE_STATUSES: AcademicPlanStatus[] = ["SUBMITTED", "PENDING_APPROVA
 
 export const isAcademicAdmin = (role: string): boolean => canManageInstitution(role);
 
+/**
+ * Expand a subject instance id to all curriculum siblings in the same school
+ * (same masterSubjectId, else same code, else same normalized name).
+ * College provisions one Subject doc per batch year — plans may reference any sibling.
+ */
+export const expandCurriculumSubjectIds = async (
+  schoolId: mongoose.Types.ObjectId,
+  subjectId: string
+): Promise<string[]> => {
+  if (!mongoose.Types.ObjectId.isValid(subjectId)) return [subjectId];
+  const subject = await Subject.findOne({
+    _id: subjectId,
+    schoolId
+  })
+    .select("_id name code masterSubjectId")
+    .lean();
+  if (!subject) return [subjectId];
+
+  const or: Record<string, unknown>[] = [];
+  if (subject.masterSubjectId) {
+    or.push({ masterSubjectId: subject.masterSubjectId });
+  }
+  const code = (subject.code ?? "").trim();
+  if (code) {
+    or.push({ code: new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") });
+  }
+  const name = (subject.name ?? "").trim();
+  if (name && !code && !subject.masterSubjectId) {
+    or.push({ name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") });
+  }
+
+  if (or.length === 0) return [subjectId];
+
+  const siblings = await Subject.find({
+    schoolId,
+    $or: or
+  })
+    .select("_id")
+    .lean();
+
+  const ids = siblings.map((s) => s._id.toString());
+  if (!ids.includes(subjectId)) ids.push(subjectId);
+  return ids;
+};
+
 export const buildAcademicFilter = (req: Request, query: AcademicManagementFilters): Record<string, unknown> => {
   const filter: Record<string, unknown> = {
     schoolId: tenantObjectId(req),
@@ -159,7 +204,7 @@ export const buildAcademicFilter = (req: Request, query: AcademicManagementFilte
   if (query.session) filter.session = query.session;
   if (query.faculty) filter.faculty = query.faculty;
   if (query.semesterBs) filter.semesterBs = query.semesterBs;
-  if (query.subjectId) filter.subjectId = query.subjectId;
+  // subjectId applied async via applyCurriculumSubjectFilter (siblings share curriculum)
   if (query.teacherId) filter.teacherId = query.teacherId;
   if (query.month) filter.month = query.month;
   if (query.classId) filter.classId = query.classId;
@@ -169,6 +214,18 @@ export const buildAcademicFilter = (req: Request, query: AcademicManagementFilte
   if (query.status) filter.status = query.status;
 
   return filter;
+};
+
+/** Attach curriculum-expanded subjectId ($in) when a subject filter is present. */
+export const applyCurriculumSubjectFilter = async (
+  req: Request,
+  filter: Record<string, unknown>,
+  subjectId?: string
+): Promise<void> => {
+  if (!subjectId) return;
+  const schoolId = tenantObjectId(req);
+  const ids = await expandCurriculumSubjectIds(schoolId, subjectId);
+  filter.subjectId = ids.length === 1 ? ids[0] : { $in: ids };
 };
 
 export const applyTeacherScopeToFilter = async (req: Request, filter: Record<string, unknown>): Promise<void> => {
@@ -181,6 +238,8 @@ export const applyTeacherScopeToFilter = async (req: Request, filter: Record<str
 /**
  * Syllabus is subject-level: teachers see records for their assigned subjects
  * (not only rows that name them as teacherId).
+ * When a subject filter is already present (possibly curriculum-expanded),
+ * intersect with teacher assignments so filters still apply.
  */
 export const applyTeacherSubjectScopeToFilter = async (
   req: Request,
@@ -188,7 +247,40 @@ export const applyTeacherSubjectScopeToFilter = async (
 ): Promise<void> => {
   const scope = await getTeacherScope(req);
   if (!scope) return;
-  filter.subjectId = { $in: scope.subjectIds };
+  const allowed = new Set(scope.subjectIds.map(String));
+  const existing = filter.subjectId;
+  if (existing == null) {
+    filter.subjectId = { $in: scope.subjectIds };
+    return;
+  }
+  const existingIds: string[] =
+    typeof existing === "string"
+      ? [existing]
+      : existing &&
+          typeof existing === "object" &&
+          Array.isArray((existing as { $in?: unknown[] }).$in)
+        ? (existing as { $in: unknown[] }).$in.map(String)
+        : [];
+  // Prefer intersection of curriculum-expanded filter with teacher subjects.
+  // If none match (sibling id only in filter, assigned sibling not expanded yet),
+  // expand filter ids once more against assignments.
+  let intersected = existingIds.filter((id) => allowed.has(id));
+  if (intersected.length === 0 && existingIds.length > 0) {
+    const schoolId = tenantObjectId(req);
+    const expanded = new Set<string>();
+    for (const id of existingIds) {
+      for (const sib of await expandCurriculumSubjectIds(schoolId, id)) {
+        if (allowed.has(sib)) expanded.add(sib);
+      }
+    }
+    intersected = [...expanded];
+  }
+  filter.subjectId =
+    intersected.length === 0
+      ? { $in: [] }
+      : intersected.length === 1
+        ? intersected[0]
+        : { $in: intersected };
 };
 
 export const assertTeacherOwnership = async (req: Request, teacherId: string): Promise<void> => {
@@ -339,8 +431,16 @@ export const assertApprovedSessionPlanForLesson = async (
       `Cannot create a Lesson Plan from a Session Plan with status ${plan.status}. Use a draft, submitted, or approved Session Plan (not rejected).`
     );
   }
-  if (plan.subjectId.toString() !== payload.subjectId) {
-    throw new ApiError(400, "Session Plan subject does not match the Lesson Plan subject.");
+  // Curriculum subjects are provisioned per batch — allow sibling subject ids
+  const schoolId = tenantObjectId(req);
+  const lessonSubjectIds = await expandCurriculumSubjectIds(schoolId, payload.subjectId);
+  const planSubjectId = plan.subjectId.toString();
+  if (!lessonSubjectIds.includes(planSubjectId)) {
+    // Also expand from the plan side in case naming differs
+    const planSubjectIds = await expandCurriculumSubjectIds(schoolId, planSubjectId);
+    if (!planSubjectIds.includes(payload.subjectId)) {
+      throw new ApiError(400, "Session Plan subject does not match the Lesson Plan subject.");
+    }
   }
   if (plan.teacherId.toString() !== payload.teacherId) {
     throw new ApiError(400, "Session Plan teacher does not match the Lesson Plan teacher.");
@@ -1177,6 +1277,7 @@ const countCurriculumSubjects = async (
 
 export const buildDashboard = async (req: Request, filters: AcademicManagementFilters): Promise<AcademicManagementDashboard> => {
   const baseFilter = buildAcademicFilter(req, filters);
+  await applyCurriculumSubjectFilter(req, baseFilter, filters.subjectId);
   await applyTeacherScopeToFilter(req, baseFilter);
   const todayBs = getTodayBs();
   const schoolId = tenantObjectId(req);
@@ -1195,7 +1296,10 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
   if (teacherScope) progressQuery.teacherId = teacherScope.teacherId;
   if (filters.academicYearBs) progressQuery.academicYearBs = filters.academicYearBs;
   if (filters.teacherId && !teacherScope) progressQuery.teacherId = filters.teacherId;
-  if (filters.subjectId) progressQuery.subjectId = filters.subjectId;
+  if (filters.subjectId) {
+    const subjectIds = await expandCurriculumSubjectIds(schoolId, filters.subjectId);
+    progressQuery.subjectId = subjectIds.length === 1 ? subjectIds[0] : { $in: subjectIds };
+  }
 
   const [sessionPlans, lessonPlans, logEntries, progressRows, subjects] = await Promise.all([
     AcademicSessionPlan.countDocuments(baseFilter),

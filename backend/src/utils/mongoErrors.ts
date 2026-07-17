@@ -25,6 +25,22 @@ const duplicateKeyMessage = (keyValue: Record<string, unknown> | undefined): str
     return "A user with this login ID already exists";
   }
 
+  if (
+    keyValue.subjectId !== undefined &&
+    keyValue.teacherId !== undefined &&
+    keyValue.academicYearBs !== undefined
+  ) {
+    return "A session plan already exists for this subject, teacher, and academic year. Open it from the list and edit instead.";
+  }
+
+  if (keyValue.subjectId !== undefined && (keyValue.yearId !== undefined || keyValue.classId !== undefined)) {
+    return "A syllabus for this subject and year/class already exists. Open it from the list and edit instead of creating a new one.";
+  }
+
+  if (keyValue.subjectId !== undefined) {
+    return "A syllabus for this subject already exists. Open it from the list and edit instead.";
+  }
+
   return "A record with these details already exists";
 };
 

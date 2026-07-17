@@ -14,11 +14,21 @@ const bsDateOptional = z
   .optional()
   .default("");
 
+/** Coerce hours; treat NaN / null / empty as 0 so form clear does not fail validation. */
+const teachingHoursSchema = z.preprocess(
+  (value) => {
+    if (value === "" || value === null || value === undefined) return 0;
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) ? n : 0;
+  },
+  z.number().min(0).default(0)
+);
+
 export const academicSessionPlanUnitSchema = z.object({
   unitNo: z.coerce.number().int().min(1),
   /** Unit heading only (e.g. "Unit 1 : Introduction to Human Anatomy"). Sub-units are not listed. */
   chapterName: z.string().min(1),
-  estimatedTeachingHours: z.coerce.number().min(0).default(0),
+  estimatedTeachingHours: teachingHoursSchema,
   learningOutcomes: z.string().default(""),
   /** Free-text topics; each line/semicolon-separated entry is a selectable sub-unit. */
   topicsCovered: z.string().default(""),

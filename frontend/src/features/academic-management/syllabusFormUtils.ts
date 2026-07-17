@@ -69,7 +69,8 @@ export const emptyUnit = (unitNo = 1): UnitDraft => ({
   references: "",
   remarks: "",
   practicalRequired: false,
-  subUnits: [emptySubUnit(1)],
+  /** Sub-units are optional — start empty; user can add headings when needed. */
+  subUnits: [],
 });
 
 export type SectionKind = "NONE" | "CHAPTER" | "PART";
@@ -525,55 +526,82 @@ const subToPayload = (sub: SubUnitDraft): AcademicSyllabusSubUnitInput => {
   };
 };
 
-/** True if every sub-unit heading (incl. nested children) is non-empty. */
+/** True if every *filled* sub-unit has a heading; empty draft rows are ignored. */
 export const allSubHeadingsFilled = (subs: SubUnitDraft[]): boolean => {
   for (const sub of subs) {
-    if (!sub.heading?.trim()) return false;
-    if (sub.children?.length && !allSubHeadingsFilled(sub.children as SubUnitDraft[])) {
+    const hasHeading = Boolean(sub.heading?.trim());
+    const hasChildren = Boolean(sub.children?.length);
+    // Empty placeholder row (no heading, no children) is OK — stripped on save
+    if (!hasHeading && !hasChildren) continue;
+    if (!hasHeading) return false;
+    if (hasChildren && !allSubHeadingsFilled(sub.children as SubUnitDraft[])) {
       return false;
     }
   }
   return true;
 };
 
+/** Drop empty draft sub-units (no heading and no children). */
+export const pruneEmptySubUnits = (subs: SubUnitDraft[]): SubUnitDraft[] =>
+  renumberSubTree(
+    subs
+      .map((sub) => ({
+        ...sub,
+        children: pruneEmptySubUnits((sub.children ?? []) as SubUnitDraft[]),
+      }))
+      .filter(
+        (sub) =>
+          Boolean(sub.heading?.trim()) ||
+          (sub.children && sub.children.length > 0),
+      ),
+  );
+
 export const formToPayload = (form: SyllabusFormState): AcademicSyllabusInput => {
-  const chapters = renumberChapters(form.chapters).map((chapter) => {
-    const kind = (chapter.sectionKind as SectionKind) || "NONE";
-    return {
-      clientKey: chapter.clientKey,
-      chapterNo: chapter.chapterNo,
-      sectionKind: kind,
-      title: kind === "NONE" ? "" : (chapter.title || "").trim(),
-      description: chapter.description || "",
-      estimatedHours: chapter.estimatedHours ?? 0,
-      weightagePercent: chapter.weightagePercent ?? 0,
-      references: chapter.references || "",
-      remarks: chapter.remarks || "",
-      tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
-      units: chapter.units.map((unit) => ({
-        clientKey: unit.clientKey,
-        unitNo: unit.unitNo,
-        title: unit.title.trim(),
-        description: unit.description || "",
-        teachingHours: unit.teachingHours ?? 0,
-        learningObjective: unit.learningObjective || "",
-        references: unit.references || "",
-        remarks: unit.remarks || "",
-        practicalRequired: Boolean(unit.practicalRequired),
-        subUnits: unit.subUnits.map(subToPayload),
-      })),
-    };
-  });
+  const chapters = renumberChapters(form.chapters)
+    .map((chapter) => {
+      const kind = (chapter.sectionKind as SectionKind) || "NONE";
+      const units = chapter.units
+        .filter((unit) => unit.title.trim())
+        .map((unit) => ({
+          clientKey: unit.clientKey,
+          unitNo: unit.unitNo,
+          title: unit.title.trim(),
+          description: unit.description || "",
+          teachingHours: unit.teachingHours ?? 0,
+          learningObjective: unit.learningObjective || "",
+          references: unit.references || "",
+          remarks: unit.remarks || "",
+          practicalRequired: Boolean(unit.practicalRequired),
+          subUnits: pruneEmptySubUnits(unit.subUnits ?? []).map(subToPayload),
+        }));
+      return {
+        clientKey: chapter.clientKey,
+        chapterNo: chapter.chapterNo,
+        sectionKind: kind,
+        title: kind === "NONE" ? "" : (chapter.title || "").trim(),
+        description: chapter.description || "",
+        estimatedHours: chapter.estimatedHours ?? 0,
+        weightagePercent: chapter.weightagePercent ?? 0,
+        references: chapter.references || "",
+        remarks: chapter.remarks || "",
+        tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
+        units,
+      };
+    })
+    .filter((chapter) => chapter.units.length > 0);
+
+  // Curriculum-shared syllabus: do not pin to a single batch
+  const batchId = form.batchId?.trim() ? form.batchId : undefined;
 
   return {
     academicYearBs: form.academicYearBs,
     session: form.session || form.academicYearBs,
     faculty: form.faculty,
     semesterBs: form.semesterBs,
-    classId: form.classId,
-    sectionId: form.sectionId,
-    batchId: form.batchId,
-    yearId: form.yearId,
+    classId: form.classId || undefined,
+    sectionId: form.sectionId || undefined,
+    batchId,
+    yearId: form.yearId || undefined,
     subjectId: form.subjectId,
     teacherId: form.teacherId || "",
     subjectCode: form.subjectCode || "",

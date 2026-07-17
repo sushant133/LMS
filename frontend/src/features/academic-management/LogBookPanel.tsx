@@ -31,12 +31,15 @@ import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
 import {
+  academicListApiParams,
   dedupeYearsForSelect,
+  ensureSubjectInOptions,
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
   NEPALI_MONTHS,
   parseSubUnitsFromTopics,
+  resolveSubjectSelectValue,
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
@@ -163,27 +166,77 @@ export const LogBookPanel = ({
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
-    if (isCollege || yearOptions.length > 0) {
-      return filterSubjectsByYear(subjects, years, form.yearId);
-    }
-    return filterSubjectsByClass(subjects, form.classId);
-  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
+    const base =
+      isCollege || yearOptions.length > 0
+        ? filterSubjectsByYear(subjects, years, form.yearId)
+        : filterSubjectsByClass(subjects, form.classId);
+    return ensureSubjectInOptions(base, form.subjectId, subjects);
+  }, [
+    subjects,
+    years,
+    form.yearId,
+    form.classId,
+    form.subjectId,
+    isCollege,
+    yearOptions.length,
+  ]);
 
-  const selectedFormSubject = useMemo(
-    () => subjectOptions.find((s) => s._id === form.subjectId),
+  const subjectSelectValue = useMemo(
+    () => resolveSubjectSelectValue(subjectOptions, form.subjectId),
     [subjectOptions, form.subjectId],
   );
+
+  const selectedFormSubject = useMemo(() => {
+    if (!form.subjectId) return undefined;
+    return (
+      subjectOptions.find(
+        (s) =>
+          s._id === form.subjectId ||
+          ((s as { subjectIds?: string[] }).subjectIds ?? []).includes(
+            form.subjectId,
+          ),
+      ) ?? subjects.find((s) => s._id === form.subjectId)
+    );
+  }, [subjectOptions, form.subjectId, subjects]);
   const formNepaliText = isNepaliSubject(selectedFormSubject);
+
+  // Keep teacherId once teacher scope resolves
+  useEffect(() => {
+    if (!teacherId) return;
+    setForm((current) =>
+      current.teacherId === teacherId
+        ? current
+        : { ...current, teacherId },
+    );
+  }, [teacherId]);
+
+  // Sync academic year from filter bar when settings load
+  useEffect(() => {
+    if (!filters.academicYearBs) return;
+    setForm((current) => {
+      if (current.academicYearBs?.trim()) return current;
+      return {
+        ...current,
+        academicYearBs: filters.academicYearBs!,
+        session: filters.session || filters.academicYearBs!,
+      };
+    });
+  }, [filters.academicYearBs, filters.session]);
 
   const effectiveTeacherId =
     teacherId || form.teacherId || filters.teacherId || "";
 
+  const listParams = useMemo(
+    () => academicListApiParams(filters, { isCollege }),
+    [filters, isCollege],
+  );
+
   const entriesQuery = useQuery({
-    queryKey: ["academic-management", "log-book", filters],
+    queryKey: ["academic-management", "log-book", listParams],
     queryFn: () =>
       unwrap<AcademicLogBookEntryRecord[]>(
         api.get("/academic-management/log-book-entries", {
-          params: filtersToParams(filters),
+          params: listParams,
         }),
       ),
   });
@@ -201,7 +254,7 @@ export const LogBookPanel = ({
     enabled: isTeacher && showForm,
   });
 
-  // Session Plan units for unit / sub-unit selection (taught topic source)
+  // Session Plan units — do not reuse hub month/status/batch filters (Session Plans are yearly)
   const sessionPlansQuery = useQuery({
     queryKey: [
       "academic-management",
@@ -214,17 +267,16 @@ export const LogBookPanel = ({
       unwrap<AcademicSessionPlanRecord[]>(
         api.get("/academic-management/session-plans", {
           params: filtersToParams({
-            ...filters,
-            subjectId: form.subjectId || filters.subjectId,
-            teacherId: effectiveTeacherId || filters.teacherId,
             academicYearBs: form.academicYearBs || filters.academicYearBs,
+            subjectId: form.subjectId || filters.subjectId || undefined,
+            teacherId: effectiveTeacherId || undefined,
           }),
         }),
       ),
     enabled: showForm && Boolean(form.subjectId || filters.subjectId),
   });
 
-  // All Lesson Plans for subject/year (no month filter) so date-range plans cascade into Log Book
+  // All Lesson Plans for subject/year (no month/status filter) so topics cascade into Log Book
   const lessonPlansQuery = useQuery({
     queryKey: [
       "academic-management",
@@ -237,12 +289,9 @@ export const LogBookPanel = ({
       unwrap<AcademicLessonPlanRecord[]>(
         api.get("/academic-management/lesson-plans", {
           params: filtersToParams({
-            ...filters,
-            subjectId: form.subjectId || filters.subjectId,
-            teacherId: effectiveTeacherId || filters.teacherId,
             academicYearBs: form.academicYearBs || filters.academicYearBs,
-            // Intentionally omit month — show every plan topic for cascade pick
-            month: "",
+            subjectId: form.subjectId || filters.subjectId || undefined,
+            teacherId: effectiveTeacherId || undefined,
           }),
         }),
       ),
@@ -831,7 +880,7 @@ export const LogBookPanel = ({
               ) : null}
               <FormField label="Subject">
                 <Select
-                  value={form.subjectId}
+                  value={subjectSelectValue}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,

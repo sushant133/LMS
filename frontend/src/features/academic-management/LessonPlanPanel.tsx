@@ -31,12 +31,15 @@ import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
 import { parseErrorMessage } from "lib/utils";
 import {
+  academicListApiParams,
   dedupeYearsForSelect,
+  ensureSubjectInOptions,
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
   matchSyllabusSubUnit,
   parseSubUnitsFromTopics,
+  resolveSubjectSelectValue,
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
@@ -75,6 +78,9 @@ interface LessonPlanPanelProps {
   institutionName?: string;
   writeAccess?: boolean;
 }
+
+const normText = (value?: string | null) =>
+  (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 const emptyItem = (
   serialNo: number,
@@ -168,16 +174,38 @@ export const LessonPlanPanel = ({
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
-    if (isCollege || yearOptions.length > 0) {
-      return filterSubjectsByYear(subjects, years, form.yearId);
-    }
-    return filterSubjectsByClass(subjects, form.classId);
-  }, [subjects, years, form.yearId, form.classId, isCollege, yearOptions.length]);
+    const base =
+      isCollege || yearOptions.length > 0
+        ? filterSubjectsByYear(subjects, years, form.yearId)
+        : filterSubjectsByClass(subjects, form.classId);
+    return ensureSubjectInOptions(base, form.subjectId, subjects);
+  }, [
+    subjects,
+    years,
+    form.yearId,
+    form.classId,
+    form.subjectId,
+    isCollege,
+    yearOptions.length,
+  ]);
 
-  const selectedFormSubject = useMemo(
-    () => subjectOptions.find((s) => s._id === form.subjectId),
+  const subjectSelectValue = useMemo(
+    () => resolveSubjectSelectValue(subjectOptions, form.subjectId),
     [subjectOptions, form.subjectId],
   );
+
+  const selectedFormSubject = useMemo(() => {
+    if (!form.subjectId) return undefined;
+    return (
+      subjectOptions.find(
+        (s) =>
+          s._id === form.subjectId ||
+          ((s as { subjectIds?: string[] }).subjectIds ?? []).includes(
+            form.subjectId,
+          ),
+      ) ?? subjects.find((s) => s._id === form.subjectId)
+    );
+  }, [subjectOptions, form.subjectId, subjects]);
   const formNepaliText = isNepaliSubject(selectedFormSubject);
 
   // Keep teacherId once teacher scope resolves
@@ -190,39 +218,204 @@ export const LessonPlanPanel = ({
     );
   }, [teacherId]);
 
-  const effectiveTeacherId = teacherId || form.teacherId || filters.teacherId || "";
+  // Admin: auto-select sole teacher so session plans resolve for that teacher
+  useEffect(() => {
+    if (teacherId) return;
+    if (teachers.length !== 1) return;
+    const onlyId = teachers[0]!._id;
+    setForm((current) =>
+      current.teacherId ? current : { ...current, teacherId: onlyId },
+    );
+  }, [teacherId, teachers]);
 
+  // Keep academic year in sync with hub settings (do not stick on placeholder 2082/083)
+  useEffect(() => {
+    if (!filters.academicYearBs?.trim()) return;
+    setForm((current) => {
+      const nextYear = filters.academicYearBs!;
+      const nextSession = filters.session || nextYear;
+      // Update when empty, placeholder, or still matching the previous settings default
+      if (
+        !current.academicYearBs?.trim() ||
+        current.academicYearBs === "2082/083" ||
+        current.academicYearBs === filters.academicYearBs
+      ) {
+        if (
+          current.academicYearBs === nextYear &&
+          (current.session || "") === nextSession
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          academicYearBs: nextYear,
+          session: nextSession,
+        };
+      }
+      return current;
+    });
+  }, [filters.academicYearBs, filters.session]);
+
+  /** Teacher for cascade: logged-in teacher, or admin selection — not the hub filter bar. */
+  const effectiveTeacherId = teacherId || form.teacherId || "";
+
+  /** Curriculum sibling subject ids for matching session plans. */
+  const formCurriculumSubjectIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!form.subjectId) return [] as string[];
+    ids.add(form.subjectId);
+    const fromOption = (selectedFormSubject as { subjectIds?: string[] } | undefined)
+      ?.subjectIds;
+    for (const id of fromOption ?? []) ids.add(id);
+
+    const selected =
+      subjects.find((s) => s._id === form.subjectId) ?? selectedFormSubject;
+    if (!selected) return [...ids];
+
+    const keyCode = normText(selected.code);
+    const keyName = normText(selected.name);
+    const rawMaster = selected.masterSubjectId as
+      | string
+      | { _id?: string }
+      | null
+      | undefined;
+    const keyMaster =
+      typeof rawMaster === "object" && rawMaster
+        ? String(rawMaster._id ?? "")
+        : rawMaster
+          ? String(rawMaster)
+          : "";
+
+    for (const s of subjects) {
+      if (s._id === form.subjectId) {
+        ids.add(s._id);
+        continue;
+      }
+      const sMaster = s.masterSubjectId as
+        | string
+        | { _id?: string }
+        | null
+        | undefined;
+      const sMasterStr =
+        typeof sMaster === "object" && sMaster
+          ? String(sMaster._id ?? "")
+          : sMaster
+            ? String(sMaster)
+            : "";
+      if (keyMaster && sMasterStr && sMasterStr === keyMaster) {
+        ids.add(s._id);
+        continue;
+      }
+      if (keyCode && normText(s.code) === keyCode) {
+        ids.add(s._id);
+        continue;
+      }
+      if (keyName && normText(s.name) === keyName) {
+        ids.add(s._id);
+      }
+    }
+    return [...ids];
+  }, [form.subjectId, selectedFormSubject, subjects]);
+
+  const listParams = useMemo(
+    () => academicListApiParams(filters, { isCollege }),
+    [filters, isCollege],
+  );
+
+  /**
+   * Load Session Plans broadly for the form.
+   * - No month/status/batch (those empty the list)
+   * - No subjectId on the API (curriculum sibling expand can miss; we match client-side)
+   * - No academicYearBs on the API (placeholder year was hiding real plans)
+   * Teacher scope is still applied server-side for TEACHER users.
+   */
   const sessionPlansQuery = useQuery({
     queryKey: [
       "academic-management",
       "session-plans-for-lesson",
-      form.subjectId,
-      effectiveTeacherId,
-      form.academicYearBs,
+      "all-for-form",
+      // Invalidate when teacher scope / selection changes
+      teacherId || form.teacherId || "any-teacher",
     ],
-    queryFn: () =>
-      unwrap<AcademicSessionPlanRecord[]>(
-        api.get("/academic-management/session-plans", {
-          params: {
-            ...filtersToParams(filters),
-            subjectId: form.subjectId || filters.subjectId,
-            teacherId: effectiveTeacherId || filters.teacherId,
-            academicYearBs: form.academicYearBs || filters.academicYearBs,
-            // Load all statuses; teachers may use draft/submitted plans
-          },
-        }),
-      ),
-    enabled: showForm && Boolean(form.subjectId),
+    queryFn: async () => {
+      // Optional teacher pin for admin; teachers are scoped on the server
+      const params: Record<string, string> = {};
+      if (effectiveTeacherId) params.teacherId = effectiveTeacherId;
+      return unwrap<AcademicSessionPlanRecord[]>(
+        api.get("/academic-management/session-plans", { params }),
+      );
+    },
+    enabled: showForm,
   });
 
-  /** Draft, submitted, pending, or approved — not rejected */
-  const usableSessionPlans = useMemo(
-    () =>
-      (sessionPlansQuery.data ?? []).filter(
-        (plan) => plan.status !== "REJECTED",
-      ),
-    [sessionPlansQuery.data],
-  );
+  /**
+   * Match Session Plans to the selected subject by:
+   * 1) curriculum subject instance ids
+   * 2) subject name / code (covers missing siblings in the subjects list)
+   * Prefer same academic year; if none, still show matching subject plans.
+   */
+  const usableSessionPlans = useMemo(() => {
+    const all = (sessionPlansQuery.data ?? []).filter(
+      (plan) => plan.status !== "REJECTED",
+    );
+    if (!form.subjectId) return all;
+
+    const subjectSet = new Set(formCurriculumSubjectIds);
+    const selectedName = normText(selectedFormSubject?.name);
+    const selectedCode = normText(selectedFormSubject?.code);
+    // Names/codes for every sibling instance we know
+    const siblingNames = new Set<string>();
+    const siblingCodes = new Set<string>();
+    for (const s of subjects) {
+      if (subjectSet.has(s._id)) {
+        if (normText(s.name)) siblingNames.add(normText(s.name));
+        if (normText(s.code)) siblingCodes.add(normText(s.code));
+      }
+    }
+    if (selectedName) siblingNames.add(selectedName);
+    if (selectedCode) siblingCodes.add(selectedCode);
+
+    const matched = all.filter((plan) => {
+      if (effectiveTeacherId && plan.teacherId !== effectiveTeacherId) {
+        return false;
+      }
+      if (subjectSet.has(plan.subjectId)) return true;
+      const planName = normText(plan.subject?.name);
+      const planCode = normText(plan.subject?.code);
+      if (planName && siblingNames.has(planName)) return true;
+      if (planCode && siblingCodes.has(planCode)) return true;
+      // Last resort: plan subject id appears on any subject with same name as selection
+      if (selectedName) {
+        const planSubjectRow = subjects.find((s) => s._id === plan.subjectId);
+        if (planSubjectRow && normText(planSubjectRow.name) === selectedName) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    const formYear = (
+      form.academicYearBs ||
+      filters.academicYearBs ||
+      ""
+    ).trim();
+    if (!formYear) return matched;
+
+    const sameYear = matched.filter(
+      (plan) => (plan.academicYearBs || "").trim() === formYear,
+    );
+    // Prefer same year, but never hide valid subject plans if year strings differ
+    return sameYear.length > 0 ? sameYear : matched;
+  }, [
+    sessionPlansQuery.data,
+    form.subjectId,
+    form.academicYearBs,
+    filters.academicYearBs,
+    formCurriculumSubjectIds,
+    effectiveTeacherId,
+    selectedFormSubject,
+    subjects,
+  ]);
 
   // Auto-select the only usable Session Plan when subject/teacher/year change
   useEffect(() => {
@@ -301,17 +494,29 @@ export const LessonPlanPanel = ({
       "syllabi-for-lesson",
       form.subjectId,
       form.academicYearBs,
+      selectedFormSubject
+        ? ((selectedFormSubject as { subjectIds?: string[] }).subjectIds ?? [
+            form.subjectId,
+          ]).join(",")
+        : form.subjectId,
     ],
-    queryFn: () =>
-      unwrap<AcademicSyllabusRecord[]>(
+    queryFn: async () => {
+      // Curriculum-shared: do not pin yearId/batchId; match subject client-side
+      const list = await unwrap<AcademicSyllabusRecord[]>(
         api.get("/academic-management/syllabi", {
           params: filtersToParams({
-            subjectId: form.subjectId,
             academicYearBs: form.academicYearBs,
-            yearId: form.yearId,
+            classId: form.classId,
           }),
         }),
-      ),
+      );
+      const subjectIds = new Set(
+        (selectedFormSubject as { subjectIds?: string[] } | undefined)
+          ?.subjectIds ?? [form.subjectId],
+      );
+      subjectIds.add(form.subjectId);
+      return list.filter((s) => subjectIds.has(s.subjectId));
+    },
     enabled: showForm && Boolean(form.subjectId),
   });
 
@@ -327,11 +532,11 @@ export const LessonPlanPanel = ({
   }, [syllabiQuery.data]);
 
   const plansQuery = useQuery({
-    queryKey: ["academic-management", "lesson-plans", filters],
+    queryKey: ["academic-management", "lesson-plans", listParams],
     queryFn: () =>
       unwrap<AcademicLessonPlanRecord[]>(
         api.get("/academic-management/lesson-plans", {
-          params: filtersToParams(filters),
+          params: listParams,
         }),
       ),
   });
@@ -816,7 +1021,7 @@ export const LessonPlanPanel = ({
               ) : null}
               <FormField label="Subject">
                 <Select
-                  value={form.subjectId}
+                  value={subjectSelectValue}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
@@ -849,10 +1054,10 @@ export const LessonPlanPanel = ({
                   ))}
                 </Select>
               </FormField>
-              {isAdmin && teachers.length > 0 ? (
-                <FormField label="Teacher">
+              {!teacherId && teachers.length > 0 ? (
+                <FormField label="Teacher *">
                   <Select
-                    value={form.teacherId}
+                    value={form.teacherId || ""}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -861,7 +1066,7 @@ export const LessonPlanPanel = ({
                       }))
                     }
                   >
-                    <option value="">Teacher</option>
+                    <option value="">Select teacher</option>
                     {teachers.map((teacher) => (
                       <option key={teacher._id} value={teacher._id}>
                         {teacher.user.fullName}
@@ -971,11 +1176,25 @@ export const LessonPlanPanel = ({
                   </option>
                   {usableSessionPlans.map((plan) => (
                     <option key={plan._id} value={plan._id}>
-                      {plan.subject?.name} · {plan.academicYearBs} ·{" "}
-                      {plan.status} ({plan.units.length} units)
+                      {plan.subject?.name ?? "Subject"} ·{" "}
+                      {plan.teacher?.user?.fullName
+                        ? `${plan.teacher.user.fullName} · `
+                        : ""}
+                      {plan.academicYearBs} · {plan.status} (
+                      {plan.units.length} units)
                     </option>
                   ))}
                 </Select>
+                {!sessionPlansQuery.isLoading &&
+                form.subjectId &&
+                usableSessionPlans.length === 0 ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    No matching Session Plan for this subject
+                    {effectiveTeacherId ? " and teacher" : ""}. Create a Session
+                    Plan first (draft is enough), using the same academic year
+                    and subject.
+                  </p>
+                ) : null}
               </FormField>
             </div>
 
@@ -1431,10 +1650,41 @@ export const LessonPlanPanel = ({
                 )}
               </div>
             ) : form.subjectId ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                {sessionPlansQuery.isLoading
-                  ? "Looking for your Session Plan…"
-                  : "No Session Plan found for this subject. Create a complete yearly Session Plan first (draft is enough), then return here to build monthly Lesson Plans."}
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-1">
+                {sessionPlansQuery.isLoading ? (
+                  <p>Looking for your Session Plan…</p>
+                ) : sessionPlansQuery.isError ? (
+                  <p>
+                    Could not load Session Plans. Check your connection and try
+                    again.
+                  </p>
+                ) : (sessionPlansQuery.data?.length ?? 0) === 0 ? (
+                  <p>
+                    No Session Plans exist yet. Open the{" "}
+                    <strong>Session Plan</strong> tab, create one for this
+                    subject (draft is enough), then return here.
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      No Session Plan matches{" "}
+                      <strong>
+                        {selectedFormSubject?.name || "this subject"}
+                      </strong>
+                      {effectiveTeacherId
+                        ? " for the selected teacher"
+                        : ""}
+                      .
+                    </p>
+                    <p className="text-xs text-amber-800">
+                      Tip: use the same subject name and teacher as on the
+                      Session Plan. Found{" "}
+                      {sessionPlansQuery.data?.length ?? 0} other plan(s) for
+                      different subjects
+                      {teacherId ? "" : " / teachers"}.
+                    </p>
+                  </>
+                )}
               </div>
             ) : null}
 

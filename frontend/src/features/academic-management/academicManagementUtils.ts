@@ -26,13 +26,65 @@ export const defaultAcademicFilters = (): AcademicManagementFilters => ({
 });
 
 export const filtersToParams = (
-  filters: AcademicManagementFilters,
+  filters: AcademicManagementFilters | Record<string, string | undefined | null>,
 ): Record<string, string> => {
   const params: Record<string, string> = {};
   Object.entries(filters).forEach(([key, value]) => {
     if (value) params[key] = String(value);
   });
   return params;
+};
+
+/**
+ * Params for Academic Management list APIs (syllabus, session plan, lesson plan, log book).
+ * Curriculum plans are shared across batches of the same year level — do not filter by
+ * batchId (or college yearId Mongo id) on the server, or valid rows disappear.
+ */
+export const academicListApiParams = (
+  filters: AcademicManagementFilters,
+  options?: { isCollege?: boolean },
+): Record<string, string> => {
+  const params = filtersToParams(filters);
+  delete params.batchId;
+  if (options?.isCollege !== false) {
+    // College: year level filtering is client-side via hierarchy tree
+    delete params.yearId;
+  }
+  return params;
+};
+
+/**
+ * Ensure the selected subject instance appears in a year-filtered dropdown
+ * even when curriculum dedupe keeps a different sibling subject _id.
+ */
+export const ensureSubjectInOptions = <
+  T extends { _id: string; subjectIds?: string[] },
+>(
+  options: T[],
+  selectedId: string | undefined,
+  allSubjects: T[],
+): T[] => {
+  if (!selectedId) return options;
+  const listed = options.some(
+    (s) => s._id === selectedId || (s.subjectIds ?? []).includes(selectedId),
+  );
+  if (listed) return options;
+  const raw = allSubjects.find((s) => s._id === selectedId);
+  if (!raw) return options;
+  return [{ ...raw, subjectIds: (raw as T).subjectIds ?? [raw._id] }, ...options];
+};
+
+export const resolveSubjectSelectValue = <
+  T extends { _id: string; subjectIds?: string[] },
+>(
+  options: T[],
+  selectedId: string | undefined,
+): string => {
+  if (!selectedId) return "";
+  const match = options.find(
+    (s) => s._id === selectedId || (s.subjectIds ?? []).includes(selectedId),
+  );
+  return match?._id ?? selectedId;
 };
 
 export const statusBadgeClass = (status: string): string => {
