@@ -1,12 +1,18 @@
 import { cn } from "lib/utils";
 import { TimetableCellView } from "./TimetableCell";
-import type { MatrixCell, TimetableSlotRow, WeeklyMatrix } from "./timetableMatrixUtils";
+import type {
+  MatrixCell,
+  TimetableSlotRow,
+  WeeklyMatrix,
+} from "./timetableMatrixUtils";
 
 interface WeeklyTimetableGridProps {
   matrix: WeeklyMatrix;
   title?: string;
-  onCellClick?: (slot: TimetableSlotRow) => void;
-  /** Print-friendly denser cells */
+  /** Open edit form for a slot (admin / teacher with permission). */
+  onEditSlot?: (slot: TimetableSlotRow) => void;
+  onDeleteSlot?: (slot: TimetableSlotRow) => void;
+  /** Print-friendly denser cells (no action buttons). */
   compact?: boolean;
   className?: string;
   id?: string;
@@ -15,7 +21,8 @@ interface WeeklyTimetableGridProps {
 export const WeeklyTimetableGrid = ({
   matrix,
   title,
-  onCellClick,
+  onEditSlot,
+  onDeleteSlot,
   compact,
   className,
   id,
@@ -33,7 +40,15 @@ export const WeeklyTimetableGrid = ({
   return (
     <div id={id} className={cn("space-y-2", className)}>
       {title ? (
-        <h3 className="text-base font-semibold text-slate-900 print:text-sm">{title}</h3>
+        <h3 className="text-base font-semibold text-slate-900 print:text-sm">
+          {title}
+        </h3>
+      ) : null}
+      {onEditSlot && !compact ? (
+        <p className="no-print text-xs text-slate-500">
+          Click a period or use <strong>Edit</strong> to change subject, teacher,
+          room, or time. Use <strong>Delete</strong> to remove it.
+        </p>
       ) : null}
       <div className="relative overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm print:overflow-visible print:rounded-none print:shadow-none">
         <table className="w-full min-w-[720px] border-collapse text-sm">
@@ -83,7 +98,8 @@ export const WeeklyTimetableGrid = ({
                     <TimetableCellView
                       cell={cell}
                       compact={compact}
-                      onClick={onCellClick}
+                      onEdit={compact ? undefined : onEditSlot}
+                      onDelete={compact ? undefined : onDeleteSlot}
                     />
                   </td>
                 ))}

@@ -450,9 +450,21 @@ export const TimetableManager = () => {
     saveMutation.mutate(parsed.data);
   };
 
+  const canEditSlot = (slot: TimetableSlotRow): boolean => {
+    if (isAdmin) return true;
+    if (!isTeacher || !canWrite) return false;
+    // Teachers may edit their own periods; breaks without teacher: admin only
+    const slotTeacher = idOf(slot.teacherId);
+    if (!slotTeacher) return false;
+    return slotTeacher === teacherId;
+  };
+
   const startEdit = (slot: TimetableSlotRow) => {
-    if (!canWrite) return;
-    if (isTeacher && idOf(slot.teacherId) !== teacherId && !isAdmin) {
+    if (!canWrite) {
+      toast.error("You do not have permission to edit the timetable");
+      return;
+    }
+    if (!canEditSlot(slot)) {
       toast.error("You can only edit your own periods");
       return;
     }
@@ -477,7 +489,24 @@ export const TimetableManager = () => {
       remarks: slot.remarks ?? "",
       roomKind: slot.roomKind as TimetableSlotInput["roomKind"],
     });
+    toast.message("Edit period — update fields below and click Update slot");
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleDeleteSlot = (slot: TimetableSlotRow) => {
+    if (!canEditSlot(slot)) {
+      toast.error("You can only delete your own periods");
+      return;
+    }
+    const label = nameOf(slot.subjectId, "this period");
+    if (
+      !window.confirm(
+        `Delete ${label} (${slot.startTime}–${slot.endTime})? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    deleteMutation.mutate(slot._id);
   };
 
   const startAddForYear = (yearId: string) => {
@@ -1081,7 +1110,8 @@ export const TimetableManager = () => {
                   ) : (
                     <WeeklyTimetableGrid
                       matrix={matrix}
-                      onCellClick={canWrite ? startEdit : undefined}
+                      onEditSlot={canWrite ? startEdit : undefined}
+                      onDeleteSlot={canWrite ? handleDeleteSlot : undefined}
                     />
                   )}
                   <TimetablePrintView
