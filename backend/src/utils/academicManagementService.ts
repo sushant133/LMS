@@ -1557,8 +1557,11 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
 
 export const matchesKeyword = (keyword: string | undefined, values: Array<string | undefined | null>): boolean => {
   if (!keyword?.trim()) return true;
-  const needle = keyword.trim().toLowerCase();
-  return values.filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+  // NFC so Devanagari combining forms (e.g. व्याकरण) match Word/paste variants
+  const needle = keyword.trim().normalize("NFC").toLowerCase();
+  return values
+    .filter(Boolean)
+    .some((value) => String(value).normalize("NFC").toLowerCase().includes(needle));
 };
 
 export const addAcademicComment = async (

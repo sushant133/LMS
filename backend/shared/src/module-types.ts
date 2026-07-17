@@ -98,6 +98,7 @@ export interface TimetableSlotRecord {
   batchId?: string;
   yearId?: string;
   dayOfWeek: DayOfWeek;
+  /** Teaching: 1–12. BREAK/HOLIDAY: synthetic ≥1000 from start time (not a teaching period). */
   periodNumber: number;
   subjectId: string;
   teacherId: string;

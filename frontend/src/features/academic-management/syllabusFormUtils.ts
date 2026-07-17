@@ -7,6 +7,19 @@ import type {
   AcademicManagementFilters,
   SyllabusSubUnitStatus,
 } from "@phit-erp/shared";
+import { ensureUnicodeNepali } from "lib/preetiToUnicode";
+
+/**
+ * Text normalize for payload. When nepaliMode is false, return text unchanged
+ * (other subjects must not run Preeti conversion).
+ */
+const textForPayload = (
+  text: string | undefined | null,
+  nepaliMode: boolean,
+): string => {
+  const raw = text || "";
+  return nepaliMode ? ensureUnicodeNepali(raw) : raw;
+};
 
 export type SubUnitDraft = AcademicSyllabusSubUnitInput & {
   clientKey: string;
@@ -97,13 +110,33 @@ export const formatSectionLabel = (
   kind: SectionKind | string | undefined,
   no: number,
   title?: string,
+  nepali = false,
 ): string => {
   const t = (title || "").trim();
   if (kind === "CHAPTER") {
+    if (nepali) {
+      const digits = "०१२३४५६७८९";
+      const n = String(no)
+        .split("")
+        .map((d) => digits[Number(d)] ?? d)
+        .join("");
+      return t ? `अध्याय ${n}: ${t}` : `अध्याय ${n}`;
+    }
     return t ? `Chapter ${no}: ${t}` : `Chapter ${no}`;
   }
   if (kind === "PART") {
+    if (nepali) {
+      const digits = "०१२३४५६७८९";
+      const n = String(no)
+        .split("")
+        .map((d) => digits[Number(d)] ?? d)
+        .join("");
+      return t ? `भाग ${n}: ${t}` : `भाग ${n}`;
+    }
     return t ? `Part ${no}: ${t}` : `Part ${no}`;
+  }
+  if (nepali) {
+    return t || "एकाइहरू (अध्याय / भाग बिना)";
   }
   return t || "Units (no Chapter / Part)";
 };
@@ -500,29 +533,42 @@ export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState =>
 };
 
 /** Keep clientKey (existing Mongo id) so updates preserve hierarchy links. */
-const subToPayload = (sub: SubUnitDraft): AcademicSyllabusSubUnitInput => {
+const subToPayload = (
+  sub: SubUnitDraft,
+  nepaliMode: boolean,
+): AcademicSyllabusSubUnitInput => {
   const children = (sub.children ?? []) as SubUnitDraft[];
+  const refs = sub.references;
+  const t = (s: string | undefined | null) => textForPayload(s, nepaliMode);
   return {
     clientKey: sub.clientKey,
     subUnitNo: sub.subUnitNo,
-    heading: sub.heading.trim(),
-    description: sub.description || "",
-    learningOutcomes: sub.learningOutcomes || "",
-    internalAssessment: sub.internalAssessment || "",
+    heading: t(sub.heading).trim(),
+    description: t(sub.description),
+    learningOutcomes: t(sub.learningOutcomes),
+    internalAssessment: t(sub.internalAssessment),
     practicalRequired: Boolean(sub.practicalRequired),
-    labName: sub.labName || "",
-    requiredEquipment: sub.requiredEquipment || "",
-    hospitalPosting: sub.hospitalPosting || "",
+    labName: t(sub.labName),
+    requiredEquipment: t(sub.requiredEquipment),
+    hospitalPosting: t(sub.hospitalPosting),
     clinicalHours: sub.clinicalHours ?? 0,
-    references: sub.references,
+    references: refs
+      ? {
+          textbooks: t(refs.textbooks),
+          journal: t(refs.journal),
+          whoGuidelines: t(refs.whoGuidelines),
+          internetResources: t(refs.internetResources),
+          freeText: t(refs.freeText),
+        }
+      : refs,
     teachingHours: sub.teachingHours ?? 0,
     attachments: sub.attachments ?? [],
-    remarks: sub.remarks || "",
+    remarks: t(sub.remarks),
     status: sub.status || "NOT_STARTED",
-    teachingNotes: sub.teachingNotes || "",
+    teachingNotes: t(sub.teachingNotes),
     teacherAttachments: sub.teacherAttachments ?? [],
-    todaysCoverage: sub.todaysCoverage || "",
-    children: children.map(subToPayload),
+    todaysCoverage: t(sub.todaysCoverage),
+    children: children.map((c) => subToPayload(c, nepaliMode)),
   };
 };
 
@@ -556,7 +602,14 @@ export const pruneEmptySubUnits = (subs: SubUnitDraft[]): SubUnitDraft[] =>
       ),
   );
 
-export const formToPayload = (form: SyllabusFormState): AcademicSyllabusInput => {
+export const formToPayload = (
+  form: SyllabusFormState,
+  options?: { nepaliMode?: boolean },
+): AcademicSyllabusInput => {
+  // Preeti → Unicode only for Nepali subject. Other subjects: text stored as typed.
+  const nepaliMode = Boolean(options?.nepaliMode);
+  const t = (s: string | undefined | null) => textForPayload(s, nepaliMode);
+
   const chapters = renumberChapters(form.chapters)
     .map((chapter) => {
       const kind = (chapter.sectionKind as SectionKind) || "NONE";
@@ -565,25 +618,27 @@ export const formToPayload = (form: SyllabusFormState): AcademicSyllabusInput =>
         .map((unit) => ({
           clientKey: unit.clientKey,
           unitNo: unit.unitNo,
-          title: unit.title.trim(),
-          description: unit.description || "",
+          title: t(unit.title).trim(),
+          description: t(unit.description),
           teachingHours: unit.teachingHours ?? 0,
-          learningObjective: unit.learningObjective || "",
-          references: unit.references || "",
-          remarks: unit.remarks || "",
+          learningObjective: t(unit.learningObjective),
+          references: t(unit.references),
+          remarks: t(unit.remarks),
           practicalRequired: Boolean(unit.practicalRequired),
-          subUnits: pruneEmptySubUnits(unit.subUnits ?? []).map(subToPayload),
+          subUnits: pruneEmptySubUnits(unit.subUnits ?? []).map((sub) =>
+            subToPayload(sub, nepaliMode),
+          ),
         }));
       return {
         clientKey: chapter.clientKey,
         chapterNo: chapter.chapterNo,
         sectionKind: kind,
-        title: kind === "NONE" ? "" : (chapter.title || "").trim(),
-        description: chapter.description || "",
+        title: kind === "NONE" ? "" : t(chapter.title).trim(),
+        description: t(chapter.description),
         estimatedHours: chapter.estimatedHours ?? 0,
         weightagePercent: chapter.weightagePercent ?? 0,
-        references: chapter.references || "",
-        remarks: chapter.remarks || "",
+        references: t(chapter.references),
+        remarks: t(chapter.remarks),
         tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
         units,
       };
@@ -608,7 +663,7 @@ export const formToPayload = (form: SyllabusFormState): AcademicSyllabusInput =>
     totalTheoryHours: form.totalTheoryHours ?? 0,
     totalPracticalHours: form.totalPracticalHours ?? 0,
     creditHours: form.creditHours ?? 0,
-    remarks: form.remarks || "",
+    remarks: t(form.remarks),
     attachmentUrl: form.attachmentUrl,
     chapters,
   };

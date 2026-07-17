@@ -72,6 +72,12 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
   <head>
     <meta charset="utf-8" />
     <title></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     ${collectDocumentStyles()}
     <style>
       html, body {
@@ -79,10 +85,15 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         padding: 0;
         background: #ffffff;
         color: #000000;
+        font-family: "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", "Mangal", sans-serif;
       }
       @page {
         size: A4 ${isLandscape ? "landscape" : "portrait"};
         margin: ${isLandscape ? "10mm 12mm" : "6mm 7mm"};
+      }
+      .font-nepali,
+      [lang="ne"] {
+        font-family: "Noto Sans Devanagari", "Nirmala UI", "Mangal", "Arial Unicode MS", sans-serif !important;
       }
       .print-results-bulk-table {
         display: block !important;

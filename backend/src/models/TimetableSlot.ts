@@ -9,8 +9,11 @@ const timetableSlotSchema = new Schema(
     batchId: { type: Schema.Types.ObjectId, ref: "Batch" },
     yearId: { type: Schema.Types.ObjectId, ref: "Year" },
     dayOfWeek: { type: Number, required: true, min: 0, max: 6 },
-    periodNumber: { type: Number, required: true, min: 1 },
-    /** Optional for BREAK/HOLIDAY periods */
+    /**
+     * Teaching: 1–12. BREAK/HOLIDAY: synthetic ≥1000 from start time (not a teaching period).
+     */
+    periodNumber: { type: Number, required: true, min: 0 },
+    /** Optional for BREAK/HOLIDAY */
     subjectId: { type: Schema.Types.ObjectId, ref: "Subject" },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher" },
     /** Optional link to SubjectAssignment (multi-teacher / unit / % splits) */

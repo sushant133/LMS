@@ -22,11 +22,69 @@
   background: #f8fafc;
 }
 
-/* Nepali / Devanagari content fields (Nepali subjects only) */
+/* Nepali / Devanagari content — ONLY applied via .font-nepali on Nepali subject fields.
+   Do not use Preeti/Kantipur as a web font. Store Unicode only.
+
+   IMPORTANT for manual typing (Windows Nepali, Google Input Tools, Mac Nepali):
+   - Do NOT set restrictive font-feature-settings (breaks matras/conjuncts like र् + क → र्क).
+   - Keep letter-spacing normal (spacing breaks reph/half-forms).
+   - Extra line-height so ि ी ु ू े ै ो ौ ँ ं are not clipped. */
 .font-nepali {
-  font-family: "Noto Sans Devanagari", "Noto Sans", "IBM Plex Sans", sans-serif;
-  font-feature-settings: "kern" 1, "liga" 1;
-  line-height: 1.65;
+  font-family:
+    "Noto Sans Devanagari",
+    "Noto Serif Devanagari",
+    "Nirmala UI",
+    "Mangal",
+    "Kokila",
+    "Arial Unicode MS",
+    "Noto Sans",
+    "IBM Plex Sans",
+    sans-serif;
+  /* Let the OpenType shaper enable all Devanagari features (akhn, half, vatu, etc.) */
+  font-feature-settings: normal;
+  font-variant-ligatures: normal;
+  font-kerning: normal;
+  letter-spacing: normal !important;
+  word-spacing: normal;
+  line-height: 1.85;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  /* Avoid breaking syllables mid-conjunct */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+
+/* Inputs/textareas with Nepali: room for upper/lower matras while typing */
+input.font-nepali,
+textarea.font-nepali {
+  font-size: 1rem;
+  line-height: 1.85;
+  /* Fixed h-10 clips ि / ी / ु — use min-height + vertical padding */
+  min-height: 2.75rem;
+  height: auto;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+textarea.font-nepali {
+  min-height: 7.5rem;
+  white-space: pre-wrap;
+}
+
+/* Print / PDF: ensure Devanagari glyphs render (html2pdf + browser print) */
+@media print {
+  .font-nepali,
+  [lang="ne"] {
+    font-family:
+      "Noto Sans Devanagari",
+      "Nirmala UI",
+      "Mangal",
+      "Arial Unicode MS",
+      sans-serif !important;
+    font-feature-settings: normal !important;
+    letter-spacing: normal !important;
+  }
 }
 
 * {

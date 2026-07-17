@@ -62,20 +62,26 @@ export const WeeklyTimetableGrid = ({
               >
                 Day / Period
               </th>
-              {periods.map((period) => (
+              {periods.map((period) => {
+                // Teaching periods: 1–12. Breaks use synthetic ≥1000 (time only).
+                const isBreakColumn =
+                  period.periodNumber < 1 || period.periodNumber > 12;
+                return (
                 <th
                   key={period.key}
                   className={cn(
                     "sticky top-0 z-10 min-w-[7.5rem] border border-slate-200 bg-slate-700 px-1.5 py-2 text-center text-[11px] font-semibold text-white",
                     "print:static print:bg-slate-700",
+                    isBreakColumn && "bg-amber-800 print:bg-amber-800",
                   )}
                 >
                   <div>{period.label}</div>
                   <div className="mt-0.5 text-[10px] font-normal text-slate-200">
-                    P{period.periodNumber}
+                    {isBreakColumn ? "Break" : `P${period.periodNumber}`}
                   </div>
                 </th>
-              ))}
+                );
+              })}
             </tr>
           </thead>
           <tbody>

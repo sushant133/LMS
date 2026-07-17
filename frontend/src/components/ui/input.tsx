@@ -1,11 +1,14 @@
 import * as React from "react";
 import { nepaliTextClass } from "lib/nepaliSubject";
+import { ensureUnicodeNepali } from "lib/preetiToUnicode";
 import { cn, formatNumberInputValue } from "lib/utils";
 
 export type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   /**
-   * When true (Nepali subject content fields), use Devanagari-friendly font
-   * and lang=ne for proper Unicode typing/display.
+   * Nepali subject content only:
+   * - Devanagari font + lang=ne for correct matras/conjuncts while typing
+   * - Native Unicode paste (Word/Docs) is NEVER rewritten
+   * - On blur (after composition ends): convert clear Preeti ASCII → Unicode if needed
    */
   nepali?: boolean;
 };
@@ -18,8 +21,26 @@ export type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
  * and are not coerced to 0 by this component.
  */
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, value, onChange, nepali = false, lang, ...props }, ref) => {
+  (
+    {
+      className,
+      type,
+      value,
+      onChange,
+      onBlur,
+      onPaste,
+      onCompositionStart,
+      onCompositionEnd,
+      nepali = false,
+      lang,
+      ...props
+    },
+    ref,
+  ) => {
     const isNumberInput = type === "number";
+    /** Track IME composition so we never rewrite mid-syllable (Windows/Mac Nepali). */
+    const composingRef = React.useRef(false);
+
     const resolvedValue = isNumberInput
       ? formatNumberInputValue(
           typeof value === "number" ||
@@ -31,21 +52,112 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         )
       : value;
 
+    /**
+     * Native paste only — do not intercept.
+     * Word / Google Docs / websites put proper UTF-8 in text/plain.
+     */
+    const handlePaste: React.ClipboardEventHandler<HTMLInputElement> = (
+      event,
+    ) => {
+      onPaste?.(event);
+    };
+
+    const handleCompositionStart: React.CompositionEventHandler<HTMLInputElement> =
+      (event) => {
+        composingRef.current = true;
+        onCompositionStart?.(event);
+      };
+
+    const handleCompositionEnd: React.CompositionEventHandler<HTMLInputElement> =
+      (event) => {
+        composingRef.current = false;
+        onCompositionEnd?.(event);
+        // After IME commits a syllable, keep value as-is (Unicode). No Preeti rewrite mid-type.
+        if (nepali && onChange && !isNumberInput && type !== "file") {
+          const target = event.currentTarget;
+          // NFC only when already Devanagari — never Preeti-map during typing
+          const raw = target.value;
+          if (/[\u0900-\u097F]/.test(raw)) {
+            const nfc = raw.normalize("NFC");
+            if (nfc !== raw) {
+              const proto = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype,
+                "value",
+              );
+              proto?.set?.call(target, nfc);
+              onChange({
+                target,
+                currentTarget: target,
+              } as React.ChangeEvent<HTMLInputElement>);
+            }
+          }
+        }
+      };
+
+    /**
+     * Pass every keystroke through unchanged (all Devanagari letters/matras).
+     * Do not transform onChange — that breaks half-forms while typing.
+     */
+    const handleChange: React.ChangeEventHandler<HTMLInputElement> = (
+      event,
+    ) => {
+      onChange?.(event);
+    };
+
+    /** Convert Preeti → Unicode only after focus leaves (and not mid-IME). */
+    const handleBlur: React.FocusEventHandler<HTMLInputElement> = (event) => {
+      if (
+        nepali &&
+        onChange &&
+        !isNumberInput &&
+        type !== "file" &&
+        !composingRef.current &&
+        typeof event.currentTarget.value === "string"
+      ) {
+        const raw = event.currentTarget.value;
+        const next = ensureUnicodeNepali(raw);
+        if (next !== raw) {
+          const target = event.currentTarget;
+          const proto = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value",
+          );
+          proto?.set?.call(target, next);
+          onChange({
+            target,
+            currentTarget: target,
+          } as React.ChangeEvent<HTMLInputElement>);
+        }
+      }
+      onBlur?.(event);
+    };
+
     return (
       <input
         ref={ref}
         type={type}
+        {...props}
         value={resolvedValue}
-        onChange={onChange}
+        onChange={handleChange}
+        onPaste={handlePaste}
+        onBlur={handleBlur}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
         lang={nepali ? lang || "ne" : lang}
         spellCheck={nepali ? false : props.spellCheck}
+        autoCorrect={nepali ? "off" : props.autoCorrect}
+        autoCapitalize={nepali ? "off" : props.autoCapitalize}
+        autoComplete={nepali ? "off" : props.autoComplete}
+        inputMode={nepali && !isNumberInput ? "text" : props.inputMode}
+        dir={nepali ? "auto" : props.dir}
         className={cn(
           "flex h-10 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
+          /* Nepali: drop fixed h-10 (clips matras); font-nepali CSS sets min-height */
+          nepali && "h-auto min-h-11 text-base",
           nepali && nepaliTextClass,
           nepali && "border-amber-200 focus:border-amber-500",
           className,
         )}
-        {...props}
       />
     );
   },

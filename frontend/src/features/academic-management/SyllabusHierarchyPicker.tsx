@@ -7,6 +7,11 @@ import { useMemo } from "react";
 import { Select } from "components/ui/select";
 import { FormField } from "components/shared/FormField";
 import { api, unwrap } from "lib/api";
+import {
+  formatStoredSubUnitDisplayNo,
+  formatUnitLabel,
+  isNepaliSubject,
+} from "lib/nepaliSubject";
 
 export interface SyllabusHierarchySelection {
   syllabusId: string;
@@ -175,7 +180,10 @@ export const SyllabusHierarchyPicker = ({
           <option value="">Select unit</option>
           {units.map((u) => (
             <option key={u._id} value={u._id}>
-              Unit {u.unitNo}: {u.title}
+              {formatUnitLabel(u.unitNo, {
+                title: u.title,
+                nepali: isNepaliSubject(selectedSyllabus?.subject),
+              })}
             </option>
           ))}
         </Select>
@@ -203,7 +211,12 @@ export const SyllabusHierarchyPicker = ({
             <option value="">Whole unit (optional sub-unit)</option>
             {flatSubUnits.map((s) => (
               <option key={s._id} value={s._id}>
-                {s.displayNo} {s.heading}
+                {formatStoredSubUnitDisplayNo(
+                  s.displayNo,
+                  selectedUnit?.unitNo ?? 0,
+                  isNepaliSubject(selectedSyllabus?.subject),
+                )}{" "}
+                {s.heading}
                 {s.depth > 0 ? ` (depth ${s.depth})` : ""}
               </option>
             ))}

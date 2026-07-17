@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { timetableSlotSchema } from "@phit-erp/shared";
+import { periodNumberFromStartTime, timetableSlotSchema } from "@phit-erp/shared";
 import { TimetableSlot } from "../models/TimetableSlot.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
@@ -23,6 +23,24 @@ import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 const isSoftSession = (sessionType?: string) =>
   sessionType === "BREAK" || sessionType === "HOLIDAY";
+
+/**
+ * BREAK / HOLIDAY are not teaching periods — never require user period numbers.
+ * Store a synthetic period key from start time (≥1000) so unique indexes still work.
+ */
+const resolvePeriodNumber = (
+  sessionType: string | undefined,
+  startTime: string,
+  provided?: number | null
+): number => {
+  if (isSoftSession(sessionType)) {
+    return periodNumberFromStartTime(startTime);
+  }
+  if (provided != null && provided >= 1 && provided <= 12) {
+    return provided;
+  }
+  throw new ApiError(400, "Period number (1–12) is required for teaching slots");
+};
 
 export const listTimetable = asyncHandler(async (req: Request, res: Response) => {
   const filter: Record<string, unknown> = withTenantScope(req);
@@ -99,6 +117,11 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
   const schoolId = tenantObjectId(req);
   const sessionType = payload.sessionType ?? "THEORY";
   const soft = isSoftSession(sessionType);
+  const periodNumber = resolvePeriodNumber(
+    sessionType,
+    payload.startTime,
+    payload.periodNumber
+  );
 
   if (req.user?.role === "TEACHER") {
     if (soft) {
@@ -160,7 +183,7 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
       schoolId,
       academicYearBs: payload.academicYearBs,
       dayOfWeek: payload.dayOfWeek,
-      periodNumber: payload.periodNumber,
+      periodNumber,
       startTime: payload.startTime,
       endTime: payload.endTime,
       teacherId: payload.teacherId ?? "",
@@ -174,12 +197,12 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
       yearId: payload.yearId
     });
   } else {
-    // Still check group conflicts for breaks
+    // Still check group conflicts for breaks (time interval only)
     await assertNoTimetableConflicts({
       schoolId,
       academicYearBs: payload.academicYearBs,
       dayOfWeek: payload.dayOfWeek,
-      periodNumber: payload.periodNumber,
+      periodNumber,
       startTime: payload.startTime,
       endTime: payload.endTime,
       teacherId: "",
@@ -195,10 +218,11 @@ export const createTimetableSlot = asyncHandler(async (req: Request, res: Respon
 
   const slot = await TimetableSlot.create({
     ...payload,
+    periodNumber,
     sessionType,
-    subjectId: payload.subjectId || undefined,
-    teacherId: payload.teacherId || undefined,
-    subjectAssignmentId: subjectAssignmentId || null,
+    subjectId: soft ? undefined : payload.subjectId || undefined,
+    teacherId: soft ? undefined : payload.teacherId || undefined,
+    subjectAssignmentId: soft ? null : subjectAssignmentId || null,
     schoolId: req.tenantSchoolId
   });
   return sendSuccess(res, "Timetable slot created", slot, 201);
@@ -251,11 +275,18 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
   }
 
   const nextDay = payload.dayOfWeek ?? existing.dayOfWeek;
-  const nextPeriod = payload.periodNumber ?? existing.periodNumber;
   const nextStart = payload.startTime ?? existing.startTime;
   const nextEnd = payload.endTime ?? existing.endTime;
-  const nextTeacher =
-    payload.teacherId !== undefined
+  const nextPeriod = soft
+    ? periodNumberFromStartTime(nextStart)
+    : resolvePeriodNumber(
+        sessionType,
+        nextStart,
+        payload.periodNumber ?? existing.periodNumber
+      );
+  const nextTeacher = soft
+    ? ""
+    : payload.teacherId !== undefined
       ? payload.teacherId || ""
       : (existing.teacherId?.toString() ?? "");
   const nextRoom =
@@ -285,7 +316,7 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
       startTime: nextStart,
       endTime: nextEnd,
       teacherId: nextTeacher,
-      subjectId,
+      subjectId: soft ? undefined : subjectId,
       room: nextRoom,
       roomKind: nextRoomKind,
       sessionType,
@@ -297,9 +328,24 @@ export const updateTimetableSlot = asyncHandler(async (req: Request, res: Respon
     });
   }
 
-  const slot = await TimetableSlot.findOneAndUpdate(withTenantScope(req, { _id: req.params.id }), payload, {
-    new: true
-  });
+  const updateDoc = {
+    ...payload,
+    periodNumber: nextPeriod,
+    sessionType,
+    ...(soft
+      ? {
+          subjectId: null,
+          teacherId: null,
+          subjectAssignmentId: null
+        }
+      : {})
+  };
+
+  const slot = await TimetableSlot.findOneAndUpdate(
+    withTenantScope(req, { _id: req.params.id }),
+    updateDoc,
+    { new: true }
+  );
   if (!slot) throw new ApiError(404, "Timetable slot not found");
   return sendSuccess(res, "Timetable slot updated", slot);
 });

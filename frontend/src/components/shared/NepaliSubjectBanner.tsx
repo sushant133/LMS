@@ -38,15 +38,23 @@ export const NepaliSubjectBanner = ({
         ) : null}
       </p>
       {!compact ? (
-        <p className="mt-0.5 text-xs text-amber-900/90">
-          Unit titles, headings, and descriptions use Nepali (Devanagari) font.
-          Type with a Nepali Unicode keyboard (Windows: Nepali Traditional, Mac:
-          Nepali, or Google Input Tools). English subjects keep normal Latin
-          input.
-        </p>
+        <div className="mt-0.5 space-y-1 text-xs text-amber-900/90">
+          <p>
+            Numbering: <strong className="font-semibold">एकाइ १</strong>, then{" "}
+            <strong className="font-semibold">क. ख. ग. घ.</strong> Type with a
+            Nepali Unicode keyboard (Windows: Nepali Traditional / Romanized,
+            Mac: Nepali, or Google Input Tools) — all letters and matras
+            (क ख ग घ ङ … ा ि ी ु ू े ै ो ौ ँ ं ्) display correctly. Paste
+            Unicode from Word/Docs is never rewritten. Legacy Preeti converts
+            on blur/save only.
+          </p>
+          <p className="text-amber-800/90">
+            Font: Noto Sans Devanagari. English subjects are unchanged.
+          </p>
+        </div>
       ) : (
         <p className="text-[11px] text-amber-900/90">
-          Use Nepali Unicode keyboard · Devanagari font applied to content fields
+          एकाइ १ · क. ख. ग. · Unicode paste · Noto Sans Devanagari
         </p>
       )}
     </div>

@@ -15,6 +15,13 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
 import { FormField } from "components/shared/FormField";
+import {
+  formatSubUnitDisplayNo,
+  formatSubUnitSiblingPreview,
+  formatUnitLabel,
+  nepaliStructuralLabels,
+  nepaliTextClass,
+} from "lib/nepaliSubject";
 import { cn } from "lib/utils";
 import { NEPALI_MONTHS } from "./academicManagementUtils";
 import {
@@ -26,7 +33,6 @@ import {
   addSiblingAfterPath,
   appendTopLevelSub,
   countSubUnits,
-  displayNoForPath,
   emptyChapter,
   emptySubUnit,
   emptyUnit,
@@ -74,19 +80,24 @@ const SubUnitNodeEditor = ({
   readOnly?: boolean;
   nepaliText?: boolean;
 }) => {
-  const displayNo = displayNoForPath(unitNo, path);
+  // Display-only numbering: English 1.1 / Nepali क. ख. — DB still uses numeric subUnitNo
+  const displayNo = formatSubUnitDisplayNo(unitNo, path, nepaliText);
   const children: SubUnitDraft[] = Array.isArray(sub.children)
     ? (sub.children as SubUnitDraft[])
     : [];
   const index = path[path.length - 1] ?? 0;
-  const nextSiblingPreview = (() => {
-    // e.g. 1.1.1 → preview 1.1.2
-    const parts = displayNo.split(".");
-    const last = Number(parts[parts.length - 1] || 1);
-    parts[parts.length - 1] = String(last + 1);
-    return parts.join(".");
-  })();
-  const firstChildPreview = `${displayNo}.1`;
+  const nextSiblingPreview = formatSubUnitSiblingPreview(
+    unitNo,
+    path,
+    nepaliText,
+    "nextSibling",
+  );
+  const firstChildPreview = formatSubUnitSiblingPreview(
+    unitNo,
+    path,
+    nepaliText,
+    "firstChild",
+  );
 
   const patch = (p: Partial<SubUnitDraft>) => {
     onUpdateTree((subs) => updateSubAtPath(subs, path, p));
@@ -102,7 +113,10 @@ const SubUnitNodeEditor = ({
     >
       <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
         <span
-          className="shrink-0 rounded-md bg-brand-50 px-2 py-0.5 font-mono text-xs font-semibold text-brand-800"
+          className={cn(
+            "shrink-0 rounded-md bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-800",
+            nepaliText ? nepaliTextClass : "font-mono",
+          )}
           title={`Auto number: ${displayNo}`}
         >
           {displayNo}
@@ -115,7 +129,7 @@ const SubUnitNodeEditor = ({
           onChange={(e) => patch({ heading: e.target.value })}
           placeholder={
             nepaliText
-              ? `${displayNo} को शीर्षक (नेपालीमा लेख्नुहोस्)`
+              ? `${displayNo} शीर्षक (युनिकोड नेपालीमा लेख्नुहोस् वा पेस्ट गर्नुहोस्)`
               : `Heading for ${displayNo}`
           }
           aria-label={`Heading ${displayNo}`}
@@ -354,11 +368,14 @@ export const SyllabusHierarchyEditor = ({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-slate-900">
-            Syllabus hierarchy
+            {nepaliText
+              ? nepaliStructuralLabels.hierarchy
+              : "Syllabus hierarchy"}
           </p>
           <p className="text-xs text-slate-500">
-            Subject → optional Chapter or Part (pick one) → Unit → Sub Unit.
-            Sub-units are heading-only (1.1, 1.1.1…).
+            {nepaliText
+              ? "विषय → वैकल्पिक अध्याय वा भाग → एकाइ → उप–एकाइ। नम्बर: एकाइ १, क. ख. ग.… युनिकोड नेपाली सिधै पेस्ट गर्न सकिन्छ।"
+              : "Subject → optional Chapter or Part (pick one) → Unit → Sub Unit. Sub-units are heading-only (1.1, 1.1.1…)."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -398,11 +415,15 @@ export const SyllabusHierarchyEditor = ({
               }}
             >
               <option value="" disabled>
-                Section type…
+                {nepaliText ? "खण्ड प्रकार…" : "Section type…"}
               </option>
-              <option value="NONE">Units only</option>
-              <option value="CHAPTER">Chapter</option>
-              <option value="PART">Part</option>
+              <option value="NONE">
+                {nepaliText ? "एकाइ मात्र" : "Units only"}
+              </option>
+              <option value="CHAPTER">
+                {nepaliText ? "अध्याय" : "Chapter"}
+              </option>
+              <option value="PART">{nepaliText ? "भाग" : "Part"}</option>
             </Select>
           </div>
         </div>
@@ -463,19 +484,41 @@ export const SyllabusHierarchyEditor = ({
                 )}
               </button>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-900">
-                  {formatSectionLabel(kind, sectionNo, chapter.title)}
+                <p
+                  className={cn(
+                    "text-sm font-semibold text-slate-900",
+                    nepaliText && nepaliTextClass,
+                  )}
+                >
+                  {formatSectionLabel(
+                    kind,
+                    sectionNo,
+                    chapter.title,
+                    nepaliText,
+                  )}
                 </p>
                 <p className="text-xs text-slate-500">
                   {kind === "NONE"
-                    ? "No Chapter or Part (optional grouping skipped)"
+                    ? nepaliText
+                      ? "अध्याय / भाग छैन (वैकल्पिक समूह छोडियो)"
+                      : "No Chapter or Part (optional grouping skipped)"
                     : kind === "CHAPTER"
-                      ? "Chapter grouping"
-                      : "Part grouping"}
+                      ? nepaliText
+                        ? "अध्याय समूह"
+                        : "Chapter grouping"
+                      : nepaliText
+                        ? "भाग समूह"
+                        : "Part grouping"}
                   {" · "}
-                  {units.length} unit{units.length === 1 ? "" : "s"} ·{" "}
+                  {units.length}{" "}
+                  {nepaliText
+                    ? nepaliStructuralLabels.unit
+                    : `unit${units.length === 1 ? "" : "s"}`}{" "}
+                  ·{" "}
                   {units.reduce((n, u) => n + countSubUnits(u.subUnits), 0)}{" "}
-                  sub-unit(s)
+                  {nepaliText
+                    ? nepaliStructuralLabels.subUnit
+                    : "sub-unit(s)"}
                 </p>
               </div>
               <div className="flex flex-wrap gap-1">
@@ -493,7 +536,7 @@ export const SyllabusHierarchyEditor = ({
                   }}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />
-                  Unit
+                  {nepaliText ? nepaliStructuralLabels.unit : "Unit"}
                 </Button>
                 <Button
                   type="button"
@@ -557,15 +600,29 @@ export const SyllabusHierarchyEditor = ({
                         });
                       }}
                     >
-                      <option value="NONE">None — units only</option>
-                      <option value="CHAPTER">Chapter</option>
-                      <option value="PART">Part</option>
+                      <option value="NONE">
+                        {nepaliText
+                          ? "कुनै होइन — एकाइ मात्र"
+                          : "None — units only"}
+                      </option>
+                      <option value="CHAPTER">
+                        {nepaliText ? "अध्याय" : "Chapter"}
+                      </option>
+                      <option value="PART">
+                        {nepaliText ? "भाग" : "Part"}
+                      </option>
                     </Select>
                   </FormField>
                   {kind !== "NONE" ? (
                     <FormField
                       label={
-                        kind === "CHAPTER" ? "Chapter title" : "Part title"
+                        kind === "CHAPTER"
+                          ? nepaliText
+                            ? "अध्याय शीर्षक"
+                            : "Chapter title"
+                          : nepaliText
+                            ? "भाग शीर्षक"
+                            : "Part title"
                       }
                     >
                       <Input
@@ -689,8 +746,15 @@ export const SyllabusHierarchyEditor = ({
                               <ChevronRight className="h-4 w-4" />
                             )}
                           </button>
-                          <p className="min-w-0 flex-1 text-sm font-medium text-slate-800">
-                            Unit {unit.unitNo || uIndex + 1}
+                          <p
+                            className={cn(
+                              "min-w-0 flex-1 text-sm font-medium text-slate-800",
+                              nepaliText && nepaliTextClass,
+                            )}
+                          >
+                            {formatUnitLabel(unit.unitNo || uIndex + 1, {
+                              nepali: nepaliText,
+                            })}
                             {unit.title ? (
                               <span className="font-normal text-slate-600">
                                 {" "}
@@ -717,7 +781,9 @@ export const SyllabusHierarchyEditor = ({
                             }}
                           >
                             <Plus className="mr-1 h-3.5 w-3.5" />
-                            Sub Unit (optional)
+                            {nepaliText
+                              ? `${nepaliStructuralLabels.subUnit} (वैकल्पिक)`
+                              : "Sub Unit (optional)"}
                           </Button>
                           <Button
                             type="button"
@@ -736,7 +802,7 @@ export const SyllabusHierarchyEditor = ({
                               const clone: UnitDraft = {
                                 ...structuredClone(unit),
                                 clientKey: emptyUnit().clientKey,
-                                title: `${unit.title || "Unit"} (copy)`,
+                                title: `${unit.title || (nepaliText ? nepaliStructuralLabels.unit : "Unit")} (copy)`,
                                 subUnits: subUnits.map(rekey),
                               };
                               const next = [...units];
@@ -796,14 +862,26 @@ export const SyllabusHierarchyEditor = ({
                         {uOpen ? (
                           <div className="space-y-3 border-t border-slate-200 p-3">
                             <div className="grid gap-3 md:grid-cols-2">
-                              <FormField label="Unit number">
+                              <FormField
+                                label={
+                                  nepaliText
+                                    ? nepaliStructuralLabels.unitNumber
+                                    : "Unit number"
+                                }
+                              >
                                 <Input
                                   value={String(unit.unitNo || uIndex + 1)}
                                   disabled
                                   className="bg-slate-100"
                                 />
                               </FormField>
-                              <FormField label="Unit title">
+                              <FormField
+                                label={
+                                  nepaliText
+                                    ? nepaliStructuralLabels.unitTitle
+                                    : "Unit title"
+                                }
+                              >
                                 <Input
                                   value={unit.title}
                                   nepali={nepaliText}
@@ -814,12 +892,18 @@ export const SyllabusHierarchyEditor = ({
                                   }
                                   placeholder={
                                     nepaliText
-                                      ? "एकाइको शीर्षक (नेपालीमा)"
+                                      ? "एकाइको शीर्षक — युनिकोड नेपाली लेख्नुहोस् वा पेस्ट गर्नुहोस्"
                                       : "e.g. Introduction to Human Anatomy"
                                   }
                                 />
                               </FormField>
-                              <FormField label="Teaching hours">
+                              <FormField
+                                label={
+                                  nepaliText
+                                    ? `${nepaliStructuralLabels.teachingHours} (${nepaliStructuralLabels.hoursPerWeekHint})`
+                                    : "Teaching hours"
+                                }
+                              >
                                 <NumberInput
                                   min={0}
                                   value={unit.teachingHours ?? 0}
@@ -842,10 +926,18 @@ export const SyllabusHierarchyEditor = ({
                                     })
                                   }
                                 />
-                                Practical required
+                                {nepaliText
+                                  ? nepaliStructuralLabels.practicalRequired
+                                  : "Practical required"}
                               </label>
                               <div className="md:col-span-2">
-                                <FormField label="Description (optional)">
+                                <FormField
+                                  label={
+                                    nepaliText
+                                      ? `${nepaliStructuralLabels.description} (वैकल्पिक)`
+                                      : "Description (optional)"
+                                  }
+                                >
                                   <Textarea
                                     value={unit.description || ""}
                                     nepali={nepaliText}
@@ -855,12 +947,20 @@ export const SyllabusHierarchyEditor = ({
                                       })
                                     }
                                     placeholder={
-                                      nepaliText ? "विवरण" : undefined
+                                      nepaliText
+                                        ? "विवरण — युनिकोड वा Preeti बाट पेस्ट गर्न सकिन्छ"
+                                        : undefined
                                     }
                                   />
                                 </FormField>
                               </div>
-                              <FormField label="Learning outcomes">
+                              <FormField
+                                label={
+                                  nepaliText
+                                    ? nepaliStructuralLabels.learningOutcomes
+                                    : "Learning outcomes"
+                                }
+                              >
                                 <Textarea
                                   value={unit.learningObjective || ""}
                                   nepali={nepaliText}
@@ -876,7 +976,13 @@ export const SyllabusHierarchyEditor = ({
                                   }
                                 />
                               </FormField>
-                              <FormField label="References">
+                              <FormField
+                                label={
+                                  nepaliText
+                                    ? nepaliStructuralLabels.references
+                                    : "References"
+                                }
+                              >
                                 <Textarea
                                   value={unit.references || ""}
                                   nepali={nepaliText}
@@ -896,24 +1002,32 @@ export const SyllabusHierarchyEditor = ({
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                   <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                                    Sub units (optional) — headings only
+                                    {nepaliText
+                                      ? "उप–एकाइ (वैकल्पिक) — शीर्षक मात्र · क. ख. ग."
+                                      : "Sub units (optional) — headings only"}
                                   </p>
                                   <p className="text-[11px] text-slate-500">
-                                    Not required to save. Leave empty if you only
-                                    need unit titles. Use{" "}
-                                    <span className="font-medium text-sky-800">
-                                      Same
-                                    </span>{" "}
-                                    for 1.1 → 1.2 or{" "}
-                                    <span className="font-medium text-violet-800">
-                                      Nest
-                                    </span>{" "}
-                                    for 1.1 → 1.1.1. Numbers auto-fill.
+                                    {nepaliText
+                                      ? "सेभ गर्न अनिवार्य होइन। एकाइ शीर्षक मात्र भए पुग्छ। नम्बर स्वतः: क. ख. ग."
+                                      : "Not required to save. Leave empty if you only need unit titles. Use "}
+                                    {!nepaliText ? (
+                                      <>
+                                        <span className="font-medium text-sky-800">
+                                          Same
+                                        </span>{" "}
+                                        for 1.1 → 1.2 or{" "}
+                                        <span className="font-medium text-violet-800">
+                                          Nest
+                                        </span>{" "}
+                                        for 1.1 → 1.1.1. Numbers auto-fill.
+                                      </>
+                                    ) : null}
                                   </p>
                                   {subUnits.length === 0 ? (
                                     <p className="mt-1 text-[11px] text-emerald-700">
-                                      No sub-units — unit title alone is enough to
-                                      save.
+                                      {nepaliText
+                                        ? "उप–एकाइ छैन — एकाइ शीर्षक मात्र पर्याप्त छ।"
+                                        : "No sub-units — unit title alone is enough to save."}
                                     </p>
                                   ) : null}
                                 </div>

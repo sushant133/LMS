@@ -19,6 +19,20 @@ import {
 
 export const dayOfWeekSchema = z.coerce.number().int().min(0).max(6);
 
+/**
+ * Teaching periods use 1–12.
+ * BREAK / HOLIDAY are not teaching periods: periodNumber is optional in the form;
+ * the API derives a synthetic key from startTime (≥ 1000) for storage uniqueness.
+ */
+export const periodNumberFromStartTime = (startTime: string): number => {
+  const parts = String(startTime ?? "00:00").split(":");
+  const h = Number(parts[0]);
+  const m = Number(parts[1] ?? 0);
+  const minutes =
+    (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+  return 1000 + Math.max(0, Math.min(minutes, 24 * 60 - 1));
+};
+
 export const timetableSlotSchema = z
   .object({
     classId: optionalObjectIdSchema,
@@ -26,15 +40,16 @@ export const timetableSlotSchema = z
     batchId: optionalObjectIdSchema,
     yearId: optionalObjectIdSchema,
     dayOfWeek: dayOfWeekSchema,
-    periodNumber: z.coerce.number().int().min(1).max(12),
+    /** Required 1–12 for teaching; optional / ignored for BREAK & HOLIDAY */
+    periodNumber: z.coerce.number().int().min(0).max(2500).optional(),
     /** Required for teaching slots; optional for BREAK / HOLIDAY */
     subjectId: optionalObjectIdSchema,
     teacherId: optionalObjectIdSchema,
     /** Optional link to SubjectAssignment for multi-teacher subjects */
     subjectAssignmentId: optionalObjectIdSchema,
     room: z.string().optional().or(z.literal("")),
-    startTime: z.string().regex(/^\d{2}:\d{2}$/),
-    endTime: z.string().regex(/^\d{2}:\d{2}$/),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/, "Start time is required (HH:MM)"),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/, "End time is required (HH:MM)"),
     academicYearBs: academicYearSchema,
     /** THEORY (default) | PRACTICAL | BREAK | HOLIDAY | EXAM | SPECIAL | ONLINE | GUEST */
     sessionType: z.enum(TIMETABLE_SESSION_TYPES).optional().default("THEORY"),
@@ -45,7 +60,26 @@ export const timetableSlotSchema = z
   })
   .superRefine((data, ctx) => {
     const soft = data.sessionType === "BREAK" || data.sessionType === "HOLIDAY";
+    const toMin = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+    if (data.startTime && data.endTime && toMin(data.startTime) >= toMin(data.endTime)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "End time must be after start time",
+        path: ["endTime"]
+      });
+    }
     if (!soft) {
+      const p = data.periodNumber;
+      if (p == null || p < 1 || p > 12) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Period number (1–12) is required for teaching slots",
+          path: ["periodNumber"]
+        });
+      }
       if (!data.subjectId) {
         ctx.addIssue({ code: "custom", message: "Subject is required", path: ["subjectId"] });
       }
@@ -53,6 +87,7 @@ export const timetableSlotSchema = z
         ctx.addIssue({ code: "custom", message: "Teacher is required", path: ["teacherId"] });
       }
     }
+    // BREAK / HOLIDAY: only start + end time required (period is not a teaching period)
   });
 
 export const assignmentAttachmentSchema = z.object({

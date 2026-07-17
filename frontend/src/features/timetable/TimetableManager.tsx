@@ -417,7 +417,10 @@ export const TimetableManager = () => {
   const buildPayload = (): TimetableSlotInput => {
     const base: TimetableSlotInput = {
       dayOfWeek: form.dayOfWeek,
-      periodNumber: form.periodNumber,
+      // Breaks/holidays are time intervals only — period number is not a teaching period
+      ...(isBreak
+        ? {}
+        : { periodNumber: form.periodNumber }),
       subjectId: isBreak ? "" : form.subjectId,
       teacherId: isBreak ? "" : isTeacher ? teacherId : form.teacherId,
       room: form.room?.trim() ? form.room : undefined,
@@ -441,6 +444,27 @@ export const TimetableManager = () => {
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!form.startTime?.trim() || !form.endTime?.trim()) {
+      toast.error("Start time and end time are required");
+      return;
+    }
+    if (isBreak) {
+      const toMin = (t: string) => {
+        const [h, m] = t.split(":").map(Number);
+        return (h || 0) * 60 + (m || 0);
+      };
+      if (toMin(form.startTime) >= toMin(form.endTime)) {
+        toast.error("Break end time must be after start time");
+        return;
+      }
+    } else if (
+      form.periodNumber == null ||
+      form.periodNumber < 1 ||
+      form.periodNumber > 12
+    ) {
+      toast.error("Period number (1–12) is required for teaching slots");
+      return;
+    }
     const payload = buildPayload();
     const parsed = timetableSlotSchema.safeParse(payload);
     if (!parsed.success) {
@@ -880,32 +904,42 @@ export const TimetableManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Period">
-                <NumberInput
-                  min={1}
-                  max={12}
-                  value={form.periodNumber}
-                  onChange={(e) =>
-                    setForm((c) => ({
-                      ...c,
-                      periodNumber: e.target.valueAsNumber,
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField label="Start time">
+              {!isBreak ? (
+                <FormField label="Period">
+                  <NumberInput
+                    min={1}
+                    max={12}
+                    value={form.periodNumber}
+                    onChange={(e) =>
+                      setForm((c) => ({
+                        ...c,
+                        periodNumber: e.target.valueAsNumber,
+                      }))
+                    }
+                  />
+                </FormField>
+              ) : (
+                <div className="flex items-end">
+                  <p className="pb-2 text-xs text-slate-500">
+                    Break is not a teaching period — only set the time interval.
+                  </p>
+                </div>
+              )}
+              <FormField label={isBreak ? "Break start time" : "Start time"}>
                 <Input
                   type="time"
                   value={form.startTime}
+                  required
                   onChange={(e) =>
                     setForm((c) => ({ ...c, startTime: e.target.value }))
                   }
                 />
               </FormField>
-              <FormField label="End time">
+              <FormField label={isBreak ? "Break end time" : "End time"}>
                 <Input
                   type="time"
                   value={form.endTime}
+                  required
                   onChange={(e) =>
                     setForm((c) => ({ ...c, endTime: e.target.value }))
                   }

@@ -487,13 +487,34 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
   const serialized = (await Promise.all(rows.map((row) => serializeSyllabus(row._id.toString())))).filter(Boolean);
   const filtered = serialized.filter((plan) => {
     const chapterTitles = (plan?.chapters ?? []).map((c) => c.title);
+    const chapterDescriptions = (plan?.chapters ?? []).map((c) => c.description);
     const unitTitles = (plan?.chapters ?? []).flatMap((c) => c.units.map((u) => u.title));
-    const subHeadings = (plan?.chapters ?? []).flatMap((c) =>
-      c.units.flatMap((u) => u.subUnits.map((s) => s.heading))
+    const unitDescriptions = (plan?.chapters ?? []).flatMap((c) =>
+      c.units.map((u) => u.description)
     );
-    const subDescriptions = (plan?.chapters ?? []).flatMap((c) =>
-      c.units.flatMap((u) => u.subUnits.map((s) => s.description))
+    const unitOutcomes = (plan?.chapters ?? []).flatMap((c) =>
+      c.units.map((u) => u.learningObjective)
     );
+    const unitRefs = (plan?.chapters ?? []).flatMap((c) =>
+      c.units.map((u) => u.references)
+    );
+    const flattenSubs = <T extends { children?: T[] }>(subs: T[]): T[] => {
+      const out: T[] = [];
+      const walk = (nodes: T[]) => {
+        for (const n of nodes) {
+          out.push(n);
+          if (n.children?.length) walk(n.children);
+        }
+      };
+      walk(subs);
+      return out;
+    };
+    const allSubs = (plan?.chapters ?? []).flatMap((c) =>
+      c.units.flatMap((u) => flattenSubs(u.subUnits ?? []))
+    );
+    const subHeadings = allSubs.map((s) => s.heading);
+    const subDescriptions = allSubs.map((s) => s.description);
+    const subOutcomes = allSubs.map((s) => s.learningOutcomes);
     return matchesKeyword(filters.keyword, [
       plan?.subject?.name,
       plan?.subject?.code,
@@ -505,9 +526,14 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
       ...(plan?.units ?? []).map((unit) => unit.chapterName),
       ...(plan?.units ?? []).map((unit) => unit.topicsCovered),
       ...chapterTitles,
+      ...chapterDescriptions,
       ...unitTitles,
+      ...unitDescriptions,
+      ...unitOutcomes,
+      ...unitRefs,
       ...subHeadings,
-      ...subDescriptions
+      ...subDescriptions,
+      ...subOutcomes
     ]);
   });
   return sendSuccess(res, "Syllabi fetched", filtered);
