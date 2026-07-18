@@ -2,11 +2,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { defineConfig, loadEnv } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 
-/**
- * Dev proxy target stays localhost by default.
- * Override only via env (VITE_DEV_PROXY_TARGET / BACKEND_URL) — never hardcode production hosts here.
- */
 const resolveDevProxyTarget = (env: Record<string, string>): string => {
   const fromEnv =
     env.VITE_DEV_PROXY_TARGET?.trim() ||
@@ -21,7 +18,54 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = resolveDevProxyTarget(env);
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        devOptions: {
+          enabled: true,
+        },
+        includeAssets: ['favicon.ico', 'logo.png'],
+        manifest: {
+          name: 'LMS - PHIT',
+          short_name: 'LMS',
+          description: 'Learning Management System - PHIT',
+          theme_color: '#1976d2',
+          background_color: '#ffffff',
+          display: 'standalone',
+          start_url: '/',
+          scope: '/',
+          icons: [
+            {
+              src: '/pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+            },
+            {
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any maskable',
+            }
+          ],
+        },
+        workbox: {
+          navigateFallback: '/index.html',     // This ensures login page shows even offline on first open
+          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          runtimeCaching: [
+            // Only cache static images - nothing else
+            {
+              urlPattern: /^https?:\/\/.*\.(?:png|jpg|jpeg|svg|gif|ico)$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'images-cache',
+              }
+            }
+          ]
+        }
+      })
+    ],
     resolve: {
       alias: {
         "@phit-erp/shared": path.resolve(__dirname, "../backend/shared/src"),
@@ -35,21 +79,13 @@ export default defineConfig(({ mode }) => {
       extensions: [".tsx", ".ts", ".jsx", ".js", ".json"]
     },
     build: {
-      // Do not ship source maps publicly in production (prevents easy source recovery)
       sourcemap: mode !== "production",
       minify: "esbuild",
       target: "es2020",
       chunkSizeWarningLimit: 1200,
-      // Clean output directory for reproducible production deploys
       emptyOutDir: true
     },
-    esbuild:
-      mode === "production"
-        ? {
-            // Strip debug noise from production bundles
-            drop: ["console", "debugger"]
-          }
-        : undefined,
+    esbuild: mode === "production" ? { drop: ["console", "debugger"] } : undefined,
     server: {
       port: 5173,
       strictPort: true,
@@ -61,20 +97,12 @@ export default defineConfig(({ mode }) => {
           secure: false,
           configure: (proxy) => {
             proxy.on("error", (_error, _request, response) => {
-              if (
-                response &&
-                "writeHead" in response &&
-                typeof response.writeHead === "function" &&
-                !response.headersSent
-              ) {
+              if (response && "writeHead" in response && typeof response.writeHead === "function" && !response.headersSent) {
                 response.writeHead(503, { "Content-Type": "application/json" });
-                response.end(
-                  JSON.stringify({
-                    success: false,
-                    message:
-                      "Backend API is not running. Start it with: npm run dev --prefix ../backend"
-                  })
-                );
+                response.end(JSON.stringify({
+                  success: false,
+                  message: "Backend API is not running. Start it with: npm run dev --prefix ../backend"
+                }));
               }
             });
           }

@@ -2,6 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { defineConfig, loadEnv } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 /**
  * Dev proxy target stays localhost by default.
  * Override only via env (VITE_DEV_PROXY_TARGET / BACKEND_URL) — never hardcode production hosts here.
@@ -17,7 +18,53 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), "");
     const proxyTarget = resolveDevProxyTarget(env);
     return {
-        plugins: [react(), tailwindcss()],
+        plugins: [
+            react(),
+            tailwindcss(),
+            VitePWA({
+                registerType: 'autoUpdate',
+                devOptions: {
+                    enabled: true, // Allows testing PWA in dev mode
+                },
+                includeAssets: ['favicon.ico', 'logo.png'],
+                manifest: {
+                    name: 'LMS - PHIT',
+                    short_name: 'LMS',
+                    description: 'Learning Management System - PHIT',
+                    theme_color: '#1976d2',
+                    background_color: '#ffffff',
+                    display: 'standalone',
+                    start_url: '/',
+                    scope: '/',
+                    icons: [
+                        {
+                            src: '/pwa-192x192.png',
+                            sizes: '192x192',
+                            type: 'image/png',
+                        },
+                        {
+                            src: '/pwa-512x512.png',
+                            sizes: '512x512',
+                            type: 'image/png',
+                            purpose: 'any maskable',
+                        }
+                    ],
+                },
+                workbox: {
+                    navigateFallback: '/index.html',
+                    globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg}'],
+                    runtimeCaching: [
+                        {
+                            urlPattern: /^https?:\/\/.*\.(?:png|jpg|jpeg|svg|gif|ico)$/i,
+                            handler: 'CacheFirst',
+                            options: {
+                                cacheName: 'images-cache',
+                            }
+                        }
+                    ]
+                }
+            })
+        ],
         resolve: {
             alias: {
                 "@phit-erp/shared": path.resolve(__dirname, "../backend/shared/src"),
@@ -31,17 +78,14 @@ export default defineConfig(({ mode }) => {
             extensions: [".tsx", ".ts", ".jsx", ".js", ".json"]
         },
         build: {
-            // Do not ship source maps publicly in production (prevents easy source recovery)
             sourcemap: mode !== "production",
             minify: "esbuild",
             target: "es2020",
             chunkSizeWarningLimit: 1200,
-            // Clean output directory for reproducible production deploys
             emptyOutDir: true
         },
         esbuild: mode === "production"
             ? {
-                // Strip debug noise from production bundles
                 drop: ["console", "debugger"]
             }
             : undefined,

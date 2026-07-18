@@ -2,6 +2,7 @@ import { Suspense, lazy, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "components/layout/AppLayout";
 import { AuthLayout } from "components/layout/AuthLayout";
+import { OfflineLoginOnly } from "components/shared/OfflineLoginOnly";
 import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
 import { LoginPage } from "pages/LoginPage";
@@ -73,6 +74,7 @@ const LazyRoute = ({ children }: { children: ReactNode }) => (
 
 export default function App() {
   return (
+    <OfflineLoginOnly>
     <Routes>
       <Route path="/" element={<RootRedirect />} />
 
@@ -369,5 +371,6 @@ export default function App() {
 
       <Route path="*" element={<LazyRoute><NotFoundPage /></LazyRoute>} />
     </Routes>
+    </OfflineLoginOnly>
   );
 }

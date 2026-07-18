@@ -191,9 +191,34 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       await deleteSchoolCascade(existingSchool._id, session);
     }
 
+    // Always purge known demo login emails on force reseed so orphaned users
+    // (e.g. leftover after a partial cascade) cannot block User.create or leave
+    // accounts pointing at a deleted school ("This college is inactive").
+    if (force) {
+      const demoEmails = [
+        demoCredentials.schoolAdmin.email,
+        demoCredentials.parent.email,
+        demoCredentials.libraryStaff.email,
+        demoCredentials.laboratoryStaff.email,
+        demoCredentials.accountant.email,
+        ...demoCredentials.teachers.map((t) => t.email),
+        ...demoCredentials.students.map((s) => s.email),
+        ...Object.values(demoCredentials.collegeStaff).map((s) => s.email)
+      ].map((email) => email.toLowerCase());
+
+      await User.deleteMany(
+        { email: { $in: demoEmails }, role: { $ne: "SUPER_ADMIN" } },
+        options
+      );
+    }
+
+    // Pin the school ObjectId before insert so every related document uses the
+    // exact same id (avoids rare mismatches between create() return value and DB).
+    const schoolId = new mongoose.Types.ObjectId();
     const [school] = await School.create(
       [
         {
+          _id: schoolId,
           name: "Public Himal Institute of Technology",
           nameNp: "पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी",
           code: DEMO_SCHOOL_CODE,
@@ -209,7 +234,11 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    const schoolId = school!._id;
+    if (!school || String(school._id) !== String(schoolId)) {
+      throw new Error(
+        `Demo seed school id mismatch: expected ${schoolId}, got ${school?._id}`
+      );
+    }
 
     const [adminUser] = await User.create(
       [
