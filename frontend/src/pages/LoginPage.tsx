@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, WifiOff } from "lucide-react";
 import { loginSchema } from "@phit-erp/shared";
 import { toast } from "sonner";
 import { CollegeLogo } from "components/shared/CollegeLogo";
@@ -11,6 +11,7 @@ import { Input } from "components/ui/input";
 import { FormField } from "components/shared/FormField";
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsDesktopViewport } from "hooks/useIsDesktopViewport";
+import { useOnlineStatus } from "hooks/useOnlineStatus";
 import { getRoleRedirectPath } from "lib/auth";
 import { parseErrorMessage } from "lib/utils";
 
@@ -62,11 +63,17 @@ export const LoginPage = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const isDesktop = useIsDesktopViewport();
+  const online = useOnlineStatus();
   const { login } = useAuth();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitting) return;
+
+    if (!online) {
+      toast.error("No internet connection. Connect to the network to sign in.");
+      return;
+    }
 
     const parsed = loginSchema.safeParse({
       email: form.email.trim(),
@@ -107,13 +114,23 @@ export const LoginPage = () => {
             <CardTitle>{t("login")}</CardTitle>
           </CardHeader>
           <CardContent>
+            {!online && (
+              <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                <WifiOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <p>
+                  You are offline. An internet connection is required to use this
+                  application. Only this login page is available until you are
+                  back online.
+                </p>
+              </div>
+            )}
             <form className="space-y-4" onSubmit={handleSubmit}>
               <FormField label="Login ID">
                 <Input
                   autoComplete="username"
                   type="text"
                   value={form.email}
-                  disabled={submitting}
+                  disabled={submitting || !online}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
@@ -129,7 +146,7 @@ export const LoginPage = () => {
                     className="pr-10"
                     type={showPassword ? "text" : "password"}
                     value={form.password}
-                    disabled={submitting}
+                    disabled={submitting || !online}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -143,7 +160,7 @@ export const LoginPage = () => {
                     }
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 hover:text-slate-700"
                     type="button"
-                    disabled={submitting}
+                    disabled={submitting || !online}
                     onClick={() => setShowPassword((current) => !current)}
                   >
                     {showPassword ? (
@@ -154,17 +171,19 @@ export const LoginPage = () => {
                   </button>
                 </div>
               </FormField>
-              <Button className="w-full" type="submit" disabled={submitting}>
-                {submitting ? "Signing in…" : t("login")}
+              <Button className="w-full" type="submit" disabled={submitting || !online}>
+                {submitting ? "Signing in…" : !online ? "Waiting for connection…" : t("login")}
               </Button>
             </form>
 
-            <p className="mt-4 text-sm text-slate-600">
-              Parent without an account?{" "}
-              <Link className="font-semibold text-brand-700" to="/register">
-                Register with student registration number
-              </Link>
-            </p>
+            {online ? (
+              <p className="mt-4 text-sm text-slate-600">
+                Parent without an account?{" "}
+                <Link className="font-semibold text-brand-700" to="/register">
+                  Register with student registration number
+                </Link>
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </div>

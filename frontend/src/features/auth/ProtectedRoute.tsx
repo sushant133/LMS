@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { normalizeUserRole, type UserRole } from "@phit-erp/shared";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { PageLoadingState } from "components/shared/LoadingState";
+import { useOnlineStatus } from "hooks/useOnlineStatus";
 import { getRoleRedirectPath } from "lib/auth";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { hasProtectedRouteAccess } from "lib/roles";
@@ -14,9 +15,10 @@ interface ProtectedRouteProps {
 export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
   const { user, loading, loggingOut } = useAuth();
   const location = useLocation();
+  const online = useOnlineStatus();
 
   // Only hard-redirect when we know there is no session (not while bootstrapping or logging out).
-  const shouldRedirectToLogin = !loading && !loggingOut && !user;
+  const shouldRedirectToLogin = online && !loading && !loggingOut && !user;
 
   useEffect(() => {
     if (!shouldRedirectToLogin || location.pathname === "/login") {
@@ -30,6 +32,11 @@ export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
 
     return () => window.clearTimeout(timer);
   }, [location.pathname, shouldRedirectToLogin]);
+
+  // Offline: never render the app shell — only the login page is allowed.
+  if (!online) {
+    return <Navigate to="/login" replace />;
+  }
 
   if (loading || loggingOut) {
     return <PageLoadingState />;

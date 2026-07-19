@@ -168,8 +168,9 @@ const startServer = async (): Promise<void> => {
     );
   }
 
-  // Demo seed is best-effort — must not prevent API from listening
-  // await ensureDemoData();
+  // Demo seed is best-effort — must not prevent API from listening.
+  // Without this, a fresh MongoDB has zero users and every login returns 401.
+  await ensureDemoData();
 
   startAcademicManagementNotificationScheduler();
 
