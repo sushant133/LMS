@@ -11,7 +11,7 @@ import {
   type TeacherRecord,
   type YearRecord,
 } from "@phit-erp/shared";
-import { BookOpen, FlaskConical, History, Plus, Trash2 } from "lucide-react";
+import { BookOpen, FlaskConical, History, Pencil, Plus, Power, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
@@ -206,6 +206,37 @@ export const TeacherAssignmentsPanel = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  const deactivateSubjectAssignment = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(
+        api.post(`/academics/subject-assignments/${id}/end`, {
+          effectiveToBs: todayBsString(),
+          endReason: "Deactivated from teacher assignments",
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success("Subject assignment deactivated");
+      await queryClient.invalidateQueries({
+        queryKey: ["subject-assignments", "teacher", teacherId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const deleteSubjectAssignment = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/academics/subject-assignments/${id}`)),
+    onSuccess: async () => {
+      toast.success("Subject assignment deleted");
+      await queryClient.invalidateQueries({
+        queryKey: ["subject-assignments", "teacher", teacherId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   const subjects = subjectAssignmentsQuery.data ?? [];
   const labs = labAssignmentsQuery.data ?? [];
   const allSubjects = subjectsQuery.data ?? [];
@@ -350,6 +381,7 @@ export const TeacherAssignmentsPanel = ({
                     <Th>Units / %</Th>
                     <Th>From</Th>
                     <Th>Status</Th>
+                    <Th className="text-right">Actions</Th>
                   </tr>
                 </TableHead>
                 <TableBody>
@@ -374,6 +406,57 @@ export const TeacherAssignmentsPanel = ({
                         <Badge className="bg-brand-100 text-brand-800">
                           {row.status}
                         </Badge>
+                      </Td>
+                      <Td className="text-right">
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          <Button asChild size="sm" variant="outline">
+                            <Link
+                              to={`/academics/subject-assignments?teacherId=${teacherId}`}
+                              title="Edit in Subject Assignment matrix"
+                            >
+                              <Pencil className="mr-1 h-3.5 w-3.5" />
+                              Edit
+                            </Link>
+                          </Button>
+                          {row.status === "ACTIVE" ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-amber-200 text-amber-800"
+                              disabled={deactivateSubjectAssignment.isPending}
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Deactivate subject assignment for ${subjectLabel(row.subjectId)}? Teaching access ends today; history is kept.`,
+                                  )
+                                ) {
+                                  deactivateSubjectAssignment.mutate(row._id);
+                                }
+                              }}
+                            >
+                              <Power className="mr-1 h-3.5 w-3.5" />
+                              Deactivate
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-rose-200 text-rose-700"
+                            disabled={deleteSubjectAssignment.isPending}
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Permanently delete assignment for ${subjectLabel(row.subjectId)}? This cannot be undone.`,
+                                )
+                              ) {
+                                deleteSubjectAssignment.mutate(row._id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" />
+                            Delete
+                          </Button>
+                        </div>
                       </Td>
                     </tr>
                   ))}

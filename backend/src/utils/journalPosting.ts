@@ -29,6 +29,8 @@ interface PostJournalParams {
   narration: string;
   lines: JournalLineInput[];
   voucherType?: VoucherType;
+  /** When set, used as journal voucherNumber (e.g. manual Goshwara no.) */
+  voucherNumber?: string;
   referenceType?: JournalReferenceType;
   referenceId?: Types.ObjectId | string;
   studentId?: Types.ObjectId | string;
@@ -99,7 +101,18 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
   }
 
   const voucherPrefix = settings?.voucherPrefix ?? "JV";
-  const voucherNumber = await generateVoucherNumber(params.schoolId, voucherPrefix, params.session);
+  const manualNo = params.voucherNumber?.trim();
+  const voucherNumber =
+    manualNo || (await generateVoucherNumber(params.schoolId, voucherPrefix, params.session));
+
+  if (manualNo) {
+    const existingQuery = JournalEntry.findOne({ schoolId: params.schoolId, voucherNumber: manualNo });
+    if (params.session) existingQuery.session(params.session);
+    const existing = await existingQuery.lean();
+    if (existing) {
+      throw new Error(`Voucher number ${manualNo} already exists`);
+    }
+  }
 
   const [created] = await JournalEntry.create(
     [

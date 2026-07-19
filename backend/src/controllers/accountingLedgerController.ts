@@ -1,8 +1,10 @@
 import type { Request, Response } from "express";
+import fs from "fs";
 import {
   chartOfAccountSchema,
   feeRefundSchema,
   fiscalYearSchema,
+  goshwaraVoucherSchema,
   journalEntrySchema,
   vendorSchema,
   type AccountingReportType
@@ -11,6 +13,7 @@ import { ChartOfAccount } from "../models/ChartOfAccount.js";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeRefund } from "../models/FeeRefund.js";
 import { FiscalYear } from "../models/FiscalYear.js";
+import { GoshwaraVoucher } from "../models/GoshwaraVoucher.js";
 import { JournalEntry } from "../models/JournalEntry.js";
 import { Student } from "../models/Student.js";
 import { Vendor } from "../models/Vendor.js";
@@ -19,6 +22,9 @@ import { Year } from "../models/Year.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { AccountingSettings } from "../models/AccountingSettings.js";
+import { School } from "../models/School.js";
+import { Setting } from "../models/Setting.js";
+import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
@@ -26,7 +32,7 @@ import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
-import { getDefaultFiscalYearDates } from "../utils/fiscalYear.js";
+import { getDefaultFiscalYearDates, getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
 import {
   ensureDefaultChartOfAccounts,
   postFeeRefundJournal,
@@ -42,6 +48,15 @@ import {
   buildTrialBalance
 } from "../utils/accountingReports.js";
 import { recordCashEntry } from "../utils/accountingCashBook.js";
+import { formatAddressLine } from "../utils/formatAddress.js";
+import { collegeLogoExists, getCollegeLogoPath } from "../utils/collegeLogo.js";
+import { withTransaction } from "../utils/transaction.js";
+import {
+  buildExactGoshwaraVoucherHtml,
+  buildExactPdfDataFromJournal,
+  buildPdfDataFromVoucherRecord,
+  generateExactGoshwaraVoucherPDF
+} from "../utils/templates/goshwaraVoucherTemplate.js";
 
 export const listChartOfAccounts = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
@@ -126,8 +141,14 @@ export const reverseJournalEntryHandler = asyncHandler(async (req: Request, res:
   if (entry.isReversal) throw new ApiError(400, "Cannot reverse a reversal entry");
   if (entry.isReversed) throw new ApiError(400, "Journal entry has already been reversed");
 
-  // Domain-linked entries must be reversed via fee/expense void APIs (cash + operational docs)
-  if (entry.referenceType && entry.referenceType !== "Manual" && entry.referenceId) {
+  // Domain-linked entries must be reversed via fee/expense void APIs (cash + operational docs).
+  // Goshwara vouchers are reversed here and soft-deleted with the journal.
+  if (
+    entry.referenceType &&
+    entry.referenceType !== "Manual" &&
+    entry.referenceType !== "GoshwaraVoucher" &&
+    entry.referenceId
+  ) {
     throw new ApiError(
       400,
       `This journal is linked to ${entry.referenceType}. Reverse it from that module (void/reverse transaction) so cash book and source documents stay in sync.`
@@ -139,6 +160,19 @@ export const reverseJournalEntryHandler = asyncHandler(async (req: Request, res:
 
   const before = entry.toObject();
   await reverseJournalEntryById(schoolId, userId, entry._id);
+
+  if (entry.referenceType === "GoshwaraVoucher" && entry.referenceId) {
+    await GoshwaraVoucher.findOneAndUpdate(
+      { _id: entry.referenceId, schoolId },
+      { isDeleted: true }
+    );
+  } else {
+    await GoshwaraVoucher.findOneAndUpdate(
+      { journalEntryId: entry._id, schoolId },
+      { isDeleted: true }
+    );
+  }
+
   const updated = await JournalEntry.findById(entry._id).lean();
   await recordAudit(req, {
     action: "accounting.journal.reverse",
@@ -148,6 +182,374 @@ export const reverseJournalEntryHandler = asyncHandler(async (req: Request, res:
     after: { isReversed: true, reversed: updated }
   });
   return sendSuccess(res, "Journal entry reversed");
+});
+
+const resolveOfficeName = async (schoolId: import("mongoose").Types.ObjectId): Promise<{
+  officeName: string;
+  schoolName: string;
+  schoolNameNp?: string;
+  principalName?: string;
+  address?: string;
+  logoDataUri: string;
+}> => {
+  const [school, settings] = await Promise.all([
+    School.findById(schoolId).lean(),
+    Setting.findOne({ schoolId }).lean()
+  ]);
+  if (!school) throw new ApiError(404, "School not found");
+
+  // Prefer Nepali full institute name, then English — never leave blank.
+  const officeName =
+    (settings?.schoolNameNp || school.nameNp || settings?.schoolName || school.name || "").trim() ||
+    "पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी";
+
+  let logoDataUri = "";
+  if (collegeLogoExists()) {
+    try {
+      const buf = fs.readFileSync(getCollegeLogoPath());
+      logoDataUri = `data:image/png;base64,${buf.toString("base64")}`;
+    } catch {
+      logoDataUri = "";
+    }
+  }
+
+  return {
+    officeName,
+    schoolName: settings?.schoolName ?? school.name,
+    schoolNameNp: settings?.schoolNameNp ?? school.nameNp,
+    principalName: settings?.principalName ?? school.principalName,
+    address: formatAddressLine(settings?.address ?? school.address),
+    logoDataUri
+  };
+};
+
+const sendGoshwaraPdfResponse = async (
+  res: Response,
+  pdfData: import("../utils/templates/goshwaraVoucherTemplate.js").ExactGoshwaraVoucherPdfData,
+  schoolInfo: { name?: string; nameNp?: string; logo?: string },
+  filename: string,
+  format?: string
+) => {
+  if (String(format ?? "").toLowerCase() === "html") {
+    const html = buildExactGoshwaraVoucherHtml(pdfData, schoolInfo);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}.html"`);
+    res.send(html);
+    return;
+  }
+
+  const buffer = await generateExactGoshwaraVoucherPDF(pdfData, schoolInfo);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="${filename}.pdf"`);
+  res.setHeader("Content-Length", String(buffer.length));
+  res.send(buffer);
+};
+
+/**
+ * Download Goshwara Bhautchar (गोश्वारा भौचर / म.ले.प.का.नं. १०)
+ * for a journal entry. Query: ?format=html for printable HTML, default PDF.
+ */
+export const downloadGoshwaraVoucher = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const entry = await JournalEntry.findOne({ _id: req.params.id, schoolId, isDeleted: false }).lean();
+  if (!entry) throw new ApiError(404, "Journal entry not found");
+
+  const branding = await resolveOfficeName(schoolId);
+  const wantBlank = String(req.query.blank ?? "") === "1" || String(req.query.blank ?? "") === "true";
+
+  // Prefer linked Goshwara voucher user-entered fields (no school autofill)
+  const linkedVoucher = await GoshwaraVoucher.findOne({
+    schoolId,
+    journalEntryId: entry._id,
+    isDeleted: false
+  }).lean();
+
+  const pdfData = wantBlank
+    ? buildExactPdfDataFromJournal({
+        entry: {
+          voucherNumber: "",
+          dateBs: "",
+          narration: "",
+          lines: [],
+          totalDebitNpr: 0,
+          totalCreditNpr: 0
+        },
+        blankForm: true
+      })
+    : linkedVoucher
+      ? buildPdfDataFromVoucherRecord({
+          voucherNo: linkedVoucher.voucherNo,
+          dateBs: linkedVoucher.dateBs,
+          particulars: linkedVoucher.particulars,
+          govOfficeName: linkedVoucher.govOfficeName,
+          instituteName: linkedVoucher.instituteName,
+          addressLine: linkedVoucher.addressLine,
+          officeName: linkedVoucher.officeName,
+          printLines: linkedVoucher.printLines,
+          lines: linkedVoucher.lines.map((l) => ({
+            accountCode: l.accountCode,
+            accountName: l.accountName,
+            debitNpr: l.debitNpr ?? 0,
+            creditNpr: l.creditNpr ?? 0,
+            description: l.description
+          })),
+          totalAmount: linkedVoucher.totalAmount,
+          totalDebitNpr: linkedVoucher.totalDebitNpr,
+          totalCreditNpr: linkedVoucher.totalCreditNpr,
+          receiptNo: linkedVoucher.receiptNo,
+          receivedAmount: linkedVoucher.receivedAmount,
+          presenterName: linkedVoucher.presenterName,
+          presenterRank: linkedVoucher.presenterRank,
+          chequeNo: linkedVoucher.chequeNo,
+          chequeAmount: linkedVoucher.chequeAmount,
+          chequePresenter: linkedVoucher.chequePresenter,
+          chequeDate: linkedVoucher.chequeDate,
+          chequeRank: linkedVoucher.chequeRank,
+          amountInWords: linkedVoucher.amountInWords
+        })
+      : buildExactPdfDataFromJournal({
+          entry: {
+            voucherNumber: entry.voucherNumber,
+            dateBs: entry.dateBs,
+            narration: entry.narration,
+            lines: entry.lines.map((line) => ({
+              accountCode: line.accountCode,
+              accountName: line.accountName,
+              debitNpr: line.debitNpr ?? 0,
+              creditNpr: line.creditNpr ?? 0,
+              description: line.description ?? undefined
+            })),
+            totalDebitNpr: entry.totalDebitNpr,
+            totalCreditNpr: entry.totalCreditNpr
+          },
+          // Header blank unless user later edits — do not inject school name
+          govOfficeName: "",
+          instituteName: "",
+          addressLine: ""
+        });
+
+  const schoolInfo = {
+    name: branding.schoolName,
+    nameNp: branding.schoolNameNp,
+    logo: branding.logoDataUri
+  };
+
+  await recordAudit(req, {
+    action: "accounting.journal.goshwara_print",
+    entity: "JournalEntry",
+    entityId: entry._id.toString(),
+    after: { voucherNumber: entry.voucherNumber, format: req.query.format ?? "pdf", blank: wantBlank }
+  });
+
+  const safeName = `goshwara-${(entry.voucherNumber || "blank").replace(/[^\w.-]+/g, "_")}`;
+  await sendGoshwaraPdfResponse(res, pdfData, schoolInfo, safeName, String(req.query.format ?? ""));
+});
+
+/** List Goshwara voucher records */
+export const listGoshwaraVouchers = asyncHandler(async (req: Request, res: Response) => {
+  const filter: Record<string, unknown> = { ...withTenantScope(req), isDeleted: false };
+  if (typeof req.query.fiscalYearBs === "string") filter.fiscalYearBs = req.query.fiscalYearBs;
+  const vouchers = await GoshwaraVoucher.find(filter).sort({ dateBs: -1, createdAt: -1 }).limit(500);
+  return sendSuccess(res, "Goshwara vouchers fetched", vouchers);
+});
+
+/** Completely blank paper-style Goshwara form (no autofill) */
+export const downloadBlankGoshwaraForm = asyncHandler(async (_req: Request, res: Response) => {
+  await sendGoshwaraPdfResponse(res, { blankForm: true }, {}, "goshwara-blank", String(_req.query.format ?? ""));
+});
+
+/**
+ * Create Goshwara voucher + balanced journal entry (atomic when replica set available).
+ * All header fields are user-supplied — nothing is force-filled from school settings.
+ */
+export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Response) => {
+  const payload = goshwaraVoucherSchema.parse(req.body);
+  ensureValidBsDate(payload.dateBs);
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, payload.dateBs);
+  await ensureDefaultChartOfAccounts(schoolId);
+
+  const govOfficeName = (payload.govOfficeName || "").trim();
+  const instituteName = (payload.instituteName || "").trim();
+  const addressLine = (payload.addressLine || "").trim();
+  const manualVoucherNo = (payload.voucherNo || "").trim();
+
+  // Resolve account names from COA when missing
+  const codes = [...new Set(payload.lines.map((l) => l.accountCode))];
+  const accounts = await ChartOfAccount.find({ schoolId, code: { $in: codes } }).lean();
+  const nameByCode = new Map(accounts.map((a) => [a.code, a.name]));
+
+  const lines = payload.lines.map((line) => ({
+    accountCode: line.accountCode,
+    accountName: line.accountName || nameByCode.get(line.accountCode) || line.accountCode,
+    debitNpr: line.debitNpr ?? 0,
+    creditNpr: line.creditNpr ?? 0,
+    description: line.description || payload.particulars
+  }));
+
+  const totalDebitNpr = lines.reduce((s, l) => s + l.debitNpr, 0);
+  const totalCreditNpr = lines.reduce((s, l) => s + l.creditNpr, 0);
+
+  const printLines = (payload.printLines ?? [])
+    .map((l) => ({
+      sn: (l.sn || "").trim(),
+      particulars: (l.particulars || "").trim(),
+      account: (l.account || "").trim(),
+      ledgerNo: (l.ledgerNo || "").trim(),
+      debit: l.debit && l.debit > 0 ? l.debit : undefined,
+      credit: l.credit && l.credit > 0 ? l.credit : undefined
+    }))
+    .filter((l) => l.particulars || l.account || l.ledgerNo || l.debit || l.credit);
+
+  try {
+    const result = await withTransaction(async (session) => {
+      const journal = await postJournalEntry({
+        schoolId,
+        userId,
+        dateBs: payload.dateBs,
+        narration: payload.particulars,
+        lines,
+        voucherType: payload.voucherType,
+        voucherNumber: manualVoucherNo || undefined,
+        referenceType: "GoshwaraVoucher",
+        session
+      });
+
+      const settingsQuery = AccountingSettings.findOne({ schoolId });
+      if (session) settingsQuery.session(session);
+      const settings = await settingsQuery.lean();
+      const fiscalYearBs = getFiscalYearFromBsDate(payload.dateBs, settings?.currentFiscalYearBs);
+
+      const created = await GoshwaraVoucher.create(
+        [
+          {
+            schoolId,
+            voucherNo: journal.voucherNumber,
+            voucherType: payload.voucherType ?? "JOURNAL",
+            dateBs: payload.dateBs,
+            fiscalYearBs,
+            particulars: payload.particulars,
+            govOfficeName,
+            instituteName,
+            addressLine,
+            officeName: instituteName || govOfficeName,
+            printLines,
+            receiptNo: (payload.receiptNo || "").trim(),
+            receivedAmount: (payload.receivedAmount || "").trim(),
+            presenterName: (payload.presenterName || "").trim(),
+            presenterRank: (payload.presenterRank || "").trim(),
+            chequeNo: (payload.chequeNo || "").trim(),
+            chequeAmount: (payload.chequeAmount || "").trim(),
+            chequePresenter: (payload.chequePresenter || "").trim(),
+            chequeDate: (payload.chequeDate || "").trim(),
+            chequeRank: (payload.chequeRank || "").trim(),
+            amountInWords: (payload.amountInWords || "").trim(),
+            lines,
+            totalAmount: totalDebitNpr,
+            totalDebitNpr,
+            totalCreditNpr,
+            journalEntryId: journal._id,
+            createdBy: userId
+          }
+        ],
+        session ? { session } : undefined
+      );
+      const voucher = created[0];
+      if (!voucher) {
+        throw new ApiError(500, "Failed to create Goshwara voucher");
+      }
+
+      journal.referenceId = voucher._id;
+      await journal.save(session ? { session } : undefined);
+
+      return { voucher, journal };
+    });
+
+    await recordAudit(req, {
+      action: "accounting.goshwara.create",
+      entity: "GoshwaraVoucher",
+      entityId: result.voucher._id.toString(),
+      after: { voucher: result.voucher, journalEntryId: result.journal._id.toString() }
+    });
+
+    return sendSuccess(
+      res,
+      "Goshwara voucher created",
+      { voucher: result.voucher, journalEntry: result.journal },
+      201
+    );
+  } catch (error) {
+    if (error instanceof Error && /already exists/i.test(error.message)) {
+      throw new ApiError(409, error.message);
+    }
+    throw error;
+  }
+});
+
+/** Print Goshwara voucher PDF by voucher id */
+export const downloadGoshwaraVoucherById = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const voucher = await GoshwaraVoucher.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  }).lean();
+  if (!voucher) throw new ApiError(404, "Goshwara voucher not found");
+
+  const branding = await resolveOfficeName(schoolId);
+  const wantBlank = String(req.query.blank ?? "") === "1" || String(req.query.blank ?? "") === "true";
+
+  const pdfData = wantBlank
+    ? { blankForm: true as const }
+    : buildPdfDataFromVoucherRecord({
+        voucherNo: voucher.voucherNo,
+        dateBs: voucher.dateBs,
+        particulars: voucher.particulars,
+        govOfficeName: voucher.govOfficeName,
+        instituteName: voucher.instituteName,
+        addressLine: voucher.addressLine,
+        officeName: voucher.officeName,
+        printLines: voucher.printLines,
+        lines: voucher.lines.map((l) => ({
+          accountCode: l.accountCode,
+          accountName: l.accountName,
+          debitNpr: l.debitNpr ?? 0,
+          creditNpr: l.creditNpr ?? 0,
+          description: l.description
+        })),
+        totalAmount: voucher.totalAmount,
+        totalDebitNpr: voucher.totalDebitNpr,
+        totalCreditNpr: voucher.totalCreditNpr,
+        receiptNo: voucher.receiptNo,
+        receivedAmount: voucher.receivedAmount,
+        presenterName: voucher.presenterName,
+        presenterRank: voucher.presenterRank,
+        chequeNo: voucher.chequeNo,
+        chequeAmount: voucher.chequeAmount,
+        chequePresenter: voucher.chequePresenter,
+        chequeDate: voucher.chequeDate,
+        chequeRank: voucher.chequeRank,
+        amountInWords: voucher.amountInWords
+      });
+
+  const schoolInfo = {
+    name: branding.schoolName,
+    nameNp: branding.schoolNameNp,
+    logo: branding.logoDataUri
+  };
+
+  await recordAudit(req, {
+    action: "accounting.goshwara.print",
+    entity: "GoshwaraVoucher",
+    entityId: voucher._id.toString(),
+    after: { voucherNo: voucher.voucherNo, format: req.query.format ?? "pdf" }
+  });
+
+  const safeName = `goshwara-${voucher.voucherNo.replace(/[^\w.-]+/g, "_")}`;
+  await sendGoshwaraPdfResponse(res, pdfData, schoolInfo, safeName, String(req.query.format ?? ""));
 });
 
 export const listVendors = asyncHandler(async (req: Request, res: Response) => {

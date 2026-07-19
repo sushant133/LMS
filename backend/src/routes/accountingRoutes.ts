@@ -55,12 +55,17 @@ import {
   createChartOfAccount,
   createFeeRefund,
   createFiscalYear,
+  createGoshwaraVoucher,
   createJournalEntry,
   createVendor,
+  downloadBlankGoshwaraForm,
+  downloadGoshwaraVoucher,
+  downloadGoshwaraVoucherById,
   generateLedgerReport,
   listChartOfAccounts,
   listFeeRefunds,
   listFiscalYears,
+  listGoshwaraVouchers,
   listJournalEntries,
   listVendors,
   reverseJournalEntryHandler,
@@ -164,6 +169,33 @@ router.put("/chart-of-accounts/:id", admins, requireAccountingPermission("manage
 router.get("/journal-entries", readers, requireAccountingPermission("read"), listJournalEntries);
 router.post("/journal-entries", managers, requireAccountingPermission("manage_journal"), createJournalEntry);
 router.post("/journal-entries/:id/reverse", managers, requireAccountingPermission("reverse_transaction"), reverseJournalEntryHandler);
+router.get(
+  "/journal-entries/:id/goshwara-voucher",
+  readers,
+  requireAccountingPermission("read"),
+  downloadGoshwaraVoucher
+);
+
+// Goshwara vouchers (create → Voucher record + JournalEntry)
+router.get("/goshwara-vouchers", readers, requireAccountingPermission("read"), listGoshwaraVouchers);
+router.get(
+  "/goshwara-vouchers/blank-form",
+  readers,
+  requireAccountingPermission("read"),
+  downloadBlankGoshwaraForm
+);
+router.post(
+  "/goshwara-vouchers",
+  managers,
+  requireAccountingPermission("manage_journal"),
+  createGoshwaraVoucher
+);
+router.get(
+  "/goshwara-vouchers/:id/pdf",
+  readers,
+  requireAccountingPermission("read"),
+  downloadGoshwaraVoucherById
+);
 
 // Vendors
 router.get("/vendors", readers, requireAccountingPermission("read"), listVendors);

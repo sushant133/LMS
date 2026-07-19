@@ -10,6 +10,7 @@ import type {
   YearRecord,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
+import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { LoadingState } from "components/shared/LoadingState";
 import { useAuth } from "features/auth/AuthProvider";
@@ -18,6 +19,8 @@ import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
+  toastCredentialUpdateResult,
+  toastResendCredentials,
   type CredentialsEmailResult,
 } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
@@ -32,6 +35,22 @@ import {
   countPendingRequiredDocuments,
   type PendingStudentDocument,
 } from "./studentDocumentUtils";
+
+type StudentWriteResult =
+  | {
+      student: StudentRecord;
+      loginEmail: string;
+      defaultPassword?: string;
+      credentialsEmail?: CredentialsEmailResult;
+      credentialsChanged?: boolean;
+    }
+  | {
+      student: StudentRecord;
+      loginEmail?: string;
+      defaultPassword?: string;
+      credentialsEmail?: CredentialsEmailResult;
+      credentialsChanged?: boolean;
+    };
 
 export const CreateStudentManager = () => {
   const { user } = useAuth();
@@ -76,23 +95,20 @@ export const CreateStudentManager = () => {
   const studentMutation = useMutation({
     mutationFn: async (payload: StudentInput) =>
       editing
-        ? unwrap<StudentRecord>(api.put(`/students/${editing._id}`, payload))
-        : unwrap<{
-            student: StudentRecord;
-            loginEmail: string;
-            defaultPassword: string;
-            credentialsEmail?: CredentialsEmailResult;
-          }>(api.post("/students", payload)),
+        ? unwrap<StudentWriteResult>(api.put(`/students/${editing._id}`, payload))
+        : unwrap<StudentWriteResult>(api.post("/students", payload)),
     onSuccess: async (data) => {
-      if ("loginEmail" in data) {
+      if (editing) {
+        toastCredentialUpdateResult(data, {
+          successTitle: "Student updated — credentials emailed",
+          noCredentialChangeTitle: "Student updated successfully",
+        });
+      } else {
         toastCredentialCreateResult(data, {
           successTitle: "Student created successfully",
         });
-      } else {
-        toast.success("Student updated");
       }
-      const profileStudentId =
-        "loginEmail" in data ? data.student._id : data._id;
+      const profileStudentId = data.student._id;
       setEditing(null);
       setPendingDocuments([]);
       await queryClient.invalidateQueries({ queryKey: ["students"] });
@@ -101,6 +117,10 @@ export const CreateStudentManager = () => {
       });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const resendCredentialsMutation = useMutation({
+    mutationFn: async (userId: string) => toastResendCredentials(userId),
   });
 
   const isLoading = isCollege
@@ -127,10 +147,41 @@ export const CreateStudentManager = () => {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>
-          {editing ? "Edit Student" : "New Student Registration"}
-        </CardTitle>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div>
+          <CardTitle>
+            {editing ? "Edit Student" : "New Student Registration"}
+          </CardTitle>
+          {editing ? (
+            <p className="mt-1 text-sm text-slate-600">
+              Changing Login ID or password emails the student their new access
+              details. You can also resend credentials without editing other
+              fields.
+            </p>
+          ) : null}
+        </div>
+        {editing?.user?._id ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={resendCredentialsMutation.isPending}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  `Resend login credentials to ${editing.user.fullName} (${editing.user.email})?\n\nA new password will be generated and emailed to the student.`,
+                )
+              ) {
+                return;
+              }
+              void resendCredentialsMutation.mutateAsync(editing.user._id);
+            }}
+          >
+            {resendCredentialsMutation.isPending
+              ? "Sending..."
+              : "Resend credentials"}
+          </Button>
+        ) : null}
       </CardHeader>
       <CardContent>
         <StudentForm
@@ -161,11 +212,7 @@ export const CreateStudentManager = () => {
             const wasEditing = Boolean(editing);
             const queuedDocs = pendingDocuments;
             const result = await studentMutation.mutateAsync(value);
-            if (
-              !wasEditing &&
-              queuedDocs.length > 0 &&
-              "student" in result
-            ) {
+            if (!wasEditing && queuedDocs.length > 0) {
               await uploadPendingDocuments(
                 result.student._id,
                 queuedDocs,
@@ -178,7 +225,7 @@ export const CreateStudentManager = () => {
                 queryKey: ["student-profile", result.student._id],
               });
             }
-            if (!wasEditing && "student" in result) {
+            if (!wasEditing) {
               // Remaining required docs after any queued uploads stay PENDING
               const uploadedTypes = new Set(queuedDocs.map((d) => d.type));
               const docsAfterCreate = (result.student.documents ?? []).map(

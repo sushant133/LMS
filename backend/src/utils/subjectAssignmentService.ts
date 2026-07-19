@@ -697,6 +697,80 @@ export const endSubjectAssignment = async (
   });
 };
 
+/**
+ * Permanently remove a subject assignment row.
+ * ACTIVE rows re-validate remaining coverage and refresh Subject.teacherIds cache.
+ * ENDED/SUPERSEDED rows are removed for cleanup only.
+ */
+export const deleteSubjectAssignment = async (
+  req: Request,
+  id: string
+): Promise<{ row: Record<string, unknown>; warnings: string[] }> => {
+  const schoolId = new mongoose.Types.ObjectId(String(req.tenantSchoolId));
+
+  return withTransaction(async (session) => {
+    const existing = await SubjectAssignment.findOne({ _id: id, schoolId }).session(session);
+    if (!existing) {
+      throw new ApiError(404, "Subject assignment not found");
+    }
+
+    const warnings: string[] = [];
+    const wasActive = existing.status === "ACTIVE";
+    const subjectId = existing.subjectId;
+    const teacherId = existing.teacherId;
+
+    if (wasActive) {
+      const institutionType = await getInstitutionType(req);
+      const college = isCollege(institutionType);
+      const group: GroupKeys = {
+        classId: existing.classId?.toString() ?? null,
+        sectionId: existing.sectionId?.toString() ?? null,
+        batchId: existing.batchId?.toString() ?? null,
+        yearId: existing.yearId?.toString() ?? null
+      };
+
+      const siblings = await loadActiveSet(
+        schoolId,
+        existing.academicYearBs,
+        existing.subjectId.toString(),
+        group,
+        college,
+        session
+      );
+      const merged = siblings.map(toDraft).filter((r) => r._id !== existing._id.toString());
+      const maxUnit = await resolveMaxUnit(
+        schoolId,
+        existing.academicYearBs,
+        existing.subjectId.toString(),
+        group,
+        college
+      );
+      warnings.push(...validateMergedActiveSet(merged, { maxUnit, allowExceedMaxUnit: true }));
+    }
+
+    // Clear audit links pointing at this row
+    await SubjectAssignment.updateMany(
+      { schoolId, supersedesAssignmentId: existing._id },
+      { $set: { supersedesAssignmentId: null } },
+      getSessionOption(session)
+    );
+    await SubjectAssignment.updateMany(
+      { schoolId, supersededByAssignmentId: existing._id },
+      { $set: { supersededByAssignmentId: null } },
+      getSessionOption(session)
+    );
+
+    const snapshot = serializeAssignment(existing.toObject() as Record<string, unknown>)!;
+    await existing.deleteOne(getSessionOption(session));
+
+    if (wasActive) {
+      await pullTeacherFromSubjectCacheIfUnused(schoolId, subjectId, teacherId, session);
+    }
+
+    return { row: snapshot, warnings };
+  });
+};
+
 export const reassignSubjectAssignment = async (
   req: Request,
   id: string,

@@ -97,9 +97,11 @@ import {
 } from "./accountingFormUtils";
 import { AccountingDashboardCharts } from "./AccountingDashboardCharts";
 import { ChartOfAccountsPanel } from "./ChartOfAccountsPanel";
-import { FeeRefundsPanel } from "./FeeRefundsPanel";
 import { JournalEntriesPanel } from "./JournalEntriesPanel";
 import { VendorsPanel } from "./VendorsPanel";
+import { StudentFeeRecordsPanel } from "./StudentFeeRecordsPanel";
+import { SalaryPaymentRecordsPanel } from "./SalaryPaymentRecordsPanel";
+import { RefundRecordsPanel } from "./RefundRecordsPanel";
 import { useAuth } from "features/auth/AuthProvider";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -118,11 +120,9 @@ import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 
 type Tab =
   | "dashboard"
-  | "fee-collection"
-  | "receipts"
-  | "refunds"
-  | "student-accounts"
-  | "salaries"
+  | "fee-records"
+  | "salary-records"
+  | "refund-records"
   | "purchases"
   | "expenses"
   | "income"
@@ -138,11 +138,9 @@ type Tab =
 
 const accountingTabs: Tab[] = [
   "dashboard",
-  "fee-collection",
-  "receipts",
-  "refunds",
-  "student-accounts",
-  "salaries",
+  "fee-records",
+  "salary-records",
+  "refund-records",
   "purchases",
   "expenses",
   "income",
@@ -164,11 +162,9 @@ const tabs: Array<{
   adminOnly?: boolean;
 }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "fee-collection", label: "Fee Collection", icon: Wallet },
-  { id: "receipts", label: "Fee Receipts", icon: Receipt },
-  { id: "refunds", label: "Refunds", icon: RotateCcw },
-  { id: "student-accounts", label: "Student Accounts", icon: Users },
-  { id: "salaries", label: "Salary Management", icon: Banknote },
+  { id: "fee-records", label: "Student Fee Records", icon: Receipt },
+  { id: "salary-records", label: "Salary Payment Records", icon: Banknote },
+  { id: "refund-records", label: "Refund Records", icon: RotateCcw },
   { id: "purchases", label: "Purchases", icon: ShoppingCart },
   { id: "expenses", label: "Expenses", icon: TrendingDown },
   { id: "income", label: "Income", icon: TrendingUp },
@@ -393,17 +389,16 @@ export const AccountingManager = () => {
         studentId: studentIdParam,
       }));
       if (!tabParam) {
-        setTab("student-accounts");
+        setTab("fee-records");
       }
     }
   }, [searchParams]);
 
   const cashierTabs: Tab[] = [
     "dashboard",
-    "fee-collection",
-    "receipts",
-    "student-accounts",
-    "refunds",
+    "fee-records",
+    "refund-records",
+    "reports",
   ];
   const visibleTabs = tabs
     .filter((item) => !item.adminOnly || isAdmin)
@@ -417,8 +412,10 @@ export const AccountingManager = () => {
           "reports",
           "approvals",
           "audit-logs",
-          "student-accounts",
-          "receipts",
+          "fee-records",
+          "salary-records",
+          "refund-records",
+          "journal-entries",
         ].includes(item.id),
     );
 
@@ -462,14 +459,14 @@ export const AccountingManager = () => {
     queryKey: ["accounting-receipts"],
     queryFn: () =>
       unwrap<EnhancedFeeCollectionRecord[]>(api.get("/accounting/receipts")),
-    enabled: tab === "receipts" || tab === "fee-collection",
+    enabled: false,
   });
 
   const studentAccountsQuery = useQuery({
     queryKey: ["accounting-student-accounts"],
     queryFn: () =>
       unwrap<StudentAccountSummary[]>(api.get("/accounting/student-accounts")),
-    enabled: tab === "student-accounts" || tab === "fee-collection",
+    enabled: false,
   });
 
   const expensesQuery = useQuery({
@@ -497,14 +494,14 @@ export const AccountingManager = () => {
     queryKey: ["accounting-salaries"],
     queryFn: () =>
       unwrap<SalaryPaymentRecord[]>(api.get("/accounting/salaries")),
-    enabled: tab === "salaries",
+    enabled: false,
   });
 
   const salaryEmployeesQuery = useQuery({
     queryKey: ["accounting-salary-employees"],
     queryFn: () =>
       unwrap<SalaryEmployeesResponse>(api.get("/accounting/salary-employees")),
-    enabled: tab === "salaries",
+    enabled: false,
   });
 
   const cashBookQuery = useQuery({
@@ -587,7 +584,7 @@ export const AccountingManager = () => {
           `/accounting/student-accounts/${selectedStudentId}/financial-history`,
         ),
       ),
-    enabled: Boolean(selectedStudentId) && tab === "student-accounts",
+    enabled: false,
   });
 
   const invalidateAccounting = async () => {
@@ -979,7 +976,7 @@ export const AccountingManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Accounting & Finance"
-        description="Fee collection, salaries, expenses, purchases, income, cash book, and financial reports."
+        description="Fee, salary & refund records, purchases, expenses, income, cash book, journals, and financial reports."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -1162,7 +1159,12 @@ export const AccountingManager = () => {
         )
       ) : null}
 
-      {tab === "fee-collection" ? (
+      {tab === "fee-records" ? <StudentFeeRecordsPanel /> : null}
+      {tab === "salary-records" ? <SalaryPaymentRecordsPanel /> : null}
+      {tab === "refund-records" ? <RefundRecordsPanel /> : null}
+
+      {/* Legacy fee-collection UI disabled — replaced by Student Fee Records */}
+      {false && tab === "fee-records" ? (
         <div className="grid gap-6 xl:grid-cols-2">
           {isAdmin ? (
             <Card>
@@ -1474,7 +1476,7 @@ export const AccountingManager = () => {
                     Previous Due:{" "}
                     <strong>
                       {formatCurrencyNpr(
-                        selectedStudentAccount.remainingDueNpr,
+                        selectedStudentAccount?.remainingDueNpr ?? 0,
                       )}
                     </strong>
                     {selectedStructure ? (
@@ -1482,7 +1484,7 @@ export const AccountingManager = () => {
                         {" "}
                         · Current Charge:{" "}
                         <strong>
-                          {formatCurrencyNpr(selectedStructure.amountNpr)}
+                          {formatCurrencyNpr(selectedStructure?.amountNpr ?? 0)}
                         </strong>
                       </>
                     ) : null}
@@ -1608,7 +1610,7 @@ export const AccountingManager = () => {
         </div>
       ) : null}
 
-      {tab === "receipts" ? (
+      {false ? (
         <Card>
           <CardHeader>
             <CardTitle>Fee Receipts</CardTitle>
@@ -1692,7 +1694,7 @@ export const AccountingManager = () => {
         </Card>
       ) : null}
 
-      {tab === "student-accounts" ? (
+      {false ? (
         <div className="grid gap-6 xl:grid-cols-2">
           <Card>
             <CardHeader>
@@ -1783,7 +1785,7 @@ export const AccountingManager = () => {
                     Outstanding:{" "}
                     <strong>
                       {formatCurrencyNpr(
-                        Number(studentHistoryQuery.data.outstandingDueNpr),
+                        Number(studentHistoryQuery.data?.outstandingDueNpr ?? 0),
                       )}
                     </strong>
                   </div>
@@ -1791,15 +1793,15 @@ export const AccountingManager = () => {
                     Total Paid:{" "}
                     <strong>
                       {formatCurrencyNpr(
-                        Number(studentHistoryQuery.data.totalPaidNpr),
+                        Number(studentHistoryQuery.data?.totalPaidNpr ?? 0),
                       )}
                     </strong>
                   </div>
                 </div>
                 {(
-                  (studentHistoryQuery.data.collections as Array<
+                  ((studentHistoryQuery.data?.collections as Array<
                     Record<string, unknown>
-                  >) ?? []
+                  >) ?? [])
                 ).map((c) => (
                   <div
                     key={String(c._id)}
@@ -1818,7 +1820,7 @@ export const AccountingManager = () => {
         </div>
       ) : null}
 
-      {tab === "salaries" ? (
+      {false ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
@@ -3051,11 +3053,6 @@ export const AccountingManager = () => {
         </Card>
       ) : null}
 
-      {tab === "refunds" ? (
-        <FeeRefundsPanel
-          canWrite={canWrite && ACCOUNTING_MANAGER_ROLES.includes(user.role)}
-        />
-      ) : null}
       {tab === "chart-of-accounts" ? (
         <ChartOfAccountsPanel isAdmin={isAdmin} />
       ) : null}

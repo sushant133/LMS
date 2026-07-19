@@ -12,6 +12,7 @@ import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { recordAudit } from "../utils/audit.js";
 import {
   buildCredentialsAdminMessage,
+  buildPortalCredentialsUpdatedMessage,
   notifyAccountCredentials,
   resolvePortalPassword
 } from "../utils/credentialEmail.js";
@@ -315,7 +316,7 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     }
   }
 
-  await updatePortalUser(student.user, {
+  const portalUpdate = await updatePortalUser(student.user, {
     fullName,
     email: loginEmail,
     phone: payload.phone,
@@ -388,10 +389,67 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     action: "student.update",
     entity: "Student",
     entityId: student._id.toString(),
-    after: { admissionNumber: student.admissionNumber, fullName }
+    after: {
+      admissionNumber: student.admissionNumber,
+      fullName,
+      loginIdChanged: portalUpdate.loginIdChanged,
+      passwordChanged: portalUpdate.passwordChanged
+    }
   });
 
-  return sendSuccess(res, "Student updated successfully", student);
+  /**
+   * When login ID and/or password change, email the student their new access details.
+   * Password is only included when the admin set a new one (hashed passwords cannot be recovered).
+   * If only the login ID changed, a fresh password is generated so both can be emailed.
+   */
+  const credentialsChanged = portalUpdate.loginIdChanged || portalUpdate.passwordChanged;
+  let credentialsEmail: Awaited<ReturnType<typeof notifyAccountCredentials>> | undefined;
+  let emailedPassword: string | undefined;
+
+  if (credentialsChanged) {
+    if (portalUpdate.passwordChanged && portalUpdate.password) {
+      emailedPassword = portalUpdate.password;
+    } else if (portalUpdate.loginIdChanged) {
+      // Login ID moved — issue a new password so we can send a complete access email
+      const user = await User.findById(student.user);
+      if (user) {
+        const { password: generated } = resolvePortalPassword(undefined);
+        user.password = generated;
+        user.mustChangePassword = true;
+        await user.save();
+        emailedPassword = generated;
+      }
+    }
+
+    if (emailedPassword) {
+      credentialsEmail = await notifyAccountCredentials({
+        userId: student.user.toString(),
+        fullName,
+        email: portalUpdate.email,
+        password: emailedPassword,
+        schoolId: schoolId.toString(),
+        req,
+        emailType: "PASSWORD_RESET",
+        accountKind: "STUDENT"
+      });
+    }
+  }
+
+  if (credentialsChanged && credentialsEmail) {
+    return sendSuccess(res, buildPortalCredentialsUpdatedMessage(credentialsEmail, "STUDENT"), {
+      student,
+      loginEmail: portalUpdate.email,
+      // Only return plaintext password when delivery failed (admin must share manually)
+      ...(credentialsEmail.sent ? {} : { defaultPassword: emailedPassword }),
+      credentialsEmail,
+      credentialsChanged: true
+    });
+  }
+
+  return sendSuccess(res, "Student updated successfully", {
+    student,
+    credentialsChanged: false
+  });
 });
 
 /**

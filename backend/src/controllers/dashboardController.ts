@@ -331,19 +331,9 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   const highlights: DashboardHighlight[] = [];
 
   if (adminLike) {
+    // Outstanding student fees widget removed from Admin dashboard (PHIT simplified accounting).
+    // Balances remain on Student Profile / Student Fee Records.
     highlights.push(
-      {
-        label: "Outstanding student fees",
-        value: `NPR ${pendingFeesTotalNpr.toLocaleString("en-NP")}`,
-        href: "/accounting",
-        tone: pendingFeesTotalNpr > 0 ? "warning" : "success"
-      },
-      {
-        label: "Students with fee dues",
-        value: `${studentsWithDueFees} student${studentsWithDueFees === 1 ? "" : "s"}`,
-        action: "fee-dues",
-        tone: studentsWithDueFees > 0 ? "warning" : "default"
-      },
       {
         label: "Latest notices published",
         value: `${noticeCount} active`,

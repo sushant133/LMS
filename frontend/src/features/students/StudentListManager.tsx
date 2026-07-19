@@ -34,6 +34,7 @@ import {
   getAcademicLabels,
 } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
+import { toastResendCredentials } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { Badge } from "components/ui/badge";
@@ -93,6 +94,10 @@ export const StudentListManager = () => {
       await queryClient.invalidateQueries({ queryKey: ["students"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const resendCredentialsMutation = useMutation({
+    mutationFn: async (userId: string) => toastResendCredentials(userId),
   });
 
   const classes = isTeacher
@@ -476,6 +481,27 @@ export const StudentListManager = () => {
                             >
                               Edit
                             </Button>
+                            {student.user?._id ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={resendCredentialsMutation.isPending}
+                                onClick={() => {
+                                  if (
+                                    !window.confirm(
+                                      `Resend login credentials to ${displayName} (${student.user.email})?\n\nA new password will be generated and emailed to the student.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  void resendCredentialsMutation.mutateAsync(
+                                    student.user._id,
+                                  );
+                                }}
+                              >
+                                Resend credentials
+                              </Button>
+                            ) : null}
                             <Button
                               variant="destructive"
                               size="sm"

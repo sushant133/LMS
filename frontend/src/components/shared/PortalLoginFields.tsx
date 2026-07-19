@@ -9,6 +9,8 @@ interface PortalLoginFieldsProps {
   onConfirmPasswordChange: (confirmPassword: string) => void;
   onEmailChange?: (email: string) => void;
   showReset?: boolean;
+  /** Optional extra guidance (e.g. student edit: credentials will be re-emailed). */
+  credentialsHint?: string;
 }
 
 export const PortalLoginFields = ({
@@ -18,12 +20,16 @@ export const PortalLoginFields = ({
   onPasswordChange,
   onConfirmPasswordChange,
   onEmailChange,
-  showReset = true
+  showReset = true,
+  credentialsHint
 }: PortalLoginFieldsProps) => (
   <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
     <p className="text-sm font-semibold text-brand-950">Portal login</p>
     {!showReset ? (
       <p className="mt-1 text-xs text-brand-800">Leave password blank to keep the current login password.</p>
+    ) : null}
+    {credentialsHint ? (
+      <p className="mt-1 text-xs text-brand-800">{credentialsHint}</p>
     ) : null}
     <div className="mt-4 grid gap-4 md:grid-cols-2">
       <FormField label="Login ID">

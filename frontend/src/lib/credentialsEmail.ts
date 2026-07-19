@@ -126,3 +126,48 @@ export const toastAdminCredentialsUpdated = (
       : undefined
   });
 };
+
+/**
+ * Feedback after student/teacher portal login ID and/or password was updated and re-emailed.
+ */
+export const toastCredentialUpdateResult = (
+  data: CredentialCreatePayload & { credentialsChanged?: boolean },
+  options?: { successTitle?: string; noCredentialChangeTitle?: string }
+): void => {
+  if (!data.credentialsChanged && !data.credentialsEmail) {
+    toast.success(options?.noCredentialChangeTitle ?? "Updated successfully");
+    return;
+  }
+
+  const emailResult = data.credentialsEmail;
+  const email = emailResult?.email ?? data.loginEmail;
+  const title = options?.successTitle ?? "Login details updated";
+
+  if (emailResult?.sent) {
+    toast.success(title, {
+      description: `Updated login credentials have been sent to: ${email}`
+    });
+    return;
+  }
+
+  if (emailResult) {
+    const passwordHint = data.defaultPassword
+      ? `\nLogin ID: ${data.loginEmail ?? email}\nPassword: ${data.defaultPassword}`
+      : data.loginEmail
+        ? `\nLogin ID: ${data.loginEmail}`
+        : "";
+    toast.warning(title, {
+      description: `Credential email could not be delivered.\nReason: ${emailResult.error ?? "Unknown error"}${passwordHint}`,
+      duration: 15_000
+    });
+    return;
+  }
+
+  toast.success(title, {
+    description: data.loginEmail
+      ? data.defaultPassword
+        ? `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
+        : `Login ID: ${data.loginEmail}`
+      : undefined
+  });
+};

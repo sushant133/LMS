@@ -36,6 +36,7 @@ const journalEntrySchema = new Schema(
         "AccountingPurchase",
         "SalaryPayment",
         "CashBookEntry",
+        "GoshwaraVoucher",
         "Manual"
       ]
     },

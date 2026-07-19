@@ -1,5 +1,4 @@
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
@@ -44,7 +43,6 @@ import {
 } from "lib/auth";
 import { AcademicCalendarWidgets } from "features/dashboard/AcademicCalendarWidgets";
 import { DashboardSchedulePanels } from "features/dashboard/DashboardSchedulePanels";
-import { FeeDuesPanel } from "features/dashboard/FeeDuesPanel";
 import { DashboardBannerPopup } from "features/notices/DashboardBannerPopup";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
 import { applyNotificationReadLocally, invalidateNotificationQueries } from "lib/notificationQueries";
@@ -541,7 +539,6 @@ export const DashboardPage = () => {
   const { t } = useTranslation();
   const { user, activeSchoolId, availableSchools } = useAuth();
   const { unreadCount: liveUnreadCount } = useNotificationBadge();
-  const [feeDuesOpen, setFeeDuesOpen] = useState(false);
   const dashboardQuery = useQuery({
     queryKey: ["dashboard", activeSchoolId],
     queryFn: () => unwrap<DashboardResponse>(api.get("/dashboard")),
@@ -735,11 +732,13 @@ export const DashboardPage = () => {
   const isCollegeAdmin = hasInstitutionAccess(user.role);
   const isTeacher = user.role === "TEACHER";
 
-  const handleHighlightAction = (action: NonNullable<DashboardHighlight["action"]>) => {
-    if (action === "fee-dues") {
-      setFeeDuesOpen(true);
-    }
-  };
+  // Filter out removed outstanding-fee admin widgets (balances live on student profile / fee records)
+  const highlights = (data.highlights ?? []).filter(
+    (h) =>
+      h.action !== "fee-dues" &&
+      !/outstanding student fees/i.test(h.label) &&
+      !/students with fee dues/i.test(h.label),
+  );
 
   return (
     <PageContent className="space-y-6">
@@ -748,7 +747,7 @@ export const DashboardPage = () => {
         title={`${t("dashboard")} · ${roleLabel}`}
         description={
           isCollegeAdmin
-            ? "Institution-wide overview with student volume, fee health, attendance trends, notices, and the latest operational alerts."
+            ? "Institution-wide overview with student volume, attendance trends, notices, and the latest operational alerts."
             : isTeacher
               ? user.designation?.trim()
                 ? `Signed in as ${user.designation.trim()}. Your teaching command center for classes, attendance, assignments, exams, and college communication.`
@@ -765,15 +764,14 @@ export const DashboardPage = () => {
       <StatGrid stats={statsWithLiveUnread} />
       <AcademicCalendarWidgets />
       <DashboardSchedulePanels />
-      <HighlightsRow highlights={data.highlights} onAction={isCollegeAdmin ? handleHighlightAction : undefined} />
-      <FeeDuesPanel open={feeDuesOpen && isCollegeAdmin} onClose={() => setFeeDuesOpen(false)} />
+      <HighlightsRow highlights={highlights} />
 
       {isCollegeAdmin ? (
         <QuickActions
           actions={[
             { label: "Students", href: "/students" },
             { label: "Attendance", href: "/attendance-view" },
-            { label: "Fee Collection", href: "/accounting" },
+            { label: "Financial Records", href: "/accounting" },
             { label: "Exams & Results", href: "/exams-view" },
             { label: "Timetable", href: "/timetable" },
             { label: "IEMIS Reports", href: "/reports" },

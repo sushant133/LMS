@@ -88,6 +88,31 @@ export const downloadReportExcel = (
   saveAs(blob, `${safeLabel}_${reportType}.xlsx`);
 };
 
+/** Generic Excel export for record tables (not typed accounting report columns). */
+export const downloadRecordsExcel = (
+  filename: string,
+  rows: Array<Record<string, unknown>>,
+): void => {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]!);
+  const sheet = XLSX.utils.aoa_to_sheet([
+    headers,
+    ...rows.map((row) => headers.map((h) => {
+      const v = row[h];
+      if (v === null || v === undefined) return "";
+      return v as string | number | boolean;
+    })),
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Records");
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const safe = filename.replace(/[^\w-]+/g, "_").replace(/_+/g, "_");
+  saveAs(blob, `${safe}.xlsx`);
+};
+
 export const downloadFinancialSummaryExcel = (
   report: FinancialSummaryReport,
 ): void => {

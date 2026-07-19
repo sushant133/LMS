@@ -581,6 +581,11 @@ export const StudentForm = ({
         onPasswordChange={setPassword}
         onConfirmPasswordChange={setConfirmPassword}
         showReset={!isEditing}
+        credentialsHint={
+          isEditing
+            ? "If you change Login ID or set a new password, updated credentials are emailed to the student automatically. Changing only the Login ID also generates a new password so both can be sent."
+            : undefined
+        }
       />
 
       <div className="flex justify-end gap-2">

@@ -72,12 +72,86 @@ export const fiscalYearSchema = z.object({
   isClosed: z.boolean().default(false)
 });
 
+/** Create Goshwara voucher + linked balanced journal entry — all header fields manual */
+export const goshwaraVoucherSchema = z.object({
+  voucherType: z.enum(VOUCHER_TYPES).default("JOURNAL"),
+  dateBs: bsDateSchema,
+  /** Manual गो. भी. नं. — leave blank to auto-generate */
+  voucherNo: z.string().optional().or(z.literal("")),
+  /**
+   * Under "नेपाल सरकार": government office line, printed as "{name} कार्यालय"
+   * e.g. blank or "जिल्ला शिक्षा"
+   */
+  govOfficeName: z.string().optional().or(z.literal("")),
+  /** Under office line — e.g. पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी */
+  instituteName: z.string().optional().or(z.literal("")),
+  /** Under institute — e.g. धनगढीमाई वडा नं. ३ */
+  addressLine: z.string().optional().or(z.literal("")),
+  /** Narration / main particulars */
+  particulars: z.string().min(1),
+  /** Optional free-text table rows for PDF (sn, विवरण, खाता, हि.नं., debit, credit) */
+  printLines: z
+    .array(
+      z.object({
+        sn: z.string().optional().or(z.literal("")),
+        particulars: z.string().optional().or(z.literal("")),
+        account: z.string().optional().or(z.literal("")),
+        ledgerNo: z.string().optional().or(z.literal("")),
+        debit: z.coerce.number().min(0).optional(),
+        credit: z.coerce.number().min(0).optional()
+      })
+    )
+    .optional(),
+  /** Bottom-section optional fields (printed only if filled) */
+  receiptNo: z.string().optional().or(z.literal("")),
+  receivedAmount: z.string().optional().or(z.literal("")),
+  presenterName: z.string().optional().or(z.literal("")),
+  presenterRank: z.string().optional().or(z.literal("")),
+  chequeNo: z.string().optional().or(z.literal("")),
+  chequeAmount: z.string().optional().or(z.literal("")),
+  chequePresenter: z.string().optional().or(z.literal("")),
+  chequeDate: z.string().optional().or(z.literal("")),
+  chequeRank: z.string().optional().or(z.literal("")),
+  amountInWords: z.string().optional().or(z.literal("")),
+  /** Journal lines for GL (must balance) */
+  lines: z.array(journalLineSchema).min(2)
+}).superRefine((value, ctx) => {
+  const totalDebit = value.lines.reduce((sum, line) => sum + line.debitNpr, 0);
+  const totalCredit = value.lines.reduce((sum, line) => sum + line.creditNpr, 0);
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Voucher must balance (total debit = total credit)",
+      path: ["lines"]
+    });
+  }
+  if (totalDebit <= 0) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Voucher must have a positive amount",
+      path: ["lines"]
+    });
+  }
+  for (const [index, line] of value.lines.entries()) {
+    const hasDebit = line.debitNpr > 0;
+    const hasCredit = line.creditNpr > 0;
+    if (hasDebit === hasCredit) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Each line must have either debit or credit (not both/neither)",
+        path: ["lines", index]
+      });
+    }
+  }
+});
+
 export type ChartOfAccountInput = z.infer<typeof chartOfAccountSchema>;
 export type JournalEntryInput = z.infer<typeof journalEntrySchema>;
 export type JournalLineInput = z.infer<typeof journalLineSchema>;
 export type VendorInput = z.infer<typeof vendorSchema>;
 export type FeeRefundInput = z.infer<typeof feeRefundSchema>;
 export type FiscalYearInput = z.infer<typeof fiscalYearSchema>;
+export type GoshwaraVoucherInput = z.infer<typeof goshwaraVoucherSchema>;
 
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export type VoucherType = (typeof VOUCHER_TYPES)[number];
@@ -122,6 +196,8 @@ export interface JournalEntryRecord {
   studentId?: string;
   bankAccountId?: string;
   isReversal: boolean;
+  /** True when a reversal entry has been posted against this original. */
+  isReversed?: boolean;
   reversedEntryId?: string;
   isPosted: boolean;
   createdBy: string;
@@ -173,6 +249,49 @@ export interface FiscalYearRecord {
   isClosed: boolean;
   closedAt?: string;
   closedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GoshwaraPrintLineRecord {
+  sn?: string;
+  particulars?: string;
+  account?: string;
+  ledgerNo?: string;
+  debit?: number;
+  credit?: number;
+}
+
+export interface GoshwaraVoucherRecord {
+  _id: string;
+  schoolId: string;
+  voucherNo: string;
+  voucherType: VoucherType;
+  dateBs: string;
+  fiscalYearBs: string;
+  particulars: string;
+  /** @deprecated use govOfficeName / instituteName */
+  officeName?: string;
+  govOfficeName?: string;
+  instituteName?: string;
+  addressLine?: string;
+  printLines?: GoshwaraPrintLineRecord[];
+  receiptNo?: string;
+  receivedAmount?: string;
+  presenterName?: string;
+  presenterRank?: string;
+  chequeNo?: string;
+  chequeAmount?: string;
+  chequePresenter?: string;
+  chequeDate?: string;
+  chequeRank?: string;
+  amountInWords?: string;
+  lines: JournalLineRecord[];
+  totalAmount: number;
+  totalDebitNpr: number;
+  totalCreditNpr: number;
+  journalEntryId: string;
+  createdBy: string;
   createdAt?: string;
   updatedAt?: string;
 }

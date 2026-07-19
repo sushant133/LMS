@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
+import { getTodayBs } from "@munatech/nepali-datepicker";
 import {
   SUBJECT_ASSIGNMENT_TYPES,
   type BatchRecord,
@@ -12,6 +13,7 @@ import {
   type TeacherRecord,
   type YearRecord,
 } from "@phit-erp/shared";
+import { Pencil, Power, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -35,6 +37,20 @@ import {
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
+
+const todayBsString = (): string => {
+  const t = getTodayBs();
+  return `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`;
+};
+
+interface EditDraft {
+  assignmentType: SubjectAssignmentType;
+  unitFrom: number | "";
+  unitTo: number | "";
+  assignedPercentage: number | "";
+  effectiveFromBs: string;
+  remarks: string;
+}
 
 interface TeacherRowDraft {
   key: string;
@@ -149,6 +165,16 @@ export const SubjectAssignmentManager = () => {
   const [teacherRows, setTeacherRows] = useState<TeacherRowDraft[]>([newTeacherRow()]);
   const [copyFromAy, setCopyFromAy] = useState("");
   const [copyToAy, setCopyToAy] = useState("");
+
+  /** Row currently being edited in the matrix */
+  const [editingRow, setEditingRow] = useState<SubjectAssignmentRecord | null>(null);
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  /** Row currently being deactivated (end assignment) */
+  const [deactivatingRow, setDeactivatingRow] = useState<SubjectAssignmentRecord | null>(
+    null,
+  );
+  const [deactivateToBs, setDeactivateToBs] = useState("");
+  const [deactivateReason, setDeactivateReason] = useState("");
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -361,26 +387,131 @@ export const SubjectAssignmentManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const endMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const effectiveToBs =
-        window.prompt("End date (BS YYYY-MM-DD)", formEffectiveFrom || "2083-04-01") ?? "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveToBs)) {
-        throw new Error("Invalid end date");
+  const openEdit = (row: SubjectAssignmentRecord) => {
+    setDeactivatingRow(null);
+    setEditingRow(row);
+    setEditDraft({
+      assignmentType: row.assignmentType,
+      unitFrom: row.unitFrom ?? "",
+      unitTo: row.unitTo ?? "",
+      assignedPercentage: row.assignedPercentage ?? "",
+      effectiveFromBs: row.effectiveFromBs,
+      remarks: row.remarks ?? "",
+    });
+  };
+
+  const closeEdit = () => {
+    setEditingRow(null);
+    setEditDraft(null);
+  };
+
+  const openDeactivate = (row: SubjectAssignmentRecord) => {
+    setEditingRow(null);
+    setEditDraft(null);
+    setDeactivatingRow(row);
+    setDeactivateToBs(todayBsString());
+    setDeactivateReason("Deactivated by admin");
+  };
+
+  const closeDeactivate = () => {
+    setDeactivatingRow(null);
+    setDeactivateToBs("");
+    setDeactivateReason("");
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingRow || !editDraft) {
+        throw new Error("No assignment selected for edit");
       }
-      return unwrap(
-        api.post(`/academics/subject-assignments/${id}/end`, {
-          effectiveToBs,
-          endReason: "Ended by admin",
-        }),
+      if (!editDraft.effectiveFromBs || !/^\d{4}-\d{2}-\d{2}$/.test(editDraft.effectiveFromBs)) {
+        throw new Error("Effective From (BS) date is required");
+      }
+      const body: Record<string, unknown> = {
+        assignmentType: editDraft.assignmentType,
+        effectiveFromBs: editDraft.effectiveFromBs,
+        remarks: editDraft.remarks || "",
+      };
+      if (editDraft.assignmentType === "UNIT") {
+        if (editDraft.unitFrom === "" || editDraft.unitTo === "") {
+          throw new Error("Unit From and Unit To are required for UNIT assignments");
+        }
+        body.unitFrom = Number(editDraft.unitFrom);
+        body.unitTo = Number(editDraft.unitTo);
+        body.assignedPercentage = null;
+      } else if (editDraft.assignmentType === "PERCENTAGE") {
+        if (editDraft.assignedPercentage === "") {
+          throw new Error("Percentage is required for PERCENTAGE assignments");
+        }
+        body.assignedPercentage = Number(editDraft.assignedPercentage);
+        body.unitFrom = null;
+        body.unitTo = null;
+      } else {
+        body.unitFrom = null;
+        body.unitTo = null;
+        body.assignedPercentage = null;
+      }
+      return unwrap<{ rows: SubjectAssignmentRecord[]; warnings: string[] }>(
+        api.put(`/academics/subject-assignments/${editingRow._id}`, body),
       );
     },
-    onSuccess: async () => {
-      toast.success("Assignment ended");
+    onSuccess: async (data) => {
+      toast.success("Assignment updated");
+      data.warnings?.forEach((w) => toast.warning(w));
+      closeEdit();
       await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
+
+  const deactivateMutation = useMutation({
+    mutationFn: async () => {
+      if (!deactivatingRow) {
+        throw new Error("No assignment selected");
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(deactivateToBs)) {
+        throw new Error("Valid end date (BS YYYY-MM-DD) is required");
+      }
+      return unwrap<{ rows: SubjectAssignmentRecord[]; warnings: string[] }>(
+        api.post(`/academics/subject-assignments/${deactivatingRow._id}/end`, {
+          effectiveToBs: deactivateToBs,
+          endReason: deactivateReason.trim() || "Deactivated by admin",
+        }),
+      );
+    },
+    onSuccess: async (data) => {
+      toast.success("Assignment deactivated");
+      data.warnings?.forEach((w) => toast.warning(w));
+      closeDeactivate();
+      await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (row: SubjectAssignmentRecord) => {
+      return unwrap<{ rows: SubjectAssignmentRecord[]; warnings: string[] }>(
+        api.delete(`/academics/subject-assignments/${row._id}`),
+      );
+    },
+    onSuccess: async (data) => {
+      toast.success("Assignment deleted permanently");
+      data.warnings?.forEach((w) => toast.warning(w));
+      if (editingRow && data.rows?.[0]?._id === editingRow._id) closeEdit();
+      if (deactivatingRow && data.rows?.[0]?._id === deactivatingRow._id) closeDeactivate();
+      await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const confirmDelete = (row: SubjectAssignmentRecord) => {
+    const teacher = labelOfTeacher(row.teacherId);
+    const subject = labelOfSubject(row.subjectId);
+    const ok = window.confirm(
+      `Permanently delete this subject assignment?\n\nTeacher: ${teacher}\nSubject: ${subject}\nStatus: ${row.status}\n\nThis cannot be undone. Prefer Deactivate to keep history.`,
+    );
+    if (ok) deleteMutation.mutate(row);
+  };
 
   const copyMutation = useMutation({
     mutationFn: async () =>
@@ -939,6 +1070,182 @@ export const SubjectAssignmentManager = () => {
             </CardContent>
           </Card>
 
+          {canManage && editingRow && editDraft ? (
+            <Card className="border-brand-200 shadow-sm">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Edit Assignment</CardTitle>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {labelOfTeacher(editingRow.teacherId)} ·{" "}
+                    {labelOfSubject(editingRow.subjectId)} · {groupLabel(editingRow)}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={closeEdit}>
+                  Cancel
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <FormField label="Type">
+                    <Select
+                      value={editDraft.assignmentType}
+                      onChange={(e) =>
+                        setEditDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                assignmentType: e.target.value as SubjectAssignmentType,
+                              }
+                            : d,
+                        )
+                      }
+                    >
+                      {SUBJECT_ASSIGNMENT_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  {editDraft.assignmentType === "UNIT" ? (
+                    <>
+                      <FormField label="Unit From">
+                        <NumberInput
+                          value={editDraft.unitFrom === "" ? undefined : editDraft.unitFrom}
+                          onChange={(e) =>
+                            setEditDraft((d) =>
+                              d
+                                ? {
+                                    ...d,
+                                    unitFrom: Number.isNaN(e.target.valueAsNumber)
+                                      ? ""
+                                      : e.target.valueAsNumber,
+                                  }
+                                : d,
+                            )
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Unit To">
+                        <NumberInput
+                          value={editDraft.unitTo === "" ? undefined : editDraft.unitTo}
+                          onChange={(e) =>
+                            setEditDraft((d) =>
+                              d
+                                ? {
+                                    ...d,
+                                    unitTo: Number.isNaN(e.target.valueAsNumber)
+                                      ? ""
+                                      : e.target.valueAsNumber,
+                                  }
+                                : d,
+                            )
+                          }
+                        />
+                      </FormField>
+                    </>
+                  ) : null}
+                  {editDraft.assignmentType === "PERCENTAGE" ? (
+                    <FormField label="% (1–99)">
+                      <NumberInput
+                        value={
+                          editDraft.assignedPercentage === ""
+                            ? undefined
+                            : editDraft.assignedPercentage
+                        }
+                        onChange={(e) =>
+                          setEditDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  assignedPercentage: Number.isNaN(e.target.valueAsNumber)
+                                    ? ""
+                                    : e.target.valueAsNumber,
+                                }
+                              : d,
+                          )
+                        }
+                      />
+                    </FormField>
+                  ) : null}
+                  <FormField label="Effective From (BS)">
+                    <NepaliDateField
+                      value={editDraft.effectiveFromBs}
+                      onChange={(value) =>
+                        setEditDraft((d) => (d ? { ...d, effectiveFromBs: value } : d))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Remarks">
+                    <Input
+                      value={editDraft.remarks}
+                      onChange={(e) =>
+                        setEditDraft((d) =>
+                          d ? { ...d, remarks: e.target.value } : d,
+                        )
+                      }
+                    />
+                  </FormField>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={closeEdit}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={updateMutation.isPending}
+                    onClick={() => updateMutation.mutate()}
+                  >
+                    {updateMutation.isPending ? "Saving..." : "Save changes"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {canManage && deactivatingRow ? (
+            <Card className="border-amber-200 shadow-sm">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Deactivate Assignment</CardTitle>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Ends teaching access for {labelOfTeacher(deactivatingRow.teacherId)} on{" "}
+                    {labelOfSubject(deactivatingRow.subjectId)} ({groupLabel(deactivatingRow)}
+                    ). History is kept with status ENDED.
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={closeDeactivate}>
+                  Cancel
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Effective To (BS)">
+                    <NepaliDateField value={deactivateToBs} onChange={setDeactivateToBs} />
+                  </FormField>
+                  <FormField label="Reason">
+                    <Input
+                      value={deactivateReason}
+                      onChange={(e) => setDeactivateReason(e.target.value)}
+                      placeholder="Deactivated by admin"
+                    />
+                  </FormField>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={closeDeactivate}>
+                    Cancel
+                  </Button>
+                  <Button
+                    className="bg-amber-600 hover:bg-amber-700"
+                    disabled={deactivateMutation.isPending || !deactivateToBs}
+                    onClick={() => deactivateMutation.mutate()}
+                  >
+                    {deactivateMutation.isPending ? "Deactivating..." : "Deactivate"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle>Assignment Matrix</CardTitle>
@@ -963,12 +1270,19 @@ export const SubjectAssignmentManager = () => {
                         <Th>Coverage</Th>
                         <Th>Status</Th>
                         <Th>From</Th>
-                        <Th />
+                        {canManage ? <Th className="text-right">Actions</Th> : <Th />}
                       </tr>
                     </TableHead>
                     <TableBody>
                       {assignments.map((row) => (
-                        <tr key={row._id}>
+                        <tr
+                          key={row._id}
+                          className={
+                            editingRow?._id === row._id || deactivatingRow?._id === row._id
+                              ? "bg-slate-50"
+                              : undefined
+                          }
+                        >
                           <Td>{labelOfTeacher(row.teacherId)}</Td>
                           <Td>{labelOfSubject(row.subjectId)}</Td>
                           <Td className="text-sm text-slate-700">{groupLabel(row)}</Td>
@@ -982,16 +1296,58 @@ export const SubjectAssignmentManager = () => {
                           </Td>
                           <Td>{row.status}</Td>
                           <Td>{row.effectiveFromBs}</Td>
-                          {canManage && row.status === "ACTIVE" ? (
+                          {canManage ? (
                             <Td className="text-right">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={endMutation.isPending}
-                                onClick={() => endMutation.mutate(row._id)}
-                              >
-                                End
-                              </Button>
+                              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                {row.status === "ACTIVE" ? (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={
+                                        updateMutation.isPending ||
+                                        deactivateMutation.isPending ||
+                                        deleteMutation.isPending
+                                      }
+                                      onClick={() => openEdit(row)}
+                                      title="Edit assignment"
+                                    >
+                                      <Pencil className="mr-1 h-3.5 w-3.5" />
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="border-amber-200 text-amber-800 hover:bg-amber-50"
+                                      disabled={
+                                        updateMutation.isPending ||
+                                        deactivateMutation.isPending ||
+                                        deleteMutation.isPending
+                                      }
+                                      onClick={() => openDeactivate(row)}
+                                      title="Deactivate assignment (keeps history)"
+                                    >
+                                      <Power className="mr-1 h-3.5 w-3.5" />
+                                      Deactivate
+                                    </Button>
+                                  </>
+                                ) : null}
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                  disabled={
+                                    updateMutation.isPending ||
+                                    deactivateMutation.isPending ||
+                                    deleteMutation.isPending
+                                  }
+                                  onClick={() => confirmDelete(row)}
+                                  title="Permanently delete assignment"
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Delete
+                                </Button>
+                              </div>
                             </Td>
                           ) : (
                             <Td />

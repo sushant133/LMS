@@ -127,6 +127,25 @@ export const buildAdminCredentialsUpdatedMessage = (result: CredentialEmailResul
   return `Administrator login details updated. Notification email could not be delivered. Reason: ${reason}`;
 };
 
+/** Admin toast/API message after portal login ID and/or password was updated. */
+export const buildPortalCredentialsUpdatedMessage = (
+  result: CredentialEmailResult,
+  accountKind: CredentialAccountKind = "GENERAL"
+): string => {
+  const kind = accountKindLabel(accountKind);
+  if (result.sent) {
+    return `Login details updated. New credentials have been sent to the ${kind}: ${result.email}`;
+  }
+
+  if (result.skipped) {
+    const reason = result.error ?? "Email skipped";
+    return `Login details updated. Credential email was not sent. Reason: ${reason}`;
+  }
+
+  const reason = result.error ?? "Unknown error";
+  return `Login details updated. Credential email could not be delivered. Reason: ${reason}`;
+};
+
 const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, "&amp;")

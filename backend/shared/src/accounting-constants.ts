@@ -12,6 +12,7 @@ export const JOURNAL_REFERENCE_TYPES = [
   "AccountingPurchase",
   "SalaryPayment",
   "CashBookEntry",
+  "GoshwaraVoucher",
   "Manual"
 ] as const;
 

@@ -1,4 +1,4 @@
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
@@ -558,34 +558,49 @@ export const AppLayout = () => {
       <div key={user._id} className="flex min-h-screen w-full">
         <aside
           className={cn(
-            "flex w-[var(--app-sidebar-width)] shrink-0 flex-col overflow-hidden border-r border-white/60 bg-slate-950/95 px-5 py-6 text-white",
-            "h-[100dvh] md:h-screen",
-            "max-md:fixed max-md:left-0 max-md:top-0 max-md:z-50 max-md:transition-transform max-md:duration-200",
+            "flex w-[min(var(--app-sidebar-width),88vw)] shrink-0 flex-col overflow-hidden border-r border-white/60 bg-slate-950/95 px-4 py-5 text-white sm:px-5 sm:py-6",
+            "h-[100dvh] md:h-screen md:w-[var(--app-sidebar-width)]",
+            "max-md:fixed max-md:left-0 max-md:top-0 max-md:z-50 max-md:transition-transform max-md:duration-200 max-md:ease-out",
+            "max-md:pt-[max(1.25rem,env(safe-area-inset-top))] max-md:pb-[max(1rem,env(safe-area-inset-bottom))]",
             open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
             "md:sticky md:top-0 md:z-30 md:translate-x-0",
           )}
         >
-          <div className="shrink-0">
+          <div className="flex shrink-0 items-start gap-2">
             <NavLink
               to={brandHomePath}
               onClick={closeMobile}
               title="Go to dashboard"
-              className="flex cursor-pointer items-center gap-3 rounded-2xl outline-none"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-2xl outline-none"
             >
-              <div className="rounded-2xl bg-white/10 p-2">
-                <CollegeLogo variant="light" className="h-10 w-10" />
+              <div className="shrink-0 rounded-2xl bg-white/10 p-2">
+                <CollegeLogo variant="light" className="h-9 w-9 sm:h-10 sm:w-10" />
               </div>
               <div className="min-w-0">
-                <h2 className="truncate text-lg font-semibold leading-tight">
+                <h2 className="truncate text-base font-semibold leading-tight sm:text-lg">
                   {t("appName")}
                 </h2>
                 {showCollegeContext ? (
                   <p className="truncate text-xs text-slate-400">
                     {INSTITUTION_NAME}
                   </p>
-                ) : null}
+                ) : (
+                  <p className="truncate text-xs text-slate-400" title={collegeName}>
+                    {collegeName}
+                  </p>
+                )}
               </div>
             </NavLink>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 shrink-0 rounded-xl p-0 text-slate-300 hover:bg-white/10 hover:text-white md:hidden"
+              aria-label="Close menu"
+              onClick={closeMobile}
+            >
+              <X className="h-5 w-5" />
+            </Button>
           </div>
 
           <div className="app-sidebar-scroll mt-8 min-h-0 flex-1">
@@ -668,60 +683,104 @@ export const AppLayout = () => {
         </aside>
 
         <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 shrink-0 border-b border-white/70 bg-white/90 backdrop-blur">
-            <div className="mx-auto w-full max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8 lg:py-4">
-              <div className="flex items-center gap-3">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 md:hidden"
-                    onClick={() => setOpen((current) => !current)}
-                  >
-                    <Menu className="h-4 w-4" />
-                  </Button>
-                  <div className="min-w-0">
-                    <p className="text-xs uppercase tracking-[0.2em] text-brand-600">
-                      {t("welcome")}
+          <header className="sticky top-0 z-20 shrink-0 border-b border-white/70 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90">
+            <div className="mx-auto w-full max-w-[1600px] px-3 py-2.5 sm:px-6 sm:py-3 lg:px-8 lg:py-4">
+              {/*
+                Mobile: [Menu] [Logo + name/role] ………… [Logout icon]
+                Desktop: [Welcome + full name] …… [College chip] [Logout]
+              */}
+              <div className="flex items-center gap-2 sm:gap-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-10 w-10 shrink-0 rounded-xl p-0 md:hidden"
+                  aria-label={open ? "Close menu" : "Open menu"}
+                  aria-expanded={open}
+                  onClick={() => setOpen((current) => !current)}
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+
+                {/* Mobile brand strip — single horizontal line, no vertical wrap */}
+                <div className="flex min-w-0 flex-1 items-center gap-2.5 md:hidden">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-brand-100 bg-brand-50">
+                    <CollegeLogo className="h-7 w-7" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="truncate text-sm font-semibold leading-tight text-slate-900"
+                      title={collegeName}
+                    >
+                      {collegeName}
                     </p>
-                    <h1 className="truncate text-lg font-semibold text-slate-900">
-                      {user.fullName}
-                    </h1>
+                    <p
+                      className="truncate text-[11px] leading-tight text-slate-500"
+                      title={
+                        getUserRoleSubtitle(user)
+                          ? `${user.fullName} · ${getUserDisplayTitle(user)} · ${getUserRoleSubtitle(user)}`
+                          : `${user.fullName} · ${getUserDisplayTitle(user)}`
+                      }
+                    >
+                      <span className="font-medium text-slate-700">
+                        {user.fullName}
+                      </span>
+                      <span className="text-slate-400"> · </span>
+                      <span>{getUserDisplayTitle(user)}</span>
+                    </p>
                   </div>
                 </div>
 
-                <div className="ml-auto flex shrink-0 items-center gap-2">
-                  <div className="flex min-w-0 max-w-[10rem] items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-xs md:max-w-sm">
-                    <CollegeLogo className="h-8 w-8 shrink-0" />
-                    <div className="min-w-0">
-                      <div
-                        className="truncate font-semibold leading-tight text-brand-950"
-                        title={collegeName}
-                      >
-                        {collegeName}
-                      </div>
-                      <div
-                        className="text-[10px] font-medium uppercase tracking-widest text-brand-700/80"
-                        title={
-                          getUserRoleSubtitle(user)
-                            ? `${getUserDisplayTitle(user)} · ${getUserRoleSubtitle(user)}`
-                            : getUserDisplayTitle(user)
-                        }
-                      >
-                        {getUserDisplayTitle(user)}
-                      </div>
+                {/* Desktop welcome */}
+                <div className="hidden min-w-0 flex-1 md:block">
+                  <p className="text-xs uppercase tracking-[0.18em] text-brand-600">
+                    {t("welcome")}
+                  </p>
+                  <h1 className="truncate text-lg font-semibold leading-tight text-slate-900">
+                    {user.fullName}
+                  </h1>
+                </div>
+
+                {/* Desktop college context chip */}
+                <div className="ml-auto hidden min-w-0 max-w-xs items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-sm md:flex lg:max-w-md">
+                  <CollegeLogo className="h-8 w-8 shrink-0" />
+                  <div className="min-w-0">
+                    <div
+                      className="truncate font-semibold leading-tight text-brand-950"
+                      title={collegeName}
+                    >
+                      {collegeName}
+                    </div>
+                    <div
+                      className="truncate text-[10px] font-medium uppercase tracking-wide text-brand-700/80"
+                      title={
+                        getUserRoleSubtitle(user)
+                          ? `${getUserDisplayTitle(user)} · ${getUserRoleSubtitle(user)}`
+                          : getUserDisplayTitle(user)
+                      }
+                    >
+                      {getUserDisplayTitle(user)}
+                      {getUserRoleSubtitle(user)
+                        ? ` · ${getUserRoleSubtitle(user)}`
+                        : ""}
                     </div>
                   </div>
-                  <Button
-                    className="shrink-0"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleLogout()}
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    {t("logout")}
-                  </Button>
                 </div>
+
+                <Button
+                  type="button"
+                  className="h-10 shrink-0 gap-0 rounded-xl px-0 sm:h-9 sm:gap-2 sm:px-3"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleLogout()}
+                  aria-label={t("logout")}
+                  title={t("logout")}
+                >
+                  <span className="inline-flex h-10 w-10 items-center justify-center sm:h-auto sm:w-auto">
+                    <LogOut className="h-4 w-4" />
+                  </span>
+                  <span className="hidden sm:inline">{t("logout")}</span>
+                </Button>
               </div>
             </div>
           </header>

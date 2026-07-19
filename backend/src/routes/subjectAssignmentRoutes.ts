@@ -4,6 +4,7 @@ import {
   bulkCreateAssignments,
   copyYear,
   createAssignment,
+  deleteAssignment,
   endAssignment,
   getAssignmentById,
   listAssignments,
@@ -34,6 +35,7 @@ router.post("/", authorizeInstitutionAdmin, createAssignment);
 
 router.get("/:id", authorizeInstitutionAdmin, getAssignmentById);
 router.put("/:id", authorizeInstitutionAdmin, updateAssignment);
+router.delete("/:id", authorizeInstitutionAdmin, deleteAssignment);
 router.post("/:id/end", authorizeInstitutionAdmin, endAssignment);
 router.post("/:id/reassign", authorizeInstitutionAdmin, reassignAssignment);
 
