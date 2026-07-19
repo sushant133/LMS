@@ -49,6 +49,15 @@ const dailyAttendanceConfigSchema = new Schema(
   { _id: false }
 );
 
+/** Field Management attendance contribution to overall student attendance. */
+const fieldAttendanceConfigSchema = new Schema(
+  {
+    contributeToOverall: { type: Boolean, default: false },
+    countLateAsPresent: { type: Boolean, default: true }
+  },
+  { _id: false }
+);
+
 const libraryInventoryAccessSchema = new Schema(
   {
     enabled: { type: Boolean, default: false }
@@ -69,6 +78,7 @@ const settingSchema = new Schema(
     holidays: { type: [holidaySchema], default: [] },
     infrastructure: { type: infrastructureSchema, default: () => ({}) },
     dailyAttendance: { type: dailyAttendanceConfigSchema, default: () => ({}) },
+    fieldAttendance: { type: fieldAttendanceConfigSchema, default: () => ({}) },
     libraryInventoryAccess: { type: libraryInventoryAccessSchema, default: () => ({}) },
     /** Per-school override for subject-assignment scope mode (unset → env default) */
     subjectAssignmentScopeMode: {

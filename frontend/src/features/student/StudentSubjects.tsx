@@ -346,7 +346,7 @@ export const StudentSubjects = () => {
         description="View all subjects you are enrolled in. Open a subject to see attendance, marks, assignments, notes, and announcements."
       />
 
-      <FieldDutyPortalPanel title="Field / Hospital Duty Attendance" />
+      <FieldDutyPortalPanel title="Field Attendance" />
 
       {subjects.length === 0 ? (
         <EmptyState

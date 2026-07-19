@@ -1,29 +1,52 @@
 import { Router } from "express";
 import {
+  assignFieldCoordinators,
+  assignFieldStudents,
   createFieldDutySchedule,
   deleteFieldDutySchedule,
   getChildFieldDutyAttendance,
   getFieldDutyAttendanceById,
   getFieldDutyDashboard,
+  getFieldDutyMonitoring,
   getFieldDutyReports,
   getFieldDutyRoster,
   getMyFieldDutyAttendance,
   getTodayFieldDutyContext,
+  listAssignableStudents,
   listFieldDutyAttendance,
   listFieldDutySchedules,
+  requestFieldAttendanceEdit,
+  reviewFieldAttendanceEditRequest,
   submitFieldDutyAttendance,
   unlockFieldDutyAttendance,
   updateFieldDutyAttendance,
   updateFieldDutySchedule
 } from "../controllers/fieldDutyController.js";
 import { authorize, protect } from "../middleware/auth.js";
-import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
-router.use(protect, tenantGuard);
+router.use(protect);
 
-// Portal (must be before :id routes)
+/** Roles that may act as field coordinators (via linked CollegeStaff) or manage. */
+const FIELD_READ = [
+  "SUPER_ADMIN",
+  "COLLEGE_ADMIN",
+  "COLLEGE_VIEWER",
+  "TEACHER",
+  "COLLEGE_STAFF"
+] as const;
+
+const FIELD_WRITE_ATTENDANCE = [
+  "SUPER_ADMIN",
+  "COLLEGE_ADMIN",
+  "TEACHER",
+  "COLLEGE_STAFF"
+] as const;
+
+const FIELD_ADMIN = ["SUPER_ADMIN", "COLLEGE_ADMIN"] as const;
+
+// Student / parent portals
 router.get("/portal/me", authorize("STUDENT"), getMyFieldDutyAttendance);
 router.get(
   "/portal/child/:studentId",
@@ -31,20 +54,39 @@ router.get(
   getChildFieldDutyAttendance
 );
 
-router.get("/dashboard", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getFieldDutyDashboard);
-router.get("/today", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), getTodayFieldDutyContext);
-router.get("/reports", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getFieldDutyReports);
+// Dashboard & monitoring
+router.get("/dashboard", authorize(...FIELD_READ), getFieldDutyDashboard);
+router.get("/monitoring", authorize(...FIELD_ADMIN, "COLLEGE_VIEWER"), getFieldDutyMonitoring);
+router.get("/today", authorize(...FIELD_WRITE_ATTENDANCE), getTodayFieldDutyContext);
+router.get("/reports", authorize(...FIELD_READ), getFieldDutyReports);
 
-router.get("/schedules", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listFieldDutySchedules);
-router.post("/schedules", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), createFieldDutySchedule);
-router.put("/schedules/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), updateFieldDutySchedule);
-router.delete("/schedules/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), deleteFieldDutySchedule);
-router.get("/schedules/:id/roster", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getFieldDutyRoster);
+// Candidate students for assignment
+router.get("/assignable-students", authorize(...FIELD_ADMIN), listAssignableStudents);
 
-router.get("/attendance", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listFieldDutyAttendance);
-router.get("/attendance/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getFieldDutyAttendanceById);
-router.post("/attendance", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), submitFieldDutyAttendance);
-router.put("/attendance/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), updateFieldDutyAttendance);
-router.post("/attendance/:id/unlock", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), unlockFieldDutyAttendance);
+// Postings (schedules)
+router.get("/schedules", authorize(...FIELD_READ), listFieldDutySchedules);
+router.post("/schedules", authorize(...FIELD_ADMIN), createFieldDutySchedule);
+router.put("/schedules/:id", authorize(...FIELD_ADMIN), updateFieldDutySchedule);
+router.delete("/schedules/:id", authorize(...FIELD_ADMIN), deleteFieldDutySchedule);
+router.get("/schedules/:id/roster", authorize(...FIELD_READ), getFieldDutyRoster);
+router.put("/schedules/:id/coordinators", authorize(...FIELD_ADMIN), assignFieldCoordinators);
+router.put("/schedules/:id/students", authorize(...FIELD_ADMIN), assignFieldStudents);
+
+// Attendance
+router.get("/attendance", authorize(...FIELD_READ), listFieldDutyAttendance);
+router.get("/attendance/:id", authorize(...FIELD_READ), getFieldDutyAttendanceById);
+router.post("/attendance", authorize(...FIELD_WRITE_ATTENDANCE), submitFieldDutyAttendance);
+router.put("/attendance/:id", authorize(...FIELD_ADMIN), updateFieldDutyAttendance);
+router.post("/attendance/:id/unlock", authorize(...FIELD_ADMIN), unlockFieldDutyAttendance);
+router.post(
+  "/attendance/:id/edit-request",
+  authorize(...FIELD_WRITE_ATTENDANCE),
+  requestFieldAttendanceEdit
+);
+router.post(
+  "/attendance/:id/edit-review",
+  authorize(...FIELD_ADMIN),
+  reviewFieldAttendanceEditRequest
+);
 
 export default router;

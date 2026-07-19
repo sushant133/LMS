@@ -1004,6 +1004,11 @@ export interface SchoolSettingsRecord {
   address: AddressSelection;
   holidays: HolidayRecord[];
   dailyAttendance?: DailyAttendanceConfig;
+  /** Field Management — contribute field attendance to overall student % when enabled. */
+  fieldAttendance?: {
+    contributeToOverall: boolean;
+    countLateAsPresent: boolean;
+  };
   libraryInventoryAccess?: LibraryInventoryAccessConfig;
   /** Per-school subject-assignment scope mode override (unset → env default) */
   subjectAssignmentScopeMode?: "legacy" | "dual" | "assignment";

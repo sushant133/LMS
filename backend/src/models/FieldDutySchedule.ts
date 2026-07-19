@@ -1,18 +1,37 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 
+/**
+ * Field Management posting (Community/PHC/Hospital and future types).
+ * Extends the original hospital field-duty schedule without breaking legacy rows.
+ */
 const fieldDutyScheduleSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     academicYearBs: { type: String, required: true, index: true },
     faculty: { type: String, default: "" },
+    semesterBs: { type: String, default: "" },
     batchId: { type: Schema.Types.ObjectId, ref: "Batch", required: true, index: true },
     yearId: { type: Schema.Types.ObjectId, ref: "Year", required: true, index: true },
     sectionId: { type: Schema.Types.ObjectId, ref: "Section" },
+    /**
+     * Configurable posting type — not a hard enum so new types can be added later.
+     * Defaults: COMMUNITY, PHC, HOSPITAL, CLINICAL_ROTATION, …
+     */
+    postingType: { type: String, required: true, default: "HOSPITAL", index: true, trim: true },
+    /** Site display name (Hospital / PHC / Community). Kept in sync with hospitalName. */
+    siteName: { type: String, default: "", trim: true },
+    /** Legacy required field — same as siteName for older clients. */
     hospitalName: { type: String, required: true, trim: true },
-    department: { type: String, required: true, trim: true },
+    address: { type: String, default: "" },
+    department: { type: String, default: "", trim: true },
     ward: { type: String, default: "" },
-    /** Field supervisor is college staff (not Teacher). */
+    /** Primary field coordinator — CollegeStaff only (not a new employee type). */
     supervisorStaffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff", required: true, index: true },
+    /** Optional assistant coordinators from CollegeStaff. */
+    assistantCoordinatorStaffIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: "CollegeStaff" }],
+      default: []
+    },
     /** @deprecated Kept only so legacy rows still load until reassigned */
     supervisorTeacherId: { type: Schema.Types.ObjectId, ref: "Teacher", required: false, index: true },
     clinicalInstructorName: { type: String, default: "" },
@@ -31,6 +50,16 @@ const fieldDutyScheduleSchema = new Schema(
       default: "ACTIVE",
       index: true
     },
+    /** AUTO_BATCH_YEAR = all active students in batch+year; MANUAL = assignedStudentIds only. */
+    rosterMode: {
+      type: String,
+      enum: ["AUTO_BATCH_YEAR", "MANUAL"],
+      default: "AUTO_BATCH_YEAR"
+    },
+    assignedStudentIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Student" }],
+      default: []
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false, index: true }
   },
@@ -39,6 +68,8 @@ const fieldDutyScheduleSchema = new Schema(
 
 fieldDutyScheduleSchema.index({ schoolId: 1, supervisorStaffId: 1, status: 1 });
 fieldDutyScheduleSchema.index({ schoolId: 1, batchId: 1, yearId: 1, status: 1 });
+fieldDutyScheduleSchema.index({ schoolId: 1, postingType: 1, status: 1 });
+fieldDutyScheduleSchema.index({ schoolId: 1, assistantCoordinatorStaffIds: 1 });
 
 export type FieldDutyScheduleDocument = InferSchemaType<typeof fieldDutyScheduleSchema>;
 export const FieldDutySchedule = mongoose.model("FieldDutySchedule", fieldDutyScheduleSchema);

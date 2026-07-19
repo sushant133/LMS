@@ -1,15 +1,18 @@
 import { useMemo, useState } from "react";
-import { CalendarCheck, ClipboardList, Hospital } from "lucide-react";
+import { CalendarCheck, ClipboardList } from "lucide-react";
 import { canManageInstitution, hasInstitutionAccess } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { AttendanceManager } from "./AttendanceManager";
 import { DailyAttendanceManager } from "./DailyAttendanceManager";
-import { FieldDutyManager } from "./FieldDutyManager";
 
-type AttendanceTab = "daily" | "subject" | "field-duty";
+type AttendanceTab = "daily" | "subject";
 
+/**
+ * Classroom attendance only (daily + subject-wise).
+ * Field / Community / Hospital postings live under Field Management for field coordinators — not here.
+ */
 export const AttendanceHub = () => {
   const { user } = useAuth();
   const hasInstitutionRead = hasInstitutionAccess(user?.role ?? "");
@@ -30,11 +33,6 @@ export const AttendanceHub = () => {
           label: "Subject-wise Attendance",
           icon: ClipboardList,
         },
-        {
-          id: "field-duty" as const,
-          label: "Field / Hospital Duty",
-          icon: Hospital,
-        },
       ] as const,
     [],
   );
@@ -43,7 +41,7 @@ export const AttendanceHub = () => {
     <div className="space-y-6">
       <PageHeader
         title="Attendance"
-        description="Daily register, subject-wise attendance, and field/hospital duty attendance — each module is independent."
+        description="Daily register and subject-wise classroom attendance."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -70,7 +68,6 @@ export const AttendanceHub = () => {
         />
       ) : null}
       {activeTab === "subject" ? <AttendanceManager embedded /> : null}
-      {activeTab === "field-duty" ? <FieldDutyManager /> : null}
     </div>
   );
 };

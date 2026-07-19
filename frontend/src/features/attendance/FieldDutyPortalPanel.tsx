@@ -32,7 +32,7 @@ interface FieldDutyPortalPanelProps {
 
 export const FieldDutyPortalPanel = ({
   studentId,
-  title = "Field / Hospital Duty Attendance",
+  title = "Field Attendance (Community / PHC / Hospital)",
 }: FieldDutyPortalPanelProps) => {
   const query = useQuery({
     queryKey: ["field-duty", "portal", studentId ?? "me"],
@@ -69,8 +69,8 @@ export const FieldDutyPortalPanel = ({
       <CardContent>
         {!data || data.rows.length === 0 ? (
           <EmptyState
-            title="No field duty records"
-            description="Hospital or community posting attendance will appear here when the field supervisor submits it."
+            title="No field attendance records"
+            description="Community/PHC or Hospital posting attendance will appear here when the field coordinator submits it."
           />
         ) : (
           <div className="overflow-x-auto">
@@ -78,10 +78,9 @@ export const FieldDutyPortalPanel = ({
               <TableHead>
                 <tr>
                   <Th>Date</Th>
-                  <Th>Hospital</Th>
-                  <Th>Department</Th>
-                  <Th>Shift</Th>
-                  <Th>Supervisor</Th>
+                  <Th>Posting</Th>
+                  <Th>Type</Th>
+                  <Th>Coordinator</Th>
                   <Th>Status</Th>
                   <Th>Remarks</Th>
                 </tr>
@@ -90,12 +89,11 @@ export const FieldDutyPortalPanel = ({
                 {data.rows.map((row) => (
                   <tr key={row._id}>
                     <Td className="whitespace-nowrap text-sm">{row.dateBs}</Td>
-                    <Td className="text-sm">{row.hospitalName}</Td>
-                    <Td className="text-sm">
-                      {row.department}
-                      {row.ward ? ` · ${row.ward}` : ""}
+                    <Td className="text-sm">{row.siteName || row.hospitalName}</Td>
+                    <Td className="text-xs">
+                      {(row.postingType || "HOSPITAL").replace(/_/g, " ")}
+                      {row.department ? ` · ${row.department}` : ""}
                     </Td>
-                    <Td className="text-xs">{row.shift}</Td>
                     <Td className="text-sm">{row.supervisorName ?? "—"}</Td>
                     <Td>
                       <Badge className={statusClass(row.status)}>

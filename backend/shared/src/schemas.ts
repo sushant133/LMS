@@ -768,7 +768,14 @@ export const settingsSchema = z.object({
     })
   ),
   infrastructure: infrastructureSchema,
-  dailyAttendance: dailyAttendanceConfigSchema.optional()
+  dailyAttendance: dailyAttendanceConfigSchema.optional(),
+  /** Field Management — whether field attendance contributes to overall %. */
+  fieldAttendance: z
+    .object({
+      contributeToOverall: z.boolean().default(false),
+      countLateAsPresent: z.boolean().default(true)
+    })
+    .optional()
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;

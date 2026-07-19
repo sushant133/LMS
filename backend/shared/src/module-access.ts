@@ -165,11 +165,12 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
   },
   {
     key: "field-duty",
-    label: "Field / Hospital Duty",
-    description: "Hospital and field duty attendance",
+    label: "Field Management",
+    description:
+      "Community/PHC and Hospital field postings — assignment, coordinator attendance, monitoring",
     apiPrefixes: ["/field-duty"],
-    routePrefixes: ["/attendance"],
-    availableActions: ["view", "create", "edit", "approve", "export"]
+    routePrefixes: ["/field-management", "/attendance"],
+    availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
     key: "academics",

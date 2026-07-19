@@ -28,6 +28,9 @@ const AcademicCalendarPage = lazy(() =>
   import("pages/AcademicCalendarPage").then((module) => ({ default: module.AcademicCalendarPage }))
 );
 const AttendancePage = lazy(() => import("pages/AttendancePage").then((module) => ({ default: module.AttendancePage })));
+const FieldManagementPage = lazy(() =>
+  import("pages/FieldManagementPage").then((module) => ({ default: module.FieldManagementPage }))
+);
 const ExamsPage = lazy(() => import("pages/ExamsPage").then((module) => ({ default: module.ExamsPage })));
 const NoticesPage = lazy(() => import("pages/NoticesPage").then((module) => ({ default: module.NoticesPage })));
 const ComplaintsPage = lazy(() => import("pages/ComplaintsPage").then((module) => ({ default: module.ComplaintsPage })));
@@ -227,6 +230,31 @@ export default function App() {
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
               <Route path="/attendance-view" element={<AttendancePage />} />
+            </Route>
+
+            {/* Field Management: Community/PHC & Hospital postings (independent from classroom attendance) */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "COLLEGE_STAFF",
+                    "STUDENT",
+                  ]}
+                />
+              }
+            >
+              <Route
+                path="/field-management"
+                element={
+                  <LazyRoute>
+                    <FieldManagementPage />
+                  </LazyRoute>
+                }
+              />
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "LIBRARY_STAFF"]} />}>

@@ -39,6 +39,10 @@ const defaultSettingsValue: SettingsInput = {
   },
   holidays: [],
   dailyAttendance: { ...DEFAULT_DAILY_ATTENDANCE_CONFIG },
+  fieldAttendance: {
+    contributeToOverall: false,
+    countLateAsPresent: true,
+  },
   infrastructure: {
     classrooms: 0,
     usableClassrooms: 0,
@@ -82,6 +86,10 @@ export const SettingsManager = () => {
       holidays: settingsQuery.data.holidays,
       dailyAttendance: settingsQuery.data.dailyAttendance ?? {
         ...DEFAULT_DAILY_ATTENDANCE_CONFIG,
+      },
+      fieldAttendance: settingsQuery.data.fieldAttendance ?? {
+        contributeToOverall: false,
+        countLateAsPresent: true,
       },
       infrastructure:
         (settingsQuery.data as any).infrastructure ||
@@ -457,6 +465,52 @@ export const SettingsManager = () => {
               />
               Allow Medical Leave status
             </label>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Field Attendance Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.fieldAttendance?.contributeToOverall ?? false}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    fieldAttendance: {
+                      contributeToOverall: event.target.checked,
+                      countLateAsPresent:
+                        current.fieldAttendance?.countLateAsPresent ?? true,
+                    },
+                  }))
+                }
+              />
+              Include field attendance (Community/PHC & Hospital) in overall student attendance %
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.fieldAttendance?.countLateAsPresent ?? true}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    fieldAttendance: {
+                      contributeToOverall:
+                        current.fieldAttendance?.contributeToOverall ?? false,
+                      countLateAsPresent: event.target.checked,
+                    },
+                  }))
+                }
+              />
+              Count Late as present for field attendance percentage
+            </label>
+            <p className="md:col-span-2 text-xs text-slate-500">
+              Field attendance is always stored separately (categorized as Community/PHC vs Hospital).
+              Classroom and laboratory attendance are never modified by this setting.
+            </p>
           </CardContent>
         </Card>
 

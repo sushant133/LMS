@@ -161,6 +161,18 @@ const navItems: NavItem[] = [
     section: "myWork",
   },
   {
+    labelKey: "fieldManagement",
+    path: "/field-management",
+    roles: ["TEACHER", "COLLEGE_STAFF"],
+    section: "myWork",
+  },
+  {
+    labelKey: "fieldAttendance",
+    path: "/field-management",
+    roles: ["STUDENT"],
+    section: "myWork",
+  },
+  {
     labelKey: "myAcademicPlans",
     path: "/academic-management",
     roles: ["TEACHER"],
@@ -231,6 +243,12 @@ const navItems: NavItem[] = [
   {
     labelKey: "attendanceManagement",
     path: "/attendance-view",
+    roles: [...institutionRoles],
+    section: "administration",
+  },
+  {
+    labelKey: "fieldManagement",
+    path: "/field-management",
     roles: [...institutionRoles],
     section: "administration",
   },
