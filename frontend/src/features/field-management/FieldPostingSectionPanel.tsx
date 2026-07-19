@@ -86,13 +86,18 @@ export const FieldPostingSectionPanel = ({
   isCoordinatorView,
 }: Props) => {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<PanelTab>(isCoordinatorView ? "mark" : "postings");
+  const [tab, setTab] = useState<PanelTab>(
+    canWrite && isCoordinatorView ? "mark" : "postings",
+  );
   const [form, setForm] = useState(() => defaultForm(section));
   const [assistantPick, setAssistantPick] = useState("");
   const [selectedScheduleId, setSelectedScheduleId] = useState("");
   const [markDateBs, setMarkDateBs] = useState("");
   const [markRows, setMarkRows] = useState<MarkRow[]>([]);
   const [notes, setNotes] = useState("");
+  /** Attendance record currently loaded for mark panel (authoritative for read-only). */
+  const [loadedAttendance, setLoadedAttendance] =
+    useState<FieldDutyAttendanceRecord | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [studentPickerOpen, setStudentPickerOpen] = useState(false);
 
@@ -101,10 +106,12 @@ export const FieldPostingSectionPanel = ({
       ...defaultForm(section, f.academicYearBs),
       academicYearBs: f.academicYearBs,
     }));
-    setTab(isCoordinatorView ? "mark" : "postings");
+    setTab(canWrite && isCoordinatorView ? "mark" : "postings");
     setSelectedScheduleId("");
     setMarkRows([]);
-  }, [section, isCoordinatorView]);
+    setLoadedAttendance(null);
+    setNotes("");
+  }, [section, isCoordinatorView, canWrite]);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -246,8 +253,9 @@ export const FieldPostingSectionPanel = ({
           })),
         }),
       ),
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       toast.success("Attendance submitted (read-only until admin unlocks)");
+      setLoadedAttendance(data as FieldDutyAttendanceRecord);
       setNotes("");
       await invalidate();
     },
@@ -260,9 +268,17 @@ export const FieldPostingSectionPanel = ({
       if (!reason) throw new Error("Unlock cancelled");
       return unwrap(api.post(`/field-duty/attendance/${id}/unlock`, { reason }));
     },
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       toast.success("Attendance unlocked");
+      setLoadedAttendance(data as FieldDutyAttendanceRecord);
       await invalidate();
+      if (selectedScheduleId && markDateBs) {
+        void loadRosterForMarking(
+          selectedScheduleId,
+          markDateBs,
+          data as FieldDutyAttendanceRecord,
+        );
+      }
     },
     onError: (e) => {
       if (String(e).includes("cancelled")) return;
@@ -315,6 +331,18 @@ export const FieldPostingSectionPanel = ({
     setSelectedScheduleId(scheduleId);
     setMarkDateBs(dateBs);
     try {
+      // Prefer explicit existing; otherwise load attendance for this schedule+date
+      let attendance = existing ?? null;
+      if (!attendance && dateBs) {
+        const list = await unwrap<FieldDutyAttendanceRecord[]>(
+          api.get("/field-duty/attendance", {
+            params: { scheduleId, dateBs },
+          }),
+        );
+        attendance = list[0] ?? null;
+      }
+      setLoadedAttendance(attendance);
+
       const data = await unwrap<{
         schedule: FieldDutyScheduleRecord;
         students: FieldDutyRosterStudent[];
@@ -322,7 +350,7 @@ export const FieldPostingSectionPanel = ({
 
       setMarkRows(
         data.students.map((s) => {
-          const prev = existing?.entries.find((e) => e.studentId === s._id);
+          const prev = attendance?.entries.find((e) => e.studentId === s._id);
           return {
             studentId: s._id,
             fullName: s.fullName,
@@ -333,8 +361,17 @@ export const FieldPostingSectionPanel = ({
           };
         }),
       );
+      if (attendance?.notes) setNotes(attendance.notes);
     } catch (e) {
       toast.error(parseErrorMessage(e));
+    }
+  };
+
+  /** When user changes attendance date, re-load roster + existing record for that date. */
+  const onMarkDateChange = (dateBs: string) => {
+    setMarkDateBs(dateBs);
+    if (selectedScheduleId && dateBs) {
+      void loadRosterForMarking(selectedScheduleId, dateBs, null);
     }
   };
 
@@ -399,8 +436,11 @@ export const FieldPostingSectionPanel = ({
   };
 
   const tabs: Array<{ id: PanelTab; label: string }> = [
-    ...(isAdmin ? [{ id: "postings" as const, label: "Posting Assignment" }] : []),
-    { id: "mark", label: "Take Attendance" },
+    {
+      id: "postings" as const,
+      label: isAdmin ? "Posting Assignment" : "Assigned postings",
+    },
+    ...(canWrite ? [{ id: "mark" as const, label: "Take Attendance" }] : []),
     { id: "history", label: "History" },
     { id: "reports", label: "Reports" },
   ];
@@ -408,12 +448,9 @@ export const FieldPostingSectionPanel = ({
   const typeOptions = postingTypeOptionsForSection(section);
   const staff = staffQuery.data ?? [];
   const schedules = schedulesQuery.data ?? [];
-  const existingForSelected = (todayQuery.data ?? []).find(
-    (c) => c.schedule._id === selectedScheduleId,
-  )?.existingAttendance;
   const isReadOnly =
-    existingForSelected?.status === "LOCKED" ||
-    existingForSelected?.status === "SUBMITTED";
+    loadedAttendance?.status === "LOCKED" ||
+    loadedAttendance?.status === "SUBMITTED";
 
   return (
     <div className="space-y-4">
@@ -437,8 +474,9 @@ export const FieldPostingSectionPanel = ({
         ))}
       </div>
 
-      {tab === "postings" && isAdmin ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+      {tab === "postings" ? (
+        <div className={`grid gap-4 ${isAdmin ? "lg:grid-cols-2" : ""}`}>
+          {isAdmin ? (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
@@ -761,6 +799,7 @@ export const FieldPostingSectionPanel = ({
               </div>
             </CardContent>
           </Card>
+          ) : null}
 
           <Card>
             <CardHeader>
@@ -774,7 +813,11 @@ export const FieldPostingSectionPanel = ({
               ) : schedules.length === 0 ? (
                 <EmptyState
                   title="No postings yet"
-                  description="Create a field posting to assign coordinators and students."
+                  description={
+                    isAdmin
+                      ? "Create a field posting to assign coordinators and students."
+                      : "No field postings are assigned to you in this section."
+                  }
                 />
               ) : (
                 schedules.map((s) => (
@@ -805,54 +848,67 @@ export const FieldPostingSectionPanel = ({
                           {s.studentCount ?? 0} students ({s.rosterMode ?? "AUTO"})
                         </p>
                       </div>
-                      <div className="flex flex-wrap gap-1">
+                      {isAdmin ? (
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingScheduleId(s._id);
+                              setForm({
+                                academicYearBs: s.academicYearBs,
+                                faculty: s.faculty ?? "",
+                                semesterBs: s.semesterBs ?? "",
+                                batchId: s.batchId,
+                                yearId: s.yearId,
+                                postingType:
+                                  s.postingType || defaultPostingTypeForSection(section),
+                                siteName: s.siteName || s.hospitalName,
+                                hospitalName: s.hospitalName,
+                                address: s.address ?? "",
+                                department: s.department ?? "",
+                                ward: s.ward ?? "",
+                                supervisorStaffId: s.supervisorStaffId,
+                                assistantCoordinatorStaffIds:
+                                  s.assistantCoordinatorStaffIds ?? [],
+                                clinicalInstructorName: s.clinicalInstructorName ?? "",
+                                hospitalSupervisorName: s.hospitalSupervisorName ?? "",
+                                startDateBs: s.startDateBs,
+                                endDateBs: s.endDateBs,
+                                shift: s.shift,
+                                remarks: s.remarks ?? "",
+                                status: s.status as "ACTIVE",
+                                rosterMode: s.rosterMode ?? "AUTO_BATCH_YEAR",
+                                assignedStudentIds: s.assignedStudentIds ?? [],
+                              });
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-rose-700"
+                            onClick={() => {
+                              if (window.confirm("Delete this posting?")) {
+                                deletePosting.mutate(s._id);
+                              }
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      ) : canWrite ? (
                         <Button
                           size="sm"
-                          variant="outline"
                           onClick={() => {
-                            setEditingScheduleId(s._id);
-                            setForm({
-                              academicYearBs: s.academicYearBs,
-                              faculty: s.faculty ?? "",
-                              semesterBs: s.semesterBs ?? "",
-                              batchId: s.batchId,
-                              yearId: s.yearId,
-                              postingType: s.postingType || defaultPostingTypeForSection(section),
-                              siteName: s.siteName || s.hospitalName,
-                              hospitalName: s.hospitalName,
-                              address: s.address ?? "",
-                              department: s.department ?? "",
-                              ward: s.ward ?? "",
-                              supervisorStaffId: s.supervisorStaffId,
-                              assistantCoordinatorStaffIds:
-                                s.assistantCoordinatorStaffIds ?? [],
-                              clinicalInstructorName: s.clinicalInstructorName ?? "",
-                              hospitalSupervisorName: s.hospitalSupervisorName ?? "",
-                              startDateBs: s.startDateBs,
-                              endDateBs: s.endDateBs,
-                              shift: s.shift,
-                              remarks: s.remarks ?? "",
-                              status: s.status as "ACTIVE",
-                              rosterMode: s.rosterMode ?? "AUTO_BATCH_YEAR",
-                              assignedStudentIds: s.assignedStudentIds ?? [],
-                            });
+                            setTab("mark");
+                            void loadRosterForMarking(s._id, s.startDateBs, null);
                           }}
                         >
-                          Edit
+                          Take attendance
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-rose-700"
-                          onClick={() => {
-                            if (window.confirm("Delete this posting?")) {
-                              deletePosting.mutate(s._id);
-                            }
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </div>
+                      ) : null}
                     </div>
                   </div>
                 ))
@@ -920,10 +976,14 @@ export const FieldPostingSectionPanel = ({
                 <div className="space-y-3 border-t border-slate-100 pt-3">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField label="Attendance Date (BS)">
-                      <NepaliDateField value={markDateBs} onChange={setMarkDateBs} />
+                      <NepaliDateField value={markDateBs} onChange={onMarkDateChange} />
                     </FormField>
                     <FormField label="Notes">
-                      <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+                      <Input
+                        value={notes}
+                        disabled={isReadOnly}
+                        onChange={(e) => setNotes(e.target.value)}
+                      />
                     </FormField>
                   </div>
 
@@ -936,8 +996,8 @@ export const FieldPostingSectionPanel = ({
                           variant="outline"
                           className="ml-2"
                           onClick={() =>
-                            existingForSelected &&
-                            unlockAttendance.mutate(existingForSelected._id)
+                            loadedAttendance &&
+                            unlockAttendance.mutate(loadedAttendance._id)
                           }
                         >
                           Unlock
@@ -947,12 +1007,15 @@ export const FieldPostingSectionPanel = ({
                           size="sm"
                           variant="outline"
                           className="ml-2"
+                          disabled={loadedAttendance?.editRequest?.status === "PENDING"}
                           onClick={() =>
-                            existingForSelected &&
-                            requestEdit.mutate(existingForSelected._id)
+                            loadedAttendance &&
+                            requestEdit.mutate(loadedAttendance._id)
                           }
                         >
-                          Request edit
+                          {loadedAttendance?.editRequest?.status === "PENDING"
+                            ? "Edit request pending"
+                            : "Request edit"}
                         </Button>
                       )}
                     </div>

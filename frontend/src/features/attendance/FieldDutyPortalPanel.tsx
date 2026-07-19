@@ -32,7 +32,7 @@ interface FieldDutyPortalPanelProps {
 
 export const FieldDutyPortalPanel = ({
   studentId,
-  title = "Field Attendance (Community / PHC / Hospital)",
+  title = "Field Attendance",
 }: FieldDutyPortalPanelProps) => {
   const query = useQuery({
     queryKey: ["field-duty", "portal", studentId ?? "me"],

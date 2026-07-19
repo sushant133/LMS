@@ -28,19 +28,20 @@ const router = Router();
 
 router.use(protect);
 
-/** Roles that may act as field coordinators (via linked CollegeStaff) or manage. */
+/**
+ * Field coordinators are College Staff (linked via CollegeStaff.user).
+ * Teachers use classroom attendance only — not field postings.
+ */
 const FIELD_READ = [
   "SUPER_ADMIN",
   "COLLEGE_ADMIN",
   "COLLEGE_VIEWER",
-  "TEACHER",
   "COLLEGE_STAFF"
 ] as const;
 
 const FIELD_WRITE_ATTENDANCE = [
   "SUPER_ADMIN",
   "COLLEGE_ADMIN",
-  "TEACHER",
   "COLLEGE_STAFF"
 ] as const;
 
@@ -57,7 +58,7 @@ router.get(
 // Dashboard & monitoring
 router.get("/dashboard", authorize(...FIELD_READ), getFieldDutyDashboard);
 router.get("/monitoring", authorize(...FIELD_ADMIN, "COLLEGE_VIEWER"), getFieldDutyMonitoring);
-router.get("/today", authorize(...FIELD_WRITE_ATTENDANCE), getTodayFieldDutyContext);
+router.get("/today", authorize(...FIELD_WRITE_ATTENDANCE, "COLLEGE_VIEWER"), getTodayFieldDutyContext);
 router.get("/reports", authorize(...FIELD_READ), getFieldDutyReports);
 
 // Candidate students for assignment

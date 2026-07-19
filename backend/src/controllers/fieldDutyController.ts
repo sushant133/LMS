@@ -10,6 +10,7 @@ import {
   fieldDutyScheduleSchema,
   fieldDutyScheduleUpdateSchema,
   fieldDutyUnlockSchema,
+  hasInstitutionAccess,
   postingTypeToSection,
   postingTypesForSection
 } from "@phit-erp/shared";
@@ -76,19 +77,30 @@ export const listFieldDutySchedules = asyncHandler(async (req: Request, res: Res
     filter.postingType = req.query.postingType.toUpperCase();
   }
   if (typeof req.query.section === "string" && req.query.section) {
-    const types = postingTypesForSection(
-      req.query.section === "HOSPITAL" ? "HOSPITAL" : "COMMUNITY_PHC"
-    );
-    // Include unknown custom types under COMMUNITY_PHC unless explicitly HOSPITAL-like;
-    // for HOSPITAL section use exact types; for COMMUNITY also match non-hospital defaults.
+    const hospitalTypes = postingTypesForSection("HOSPITAL");
+    const priorAnd = Array.isArray(filter.$and) ? (filter.$and as unknown[]) : [];
+    // Legacy rows without postingType are treated as HOSPITAL.
     if (req.query.section === "HOSPITAL") {
-      filter.postingType = { $in: types };
+      filter.$and = [
+        ...priorAnd,
+        {
+          $or: [
+            { postingType: { $in: hospitalTypes } },
+            { postingType: { $exists: false } },
+            { postingType: null },
+            { postingType: "" }
+          ]
+        }
+      ];
     } else {
-      filter.postingType = { $nin: postingTypesForSection("HOSPITAL") };
+      filter.$and = [
+        ...priorAnd,
+        { postingType: { $exists: true, $nin: hospitalTypes, $ne: "" } }
+      ];
     }
   }
 
-  if (!canManageInstitution(req.user?.role ?? "")) {
+  if (!hasInstitutionAccess(req.user?.role ?? "")) {
     filter = await scheduleAccessFilter(req, filter);
   } else if (typeof req.query.supervisorStaffId === "string" && req.query.supervisorStaffId) {
     filter.$or = [
@@ -406,14 +418,7 @@ export const listAssignableStudents = asyncHandler(async (req: Request, res: Res
   };
   if (typeof req.query.batchId === "string" && req.query.batchId) filter.batchId = req.query.batchId;
   if (typeof req.query.yearId === "string" && req.query.yearId) filter.yearId = req.query.yearId;
-  if (typeof req.query.faculty === "string" && req.query.faculty) {
-    // faculty may live on student or we filter client-side; try common fields
-    filter.$or = [
-      { faculty: req.query.faculty },
-      { program: req.query.faculty },
-      { stream: req.query.faculty }
-    ];
-  }
+  // Note: Student model has no faculty/program field — filter by batch + year only.
 
   const students = await Student.find(filter)
     .populate("user", "fullName")
@@ -453,7 +458,7 @@ export const listFieldDutyAttendance = asyncHandler(async (req: Request, res: Re
     filter["editRequest.status"] = req.query.editRequestStatus;
   }
 
-  if (!canManageInstitution(req.user?.role ?? "")) {
+  if (!hasInstitutionAccess(req.user?.role ?? "")) {
     const staffScope = await getFieldSupervisorStaffScope(req);
     if (!staffScope) throw new ApiError(403, "Not allowed");
     // Scope to postings where this staff is coordinator
@@ -764,7 +769,7 @@ export const getFieldDutyDashboard = asyncHandler(async (req: Request, res: Resp
 });
 
 export const getFieldDutyMonitoring = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
+  if (!hasInstitutionAccess(req.user?.role ?? "")) {
     throw new ApiError(403, "Only administrators can view field monitoring");
   }
   const data = await buildFieldDutyMonitoring(req, {
@@ -783,8 +788,7 @@ export const getFieldDutyMonitoring = asyncHandler(async (req: Request, res: Res
 
 export const getFieldDutyReports = asyncHandler(async (req: Request, res: Response) => {
   if (
-    !canManageInstitution(req.user?.role ?? "") &&
-    req.user?.role !== "TEACHER" &&
+    !hasInstitutionAccess(req.user?.role ?? "") &&
     req.user?.role !== "COLLEGE_STAFF"
   ) {
     throw new ApiError(403, "Not allowed");
@@ -815,21 +819,20 @@ export const getFieldDutyReports = asyncHandler(async (req: Request, res: Respon
     filter.supervisorStaffId = req.query.supervisorStaffId;
   }
 
-  if (!canManageInstitution(req.user?.role ?? "")) {
+  if (!hasInstitutionAccess(req.user?.role ?? "")) {
     const staffScope = await getFieldSupervisorStaffScope(req);
-    if (staffScope) {
-      const mySchedules = await FieldDutySchedule.find({
-        schoolId,
-        isDeleted: false,
-        $or: [
-          { supervisorStaffId: staffScope.staffId },
-          { assistantCoordinatorStaffIds: staffScope.staffId }
-        ]
-      })
-        .select("_id")
-        .lean();
-      filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
-    }
+    if (!staffScope) throw new ApiError(403, "Not allowed");
+    const mySchedules = await FieldDutySchedule.find({
+      schoolId,
+      isDeleted: false,
+      $or: [
+        { supervisorStaffId: staffScope.staffId },
+        { assistantCoordinatorStaffIds: staffScope.staffId }
+      ]
+    })
+      .select("_id")
+      .lean();
+    filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
   }
 
   let rows = await FieldDutyAttendance.find(filter).sort({ dateBs: -1 }).limit(500).lean();
@@ -878,7 +881,7 @@ export const getMyFieldDutyAttendance = asyncHandler(async (req: Request, res: R
 
 /** Parent portal: child's field attendance */
 export const getChildFieldDutyAttendance = asyncHandler(async (req: Request, res: Response) => {
-  if (req.user?.role !== "PARENT" && !canManageInstitution(req.user?.role ?? "")) {
+  if (req.user?.role !== "PARENT" && !hasInstitutionAccess(req.user?.role ?? "")) {
     throw new ApiError(403, "Parent access required");
   }
   const studentId = String(req.params.studentId ?? "");
@@ -914,15 +917,30 @@ export const getTodayFieldDutyContext = asyncHandler(async (req: Request, res: R
     endDateBs: { $gte: todayBs }
   };
 
-  if (!canManageInstitution(req.user?.role ?? "")) {
+  if (!hasInstitutionAccess(req.user?.role ?? "")) {
     filter = await scheduleAccessFilter(req, filter);
   }
 
   if (typeof req.query.section === "string" && req.query.section) {
+    const hospitalTypes = postingTypesForSection("HOSPITAL");
+    const priorAnd = Array.isArray(filter.$and) ? (filter.$and as unknown[]) : [];
     if (req.query.section === "HOSPITAL") {
-      filter.postingType = { $in: postingTypesForSection("HOSPITAL") };
+      filter.$and = [
+        ...priorAnd,
+        {
+          $or: [
+            { postingType: { $in: hospitalTypes } },
+            { postingType: { $exists: false } },
+            { postingType: null },
+            { postingType: "" }
+          ]
+        }
+      ];
     } else {
-      filter.postingType = { $nin: postingTypesForSection("HOSPITAL") };
+      filter.$and = [
+        ...priorAnd,
+        { postingType: { $exists: true, $nin: hospitalTypes, $ne: "" } }
+      ];
     }
   }
 

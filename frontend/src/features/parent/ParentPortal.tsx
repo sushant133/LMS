@@ -50,7 +50,7 @@ export const ParentPortal = () => {
     <div className="space-y-6">
       <PageHeader
         title="Parent Portal"
-        description="View your children's attendance (including hospital/field duty), fees, assignments, and college alerts."
+        description="View your children's classroom and field attendance, fees, assignments, and college alerts."
       />
 
       {children.length === 0 ? (
@@ -103,7 +103,7 @@ export const ParentPortal = () => {
         <FieldDutyPortalPanel
           key={`field-${child.studentId}`}
           studentId={child.studentId}
-          title={`Field / Hospital Duty · ${child.fullName}`}
+          title={`Field Attendance · ${child.fullName}`}
         />
       ))}
 

@@ -232,7 +232,7 @@ export default function App() {
               <Route path="/attendance-view" element={<AttendancePage />} />
             </Route>
 
-            {/* Field Management: Community/PHC & Hospital postings (independent from classroom attendance) */}
+            {/* Field Management: admins + field coordinators (staff) + students (read-only) — not teachers */}
             <Route
               element={
                 <ProtectedRoute
@@ -240,7 +240,6 @@ export default function App() {
                     "SUPER_ADMIN",
                     "COLLEGE_ADMIN",
                     "COLLEGE_VIEWER",
-                    "TEACHER",
                     "COLLEGE_STAFF",
                     "STUDENT",
                   ]}

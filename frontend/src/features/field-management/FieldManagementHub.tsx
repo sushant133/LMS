@@ -21,7 +21,6 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "lib/api";
 import { FieldPostingSectionPanel } from "./FieldPostingSectionPanel";
 import { FieldStudentAttendancePanel } from "./FieldStudentAttendancePanel";
-import { sectionLabel } from "./fieldUtils";
 
 type TopTab = "community" | "hospital" | "my-duties" | "my-attendance" | "monitoring";
 
@@ -30,12 +29,13 @@ export const FieldManagementHub = () => {
   const isAdmin = canManageInstitution(user?.role ?? "");
   const isViewer = user?.role === "COLLEGE_VIEWER";
   const isStudent = user?.role === "STUDENT";
-  const isStaffOrTeacher =
-    user?.role === "COLLEGE_STAFF" || user?.role === "TEACHER";
+  /** Field coordinators log in as College Staff (not teachers). */
+  const isCoordinator = user?.role === "COLLEGE_STAFF";
+  const canWriteAttendance = isAdmin || isCoordinator;
 
   const defaultTab: TopTab = isStudent
     ? "my-attendance"
-    : isStaffOrTeacher
+    : isCoordinator && !isAdmin
       ? "my-duties"
       : "community";
 
@@ -57,7 +57,7 @@ export const FieldManagementHub = () => {
     if (isStudent) {
       return [{ id: "my-attendance" as const, label: "Field Attendance", icon: ClipboardCheck }];
     }
-    if (isStaffOrTeacher && !isAdmin) {
+    if (isCoordinator && !isAdmin) {
       return [
         { id: "my-duties" as const, label: "My Field Duties", icon: MapPin },
         { id: "community" as const, label: "Community / PHC", icon: Building2 },
@@ -70,11 +70,11 @@ export const FieldManagementHub = () => {
       ...(isAdmin || isViewer
         ? [{ id: "monitoring" as const, label: "Admin Monitoring", icon: Users }]
         : []),
-      ...(isStaffOrTeacher
+      ...(isCoordinator
         ? [{ id: "my-duties" as const, label: "My Field Duties", icon: MapPin }]
         : []),
     ];
-  }, [isAdmin, isViewer, isStudent, isStaffOrTeacher]);
+  }, [isAdmin, isViewer, isStudent, isCoordinator]);
 
   const section: FieldPostingSection | null =
     topTab === "community" ? "COMMUNITY_PHC" : topTab === "hospital" ? "HOSPITAL" : null;
@@ -127,8 +127,8 @@ export const FieldManagementHub = () => {
         <FieldPostingSectionPanel
           section={section}
           isAdmin={isAdmin}
-          canWrite={isAdmin || isStaffOrTeacher}
-          isCoordinatorView={isStaffOrTeacher && !isAdmin}
+          canWrite={canWriteAttendance}
+          isCoordinatorView={isCoordinator && !isAdmin}
         />
       ) : null}
 
@@ -367,6 +367,3 @@ const MonitorTable = ({
     </CardContent>
   </Card>
 );
-
-// silence unused import warning if tree-shaken oddly
-void sectionLabel;

@@ -163,7 +163,7 @@ const navItems: NavItem[] = [
   {
     labelKey: "fieldManagement",
     path: "/field-management",
-    roles: ["TEACHER", "COLLEGE_STAFF"],
+    roles: ["COLLEGE_STAFF"],
     section: "myWork",
   },
   {

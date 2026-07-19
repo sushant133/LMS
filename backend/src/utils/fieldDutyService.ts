@@ -8,7 +8,7 @@ import type {
   FieldDutyStudentStatus,
   FieldPostingSection
 } from "@phit-erp/shared";
-import { canManageInstitution, postingTypeToSection } from "@phit-erp/shared";
+import { hasInstitutionAccess, postingTypeToSection } from "@phit-erp/shared";
 import { Batch } from "../models/Batch.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { FieldDutyAttendance } from "../models/FieldDutyAttendance.js";
@@ -196,7 +196,8 @@ export const assertScheduleAccess = async (
     assistantCoordinatorStaffIds?: unknown;
   }
 ) => {
-  if (canManageInstitution(req.user?.role ?? "")) return;
+  // Institution admins + read-only viewers may open any posting
+  if (hasInstitutionAccess(req.user?.role ?? "")) return;
   const staffScope = await getFieldSupervisorStaffScope(req);
   if (staffScope && isCoordinatorOfSchedule(staffScope.staffId, schedule)) return;
   throw new ApiError(
@@ -205,13 +206,17 @@ export const assertScheduleAccess = async (
   );
 };
 
-/** Mongo filter for schedules visible to the current user (admin = all; staff = assigned). */
+/**
+ * Mongo filter for schedules visible to the current user.
+ * - Institution access (admin + viewer): all postings
+ * - Linked CollegeStaff: only postings where they are primary or assistant coordinator
+ */
 export const scheduleAccessFilter = async (
   req: Request,
   base: Record<string, unknown> = {}
 ): Promise<Record<string, unknown>> => {
   const filter = { ...base };
-  if (canManageInstitution(req.user?.role ?? "")) return filter;
+  if (hasInstitutionAccess(req.user?.role ?? "")) return filter;
   const staffScope = await getFieldSupervisorStaffScope(req);
   if (!staffScope) {
     throw new ApiError(403, "Not allowed to list field postings");
@@ -530,8 +535,8 @@ export const notifyFieldDutyAttendance = async (
 export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDashboard> => {
   const schoolId = tenantObjectId(req);
   const todayBs = getTodayBs();
-  const isAdmin = canManageInstitution(req.user?.role ?? "");
-  const staffScope = !isAdmin ? await getFieldSupervisorStaffScope(req) : null;
+  const institutionWide = hasInstitutionAccess(req.user?.role ?? "");
+  const staffScope = !institutionWide ? await getFieldSupervisorStaffScope(req) : null;
 
   const scheduleFilter: Record<string, unknown> = {
     schoolId,
@@ -540,11 +545,14 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
     startDateBs: { $lte: todayBs },
     endDateBs: { $gte: todayBs }
   };
-  if (!isAdmin && staffScope) {
+  if (!institutionWide && staffScope) {
     scheduleFilter.$or = [
       { supervisorStaffId: staffScope.staffId },
       { assistantCoordinatorStaffIds: staffScope.staffId }
     ];
+  } else if (!institutionWide && !staffScope) {
+    // No staff link and not institution role → empty dashboard (no 500)
+    scheduleFilter._id = { $in: [] };
   }
 
   const activeSchedules = await FieldDutySchedule.find(scheduleFilter).lean();
@@ -697,11 +705,13 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
     status: "ACTIVE",
     startDateBs: { $gt: todayBs }
   };
-  if (!isAdmin && staffScope) {
+  if (!institutionWide && staffScope) {
     upcomingFilter.$or = [
       { supervisorStaffId: staffScope.staffId },
       { assistantCoordinatorStaffIds: staffScope.staffId }
     ];
+  } else if (!institutionWide && !staffScope) {
+    upcomingFilter._id = { $in: [] };
   }
   const upcoming = await FieldDutySchedule.find(upcomingFilter)
     .sort({ startDateBs: 1 })
