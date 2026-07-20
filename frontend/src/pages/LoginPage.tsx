@@ -184,6 +184,11 @@ export const LoginPage = () => {
                 </Link>
               </p>
             ) : null}
+            <p className="mt-4 text-center text-xs text-slate-500">
+              <Link className="hover:text-brand-700 hover:underline" to="/privacy">
+                Privacy Policy
+              </Link>
+            </p>
           </CardContent>
         </Card>
       </div>

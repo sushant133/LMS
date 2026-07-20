@@ -7,6 +7,9 @@ import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
 import { LoginPage } from "pages/LoginPage";
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
+const PrivacyPolicyPage = lazy(() =>
+  import("pages/PrivacyPolicyPage").then((module) => ({ default: module.PrivacyPolicyPage })),
+);
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const StudentsLayout = lazy(() => import("pages/StudentsPage"));
 const CreateStudentPage = lazy(() =>
@@ -84,6 +87,7 @@ export default function App() {
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<LazyRoute><RegisterPage /></LazyRoute>} />
+        <Route path="/privacy" element={<LazyRoute><PrivacyPolicyPage /></LazyRoute>} />
       </Route>
 
         <Route element={<ProtectedRoute />}>
