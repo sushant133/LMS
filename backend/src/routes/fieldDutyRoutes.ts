@@ -23,10 +23,12 @@ import {
   updateFieldDutySchedule
 } from "../controllers/fieldDutyController.js";
 import { authorize, protect } from "../middleware/auth.js";
+import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
-router.use(protect);
+// tenantGuard sets req.tenantSchoolId — required by tenantObjectId() in controllers
+router.use(protect, tenantGuard);
 
 /**
  * Field coordinators are College Staff (linked via CollegeStaff.user).
