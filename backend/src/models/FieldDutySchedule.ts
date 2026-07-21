@@ -53,13 +53,13 @@ const fieldDutyScheduleSchema = new Schema(
     /**
      * AUTO_BATCH_YEAR = all active students in batch+year (single shift).
      * MANUAL = assignedStudentIds only (single shift).
-     * MULTI_SHIFT = studentShifts maps each student to MORNING/DAY/EVENING/NIGHT/FULL_DAY;
-     *   attendance is taken separately per shift.
+     * MULTI_SHIFT = studentShifts default map; attendance is date+shift-wise.
+     * DAILY = pool is batch+year; coordinator picks students each day and marks attendance.
      */
     rosterMode: {
       type: String,
-      enum: ["AUTO_BATCH_YEAR", "MANUAL", "MULTI_SHIFT"],
-      default: "AUTO_BATCH_YEAR"
+      enum: ["AUTO_BATCH_YEAR", "MANUAL", "MULTI_SHIFT", "DAILY"],
+      default: "DAILY"
     },
     assignedStudentIds: {
       type: [{ type: Schema.Types.ObjectId, ref: "Student" }],

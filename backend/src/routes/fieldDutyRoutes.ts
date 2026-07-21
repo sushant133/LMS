@@ -9,6 +9,7 @@ import {
   getFieldDutyDashboard,
   getFieldDutyMonitoring,
   getFieldDutyReports,
+  getFieldDutyRegister,
   getFieldDutyRoster,
   getMyFieldDutyAttendance,
   getTodayFieldDutyContext,
@@ -75,7 +76,8 @@ router.get("/schedules/:id/roster", authorize(...FIELD_READ), getFieldDutyRoster
 router.put("/schedules/:id/coordinators", authorize(...FIELD_ADMIN), assignFieldCoordinators);
 router.put("/schedules/:id/students", authorize(...FIELD_ADMIN), assignFieldStudents);
 
-// Attendance
+// Attendance + manual-style register book
+router.get("/register", authorize(...FIELD_READ), getFieldDutyRegister);
 router.get("/attendance", authorize(...FIELD_READ), listFieldDutyAttendance);
 router.get("/attendance/:id", authorize(...FIELD_READ), getFieldDutyAttendanceById);
 router.post("/attendance", authorize(...FIELD_WRITE_ATTENDANCE), submitFieldDutyAttendance);

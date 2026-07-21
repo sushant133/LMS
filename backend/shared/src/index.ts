@@ -17,6 +17,8 @@ export * from "./module-schemas.js";
 export * from "./module-types.js";
 export * from "./field-duty-types.js";
 export * from "./field-duty-schemas.js";
+export * from "./employee-attendance-types.js";
+export * from "./employee-attendance-schemas.js";
 export * from "./laboratory-constants.js";
 export * from "./laboratory-schemas.js";
 export * from "./laboratory-types.js";

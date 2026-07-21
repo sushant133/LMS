@@ -13,6 +13,8 @@ export const ERP_MODULE_KEYS = [
   "parents",
   "attendance",
   "daily-attendance",
+  "teacher-attendance",
+  "staff-attendance",
   "field-duty",
   "academics",
   "subject-assignment",
@@ -162,6 +164,23 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     apiPrefixes: ["/daily-attendance"],
     routePrefixes: ["/daily-attendance", "/attendance"],
     availableActions: ["view", "create", "edit", "approve", "export"]
+  },
+  {
+    key: "teacher-attendance",
+    label: "Teacher Attendance",
+    description:
+      "Daily attendance for teaching staff (teachers and dual-role leaders with teaching duties)",
+    apiPrefixes: ["/employee-attendance"],
+    routePrefixes: ["/attendance"],
+    availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
+  },
+  {
+    key: "staff-attendance",
+    label: "Staff Attendance",
+    description: "Daily attendance for non-teaching college staff (uses existing staff records)",
+    apiPrefixes: ["/employee-attendance"],
+    routePrefixes: ["/attendance"],
+    availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
     key: "field-duty",

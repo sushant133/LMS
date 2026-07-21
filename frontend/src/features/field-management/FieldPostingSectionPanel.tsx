@@ -4,6 +4,7 @@ import {
   type BatchRecord,
   type CollegeStaffRecord,
   type FieldDutyAttendanceRecord,
+  type FieldDutyRegisterBook,
   type FieldDutyRosterStudent,
   type FieldDutyScheduleRecord,
   type FieldDutyShift,
@@ -11,6 +12,7 @@ import {
   type FieldPostingSection,
   type YearRecord,
 } from "@phit-erp/shared";
+import { formatBsDate, getTodayBs } from "@munatech/nepali-datepicker";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -43,9 +45,19 @@ interface MarkRow {
   fullName: string;
   admissionNumber: string;
   rollNumber: number;
+  /** Included on today's daily roster for this date+shift */
+  onRoster: boolean;
   status: FieldDutyStudentStatus;
   remarks: string;
 }
+
+const todayBsString = () => {
+  try {
+    return formatBsDate(getTodayBs(), "YYYY-MM-DD");
+  } catch {
+    return "";
+  }
+};
 
 interface Props {
   section: FieldPostingSection;
@@ -75,7 +87,7 @@ const defaultForm = (section: FieldPostingSection, academicYearBs = "") => ({
   shift: "DAY" as FieldDutyShift,
   remarks: "",
   status: "ACTIVE" as const,
-  rosterMode: "AUTO_BATCH_YEAR" as "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT",
+  rosterMode: "DAILY" as "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT" | "DAILY",
   assignedStudentIds: [] as string[],
   /** studentId → shift for MULTI_SHIFT mode */
   studentShiftMap: {} as Record<string, FieldDutyShift>,
@@ -97,21 +109,20 @@ export const FieldPostingSectionPanel = ({
   /** Full schedule metadata for the posting currently being marked. */
   const [selectedSchedule, setSelectedSchedule] =
     useState<FieldDutyScheduleRecord | null>(null);
-  const [markDateBs, setMarkDateBs] = useState("");
+  const [markDateBs, setMarkDateBs] = useState(() => todayBsString());
   const [markRows, setMarkRows] = useState<MarkRow[]>([]);
   const [notes, setNotes] = useState("");
-  /** Filter postings by duty shift when taking attendance (empty = all shifts). */
+  const [rosterSearch, setRosterSearch] = useState("");
+  /** Filter postings list by shift (optional). */
   const [shiftFilter, setShiftFilter] = useState<"" | FieldDutyShift>("");
-  /**
-   * Shift selected for marking attendance on a MULTI_SHIFT posting
-   * (or the posting's single shift for single-mode).
-   */
-  const [markShift, setMarkShift] = useState<FieldDutyShift | "">("");
+  /** Shift for this day's register sheet. */
+  const [markShift, setMarkShift] = useState<FieldDutyShift>("DAY");
   /** Attendance record currently loaded for mark panel (authoritative for read-only). */
   const [loadedAttendance, setLoadedAttendance] =
     useState<FieldDutyAttendanceRecord | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [studentPickerOpen, setStudentPickerOpen] = useState(false);
+  const [loadingMark, setLoadingMark] = useState(false);
 
   useEffect(() => {
     setForm((f) => ({
@@ -125,7 +136,9 @@ export const FieldPostingSectionPanel = ({
     setLoadedAttendance(null);
     setNotes("");
     setShiftFilter("");
-    setMarkShift("");
+    setMarkShift("DAY");
+    setMarkDateBs(todayBsString());
+    setRosterSearch("");
   }, [section, isCoordinatorView, canWrite]);
 
   const settingsQuery = useQuery({
@@ -189,6 +202,15 @@ export const FieldPostingSectionPanel = ({
     queryFn: () =>
       unwrap<FieldDutyAttendanceRecord[]>(
         api.get("/field-duty/attendance", { params: { section } }),
+      ),
+    enabled: tab === "history" || tab === "reports",
+  });
+
+  const registerQuery = useQuery({
+    queryKey: ["field-duty", "register", section],
+    queryFn: () =>
+      unwrap<FieldDutyRegisterBook>(
+        api.get("/field-duty/register", { params: { section } }),
       ),
     enabled: tab === "history" || tab === "reports",
   });
@@ -326,21 +348,19 @@ export const FieldPostingSectionPanel = ({
 
   const submitAttendance = useMutation({
     mutationFn: () => {
-      const isMulti = selectedSchedule?.rosterMode === "MULTI_SHIFT";
-      const shift =
-        markShift ||
-        selectedSchedule?.shift ||
-        "DAY";
-      if (isMulti && !markShift) {
-        throw new Error("Select a shift before submitting multi-shift attendance");
+      if (!markDateBs) throw new Error("Select attendance date (BS)");
+      if (!markShift) throw new Error("Select duty shift for this day");
+      const onDuty = markRows.filter((r) => r.onRoster);
+      if (onDuty.length === 0) {
+        throw new Error("Select at least one student for today's roster");
       }
       return unwrap(
         api.post("/field-duty/attendance", {
           scheduleId: selectedScheduleId,
           dateBs: markDateBs,
-          shift,
+          shift: markShift,
           notes,
-          entries: markRows.map((r) => ({
+          entries: onDuty.map((r) => ({
             studentId: r.studentId,
             status: r.status,
             remarks: r.remarks,
@@ -349,14 +369,13 @@ export const FieldPostingSectionPanel = ({
       );
     },
     onSuccess: async (data) => {
+      const rec = data as FieldDutyAttendanceRecord;
       toast.success(
-        markShift
-          ? `${markShift.replace(/_/g, " ")} shift attendance submitted`
-          : "Attendance submitted (read-only until admin unlocks)",
+        `Register saved · ${markDateBs} · ${markShift.replace(/_/g, " ")} · ${rec.entries?.length ?? 0} students`,
       );
-      setLoadedAttendance(data as FieldDutyAttendanceRecord);
-      setNotes("");
+      setLoadedAttendance(rec);
       await invalidate();
+      await queryClient.invalidateQueries({ queryKey: ["field-duty", "register"] });
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
@@ -376,7 +395,7 @@ export const FieldPostingSectionPanel = ({
           selectedScheduleId,
           markDateBs,
           data as FieldDutyAttendanceRecord,
-          markShift || (data as FieldDutyAttendanceRecord).shift || "",
+          markShift || (data as FieldDutyAttendanceRecord).shift || "DAY",
         );
       }
     },
@@ -424,8 +443,8 @@ export const FieldPostingSectionPanel = ({
   });
 
   /**
-   * Load roster for one posting (+ optional shift for MULTI_SHIFT).
-   * Attendance is always looked up by scheduleId + dateBs + shift.
+   * Load daily mark context: candidate pool + suggested roster for date+shift.
+   * Coordinator then ticks who is on duty today and marks P/A/L.
    */
   const loadRosterForMarking = async (
     scheduleId: string,
@@ -433,90 +452,68 @@ export const FieldPostingSectionPanel = ({
     existing?: FieldDutyAttendanceRecord | null,
     shiftForMark?: FieldDutyShift | "",
   ) => {
+    const date = dateBs || todayBsString();
+    const shift = (shiftForMark || markShift || "DAY") as FieldDutyShift;
     setSelectedScheduleId(scheduleId);
-    setMarkDateBs(dateBs);
+    setMarkDateBs(date);
+    setMarkShift(shift);
+    setLoadingMark(true);
     try {
-      // First fetch schedule meta (no filter) so we know multi vs single
-      const meta = await unwrap<{
+      const ctx = await unwrap<{
         schedule: FieldDutyScheduleRecord;
+        pool?: FieldDutyRosterStudent[];
         students: FieldDutyRosterStudent[];
-      }>(api.get(`/field-duty/schedules/${scheduleId}/roster`));
+        suggestedStudentIds?: string[];
+        existingAttendance?: FieldDutyAttendanceRecord | null;
+        dateBs: string;
+        shift: FieldDutyShift;
+      }>(
+        api.get(`/field-duty/schedules/${scheduleId}/roster`, {
+          params: { dateBs: date, shift },
+        }),
+      );
 
-      const isMulti = meta.schedule.rosterMode === "MULTI_SHIFT";
-      const usedShifts: FieldDutyShift[] =
-        meta.schedule.shiftsUsed && meta.schedule.shiftsUsed.length > 0
-          ? meta.schedule.shiftsUsed
-          : isMulti
-            ? (FIELD_SHIFTS.filter(
-                (s) => (meta.schedule.shiftCounts?.[s] ?? 0) > 0,
-              ) as FieldDutyShift[])
-            : [meta.schedule.shift || "DAY"];
-
-      const activeShift: FieldDutyShift =
-        (shiftForMark as FieldDutyShift) ||
-        (isMulti
-          ? usedShifts[0] || "DAY"
-          : meta.schedule.shift || "DAY");
-
-      setMarkShift(activeShift);
-      setSelectedSchedule(meta.schedule);
-
-      const roster = isMulti
-        ? await unwrap<{
-            schedule: FieldDutyScheduleRecord;
-            students: FieldDutyRosterStudent[];
-          }>(
-            api.get(`/field-duty/schedules/${scheduleId}/roster`, {
-              params: { shift: activeShift },
-            }),
-          )
-        : meta;
-
-      if (isMulti) setSelectedSchedule(roster.schedule);
-
-      let attendance = existing ?? null;
-      if (
-        attendance &&
-        attendance.shift &&
-        attendance.shift !== activeShift
-      ) {
-        attendance = null;
-      }
-      if (!attendance && dateBs) {
-        const list = await unwrap<FieldDutyAttendanceRecord[]>(
-          api.get("/field-duty/attendance", {
-            params: {
-              scheduleId,
-              dateBs,
-              shift: activeShift,
-            },
-          }),
-        );
-        attendance = list[0] ?? null;
-      }
+      setSelectedSchedule(ctx.schedule);
+      const attendance = existing ?? ctx.existingAttendance ?? null;
       setLoadedAttendance(attendance);
 
+      const pool = ctx.pool ?? ctx.students ?? [];
+      const mode = ctx.schedule.rosterMode || "DAILY";
+
       setMarkRows(
-        roster.students.map((s) => {
+        pool.map((s) => {
           const prev = attendance?.entries.find((e) => e.studentId === s._id);
+          // Existing register → those students are on roster
+          // MULTI/MANUAL/AUTO defaults → all pool selected
+          // DAILY new day → none selected (coordinator picks daily roster)
+          let onRoster = false;
+          if (prev) onRoster = true;
+          else if (attendance?.entries?.length) onRoster = false;
+          else if (mode === "DAILY") onRoster = false;
+          else onRoster = true;
+
           return {
             studentId: s._id,
             fullName: s.fullName,
             admissionNumber: s.admissionNumber,
             rollNumber: s.rollNumber,
-            status: prev?.status ?? "PRESENT",
+            onRoster,
+            status: prev?.status ?? ("PRESENT" as FieldDutyStudentStatus),
             remarks: prev?.remarks ?? "",
           };
         }),
       );
+
       if (attendance?.notes) setNotes(attendance.notes);
       else setNotes("");
     } catch (e) {
       toast.error(parseErrorMessage(e));
+    } finally {
+      setLoadingMark(false);
     }
   };
 
-  /** When user changes attendance date, re-load roster + existing record for that date. */
+  /** When user changes attendance date, re-load pool + register for that date. */
   const onMarkDateChange = (dateBs: string) => {
     setMarkDateBs(dateBs);
     if (selectedScheduleId && dateBs) {
@@ -529,68 +526,104 @@ export const FieldPostingSectionPanel = ({
     if (selectedScheduleId) {
       void loadRosterForMarking(
         selectedScheduleId,
-        markDateBs || selectedSchedule?.startDateBs || "",
+        markDateBs || todayBsString(),
         null,
         shift,
       );
     }
   };
 
-  const exportExcel = () => {
-    const rows = (historyQuery.data ?? []).flatMap((rec) =>
-      rec.entries.map((e) => ({
-        Date: rec.dateBs,
-        Section: sectionLabel(section),
-        Type: postingTypeLabel(rec.postingType),
-        Site: rec.siteName || rec.hospitalName,
-        Department: rec.department,
-        Shift: rec.shift,
-        Student: e.student?.fullName ?? "",
-        Admission: e.student?.admissionNumber ?? "",
-        Roll: e.student?.rollNumber ?? "",
-        Status: e.status,
-        Remarks: e.remarks ?? "",
-        Record: rec.status,
-      })),
+  const onDutyCount = markRows.filter((r) => r.onRoster).length;
+  const filteredMarkRows = useMemo(() => {
+    const q = rosterSearch.trim().toLowerCase();
+    if (!q) return markRows;
+    return markRows.filter(
+      (r) =>
+        r.fullName.toLowerCase().includes(q) ||
+        r.admissionNumber.toLowerCase().includes(q) ||
+        String(r.rollNumber).includes(q),
     );
+  }, [markRows, rosterSearch]);
+
+  const exportExcel = () => {
+    const reg = registerQuery.data?.rows ?? [];
+    const rows =
+      reg.length > 0
+        ? reg.map((r) => ({
+            Date: r.dateBs,
+            Shift: r.shift,
+            Site: r.siteName,
+            Batch: r.batchName ?? "",
+            Year: r.yearName ?? "",
+            Roll: r.rollNumber ?? "",
+            Student: r.fullName ?? "",
+            Admission: r.admissionNumber ?? "",
+            Status: r.status,
+            Remarks: r.remarks ?? "",
+            Record: r.recordStatus,
+          }))
+        : (historyQuery.data ?? []).flatMap((rec) =>
+            rec.entries.map((e) => ({
+              Date: rec.dateBs,
+              Shift: rec.shift,
+              Site: rec.siteName || rec.hospitalName,
+              Batch: "",
+              Year: "",
+              Roll: e.student?.rollNumber ?? "",
+              Student: e.student?.fullName ?? "",
+              Admission: e.student?.admissionNumber ?? "",
+              Status: e.status,
+              Remarks: e.remarks ?? "",
+              Record: rec.status,
+            })),
+          );
     const sheet = XLSX.utils.json_to_sheet(rows);
     const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Field Attendance");
+    XLSX.utils.book_append_sheet(book, sheet, "Field Register");
     XLSX.writeFile(
       book,
-      `field-${section === "HOSPITAL" ? "hospital" : "community"}-attendance.xlsx`,
+      `field-${section === "HOSPITAL" ? "hospital" : "community"}-register.xlsx`,
     );
   };
 
   const printReport = () => {
-    const rows = historyQuery.data ?? [];
+    const byDate = registerQuery.data?.byDate ?? [];
     const win = window.open("", "_blank");
     if (!win) {
       toast.error("Pop-up blocked — allow pop-ups to print");
       return;
     }
-    const body = rows
-      .map((rec) => {
-        const entries = rec.entries
-          .map(
-            (e) =>
-              `<tr><td>${e.student?.rollNumber ?? ""}</td><td>${e.student?.fullName ?? ""}</td><td>${e.status}</td><td>${e.remarks ?? ""}</td></tr>`,
-          )
-          .join("");
-        return `<h3>${rec.dateBs} — ${rec.siteName || rec.hospitalName} · Shift ${rec.shift} (${postingTypeLabel(rec.postingType)})</h3>
-          <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px">
-            <thead><tr><th>Roll</th><th>Name</th><th>Status</th><th>Remarks</th></tr></thead>
-            <tbody>${entries}</tbody>
-          </table>`;
-      })
-      .join("<hr/>");
+    const body =
+      byDate.length > 0
+        ? byDate
+            .map((day) => {
+              const blocks = day.shifts
+                .map((block) => {
+                  const entries = block.entries
+                    .map(
+                      (e) =>
+                        `<tr><td>${e.rollNumber ?? ""}</td><td>${e.fullName ?? ""}</td><td>${e.status}</td><td>${e.remarks ?? ""}</td></tr>`,
+                    )
+                    .join("");
+                  return `<h3>${day.dateBs} · ${block.shift} · ${block.siteName}</h3>
+                    <p style="font-size:12px">P:${block.summary.present} A:${block.summary.absent} L:${block.summary.late} Leave:${block.summary.leave} · Total ${block.summary.total} · ${block.recordStatus}</p>
+                    <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px">
+                      <thead><tr><th>Roll</th><th>Name</th><th>Status</th><th>Remarks</th></tr></thead>
+                      <tbody>${entries}</tbody>
+                    </table>`;
+                })
+                .join("");
+              return blocks;
+            })
+            .join("<hr/>")
+        : "<p>No register records.</p>";
 
-    win.document.write(`<!DOCTYPE html><html><head><title>PHIT LMS — Field Attendance Report</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>PHIT LMS — Field Attendance Register</title>
       <style>body{font-family:system-ui,sans-serif;padding:24px} h1{font-size:18px} h3{font-size:14px;margin-top:16px}</style>
       </head><body>
-      <h1>PHIT LMS — ${sectionLabel(section)} Attendance Report</h1>
+      <h1>PHIT LMS — ${sectionLabel(section)} Attendance Register</h1>
       <p>Generated ${new Date().toLocaleString()}</p>
-      ${body || "<p>No records.</p>"}
+      ${body}
       <script>window.onload=()=>{window.print()}</script>
       </body></html>`);
     win.document.close();
@@ -601,8 +634,8 @@ export const FieldPostingSectionPanel = ({
       id: "postings" as const,
       label: isAdmin ? "Posting Assignment" : "Assigned postings",
     },
-    ...(canWrite ? [{ id: "mark" as const, label: "Take Attendance" }] : []),
-    { id: "history", label: "History" },
+    ...(canWrite ? [{ id: "mark" as const, label: "Daily Attendance" }] : []),
+    { id: "history", label: "Attendance Register" },
     { id: "reports", label: "Reports" },
   ];
 
@@ -614,9 +647,9 @@ export const FieldPostingSectionPanel = ({
     loadedAttendance?.status === "SUBMITTED";
 
   /**
-   * Active postings expanded to shift cards.
-   * MULTI_SHIFT postings → one card per used shift (Morning 10, Day 10, …).
-   * Single-shift postings → one card with posting.shift.
+   * Active postings for daily marking.
+   * DAILY / AUTO / MANUAL → one card (coordinator picks date+shift+students).
+   * MULTI_SHIFT → one card per configured shift (optional).
    */
   const markablePostings = useMemo(() => {
     type MarkCard = {
@@ -633,11 +666,11 @@ export const FieldPostingSectionPanel = ({
     const todayById = new Map(todayCtx.map((c) => [c.schedule._id, c]));
     const active = schedules.filter((s) => s.status === "ACTIVE");
     const cards: MarkCard[] = [];
+    const dateBs = markDateBs || todayBsString();
 
     for (const s of active) {
       const ctx = todayById.get(s._id);
       const isMulti = s.rosterMode === "MULTI_SHIFT";
-      const dateBs = ctx?.dateBs ?? markDateBs;
       const activeToday = Boolean(ctx);
 
       if (isMulti) {
@@ -647,7 +680,7 @@ export const FieldPostingSectionPanel = ({
             : (FIELD_SHIFTS.filter(
                 (sh) => (s.shiftCounts?.[sh] ?? 0) > 0,
               ) as FieldDutyShift[]);
-        for (const sh of used) {
+        for (const sh of used.length ? used : (["DAY"] as FieldDutyShift[])) {
           if (shiftFilter && sh !== shiftFilter) continue;
           const att =
             ctx?.attendanceByShift?.[sh] ??
@@ -658,22 +691,24 @@ export const FieldPostingSectionPanel = ({
             key: `${s._id}:${sh}`,
             schedule: s,
             shift: sh,
-            dateBs,
-            studentCount: s.shiftCounts?.[sh] ?? 0,
+            dateBs: ctx?.dateBs ?? dateBs,
+            studentCount: s.shiftCounts?.[sh] ?? s.studentCount ?? 0,
             existingAttendance: att ?? null,
             activeToday,
             isMultiShift: true,
           });
         }
       } else {
-        const sh = (s.shift || "DAY") as FieldDutyShift;
-        if (shiftFilter && sh !== shiftFilter) continue;
+        const sh = (shiftFilter || s.shift || "DAY") as FieldDutyShift;
+        if (shiftFilter && s.shift && s.shift !== shiftFilter && s.rosterMode !== "DAILY") {
+          // For DAILY, shift is chosen when marking — still show posting
+        }
         cards.push({
-          key: `${s._id}:${sh}`,
+          key: `${s._id}:daily`,
           schedule: s,
           shift: sh,
-          dateBs,
-          studentCount: ctx?.students.length ?? s.studentCount ?? 0,
+          dateBs: ctx?.dateBs ?? dateBs,
+          studentCount: s.studentCount ?? ctx?.students.length ?? 0,
           existingAttendance: ctx?.existingAttendance ?? null,
           activeToday,
           isMultiShift: false,
@@ -939,7 +974,8 @@ export const FieldPostingSectionPanel = ({
                     const mode = e.target.value as
                       | "AUTO_BATCH_YEAR"
                       | "MANUAL"
-                      | "MULTI_SHIFT";
+                      | "MULTI_SHIFT"
+                      | "DAILY";
                     setForm((f) => ({
                       ...f,
                       rosterMode: mode,
@@ -953,15 +989,26 @@ export const FieldPostingSectionPanel = ({
                     }
                   }}
                 >
-                  <option value="AUTO_BATCH_YEAR">
-                    Auto — all batch + year students (one shift)
+                  <option value="DAILY">
+                    Daily roster — pick students each day (recommended)
                   </option>
-                  <option value="MANUAL">Manual — select students (one shift)</option>
+                  <option value="AUTO_BATCH_YEAR">
+                    Auto — all batch + year students every day
+                  </option>
+                  <option value="MANUAL">Manual — fixed student list</option>
                   <option value="MULTI_SHIFT">
-                    Multi-shift — assign each student to Morning / Day / Night / Full day
+                    Multi-shift defaults — fixed student→shift map
                   </option>
                 </Select>
               </FormField>
+
+              {form.rosterMode === "DAILY" ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-3 py-2 text-xs text-emerald-900">
+                  <strong>Daily roster:</strong> Coordinator selects who is on duty each day
+                  (date + shift), marks Present/Absent/Late/Leave, and saves a register
+                  sheet. Student list can change every day.
+                </div>
+              ) : null}
 
               {form.rosterMode === "MULTI_SHIFT" ? (
                 <div className="space-y-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
@@ -1358,7 +1405,7 @@ export const FieldPostingSectionPanel = ({
                                 : s.shift || "DAY";
                             void loadRosterForMarking(
                               s._id,
-                              s.startDateBs,
+                              todayBsString() || s.startDateBs,
                               null,
                               firstShift,
                             );
@@ -1381,17 +1428,17 @@ export const FieldPostingSectionPanel = ({
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                Take attendance (shift-wise)
+                Daily attendance register
               </CardTitle>
               <p className="text-sm font-normal text-slate-500">
-                Open a posting, pick the duty shift (for multi-shift postings only students
-                on that shift appear), mark Present / Absent / Late / Leave, then submit.
-                Mark each shift separately (e.g. Morning, then Day, then Night).
+                1) Open a posting · 2) Choose <strong>date</strong> and <strong>shift</strong> ·
+                3) Tick students on today&apos;s roster · 4) Mark Present / Absent / Late /
+                Leave · 5) Save register (stored like a manual attendance book).
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <FormField label="Filter by shift">
+                <FormField label="Filter postings by shift (optional)">
                   <Select
                     value={shiftFilter}
                     onChange={(e) =>
@@ -1526,73 +1573,42 @@ export const FieldPostingSectionPanel = ({
                       <span className="font-medium">Year:</span>{" "}
                       {selectedSchedule.year?.name ?? "—"}
                       {" · "}
-                      <span className="font-medium">{markRows.length}</span> students on this
-                      shift
+                      Pool: <span className="font-medium">{markRows.length}</span>
+                      {" · "}
+                      On duty today:{" "}
+                      <span className="font-medium text-indigo-700">{onDutyCount}</span>
                     </p>
-                    {selectedSchedule.rosterMode === "MULTI_SHIFT" &&
-                    selectedSchedule.shiftCounts ? (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Shift split:{" "}
-                        {FIELD_SHIFTS.filter(
-                          (sh) => (selectedSchedule.shiftCounts?.[sh] ?? 0) > 0,
-                        )
-                          .map(
-                            (sh) =>
-                              `${sh.replace(/_/g, " ")} (${selectedSchedule.shiftCounts?.[sh] ?? 0})`,
-                          )
-                          .join(" · ")}
-                      </p>
-                    ) : null}
+                    <p className="mt-1 text-xs text-slate-500">
+                      Rosters can change every day — tick only the students on duty for this
+                      date and shift, then mark attendance.
+                    </p>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <FormField label="Attendance Date (BS)">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <FormField label="Attendance date (BS) *">
                       <NepaliDateField value={markDateBs} onChange={onMarkDateChange} />
                     </FormField>
-                    <FormField
-                      label={
-                        selectedSchedule.rosterMode === "MULTI_SHIFT"
-                          ? "Duty shift (required)"
-                          : "Duty shift"
-                      }
-                    >
+                    <FormField label="Duty shift *">
                       <Select
-                        value={
-                          markShift ||
-                          (selectedSchedule.rosterMode === "MULTI_SHIFT"
-                            ? ""
-                            : selectedSchedule.shift || "DAY")
-                        }
-                        disabled={
-                          isReadOnly ||
-                          selectedSchedule.rosterMode !== "MULTI_SHIFT"
-                        }
+                        value={markShift}
+                        disabled={isReadOnly}
                         onChange={(e) =>
                           onMarkShiftChange(e.target.value as FieldDutyShift)
                         }
                       >
-                        {selectedSchedule.rosterMode === "MULTI_SHIFT" ? (
-                          <>
-                            <option value="">Select shift…</option>
-                            {(selectedSchedule.shiftsUsed?.length
-                              ? selectedSchedule.shiftsUsed
-                              : FIELD_SHIFTS.filter(
-                                  (s) =>
-                                    (selectedSchedule.shiftCounts?.[s] ?? 0) > 0,
-                                )
-                            ).map((s) => (
-                              <option key={s} value={s}>
-                                {s.replace(/_/g, " ")} (
-                                {selectedSchedule.shiftCounts?.[s] ?? 0} students)
-                              </option>
-                            ))}
-                          </>
-                        ) : (
-                          <option value={selectedSchedule.shift || "DAY"}>
-                            {(selectedSchedule.shift || "DAY").replace(/_/g, " ")}
+                        {FIELD_SHIFTS.map((s) => (
+                          <option key={s} value={s}>
+                            {s.replace(/_/g, " ")}
                           </option>
-                        )}
+                        ))}
                       </Select>
+                    </FormField>
+                    <FormField label="Search students">
+                      <Input
+                        value={rosterSearch}
+                        onChange={(e) => setRosterSearch(e.target.value)}
+                        placeholder="Name, roll, admission…"
+                      />
                     </FormField>
                     <FormField label="Notes (optional)">
                       <Input
@@ -1605,7 +1621,7 @@ export const FieldPostingSectionPanel = ({
 
                   {isReadOnly ? (
                     <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      Submitted attendance is read-only.
+                      This day&apos;s register is locked (read-only).
                       {isAdmin ? (
                         <Button
                           size="sm"
@@ -1637,16 +1653,27 @@ export const FieldPostingSectionPanel = ({
                     </div>
                   ) : null}
 
-                  {markRows.length === 0 ? (
+                  {loadingMark ? (
+                    <LoadingState />
+                  ) : markRows.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                      No students in roster for this batch/year (or manual list is empty).
+                      No students in the batch/year pool. Check posting batch and year.
                     </p>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+                        Daily register sheet · {markDateBs || "—"} ·{" "}
+                        {markShift.replace(/_/g, " ")} ·{" "}
+                        {selectedSchedule.siteName || selectedSchedule.hospitalName}
+                      </div>
                       <Table>
                         <TableHead>
                           <tr>
-                            <Th>Roll No</Th>
+                            <Th>
+                              <span className="sr-only">On roster</span>
+                              Duty
+                            </Th>
+                            <Th>Roll</Th>
                             <Th>Student Name</Th>
                             <Th>Present</Th>
                             <Th>Absent</Th>
@@ -1656,52 +1683,79 @@ export const FieldPostingSectionPanel = ({
                           </tr>
                         </TableHead>
                         <TableBody>
-                          {markRows.map((row, idx) => (
-                            <tr key={row.studentId}>
-                              <Td className="text-sm">{row.rollNumber}</Td>
-                              <Td className="text-sm">
-                                {row.fullName}
-                                <div className="text-xs text-slate-400">
-                                  {row.admissionNumber}
-                                </div>
-                              </Td>
-                              {(["PRESENT", "ABSENT", "LATE", "LEAVE"] as const).map(
-                                (st) => (
-                                  <Td key={st} className="text-center">
-                                    <input
-                                      type="radio"
-                                      name={`status-${row.studentId}`}
-                                      disabled={isReadOnly}
-                                      checked={row.status === st}
-                                      onChange={() =>
-                                        setMarkRows((rows) =>
-                                          rows.map((r, i) =>
-                                            i === idx ? { ...r, status: st } : r,
-                                          ),
-                                        )
-                                      }
-                                    />
-                                  </Td>
-                                ),
-                              )}
-                              <Td>
-                                <Input
-                                  className="min-w-[120px]"
-                                  disabled={isReadOnly}
-                                  value={row.remarks}
-                                  onChange={(e) =>
-                                    setMarkRows((rows) =>
-                                      rows.map((r, i) =>
-                                        i === idx
-                                          ? { ...r, remarks: e.target.value }
-                                          : r,
-                                      ),
-                                    )
-                                  }
-                                />
-                              </Td>
-                            </tr>
-                          ))}
+                          {filteredMarkRows.map((row) => {
+                            const idx = markRows.findIndex(
+                              (r) => r.studentId === row.studentId,
+                            );
+                            return (
+                              <tr
+                                key={row.studentId}
+                                className={row.onRoster ? "" : "opacity-50"}
+                              >
+                                <Td className="text-center">
+                                  <input
+                                    type="checkbox"
+                                    disabled={isReadOnly}
+                                    checked={row.onRoster}
+                                    title="Include on today's roster"
+                                    onChange={() =>
+                                      setMarkRows((rows) =>
+                                        rows.map((r, i) =>
+                                          i === idx
+                                            ? { ...r, onRoster: !r.onRoster }
+                                            : r,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </Td>
+                                <Td className="text-sm">{row.rollNumber}</Td>
+                                <Td className="text-sm">
+                                  {row.fullName}
+                                  <div className="text-xs text-slate-400">
+                                    {row.admissionNumber}
+                                  </div>
+                                </Td>
+                                {(["PRESENT", "ABSENT", "LATE", "LEAVE"] as const).map(
+                                  (st) => (
+                                    <Td key={st} className="text-center">
+                                      <input
+                                        type="radio"
+                                        name={`status-${row.studentId}`}
+                                        disabled={isReadOnly || !row.onRoster}
+                                        checked={row.onRoster && row.status === st}
+                                        onChange={() =>
+                                          setMarkRows((rows) =>
+                                            rows.map((r, i) =>
+                                              i === idx
+                                                ? { ...r, onRoster: true, status: st }
+                                                : r,
+                                            ),
+                                          )
+                                        }
+                                      />
+                                    </Td>
+                                  ),
+                                )}
+                                <Td>
+                                  <Input
+                                    className="min-w-[120px]"
+                                    disabled={isReadOnly || !row.onRoster}
+                                    value={row.remarks}
+                                    onChange={(e) =>
+                                      setMarkRows((rows) =>
+                                        rows.map((r, i) =>
+                                          i === idx
+                                            ? { ...r, remarks: e.target.value }
+                                            : r,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </Td>
+                              </tr>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </div>
@@ -1710,40 +1764,64 @@ export const FieldPostingSectionPanel = ({
                   {!isReadOnly && markRows.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       <Button
-                        onClick={() => {
-                          setMarkRows((rows) =>
-                            rows.map((r) => ({ ...r, status: "PRESENT" })),
-                          );
-                        }}
-                        variant="outline"
                         type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setMarkRows((rows) =>
+                            rows.map((r) => ({ ...r, onRoster: true })),
+                          )
+                        }
                       >
-                        Mark all Present
+                        Select all for today
                       </Button>
                       <Button
-                        onClick={() => {
-                          setMarkRows((rows) =>
-                            rows.map((r) => ({ ...r, status: "ABSENT" })),
-                          );
-                        }}
-                        variant="outline"
                         type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setMarkRows((rows) =>
+                            rows.map((r) => ({ ...r, onRoster: false })),
+                          )
+                        }
                       >
-                        Mark all Absent
+                        Clear selection
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setMarkRows((rows) =>
+                            rows.map((r) =>
+                              r.onRoster ? { ...r, status: "PRESENT" } : r,
+                            ),
+                          )
+                        }
+                      >
+                        On-duty → Present
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setMarkRows((rows) =>
+                            rows.map((r) =>
+                              r.onRoster ? { ...r, status: "ABSENT" } : r,
+                            ),
+                          )
+                        }
+                      >
+                        On-duty → Absent
                       </Button>
                       <Button
                         onClick={() => submitAttendance.mutate()}
                         disabled={
                           submitAttendance.isPending ||
                           !markDateBs ||
-                          (selectedSchedule.rosterMode === "MULTI_SHIFT" && !markShift)
+                          !markShift ||
+                          onDutyCount === 0
                         }
                       >
-                        Submit{" "}
-                        {markShift
-                          ? `${markShift.replace(/_/g, " ")} shift `
-                          : ""}
-                        attendance
+                        Save register ({onDutyCount} students · {markDateBs} ·{" "}
+                        {markShift.replace(/_/g, " ")})
                       </Button>
                     </div>
                   ) : null}
@@ -1758,7 +1836,7 @@ export const FieldPostingSectionPanel = ({
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
             <CardTitle className="text-base">
-              {tab === "reports" ? "Reports" : "Attendance history"}
+              {tab === "reports" ? "Reports" : "Attendance register (manual book)"}
             </CardTitle>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={exportExcel}>
@@ -1770,13 +1848,128 @@ export const FieldPostingSectionPanel = ({
             </div>
           </CardHeader>
           <CardContent>
-            {historyQuery.isLoading ? (
+            {registerQuery.isLoading || historyQuery.isLoading ? (
               <LoadingState />
-            ) : (historyQuery.data ?? []).length === 0 ? (
+            ) : (registerQuery.data?.byDate ?? []).length === 0 &&
+              (historyQuery.data ?? []).length === 0 ? (
               <EmptyState
-                title="No attendance records"
-                description="Submitted field attendance will appear here."
+                title="No register entries yet"
+                description="Saved daily attendance sheets will appear here as a date-wise register."
               />
+            ) : (registerQuery.data?.byDate ?? []).length > 0 ? (
+              <div className="space-y-6">
+                {(registerQuery.data?.byDate ?? []).map((day) => (
+                  <div key={day.dateBs} className="space-y-3">
+                    <h3 className="text-sm font-semibold text-slate-800">
+                      Date (BS): {day.dateBs}
+                    </h3>
+                    {day.shifts.map((block) => (
+                      <div
+                        key={block.attendanceId}
+                        className="overflow-hidden rounded-xl border border-slate-200"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                          <div>
+                            <span className="font-medium">{block.siteName}</span>
+                            <Badge className="ml-2 bg-indigo-100 text-indigo-800">
+                              {block.shift.replace(/_/g, " ")}
+                            </Badge>
+                            <Badge className={`ml-1 ${statusClass(block.recordStatus)}`}>
+                              {block.recordStatus}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-slate-600">
+                            P {block.summary.present} · A {block.summary.absent} · Late{" "}
+                            {block.summary.late} · Leave {block.summary.leave} · Total{" "}
+                            {block.summary.total}
+                          </p>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHead>
+                              <tr>
+                                <Th>Roll</Th>
+                                <Th>Student Name</Th>
+                                <Th>Admission</Th>
+                                <Th>Status</Th>
+                                <Th>Remarks</Th>
+                              </tr>
+                            </TableHead>
+                            <TableBody>
+                              {block.entries.map((e) => (
+                                <tr key={`${block.attendanceId}-${e.studentId}`}>
+                                  <Td className="text-sm">{e.rollNumber ?? "—"}</Td>
+                                  <Td className="text-sm">{e.fullName ?? "—"}</Td>
+                                  <Td className="text-sm text-slate-500">
+                                    {e.admissionNumber ?? "—"}
+                                  </Td>
+                                  <Td>
+                                    <Badge className={statusClass(e.status)}>
+                                      {e.status}
+                                    </Badge>
+                                  </Td>
+                                  <Td className="text-sm text-slate-600">
+                                    {e.remarks || "—"}
+                                  </Td>
+                                </tr>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                        {isAdmin ? (
+                          <div className="flex flex-wrap gap-1 border-t border-slate-100 px-3 py-2">
+                            {block.recordStatus === "LOCKED" ||
+                            block.recordStatus === "SUBMITTED" ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => unlockAttendance.mutate(block.attendanceId)}
+                              >
+                                Unlock day sheet
+                              </Button>
+                            ) : null}
+                            {canWrite ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setTab("mark");
+                                  void loadRosterForMarking(
+                                    block.scheduleId,
+                                    day.dateBs,
+                                    null,
+                                    block.shift as FieldDutyShift,
+                                  );
+                                }}
+                              >
+                                Open / re-mark
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : canWrite ? (
+                          <div className="border-t border-slate-100 px-3 py-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setTab("mark");
+                                void loadRosterForMarking(
+                                  block.scheduleId,
+                                  day.dateBs,
+                                  null,
+                                  block.shift as FieldDutyShift,
+                                );
+                              }}
+                            >
+                              Open day sheet
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="space-y-3">
                 {(historyQuery.data ?? []).map((rec) => (
@@ -1787,7 +1980,8 @@ export const FieldPostingSectionPanel = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="font-medium">
-                          {rec.dateBs} · {rec.siteName || rec.hospitalName}
+                          {rec.dateBs} · {rec.siteName || rec.hospitalName} ·{" "}
+                          {rec.shift}
                         </p>
                         <p className="text-xs text-slate-500">
                           {postingTypeLabel(rec.postingType)} ·{" "}

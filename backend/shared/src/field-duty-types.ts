@@ -81,12 +81,13 @@ export type FieldDutyStudentStatus =
 export type FieldDutyShift = "MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY";
 
 /**
- * AUTO_BATCH_YEAR — all active students in batch+year share the posting's single shift.
- * MANUAL — selected students share the posting's single shift.
- * MULTI_SHIFT — each student is assigned their own shift (e.g. 10 morning, 10 day, 10 night);
- *   attendance is taken separately per shift for that subset of the roster.
+ * AUTO_BATCH_YEAR — pool = all active students in batch+year (single default shift).
+ * MANUAL — pool = selected students (single default shift).
+ * MULTI_SHIFT — fixed default shift map; attendance still date-wise with daily pick.
+ * DAILY — pool = batch+year; coordinator selects which students attend each day/shift.
+ *   Rosters change daily — pick students + mark attendance for that date.
  */
-export type FieldDutyRosterMode = "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT";
+export type FieldDutyRosterMode = "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT" | "DAILY";
 
 /** Per-student shift assignment (MULTI_SHIFT roster mode). */
 export interface FieldDutyStudentShiftAssignment {
@@ -261,6 +262,70 @@ export interface FieldDutyRosterStudent {
   yearId?: string;
   /** Assigned duty shift when roster is MULTI_SHIFT (or posting single shift). */
   shift?: FieldDutyShift;
+}
+
+/**
+ * Daily mark context: candidate pool + existing register row for a date/shift.
+ * Coordinator selects who is on today's roster, then marks Present/Absent/Late/Leave.
+ */
+export interface FieldDutyDailyMarkContext {
+  dateBs: string;
+  shift: FieldDutyShift;
+  schedule: FieldDutyScheduleRecord;
+  /** Full candidate pool for this posting (batch/year or fixed lists). */
+  pool: FieldDutyRosterStudent[];
+  /**
+   * Suggested students for this date/shift (defaults to check).
+   * Coordinator may add/remove before submit.
+   */
+  suggestedStudentIds: string[];
+  /** Existing attendance register for this date+shift, if any. */
+  existingAttendance: FieldDutyAttendanceRecord | null;
+}
+
+/** Flat register row (one student attendance line) — like a manual register book. */
+export interface FieldDutyRegisterRow {
+  attendanceId: string;
+  dateBs: string;
+  shift: FieldDutyShift;
+  siteName: string;
+  postingType?: string;
+  batchName?: string;
+  yearName?: string;
+  department?: string;
+  studentId: string;
+  rollNumber?: number;
+  fullName?: string;
+  admissionNumber?: string;
+  status: FieldDutyStudentStatus;
+  remarks?: string;
+  recordStatus: FieldDutyAttendanceStatus;
+  notes?: string;
+}
+
+export interface FieldDutyRegisterBook {
+  rows: FieldDutyRegisterRow[];
+  /** Grouped by date for register-page printing. */
+  byDate: Array<{
+    dateBs: string;
+    shifts: Array<{
+      shift: FieldDutyShift;
+      siteName: string;
+      scheduleId: string;
+      attendanceId: string;
+      recordStatus: FieldDutyAttendanceStatus;
+      notes?: string;
+      summary: {
+        present: number;
+        absent: number;
+        late: number;
+        leave: number;
+        emergencyDuty: number;
+        total: number;
+      };
+      entries: FieldDutyRegisterRow[];
+    }>;
+  }>;
 }
 
 export interface FieldDutyDashboard {

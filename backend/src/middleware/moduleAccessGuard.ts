@@ -1,6 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
 import {
+  canAccessModule,
   canManageInstitution,
+  canWriteModule,
   hasModuleAction,
   inferActionFromApiPath,
   MODULE_ACCESS_DENIED_MESSAGE,
@@ -36,6 +38,43 @@ export const enforceModuleAccess = async (
     if (!req.user) return next();
     if (canManageInstitution(req.user.role)) return next();
     if (isModuleAccessBypassPath(req.method, req.originalUrl || req.path || "")) return next();
+
+    const originalPath = (req.originalUrl || req.path || "").split("?")[0] ?? "";
+    // Self-service: any linked teacher/staff may read own attendance + permission flags
+    if (
+      READ_METHODS.has(req.method) &&
+      (/\/api\/employee-attendance\/me$/.test(originalPath) ||
+        /\/api\/employee-attendance\/permissions$/.test(originalPath))
+    ) {
+      return next();
+    }
+    // Teacher + Staff attendance share /api/employee-attendance — allow if either
+    // category module (or legacy "attendance") is granted. Category-level checks
+    // run inside the employee attendance controller.
+    if (/\/api\/employee-attendance(\/|$)/.test(originalPath)) {
+      const [accessMap] = await Promise.all([getUserModuleAccessMap(req.user.userId)]);
+      const canTeacher =
+        canAccessModule(accessMap, "teacher-attendance") ||
+        canAccessModule(accessMap, "attendance");
+      const canStaff =
+        canAccessModule(accessMap, "staff-attendance") ||
+        canAccessModule(accessMap, "attendance");
+      // TEACHER / COLLEGE_STAFF roles may always open read-only self endpoints (handled above);
+      // for admin sheets they need explicit module grants (or legacy empty matrix → WRITE).
+      if (!canTeacher && !canStaff) {
+        return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
+      }
+      if (!READ_METHODS.has(req.method)) {
+        const canWrite =
+          canWriteModule(accessMap, "teacher-attendance") ||
+          canWriteModule(accessMap, "staff-attendance") ||
+          canWriteModule(accessMap, "attendance");
+        if (!canWrite) {
+          return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
+        }
+      }
+      return next();
+    }
 
     const moduleKey = resolveModuleForRequest(req);
     if (!moduleKey) return next();

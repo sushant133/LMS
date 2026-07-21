@@ -4,6 +4,7 @@ import { MasterSubject } from "../models/MasterSubject.js";
 import { Subject } from "../models/Subject.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { FieldDutyAttendance } from "../models/FieldDutyAttendance.js";
+import { EmployeeAttendance } from "../models/EmployeeAttendance.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -47,6 +48,8 @@ export const connectDatabase = async (): Promise<void> => {
   await syncIndexesWithRetry(AcademicSyllabusSubUnit, "AcademicSyllabusSubUnit");
   // Field attendance: unique per schedule+date+shift (multi-shift postings)
   await syncIndexesWithRetry(FieldDutyAttendance, "FieldDutyAttendance");
+  // Teacher / Staff attendance: unique per category+date
+  await syncIndexesWithRetry(EmployeeAttendance, "EmployeeAttendance");
   // Never log full connection string (may contain credentials)
   console.log(`MongoDB connected: ${mongoose.connection.host}/${mongoose.connection.name}`);
 };

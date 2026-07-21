@@ -138,10 +138,12 @@ export const presentForPercent = (
 type StudentShiftRow = { studentId: unknown; shift: string };
 
 /**
- * Students for a field posting roster.
- * - MANUAL → assignedStudentIds only (single shift)
- * - MULTI_SHIFT → studentShifts; optional filterShift returns only that shift's students
- * - AUTO_BATCH_YEAR → active batch+year students (single shift)
+ * Candidate pool for a field posting.
+ * - MANUAL → assignedStudentIds only
+ * - MULTI_SHIFT → studentShifts; optional filterShift returns that shift's students
+ * - DAILY / AUTO_BATCH_YEAR → all active students in batch+year
+ *
+ * Daily attendance: coordinator may submit any non-empty subset of this pool.
  */
 export const getEligibleStudentsForDuty = async (
   schoolId: unknown,
@@ -155,9 +157,14 @@ export const getEligibleStudentsForDuty = async (
     filterShift?: string;
     /** Single-mode posting shift attached to each student row. */
     defaultShift?: string;
+    /**
+     * When true (default for DAILY pool), MULTI_SHIFT without filterShift
+     * returns the full multi-shift map as the pool (all shifts).
+     */
+    multiShiftAsPool?: boolean;
   }
 ) => {
-  const mode = options?.rosterMode || "AUTO_BATCH_YEAR";
+  const mode = options?.rosterMode || "DAILY";
   const assigned = (options?.assignedStudentIds ?? []).map((id) => toId(id)).filter(Boolean);
   const shiftMap = new Map<string, string>();
   for (const row of options?.studentShifts ?? []) {
@@ -178,6 +185,7 @@ export const getEligibleStudentsForDuty = async (
     studentIdsFilter = rows.map(([id]) => id);
     if (!studentIdsFilter.length) return [];
   }
+  // DAILY and AUTO_BATCH_YEAR → full batch+year pool (studentIdsFilter stays null)
 
   let students;
   if (studentIdsFilter) {
@@ -343,8 +351,12 @@ export const serializeSchedule = async (
   const postingType = resolvePostingType(schedule);
   const siteName = resolveSiteName(schedule);
   const rosterMode =
-    (schedule.rosterMode as "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT" | undefined) ||
-    "AUTO_BATCH_YEAR";
+    (schedule.rosterMode as
+      | "AUTO_BATCH_YEAR"
+      | "MANUAL"
+      | "MULTI_SHIFT"
+      | "DAILY"
+      | undefined) || "DAILY";
   const assignedStudentIds = Array.isArray(schedule.assignedStudentIds)
     ? schedule.assignedStudentIds.map((id) => toId(id)).filter(Boolean)
     : [];
@@ -380,7 +392,8 @@ export const serializeSchedule = async (
         ? Promise.resolve(assignedStudentIds.length)
         : rosterMode === "MULTI_SHIFT"
           ? Promise.resolve(studentShiftsNormalized.length)
-          : Student.countDocuments({
+          : // DAILY + AUTO → batch+year headcount (daily pick from this pool)
+            Student.countDocuments({
               schoolId: schedule.schoolId,
               batchId,
               yearId,

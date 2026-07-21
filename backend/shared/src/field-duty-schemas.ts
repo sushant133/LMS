@@ -22,7 +22,8 @@ export const fieldDutyShiftSchema = z.enum([
 export const fieldDutyRosterModeSchema = z.enum([
   "AUTO_BATCH_YEAR",
   "MANUAL",
-  "MULTI_SHIFT"
+  "MULTI_SHIFT",
+  "DAILY"
 ]);
 
 export const fieldDutyStudentShiftSchema = z.object({
@@ -66,7 +67,7 @@ export const fieldDutyScheduleSchema = z.object({
   shift: fieldDutyShiftSchema.default("DAY"),
   remarks: z.string().optional().or(z.literal("")),
   status: z.enum(["ACTIVE", "COMPLETED", "CANCELLED"]).default("ACTIVE"),
-  rosterMode: fieldDutyRosterModeSchema.default("AUTO_BATCH_YEAR"),
+  rosterMode: fieldDutyRosterModeSchema.default("DAILY"),
   assignedStudentIds: z.array(objectId).optional().default([]),
   /** Required when rosterMode is MULTI_SHIFT — map each student to a shift. */
   studentShifts: z.array(fieldDutyStudentShiftSchema).optional().default([])
