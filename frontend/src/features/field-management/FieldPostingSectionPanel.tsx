@@ -75,8 +75,10 @@ const defaultForm = (section: FieldPostingSection, academicYearBs = "") => ({
   shift: "DAY" as FieldDutyShift,
   remarks: "",
   status: "ACTIVE" as const,
-  rosterMode: "AUTO_BATCH_YEAR" as "AUTO_BATCH_YEAR" | "MANUAL",
+  rosterMode: "AUTO_BATCH_YEAR" as "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT",
   assignedStudentIds: [] as string[],
+  /** studentId → shift for MULTI_SHIFT mode */
+  studentShiftMap: {} as Record<string, FieldDutyShift>,
 });
 
 export const FieldPostingSectionPanel = ({
@@ -92,9 +94,19 @@ export const FieldPostingSectionPanel = ({
   const [form, setForm] = useState(() => defaultForm(section));
   const [assistantPick, setAssistantPick] = useState("");
   const [selectedScheduleId, setSelectedScheduleId] = useState("");
+  /** Full schedule metadata for the posting currently being marked. */
+  const [selectedSchedule, setSelectedSchedule] =
+    useState<FieldDutyScheduleRecord | null>(null);
   const [markDateBs, setMarkDateBs] = useState("");
   const [markRows, setMarkRows] = useState<MarkRow[]>([]);
   const [notes, setNotes] = useState("");
+  /** Filter postings by duty shift when taking attendance (empty = all shifts). */
+  const [shiftFilter, setShiftFilter] = useState<"" | FieldDutyShift>("");
+  /**
+   * Shift selected for marking attendance on a MULTI_SHIFT posting
+   * (or the posting's single shift for single-mode).
+   */
+  const [markShift, setMarkShift] = useState<FieldDutyShift | "">("");
   /** Attendance record currently loaded for mark panel (authoritative for read-only). */
   const [loadedAttendance, setLoadedAttendance] =
     useState<FieldDutyAttendanceRecord | null>(null);
@@ -108,9 +120,12 @@ export const FieldPostingSectionPanel = ({
     }));
     setTab(canWrite && isCoordinatorView ? "mark" : "postings");
     setSelectedScheduleId("");
+    setSelectedSchedule(null);
     setMarkRows([]);
     setLoadedAttendance(null);
     setNotes("");
+    setShiftFilter("");
+    setMarkShift("");
   }, [section, isCoordinatorView, canWrite]);
 
   const settingsQuery = useQuery({
@@ -162,6 +177,8 @@ export const FieldPostingSectionPanel = ({
           schedule: FieldDutyScheduleRecord;
           students: FieldDutyRosterStudent[];
           existingAttendance: FieldDutyAttendanceRecord | null;
+          attendanceByShift?: Record<string, FieldDutyAttendanceRecord>;
+          isMultiShift?: boolean;
         }>
       >(api.get("/field-duty/today", { params: { section } })),
     enabled: tab === "mark" || canWrite,
@@ -194,8 +211,21 @@ export const FieldPostingSectionPanel = ({
           },
         }),
       ),
-    enabled: isAdmin && form.rosterMode === "MANUAL" && !!form.batchId,
+    enabled:
+      isAdmin &&
+      (form.rosterMode === "MANUAL" || form.rosterMode === "MULTI_SHIFT") &&
+      !!form.batchId &&
+      !!form.yearId,
   });
+
+  const multiShiftCounts = useMemo(() => {
+    const counts: Partial<Record<FieldDutyShift, number>> = {};
+    for (const sh of Object.values(form.studentShiftMap)) {
+      if (!sh) continue;
+      counts[sh] = (counts[sh] ?? 0) + 1;
+    }
+    return counts;
+  }, [form.studentShiftMap]);
 
   const yearsForBatch = useMemo(() => {
     const years = yearsQuery.data ?? [];
@@ -209,11 +239,65 @@ export const FieldPostingSectionPanel = ({
 
   const savePosting = useMutation({
     mutationFn: async () => {
+      if (!form.batchId || !form.yearId) {
+        throw new Error("Select batch and year");
+      }
+      if (!form.siteName.trim()) {
+        throw new Error("Hospital / PHC / Community name is required");
+      }
+      if (!form.supervisorStaffId) {
+        throw new Error("Select a primary field coordinator");
+      }
+      if (!form.startDateBs || !form.endDateBs) {
+        throw new Error("Start and end dates are required");
+      }
+      if (form.rosterMode === "MANUAL" && form.assignedStudentIds.length === 0) {
+        throw new Error("Select at least one student for manual roster");
+      }
+      if (form.rosterMode === "MULTI_SHIFT") {
+        const assigned = Object.entries(form.studentShiftMap).filter(([, sh]) => !!sh);
+        if (assigned.length === 0) {
+          throw new Error(
+            "Assign students to shifts (e.g. 10 Morning, 10 Day, 10 Night, 10 Full day)",
+          );
+        }
+      }
+
+      // Explicit payload only — avoid spreading UI-only fields into the API body.
       const payload = {
-        ...form,
-        hospitalName: form.siteName,
+        academicYearBs: form.academicYearBs,
+        faculty: form.faculty,
+        semesterBs: form.semesterBs,
+        batchId: form.batchId,
+        yearId: form.yearId,
+        postingType: form.postingType,
         siteName: form.siteName,
+        hospitalName: form.siteName,
+        address: form.address,
+        department: form.department,
+        ward: form.ward,
+        supervisorStaffId: form.supervisorStaffId,
         assistantCoordinatorStaffIds: form.assistantCoordinatorStaffIds,
+        clinicalInstructorName: form.clinicalInstructorName,
+        hospitalSupervisorName: form.hospitalSupervisorName,
+        startDateBs: form.startDateBs,
+        endDateBs: form.endDateBs,
+        // Single-shift default; for MULTI_SHIFT attendance uses each student's shift
+        shift: form.rosterMode === "MULTI_SHIFT" ? "DAY" : form.shift,
+        remarks: form.remarks,
+        status: form.status,
+        rosterMode: form.rosterMode,
+        assignedStudentIds:
+          form.rosterMode === "MANUAL" ? form.assignedStudentIds : [],
+        studentShifts:
+          form.rosterMode === "MULTI_SHIFT"
+            ? Object.entries(form.studentShiftMap)
+                .filter(([, shift]) => !!shift)
+                .map(([studentId, shift]) => ({
+                  studentId,
+                  shift,
+                }))
+            : [],
       };
       if (editingScheduleId) {
         return unwrap(api.put(`/field-duty/schedules/${editingScheduleId}`, payload));
@@ -225,6 +309,7 @@ export const FieldPostingSectionPanel = ({
       setForm(defaultForm(section, settingsQuery.data?.academicYearBs ?? ""));
       setEditingScheduleId(null);
       setAssistantPick("");
+      setStudentPickerOpen(false);
       await invalidate();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -240,11 +325,20 @@ export const FieldPostingSectionPanel = ({
   });
 
   const submitAttendance = useMutation({
-    mutationFn: () =>
-      unwrap(
+    mutationFn: () => {
+      const isMulti = selectedSchedule?.rosterMode === "MULTI_SHIFT";
+      const shift =
+        markShift ||
+        selectedSchedule?.shift ||
+        "DAY";
+      if (isMulti && !markShift) {
+        throw new Error("Select a shift before submitting multi-shift attendance");
+      }
+      return unwrap(
         api.post("/field-duty/attendance", {
           scheduleId: selectedScheduleId,
           dateBs: markDateBs,
+          shift,
           notes,
           entries: markRows.map((r) => ({
             studentId: r.studentId,
@@ -252,9 +346,14 @@ export const FieldPostingSectionPanel = ({
             remarks: r.remarks,
           })),
         }),
-      ),
+      );
+    },
     onSuccess: async (data) => {
-      toast.success("Attendance submitted (read-only until admin unlocks)");
+      toast.success(
+        markShift
+          ? `${markShift.replace(/_/g, " ")} shift attendance submitted`
+          : "Attendance submitted (read-only until admin unlocks)",
+      );
       setLoadedAttendance(data as FieldDutyAttendanceRecord);
       setNotes("");
       await invalidate();
@@ -277,6 +376,7 @@ export const FieldPostingSectionPanel = ({
           selectedScheduleId,
           markDateBs,
           data as FieldDutyAttendanceRecord,
+          markShift || (data as FieldDutyAttendanceRecord).shift || "",
         );
       }
     },
@@ -323,33 +423,81 @@ export const FieldPostingSectionPanel = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  /**
+   * Load roster for one posting (+ optional shift for MULTI_SHIFT).
+   * Attendance is always looked up by scheduleId + dateBs + shift.
+   */
   const loadRosterForMarking = async (
     scheduleId: string,
     dateBs: string,
     existing?: FieldDutyAttendanceRecord | null,
+    shiftForMark?: FieldDutyShift | "",
   ) => {
     setSelectedScheduleId(scheduleId);
     setMarkDateBs(dateBs);
     try {
-      // Prefer explicit existing; otherwise load attendance for this schedule+date
+      // First fetch schedule meta (no filter) so we know multi vs single
+      const meta = await unwrap<{
+        schedule: FieldDutyScheduleRecord;
+        students: FieldDutyRosterStudent[];
+      }>(api.get(`/field-duty/schedules/${scheduleId}/roster`));
+
+      const isMulti = meta.schedule.rosterMode === "MULTI_SHIFT";
+      const usedShifts: FieldDutyShift[] =
+        meta.schedule.shiftsUsed && meta.schedule.shiftsUsed.length > 0
+          ? meta.schedule.shiftsUsed
+          : isMulti
+            ? (FIELD_SHIFTS.filter(
+                (s) => (meta.schedule.shiftCounts?.[s] ?? 0) > 0,
+              ) as FieldDutyShift[])
+            : [meta.schedule.shift || "DAY"];
+
+      const activeShift: FieldDutyShift =
+        (shiftForMark as FieldDutyShift) ||
+        (isMulti
+          ? usedShifts[0] || "DAY"
+          : meta.schedule.shift || "DAY");
+
+      setMarkShift(activeShift);
+      setSelectedSchedule(meta.schedule);
+
+      const roster = isMulti
+        ? await unwrap<{
+            schedule: FieldDutyScheduleRecord;
+            students: FieldDutyRosterStudent[];
+          }>(
+            api.get(`/field-duty/schedules/${scheduleId}/roster`, {
+              params: { shift: activeShift },
+            }),
+          )
+        : meta;
+
+      if (isMulti) setSelectedSchedule(roster.schedule);
+
       let attendance = existing ?? null;
+      if (
+        attendance &&
+        attendance.shift &&
+        attendance.shift !== activeShift
+      ) {
+        attendance = null;
+      }
       if (!attendance && dateBs) {
         const list = await unwrap<FieldDutyAttendanceRecord[]>(
           api.get("/field-duty/attendance", {
-            params: { scheduleId, dateBs },
+            params: {
+              scheduleId,
+              dateBs,
+              shift: activeShift,
+            },
           }),
         );
         attendance = list[0] ?? null;
       }
       setLoadedAttendance(attendance);
 
-      const data = await unwrap<{
-        schedule: FieldDutyScheduleRecord;
-        students: FieldDutyRosterStudent[];
-      }>(api.get(`/field-duty/schedules/${scheduleId}/roster`));
-
       setMarkRows(
-        data.students.map((s) => {
+        roster.students.map((s) => {
           const prev = attendance?.entries.find((e) => e.studentId === s._id);
           return {
             studentId: s._id,
@@ -362,6 +510,7 @@ export const FieldPostingSectionPanel = ({
         }),
       );
       if (attendance?.notes) setNotes(attendance.notes);
+      else setNotes("");
     } catch (e) {
       toast.error(parseErrorMessage(e));
     }
@@ -371,7 +520,19 @@ export const FieldPostingSectionPanel = ({
   const onMarkDateChange = (dateBs: string) => {
     setMarkDateBs(dateBs);
     if (selectedScheduleId && dateBs) {
-      void loadRosterForMarking(selectedScheduleId, dateBs, null);
+      void loadRosterForMarking(selectedScheduleId, dateBs, null, markShift);
+    }
+  };
+
+  const onMarkShiftChange = (shift: FieldDutyShift) => {
+    setMarkShift(shift);
+    if (selectedScheduleId) {
+      void loadRosterForMarking(
+        selectedScheduleId,
+        markDateBs || selectedSchedule?.startDateBs || "",
+        null,
+        shift,
+      );
     }
   };
 
@@ -416,7 +577,7 @@ export const FieldPostingSectionPanel = ({
               `<tr><td>${e.student?.rollNumber ?? ""}</td><td>${e.student?.fullName ?? ""}</td><td>${e.status}</td><td>${e.remarks ?? ""}</td></tr>`,
           )
           .join("");
-        return `<h3>${rec.dateBs} — ${rec.siteName || rec.hospitalName} (${postingTypeLabel(rec.postingType)})</h3>
+        return `<h3>${rec.dateBs} — ${rec.siteName || rec.hospitalName} · Shift ${rec.shift} (${postingTypeLabel(rec.postingType)})</h3>
           <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px">
             <thead><tr><th>Roll</th><th>Name</th><th>Status</th><th>Remarks</th></tr></thead>
             <tbody>${entries}</tbody>
@@ -451,6 +612,76 @@ export const FieldPostingSectionPanel = ({
   const isReadOnly =
     loadedAttendance?.status === "LOCKED" ||
     loadedAttendance?.status === "SUBMITTED";
+
+  /**
+   * Active postings expanded to shift cards.
+   * MULTI_SHIFT postings → one card per used shift (Morning 10, Day 10, …).
+   * Single-shift postings → one card with posting.shift.
+   */
+  const markablePostings = useMemo(() => {
+    type MarkCard = {
+      key: string;
+      schedule: FieldDutyScheduleRecord;
+      shift: FieldDutyShift;
+      dateBs: string;
+      studentCount: number;
+      existingAttendance: FieldDutyAttendanceRecord | null;
+      activeToday: boolean;
+      isMultiShift: boolean;
+    };
+    const todayCtx = todayQuery.data ?? [];
+    const todayById = new Map(todayCtx.map((c) => [c.schedule._id, c]));
+    const active = schedules.filter((s) => s.status === "ACTIVE");
+    const cards: MarkCard[] = [];
+
+    for (const s of active) {
+      const ctx = todayById.get(s._id);
+      const isMulti = s.rosterMode === "MULTI_SHIFT";
+      const dateBs = ctx?.dateBs ?? markDateBs;
+      const activeToday = Boolean(ctx);
+
+      if (isMulti) {
+        const used: FieldDutyShift[] =
+          s.shiftsUsed && s.shiftsUsed.length > 0
+            ? s.shiftsUsed
+            : (FIELD_SHIFTS.filter(
+                (sh) => (s.shiftCounts?.[sh] ?? 0) > 0,
+              ) as FieldDutyShift[]);
+        for (const sh of used) {
+          if (shiftFilter && sh !== shiftFilter) continue;
+          const att =
+            ctx?.attendanceByShift?.[sh] ??
+            (ctx?.existingAttendance?.shift === sh
+              ? ctx.existingAttendance
+              : null);
+          cards.push({
+            key: `${s._id}:${sh}`,
+            schedule: s,
+            shift: sh,
+            dateBs,
+            studentCount: s.shiftCounts?.[sh] ?? 0,
+            existingAttendance: att ?? null,
+            activeToday,
+            isMultiShift: true,
+          });
+        }
+      } else {
+        const sh = (s.shift || "DAY") as FieldDutyShift;
+        if (shiftFilter && sh !== shiftFilter) continue;
+        cards.push({
+          key: `${s._id}:${sh}`,
+          schedule: s,
+          shift: sh,
+          dateBs,
+          studentCount: ctx?.students.length ?? s.studentCount ?? 0,
+          existingAttendance: ctx?.existingAttendance ?? null,
+          activeToday,
+          isMultiShift: false,
+        });
+      }
+    }
+    return cards;
+  }, [schedules, todayQuery.data, shiftFilter, markDateBs]);
 
   return (
     <div className="space-y-4">
@@ -578,23 +809,32 @@ export const FieldPostingSectionPanel = ({
                     }
                   />
                 </FormField>
-                <FormField label="Shift">
-                  <Select
-                    value={form.shift}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        shift: e.target.value as FieldDutyShift,
-                      }))
-                    }
-                  >
-                    {FIELD_SHIFTS.map((s) => (
-                      <option key={s} value={s}>
-                        {s.replace(/_/g, " ")}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
+                {form.rosterMode !== "MULTI_SHIFT" ? (
+                  <FormField label="Shift (all roster students)">
+                    <Select
+                      value={form.shift}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          shift: e.target.value as FieldDutyShift,
+                        }))
+                      }
+                    >
+                      {FIELD_SHIFTS.map((s) => (
+                        <option key={s} value={s}>
+                          {s.replace(/_/g, " ")}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                ) : (
+                  <FormField label="Shift assignment">
+                    <p className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                      Multi-shift mode: assign each student a shift below. Attendance is
+                      taken separately per shift.
+                    </p>
+                  </FormField>
+                )}
                 <FormField label="Start Date (BS)">
                   <NepaliDateField
                     value={form.startDateBs}
@@ -695,21 +935,198 @@ export const FieldPostingSectionPanel = ({
               <FormField label="Student roster mode">
                 <Select
                   value={form.rosterMode}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const mode = e.target.value as
+                      | "AUTO_BATCH_YEAR"
+                      | "MANUAL"
+                      | "MULTI_SHIFT";
                     setForm((f) => ({
                       ...f,
-                      rosterMode: e.target.value as "AUTO_BATCH_YEAR" | "MANUAL",
+                      rosterMode: mode,
                       assignedStudentIds:
-                        e.target.value === "AUTO_BATCH_YEAR" ? [] : f.assignedStudentIds,
-                    }))
-                  }
+                        mode === "MANUAL" ? f.assignedStudentIds : [],
+                      studentShiftMap:
+                        mode === "MULTI_SHIFT" ? f.studentShiftMap : {},
+                    }));
+                    if (mode === "MULTI_SHIFT" || mode === "MANUAL") {
+                      setStudentPickerOpen(true);
+                    }
+                  }}
                 >
                   <option value="AUTO_BATCH_YEAR">
-                    Auto — all active students in Batch + Year
+                    Auto — all batch + year students (one shift)
                   </option>
-                  <option value="MANUAL">Manual — select students</option>
+                  <option value="MANUAL">Manual — select students (one shift)</option>
+                  <option value="MULTI_SHIFT">
+                    Multi-shift — assign each student to Morning / Day / Night / Full day
+                  </option>
                 </Select>
               </FormField>
+
+              {form.rosterMode === "MULTI_SHIFT" ? (
+                <div className="space-y-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">
+                      Assign each student a duty shift
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Example: 40 students → 10 Morning, 10 Day, 10 Night, 10 Full day.
+                      Attendance is taken separately for each shift.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {FIELD_SHIFTS.map((s) => (
+                      <Badge key={s} className="bg-white text-slate-800 ring-1 ring-slate-200">
+                        {s.replace(/_/g, " ")}: {multiShiftCounts[s] ?? 0}
+                      </Badge>
+                    ))}
+                    <Badge className="bg-slate-800 text-white">
+                      Assigned: {Object.keys(form.studentShiftMap).length}
+                    </Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setStudentPickerOpen((v) => !v)}
+                    >
+                      {studentPickerOpen ? "Hide students" : "Show students"}
+                    </Button>
+                    {(assignableQuery.data ?? []).length > 0 ? (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            // Even split across MORNING / DAY / NIGHT / FULL_DAY (common hospital pattern)
+                            const targets: FieldDutyShift[] = [
+                              "MORNING",
+                              "DAY",
+                              "NIGHT",
+                              "FULL_DAY",
+                            ];
+                            const students = [...(assignableQuery.data ?? [])].sort(
+                              (a, b) => a.rollNumber - b.rollNumber,
+                            );
+                            const map: Record<string, FieldDutyShift> = {};
+                            const n = students.length;
+                            const base = Math.floor(n / targets.length);
+                            let rem = n % targets.length;
+                            let idx = 0;
+                            for (const sh of targets) {
+                              const take = base + (rem > 0 ? 1 : 0);
+                              if (rem > 0) rem -= 1;
+                              for (let i = 0; i < take && idx < n; i += 1, idx += 1) {
+                                map[students[idx]._id] = sh;
+                              }
+                            }
+                            setForm((f) => ({ ...f, studentShiftMap: map }));
+                            toast.success(
+                              `Split ${n} students across Morning / Day / Night / Full day`,
+                            );
+                          }}
+                        >
+                          Auto-split 4 ways (M/D/N/Full)
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const students = assignableQuery.data ?? [];
+                            const map: Record<string, FieldDutyShift> = {
+                              ...form.studentShiftMap,
+                            };
+                            const unassigned = students.filter((s) => !map[s._id]);
+                            unassigned.forEach((s, i) => {
+                              map[s._id] = FIELD_SHIFTS[i % FIELD_SHIFTS.length];
+                            });
+                            setForm((f) => ({ ...f, studentShiftMap: map }));
+                            toast.success(
+                              `Assigned ${unassigned.length} unassigned students evenly`,
+                            );
+                          }}
+                        >
+                          Fill unassigned evenly
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setForm((f) => ({ ...f, studentShiftMap: {} }));
+                            toast.message("Cleared all shift assignments");
+                          }}
+                        >
+                          Clear all
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                  {studentPickerOpen ? (
+                    assignableQuery.isLoading ? (
+                      <LoadingState />
+                    ) : !form.batchId || !form.yearId ? (
+                      <p className="text-xs text-slate-500">
+                        Select batch and year first to load students.
+                      </p>
+                    ) : (assignableQuery.data ?? []).length === 0 ? (
+                      <p className="text-xs text-slate-500">
+                        No active students found for this batch and year.
+                      </p>
+                    ) : (
+                      <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                        <Table>
+                          <TableHead>
+                            <tr>
+                              <Th>Roll</Th>
+                              <Th>Student</Th>
+                              <Th>Shift</Th>
+                            </tr>
+                          </TableHead>
+                          <TableBody>
+                            {(assignableQuery.data ?? []).map((s) => (
+                              <tr key={s._id}>
+                                <Td className="text-sm">{s.rollNumber}</Td>
+                                <Td className="text-sm">
+                                  {s.fullName}
+                                  <div className="text-xs text-slate-400">
+                                    {s.admissionNumber}
+                                  </div>
+                                </Td>
+                                <Td>
+                                  <Select
+                                    className="min-w-[130px]"
+                                    value={form.studentShiftMap[s._id] ?? ""}
+                                    onChange={(e) => {
+                                      const val = e.target.value as FieldDutyShift | "";
+                                      setForm((f) => {
+                                        const next = { ...f.studentShiftMap };
+                                        if (!val) delete next[s._id];
+                                        else next[s._id] = val;
+                                        return { ...f, studentShiftMap: next };
+                                      });
+                                    }}
+                                  >
+                                    <option value="">— Unassigned —</option>
+                                    {FIELD_SHIFTS.map((sh) => (
+                                      <option key={sh} value={sh}>
+                                        {sh.replace(/_/g, " ")}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                </Td>
+                              </tr>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )
+                  ) : null}
+                </div>
+              ) : null}
 
               {form.rosterMode === "MANUAL" ? (
                 <div className="space-y-2 rounded-xl border border-slate-200 p-3">
@@ -835,8 +1252,19 @@ export const FieldPostingSectionPanel = ({
                         </p>
                         <p className="text-xs text-slate-500">
                           {s.batch?.name} · {s.year?.name}
-                          {s.semesterBs ? ` · ${s.semesterBs}` : ""} · {s.startDateBs} →{" "}
-                          {s.endDateBs}
+                          {s.semesterBs ? ` · ${s.semesterBs}` : ""}
+                          {" · "}
+                          {s.rosterMode === "MULTI_SHIFT" ? (
+                            <span className="font-medium text-indigo-700">
+                              Multi-shift roster
+                            </span>
+                          ) : (
+                            <span className="font-medium text-indigo-700">
+                              Shift: {(s.shift || "DAY").replace(/_/g, " ")}
+                            </span>
+                          )}
+                          {" · "}
+                          {s.startDateBs} → {s.endDateBs}
                         </p>
                         <p className="text-xs text-slate-500">
                           Coordinator:{" "}
@@ -846,6 +1274,14 @@ export const FieldPostingSectionPanel = ({
                             : ""}
                           {" · "}
                           {s.studentCount ?? 0} students ({s.rosterMode ?? "AUTO"})
+                          {s.rosterMode === "MULTI_SHIFT" && s.shiftCounts
+                            ? ` · ${FIELD_SHIFTS.filter((sh) => (s.shiftCounts?.[sh] ?? 0) > 0)
+                                .map(
+                                  (sh) =>
+                                    `${sh.replace(/_/g, " ")}: ${s.shiftCounts?.[sh] ?? 0}`,
+                                )
+                                .join(", ")}`
+                            : ""}
                         </p>
                       </div>
                       {isAdmin ? (
@@ -880,7 +1316,16 @@ export const FieldPostingSectionPanel = ({
                                 status: s.status as "ACTIVE",
                                 rosterMode: s.rosterMode ?? "AUTO_BATCH_YEAR",
                                 assignedStudentIds: s.assignedStudentIds ?? [],
+                                studentShiftMap: Object.fromEntries(
+                                  (s.studentShifts ?? []).map((r) => [
+                                    r.studentId,
+                                    r.shift as FieldDutyShift,
+                                  ]),
+                                ),
                               });
+                              if (s.rosterMode === "MULTI_SHIFT" || s.rosterMode === "MANUAL") {
+                                setStudentPickerOpen(true);
+                              }
                             }}
                           >
                             Edit
@@ -903,7 +1348,20 @@ export const FieldPostingSectionPanel = ({
                           size="sm"
                           onClick={() => {
                             setTab("mark");
-                            void loadRosterForMarking(s._id, s.startDateBs, null);
+                            const firstShift =
+                              s.rosterMode === "MULTI_SHIFT"
+                                ? s.shiftsUsed?.[0] ||
+                                  FIELD_SHIFTS.find(
+                                    (sh) => (s.shiftCounts?.[sh] ?? 0) > 0,
+                                  ) ||
+                                  "DAY"
+                                : s.shift || "DAY";
+                            void loadRosterForMarking(
+                              s._id,
+                              s.startDateBs,
+                              null,
+                              firstShift,
+                            );
                           }}
                         >
                           Take attendance
@@ -922,63 +1380,221 @@ export const FieldPostingSectionPanel = ({
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Select posting & date</CardTitle>
+              <CardTitle className="text-base">
+                Take attendance (shift-wise)
+              </CardTitle>
+              <p className="text-sm font-normal text-slate-500">
+                Open a posting, pick the duty shift (for multi-shift postings only students
+                on that shift appear), mark Present / Absent / Late / Leave, then submit.
+                Mark each shift separately (e.g. Morning, then Day, then Night).
+              </p>
             </CardHeader>
             <CardContent className="space-y-3">
-              {todayQuery.isLoading ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <FormField label="Filter by shift">
+                  <Select
+                    value={shiftFilter}
+                    onChange={(e) =>
+                      setShiftFilter((e.target.value || "") as "" | FieldDutyShift)
+                    }
+                  >
+                    <option value="">All shifts</option>
+                    {FIELD_SHIFTS.map((s) => (
+                      <option key={s} value={s}>
+                        {s.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              </div>
+
+              {schedulesQuery.isLoading || todayQuery.isLoading ? (
                 <LoadingState />
-              ) : (todayQuery.data ?? []).length === 0 ? (
+              ) : markablePostings.length === 0 ? (
                 <EmptyState
-                  title="No active postings today"
+                  title={
+                    shiftFilter
+                      ? `No ${shiftFilter.replace(/_/g, " ")} postings assigned`
+                      : "No active postings"
+                  }
                   description={
                     isCoordinatorView
-                      ? "You have no assigned field duties active today."
-                      : "Create an active posting whose date range includes today."
+                      ? "You have no assigned field postings for this section (and shift filter). Ask admin to assign you as field coordinator."
+                      : "Create an active posting and assign a coordinator first."
                   }
                 />
               ) : (
                 <div className="space-y-2">
-                  {(todayQuery.data ?? []).map((ctx) => (
-                    <div
-                      key={ctx.schedule._id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 p-3"
-                    >
-                      <div>
-                        <p className="font-medium">
-                          {ctx.schedule.siteName || ctx.schedule.hospitalName}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {postingTypeLabel(ctx.schedule.postingType)} ·{" "}
-                          {ctx.students.length} students ·{" "}
-                          {ctx.existingAttendance
-                            ? `Attendance: ${ctx.existingAttendance.status}`
-                            : "Not submitted"}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          void loadRosterForMarking(
-                            ctx.schedule._id,
-                            ctx.dateBs,
-                            ctx.existingAttendance,
-                          )
-                        }
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    Shift rosters to mark
+                    {shiftFilter ? ` · ${shiftFilter.replace(/_/g, " ")}` : " · all shifts"}
+                  </p>
+                  {markablePostings.map((ctx) => {
+                    const isSelected =
+                      selectedScheduleId === ctx.schedule._id &&
+                      markShift === ctx.shift;
+                    const submitted =
+                      ctx.existingAttendance?.status === "LOCKED" ||
+                      ctx.existingAttendance?.status === "SUBMITTED";
+                    return (
+                      <div
+                        key={ctx.key}
+                        className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 ${
+                          isSelected
+                            ? "border-brand-500 bg-brand-50/50"
+                            : "border-slate-200"
+                        }`}
                       >
-                        {ctx.existingAttendance ? "View / re-open" : "Take attendance"}
-                      </Button>
-                    </div>
-                  ))}
+                        <div>
+                          <p className="font-medium">
+                            {ctx.schedule.siteName || ctx.schedule.hospitalName}
+                            <Badge className="ml-2 bg-indigo-100 text-indigo-800">
+                              {ctx.shift.replace(/_/g, " ")}
+                            </Badge>
+                            {ctx.isMultiShift ? (
+                              <Badge className="ml-1 bg-violet-100 text-violet-800">
+                                multi-shift
+                              </Badge>
+                            ) : null}
+                            {submitted ? (
+                              <Badge className="ml-1 bg-emerald-100 text-emerald-800">
+                                {ctx.existingAttendance?.status}
+                              </Badge>
+                            ) : (
+                              <Badge className="ml-1 bg-amber-100 text-amber-900">
+                                Not submitted
+                              </Badge>
+                            )}
+                          </p>
+                          <p className="text-xs text-slate-600">
+                            <span className="font-medium">
+                              {ctx.schedule.batch?.name ?? "Batch"} ·{" "}
+                              {ctx.schedule.year?.name ?? "Year"}
+                            </span>
+                            {" · "}
+                            {postingTypeLabel(ctx.schedule.postingType)}
+                            {" · "}
+                            <span className="font-medium">{ctx.studentCount}</span>{" "}
+                            students on this shift
+                            {ctx.activeToday ? (
+                              <span className="ml-1 text-emerald-700">· Active today</span>
+                            ) : null}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {ctx.schedule.startDateBs} → {ctx.schedule.endDateBs}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={isSelected ? "default" : "outline"}
+                          onClick={() => {
+                            const date =
+                              ctx.dateBs ||
+                              markDateBs ||
+                              ctx.schedule.startDateBs ||
+                              "";
+                            void loadRosterForMarking(
+                              ctx.schedule._id,
+                              date,
+                              ctx.existingAttendance,
+                              ctx.shift,
+                            );
+                          }}
+                        >
+                          {submitted && isSelected
+                            ? "View / re-open"
+                            : isSelected
+                              ? "Selected"
+                              : `Mark ${ctx.shift.replace(/_/g, " ")}`}
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
-              {selectedScheduleId ? (
+              {selectedScheduleId && selectedSchedule ? (
                 <div className="space-y-3 border-t border-slate-100 pt-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+                    <p className="font-semibold text-slate-900">
+                      {selectedSchedule.siteName || selectedSchedule.hospitalName}
+                    </p>
+                    <p className="mt-1 text-slate-600">
+                      <span className="font-medium">Batch:</span>{" "}
+                      {selectedSchedule.batch?.name ?? "—"}
+                      {" · "}
+                      <span className="font-medium">Year:</span>{" "}
+                      {selectedSchedule.year?.name ?? "—"}
+                      {" · "}
+                      <span className="font-medium">{markRows.length}</span> students on this
+                      shift
+                    </p>
+                    {selectedSchedule.rosterMode === "MULTI_SHIFT" &&
+                    selectedSchedule.shiftCounts ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Shift split:{" "}
+                        {FIELD_SHIFTS.filter(
+                          (sh) => (selectedSchedule.shiftCounts?.[sh] ?? 0) > 0,
+                        )
+                          .map(
+                            (sh) =>
+                              `${sh.replace(/_/g, " ")} (${selectedSchedule.shiftCounts?.[sh] ?? 0})`,
+                          )
+                          .join(" · ")}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <FormField label="Attendance Date (BS)">
                       <NepaliDateField value={markDateBs} onChange={onMarkDateChange} />
                     </FormField>
-                    <FormField label="Notes">
+                    <FormField
+                      label={
+                        selectedSchedule.rosterMode === "MULTI_SHIFT"
+                          ? "Duty shift (required)"
+                          : "Duty shift"
+                      }
+                    >
+                      <Select
+                        value={
+                          markShift ||
+                          (selectedSchedule.rosterMode === "MULTI_SHIFT"
+                            ? ""
+                            : selectedSchedule.shift || "DAY")
+                        }
+                        disabled={
+                          isReadOnly ||
+                          selectedSchedule.rosterMode !== "MULTI_SHIFT"
+                        }
+                        onChange={(e) =>
+                          onMarkShiftChange(e.target.value as FieldDutyShift)
+                        }
+                      >
+                        {selectedSchedule.rosterMode === "MULTI_SHIFT" ? (
+                          <>
+                            <option value="">Select shift…</option>
+                            {(selectedSchedule.shiftsUsed?.length
+                              ? selectedSchedule.shiftsUsed
+                              : FIELD_SHIFTS.filter(
+                                  (s) =>
+                                    (selectedSchedule.shiftCounts?.[s] ?? 0) > 0,
+                                )
+                            ).map((s) => (
+                              <option key={s} value={s}>
+                                {s.replace(/_/g, " ")} (
+                                {selectedSchedule.shiftCounts?.[s] ?? 0} students)
+                              </option>
+                            ))}
+                          </>
+                        ) : (
+                          <option value={selectedSchedule.shift || "DAY"}>
+                            {(selectedSchedule.shift || "DAY").replace(/_/g, " ")}
+                          </option>
+                        )}
+                      </Select>
+                    </FormField>
+                    <FormField label="Notes (optional)">
                       <Input
                         value={notes}
                         disabled={isReadOnly}
@@ -1022,7 +1638,9 @@ export const FieldPostingSectionPanel = ({
                   ) : null}
 
                   {markRows.length === 0 ? (
-                    <p className="text-sm text-slate-500">No students in roster.</p>
+                    <p className="text-sm text-slate-500">
+                      No students in roster for this batch/year (or manual list is empty).
+                    </p>
                   ) : (
                     <div className="overflow-x-auto">
                       <Table>
@@ -1093,25 +1711,39 @@ export const FieldPostingSectionPanel = ({
                     <div className="flex flex-wrap gap-2">
                       <Button
                         onClick={() => {
-                          // quick-fill remaining statuses if needed
                           setMarkRows((rows) =>
-                            rows.map((r) =>
-                              FIELD_STATUSES.includes(r.status)
-                                ? r
-                                : { ...r, status: "PRESENT" },
-                            ),
+                            rows.map((r) => ({ ...r, status: "PRESENT" })),
                           );
                         }}
                         variant="outline"
                         type="button"
                       >
-                        Fill blank as Present
+                        Mark all Present
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setMarkRows((rows) =>
+                            rows.map((r) => ({ ...r, status: "ABSENT" })),
+                          );
+                        }}
+                        variant="outline"
+                        type="button"
+                      >
+                        Mark all Absent
                       </Button>
                       <Button
                         onClick={() => submitAttendance.mutate()}
-                        disabled={submitAttendance.isPending || !markDateBs}
+                        disabled={
+                          submitAttendance.isPending ||
+                          !markDateBs ||
+                          (selectedSchedule.rosterMode === "MULTI_SHIFT" && !markShift)
+                        }
                       >
-                        Submit attendance
+                        Submit{" "}
+                        {markShift
+                          ? `${markShift.replace(/_/g, " ")} shift `
+                          : ""}
+                        attendance
                       </Button>
                     </div>
                   ) : null}

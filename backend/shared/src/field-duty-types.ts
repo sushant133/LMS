@@ -80,7 +80,25 @@ export type FieldDutyStudentStatus =
 
 export type FieldDutyShift = "MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY";
 
-export type FieldDutyRosterMode = "AUTO_BATCH_YEAR" | "MANUAL";
+/**
+ * AUTO_BATCH_YEAR — all active students in batch+year share the posting's single shift.
+ * MANUAL — selected students share the posting's single shift.
+ * MULTI_SHIFT — each student is assigned their own shift (e.g. 10 morning, 10 day, 10 night);
+ *   attendance is taken separately per shift for that subset of the roster.
+ */
+export type FieldDutyRosterMode = "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT";
+
+/** Per-student shift assignment (MULTI_SHIFT roster mode). */
+export interface FieldDutyStudentShiftAssignment {
+  studentId: string;
+  shift: FieldDutyShift;
+  student?: {
+    _id: string;
+    fullName?: string;
+    admissionNumber?: string;
+    rollNumber?: number;
+  };
+}
 
 export type FieldDutyEditRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
 
@@ -130,13 +148,26 @@ export interface FieldDutyScheduleRecord {
   hospitalSupervisorName?: string;
   startDateBs: string;
   endDateBs: string;
+  /**
+   * Default / single-mode shift. For MULTI_SHIFT, this is a display default only —
+   * real assignments live in studentShifts.
+   */
   shift: FieldDutyShift;
   remarks?: string;
   status: FieldDutyScheduleStatus;
-  /** AUTO_BATCH_YEAR (default) or MANUAL selected students. */
+  /** AUTO_BATCH_YEAR | MANUAL | MULTI_SHIFT. */
   rosterMode?: FieldDutyRosterMode;
-  /** When rosterMode is MANUAL (or hybrid override), explicit student ids. */
+  /** When rosterMode is MANUAL, explicit student ids. */
   assignedStudentIds?: string[];
+  /**
+   * When rosterMode is MULTI_SHIFT: each student with their duty shift.
+   * Attendance is submitted once per (posting, date, shift).
+   */
+  studentShifts?: FieldDutyStudentShiftAssignment[];
+  /** Counts of students per shift (MULTI_SHIFT or derived for single-mode). */
+  shiftCounts?: Partial<Record<FieldDutyShift, number>>;
+  /** Distinct shifts that have students (for coordinator shift picker). */
+  shiftsUsed?: FieldDutyShift[];
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -228,6 +259,8 @@ export interface FieldDutyRosterStudent {
   rollNumber: number;
   batchId?: string;
   yearId?: string;
+  /** Assigned duty shift when roster is MULTI_SHIFT (or posting single shift). */
+  shift?: FieldDutyShift;
 }
 
 export interface FieldDutyDashboard {
@@ -264,7 +297,11 @@ export interface FieldDutyDashboard {
     department: string;
     batchName?: string;
     yearName?: string;
+    /** Duty shift for this posting (MORNING / DAY / EVENING / NIGHT / FULL_DAY). */
+    shift?: FieldDutyShift;
     studentCount: number;
+    shiftCounts?: Partial<Record<FieldDutyShift, number>>;
+    shiftsUsed?: FieldDutyShift[];
     attendanceStatus?: FieldDutyAttendanceStatus | "NONE";
     startDateBs?: string;
     endDateBs?: string;

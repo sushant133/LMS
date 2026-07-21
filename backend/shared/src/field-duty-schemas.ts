@@ -19,7 +19,16 @@ export const fieldDutyShiftSchema = z.enum([
   "FULL_DAY"
 ]);
 
-export const fieldDutyRosterModeSchema = z.enum(["AUTO_BATCH_YEAR", "MANUAL"]);
+export const fieldDutyRosterModeSchema = z.enum([
+  "AUTO_BATCH_YEAR",
+  "MANUAL",
+  "MULTI_SHIFT"
+]);
+
+export const fieldDutyStudentShiftSchema = z.object({
+  studentId: z.string().min(1),
+  shift: fieldDutyShiftSchema
+});
 
 /** Accept known types or any non-empty custom type string for future scalability. */
 export const fieldPostingTypeSchema = z
@@ -58,7 +67,9 @@ export const fieldDutyScheduleSchema = z.object({
   remarks: z.string().optional().or(z.literal("")),
   status: z.enum(["ACTIVE", "COMPLETED", "CANCELLED"]).default("ACTIVE"),
   rosterMode: fieldDutyRosterModeSchema.default("AUTO_BATCH_YEAR"),
-  assignedStudentIds: z.array(objectId).optional().default([])
+  assignedStudentIds: z.array(objectId).optional().default([]),
+  /** Required when rosterMode is MULTI_SHIFT — map each student to a shift. */
+  studentShifts: z.array(fieldDutyStudentShiftSchema).optional().default([])
 }).superRefine((data, ctx) => {
   const site = (data.siteName || data.hospitalName || "").trim();
   if (!site) {
@@ -74,6 +85,28 @@ export const fieldDutyScheduleSchema = z.object({
       message: "Select at least one student for manual roster",
       path: ["assignedStudentIds"]
     });
+  }
+  if (data.rosterMode === "MULTI_SHIFT") {
+    if (!data.studentShifts || data.studentShifts.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Assign at least one student to a shift for multi-shift roster",
+        path: ["studentShifts"]
+      });
+    } else {
+      const seen = new Set<string>();
+      for (const row of data.studentShifts) {
+        if (seen.has(row.studentId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Each student can only be assigned to one shift",
+            path: ["studentShifts"]
+          });
+          break;
+        }
+        seen.add(row.studentId);
+      }
+    }
   }
 });
 
@@ -96,11 +129,36 @@ export const fieldDutyScheduleUpdateSchema = fieldDutyScheduleSchema.partial().s
       path: ["assignedStudentIds"]
     });
   }
+  if (data.rosterMode === "MULTI_SHIFT" && data.studentShifts !== undefined) {
+    if (data.studentShifts.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Assign at least one student to a shift for multi-shift roster",
+        path: ["studentShifts"]
+      });
+    }
+  }
 });
 
 export const fieldDutyAssignStudentsSchema = z.object({
   rosterMode: fieldDutyRosterModeSchema,
-  assignedStudentIds: z.array(objectId).default([])
+  assignedStudentIds: z.array(objectId).default([]),
+  studentShifts: z.array(fieldDutyStudentShiftSchema).optional().default([])
+}).superRefine((data, ctx) => {
+  if (data.rosterMode === "MANUAL" && data.assignedStudentIds.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Select at least one student for manual roster",
+      path: ["assignedStudentIds"]
+    });
+  }
+  if (data.rosterMode === "MULTI_SHIFT" && data.studentShifts.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Assign at least one student to a shift",
+      path: ["studentShifts"]
+    });
+  }
 });
 
 export const fieldDutyAssignCoordinatorsSchema = z.object({
@@ -117,6 +175,11 @@ export const fieldDutyAttendanceEntrySchema = z.object({
 export const fieldDutyAttendanceSubmitSchema = z.object({
   scheduleId: objectId,
   dateBs: z.string().min(1),
+  /**
+   * Required for MULTI_SHIFT postings (attendance is per shift).
+   * Optional for single-shift postings (falls back to posting.shift).
+   */
+  shift: fieldDutyShiftSchema.optional(),
   entries: z.array(fieldDutyAttendanceEntrySchema).min(1),
   notes: z.string().optional().or(z.literal(""))
 });

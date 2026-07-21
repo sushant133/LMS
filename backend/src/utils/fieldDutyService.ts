@@ -135,10 +135,13 @@ export const presentForPercent = (
   countLateAsPresent = true
 ) => summary.present + summary.emergencyDuty + (countLateAsPresent ? summary.late : 0);
 
+type StudentShiftRow = { studentId: unknown; shift: string };
+
 /**
  * Students for a field posting roster.
- * MANUAL → assignedStudentIds only; AUTO_BATCH_YEAR → active batch+year students.
- * If MANUAL has no assignments, falls back to empty list (admin must assign).
+ * - MANUAL → assignedStudentIds only (single shift)
+ * - MULTI_SHIFT → studentShifts; optional filterShift returns only that shift's students
+ * - AUTO_BATCH_YEAR → active batch+year students (single shift)
  */
 export const getEligibleStudentsForDuty = async (
   schoolId: unknown,
@@ -147,17 +150,40 @@ export const getEligibleStudentsForDuty = async (
   options?: {
     rosterMode?: string;
     assignedStudentIds?: unknown[];
+    studentShifts?: StudentShiftRow[];
+    /** When set (MULTI_SHIFT), only students assigned to this shift. */
+    filterShift?: string;
+    /** Single-mode posting shift attached to each student row. */
+    defaultShift?: string;
   }
 ) => {
   const mode = options?.rosterMode || "AUTO_BATCH_YEAR";
   const assigned = (options?.assignedStudentIds ?? []).map((id) => toId(id)).filter(Boolean);
+  const shiftMap = new Map<string, string>();
+  for (const row of options?.studentShifts ?? []) {
+    const sid = toId(row.studentId);
+    if (sid && row.shift) shiftMap.set(sid, String(row.shift).toUpperCase());
+  }
 
-  let students;
+  let studentIdsFilter: string[] | null = null;
   if (mode === "MANUAL") {
     if (!assigned.length) return [];
+    studentIdsFilter = assigned;
+  } else if (mode === "MULTI_SHIFT") {
+    let rows = [...shiftMap.entries()];
+    if (options?.filterShift) {
+      const want = options.filterShift.toUpperCase();
+      rows = rows.filter(([, sh]) => sh === want);
+    }
+    studentIdsFilter = rows.map(([id]) => id);
+    if (!studentIdsFilter.length) return [];
+  }
+
+  let students;
+  if (studentIdsFilter) {
     students = await Student.find({
       schoolId,
-      _id: { $in: assigned },
+      _id: { $in: studentIdsFilter },
       academicStatus: "ACTIVE"
     })
       .populate("user", "fullName")
@@ -175,17 +201,76 @@ export const getEligibleStudentsForDuty = async (
       .lean();
   }
 
+  const defaultShift = options?.defaultShift
+    ? String(options.defaultShift).toUpperCase()
+    : undefined;
+
   return students.map((s) => {
     const user = s.user as unknown as { fullName?: string } | null;
+    const id = s._id.toString();
+    const shift =
+      (shiftMap.get(id) as "MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY" | undefined) ||
+      (defaultShift as "MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY" | undefined);
     return {
-      _id: s._id.toString(),
+      _id: id,
       fullName: user?.fullName ?? "Student",
       admissionNumber: s.admissionNumber,
       rollNumber: s.rollNumber,
       batchId: s.batchId?.toString(),
-      yearId: s.yearId?.toString()
+      yearId: s.yearId?.toString(),
+      shift
     };
   });
+};
+
+/** Build shiftCounts + shiftsUsed from schedule fields. */
+export const buildShiftMeta = (schedule: {
+  rosterMode?: unknown;
+  shift?: unknown;
+  assignedStudentIds?: unknown[];
+  studentShifts?: StudentShiftRow[];
+  studentCount?: number;
+}): {
+  shiftCounts: Partial<Record<"MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY", number>>;
+  shiftsUsed: Array<"MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY">;
+} => {
+  const mode = String(schedule.rosterMode || "AUTO_BATCH_YEAR");
+  const shiftCounts: Partial<
+    Record<"MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY", number>
+  > = {};
+
+  if (mode === "MULTI_SHIFT") {
+    for (const row of schedule.studentShifts ?? []) {
+      const sh = String(row.shift || "").toUpperCase() as
+        | "MORNING"
+        | "DAY"
+        | "EVENING"
+        | "NIGHT"
+        | "FULL_DAY";
+      if (!sh) continue;
+      shiftCounts[sh] = (shiftCounts[sh] ?? 0) + 1;
+    }
+  } else {
+    const sh = (String(schedule.shift || "DAY").toUpperCase() || "DAY") as
+      | "MORNING"
+      | "DAY"
+      | "EVENING"
+      | "NIGHT"
+      | "FULL_DAY";
+    const n =
+      typeof schedule.studentCount === "number"
+        ? schedule.studentCount
+        : mode === "MANUAL"
+          ? (schedule.assignedStudentIds ?? []).length
+          : 0;
+    if (n > 0) shiftCounts[sh] = n;
+  }
+
+  const shiftsUsed = (
+    ["MORNING", "DAY", "EVENING", "NIGHT", "FULL_DAY"] as const
+  ).filter((s) => (shiftCounts[s] ?? 0) > 0);
+
+  return { shiftCounts, shiftsUsed };
 };
 
 export const assertScheduleAccess = async (
@@ -258,10 +343,25 @@ export const serializeSchedule = async (
   const postingType = resolvePostingType(schedule);
   const siteName = resolveSiteName(schedule);
   const rosterMode =
-    (schedule.rosterMode as "AUTO_BATCH_YEAR" | "MANUAL" | undefined) || "AUTO_BATCH_YEAR";
+    (schedule.rosterMode as "AUTO_BATCH_YEAR" | "MANUAL" | "MULTI_SHIFT" | undefined) ||
+    "AUTO_BATCH_YEAR";
   const assignedStudentIds = Array.isArray(schedule.assignedStudentIds)
     ? schedule.assignedStudentIds.map((id) => toId(id)).filter(Boolean)
     : [];
+  const rawStudentShifts = Array.isArray(schedule.studentShifts)
+    ? (schedule.studentShifts as StudentShiftRow[])
+    : [];
+  const studentShiftsNormalized = rawStudentShifts
+    .map((row) => ({
+      studentId: toId(row.studentId),
+      shift: String(row.shift || "").toUpperCase() as
+        | "MORNING"
+        | "DAY"
+        | "EVENING"
+        | "NIGHT"
+        | "FULL_DAY"
+    }))
+    .filter((row) => row.studentId && row.shift);
 
   const [batch, year, staff, legacyTeacher, assistants, studentCount] = await Promise.all([
     Batch.findById(batchId).select("name").lean(),
@@ -278,14 +378,24 @@ export const serializeSchedule = async (
     options?.includeStudentCount
       ? rosterMode === "MANUAL"
         ? Promise.resolve(assignedStudentIds.length)
-        : Student.countDocuments({
-            schoolId: schedule.schoolId,
-            batchId,
-            yearId,
-            academicStatus: "ACTIVE"
-          })
+        : rosterMode === "MULTI_SHIFT"
+          ? Promise.resolve(studentShiftsNormalized.length)
+          : Student.countDocuments({
+              schoolId: schedule.schoolId,
+              batchId,
+              yearId,
+              academicStatus: "ACTIVE"
+            })
       : Promise.resolve(undefined)
   ]);
+
+  const { shiftCounts, shiftsUsed } = buildShiftMeta({
+    rosterMode,
+    shift: schedule.shift,
+    assignedStudentIds,
+    studentShifts: studentShiftsNormalized,
+    studentCount: typeof studentCount === "number" ? studentCount : undefined
+  });
 
   const staffUser = staff?.user as unknown as { fullName?: string } | undefined;
   const teacherUser = legacyTeacher?.user as unknown as { fullName?: string } | undefined;
@@ -348,6 +458,9 @@ export const serializeSchedule = async (
     status: schedule.status as FieldDutyScheduleRecord["status"],
     rosterMode,
     assignedStudentIds,
+    studentShifts: studentShiftsNormalized,
+    shiftCounts,
+    shiftsUsed,
     createdBy: schedule.createdBy ? toId(schedule.createdBy) : undefined,
     createdAt: schedule.createdAt
       ? new Date(schedule.createdAt as Date).toISOString()
@@ -653,10 +766,24 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
     }
   }
 
+  // Expected submissions today: 1 per single-shift posting, 1 per used shift for MULTI_SHIFT
+  let expectedSubmissions = 0;
+  for (const sch of activeSchedules) {
+    if (sch.rosterMode === "MULTI_SHIFT") {
+      const used = new Set(
+        (Array.isArray(sch.studentShifts) ? sch.studentShifts : []).map((r: { shift?: string }) =>
+          String(r.shift || "").toUpperCase()
+        )
+      );
+      expectedSubmissions += Math.max(used.size, 0);
+    } else {
+      expectedSubmissions += 1;
+    }
+  }
   const submittedToday = todayRecords.filter(
     (r) => r.status === "SUBMITTED" || r.status === "LOCKED"
   ).length;
-  const pendingSubmissions = Math.max(activeSchedules.length - submittedToday, 0);
+  const pendingSubmissions = Math.max(expectedSubmissions - submittedToday, 0);
   const missingAttendance = pendingSubmissions;
   const markedPresent = present + emergencyDuty + late;
   const overallAttendancePercent =
@@ -668,19 +795,48 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
       activeSchedules.map(async (sch) => {
         const rosterMode = (sch.rosterMode as string) || "AUTO_BATCH_YEAR";
         const assigned = Array.isArray(sch.assignedStudentIds) ? sch.assignedStudentIds : [];
+        const multiShifts = Array.isArray(sch.studentShifts) ? sch.studentShifts : [];
         const count =
           rosterMode === "MANUAL"
             ? assigned.length
-            : await Student.countDocuments({
-                schoolId,
-                batchId: sch.batchId,
-                yearId: sch.yearId,
-                academicStatus: "ACTIVE"
-              });
-        const att = todayRecords.find((r) => r.scheduleId.toString() === sch._id.toString());
+            : rosterMode === "MULTI_SHIFT"
+              ? multiShifts.length
+              : await Student.countDocuments({
+                  schoolId,
+                  batchId: sch.batchId,
+                  yearId: sch.yearId,
+                  academicStatus: "ACTIVE"
+                });
+        const dayAtts = todayRecords.filter(
+          (r) => r.scheduleId.toString() === sch._id.toString()
+        );
+        const att = dayAtts[0];
+        const allShiftsSubmitted =
+          rosterMode === "MULTI_SHIFT"
+            ? (() => {
+                const used = new Set(
+                  multiShifts.map((r: { shift?: string }) =>
+                    String(r.shift || "").toUpperCase()
+                  )
+                );
+                const submitted = new Set(
+                  dayAtts
+                    .filter((r) => r.status === "SUBMITTED" || r.status === "LOCKED")
+                    .map((r) => String(r.shift || "").toUpperCase())
+                );
+                return used.size > 0 && [...used].every((s) => submitted.has(s));
+              })()
+            : att && (att.status === "SUBMITTED" || att.status === "LOCKED");
         const batch = await Batch.findById(sch.batchId).select("name").lean();
         const year = await Year.findById(sch.yearId).select("name").lean();
         const siteName = resolveSiteName(sch);
+        const { shiftCounts, shiftsUsed } = buildShiftMeta({
+          rosterMode,
+          shift: sch.shift,
+          assignedStudentIds: assigned,
+          studentShifts: multiShifts as StudentShiftRow[],
+          studentCount: count
+        });
         return {
           scheduleId: sch._id.toString(),
           hospitalName: siteName,
@@ -689,8 +845,15 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
           department: sch.department || "",
           batchName: batch?.name,
           yearName: year?.name,
+          shift: (sch.shift as "MORNING" | "DAY" | "EVENING" | "NIGHT" | "FULL_DAY") || "DAY",
           studentCount: count,
-          attendanceStatus: (att?.status as "DRAFT" | "SUBMITTED" | "LOCKED" | undefined) ?? "NONE",
+          shiftCounts,
+          shiftsUsed,
+          attendanceStatus: allShiftsSubmitted
+            ? ("LOCKED" as const)
+            : dayAtts.length > 0
+              ? ("DRAFT" as const)
+              : ("NONE" as const),
           startDateBs: sch.startDateBs,
           endDateBs: sch.endDateBs
         };

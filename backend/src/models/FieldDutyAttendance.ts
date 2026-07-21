@@ -72,9 +72,10 @@ const fieldDutyAttendanceSchema = new Schema(
   { timestamps: true }
 );
 
-// One attendance record per duty schedule per day
+// One attendance record per duty schedule per day per shift
+// (MULTI_SHIFT postings submit separately for MORNING / DAY / NIGHT / …)
 fieldDutyAttendanceSchema.index(
-  { schoolId: 1, scheduleId: 1, dateBs: 1 },
+  { schoolId: 1, scheduleId: 1, dateBs: 1, shift: 1 },
   { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 fieldDutyAttendanceSchema.index({ schoolId: 1, dateBs: 1 });

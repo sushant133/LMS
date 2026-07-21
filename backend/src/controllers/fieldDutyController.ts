@@ -137,6 +137,35 @@ export const createFieldDutySchedule = asyncHandler(async (req: Request, res: Re
     (id) => id !== payload.supervisorStaffId
   );
 
+  if (payload.rosterMode === "MANUAL" && (payload.assignedStudentIds ?? []).length) {
+    const count = await Student.countDocuments({
+      schoolId,
+      _id: { $in: payload.assignedStudentIds },
+      academicStatus: "ACTIVE"
+    });
+    if (count !== payload.assignedStudentIds!.length) {
+      throw new ApiError(400, "One or more students are invalid or inactive");
+    }
+  }
+  if (payload.rosterMode === "MULTI_SHIFT") {
+    const shifts = payload.studentShifts ?? [];
+    if (!shifts.length) {
+      throw new ApiError(400, "Assign at least one student to a shift");
+    }
+    const ids = shifts.map((r) => r.studentId);
+    if (new Set(ids).size !== ids.length) {
+      throw new ApiError(400, "Each student can only be assigned to one shift");
+    }
+    const count = await Student.countDocuments({
+      schoolId,
+      _id: { $in: ids },
+      academicStatus: "ACTIVE"
+    });
+    if (count !== ids.length) {
+      throw new ApiError(400, "One or more students are invalid or inactive");
+    }
+  }
+
   const created = await FieldDutySchedule.create({
     schoolId,
     academicYearBs: payload.academicYearBs,
@@ -157,11 +186,19 @@ export const createFieldDutySchedule = asyncHandler(async (req: Request, res: Re
     hospitalSupervisorName: emptyToUndef(payload.hospitalSupervisorName) ?? "",
     startDateBs: payload.startDateBs,
     endDateBs: payload.endDateBs,
-    shift: payload.shift,
+    shift: payload.rosterMode === "MULTI_SHIFT" ? "DAY" : payload.shift,
     remarks: emptyToUndef(payload.remarks) ?? "",
     status: payload.status,
     rosterMode: payload.rosterMode ?? "AUTO_BATCH_YEAR",
-    assignedStudentIds: payload.assignedStudentIds ?? [],
+    assignedStudentIds:
+      payload.rosterMode === "MANUAL" ? (payload.assignedStudentIds ?? []) : [],
+    studentShifts:
+      payload.rosterMode === "MULTI_SHIFT"
+        ? (payload.studentShifts ?? []).map((r) => ({
+            studentId: r.studentId,
+            shift: r.shift
+          }))
+        : [],
     createdBy: actorId(req)
   });
 
@@ -246,10 +283,34 @@ export const updateFieldDutySchedule = asyncHandler(async (req: Request, res: Re
             (id) => id !== (payload.supervisorStaffId ?? existing.supervisorStaffId?.toString())
           )
         : existing.assistantCoordinatorStaffIds,
-    assignedStudentIds:
-      payload.assignedStudentIds !== undefined
-        ? payload.assignedStudentIds
-        : existing.assignedStudentIds
+    assignedStudentIds: (() => {
+      if (payload.rosterMode === "MANUAL") {
+        return payload.assignedStudentIds ?? existing.assignedStudentIds;
+      }
+      if (payload.rosterMode === "AUTO_BATCH_YEAR" || payload.rosterMode === "MULTI_SHIFT") {
+        return [];
+      }
+      if (payload.assignedStudentIds !== undefined) return payload.assignedStudentIds;
+      return existing.assignedStudentIds;
+    })(),
+    studentShifts: (() => {
+      if (payload.rosterMode === "MULTI_SHIFT") {
+        return (payload.studentShifts ?? []).map((r) => ({
+          studentId: r.studentId as never,
+          shift: r.shift
+        }));
+      }
+      if (payload.rosterMode === "AUTO_BATCH_YEAR" || payload.rosterMode === "MANUAL") {
+        return [];
+      }
+      if (payload.studentShifts !== undefined) {
+        return payload.studentShifts.map((r) => ({
+          studentId: r.studentId as never,
+          shift: r.shift
+        }));
+      }
+      return existing.studentShifts;
+    })()
   });
 
   if (siteName !== undefined) {
@@ -356,9 +417,35 @@ export const assignFieldStudents = asyncHandler(async (req: Request, res: Respon
     }
   }
 
+  if (payload.rosterMode === "MULTI_SHIFT") {
+    if (!payload.studentShifts.length) {
+      throw new ApiError(400, "Assign at least one student to a shift");
+    }
+    const ids = payload.studentShifts.map((r) => r.studentId);
+    const unique = new Set(ids);
+    if (unique.size !== ids.length) {
+      throw new ApiError(400, "Each student can only be assigned to one shift");
+    }
+    const count = await Student.countDocuments({
+      schoolId: tenantObjectId(req),
+      _id: { $in: ids },
+      academicStatus: "ACTIVE"
+    });
+    if (count !== ids.length) {
+      throw new ApiError(400, "One or more students are invalid or inactive");
+    }
+  }
+
   existing.rosterMode = payload.rosterMode;
   existing.assignedStudentIds =
     payload.rosterMode === "MANUAL" ? (payload.assignedStudentIds as never) : ([] as never);
+  existing.studentShifts =
+    payload.rosterMode === "MULTI_SHIFT"
+      ? (payload.studentShifts.map((r) => ({
+          studentId: r.studentId,
+          shift: r.shift
+        })) as never)
+      : ([] as never);
   await existing.save();
 
   await recordAudit(req, {
@@ -367,7 +454,8 @@ export const assignFieldStudents = asyncHandler(async (req: Request, res: Respon
     entityId: existing._id.toString(),
     after: {
       rosterMode: payload.rosterMode,
-      assignedStudentIds: payload.assignedStudentIds
+      assignedStudentIds: payload.assignedStudentIds,
+      studentShifts: payload.studentShifts
     }
   });
 
@@ -378,7 +466,7 @@ export const assignFieldStudents = asyncHandler(async (req: Request, res: Respon
   );
 });
 
-/** Roster for a posting (manual or auto). */
+/** Roster for a posting (manual, auto, or multi-shift). Optional ?shift= for MULTI_SHIFT. */
 export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Response) => {
   const schedule = await FieldDutySchedule.findOne({
     _id: req.params.id,
@@ -388,18 +476,28 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
   if (!schedule) throw new ApiError(404, "Field posting not found");
   await assertScheduleAccess(req, schedule);
 
+  const filterShift =
+    typeof req.query.shift === "string" && req.query.shift
+      ? req.query.shift.toUpperCase()
+      : undefined;
+
   const students = await getEligibleStudentsForDuty(
     schedule.schoolId,
     schedule.batchId.toString(),
     schedule.yearId.toString(),
     {
       rosterMode: schedule.rosterMode as string,
-      assignedStudentIds: schedule.assignedStudentIds as unknown[]
+      assignedStudentIds: schedule.assignedStudentIds as unknown[],
+      studentShifts: schedule.studentShifts as Array<{ studentId: unknown; shift: string }>,
+      filterShift:
+        schedule.rosterMode === "MULTI_SHIFT" ? filterShift : undefined,
+      defaultShift: (schedule.shift as string) || "DAY"
     }
   );
   return sendSuccess(res, "Field posting roster fetched", {
     schedule: await serializeSchedule(schedule as never, { includeStudentCount: true }),
-    students
+    students,
+    filterShift: filterShift ?? null
   });
 });
 
@@ -457,6 +555,9 @@ export const listFieldDutyAttendance = asyncHandler(async (req: Request, res: Re
   if (typeof req.query.editRequestStatus === "string" && req.query.editRequestStatus) {
     filter["editRequest.status"] = req.query.editRequestStatus;
   }
+  if (typeof req.query.shift === "string" && req.query.shift) {
+    filter.shift = req.query.shift.toUpperCase();
+  }
 
   if (!hasInstitutionAccess(req.user?.role ?? "")) {
     const staffScope = await getFieldSupervisorStaffScope(req);
@@ -472,7 +573,19 @@ export const listFieldDutyAttendance = asyncHandler(async (req: Request, res: Re
     })
       .select("_id")
       .lean();
-    filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
+    const allowedIds = mySchedules.map((s) => s._id.toString());
+    const requested =
+      typeof req.query.scheduleId === "string" && req.query.scheduleId
+        ? req.query.scheduleId
+        : null;
+    if (requested) {
+      if (!allowedIds.includes(requested)) {
+        throw new ApiError(403, "Not allowed to view this posting attendance");
+      }
+      filter.scheduleId = requested;
+    } else {
+      filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
+    }
   } else if (typeof req.query.supervisorStaffId === "string" && req.query.supervisorStaffId) {
     filter.supervisorStaffId = req.query.supervisorStaffId;
   }
@@ -520,16 +633,51 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     throw new ApiError(400, "Attendance date is outside the posting period");
   }
 
+  const isMultiShift = schedule.rosterMode === "MULTI_SHIFT";
+  const attendanceShift = (
+    payload.shift ||
+    (isMultiShift ? "" : schedule.shift) ||
+    "DAY"
+  ).toString().toUpperCase();
+
+  if (isMultiShift && !payload.shift) {
+    throw new ApiError(
+      400,
+      "Select a shift when submitting multi-shift field attendance (e.g. MORNING, DAY, NIGHT)"
+    );
+  }
+
+  const validShifts = new Set(["MORNING", "DAY", "EVENING", "NIGHT", "FULL_DAY"]);
+  if (!validShifts.has(attendanceShift)) {
+    throw new ApiError(400, `Invalid shift: ${attendanceShift}`);
+  }
+
+  // MULTI_SHIFT: shift must be one that has assigned students
+  if (isMultiShift) {
+    const used = new Set(
+      ((schedule.studentShifts as Array<{ shift?: string }>) ?? []).map((r) =>
+        String(r.shift || "").toUpperCase()
+      )
+    );
+    if (!used.has(attendanceShift)) {
+      throw new ApiError(
+        400,
+        `No students are assigned to the ${attendanceShift} shift on this posting`
+      );
+    }
+  }
+
   const existing = await FieldDutyAttendance.findOne({
     schoolId,
     scheduleId: schedule._id,
     dateBs,
+    shift: attendanceShift,
     isDeleted: false
   });
   if (existing && (existing.status === "SUBMITTED" || existing.status === "LOCKED")) {
     throw new ApiError(
       400,
-      "Attendance already submitted for this posting and date. Request an edit or ask admin to unlock."
+      `Attendance already submitted for this posting, date, and ${attendanceShift} shift. Request an edit or ask admin to unlock.`
     );
   }
 
@@ -539,17 +687,39 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     schedule.yearId.toString(),
     {
       rosterMode: schedule.rosterMode as string,
-      assignedStudentIds: schedule.assignedStudentIds as unknown[]
+      assignedStudentIds: schedule.assignedStudentIds as unknown[],
+      studentShifts: schedule.studentShifts as Array<{ studentId: unknown; shift: string }>,
+      filterShift: isMultiShift ? attendanceShift : undefined,
+      defaultShift: (schedule.shift as string) || "DAY"
     }
   );
+  if (eligible.length === 0) {
+    throw new ApiError(
+      400,
+      isMultiShift
+        ? `No active students found for the ${attendanceShift} shift roster`
+        : "No students found in this field posting roster"
+    );
+  }
   const eligibleIds = new Set(eligible.map((s) => s._id));
   for (const entry of payload.entries) {
     if (!eligibleIds.has(entry.studentId)) {
       throw new ApiError(
         400,
-        `Student ${entry.studentId} is not assigned to this field posting roster`
+        isMultiShift
+          ? `Student is not assigned to the ${attendanceShift} shift roster`
+          : "Student is not assigned to this field posting roster"
       );
     }
+  }
+  // Require every roster student to be included (prevents partial silent skips)
+  const submittedIds = new Set(payload.entries.map((e) => e.studentId));
+  const missing = eligible.filter((s) => !submittedIds.has(s._id));
+  if (missing.length > 0) {
+    throw new ApiError(
+      400,
+      `Mark attendance for all ${eligible.length} students on this shift (missing ${missing.length})`
+    );
   }
 
   const siteName = resolveSiteName(schedule);
@@ -564,7 +734,7 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     hospitalName: siteName,
     department: schedule.department ?? "",
     ward: schedule.ward ?? "",
-    shift: schedule.shift,
+    shift: attendanceShift,
     batchId: schedule.batchId,
     yearId: schedule.yearId,
     supervisorStaffId: schedule.supervisorStaffId ?? schedule.supervisorTeacherId,
@@ -947,26 +1117,40 @@ export const getTodayFieldDutyContext = asyncHandler(async (req: Request, res: R
   const schedules = await FieldDutySchedule.find(filter).lean();
   const contexts = await Promise.all(
     schedules.map(async (sch) => {
+      const isMulti = sch.rosterMode === "MULTI_SHIFT";
       const students = await getEligibleStudentsForDuty(
         schoolId,
         sch.batchId.toString(),
         sch.yearId.toString(),
         {
           rosterMode: sch.rosterMode as string,
-          assignedStudentIds: sch.assignedStudentIds as unknown[]
+          assignedStudentIds: sch.assignedStudentIds as unknown[],
+          studentShifts: sch.studentShifts as Array<{ studentId: unknown; shift: string }>,
+          defaultShift: (sch.shift as string) || "DAY"
         }
       );
-      const existing = await FieldDutyAttendance.findOne({
+      // For multi-shift, load today's attendance records for each used shift
+      const todayAttendance = await FieldDutyAttendance.find({
         schoolId,
         scheduleId: sch._id,
         dateBs: todayBs,
         isDeleted: false
       }).lean();
+      const attendanceByShift: Record<string, unknown> = {};
+      for (const row of todayAttendance) {
+        attendanceByShift[String(row.shift || "DAY")] = await serializeAttendance(row as never);
+      }
+      const legacySingle =
+        !isMulti && todayAttendance[0]
+          ? await serializeAttendance(todayAttendance[0] as never)
+          : null;
       return {
         dateBs: todayBs,
         schedule: await serializeSchedule(sch as never, { includeStudentCount: true }),
         students,
-        existingAttendance: existing ? await serializeAttendance(existing as never) : null
+        existingAttendance: legacySingle,
+        attendanceByShift,
+        isMultiShift: isMulti
       };
     })
   );

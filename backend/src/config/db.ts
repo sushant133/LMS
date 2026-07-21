@@ -3,6 +3,7 @@ import { env } from "./env.js";
 import { MasterSubject } from "../models/MasterSubject.js";
 import { Subject } from "../models/Subject.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
+import { FieldDutyAttendance } from "../models/FieldDutyAttendance.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -44,6 +45,8 @@ export const connectDatabase = async (): Promise<void> => {
   await syncIndexesWithRetry(Subject, "Subject");
   // Nested sub-units: drop legacy unique {unitId, subUnitNo} in favor of sibling index
   await syncIndexesWithRetry(AcademicSyllabusSubUnit, "AcademicSyllabusSubUnit");
+  // Field attendance: unique per schedule+date+shift (multi-shift postings)
+  await syncIndexesWithRetry(FieldDutyAttendance, "FieldDutyAttendance");
   // Never log full connection string (may contain credentials)
   console.log(`MongoDB connected: ${mongoose.connection.host}/${mongoose.connection.name}`);
 };

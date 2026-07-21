@@ -190,8 +190,30 @@ const CoordinatorDutiesOverview = ({
                     ) : null}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {a.batchName} · {a.yearName} · {a.studentCount} students · Status:{" "}
-                    {a.attendanceStatus ?? "NONE"}
+                    {a.batchName} · {a.yearName}
+                    {a.shiftsUsed && a.shiftsUsed.length > 1 ? (
+                      <>
+                        {" · "}
+                        <span className="font-medium text-indigo-700">
+                          Shifts:{" "}
+                          {a.shiftsUsed
+                            .map(
+                              (sh) =>
+                                `${sh.replace(/_/g, " ")} (${a.shiftCounts?.[sh] ?? 0})`,
+                            )
+                            .join(", ")}
+                        </span>
+                      </>
+                    ) : a.shift ? (
+                      <>
+                        {" · "}
+                        <span className="font-medium text-indigo-700">
+                          Shift: {a.shift.replace(/_/g, " ")}
+                        </span>
+                      </>
+                    ) : null}
+                    {" · "}
+                    {a.studentCount} students · Status: {a.attendanceStatus ?? "NONE"}
                   </p>
                 </div>
                 <Button
