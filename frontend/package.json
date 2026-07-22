@@ -12,7 +12,6 @@
     "dev:client": "npm run build:shared && vite",
     "build": "npm run build:shared && vite build",
     "start": "vite preview --host",
-    "prestart": "npm run build",
     "preview": "vite preview",
     "typecheck": "npm run build:shared && tsc --noEmit",
     "lint": "npm run build:shared && tsc --noEmit"

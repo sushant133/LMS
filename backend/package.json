@@ -10,7 +10,6 @@
     "build:shared": "npm install --include=dev --prefix ./shared && npm run build --prefix ./shared",
     "dev": "npm run build:shared && tsx watch src/server.ts",
     "build": "npm run build:shared && tsc -p tsconfig.json",
-    "postinstall": "npm run build",
     "start": "node dist/server.js",
     "seed:superadmin": "npm run build:shared && tsx src/scripts/seedSuperAdmin.ts",
     "seed:demo": "npm run build:shared && tsx src/scripts/seedDemoSchool.ts",
@@ -19,7 +18,6 @@
   },
   "dependencies": {
     "@phit-erp/shared": "file:./shared",
-    "@types/sharp": "^0.31.1",
     "bcryptjs": "3.0.2",
     "cloudinary": "^2.10.0",
     "cookie-parser": "1.4.7",
@@ -50,6 +48,7 @@
     "@types/node": "^22.15.21",
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
+    "@types/sharp": "^0.31.1",
     "tsx": "^4.23.1",
     "typescript": "^5.8.3"
   }
