@@ -67,6 +67,64 @@ export const computeBalanceAfterEntry = (
 ): number =>
   entryType === "CREDIT" ? previousBalanceNpr + amountNpr : previousBalanceNpr - amountNpr;
 
+export const PROGRAM_YEAR_LABELS: Record<number, string> = {
+  1: "1st Year",
+  2: "2nd Year",
+  3: "3rd Year"
+};
+
+/**
+ * HA / multi-year fee ledger: paid, scholarship, remaining per program year.
+ */
+export const buildProgramYearFeeSummary = (
+  collections: Array<Record<string, unknown>>,
+  awards: Array<Record<string, unknown>> = []
+) => {
+  return ([1, 2, 3] as const).map((programYear) => {
+    const yearRows = collections.filter((c) => Number(c.programYear) === programYear);
+    const chargedNpr = yearRows.reduce((s, c) => s + Number(c.currentChargesNpr ?? 0), 0);
+    const paidNpr = yearRows.reduce((s, c) => s + Number(c.amountPaidNpr ?? 0), 0);
+    const scholarshipNpr = yearRows.reduce((s, c) => s + Number(c.scholarshipNpr ?? 0), 0);
+    const discountNpr = yearRows.reduce((s, c) => s + Number(c.discountNpr ?? 0), 0);
+    const remainingNpr = Math.max(0, chargedNpr - paidNpr - scholarshipNpr - discountNpr);
+    const award = awards.find(
+      (a) =>
+        Number(a.coversProgramYear) === programYear &&
+        (a.status === "ACTIVE" || a.status === "APPLIED")
+    );
+    let status: "PAID" | "PARTIAL" | "DUE" | "SCHOLARSHIP" | "NO_RECORD" = "NO_RECORD";
+    if (yearRows.length === 0 && award) {
+      status = "SCHOLARSHIP";
+    } else if (yearRows.length === 0) {
+      status = "NO_RECORD";
+    } else if (scholarshipNpr > 0 && paidNpr === 0 && remainingNpr === 0) {
+      status = "SCHOLARSHIP";
+    } else if (remainingNpr <= 0 && (paidNpr > 0 || scholarshipNpr > 0)) {
+      status = "PAID";
+    } else if (paidNpr > 0 || scholarshipNpr > 0) {
+      status = "PARTIAL";
+    } else {
+      status = "DUE";
+    }
+    return {
+      programYear,
+      label: PROGRAM_YEAR_LABELS[programYear] ?? `Year ${programYear}`,
+      chargedNpr,
+      paidNpr,
+      scholarshipNpr,
+      discountNpr,
+      remainingNpr,
+      status,
+      scholarshipNote: award
+        ? String(
+            award.reason ||
+              `Topper scholarship covering ${PROGRAM_YEAR_LABELS[programYear]} (topped year ${award.toppedProgramYear})`
+          )
+        : undefined
+    };
+  });
+};
+
 /** Replays active fee collections chronologically to derive the correct outstanding balance. */
 export const recalculateStudentFeesDue = async (
   studentId: import("mongoose").Types.ObjectId | string,

@@ -9,6 +9,22 @@ const feeBreakdownSchema = new Schema(
   { _id: false }
 );
 
+/** Slip / voucher / invoice attached to a fee payment (image or PDF). */
+const feeAttachmentSchema = new Schema(
+  {
+    name: { type: String, default: "" },
+    url: { type: String, required: true },
+    mimeType: { type: String, default: "" },
+    size: { type: Number, default: 0 },
+    kind: {
+      type: String,
+      enum: ["BANK_VOUCHER", "PAYMENT_SCREENSHOT", "INVOICE", "RECEIPT_SLIP", "OTHER"],
+      default: "OTHER"
+    }
+  },
+  { _id: false }
+);
+
 const feeCollectionSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
@@ -19,11 +35,24 @@ const feeCollectionSchema = new Schema(
     fiscalYearBs: { type: String },
     academicYearBs: { type: String },
     semesterBs: { type: String },
+    /**
+     * Program year for HA / multi-year college programs (1st / 2nd / 3rd year fee).
+     * Used for year-wise paid vs remaining ledger.
+     */
+    programYear: { type: Number, enum: [1, 2, 3], index: true },
     previousDueNpr: { type: Number, default: 0 },
     currentChargesNpr: { type: Number, default: 0 },
     amountPaidNpr: { type: Number, required: true },
     discountNpr: { type: Number, default: 0 },
     scholarshipNpr: { type: Number, default: 0 },
+    /**
+     * NONE | TOPPER_YEAR_WAIVER (topped previous final → next year free) | MERIT | OTHER
+     */
+    scholarshipType: {
+      type: String,
+      enum: ["NONE", "TOPPER_YEAR_WAIVER", "MERIT", "OTHER"],
+      default: "NONE"
+    },
     lateFeeNpr: { type: Number, default: 0 },
     advancePaymentNpr: { type: Number, default: 0 },
     remainingDueNpr: { type: Number, default: 0 },
@@ -36,6 +65,7 @@ const feeCollectionSchema = new Schema(
     transactionNumber: { type: String },
     verificationCode: { type: String },
     feeBreakdown: { type: [feeBreakdownSchema], default: [] },
+    attachments: { type: [feeAttachmentSchema], default: [] },
     isInstallment: { type: Boolean, default: false },
     installmentNumber: { type: Number },
     totalInstallments: { type: Number },

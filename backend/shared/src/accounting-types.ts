@@ -51,6 +51,14 @@ export interface AccountantRecord {
   updatedAt?: string;
 }
 
+export interface FeePaymentAttachment {
+  name?: string;
+  url: string;
+  mimeType?: string;
+  size?: number;
+  kind?: "BANK_VOUCHER" | "PAYMENT_SCREENSHOT" | "INVOICE" | "RECEIPT_SLIP" | "OTHER";
+}
+
 export interface EnhancedFeeCollectionRecord {
   _id: string;
   schoolId: string;
@@ -61,11 +69,14 @@ export interface EnhancedFeeCollectionRecord {
   fiscalYearBs?: string;
   academicYearBs?: string;
   semesterBs?: string;
+  /** 1st / 2nd / 3rd program year (HA) */
+  programYear?: number;
   previousDueNpr: number;
   currentChargesNpr: number;
   amountPaidNpr: number;
   discountNpr: number;
   scholarshipNpr: number;
+  scholarshipType?: "NONE" | "TOPPER_YEAR_WAIVER" | "MERIT" | "OTHER";
   lateFeeNpr: number;
   advancePaymentNpr: number;
   remainingDueNpr: number;
@@ -74,6 +85,7 @@ export interface EnhancedFeeCollectionRecord {
   transactionNumber?: string;
   verificationCode?: string;
   feeBreakdown: FeeBreakdownItem[];
+  attachments?: FeePaymentAttachment[];
   isInstallment: boolean;
   installmentNumber?: number;
   totalInstallments?: number;
@@ -87,6 +99,37 @@ export interface EnhancedFeeCollectionRecord {
   updatedAt?: string;
 }
 
+/** Year-wise fee ledger line for multi-year programs (e.g. HA 1–3). */
+export interface ProgramYearFeeSummary {
+  programYear: 1 | 2 | 3;
+  label: string;
+  chargedNpr: number;
+  paidNpr: number;
+  scholarshipNpr: number;
+  discountNpr: number;
+  remainingNpr: number;
+  status: "PAID" | "PARTIAL" | "DUE" | "SCHOLARSHIP" | "NO_RECORD";
+  scholarshipNote?: string;
+}
+
+export interface StudentScholarshipAwardRecord {
+  _id: string;
+  schoolId: string;
+  studentId: string;
+  toppedProgramYear: number;
+  coversProgramYear: number;
+  academicYearBs?: string;
+  examName?: string;
+  rank?: number;
+  waiverType: "FULL" | "PARTIAL";
+  amountNpr: number;
+  reason?: string;
+  status: "ACTIVE" | "APPLIED" | "REVOKED";
+  feeCollectionId?: string;
+  notes?: string;
+  createdAt?: string;
+}
+
 export interface StudentAccountSummary {
   student: StudentRecord;
   className: string;
@@ -97,6 +140,7 @@ export interface StudentAccountSummary {
   totalScholarshipNpr: number;
   remainingDueNpr: number;
   lastPaymentDateBs?: string;
+  yearWise?: ProgramYearFeeSummary[];
 }
 
 export interface AccountingExpenseRecord {
@@ -264,6 +308,9 @@ export interface StudentFinancialHistory {
   collections: EnhancedFeeCollectionRecord[];
   refunds: Array<{ _id?: string; refundNumber?: string; dateBs: string; amountNpr: number; reason: string }>;
   dueInstallments: Array<{ installmentNumber: number; totalInstallments: number; amountNpr: number; dueDateBs?: string }>;
+  /** HA-style year ledger: 1st / 2nd / 3rd year paid, scholarship, remaining */
+  yearWise?: ProgramYearFeeSummary[];
+  scholarshipAwards?: StudentScholarshipAwardRecord[];
 }
 
 export interface AuditLogRecord {

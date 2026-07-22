@@ -543,19 +543,19 @@ export const StudentProfileView = () => {
               <InfoGrid
                 items={[
                   {
-                    label: "Outstanding Due",
+                    label: "Outstanding due",
                     value: formatCurrencyNpr(
                       profile.financial.outstandingDueNpr as number,
                     ),
                   },
                   {
-                    label: "Total Paid",
+                    label: "Total paid",
                     value: formatCurrencyNpr(
                       profile.financial.totalPaidNpr as number,
                     ),
                   },
                   {
-                    label: "Total Discount",
+                    label: "Total discount",
                     value: formatCurrencyNpr(
                       profile.financial.totalDiscountNpr as number,
                     ),
@@ -566,17 +566,67 @@ export const StudentProfileView = () => {
                       profile.financial.totalScholarshipNpr as number,
                     ),
                   },
+                  {
+                    label: "Scholarship status",
+                    value: String(
+                      profile.financial.scholarshipStatus ?? "None",
+                    ),
+                  },
                 ]}
               />
+              {Array.isArray(profile.financial.yearWise) &&
+              (profile.financial.yearWise as unknown[]).length > 0 ? (
+                <section>
+                  <h3 className="mb-3 font-semibold">
+                    Year-wise fee status (HA)
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {(
+                      profile.financial.yearWise as Array<{
+                        programYear: number;
+                        label: string;
+                        paidNpr: number;
+                        scholarshipNpr: number;
+                        remainingNpr: number;
+                        status: string;
+                        scholarshipNote?: string;
+                      }>
+                    ).map((y) => (
+                      <div
+                        key={y.programYear}
+                        className="rounded-xl border border-slate-200 p-3 text-sm"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">{y.label}</span>
+                          <Badge className="bg-slate-100 text-slate-700">
+                            {String(y.status).replace(/_/g, " ")}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-slate-600">
+                          Paid {formatCurrencyNpr(y.paidNpr)} · Sch.{" "}
+                          {formatCurrencyNpr(y.scholarshipNpr)} · Due{" "}
+                          {formatCurrencyNpr(y.remainingNpr)}
+                        </p>
+                        {y.scholarshipNote ? (
+                          <p className="mt-1 text-xs text-violet-700">
+                            {y.scholarshipNote}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
               <section>
-                <h3 className="mb-3 font-semibold">Payment History</h3>
+                <h3 className="mb-3 font-semibold">Payment history</h3>
                 <Table>
                   <TableHead>
                     <tr>
                       <Th>Date (BS)</Th>
+                      <Th>Year</Th>
                       <Th>Amount</Th>
-                      <Th>Discount</Th>
                       <Th>Scholarship</Th>
+                      <Th>Proof</Th>
                       <Th>Method</Th>
                     </tr>
                   </TableHead>
@@ -588,12 +638,26 @@ export const StudentProfileView = () => {
                     ).map((item) => (
                       <tr key={String(item._id)}>
                         <Td>{String(item.paidDateBs)}</Td>
+                        <Td>
+                          {item.programYear
+                            ? `${item.programYear}${
+                                item.programYear === 1
+                                  ? "st"
+                                  : item.programYear === 2
+                                    ? "nd"
+                                    : "rd"
+                              } Year`
+                            : "—"}
+                        </Td>
                         <Td>{formatCurrencyNpr(Number(item.amountPaidNpr))}</Td>
                         <Td>
-                          {formatCurrencyNpr(Number(item.discountNpr ?? 0))}
-                        </Td>
-                        <Td>
                           {formatCurrencyNpr(Number(item.scholarshipNpr ?? 0))}
+                        </Td>
+                        <Td className="text-xs text-slate-600">
+                          {Array.isArray(item.attachments) &&
+                          item.attachments.length > 0
+                            ? `${item.attachments.length} file(s)`
+                            : "—"}
                         </Td>
                         <Td>{String(item.paymentMethod ?? "—")}</Td>
                       </tr>

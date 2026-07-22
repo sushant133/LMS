@@ -10,7 +10,12 @@ import { AuditLog } from "../models/AuditLog.js";
 import { Batch } from "../models/Batch.js";
 import { Exam } from "../models/Exam.js";
 import { FeeCollection } from "../models/FeeCollection.js";
+import { StudentScholarshipAward } from "../models/StudentScholarshipAward.js";
 import { LibraryIssue } from "../models/LibraryBook.js";
+import {
+  buildProgramYearFeeSummary,
+  PROGRAM_YEAR_LABELS
+} from "../utils/accountingCalculations.js";
 import { Result } from "../models/Result.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
@@ -241,8 +246,18 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
     ? { schoolId, yearIds: { $in: [student.yearId] } }
     : { schoolId, classIds: { $in: [student.classId] } };
 
-  const [primaryDoc, secondaryDoc, allSubjects, attendanceRecords, results, exams, collections, libraryIssues, transportAssignment] =
-    await Promise.all([
+  const [
+    primaryDoc,
+    secondaryDoc,
+    allSubjects,
+    attendanceRecords,
+    results,
+    exams,
+    collections,
+    libraryIssues,
+    transportAssignment,
+    scholarshipAwards
+  ] = await Promise.all([
       college ? Batch.findById(student.batchId).lean() : SchoolClass.findById(student.classId).lean(),
       college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean(),
       Subject.find(subjectQuery).lean(),
@@ -264,14 +279,25 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
       Result.find({ schoolId, studentId: student._id }).sort({ updatedAt: -1 }).lean(),
       Exam.find({ schoolId }).sort({ createdAt: -1 }).lean(),
       permissions.canViewFinancial
-        ? FeeCollection.find({ schoolId, studentId: student._id }).sort({ paidDateBs: -1 }).lean()
+        ? FeeCollection.find({ schoolId, studentId: student._id, isDeleted: false })
+            .sort({ paidDateBs: -1 })
+            .lean()
         : Promise.resolve([]),
       permissions.canViewLibrary
         ? LibraryIssue.find({ schoolId, studentId: student._id }).populate("bookId").sort({ createdAt: -1 }).lean()
         : Promise.resolve([]),
       permissions.canViewTransport
         ? TransportAssignment.findOne({ schoolId, studentId: student._id }).populate("routeId").lean()
-        : Promise.resolve(null)
+        : Promise.resolve(null),
+      permissions.canViewFinancial
+        ? StudentScholarshipAward.find({
+            schoolId,
+            studentId: student._id,
+            isDeleted: false
+          })
+            .sort({ createdAt: -1 })
+            .lean()
+        : Promise.resolve([])
     ]);
 
   const subjects =
@@ -311,6 +337,27 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
   const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
   const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
   const totalScholarship = collections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
+  const activeAwards = (scholarshipAwards as Array<Record<string, unknown>>).filter(
+    (a) => a.status !== "REVOKED"
+  );
+  const yearWise = permissions.canViewFinancial
+    ? buildProgramYearFeeSummary(
+        collections as unknown as Array<Record<string, unknown>>,
+        activeAwards
+      )
+    : [];
+  const scholarshipStatus =
+    activeAwards.length > 0
+      ? activeAwards
+          .map((a) => {
+            const top = Number(a.toppedProgramYear);
+            const cover = Number(a.coversProgramYear);
+            return `Topped ${PROGRAM_YEAR_LABELS[top] ?? top} → ${PROGRAM_YEAR_LABELS[cover] ?? cover} scholarship`;
+          })
+          .join("; ")
+      : totalScholarship > 0
+        ? "Scholarship Applied"
+        : "None";
 
   const pendingIssues = libraryIssues.filter((issue) => issue.status === "ISSUED" || issue.status === "OVERDUE");
   const fineTotal = libraryIssues.reduce((sum, issue) => sum + (issue.fineNpr ?? 0), 0);
@@ -397,6 +444,9 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
           totalDiscountNpr: totalDiscount,
           totalScholarshipNpr: totalScholarship,
           totalRefundsNpr: 0,
+          scholarshipStatus,
+          yearWise,
+          scholarshipAwards: activeAwards,
           collections
         }
       : null,

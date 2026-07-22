@@ -74,25 +74,94 @@ export const ParentPortal = () => {
                   {child.sectionName} · Roll {child.rollNumber}
                 </p>
               </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <p className="text-slate-500">Attendance</p>
-                  <p className="font-semibold">{child.attendanceRate}%</p>
+              <CardContent className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-slate-500">Attendance</p>
+                    <p className="font-semibold">{child.attendanceRate}%</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Fees remaining</p>
+                    <p className="font-semibold text-rose-700">
+                      {formatCurrencyNpr(child.feesDueNpr)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Total paid</p>
+                    <p className="font-semibold text-emerald-700">
+                      {formatCurrencyNpr(
+                        (child as { totalPaidNpr?: number }).totalPaidNpr ?? 0,
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Scholarship</p>
+                    <p className="font-semibold text-violet-700">
+                      {formatCurrencyNpr(
+                        (child as { totalScholarshipNpr?: number })
+                          .totalScholarshipNpr ?? 0,
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Pending assignments</p>
+                    <p className="font-semibold">{child.pendingHomework}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Relationship</p>
+                    <p className="font-semibold">{child.relationship}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-slate-500">Fees due</p>
-                  <p className="font-semibold">
-                    {formatCurrencyNpr(child.feesDueNpr)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Pending assignments</p>
-                  <p className="font-semibold">{child.pendingHomework}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Relationship</p>
-                  <p className="font-semibold">{child.relationship}</p>
-                </div>
+                {Array.isArray(
+                  (child as { yearWise?: Array<Record<string, unknown>> })
+                    .yearWise,
+                ) &&
+                (
+                  (child as { yearWise?: Array<Record<string, unknown>> })
+                    .yearWise ?? []
+                ).length > 0 ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-2">
+                    <p className="mb-1 text-xs font-medium text-slate-600">
+                      Year-wise fees
+                    </p>
+                    <div className="grid gap-1 sm:grid-cols-3">
+                      {(
+                        (
+                          child as {
+                            yearWise: Array<{
+                              label: string;
+                              status: string;
+                              paidNpr: number;
+                              remainingNpr: number;
+                              scholarshipNpr: number;
+                            }>;
+                          }
+                        ).yearWise ?? []
+                      ).map((y) => (
+                        <div
+                          key={y.label}
+                          className="rounded-lg bg-white px-2 py-1.5 text-xs"
+                        >
+                          <p className="font-medium text-slate-800">{y.label}</p>
+                          <p className="text-slate-500">
+                            {String(y.status).replace(/_/g, " ")}
+                          </p>
+                          <p>
+                            Paid {formatCurrencyNpr(y.paidNpr)}
+                            {y.scholarshipNpr > 0
+                              ? ` · Sch ${formatCurrencyNpr(y.scholarshipNpr)}`
+                              : ""}
+                          </p>
+                          {y.remainingNpr > 0 ? (
+                            <p className="text-rose-600">
+                              Due {formatCurrencyNpr(y.remainingNpr)}
+                            </p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           ))}

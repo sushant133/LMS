@@ -323,33 +323,49 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
   const studentIds = await getLinkedStudentIds(req);
   const students = await Student.find({ schoolId, _id: { $in: studentIds } }).populate("user", "-password").lean();
 
+  const { FeeCollection } = await import("../models/FeeCollection.js");
+  const { StudentScholarshipAward } = await import("../models/StudentScholarshipAward.js");
+  const { buildProgramYearFeeSummary } = await import("../utils/accountingCalculations.js");
+
   const children = await Promise.all(
     students.map(async (student) => {
-      const [primaryDoc, secondaryDoc, attendanceRecords, submissions, link] = await Promise.all([
-        college
-          ? student.batchId
-            ? Batch.findById(student.batchId).lean()
-            : Promise.resolve(null)
-          : student.classId
-            ? SchoolClass.findById(student.classId).lean()
-            : Promise.resolve(null),
-        college
-          ? student.yearId
-            ? Year.findById(student.yearId).lean()
-            : Promise.resolve(null)
-          : student.sectionId
-            ? Section.findById(student.sectionId).lean()
-            : Promise.resolve(null),
-        Attendance.find({ schoolId, "entries.studentId": student._id }).lean(),
-        AssignmentSubmission.find({ schoolId, studentId: student._id, status: "PENDING" }).lean(),
-        ParentChildLink.findOne(
-          approvedParentLinkFilter({
+      const [primaryDoc, secondaryDoc, attendanceRecords, submissions, link, collections, awards] =
+        await Promise.all([
+          college
+            ? student.batchId
+              ? Batch.findById(student.batchId).lean()
+              : Promise.resolve(null)
+            : student.classId
+              ? SchoolClass.findById(student.classId).lean()
+              : Promise.resolve(null),
+          college
+            ? student.yearId
+              ? Year.findById(student.yearId).lean()
+              : Promise.resolve(null)
+            : student.sectionId
+              ? Section.findById(student.sectionId).lean()
+              : Promise.resolve(null),
+          Attendance.find({ schoolId, "entries.studentId": student._id }).lean(),
+          AssignmentSubmission.find({ schoolId, studentId: student._id, status: "PENDING" }).lean(),
+          ParentChildLink.findOne(
+            approvedParentLinkFilter({
+              schoolId,
+              parentUserId: req.user!.userId,
+              studentId: student._id
+            })
+          ).lean(),
+          FeeCollection.find({
             schoolId,
-            parentUserId: req.user!.userId,
-            studentId: student._id
-          })
-        ).lean()
-      ]);
+            studentId: student._id,
+            isDeleted: false
+          }).lean(),
+          StudentScholarshipAward.find({
+            schoolId,
+            studentId: student._id,
+            isDeleted: false,
+            status: { $in: ["ACTIVE", "APPLIED"] }
+          }).lean()
+        ]);
 
       let present = 0;
       let total = 0;
@@ -361,6 +377,13 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
         }
       });
 
+      const totalPaidNpr = collections.reduce((s, c) => s + (c.amountPaidNpr ?? 0), 0);
+      const totalScholarshipNpr = collections.reduce((s, c) => s + (c.scholarshipNpr ?? 0), 0);
+      const yearWise = buildProgramYearFeeSummary(
+        collections as unknown as Array<Record<string, unknown>>,
+        awards as unknown as Array<Record<string, unknown>>
+      );
+
       return {
         studentId: student._id.toString(),
         fullName: (student.user as unknown as { fullName: string }).fullName,
@@ -368,6 +391,9 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
         sectionName: secondaryDoc?.name ?? "—",
         rollNumber: student.rollNumber,
         feesDueNpr: student.feesDueNpr,
+        totalPaidNpr,
+        totalScholarshipNpr,
+        yearWise,
         attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
         pendingHomework: submissions.length,
         relationship: link?.relationship ?? "GUARDIAN"

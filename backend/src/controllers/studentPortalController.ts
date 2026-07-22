@@ -8,9 +8,14 @@ import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
+import { StudentScholarshipAward } from "../models/StudentScholarshipAward.js";
 import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  buildProgramYearFeeSummary,
+  PROGRAM_YEAR_LABELS
+} from "../utils/accountingCalculations.js";
 import { buildStudentAcademicFilter } from "../utils/academicScope.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getTodayBs } from "../utils/nepaliDate.js";
@@ -258,28 +263,77 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
 
-  const [classDoc, sectionDoc, batchDoc, yearDoc, collections] = await Promise.all([
-    college ? null : SchoolClass.findById(student.classId).lean(),
-    college ? null : Section.findById(student.sectionId).lean(),
-    college ? Batch.findById(student.batchId).lean() : null,
-    college ? Year.findById(student.yearId).lean() : null,
-    FeeCollection.find({ schoolId, studentId: student._id }).sort({ paidDateBs: -1 }).lean()
-  ]);
+  const [classDoc, sectionDoc, batchDoc, yearDoc, collections, awards] =
+    await Promise.all([
+      college ? null : SchoolClass.findById(student.classId).lean(),
+      college ? null : Section.findById(student.sectionId).lean(),
+      college ? Batch.findById(student.batchId).lean() : null,
+      college ? Year.findById(student.yearId).lean() : null,
+      FeeCollection.find({ schoolId, studentId: student._id, isDeleted: false })
+        .sort({ paidDateBs: -1 })
+        .lean(),
+      StudentScholarshipAward.find({
+        schoolId,
+        studentId: student._id,
+        isDeleted: false
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+    ]);
 
   const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
   const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
   const totalScholarship = collections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
+  const activeAwards = awards.filter((a) => a.status !== "REVOKED");
+  const yearWise = buildProgramYearFeeSummary(
+    collections as unknown as Array<Record<string, unknown>>,
+    activeAwards as unknown as Array<Record<string, unknown>>
+  );
+  const scholarshipStatus =
+    activeAwards.length > 0
+      ? activeAwards
+          .map(
+            (a) =>
+              `Topped ${PROGRAM_YEAR_LABELS[a.toppedProgramYear] ?? a.toppedProgramYear} → ${PROGRAM_YEAR_LABELS[a.coversProgramYear] ?? a.coversProgramYear} scholarship`
+          )
+          .join("; ")
+      : totalScholarship > 0
+        ? "Scholarship Applied"
+        : "None";
 
   return sendSuccess(res, "Financial history fetched", {
     student,
     className: college ? (batchDoc?.name ?? "") : (classDoc?.name ?? ""),
     sectionName: college ? (yearDoc?.name ?? "") : (sectionDoc?.name ?? ""),
+    batchName: college ? (batchDoc?.name ?? "") : undefined,
+    yearName: college ? (yearDoc?.name ?? "") : undefined,
     outstandingDueNpr: student.feesDueNpr ?? 0,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
     totalScholarshipNpr: totalScholarship,
+    totalPayableNpr: totalPaid + (student.feesDueNpr ?? 0) + totalDiscount + totalScholarship,
+    totalFineNpr: collections.reduce((s, c) => s + (c.lateFeeNpr ?? 0), 0),
+    advanceBalanceNpr: collections.reduce((s, c) => s + (c.advancePaymentNpr ?? 0), 0),
     totalRefundsNpr: 0,
+    scholarshipStatus,
     collections,
-    refunds: []
+    refunds: [],
+    dueInstallments: [],
+    yearWise,
+    scholarshipAwards: awards.map((a) => ({
+      _id: a._id.toString(),
+      schoolId: schoolId.toString(),
+      studentId: a.studentId.toString(),
+      toppedProgramYear: a.toppedProgramYear,
+      coversProgramYear: a.coversProgramYear,
+      academicYearBs: a.academicYearBs || undefined,
+      examName: a.examName || undefined,
+      rank: a.rank ?? undefined,
+      waiverType: a.waiverType as "FULL" | "PARTIAL",
+      amountNpr: a.amountNpr ?? 0,
+      reason: a.reason || undefined,
+      status: a.status as "ACTIVE" | "APPLIED" | "REVOKED",
+      notes: a.notes || undefined
+    }))
   });
 });

@@ -10,6 +10,7 @@ import {
   createIncome,
   createPurchase,
   createSalary,
+  createStudentScholarshipAward,
   deleteAccountant,
   deleteAccountingStructure,
   deleteBankAccount,
@@ -32,9 +33,11 @@ import {
   listSalaries,
   listSalaryEmployees,
   listStudentAccounts,
+  listStudentScholarshipAwards,
   listAccountingStructures,
   resetAccountantPassword,
   reverseFeeCollection,
+  revokeStudentScholarshipAward,
   updateAccountant,
   updateAccountingFeeCollection,
   updateAccountingSettings,
@@ -112,6 +115,16 @@ router.get("/collections", readers, requireAccountingPermission("read"), listFee
 router.post("/collections", cashiers, requireAccountingPermission("collect_fees"), collectAccountingFee);
 router.put("/collections/:id", managers, requireAccountingPermission("manage_expenses"), updateAccountingFeeCollection);
 router.post("/collections/:id/reverse", managers, requireAccountingPermission("reverse_transaction"), reverseFeeCollection);
+
+// HA topper scholarships (top year N → free year N+1)
+router.get("/scholarships", readers, requireAccountingPermission("read"), listStudentScholarshipAwards);
+router.post("/scholarships", cashiers, requireAccountingPermission("collect_fees"), createStudentScholarshipAward);
+router.post(
+  "/scholarships/:id/revoke",
+  managers,
+  requireAccountingPermission("reverse_transaction"),
+  revokeStudentScholarshipAward
+);
 router.get(
   "/collections/:id/receipt",
   authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "STUDENT"),

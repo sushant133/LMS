@@ -16,6 +16,17 @@ export const feeBreakdownItemSchema = z.object({
   amountNpr: moneySchema
 });
 
+export const feeAttachmentSchema = z.object({
+  name: z.string().optional().or(z.literal("")),
+  url: z.string().min(1),
+  mimeType: z.string().optional().or(z.literal("")),
+  size: z.coerce.number().optional(),
+  kind: z
+    .enum(["BANK_VOUCHER", "PAYMENT_SCREENSHOT", "INVOICE", "RECEIPT_SLIP", "OTHER"])
+    .optional()
+    .default("OTHER")
+});
+
 export const enhancedFeeCollectionSchema = z.object({
   studentId: objectIdSchema,
   feeStructureId: optionalObjectIdSchema,
@@ -23,20 +34,42 @@ export const enhancedFeeCollectionSchema = z.object({
   paidDateBs: bsDateSchema,
   academicYearBs: z.string().optional(),
   semesterBs: z.string().optional(),
+  /** HA / multi-year: 1 = 1st year, 2 = 2nd year, 3 = 3rd year */
+  programYear: z.coerce.number().int().min(1).max(3).optional(),
   currentChargesNpr: moneySchema.default(0),
   amountPaidNpr: moneySchema,
   discountNpr: moneySchema.default(0),
   scholarshipNpr: moneySchema.default(0),
+  scholarshipType: z
+    .enum(["NONE", "TOPPER_YEAR_WAIVER", "MERIT", "OTHER"])
+    .optional()
+    .default("NONE"),
   lateFeeNpr: moneySchema.default(0),
   advancePaymentNpr: moneySchema.default(0),
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
   bankAccountId: optionalObjectIdSchema,
   transactionNumber: z.string().optional().or(z.literal("")),
   feeBreakdown: z.array(feeBreakdownItemSchema).default([]),
+  attachments: z.array(feeAttachmentSchema).optional().default([]),
   isInstallment: z.boolean().default(false),
   installmentNumber: z.coerce.number().int().min(1).optional(),
   totalInstallments: z.coerce.number().int().min(1).optional(),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  /** When recording a topper scholarship with this payment */
+  scholarshipAwardId: optionalObjectIdSchema
+});
+
+export const studentScholarshipAwardSchema = z.object({
+  studentId: objectIdSchema,
+  toppedProgramYear: z.coerce.number().int().min(1).max(3),
+  coversProgramYear: z.coerce.number().int().min(1).max(3).optional(),
+  academicYearBs: z.string().optional().or(z.literal("")),
+  examName: z.string().optional().or(z.literal("")),
+  rank: z.coerce.number().int().min(1).optional(),
+  waiverType: z.enum(["FULL", "PARTIAL"]).default("FULL"),
+  amountNpr: moneySchema.default(0),
+  reason: z.string().optional().or(z.literal("")),
+  notes: z.string().optional().or(z.literal(""))
 });
 
 export const accountantSchema = z.object({
@@ -171,6 +204,7 @@ export const extendedFeeStructureSchema = z.object({
 
 export type AccountantInput = z.infer<typeof accountantSchema>;
 export type EnhancedFeeCollectionInput = z.infer<typeof enhancedFeeCollectionSchema>;
+export type StudentScholarshipAwardInput = z.infer<typeof studentScholarshipAwardSchema>;
 export type AccountingExpenseInput = z.infer<typeof accountingExpenseSchema>;
 export type AccountingPurchaseInput = z.infer<typeof accountingPurchaseSchema>;
 export type AccountingIncomeInput = z.infer<typeof accountingIncomeSchema>;

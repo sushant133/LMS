@@ -11,6 +11,7 @@ import {
   enhancedFeeCollectionSchema,
   extendedFeeStructureSchema,
   salaryPaymentSchema,
+  studentScholarshipAwardSchema,
   buildFinancialSummaryRows,
   buildFinancialSummaryCsv,
   buildReportCsv,
@@ -28,6 +29,7 @@ import { BankAccount } from "../models/BankAccount.js";
 import { CashBookEntry } from "../models/CashBookEntry.js";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { FeeStructure } from "../models/FeeStructure.js";
+import { StudentScholarshipAward } from "../models/StudentScholarshipAward.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
 import { School } from "../models/School.js";
 import { Batch } from "../models/Batch.js";
@@ -40,11 +42,13 @@ import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
 import {
+  buildProgramYearFeeSummary,
   calculateFeeTotals,
   calculateNetSalary,
   calculateSuggestedLateFee,
   computeBalanceAfterEntry,
   generateReceiptNumber,
+  PROGRAM_YEAR_LABELS,
   recalculateStudentFeesDue
 } from "../utils/accountingCalculations.js";
 import { getLatestCashBalance, recordCashEntry, reverseCashEntry } from "../utils/accountingCashBook.js";
@@ -255,12 +259,19 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
   const primaryMap = new Map(primaryGroups.map((item) => [item._id.toString(), item.name]));
   const secondaryMap = new Map(secondaryGroups.map((item) => [item._id.toString(), item.name]));
 
+  const awards = await StudentScholarshipAward.find({
+    schoolId,
+    isDeleted: false,
+    status: { $in: ["ACTIVE", "APPLIED"] }
+  }).lean();
+
   const accounts = students.map((student) => {
     const studentCollections = collections.filter((item) => item.studentId.toString() === student._id.toString());
     const totalPaid = studentCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
     const totalDiscount = studentCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
     const totalScholarship = studentCollections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
     const lastPayment = studentCollections.sort((a, b) => b.paidDateBs.localeCompare(a.paidDateBs))[0];
+    const studentAwards = awards.filter((a) => a.studentId.toString() === student._id.toString());
 
     const primaryId = college ? student.batchId?.toString() : student.classId?.toString();
     const secondaryId = college ? student.yearId?.toString() : student.sectionId?.toString();
@@ -274,12 +285,15 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
       totalDiscountNpr: totalDiscount,
       totalScholarshipNpr: totalScholarship,
       remainingDueNpr: student.feesDueNpr ?? 0,
-      lastPaymentDateBs: lastPayment?.paidDateBs
+      lastPaymentDateBs: lastPayment?.paidDateBs,
+      yearWise: buildProgramYearFeeSummary(studentCollections, studentAwards)
     };
   });
 
   return sendSuccess(res, "Student accounts fetched", accounts);
 });
+
+const YEAR_LABELS = PROGRAM_YEAR_LABELS;
 
 export const getStudentFinancialHistory = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
@@ -296,12 +310,24 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
 
-  const [primaryDoc, secondaryDoc, collections, refunds] = await Promise.all([
-    college ? Batch.findById(student.batchId).lean() : SchoolClass.findById(student.classId).lean(),
-    college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean(),
-    FeeCollection.find({ schoolId, studentId: student._id, isDeleted: false }).sort({ paidDateBs: -1 }).lean(),
-    FeeRefund.find({ schoolId, studentId: student._id, isDeleted: false }).sort({ dateBs: -1 }).lean()
-  ]);
+  const [primaryDoc, secondaryDoc, collections, refunds, scholarshipAwards] =
+    await Promise.all([
+      college ? Batch.findById(student.batchId).lean() : SchoolClass.findById(student.classId).lean(),
+      college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean(),
+      FeeCollection.find({ schoolId, studentId: student._id, isDeleted: false })
+        .sort({ paidDateBs: -1 })
+        .lean(),
+      FeeRefund.find({ schoolId, studentId: student._id, isDeleted: false })
+        .sort({ dateBs: -1 })
+        .lean(),
+      StudentScholarshipAward.find({
+        schoolId,
+        studentId: student._id,
+        isDeleted: false
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+    ]);
 
   const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
   const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
@@ -319,6 +345,24 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
       dueDateBs: c.paidDateBs
     }));
 
+  const activeAwards = scholarshipAwards.filter((a) => a.status !== "REVOKED");
+  const yearWise = buildProgramYearFeeSummary(
+    collections as unknown as Array<Record<string, unknown>>,
+    activeAwards as unknown as Array<Record<string, unknown>>
+  );
+
+  const scholarshipStatus =
+    activeAwards.length > 0
+      ? activeAwards
+          .map(
+            (a) =>
+              `Topped ${YEAR_LABELS[a.toppedProgramYear] ?? a.toppedProgramYear} → ${YEAR_LABELS[a.coversProgramYear] ?? a.coversProgramYear} scholarship`
+          )
+          .join("; ")
+      : totalScholarship > 0
+        ? "Scholarship Applied"
+        : "None";
+
   return sendSuccess(res, "Student financial history fetched", {
     student,
     className: college ? "" : (primaryDoc?.name ?? ""),
@@ -326,7 +370,7 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     batchName: college ? (primaryDoc?.name ?? "") : undefined,
     yearName: college ? (secondaryDoc?.name ?? "") : undefined,
     guardianName: student.guardianName,
-    scholarshipStatus: totalScholarship > 0 ? "Scholarship Applied" : "None",
+    scholarshipStatus,
     totalPayableNpr: totalPaid + (student.feesDueNpr ?? 0) + totalDiscount + totalScholarship,
     outstandingDueNpr: student.feesDueNpr ?? 0,
     totalPaidNpr: totalPaid,
@@ -343,7 +387,25 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
       amountNpr: r.amountNpr,
       reason: r.reason
     })),
-    dueInstallments
+    dueInstallments,
+    yearWise,
+    scholarshipAwards: scholarshipAwards.map((a) => ({
+      _id: a._id.toString(),
+      schoolId: schoolId.toString(),
+      studentId: a.studentId.toString(),
+      toppedProgramYear: a.toppedProgramYear,
+      coversProgramYear: a.coversProgramYear,
+      academicYearBs: a.academicYearBs || undefined,
+      examName: a.examName || undefined,
+      rank: a.rank ?? undefined,
+      waiverType: a.waiverType as "FULL" | "PARTIAL",
+      amountNpr: a.amountNpr ?? 0,
+      reason: a.reason || undefined,
+      status: a.status as "ACTIVE" | "APPLIED" | "REVOKED",
+      feeCollectionId: a.feeCollectionId?.toString(),
+      notes: a.notes || undefined,
+      createdAt: a.createdAt?.toISOString?.() ?? undefined
+    }))
   });
 });
 
@@ -433,11 +495,13 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           fiscalYearBs,
           academicYearBs: payload.academicYearBs ?? structure?.academicYearBs,
           semesterBs: payload.semesterBs ?? structure?.semesterBs,
+          programYear: payload.programYear,
           previousDueNpr,
           currentChargesNpr,
           amountPaidNpr: payload.amountPaidNpr,
           discountNpr: payload.discountNpr,
           scholarshipNpr: payload.scholarshipNpr,
+          scholarshipType: payload.scholarshipType ?? "NONE",
           lateFeeNpr,
           advancePaymentNpr: totals.advancePaymentNpr,
           remainingDueNpr: totals.remainingDueNpr,
@@ -446,6 +510,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           transactionNumber: payload.transactionNumber,
           verificationCode,
           feeBreakdown,
+          attachments: payload.attachments ?? [],
           isInstallment: payload.isInstallment,
           installmentNumber: payload.installmentNumber,
           totalInstallments: payload.totalInstallments ?? structure?.installmentCount,
@@ -457,6 +522,23 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       session ? { session } : undefined
     );
     if (!created) throw new ApiError(500, "Failed to create fee collection");
+
+    // Mark linked topper scholarship as APPLIED when payment used it
+    if (payload.scholarshipAwardId && (payload.scholarshipNpr ?? 0) > 0) {
+      await StudentScholarshipAward.findOneAndUpdate(
+        {
+          _id: payload.scholarshipAwardId,
+          schoolId,
+          studentId: payload.studentId,
+          isDeleted: false
+        },
+        {
+          status: "APPLIED",
+          feeCollectionId: created._id
+        },
+        session ? { session } : undefined
+      );
+    }
 
     // Replay all collections for authoritative outstanding balance (handles concurrent cashiers better)
     await recalculateStudentFeesDue(payload.studentId, schoolId, session);
@@ -505,6 +587,106 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
   });
 
   return sendSuccess(res, "Fee collected successfully", collection, 201);
+});
+
+/** Record topper scholarship: topped year N finals → waive year N+1 fees. */
+export const createStudentScholarshipAward = asyncHandler(async (req: Request, res: Response) => {
+  const payload = studentScholarshipAwardSchema.parse(req.body);
+  const schoolId = tenantObjectId(req);
+  const student = await Student.findOne({ _id: payload.studentId, schoolId }).select("_id").lean();
+  if (!student) throw new ApiError(404, "Student not found");
+
+  const coversProgramYear =
+    payload.coversProgramYear ??
+    (payload.toppedProgramYear < 3 ? payload.toppedProgramYear + 1 : payload.toppedProgramYear);
+
+  if (coversProgramYear === payload.toppedProgramYear && !payload.coversProgramYear) {
+    // default is next year; if already year 3, still allow covering year 3 only if explicit
+  }
+
+  const existing = await StudentScholarshipAward.findOne({
+    schoolId,
+    studentId: payload.studentId,
+    coversProgramYear,
+    isDeleted: false,
+    status: { $in: ["ACTIVE", "APPLIED"] }
+  }).lean();
+  if (existing) {
+    throw new ApiError(
+      400,
+      `An active scholarship already covers ${YEAR_LABELS[coversProgramYear] ?? `year ${coversProgramYear}`} for this student`
+    );
+  }
+
+  const created = await StudentScholarshipAward.create({
+    schoolId,
+    studentId: payload.studentId,
+    toppedProgramYear: payload.toppedProgramYear,
+    coversProgramYear,
+    academicYearBs: payload.academicYearBs ?? "",
+    examName: payload.examName ?? "",
+    rank: payload.rank,
+    waiverType: payload.waiverType,
+    amountNpr: payload.amountNpr ?? 0,
+    reason:
+      payload.reason?.trim() ||
+      `Topped ${YEAR_LABELS[payload.toppedProgramYear]} final examination — scholarship for ${YEAR_LABELS[coversProgramYear]}`,
+    notes: payload.notes ?? "",
+    status: "ACTIVE",
+    createdBy: req.user!.userId
+  });
+
+  await recordAudit(req, {
+    action: "accounting.scholarship.award",
+    entity: "StudentScholarshipAward",
+    entityId: created._id.toString(),
+    after: created
+  });
+
+  return sendSuccess(
+    res,
+    `Scholarship recorded: ${YEAR_LABELS[coversProgramYear]} fee waiver (topped ${YEAR_LABELS[payload.toppedProgramYear]})`,
+    created,
+    201
+  );
+});
+
+export const listStudentScholarshipAwards = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const filter: Record<string, unknown> = { schoolId, isDeleted: false };
+  if (typeof req.query.studentId === "string" && req.query.studentId) {
+    filter.studentId = req.query.studentId;
+  }
+  const rows = await StudentScholarshipAward.find(filter)
+    .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
+    .sort({ createdAt: -1 })
+    .lean();
+  return sendSuccess(res, "Scholarship awards fetched", rows);
+});
+
+export const revokeStudentScholarshipAward = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const award = await StudentScholarshipAward.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
+  if (!award) throw new ApiError(404, "Scholarship award not found");
+  if (award.status === "APPLIED") {
+    throw new ApiError(
+      400,
+      "This scholarship was already applied on a fee receipt. Reverse that receipt before revoking."
+    );
+  }
+  award.status = "REVOKED";
+  await award.save();
+  await recordAudit(req, {
+    action: "accounting.scholarship.revoke",
+    entity: "StudentScholarshipAward",
+    entityId: award._id.toString(),
+    after: { status: "REVOKED" }
+  });
+  return sendSuccess(res, "Scholarship award revoked", award);
 });
 
 export const updateAccountingFeeCollection = asyncHandler(async (req: Request, res: Response) => {
