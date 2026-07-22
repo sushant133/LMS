@@ -20,6 +20,7 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { api, unwrap } from "lib/api";
@@ -34,6 +35,17 @@ const STATUSES: EmployeeAttendanceStatus[] = [
   "OFFICIAL_DUTY",
   "HOLIDAY",
 ];
+
+/** Check-in / check-out only apply when the employee is considered on-duty. */
+const STATUSES_WITH_CHECK_TIMES: ReadonlySet<EmployeeAttendanceStatus> = new Set([
+  "PRESENT",
+  "HALF_DAY",
+  "LATE",
+  "OFFICIAL_DUTY",
+]);
+
+const hasCheckTimes = (status: EmployeeAttendanceStatus | string): boolean =>
+  STATUSES_WITH_CHECK_TIMES.has(status as EmployeeAttendanceStatus);
 
 const statusClass = (s: string) => {
   switch (s) {
@@ -69,6 +81,8 @@ interface MarkRow {
   status: EmployeeAttendanceStatus;
   checkInTime: string;
   checkOutTime: string;
+  /** Periods taught — empty string when not entered (still valid to submit). */
+  periodsTaught: string;
   remarks: string;
 }
 
@@ -165,6 +179,10 @@ export const EmployeeAttendancePanel = ({
           status: prev?.status ?? "PRESENT",
           checkInTime: prev?.checkInTime ?? "",
           checkOutTime: prev?.checkOutTime ?? "",
+          periodsTaught:
+            typeof prev?.periodsTaught === "number"
+              ? String(prev.periodsTaught)
+              : "",
           remarks: prev?.remarks ?? "",
         };
       }),
@@ -202,20 +220,32 @@ export const EmployeeAttendancePanel = ({
           dateBs,
           notes,
           asDraft,
-          entries: rows.map((r) => ({
-            teacherId: category === "TEACHER" ? r.id : undefined,
-            staffId: category === "STAFF" ? r.id : undefined,
-            employeeUserId: r.userId,
-            employeeCode: r.employeeCode,
-            fullName: r.fullName,
-            department: r.department ?? "",
-            designation: r.designation ?? "",
-            status: r.status,
-            checkInTime: r.checkInTime || undefined,
-            checkOutTime: r.checkOutTime || undefined,
-            remarks: r.remarks,
-            source: "MANUAL",
-          })),
+          entries: rows.map((r) => {
+            const withTimes = hasCheckTimes(r.status);
+            const periodsRaw = r.periodsTaught.trim();
+            const periodsNum =
+              category === "TEACHER" && periodsRaw !== ""
+                ? Number(periodsRaw)
+                : undefined;
+            return {
+              teacherId: category === "TEACHER" ? r.id : undefined,
+              staffId: category === "STAFF" ? r.id : undefined,
+              employeeUserId: r.userId,
+              employeeCode: r.employeeCode,
+              fullName: r.fullName,
+              department: r.department ?? "",
+              designation: r.designation ?? "",
+              status: r.status,
+              checkInTime: withTimes ? r.checkInTime || undefined : undefined,
+              checkOutTime: withTimes ? r.checkOutTime || undefined : undefined,
+              periodsTaught:
+                periodsNum !== undefined && Number.isFinite(periodsNum)
+                  ? periodsNum
+                  : undefined,
+              remarks: r.remarks,
+              source: "MANUAL" as const,
+            };
+          }),
         }),
       ),
     onSuccess: async (data, asDraft) => {
@@ -251,6 +281,8 @@ export const EmployeeAttendancePanel = ({
     },
   });
 
+  const showPeriods = category === "TEACHER";
+
   const exportExcel = () => {
     const reg = (registerQuery.data?.rows ?? []) as Array<{
       dateBs?: string;
@@ -261,6 +293,7 @@ export const EmployeeAttendancePanel = ({
       status?: string;
       checkInTime?: string;
       checkOutTime?: string;
+      periodsTaught?: number;
       remarks?: string;
       recordStatus?: string;
       attendanceId?: string;
@@ -275,6 +308,9 @@ export const EmployeeAttendancePanel = ({
         Status: r.status ?? "",
         "Check-in": r.checkInTime ?? "",
         "Check-out": r.checkOutTime ?? "",
+        ...(showPeriods
+          ? { Period: r.periodsTaught ?? "" }
+          : {}),
         Remarks: r.remarks ?? "",
         Record: r.recordStatus ?? "",
       })),
@@ -294,6 +330,7 @@ export const EmployeeAttendancePanel = ({
       status?: string;
       checkInTime?: string;
       checkOutTime?: string;
+      periodsTaught?: number;
       remarks?: string;
     }>;
     const win = window.open("", "_blank");
@@ -301,19 +338,23 @@ export const EmployeeAttendancePanel = ({
       toast.error("Allow pop-ups to print");
       return;
     }
+    const periodHeader = showPeriods ? "<th>Period</th>" : "";
+    const colSpan = showPeriods ? 10 : 9;
     const body = reg
-      .map(
-        (r) =>
-          `<tr><td>${r.dateBs ?? ""}</td><td>${r.employeeCode ?? ""}</td><td>${r.fullName ?? ""}</td><td>${r.department ?? ""}</td><td>${r.designation ?? ""}</td><td>${r.status ?? ""}</td><td>${r.checkInTime ?? ""}</td><td>${r.checkOutTime ?? ""}</td><td>${r.remarks ?? ""}</td></tr>`,
-      )
+      .map((r) => {
+        const periodCell = showPeriods
+          ? `<td>${r.periodsTaught ?? ""}</td>`
+          : "";
+        return `<tr><td>${r.dateBs ?? ""}</td><td>${r.employeeCode ?? ""}</td><td>${r.fullName ?? ""}</td><td>${r.department ?? ""}</td><td>${r.designation ?? ""}</td><td>${r.status ?? ""}</td><td>${r.checkInTime ?? ""}</td><td>${r.checkOutTime ?? ""}</td>${periodCell}<td>${r.remarks ?? ""}</td></tr>`;
+      })
       .join("");
     win.document.write(`<!DOCTYPE html><html><head><title>PHIT LMS — ${label} Attendance</title>
       <style>body{font-family:system-ui,sans-serif;padding:24px} table{border-collapse:collapse;width:100%;font-size:12px} th,td{border:1px solid #ccc;padding:4px}</style>
       </head><body>
       <h1>PHIT LMS — ${label} Attendance Register</h1>
       <p>Generated ${new Date().toLocaleString()}</p>
-      <table><thead><tr><th>Date</th><th>ID</th><th>Name</th><th>Dept</th><th>Designation</th><th>Status</th><th>In</th><th>Out</th><th>Remarks</th></tr></thead>
-      <tbody>${body || "<tr><td colspan='9'>No records</td></tr>"}</tbody></table>
+      <table><thead><tr><th>Date</th><th>ID</th><th>Name</th><th>Dept</th><th>Designation</th><th>Status</th><th>In</th><th>Out</th>${periodHeader}<th>Remarks</th></tr></thead>
+      <tbody>${body || `<tr><td colspan='${colSpan}'>No records</td></tr>`}</tbody></table>
       <script>window.onload=()=>window.print()</script></body></html>`);
     win.document.close();
   };
@@ -321,7 +362,14 @@ export const EmployeeAttendancePanel = ({
   const dash = dashQuery.data;
 
   if (selfOnly) {
-    return <SelfPortal data={myQuery.data} loading={myQuery.isLoading} label={label} />;
+    return (
+      <SelfPortal
+        data={myQuery.data}
+        loading={myQuery.isLoading}
+        label={label}
+        showPeriods={showPeriods}
+      />
+    );
   }
 
   return (
@@ -467,6 +515,7 @@ export const EmployeeAttendancePanel = ({
                       <Th>Status</Th>
                       <Th>Check-in</Th>
                       <Th>Check-out</Th>
+                      {showPeriods ? <Th>Period</Th> : null}
                       <Th>Remarks</Th>
                     </tr>
                   </TableHead>
@@ -486,19 +535,28 @@ export const EmployeeAttendancePanel = ({
                             className="min-w-[130px]"
                             disabled={!canWriteSheet}
                             value={row.status}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const nextStatus = e.target
+                                .value as EmployeeAttendanceStatus;
+                              const withTimes = hasCheckTimes(nextStatus);
                               setRows((list) =>
                                 list.map((r) =>
                                   r.id === row.id
                                     ? {
                                         ...r,
-                                        status: e.target
-                                          .value as EmployeeAttendanceStatus,
+                                        status: nextStatus,
+                                        // Clear times when status does not use check-in/out
+                                        checkInTime: withTimes
+                                          ? r.checkInTime
+                                          : "",
+                                        checkOutTime: withTimes
+                                          ? r.checkOutTime
+                                          : "",
                                       }
                                     : r,
                                 ),
-                              )
-                            }
+                              );
+                            }}
                           >
                             {STATUSES.map((s) => (
                               <option key={s} value={s}>
@@ -507,40 +565,75 @@ export const EmployeeAttendancePanel = ({
                             ))}
                           </Select>
                         </Td>
-                        <Td>
-                          <Input
-                            className="w-24"
-                            placeholder="HH:mm"
-                            disabled={!canWriteSheet}
-                            value={row.checkInTime}
-                            onChange={(e) =>
-                              setRows((list) =>
-                                list.map((r) =>
-                                  r.id === row.id
-                                    ? { ...r, checkInTime: e.target.value }
-                                    : r,
-                                ),
-                              )
-                            }
-                          />
+                        <Td className="whitespace-nowrap">
+                          {hasCheckTimes(row.status) ? (
+                            <Input
+                              className="time-input block min-w-[9.5rem] w-[9.5rem] px-2"
+                              type="time"
+                              placeholder="HH:mm"
+                              disabled={!canWriteSheet}
+                              value={row.checkInTime}
+                              onChange={(e) =>
+                                setRows((list) =>
+                                  list.map((r) =>
+                                    r.id === row.id
+                                      ? { ...r, checkInTime: e.target.value }
+                                      : r,
+                                  ),
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="text-sm text-slate-400">—</span>
+                          )}
                         </Td>
-                        <Td>
-                          <Input
-                            className="w-24"
-                            placeholder="HH:mm"
-                            disabled={!canWriteSheet}
-                            value={row.checkOutTime}
-                            onChange={(e) =>
-                              setRows((list) =>
-                                list.map((r) =>
-                                  r.id === row.id
-                                    ? { ...r, checkOutTime: e.target.value }
-                                    : r,
-                                ),
-                              )
-                            }
-                          />
+                        <Td className="whitespace-nowrap">
+                          {hasCheckTimes(row.status) ? (
+                            <Input
+                              className="time-input block min-w-[9.5rem] w-[9.5rem] px-2"
+                              type="time"
+                              placeholder="HH:mm"
+                              disabled={!canWriteSheet}
+                              value={row.checkOutTime}
+                              onChange={(e) =>
+                                setRows((list) =>
+                                  list.map((r) =>
+                                    r.id === row.id
+                                      ? { ...r, checkOutTime: e.target.value }
+                                      : r,
+                                  ),
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="text-sm text-slate-400">—</span>
+                          )}
                         </Td>
+                        {showPeriods ? (
+                          <Td>
+                            <NumberInput
+                              className="w-16"
+                              min={0}
+                              max={24}
+                              step={1}
+                              placeholder=""
+                              disabled={!canWriteSheet}
+                              value={row.periodsTaught}
+                              onChange={(e) =>
+                                setRows((list) =>
+                                  list.map((r) =>
+                                    r.id === row.id
+                                      ? {
+                                          ...r,
+                                          periodsTaught: e.target.value,
+                                        }
+                                      : r,
+                                  ),
+                                )
+                              }
+                            />
+                          </Td>
+                        ) : null}
                         <Td>
                           <Input
                             className="min-w-[100px]"
@@ -582,7 +675,12 @@ export const EmployeeAttendancePanel = ({
                   variant="outline"
                   onClick={() =>
                     setRows((list) =>
-                      list.map((r) => ({ ...r, status: "ABSENT" })),
+                      list.map((r) => ({
+                        ...r,
+                        status: "ABSENT",
+                        checkInTime: "",
+                        checkOutTime: "",
+                      })),
                     )
                   }
                 >
@@ -643,6 +741,7 @@ export const EmployeeAttendancePanel = ({
                       <Th>Status</Th>
                       <Th>In</Th>
                       <Th>Out</Th>
+                      {showPeriods ? <Th>Period</Th> : null}
                       <Th>Remarks</Th>
                     </tr>
                   </TableHead>
@@ -658,6 +757,7 @@ export const EmployeeAttendancePanel = ({
                         status?: string;
                         checkInTime?: string;
                         checkOutTime?: string;
+                        periodsTaught?: number;
                         remarks?: string;
                       }>
                     ).map((r, i) => (
@@ -672,8 +772,23 @@ export const EmployeeAttendancePanel = ({
                             {String(r.status ?? "—").replace(/_/g, " ")}
                           </Badge>
                         </Td>
-                        <Td className="text-sm">{r.checkInTime ?? "—"}</Td>
-                        <Td className="text-sm">{r.checkOutTime ?? "—"}</Td>
+                        <Td className="text-sm">
+                          {hasCheckTimes(String(r.status ?? ""))
+                            ? r.checkInTime || "—"
+                            : "—"}
+                        </Td>
+                        <Td className="text-sm">
+                          {hasCheckTimes(String(r.status ?? ""))
+                            ? r.checkOutTime || "—"
+                            : "—"}
+                        </Td>
+                        {showPeriods ? (
+                          <Td className="text-sm">
+                            {typeof r.periodsTaught === "number"
+                              ? r.periodsTaught
+                              : "—"}
+                          </Td>
+                        ) : null}
                         <Td className="text-sm">{r.remarks ?? "—"}</Td>
                       </tr>
                     ))}
@@ -686,7 +801,12 @@ export const EmployeeAttendancePanel = ({
       ) : null}
 
       {view === "my" ? (
-        <SelfPortal data={myQuery.data} loading={myQuery.isLoading} label={label} />
+        <SelfPortal
+          data={myQuery.data}
+          loading={myQuery.isLoading}
+          label={label}
+          showPeriods={showPeriods}
+        />
       ) : null}
     </div>
   );
@@ -696,10 +816,12 @@ const SelfPortal = ({
   data,
   loading,
   label,
+  showPeriods = false,
 }: {
   data?: EmployeeAttendanceSelfSummary;
   loading: boolean;
   label: string;
+  showPeriods?: boolean;
 }) => {
   if (loading) return <LoadingState />;
   if (!data) {
@@ -747,6 +869,7 @@ const SelfPortal = ({
                     <Th>Status</Th>
                     <Th>Check-in</Th>
                     <Th>Check-out</Th>
+                    {showPeriods ? <Th>Period</Th> : null}
                     <Th>Remarks</Th>
                   </tr>
                 </TableHead>
@@ -759,8 +882,19 @@ const SelfPortal = ({
                           {h.status.replace(/_/g, " ")}
                         </Badge>
                       </Td>
-                      <Td className="text-sm">{h.checkInTime || "—"}</Td>
-                      <Td className="text-sm">{h.checkOutTime || "—"}</Td>
+                      <Td className="text-sm">
+                        {hasCheckTimes(h.status) ? h.checkInTime || "—" : "—"}
+                      </Td>
+                      <Td className="text-sm">
+                        {hasCheckTimes(h.status) ? h.checkOutTime || "—" : "—"}
+                      </Td>
+                      {showPeriods ? (
+                        <Td className="text-sm">
+                          {typeof h.periodsTaught === "number"
+                            ? h.periodsTaught
+                            : "—"}
+                        </Td>
+                      ) : null}
                       <Td className="text-sm">{h.remarks || "—"}</Td>
                     </tr>
                   ))}

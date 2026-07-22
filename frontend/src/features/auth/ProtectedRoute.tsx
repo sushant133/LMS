@@ -1,5 +1,9 @@
 import { useEffect } from "react";
-import { normalizeUserRole, type UserRole } from "@phit-erp/shared";
+import {
+  normalizeUserRole,
+  type ModuleAccessMap,
+  type UserRole,
+} from "@phit-erp/shared";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { PageLoadingState } from "components/shared/LoadingState";
 import { useOnlineStatus } from "hooks/useOnlineStatus";
@@ -51,7 +55,11 @@ export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
 
   if (
     roles &&
-    !hasProtectedRouteAccess(normalizedRole, roles, user.secondaryRoles)
+    !hasProtectedRouteAccess(normalizedRole, roles, user.secondaryRoles, {
+      pathname: location.pathname,
+      moduleAccess: (user.moduleAccess ?? {}) as ModuleAccessMap,
+      moduleAccessConfigured: Boolean(user.moduleAccessConfigured),
+    })
   ) {
     const fallback = getRoleRedirectPath(user.role);
     if (!fallback || fallback === location.pathname) {

@@ -1,5 +1,12 @@
 import { Router } from "express";
-import { createTeacher, deleteTeacher, getTeacherById, listTeachers, updateTeacher } from "../controllers/teacherController.js";
+import {
+  createTeacher,
+  deleteTeacher,
+  getTeacherById,
+  listTeachers,
+  setTeacherStatus,
+  updateTeacher
+} from "../controllers/teacherController.js";
 import {
   addTeacherDocument,
   deleteTeacherDocument,
@@ -48,6 +55,7 @@ router.delete("/:id/documents/:documentId", documentManagers, deleteTeacherDocum
 router.get("/:id", teacherReaders, getTeacherById);
 router.post("/", authorizeInstitutionAdmin, createTeacher);
 router.put("/:id", authorizeInstitutionAdmin, updateTeacher);
+router.put("/:id/status", authorizeInstitutionAdmin, setTeacherStatus);
 router.delete("/:id", authorizeInstitutionAdmin, deleteTeacher);
 
 export default router;

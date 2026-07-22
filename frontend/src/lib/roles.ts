@@ -1,11 +1,14 @@
 import {
   INSTITUTION_ACCESS_ROLES,
   INSTITUTION_ADMIN_ROLES,
+  canAccessModule,
   canManageInstitution,
   hasInstitutionAccess,
   isInstitutionAdmin,
   isSystemAdministrator,
   normalizeUserRole,
+  resolveModuleFromRoutePath,
+  type ModuleAccessMap,
   type UserRole
 } from "@phit-erp/shared";
 
@@ -21,7 +24,13 @@ export {
 export const hasProtectedRouteAccess = (
   userRole: string,
   allowedRoles?: UserRole[],
-  secondaryRoles?: string[]
+  secondaryRoles?: string[],
+  options?: {
+    pathname?: string;
+    moduleAccess?: ModuleAccessMap | null;
+    /** Only unlock role-gated routes when an admin has saved a custom map */
+    moduleAccessConfigured?: boolean;
+  }
 ): boolean => {
   if (!allowedRoles || allowedRoles.length === 0) {
     return true;
@@ -56,6 +65,18 @@ export const hasProtectedRouteAccess = (
       "AUDITOR"
     ];
     return allowedRoles.some((role) => staffModuleRoles.includes(role));
+  }
+
+  // Staff / teachers with an explicit Module Access grant may open that department's routes
+  if (
+    options?.moduleAccessConfigured &&
+    options.pathname &&
+    options.moduleAccess
+  ) {
+    const moduleKey = resolveModuleFromRoutePath(options.pathname);
+    if (moduleKey && canAccessModule(options.moduleAccess, moduleKey)) {
+      return true;
+    }
   }
 
   return false;

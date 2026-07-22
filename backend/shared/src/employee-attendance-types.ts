@@ -45,6 +45,8 @@ export interface EmployeeAttendanceEntryRecord {
   status: EmployeeAttendanceStatus;
   checkInTime?: string;
   checkOutTime?: string;
+  /** Number of periods taught (teachers). Omitted when not recorded. */
+  periodsTaught?: number;
   remarks?: string;
   source?: EmployeeAttendanceSource;
   deviceId?: string;
@@ -140,6 +142,7 @@ export interface EmployeeAttendanceSelfSummary {
     status: EmployeeAttendanceStatus;
     checkInTime?: string;
     checkOutTime?: string;
+    periodsTaught?: number;
     remarks?: string;
   }>;
 }
@@ -154,6 +157,7 @@ export interface EmployeeAttendanceRegisterRow {
   status: EmployeeAttendanceStatus;
   checkInTime?: string;
   checkOutTime?: string;
+  periodsTaught?: number;
   remarks?: string;
   recordStatus: EmployeeAttendanceRecordStatus;
   attendanceId: string;

@@ -1431,9 +1431,10 @@ export const FieldPostingSectionPanel = ({
                 Daily attendance register
               </CardTitle>
               <p className="text-sm font-normal text-slate-500">
-                1) Open a posting · 2) Choose <strong>date</strong> and <strong>shift</strong> ·
-                3) Tick students on today&apos;s roster · 4) Mark Present / Absent / Late /
-                Leave · 5) Save register (stored like a manual attendance book).
+                1) Open a posting · 2) Choose <strong>attendance date</strong> (today or any
+                previous date within the posting period) and <strong>shift</strong> · 3) Tick
+                students on duty for that date · 4) Mark Present / Absent / Late / Leave ·
+                5) Save register (stored like a manual attendance book).
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1585,9 +1586,16 @@ export const FieldPostingSectionPanel = ({
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <FormField label="Attendance date (BS) *">
-                      <NepaliDateField value={markDateBs} onChange={onMarkDateChange} />
-                    </FormField>
+                    <div className="space-y-2">
+                      <FormField label="Attendance date (BS) *">
+                        <NepaliDateField value={markDateBs} onChange={onMarkDateChange} />
+                      </FormField>
+                      <p className="text-xs text-slate-500">
+                        Posting {selectedSchedule.startDateBs} →{" "}
+                        {selectedSchedule.endDateBs}. Choose today or a previous date
+                        within this range to keep past records.
+                      </p>
+                    </div>
                     <FormField label="Duty shift *">
                       <Select
                         value={markShift}

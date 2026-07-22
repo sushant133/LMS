@@ -87,6 +87,10 @@ const serializeRecord = (
       status: e.status as EmployeeAttendanceStatus,
       checkInTime: e.checkInTime || undefined,
       checkOutTime: e.checkOutTime || undefined,
+      periodsTaught:
+        typeof e.periodsTaught === "number" && Number.isFinite(e.periodsTaught)
+          ? e.periodsTaught
+          : undefined,
       remarks: e.remarks || undefined,
       source: e.source || "MANUAL",
       deviceId: e.deviceId || undefined,
@@ -356,6 +360,12 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
     status: e.status,
     checkInTime: emptyToUndef(e.checkInTime) ?? "",
     checkOutTime: emptyToUndef(e.checkOutTime) ?? "",
+    periodsTaught:
+      payload.category === "TEACHER" &&
+      typeof e.periodsTaught === "number" &&
+      Number.isFinite(e.periodsTaught)
+        ? e.periodsTaught
+        : undefined,
     remarks: emptyToUndef(e.remarks) ?? "",
     source: e.source || payload.sourceDefault || "MANUAL",
     deviceId: emptyToUndef(e.deviceId) ?? "",
@@ -431,6 +441,12 @@ export const updateEmployeeAttendance = asyncHandler(async (req: Request, res: R
     status: e.status,
     checkInTime: emptyToUndef(e.checkInTime) ?? "",
     checkOutTime: emptyToUndef(e.checkOutTime) ?? "",
+    periodsTaught:
+      existing.category === "TEACHER" &&
+      typeof e.periodsTaught === "number" &&
+      Number.isFinite(e.periodsTaught)
+        ? e.periodsTaught
+        : undefined,
     remarks: emptyToUndef(e.remarks) ?? "",
     source: e.source || "MANUAL",
     deviceId: emptyToUndef(e.deviceId) ?? "",
@@ -621,6 +637,10 @@ export const getEmployeeAttendanceRegister = asyncHandler(
           status: e.status,
           checkInTime: e.checkInTime || undefined,
           checkOutTime: e.checkOutTime || undefined,
+          periodsTaught:
+            typeof e.periodsTaught === "number" && Number.isFinite(e.periodsTaught)
+              ? e.periodsTaught
+              : undefined,
           remarks: e.remarks || undefined,
           recordStatus: rec.status,
           attendanceId: rec._id.toString()
@@ -680,6 +700,7 @@ export const getMyEmployeeAttendance = asyncHandler(async (req: Request, res: Re
     status: EmployeeAttendanceStatus;
     checkInTime?: string;
     checkOutTime?: string;
+    periodsTaught?: number;
     remarks?: string;
   }> = [];
 
@@ -695,6 +716,10 @@ export const getMyEmployeeAttendance = asyncHandler(async (req: Request, res: Re
         status: e.status as EmployeeAttendanceStatus,
         checkInTime: (e.checkInTime as string) || undefined,
         checkOutTime: (e.checkOutTime as string) || undefined,
+        periodsTaught:
+          typeof e.periodsTaught === "number" && Number.isFinite(e.periodsTaught)
+            ? (e.periodsTaught as number)
+            : undefined,
         remarks: (e.remarks as string) || undefined
       });
     }

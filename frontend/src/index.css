@@ -164,6 +164,36 @@ input[type="file"]:disabled {
   cursor: pointer;
 }
 
+/*
+ * Native time inputs: keep clock/picker control fully visible.
+ * Narrow widths + padding often clip ::-webkit-calendar-picker-indicator.
+ */
+input[type="time"].time-input,
+input.time-input[type="time"] {
+  min-width: 9.5rem;
+  box-sizing: border-box;
+  /* Room for HH:mm + picker icon on Chromium / Edge */
+  padding-inline-end: 0.35rem;
+}
+
+input[type="time"].time-input::-webkit-calendar-picker-indicator,
+input.time-input[type="time"]::-webkit-calendar-picker-indicator {
+  opacity: 1;
+  cursor: pointer;
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  padding: 0.1rem;
+  /* Ensure icon is not washed out on light backgrounds */
+  filter: invert(0.35);
+}
+
+input[type="time"].time-input::-webkit-calendar-picker-indicator:hover,
+input.time-input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  filter: invert(0.15);
+}
+
 .app-sidebar-scroll {
   overflow-x: hidden;
   overflow-y: auto;

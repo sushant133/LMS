@@ -22,6 +22,8 @@ const entrySchema = new Schema(
     },
     checkInTime: { type: String, default: "" },
     checkOutTime: { type: String, default: "" },
+    /** Periods taught that day (teachers). Not set when not recorded. */
+    periodsTaught: { type: Number, min: 0, max: 24 },
     remarks: { type: String, default: "" },
     source: {
       type: String,

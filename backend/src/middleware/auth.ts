@@ -1,12 +1,23 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import { isCollegeViewer, normalizeUserRole, type UserRole } from "@phit-erp/shared";
+import {
+  canAccessModule,
+  canWriteModule,
+  isCollegeViewer,
+  MODULE_ACCESS_DISABLED_MESSAGE,
+  normalizeUserRole,
+  type UserRole
+} from "@phit-erp/shared";
 import { env } from "../config/env.js";
 import { User } from "../models/User.js";
 import { enforceInstitutionReadOnly } from "./readOnlyGuard.js";
 import { enforceModuleAccess } from "./moduleAccessGuard.js";
 import { ApiError } from "../utils/apiError.js";
-import { getUserSecondaryRoles } from "../utils/moduleAccessService.js";
+import {
+  getUserModuleAccessMap,
+  getUserSecondaryRoles,
+  resolveModuleForRequest
+} from "../utils/moduleAccessService.js";
 
 interface JwtPayload {
   userId: string;
@@ -87,7 +98,7 @@ export const authorize =
       return next();
     }
 
-    // Multi-role: check secondary responsibilities asynchronously
+    // Multi-role + module-grant: check secondary roles and department access
     void (async () => {
       try {
         const secondary = await getUserSecondaryRoles(req.user!.userId);
@@ -95,6 +106,24 @@ export const authorize =
         if (hasSecondary) {
           return next();
         }
+
+        /**
+         * Module Access grants: staff/teachers assigned a department may use its APIs
+         * even when their primary role is not in the route's role list.
+         * READ_ONLY → GET only; WRITE → full methods (moduleAccessGuard still enforces).
+         */
+        const moduleKey = resolveModuleForRequest(req);
+        if (moduleKey) {
+          const accessMap = await getUserModuleAccessMap(req.user!.userId);
+          if (canAccessModule(accessMap, moduleKey)) {
+            const isRead = ["GET", "HEAD", "OPTIONS"].includes(req.method);
+            if (isRead || canWriteModule(accessMap, moduleKey)) {
+              return next();
+            }
+            return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
+          }
+        }
+
         return next(new ApiError(403, "You do not have permission to perform this action"));
       } catch (error) {
         return next(error);

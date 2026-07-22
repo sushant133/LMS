@@ -85,6 +85,7 @@ export const AttendanceManager = ({
   const [statusMap, setStatusMap] = useState<Record<string, AttendanceStatus>>(
     {},
   );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const classesQuery = useQuery({
     queryKey: ["classes"],
@@ -301,6 +302,7 @@ export const AttendanceManager = ({
     const existing = attendanceQuery.data?.[0];
     if (!existing) {
       setStatusMap({});
+      setSelectedIds(new Set());
       return;
     }
 
@@ -311,6 +313,7 @@ export const AttendanceManager = ({
       return acc;
     }, {});
     setStatusMap(nextStatusMap);
+    setSelectedIds(new Set());
   }, [attendanceQuery.data]);
 
   const summary = useMemo(() => {
@@ -328,6 +331,59 @@ export const AttendanceManager = ({
     });
     return counts;
   }, [filteredStudents, statusMap]);
+
+  const applyStatus = (studentIds: string[], status: AttendanceStatus) => {
+    setStatusMap((current) => {
+      const next = { ...current };
+      studentIds.forEach((id) => {
+        next[id] = status;
+      });
+      return next;
+    });
+  };
+
+  /**
+   * Selected → PRESENT; everyone else on the roster → ABSENT.
+   * Lets teachers select present students, then finish the sheet in one click.
+   */
+  const markSelectedPresentRestAbsent = () => {
+    if (selectedIds.size === 0) return;
+    setStatusMap((current) => {
+      const next = { ...current };
+      filteredStudents.forEach((student) => {
+        next[student._id] = selectedIds.has(student._id)
+          ? "PRESENT"
+          : "ABSENT";
+      });
+      return next;
+    });
+  };
+
+  /**
+   * Selected → ABSENT; everyone else on the roster → PRESENT.
+   * Lets teachers select absent students, then finish the sheet in one click.
+   */
+  const markSelectedAbsentRestPresent = () => {
+    if (selectedIds.size === 0) return;
+    setStatusMap((current) => {
+      const next = { ...current };
+      filteredStudents.forEach((student) => {
+        next[student._id] = selectedIds.has(student._id)
+          ? "ABSENT"
+          : "PRESENT";
+      });
+      return next;
+    });
+  };
+
+  const toggleSelected = (studentId: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
+  };
 
   const isLoading = isTeacher
     ? teacherScopeQuery.isLoading
@@ -574,10 +630,63 @@ export const AttendanceManager = ({
                 />
               ) : (
                 <>
+                  {canMark ? (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          applyStatus(
+                            filteredStudents.map((s) => s._id),
+                            "PRESENT",
+                          )
+                        }
+                      >
+                        Mark All Present
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          applyStatus(
+                            filteredStudents.map((s) => s._id),
+                            "ABSENT",
+                          )
+                        }
+                      >
+                        Mark All Absent
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={markSelectedPresentRestAbsent}
+                        disabled={selectedIds.size === 0}
+                        title="Selected students become Present; all others become Absent"
+                      >
+                        Mark Selected Present
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={markSelectedAbsentRestPresent}
+                        disabled={selectedIds.size === 0}
+                        title="Selected students become Absent; all others become Present"
+                      >
+                        Mark Selected Absent
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setStatusMap({});
+                          setSelectedIds(new Set());
+                        }}
+                      >
+                        Reset Attendance
+                      </Button>
+                    </div>
+                  ) : null}
+
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHead>
                         <tr>
+                          {canMark ? <Th>Select</Th> : null}
                           <Th>Student</Th>
                           <Th>Roll</Th>
                           <Th>Status</Th>
@@ -588,6 +697,17 @@ export const AttendanceManager = ({
                           const status = statusMap[student._id];
                           return (
                             <tr key={student._id}>
+                              {canMark ? (
+                                <Td>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIds.has(student._id)}
+                                    onChange={() =>
+                                      toggleSelected(student._id)
+                                    }
+                                  />
+                                </Td>
+                              ) : null}
                               <Td>
                                 <StudentNameLink
                                   studentId={student._id}

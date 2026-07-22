@@ -94,8 +94,12 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const [assignmentsTeacher, setAssignmentsTeacher] =
     useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
-    queryKey: ["teachers"],
-    queryFn: () => unwrap<TeacherRecord[]>(api.get("/teachers")),
+    // includeInactive so admins can see deactivated teachers and re-activate them
+    queryKey: ["teachers", "manage"],
+    queryFn: () =>
+      unwrap<TeacherRecord[]>(
+        api.get("/teachers", { params: { includeInactive: true } }),
+      ),
   });
 
   const teacherMutation = useMutation({
@@ -129,6 +133,20 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     },
     onSuccess: async () => {
       toast.success("Teacher permanently deleted");
+      await queryClient.invalidateQueries({ queryKey: ["teachers"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: "ACTIVE" | "INACTIVE" }) =>
+      unwrap<TeacherRecord>(api.put(`/teachers/${id}/status`, { status })),
+    onSuccess: async (_, vars) => {
+      toast.success(
+        vars.status === "ACTIVE"
+          ? "Teacher activated — they can log in again"
+          : "Teacher deactivated — login is disabled",
+      );
       await queryClient.invalidateQueries({ queryKey: ["teachers"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -248,6 +266,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     <Th>Name</Th>
                     <Th>Designation</Th>
                     <Th>Code</Th>
+                    <Th>Status</Th>
                     <Th>Teaching load</Th>
                     <Th>Migration</Th>
                     <Th>Salary</Th>
@@ -256,11 +275,14 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                 </TableHead>
                 <TableBody>
                   {teachers.map((teacher) => {
-                    const status =
+                    const migrationStatus =
                       teacher.assignmentMigrationStatus ?? "PENDING";
                     const designation =
                       teacher.user?.designation?.trim() ||
                       DEFAULT_TEACHER_DESIGNATION;
+                    const isActive =
+                      teacher.status !== "INACTIVE" &&
+                      teacher.user?.isActive !== false;
                     return (
                     <tr key={teacher._id}>
                       <Td>
@@ -282,18 +304,29 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                         </Badge>
                       </Td>
                       <Td>{teacher.teacherCode}</Td>
+                      <Td>
+                        <Badge
+                          className={
+                            isActive
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-slate-200 text-slate-700"
+                          }
+                        >
+                          {isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </Td>
                       <Td className="max-w-[14rem] text-xs text-slate-600">
                         {legacyLoadSummary(teacher, isCollege)}
                       </Td>
                       <Td>
-                        <Badge className={migrationBadgeClass(status)}>
-                          {status}
+                        <Badge className={migrationBadgeClass(migrationStatus)}>
+                          {migrationStatus}
                         </Badge>
                       </Td>
                       <Td>{formatCurrencyNpr(teacher.basicSalaryNpr)}</Td>
                       {canManage ? (
                         <Td className="text-right">
-                          <div className="flex justify-end gap-2">
+                          <div className="flex flex-wrap justify-end gap-2">
                             <Button size="sm" variant="outline" asChild>
                               <Link to={`/teachers/${teacher._id}/profile`}>
                                 Profile
@@ -334,6 +367,42 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                             >
                               Module Access
                             </Button>
+                            {isActive ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={statusMutation.isPending}
+                                onClick={() => {
+                                  if (
+                                    !window.confirm(
+                                      `Deactivate ${teacher.user.fullName}?\n\nThey will not be able to log in until you activate them again.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  statusMutation.mutate({
+                                    id: teacher._id,
+                                    status: "INACTIVE",
+                                  });
+                                }}
+                              >
+                                Deactivate
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={statusMutation.isPending}
+                                onClick={() =>
+                                  statusMutation.mutate({
+                                    id: teacher._id,
+                                    status: "ACTIVE",
+                                  })
+                                }
+                              >
+                                Activate
+                              </Button>
+                            )}
                             <Button
                               variant="destructive"
                               size="sm"

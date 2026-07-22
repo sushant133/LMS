@@ -221,6 +221,11 @@ export interface UserProfile {
    */
   moduleAccess?: Partial<Record<string, "NONE" | "READ_ONLY" | "WRITE">>;
   /**
+   * True when an admin has saved a custom module-access map for this user.
+   * When false, the account uses role defaults (legacy unrestricted modules).
+   */
+  moduleAccessConfigured?: boolean;
+  /**
    * Optional granular actions per module (view, create, approve, …).
    * When omitted, actions are derived from the module access mode.
    */
@@ -398,6 +403,8 @@ export interface TeacherRecord {
   assignedYearIds: string[];
   /** Dual-read migration marker — NA | PENDING | NEEDS_REVIEW | ACCEPTED */
   assignmentMigrationStatus?: "NA" | "PENDING" | "NEEDS_REVIEW" | "ACCEPTED";
+  /** Portal employment status — INACTIVE blocks login */
+  status?: "ACTIVE" | "INACTIVE";
   basicSalaryNpr: number;
   photoUrl?: string;
   documents?: HrDocument[];

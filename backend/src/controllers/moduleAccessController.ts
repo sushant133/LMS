@@ -2,12 +2,14 @@ import type { Request, Response } from "express";
 import {
   ERP_MODULES,
   LEADERSHIP_DESIGNATIONS,
+  MODULE_ACCESS_UI_GROUPS,
   MODULE_PERMISSION_ACTIONS,
   MODULE_PERMISSION_ACTION_LABELS,
   PERMISSION_PRESETS,
   buildPresetModuleAccess,
   expandModuleAccessMap,
   expandModuleActionsMap,
+  hasConfiguredModuleAccess,
   updateModuleAccessSchema,
   type ErpModuleKey,
   type ModuleAccessMap,
@@ -72,8 +74,16 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
 
   const map = mapFromDoc(user.moduleAccess);
   const actions = actionsFromDoc(user.moduleActions);
-  const expanded = expandModuleAccessMap(map);
-  const expandedActions = expandModuleActionsMap(map, actions);
+  const configured = hasConfiguredModuleAccess(map);
+  // Unconfigured accounts: show a clean "start from no access" draft in the admin UI
+  // (runtime still uses legacy role defaults until the first save).
+  const expanded = configured
+    ? expandModuleAccessMap(map)
+    : buildPresetModuleAccess("NO_ACCESS");
+  const expandedActions = expandModuleActionsMap(
+    configured ? map : expanded,
+    actions
+  );
 
   return sendSuccess(res, "Module access fetched", {
     userId,
@@ -84,6 +94,7 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
     designation: user.designation,
     department: user.department,
     secondaryRoles: (user.secondaryRoles as UserRole[]) ?? [],
+    configured,
     moduleAccess: expanded,
     moduleActions: expandedActions,
     modules: ERP_MODULES.map((m) => ({
@@ -94,6 +105,7 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
       actions: expandedActions[m.key as ErpModuleKey],
       availableActions: m.availableActions ?? [...MODULE_PERMISSION_ACTIONS]
     })),
+    groups: MODULE_ACCESS_UI_GROUPS,
     leadershipDesignations: LEADERSHIP_DESIGNATIONS,
     presets: PERMISSION_PRESETS
   });

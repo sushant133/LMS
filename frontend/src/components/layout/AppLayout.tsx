@@ -19,6 +19,7 @@ import { Button } from "components/ui/button";
 import { cn } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
+import { useFieldCoordinatorAccess } from "hooks/useFieldCoordinatorAccess";
 import { useTeacherLabAccess } from "hooks/useTeacherLabAccess";
 import {
   getCollegeDisplayName,
@@ -372,9 +373,26 @@ export const AppLayout = () => {
       (user!.secondaryRoles ?? []).some(
         (role) => normalizeUserRole(role) === "TEACHER",
       ));
+  const isStaffUser =
+    Boolean(user) &&
+    (normalizeUserRole(user!.role) === "COLLEGE_STAFF" ||
+      (user!.secondaryRoles ?? []).some(
+        (role) => normalizeUserRole(role) === "COLLEGE_STAFF",
+      ));
   const teacherLabAccessQuery = useTeacherLabAccess(isTeacherUser);
   const teacherHasLaboratory =
     teacherLabAccessQuery.data?.hasLaboratoryAccess === true;
+  const fieldCoordAccessQuery = useFieldCoordinatorAccess(isStaffUser);
+  /** True when staff is assigned as primary/assistant coordinator on any posting. */
+  const hasFieldCoordinatorAccess =
+    fieldCoordAccessQuery.data?.hasCoordinatorAccess === true;
+  /**
+   * While the access probe is loading, keep the menu item visible for staff so it
+   * does not flash away; after load, hide if neither assignment nor module grant.
+   */
+  const staffMaySeeFieldManagement =
+    hasFieldCoordinatorAccess ||
+    (isStaffUser && fieldCoordAccessQuery.isLoading);
 
   useEffect(() => {
     if (!open) return;
@@ -412,8 +430,18 @@ export const AppLayout = () => {
   const institutionAccess = hasInstitutionAccess(normalizedRole);
   const isAdmin = canManageInstitution(normalizedRole);
   const moduleAccessMap = (user.moduleAccess ?? {}) as ModuleAccessMap;
+  /** Custom map saved by admin — unlocks admin nav for staff/teachers with grants */
+  const moduleAccessConfigured = Boolean(user.moduleAccessConfigured);
   const collegeName = getCollegeDisplayName(availableSchools, user);
   const showCollegeContext = !institutionAccess;
+
+  /** Explicit department grant (not legacy unconfigured full access) */
+  const hasExplicitModuleGrant = (path: string): boolean => {
+    if (!moduleAccessConfigured) return false;
+    const moduleKey = resolveModuleFromRoutePath(path);
+    if (!moduleKey) return false;
+    return canAccessModule(moduleAccessMap, moduleKey);
+  };
 
   const hasTeachingCapability =
     effectiveRoles.has("TEACHER") || isTeacherUser;
@@ -443,6 +471,12 @@ export const AppLayout = () => {
     ) {
       return true;
     }
+    // Field Management: assigned coordinators always see it (even without module matrix)
+    if (path === "/field-management" || path.startsWith("/field-management/")) {
+      if (effectiveRoles.has("STUDENT")) return true;
+      if (staffMaySeeFieldManagement || hasFieldCoordinatorAccess) return true;
+      return canAccessModule(moduleAccessMap, "field-duty");
+    }
     const moduleKey = resolveModuleFromRoutePath(path);
     if (!moduleKey) return true;
     if (moduleKey === "profile") return true;
@@ -461,15 +495,43 @@ export const AppLayout = () => {
    */
   const filteredItems = useMemo(() => {
     const roleMatched = navItems
-      .filter((item) => hasAnyRole(item.roles))
+      .filter((item) => {
+        // Role match OR explicit module grant unlocks admin sections for staff/teachers
+        if (hasAnyRole(item.roles)) return true;
+        if (
+          item.section === "administration" &&
+          hasExplicitModuleGrant(item.path)
+        ) {
+          return true;
+        }
+        return false;
+      })
       .filter((item) => {
         // Lab: teachers only if assigned (unless lab staff / admin)
         if (item.path === "/laboratory") {
           if (isAdmin || effectiveRoles.has("LABORATORY_STAFF")) return true;
+          if (hasExplicitModuleGrant(item.path)) return true;
           if (item.section === "myWork") {
             return hasTeachingCapability && teacherHasLaboratory;
           }
           // administration laboratory without lab role: need module access only
+          return isModuleAllowedForNav(item.path);
+        }
+        // Field Management: staff only when assigned as primary/assistant coordinator
+        // (or module grant); students always get Field Attendance entry
+        if (item.path === "/field-management") {
+          if (isAdmin || institutionAccess) {
+            return isModuleAllowedForNav(item.path);
+          }
+          if (effectiveRoles.has("STUDENT")) return true;
+          if (hasExplicitModuleGrant(item.path)) return true;
+          if (effectiveRoles.has("COLLEGE_STAFF")) {
+            return (
+              staffMaySeeFieldManagement ||
+              hasFieldCoordinatorAccess ||
+              canAccessModule(moduleAccessMap, "field-duty")
+            );
+          }
           return isModuleAllowedForNav(item.path);
         }
         return isModuleAllowedForNav(item.path);
@@ -502,10 +564,13 @@ export const AppLayout = () => {
         result.push(generalItem);
         continue;
       }
-      if (adminItem && hasAdminCapability && hasAnyRole(adminItem.roles)) {
-        // Multi-role: show management label under Administration only
+      if (
+        adminItem &&
+        ((hasAdminCapability && hasAnyRole(adminItem.roles)) ||
+          hasExplicitModuleGrant(adminItem.path))
+      ) {
+        // Multi-role or module grant: show management label under Administration
         result.push(adminItem);
-        // If they also teach, keep personal-only items that share path only once
         continue;
       }
       if (workItem) {
@@ -521,6 +586,9 @@ export const AppLayout = () => {
     normalizedRole,
     secondaryRoles.join(","),
     teacherHasLaboratory,
+    hasFieldCoordinatorAccess,
+    staffMaySeeFieldManagement,
+    moduleAccessConfigured,
     isAdmin,
     JSON.stringify(moduleAccessMap),
     hasTeachingCapability,
@@ -819,7 +887,15 @@ export const AppLayout = () => {
                       path === "/my-fees" ||
                       path === "/my-library" ||
                       path === "/parent-portal";
-                    if (!alwaysOk) {
+                    // Assigned field coordinators may open Field Management without module matrix
+                    const fieldOk =
+                      (path === "/field-management" ||
+                        path.startsWith("/field-management/")) &&
+                      (hasFieldCoordinatorAccess ||
+                        staffMaySeeFieldManagement ||
+                        effectiveRoles.has("STUDENT") ||
+                        canAccessModule(moduleAccessMap, "field-duty"));
+                    if (!alwaysOk && !fieldOk) {
                       const moduleKey = resolveModuleFromRoutePath(path);
                       if (
                         moduleKey &&

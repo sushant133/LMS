@@ -100,6 +100,7 @@ const getSafeUser = async (userId: string) => {
     return {};
   })();
   const moduleAccess = expandModuleAccessMap(rawAccess);
+  const moduleAccessConfigured = Object.keys(rawAccess).length > 0;
   const secondaryRoles = ((user as { secondaryRoles?: string[] }).secondaryRoles ?? []).map((role) =>
     normalizeUserRole(role)
   );
@@ -119,6 +120,7 @@ const getSafeUser = async (userId: string) => {
     isActive: user.isActive,
     mustChangePassword: user.mustChangePassword,
     moduleAccess,
+    moduleAccessConfigured,
     moduleActions: rawActions,
     secondaryRoles
   };
@@ -310,7 +312,16 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       }
     }
 
-    throw new ApiError(403, "This account is disabled");
+    const roleLabel =
+      normalizeUserRole(user.role as string) === "TEACHER"
+        ? "teacher"
+        : normalizeUserRole(user.role as string) === "COLLEGE_STAFF"
+          ? "staff"
+          : "account";
+    throw new ApiError(
+      403,
+      `This ${roleLabel} account has been deactivated. Contact the college administrator.`
+    );
   }
 
   if ((user.role as string) === "SCHOOL_ADMIN") {

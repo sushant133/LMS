@@ -11,6 +11,7 @@ import {
   getFieldDutyReports,
   getFieldDutyRegister,
   getFieldDutyRoster,
+  getMyFieldCoordinatorAccess,
   getMyFieldDutyAttendance,
   getTodayFieldDutyContext,
   listAssignableStudents,
@@ -56,6 +57,13 @@ router.get(
   "/portal/child/:studentId",
   authorize("PARENT", "SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"),
   getChildFieldDutyAttendance
+);
+
+// Assigned coordinator access (nav + client gate; no field-duty module required)
+router.get(
+  "/me/access",
+  authorize(...FIELD_READ, "STUDENT"),
+  getMyFieldCoordinatorAccess
 );
 
 // Dashboard & monitoring

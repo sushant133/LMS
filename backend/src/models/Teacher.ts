@@ -57,12 +57,23 @@ const teacherSchema = new Schema(
     },
     basicSalaryNpr: { type: Number, default: 0 },
     photoUrl: { type: String },
-    documents: { type: [hrDocumentSchema], default: [] }
+    documents: { type: [hrDocumentSchema], default: [] },
+    /**
+     * Employment / portal status. INACTIVE disables login (User.isActive = false).
+     * Defaults ACTIVE for existing teachers without the field.
+     */
+    status: {
+      type: String,
+      enum: ["ACTIVE", "INACTIVE"],
+      default: "ACTIVE",
+      index: true
+    }
   },
   { timestamps: true }
 );
 
 teacherSchema.index({ schoolId: 1, teacherCode: 1 }, { unique: true });
+teacherSchema.index({ schoolId: 1, status: 1 });
 
 export type TeacherDocument = InferSchemaType<typeof teacherSchema>;
 export const Teacher = mongoose.model("Teacher", teacherSchema);

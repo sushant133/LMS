@@ -29,7 +29,8 @@ export const getFieldSupervisorStaffScope = async (
   const staff = await CollegeStaff.findOne({
     schoolId: tenantObjectId(req),
     user: req.user.userId,
-    status: "ACTIVE"
+    status: "ACTIVE",
+    isDeleted: false
   })
     .select("_id fullName staffId")
     .lean();
@@ -37,6 +38,85 @@ export const getFieldSupervisorStaffScope = async (
   return {
     staffId: staff._id.toString(),
     fullName: staff.fullName || staff.staffId || "Staff"
+  };
+};
+
+/**
+ * True when the logged-in user is primary or assistant coordinator on any
+ * non-deleted field posting (ACTIVE or completed — needed for past registers).
+ */
+export const isAssignedFieldCoordinator = async (req: Request): Promise<boolean> => {
+  const staffScope = await getFieldSupervisorStaffScope(req);
+  if (!staffScope) return false;
+  const schoolId = tenantObjectId(req);
+  const count = await FieldDutySchedule.countDocuments({
+    schoolId,
+    isDeleted: false,
+    $or: [
+      { supervisorStaffId: staffScope.staffId },
+      { assistantCoordinatorStaffIds: staffScope.staffId }
+    ]
+  });
+  return count > 0;
+};
+
+/** Access summary for nav / module-guard bypass (assigned coordinators). */
+export const getFieldCoordinatorAccessSummary = async (
+  req: Request
+): Promise<{
+  hasStaffProfile: boolean;
+  hasCoordinatorAccess: boolean;
+  isPrimary: boolean;
+  isAssistant: boolean;
+  activePostingCount: number;
+  totalPostingCount: number;
+  staffId?: string;
+  fullName?: string;
+}> => {
+  const staffScope = await getFieldSupervisorStaffScope(req);
+  if (!staffScope) {
+    return {
+      hasStaffProfile: false,
+      hasCoordinatorAccess: false,
+      isPrimary: false,
+      isAssistant: false,
+      activePostingCount: 0,
+      totalPostingCount: 0
+    };
+  }
+  const schoolId = tenantObjectId(req);
+  const coordFilter = {
+    schoolId,
+    isDeleted: false,
+    $or: [
+      { supervisorStaffId: staffScope.staffId },
+      { assistantCoordinatorStaffIds: staffScope.staffId }
+    ]
+  };
+  const [totalPostingCount, activePostingCount, primaryCount, assistantCount] =
+    await Promise.all([
+      FieldDutySchedule.countDocuments(coordFilter),
+      FieldDutySchedule.countDocuments({ ...coordFilter, status: "ACTIVE" }),
+      FieldDutySchedule.countDocuments({
+        schoolId,
+        isDeleted: false,
+        supervisorStaffId: staffScope.staffId
+      }),
+      FieldDutySchedule.countDocuments({
+        schoolId,
+        isDeleted: false,
+        assistantCoordinatorStaffIds: staffScope.staffId
+      })
+    ]);
+  return {
+    hasStaffProfile: true,
+    hasCoordinatorAccess: totalPostingCount > 0,
+    isPrimary: primaryCount > 0,
+    isAssistant: assistantCount > 0,
+    activePostingCount,
+    totalPostingCount,
+    staffId: staffScope.staffId,
+    fullName: staffScope.fullName
   };
 };
 
@@ -312,11 +392,16 @@ export const scheduleAccessFilter = async (
   if (hasInstitutionAccess(req.user?.role ?? "")) return filter;
   const staffScope = await getFieldSupervisorStaffScope(req);
   if (!staffScope) {
-    throw new ApiError(403, "Not allowed to list field postings");
+    throw new ApiError(
+      403,
+      "No active staff profile is linked to your login. Ask admin to link your College Staff record (user account) so field coordinator access can apply."
+    );
   }
+  // Explicit ObjectId so primary + assistant array membership always match
+  const staffOid = staffScope.staffId;
   filter.$or = [
-    { supervisorStaffId: staffScope.staffId },
-    { assistantCoordinatorStaffIds: staffScope.staffId }
+    { supervisorStaffId: staffOid },
+    { assistantCoordinatorStaffIds: staffOid }
   ];
   return filter;
 };

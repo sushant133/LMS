@@ -502,10 +502,78 @@ export const normalizeModuleAccessMode = (value: unknown): ModuleAccessMode => {
   return "WRITE";
 };
 
-const hasExplicitModuleAccess = (map: ModuleAccessMap | null | undefined): boolean => {
+/** True when admin has saved a module-access map for this user (not legacy unrestricted). */
+export const hasConfiguredModuleAccess = (
+  map: ModuleAccessMap | null | undefined
+): boolean => {
   if (!map) return false;
   return Object.keys(map).length > 0;
 };
+
+const hasExplicitModuleAccess = hasConfiguredModuleAccess;
+
+/**
+ * Admin UI groups — only modules an admin typically assigns to staff/teachers.
+ * Dashboard & profile are always available (self-service) and not listed here.
+ */
+export const MODULE_ACCESS_UI_GROUPS: Array<{
+  id: string;
+  title: string;
+  description: string;
+  keys: ErpModuleKey[];
+}> = [
+  {
+    id: "people",
+    title: "People",
+    description: "Who they can manage in the directory",
+    keys: ["students", "teachers", "staff", "parents"]
+  },
+  {
+    id: "academics",
+    title: "Academics",
+    description: "Classes, subjects, plans, and exams",
+    keys: [
+      "academics",
+      "subject-assignment",
+      "academic-management",
+      "academic-calendar",
+      "timetable",
+      "examinations",
+      "results",
+      "homework"
+    ]
+  },
+  {
+    id: "attendance",
+    title: "Attendance & field",
+    description: "Daily / subject attendance and field postings",
+    keys: [
+      "attendance",
+      "daily-attendance",
+      "teacher-attendance",
+      "staff-attendance",
+      "field-duty"
+    ]
+  },
+  {
+    id: "campus",
+    title: "Campus services",
+    description: "Library, lab, transport, notices",
+    keys: ["library", "laboratory", "inventory", "transport", "notices", "banners", "hostel"]
+  },
+  {
+    id: "finance",
+    title: "Finance & HR",
+    description: "Accounting, fees, and payroll",
+    keys: ["accounts", "fees", "hr"]
+  },
+  {
+    id: "system",
+    title: "Reports & settings",
+    description: "Institution reports and configuration",
+    keys: ["reports", "settings", "user-management", "complaints"]
+  }
+];
 
 export const resolveModuleAccessMode = (
   map: ModuleAccessMap | null | undefined,

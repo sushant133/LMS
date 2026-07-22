@@ -30,6 +30,7 @@ import {
   buildStudentFieldDutyPortal,
   emptyToUndef,
   getEligibleStudentsForDuty,
+  getFieldCoordinatorAccessSummary,
   getFieldSupervisorStaffScope,
   isDateWithinDuty,
   notifyFieldDutyAttendance,
@@ -46,6 +47,15 @@ import { getStudentProfile } from "../utils/studentScope.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
 const actorId = (req: Request) => req.user!.userId;
+
+/**
+ * Nav / client gate: assigned primary or assistant field coordinators get Field Management
+ * even when Module Access matrix does not list "field-duty".
+ */
+export const getMyFieldCoordinatorAccess = asyncHandler(async (req: Request, res: Response) => {
+  const summary = await getFieldCoordinatorAccessSummary(req);
+  return sendSuccess(res, "Field coordinator access fetched", summary);
+});
 
 const normalizeSiteName = (payload: {
   siteName?: string;

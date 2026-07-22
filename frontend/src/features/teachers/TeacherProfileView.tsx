@@ -196,7 +196,11 @@ export const TeacherProfileView = () => {
                     },
                     {
                       label: "Account status",
-                      value: teacher.user?.isActive ? "Active" : "Inactive",
+                      value:
+                        teacher.status === "INACTIVE" ||
+                        teacher.user?.isActive === false
+                          ? "Inactive"
+                          : "Active",
                     },
                     { label: "Address", value: formatAddress(teacher.address) },
                   ]}

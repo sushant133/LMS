@@ -12,6 +12,7 @@ import {
 } from "@phit-erp/shared";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
+import { isAssignedFieldCoordinator } from "../utils/fieldDutyService.js";
 import {
   getUserModuleAccessMap,
   getUserModuleActionsMap,
@@ -74,6 +75,40 @@ export const enforceModuleAccess = async (
         }
       }
       return next();
+    }
+
+    /**
+     * Field Management (/api/field-duty):
+     * - Student/parent portals: allow (route authorize enforces role)
+     * - Module "field-duty" grant: allow
+     * - Assigned primary/assistant field coordinators: allow even without module matrix
+     *   (schedule-level checks still apply in controllers)
+     */
+    if (/\/api\/field-duty(\/|$)/.test(originalPath)) {
+      const role = req.user.role;
+      if (role === "STUDENT" || role === "PARENT") {
+        return next();
+      }
+      // Access probe must work so the client can show/hide nav before module grants exist
+      if (READ_METHODS.has(req.method) && /\/api\/field-duty\/me\/access$/.test(originalPath)) {
+        return next();
+      }
+      const accessMap = await getUserModuleAccessMap(req.user.userId);
+      if (canAccessModule(accessMap, "field-duty")) {
+        if (!READ_METHODS.has(req.method) && !canWriteModule(accessMap, "field-duty")) {
+          // Coordinators still need to submit attendance when module is READ_ONLY
+          const isCoord = await isAssignedFieldCoordinator(req);
+          if (!isCoord) {
+            return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
+          }
+        }
+        return next();
+      }
+      const isCoord = await isAssignedFieldCoordinator(req);
+      if (isCoord) {
+        return next();
+      }
+      return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
     }
 
     const moduleKey = resolveModuleForRequest(req);

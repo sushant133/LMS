@@ -409,6 +409,42 @@ export const DailyAttendanceManager = ({
     });
   };
 
+  /**
+   * Selected → PRESENT; everyone else on the full roster → ABSENT.
+   * Lets teachers tick present students, then finish the sheet in one click.
+   */
+  const markSelectedPresentRestAbsent = () => {
+    const roster = contextQuery.data?.students ?? [];
+    if (selectedIds.size === 0) return;
+    setStatusMap((current) => {
+      const next = { ...current };
+      roster.forEach((student) => {
+        next[student._id] = selectedIds.has(student._id)
+          ? "PRESENT"
+          : "ABSENT";
+      });
+      return next;
+    });
+  };
+
+  /**
+   * Selected → ABSENT; everyone else on the full roster → PRESENT.
+   * Lets teachers tick absent students, then finish the sheet in one click.
+   */
+  const markSelectedAbsentRestPresent = () => {
+    const roster = contextQuery.data?.students ?? [];
+    if (selectedIds.size === 0) return;
+    setStatusMap((current) => {
+      const next = { ...current };
+      roster.forEach((student) => {
+        next[student._id] = selectedIds.has(student._id)
+          ? "ABSENT"
+          : "PRESENT";
+      });
+      return next;
+    });
+  };
+
   const toggleSelected = (studentId: string) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -946,19 +982,17 @@ export const DailyAttendanceManager = ({
                           </Button>
                           <Button
                             variant="outline"
-                            onClick={() =>
-                              applyStatus([...selectedIds], "PRESENT")
-                            }
+                            onClick={markSelectedPresentRestAbsent}
                             disabled={selectedIds.size === 0}
+                            title="Selected students become Present; all others become Absent"
                           >
                             Mark Selected Present
                           </Button>
                           <Button
                             variant="outline"
-                            onClick={() =>
-                              applyStatus([...selectedIds], "ABSENT")
-                            }
+                            onClick={markSelectedAbsentRestPresent}
                             disabled={selectedIds.size === 0}
+                            title="Selected students become Absent; all others become Present"
                           >
                             Mark Selected Absent
                           </Button>

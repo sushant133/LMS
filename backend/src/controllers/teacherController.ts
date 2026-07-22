@@ -29,6 +29,7 @@ import {
   getSessionOption
 } from "../utils/transaction.js";
 import { hardDeleteTeacherAccount } from "../utils/deletePersonCascade.js";
+import { recordAudit } from "../utils/audit.js";
 
 const resolveTeacherDesignation = (value?: string | null): string => {
   const trimmed = value?.trim();
@@ -198,9 +199,11 @@ export const listTeachers = asyncHandler(async (req: Request, res: Response) => 
   const includeInactive = req.query.includeInactive === "true";
   const teachers = await Teacher.find(withTenantScope(req)).populate("user", "-password").sort({ createdAt: -1 });
   const rows = includeInactive
-    ? teachers
+    ? teachers.filter((teacher) => !String(teacher.teacherCode).includes("__deleted__"))
     : teachers.filter((teacher) => {
         const user = teacher.user as { isActive?: boolean } | null;
+        const teacherStatus = (teacher as { status?: string }).status;
+        if (teacherStatus === "INACTIVE") return false;
         if (user && user.isActive === false) return false;
         if (String(teacher.teacherCode).includes("__deleted__")) return false;
         return true;
@@ -283,6 +286,7 @@ export const createTeacher = asyncHandler(async (req: Request, res: Response) =>
           user: user._id,
           ...buildTeacherAssignmentFields(institutionType, payload),
           assignmentMigrationStatus: "NA",
+          status: "ACTIVE",
           photoUrl,
           documents: []
         }
@@ -421,6 +425,45 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
   await teacher.populate("user", "-password");
 
   return sendSuccess(res, "Teacher updated successfully", teacher);
+});
+
+/**
+ * Activate / deactivate teacher portal access.
+ * INACTIVE → User.isActive = false (login blocked; existing sessions rejected by protect).
+ */
+export const setTeacherStatus = asyncHandler(async (req: Request, res: Response) => {
+  const status = req.body?.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
+  const teacher = await Teacher.findOne(withTenantScope(req, { _id: req.params.id }));
+  if (!teacher) {
+    throw new ApiError(404, "Teacher not found");
+  }
+  if (String(teacher.teacherCode).includes("__deleted__")) {
+    throw new ApiError(400, "This teacher record is deleted and cannot be reactivated");
+  }
+
+  teacher.status = status;
+  await teacher.save();
+
+  if (teacher.user) {
+    await User.findByIdAndUpdate(teacher.user, { isActive: status === "ACTIVE" });
+  }
+
+  await recordAudit(req, {
+    action: status === "ACTIVE" ? "teacher.activate" : "teacher.deactivate",
+    entity: "Teacher",
+    entityId: teacher._id.toString(),
+    after: { status, isActive: status === "ACTIVE" }
+  });
+
+  await teacher.populate("user", "-password");
+
+  return sendSuccess(
+    res,
+    status === "ACTIVE"
+      ? "Teacher activated — they can log in again"
+      : "Teacher deactivated — login is disabled for this account",
+    teacher
+  );
 });
 
 /**
