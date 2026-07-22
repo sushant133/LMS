@@ -15,18 +15,18 @@ import { useOnlineStatus } from "hooks/useOnlineStatus";
 import { getRoleRedirectPath } from "lib/auth";
 import { parseErrorMessage } from "lib/utils";
 
-const HERO_TAGLINE = "Official LMS for Public Himal Institute of Technology.";
+const LOGIN_BRAND_NAME = "PHIT COLLEGE";
+const HERO_TAGLINE =
+  "Official Login for Public Himal Institute of Technology.";
 
 const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
-  const { t } = useTranslation();
-
   if (!isDesktop) {
     return (
       <div className="flex flex-col items-center gap-3 px-6 pt-8 text-center text-white">
         <div className="rounded-2xl bg-white/10 p-2">
           <CollegeLogo variant="light" className="h-12 w-12" />
         </div>
-        <h1 className="text-2xl font-semibold">{t("appName")}</h1>
+        <h1 className="text-2xl font-semibold">{LOGIN_BRAND_NAME}</h1>
         <p className="max-w-sm text-sm text-brand-50/85">{HERO_TAGLINE}</p>
       </div>
     );
@@ -39,7 +39,7 @@ const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
           <CollegeLogo variant="light" className="h-12 w-12" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold">{t("appName")}</h1>
+          <h1 className="text-2xl font-semibold">{LOGIN_BRAND_NAME}</h1>
         </div>
       </div>
 

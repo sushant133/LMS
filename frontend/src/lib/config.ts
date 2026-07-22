@@ -45,7 +45,7 @@ export const getApiBaseUrl = (): string => {
 
 export const appConfig = {
   /** Display name (optional branding via env). */
-  appName: import.meta.env.VITE_APP_NAME?.trim() || "PHIT LMS",
+  appName: import.meta.env.VITE_APP_NAME?.trim() || "PHIT COLLEGE",
   /** Vite mode: development | production */
   mode: import.meta.env.MODE,
   /** True when running `vite` / `npm run dev`. */
