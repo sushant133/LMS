@@ -341,7 +341,6 @@ export const buildFinancialSummaryCsv = (report: FinancialSummaryReport): string
     `Expenses,,${report.totals.expenseNpr}`,
     `Purchases,,${report.totals.purchaseNpr}`,
     `Salaries,,${report.totals.salaryNpr}`,
-    `Pending Student Fees,,${report.totals.pendingFeesNpr}`,
     `Net Surplus,,${report.totals.netSurplusNpr}`
   ];
 
@@ -375,6 +374,5 @@ export const buildFinancialSummaryRows = (
   { category: "Expenses", transactions: counts.expenses, totalNpr: totals.expenseNpr },
   { category: "Purchases", transactions: counts.purchases, totalNpr: totals.purchaseNpr },
   { category: "Salary Payments", transactions: counts.salaries, totalNpr: totals.salaryNpr },
-  { category: "Pending Student Fees", transactions: counts.pendingStudents, totalNpr: totals.pendingFeesNpr },
   { category: "Net Surplus (Income − Outflow)", transactions: 0, totalNpr: totals.netSurplusNpr }
 ];

@@ -166,7 +166,6 @@ const reportTypes = [
   { id: "ledger", label: "Ledger Report" },
   { id: "daily-fee-collection", label: "Student Fee Report (Daily)" },
   { id: "monthly-fee-collection", label: "Student Fee Report (Monthly)" },
-  { id: "pending-fees", label: "Pending Fees" },
   { id: "salary-payments", label: "Salary Report" },
   { id: "refunds", label: "Refund Report" },
   { id: "purchases", label: "Purchase Report" },
@@ -175,7 +174,6 @@ const reportTypes = [
   { id: "journal", label: "Journal Report" },
   { id: "financial-summary", label: "Monthly Financial Summary" },
   { id: "student-ledger", label: "Student Ledger", ledger: true },
-  { id: "student-due", label: "Student Due Report", ledger: true },
   { id: "day-book", label: "Day Book", ledger: true },
   {
     id: "fee-collection-summary",
@@ -999,7 +997,13 @@ export const AccountingManager = () => {
                     value: dashboardQuery.data?.cashBalanceNpr ?? 0,
                   },
                 ]
-              ).map((stat) => (
+              )
+                // Outstanding / pending fee cards removed from accounting dashboard
+                .filter(
+                  (stat) =>
+                    !/outstanding|pending\s*fee|fee\s*due/i.test(stat.label),
+                )
+                .map((stat) => (
                 <Card key={stat.label}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium text-slate-500">

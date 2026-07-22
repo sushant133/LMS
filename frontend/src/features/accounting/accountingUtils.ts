@@ -130,7 +130,6 @@ export const downloadFinancialSummaryExcel = (
     ["Total Expenses", "", report.totals.expenseNpr],
     ["Total Purchases", "", report.totals.purchaseNpr],
     ["Total Salaries", "", report.totals.salaryNpr],
-    ["Pending Student Fees", "", report.totals.pendingFeesNpr],
     ["Net Surplus", "", report.totals.netSurplusNpr],
   ]);
   XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
