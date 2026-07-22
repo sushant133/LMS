@@ -30,6 +30,10 @@ export const calculateFeeTotals = (input: FeeCalculationInput): FeeCalculationRe
   };
 };
 
+/**
+ * Net pay = earnings − deductions.
+ * advanceSalaryNpr is treated as advance recovery (deduction), not an earning.
+ */
 export const calculateNetSalary = (input: {
   basicSalaryNpr: number;
   allowancesNpr: number;
@@ -40,8 +44,14 @@ export const calculateNetSalary = (input: {
   otherDeductionsNpr: number;
 }): number => {
   const gross =
-    input.basicSalaryNpr + input.allowancesNpr + input.bonusNpr + input.advanceSalaryNpr;
-  const deductions = input.loanDeductionNpr + input.taxNpr + input.otherDeductionsNpr;
+    Number(input.basicSalaryNpr || 0) +
+    Number(input.allowancesNpr || 0) +
+    Number(input.bonusNpr || 0);
+  const deductions =
+    Number(input.advanceSalaryNpr || 0) +
+    Number(input.loanDeductionNpr || 0) +
+    Number(input.taxNpr || 0) +
+    Number(input.otherDeductionsNpr || 0);
   return Math.max(0, gross - deductions);
 };
 

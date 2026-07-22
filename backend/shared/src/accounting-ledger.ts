@@ -52,16 +52,54 @@ export const vendorSchema = z.object({
   isActive: z.boolean().default(true)
 });
 
+export const FEE_REFUND_TYPES = [
+  "DEPOSIT_REFUND",
+  "OVERPAYMENT",
+  "FEE_ADJUSTMENT",
+  "WITHDRAWAL",
+  "OTHER"
+] as const;
+
+export type FeeRefundType = (typeof FEE_REFUND_TYPES)[number];
+
+export const FEE_REFUND_TYPE_LABELS: Record<FeeRefundType, string> = {
+  DEPOSIT_REFUND: "Admission deposit (pass-out)",
+  OVERPAYMENT: "Overpayment refund",
+  FEE_ADJUSTMENT: "Fee adjustment refund",
+  WITHDRAWAL: "Withdrawal refund",
+  OTHER: "Other student refund"
+};
+
 export const feeRefundSchema = z.object({
   studentId: objectIdSchema,
   feeCollectionId: optionalObjectIdSchema,
+  refundType: z.enum(FEE_REFUND_TYPES).default("OTHER"),
   amountNpr: moneySchema,
   dateBs: bsDateSchema,
   reason: z.string().min(1),
-  paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"]).default("CASH"),
+  paymentMethod: z
+    .enum(["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"])
+    .default("CASH"),
   bankAccountId: optionalObjectIdSchema,
   transactionNumber: z.string().optional().or(z.literal("")),
-  notes: z.string().optional().or(z.literal(""))
+  notes: z.string().optional().or(z.literal("")),
+  approvedBy: z.string().optional().or(z.literal("")),
+  /**
+   * When recording a deposit refund, set or confirm the original admission deposit
+   * if it was never stored on the student record.
+   */
+  originalDepositNpr: moneySchema.optional(),
+  attachments: z
+    .array(
+      z.object({
+        name: z.string().optional().or(z.literal("")),
+        url: z.string().min(1),
+        mimeType: z.string().optional().or(z.literal("")),
+        size: z.coerce.number().optional()
+      })
+    )
+    .optional()
+    .default([])
 });
 
 export const fiscalYearSchema = z.object({
@@ -226,6 +264,7 @@ export interface FeeRefundRecord {
   studentId: string;
   feeCollectionId?: string;
   refundNumber: string;
+  refundType?: FeeRefundType;
   amountNpr: number;
   dateBs: string;
   reason: string;
@@ -233,6 +272,8 @@ export interface FeeRefundRecord {
   bankAccountId?: string;
   transactionNumber?: string;
   notes?: string;
+  approvedBy?: string;
+  attachments?: Array<{ name?: string; url: string; mimeType?: string; size?: number }>;
   journalEntryId?: string;
   createdBy: string;
   createdAt?: string;

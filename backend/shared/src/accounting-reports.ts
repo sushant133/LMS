@@ -67,31 +67,66 @@ export const REPORT_COLUMNS: Record<AccountingReportType, ReportColumn[]> = {
   ],
   expenses: [
     { key: "dateBs", label: "Date (BS)" },
+    { key: "voucherNumber", label: "Voucher No." },
     { key: "category", label: "Category" },
     { key: "vendor", label: "Vendor" },
     { key: "description", label: "Description" },
     { key: "amountNpr", label: "Amount", format: "currency" },
-    { key: "paymentMethod", label: "Payment Method" }
+    { key: "paymentMethod", label: "Payment Method" },
+    { key: "approvedBy", label: "Approved By" }
   ],
   purchases: [
     { key: "purchaseDateBs", label: "Date (BS)" },
+    { key: "voucherNumber", label: "Voucher No." },
     { key: "category", label: "Category" },
     { key: "vendor", label: "Vendor" },
-    { key: "invoiceNumber", label: "Invoice No." },
+    { key: "invoiceNumber", label: "Bill No." },
+    { key: "item", label: "Item" },
     { key: "quantity", label: "Qty" },
     { key: "unitPriceNpr", label: "Unit Price", format: "currency" },
     { key: "totalAmountNpr", label: "Total Amount", format: "currency" },
     { key: "paymentStatus", label: "Payment Status" },
     { key: "paymentMethod", label: "Payment Method" },
-    { key: "description", label: "Description" }
+    { key: "description", label: "Remarks" }
   ],
   income: [
     { key: "dateBs", label: "Date (BS)" },
-    { key: "category", label: "Category" },
+    { key: "receiptNumber", label: "Receipt No." },
+    { key: "category", label: "Income Type" },
     { key: "source", label: "Source" },
     { key: "description", label: "Description" },
     { key: "amountNpr", label: "Amount", format: "currency" },
-    { key: "paymentMethod", label: "Payment Method" }
+    { key: "paymentMethod", label: "Payment Mode" }
+  ],
+  refunds: [
+    { key: "refundNumber", label: "Refund No." },
+    { key: "dateBs", label: "Date (BS)" },
+    { key: "studentName", label: "Student" },
+    { key: "admissionNumber", label: "Admission No." },
+    { key: "refundType", label: "Type" },
+    { key: "reason", label: "Reason" },
+    { key: "amountNpr", label: "Amount", format: "currency" },
+    { key: "paymentMethod", label: "Payment Method" },
+    { key: "approvedByName", label: "Approved By" }
+  ],
+  journal: [
+    { key: "dateBs", label: "Date (BS)" },
+    { key: "voucherNumber", label: "Voucher No." },
+    { key: "voucherType", label: "Type" },
+    { key: "narration", label: "Narration" },
+    { key: "totalDebitNpr", label: "Debit", format: "currency" },
+    { key: "totalCreditNpr", label: "Credit", format: "currency" },
+    { key: "referenceType", label: "Source" }
+  ],
+  ledger: [
+    { key: "dateBs", label: "Date (BS)" },
+    { key: "voucherNumber", label: "Voucher No." },
+    { key: "accountCode", label: "Account Code" },
+    { key: "accountName", label: "Account" },
+    { key: "narration", label: "Particulars" },
+    { key: "debitNpr", label: "Debit", format: "currency" },
+    { key: "creditNpr", label: "Credit", format: "currency" },
+    { key: "runningBalanceNpr", label: "Balance", format: "currency" }
   ],
   "cash-summary": [
     { key: "dateBs", label: "Date (BS)" },

@@ -4,11 +4,17 @@ const accountingExpenseSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     category: { type: String, required: true },
-    vendor: { type: String, required: true },
+    vendor: { type: String, default: "" },
     dateBs: { type: String, required: true },
     amountNpr: { type: Number, required: true },
-    paymentMethod: { type: String, enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "OTHER"], default: "CASH" },
+    paymentMethod: {
+      type: String,
+      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      default: "CASH"
+    },
     description: { type: String, required: true },
+    voucherNumber: { type: String },
+    approvedBy: { type: String },
     attachmentUrl: { type: String },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false, index: true },

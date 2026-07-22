@@ -17,6 +17,9 @@ export type AccountingReportType =
   | "expenses"
   | "purchases"
   | "income"
+  | "refunds"
+  | "journal"
+  | "ledger"
   | "cash-summary"
   | "financial-summary"
   | "trial-balance"
@@ -152,6 +155,8 @@ export interface AccountingExpenseRecord {
   amountNpr: number;
   paymentMethod: PaymentMethod;
   description: string;
+  voucherNumber?: string;
+  approvedBy?: string;
   attachmentUrl?: string;
   createdBy: string;
   createdAt?: string;
@@ -165,12 +170,15 @@ export interface AccountingPurchaseRecord {
   vendor: string;
   purchaseDateBs: string;
   invoiceNumber: string;
+  item?: string;
   quantity: number;
   unitPriceNpr: number;
   totalAmountNpr: number;
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
   description?: string;
+  voucherNumber?: string;
+  attachmentUrl?: string;
   createdBy: string;
   createdAt?: string;
   updatedAt?: string;
@@ -185,6 +193,8 @@ export interface AccountingIncomeRecord {
   amountNpr: number;
   paymentMethod: PaymentMethod;
   description?: string;
+  receiptNumber?: string;
+  voucherNumber?: string;
   createdBy: string;
   createdAt?: string;
   updatedAt?: string;
@@ -209,9 +219,19 @@ export interface SalaryPaymentRecord {
   status: SalaryPaymentStatus;
   paidDateBs?: string;
   paymentMethod: PaymentMethod;
+  transactionNumber?: string;
+  notes?: string;
+  attachments?: Array<{ name?: string; url: string; mimeType?: string; size?: number }>;
   createdBy: string;
   teacher?: TeacherRecord;
-  collegeStaff?: Pick<CollegeStaffRecord, "_id" | "fullName">;
+  collegeStaff?: Pick<
+    CollegeStaffRecord,
+    "_id" | "fullName" | "staffId" | "department" | "designation"
+  >;
+  /** Resolved display helpers from API */
+  employeeName?: string;
+  department?: string;
+  designation?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -266,6 +286,18 @@ export interface AccountingSettingsRecord {
   updatedAt?: string;
 }
 
+/** Compact row for accounting dashboard recent-activity lists */
+export interface AccountingDashboardActivityItem {
+  id: string;
+  dateBs: string;
+  voucherNo: string;
+  party: string;
+  amountNpr: number;
+  status: string;
+  /** Navigate target tab in Accounting UI */
+  linkTab?: string;
+}
+
 export interface AccountingDashboardResponse {
   stats: Array<{ label: string; value: number; change?: string }>;
   feeChart: Array<{ label: string; amount: number }>;
@@ -281,12 +313,22 @@ export interface AccountingDashboardResponse {
     amountNpr: number;
     entryType: "DEBIT" | "CREDIT";
   }>;
-  pendingFeesTotal: number;
+  /** Nepal-college dashboard cards */
   todayCollectionNpr: number;
   monthlyCollectionNpr: number;
+  totalIncomeNpr: number;
+  totalExpensesNpr: number;
   cashBalanceNpr: number;
-  bankBalanceNpr: number;
-  pendingApprovals: number;
+  /** Recent activity panels (dashboard redesign) */
+  recentFees: AccountingDashboardActivityItem[];
+  recentSalaries: AccountingDashboardActivityItem[];
+  recentPurchases: AccountingDashboardActivityItem[];
+  recentExpenseItems: AccountingDashboardActivityItem[];
+  recentRefunds: AccountingDashboardActivityItem[];
+  /** @deprecated kept for older clients */
+  pendingFeesTotal?: number;
+  bankBalanceNpr?: number;
+  pendingApprovals?: number;
 }
 
 export interface StudentFinancialHistory {

@@ -7,8 +7,14 @@ const accountingIncomeSchema = new Schema(
     source: { type: String, required: true },
     dateBs: { type: String, required: true },
     amountNpr: { type: Number, required: true },
-    paymentMethod: { type: String, enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "OTHER"], default: "CASH" },
+    paymentMethod: {
+      type: String,
+      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      default: "CASH"
+    },
     description: { type: String },
+    receiptNumber: { type: String },
+    voucherNumber: { type: String },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },

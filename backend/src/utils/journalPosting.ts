@@ -4,6 +4,7 @@ import {
   EXPENSE_CATEGORY_ACCOUNT_MAP,
   FEE_TYPE_ACCOUNT_MAP,
   INCOME_CATEGORY_ACCOUNT_MAP,
+  PURCHASE_CATEGORY_ACCOUNT_MAP,
   SYSTEM_ACCOUNT_CODES,
   type FeeType,
   type JournalReferenceType,
@@ -41,22 +42,40 @@ interface PostJournalParams {
 }
 
 const getPaymentAccountCode = (paymentMethod: string): string => {
-  if (paymentMethod === "BANK_TRANSFER" || paymentMethod === "CHEQUE" || paymentMethod === "FONEPAY") {
+  if (
+    paymentMethod === "BANK_TRANSFER" ||
+    paymentMethod === "CHEQUE" ||
+    paymentMethod === "FONEPAY" ||
+    paymentMethod === "ONLINE"
+  ) {
     return SYSTEM_ACCOUNT_CODES.BANK;
   }
   return SYSTEM_ACCOUNT_CODES.CASH;
 };
 
+/**
+ * Seed missing system accounts without wiping custom ledgers.
+ * Safe to call on every journal post (upsert by code).
+ */
 export const ensureDefaultChartOfAccounts = async (schoolId: Types.ObjectId): Promise<void> => {
-  const existing = await ChartOfAccount.countDocuments({ schoolId });
-  if (existing > 0) return;
-
-  await ChartOfAccount.insertMany(
-    DEFAULT_CHART_OF_ACCOUNTS.map((account) => ({
-      schoolId,
-      ...account
-    }))
-  );
+  for (const account of DEFAULT_CHART_OF_ACCOUNTS) {
+    await ChartOfAccount.updateOne(
+      { schoolId, code: account.code },
+      {
+        $setOnInsert: {
+          schoolId,
+          code: account.code,
+          name: account.name,
+          nameNp: account.nameNp,
+          accountType: account.accountType,
+          parentCode: account.parentCode,
+          isSystem: account.isSystem,
+          isActive: true
+        }
+      },
+      { upsert: true }
+    );
+  }
 };
 
 const getAccountName = async (schoolId: Types.ObjectId, code: string): Promise<string> => {
@@ -142,8 +161,9 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
 };
 
 /**
- * Reverse a journal entry by domain reference (FeeCollection, AccountingExpense, etc.).
- * Keeps the original posted (not soft-deleted) so original + reversal net to zero in GL reports.
+ * Reverse all journal entries for a domain reference (FeeCollection, AccountingExpense, etc.).
+ * Purchases may have two posts (purchase + AP settlement) — both must reverse on void.
+ * Keeps originals posted so original + reversal net to zero in GL reports.
  */
 export const reverseJournalEntry = async (
   schoolId: Types.ObjectId,
@@ -151,51 +171,57 @@ export const reverseJournalEntry = async (
   referenceType: JournalReferenceType,
   referenceId: Types.ObjectId | string
 ): Promise<void> => {
-  const original = await JournalEntry.findOne({
+  const originals = await JournalEntry.find({
     schoolId,
     referenceType,
     referenceId,
     isReversal: false,
-    isDeleted: false
-  });
+    isDeleted: false,
+    isReversed: { $ne: true }
+  }).sort({ createdAt: 1 });
 
-  if (!original) return;
+  if (originals.length === 0) return;
 
-  // Already reversed
-  const existingReversal = await JournalEntry.findOne({
-    schoolId,
-    reversedEntryId: original._id,
-    isReversal: true,
-    isDeleted: false
-  }).lean();
-  if (existingReversal) return;
+  for (const original of originals) {
+    const existingReversal = await JournalEntry.findOne({
+      schoolId,
+      reversedEntryId: original._id,
+      isReversal: true,
+      isDeleted: false
+    }).lean();
+    if (existingReversal) {
+      original.isReversed = true;
+      await original.save();
+      continue;
+    }
 
-  const reversalLines = original.lines.map((line) => ({
-    accountCode: line.accountCode,
-    accountName: line.accountName,
-    debitNpr: line.creditNpr,
-    creditNpr: line.debitNpr,
-    description: `Reversal: ${line.description ?? ""}`
-  }));
+    const reversalLines = original.lines.map((line) => ({
+      accountCode: line.accountCode,
+      accountName: line.accountName,
+      debitNpr: line.creditNpr,
+      creditNpr: line.debitNpr,
+      description: `Reversal: ${line.description ?? ""}`
+    }));
 
-  await postJournalEntry({
-    schoolId,
-    userId,
-    dateBs: original.dateBs,
-    narration: `Reversal of ${original.voucherNumber}`,
-    lines: reversalLines,
-    voucherType: original.voucherType as VoucherType,
-    referenceType,
-    referenceId,
-    studentId: original.studentId ?? undefined,
-    bankAccountId: original.bankAccountId ?? undefined,
-    isReversal: true,
-    reversedEntryId: original._id
-  });
+    await postJournalEntry({
+      schoolId,
+      userId,
+      dateBs: original.dateBs,
+      narration: `Reversal of ${original.voucherNumber}`,
+      lines: reversalLines,
+      voucherType: original.voucherType as VoucherType,
+      referenceType,
+      referenceId,
+      studentId: original.studentId ?? undefined,
+      bankAccountId: original.bankAccountId ?? undefined,
+      isReversal: true,
+      reversedEntryId: original._id
+    });
 
-  // Do NOT soft-delete original — both stay posted so reports net correctly.
-  original.isReversed = true;
-  await original.save();
+    // Do NOT soft-delete original — both stay posted so reports net correctly.
+    original.isReversed = true;
+    await original.save();
+  }
 };
 
 /** Reverse a journal entry by its own Mongo id (manual journals, etc.). */
@@ -311,7 +337,7 @@ export const postFeeCollectionJournal = async (params: {
       });
     } else {
       incomeLines.push({
-        accountCode: SYSTEM_ACCOUNT_CODES.FEE_INCOME,
+        accountCode: SYSTEM_ACCOUNT_CODES.OTHER_INCOME,
         accountName: "",
         debitNpr: 0,
         creditNpr: feeIncomeCredit,
@@ -402,22 +428,26 @@ export const postFeeRefundJournal = async (params: {
   bankAccountId?: Types.ObjectId | string;
   refundNumber: string;
 }): Promise<void> => {
+  // Spec: Debit Refund Expense · Credit Cash/Bank
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
   const paymentName = await getAccountName(params.schoolId, paymentAccount);
-  const incomeName = await getAccountName(params.schoolId, SYSTEM_ACCOUNT_CODES.FEE_INCOME);
+  const refundExpenseName = await getAccountName(
+    params.schoolId,
+    SYSTEM_ACCOUNT_CODES.REFUND_EXPENSE
+  );
 
   await postJournalEntry({
     schoolId: params.schoolId,
     userId: params.userId,
     dateBs: params.dateBs,
-    narration: `Fee refund — ${params.refundNumber}`,
+    narration: `Student refund — ${params.refundNumber}`,
     lines: [
       {
-        accountCode: SYSTEM_ACCOUNT_CODES.FEE_INCOME,
-        accountName: incomeName,
+        accountCode: SYSTEM_ACCOUNT_CODES.REFUND_EXPENSE,
+        accountName: refundExpenseName,
         debitNpr: params.amountNpr,
         creditNpr: 0,
-        description: "Fee refund"
+        description: "Refund expense"
       },
       {
         accountCode: paymentAccount,
@@ -526,7 +556,9 @@ export const postPurchaseJournal = async (params: {
   paymentMethod: string;
   vendor: string;
 }): Promise<void> => {
-  const expenseCode = SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE;
+  const expenseCode =
+    PURCHASE_CATEGORY_ACCOUNT_MAP[params.category] ??
+    SYSTEM_ACCOUNT_CODES.PURCHASE_EXPENSE;
   const isPaid = params.paymentStatus === "PAID";
 
   const creditLine: JournalLineInput = isPaid
@@ -561,6 +593,50 @@ export const postPurchaseJournal = async (params: {
       creditLine
     ],
     voucherType: "PURCHASE",
+    referenceType: "AccountingPurchase",
+    referenceId: params.purchaseId
+  });
+};
+
+/**
+ * When a pending purchase is marked PAID: settle Accounts Payable.
+ * Dr Accounts Payable · Cr Cash/Bank
+ * (Expense was already debited on original purchase voucher.)
+ */
+export const postPurchasePaymentJournal = async (params: {
+  schoolId: Types.ObjectId;
+  userId: Types.ObjectId;
+  purchaseId: Types.ObjectId | string;
+  dateBs: string;
+  amountNpr: number;
+  paymentMethod: string;
+  vendor: string;
+}): Promise<void> => {
+  const paymentAccount = getPaymentAccountCode(params.paymentMethod);
+  const apCode = SYSTEM_ACCOUNT_CODES.ACCOUNTS_PAYABLE;
+
+  await postJournalEntry({
+    schoolId: params.schoolId,
+    userId: params.userId,
+    dateBs: params.dateBs,
+    narration: `Purchase payment — ${params.vendor}`,
+    lines: [
+      {
+        accountCode: apCode,
+        accountName: await getAccountName(params.schoolId, apCode),
+        debitNpr: params.amountNpr,
+        creditNpr: 0,
+        description: `Settle payable — ${params.vendor}`
+      },
+      {
+        accountCode: paymentAccount,
+        accountName: await getAccountName(params.schoolId, paymentAccount),
+        debitNpr: 0,
+        creditNpr: params.amountNpr,
+        description: "Payment"
+      }
+    ],
+    voucherType: "PAYMENT",
     referenceType: "AccountingPurchase",
     referenceId: params.purchaseId
   });

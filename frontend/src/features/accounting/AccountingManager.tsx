@@ -54,21 +54,16 @@ import {
 import {
   Banknote,
   BarChart3,
-  BookOpen,
-  Building2,
-  ClipboardList,
+  BookMarked,
   FileText,
   Landmark,
   LayoutDashboard,
+  Printer,
   RotateCcw,
   Receipt,
-  Settings,
   ShoppingCart,
   TrendingDown,
   TrendingUp,
-  UserCog,
-  Users,
-  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
@@ -95,13 +90,13 @@ import {
   emptyIdsToUndefined,
   getSalaryEmployeeLabel,
 } from "./accountingFormUtils";
-import { AccountingDashboardCharts } from "./AccountingDashboardCharts";
 import { ChartOfAccountsPanel } from "./ChartOfAccountsPanel";
 import { JournalEntriesPanel } from "./JournalEntriesPanel";
-import { VendorsPanel } from "./VendorsPanel";
+import { LedgerPanel } from "./LedgerPanel";
 import { StudentFeeRecordsPanel } from "./StudentFeeRecordsPanel";
 import { SalaryPaymentRecordsPanel } from "./SalaryPaymentRecordsPanel";
 import { RefundRecordsPanel } from "./RefundRecordsPanel";
+import { printRegisterVoucher, printSimpleDocument } from "./voucherPrint";
 import { useAuth } from "features/auth/AuthProvider";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -112,9 +107,7 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 
-import { FinancialApprovalsPanel } from "features/accounting/FinancialApprovalsPanel";
 import { api, unwrap } from "lib/api";
-import { invalidateDashboardQueries } from "lib/dashboardQueries";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 
@@ -126,15 +119,10 @@ type Tab =
   | "purchases"
   | "expenses"
   | "income"
-  | "cash-book"
+  | "ledger"
   | "chart-of-accounts"
   | "journal-entries"
-  | "vendors"
-  | "reports"
-  | "settings"
-  | "accountants"
-  | "audit-logs"
-  | "approvals";
+  | "reports";
 
 const accountingTabs: Tab[] = [
   "dashboard",
@@ -144,15 +132,10 @@ const accountingTabs: Tab[] = [
   "purchases",
   "expenses",
   "income",
-  "cash-book",
+  "ledger",
   "chart-of-accounts",
   "journal-entries",
-  "vendors",
   "reports",
-  "settings",
-  "accountants",
-  "audit-logs",
-  "approvals",
 ];
 
 const tabs: Array<{
@@ -168,34 +151,31 @@ const tabs: Array<{
   { id: "purchases", label: "Purchases", icon: ShoppingCart },
   { id: "expenses", label: "Expenses", icon: TrendingDown },
   { id: "income", label: "Income", icon: TrendingUp },
-  { id: "cash-book", label: "Cash Book", icon: BookOpen },
+  { id: "ledger", label: "Ledger", icon: BookMarked },
   { id: "chart-of-accounts", label: "Chart of Accounts", icon: Landmark },
-  { id: "journal-entries", label: "Journal Entries", icon: FileText },
-  { id: "vendors", label: "Vendors", icon: Building2 },
+  {
+    id: "journal-entries",
+    label: "Journal Entries (गोश्वारा भौचर)",
+    icon: FileText,
+  },
   { id: "reports", label: "Reports", icon: BarChart3 },
-  { id: "approvals", label: "Approvals", icon: ClipboardList },
-  { id: "settings", label: "Settings", icon: Settings, adminOnly: true },
-  { id: "accountants", label: "Accountants", icon: UserCog, adminOnly: true },
-  { id: "audit-logs", label: "Audit Trail", icon: ClipboardList },
 ];
 
+/** Practical college reports — one Reports module (filters + export) */
 const reportTypes = [
-  { id: "daily-fee-collection", label: "Daily Fee Collection" },
-  { id: "monthly-fee-collection", label: "Monthly Fee Collection" },
+  { id: "ledger", label: "Ledger Report" },
+  { id: "daily-fee-collection", label: "Student Fee Report (Daily)" },
+  { id: "monthly-fee-collection", label: "Student Fee Report (Monthly)" },
   { id: "pending-fees", label: "Pending Fees" },
-  { id: "fee-defaulters", label: "Fee Defaulters" },
-  { id: "salary-payments", label: "Salary Payments" },
-  { id: "expenses", label: "Expenses" },
-  { id: "purchases", label: "Purchases" },
-  { id: "income", label: "Income" },
-  { id: "cash-summary", label: "Cash Summary" },
-  { id: "financial-summary", label: "Financial Summary (All)" },
-  { id: "trial-balance", label: "Trial Balance", ledger: true },
-  { id: "balance-sheet", label: "Balance Sheet", ledger: true },
-  { id: "income-expenditure", label: "Income & Expenditure", ledger: true },
+  { id: "salary-payments", label: "Salary Report" },
+  { id: "refunds", label: "Refund Report" },
+  { id: "purchases", label: "Purchase Report" },
+  { id: "expenses", label: "Expense Report" },
+  { id: "income", label: "Income Report" },
+  { id: "journal", label: "Journal Report" },
+  { id: "financial-summary", label: "Monthly Financial Summary" },
   { id: "student-ledger", label: "Student Ledger", ledger: true },
   { id: "student-due", label: "Student Due Report", ledger: true },
-  { id: "bank-book", label: "Bank Book", ledger: true },
   { id: "day-book", label: "Day Book", ledger: true },
   {
     id: "fee-collection-summary",
@@ -203,8 +183,6 @@ const reportTypes = [
     ledger: true,
   },
   { id: "scholarship-report", label: "Scholarship Report", ledger: true },
-  { id: "vendor-ledger", label: "Vendor Ledger", ledger: true },
-  { id: "cash-flow", label: "Cash Flow", ledger: true },
 ] as const;
 
 const defaultStructure: ExtendedFeeStructureInput = {
@@ -238,12 +216,15 @@ const defaultCollection: EnhancedFeeCollectionInput = {
 };
 
 const defaultExpense: AccountingExpenseInput = {
-  category: "Office Expenses",
+  category: "Office",
   vendor: "",
   dateBs: "",
   amountNpr: 0,
   paymentMethod: "CASH",
   description: "",
+  voucherNumber: "",
+  approvedBy: "",
+  attachmentUrl: "",
 };
 
 const defaultPurchase: AccountingPurchaseInput = {
@@ -251,20 +232,25 @@ const defaultPurchase: AccountingPurchaseInput = {
   vendor: "",
   purchaseDateBs: "",
   invoiceNumber: "",
+  item: "",
   quantity: 1,
   unitPriceNpr: 0,
-  paymentStatus: "PENDING",
+  paymentStatus: "PAID",
   paymentMethod: "CASH",
   description: "",
+  voucherNumber: "",
+  attachmentUrl: "",
 };
 
 const defaultIncome: AccountingIncomeInput = {
-  category: "Donations",
+  category: "Donation",
   source: "",
   dateBs: "",
   amountNpr: 0,
   paymentMethod: "CASH",
   description: "",
+  receiptNumber: "",
+  voucherNumber: "",
 };
 
 const defaultSalary: SalaryPaymentInput = {
@@ -366,7 +352,7 @@ export const AccountingManager = () => {
     useState<SalaryPaymentRecord | null>(null);
   const [selectedReport, setSelectedReport] = useState<
     (typeof reportTypes)[number]["id"]
-  >("daily-fee-collection");
+  >("ledger");
   const [reportMonth, setReportMonth] = useState("2081-09");
   const [reportDate, setReportDate] = useState("2081-09-01");
   const [summarySection, setSummarySection] =
@@ -401,8 +387,6 @@ export const AccountingManager = () => {
     "reports",
   ];
   const visibleTabs = tabs
-    .filter((item) => !item.adminOnly || isAdmin)
-    .filter((item) => item.id !== "audit-logs" || canViewAudit)
     .filter((item) => !isCashier || cashierTabs.includes(item.id))
     .filter(
       (item) =>
@@ -410,11 +394,10 @@ export const AccountingManager = () => {
         [
           "dashboard",
           "reports",
-          "approvals",
-          "audit-logs",
           "fee-records",
           "salary-records",
           "refund-records",
+          "ledger",
           "journal-entries",
         ].includes(item.id),
     );
@@ -508,7 +491,7 @@ export const AccountingManager = () => {
     queryKey: ["accounting-cash-book"],
     queryFn: () =>
       unwrap<CashBookEntryRecord[]>(api.get("/accounting/cash-book")),
-    enabled: tab === "cash-book",
+    enabled: false,
   });
 
   const settingsQuery = useQuery({
@@ -523,13 +506,13 @@ export const AccountingManager = () => {
     queryKey: ["accounting-accountants"],
     queryFn: () =>
       unwrap<AccountantRecord[]>(api.get("/accounting/accountants")),
-    enabled: isAdmin && tab === "accountants",
+    enabled: false,
   });
 
   const auditLogsQuery = useQuery({
     queryKey: ["accounting-audit-logs"],
     queryFn: () => unwrap<AuditLogRecord[]>(api.get("/accounting/audit-logs")),
-    enabled: canViewAudit && tab === "audit-logs",
+    enabled: false,
   });
 
   const reverseCollection = useMutation({
@@ -588,22 +571,10 @@ export const AccountingManager = () => {
   });
 
   const invalidateAccounting = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["accounting-dashboard"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-structures"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-receipts"] }),
-      queryClient.invalidateQueries({
-        queryKey: ["accounting-student-accounts"],
-      }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-expenses"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-purchases"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-income"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-salaries"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounting-cash-book"] }),
-
-      queryClient.invalidateQueries({ queryKey: ["students"] }),
-      invalidateDashboardQueries(),
-    ]);
+    const { invalidateAccountingQueries } = await import(
+      "./invalidateAccountingQueries"
+    );
+    await invalidateAccountingQueries();
   };
 
   const saveStructure = useMutation({
@@ -976,7 +947,7 @@ export const AccountingManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Accounting & Finance"
-        description="Fee, salary & refund records, purchases, expenses, income, cash book, journals, and financial reports."
+        description="Nepal college accounting — fee, salary, refunds, purchases, expenses, income, ledger, and गोश्वारा भौचर. Transactions post to the ledger automatically."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -1004,156 +975,126 @@ export const AccountingManager = () => {
           <LoadingState />
         ) : (
           <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {(dashboardQuery.data?.stats ?? []).map((stat) => (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              {(
+                dashboardQuery.data?.stats ?? [
+                  {
+                    label: "Today's Collection",
+                    value: dashboardQuery.data?.todayCollectionNpr ?? 0,
+                  },
+                  {
+                    label: "Monthly Collection",
+                    value: dashboardQuery.data?.monthlyCollectionNpr ?? 0,
+                  },
+                  {
+                    label: "Total Income",
+                    value: dashboardQuery.data?.totalIncomeNpr ?? 0,
+                  },
+                  {
+                    label: "Total Expenses",
+                    value: dashboardQuery.data?.totalExpensesNpr ?? 0,
+                  },
+                  {
+                    label: "Cash Balance",
+                    value: dashboardQuery.data?.cashBalanceNpr ?? 0,
+                  },
+                ]
+              ).map((stat) => (
                 <Card key={stat.label}>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm text-slate-500">
+                    <CardTitle className="text-sm font-medium text-slate-500">
                       {stat.label}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="text-2xl font-semibold">
-                    {stat.label.includes("Students")
-                      ? stat.value
-                      : formatCurrencyNpr(stat.value)}
+                  <CardContent
+                    className={cn(
+                      "text-2xl font-semibold",
+                      stat.label.includes("Expense") && "text-rose-700",
+                      stat.label.includes("Income") && "text-emerald-700",
+                      stat.label.includes("Cash") && "text-brand-700",
+                      stat.label.includes("Collection") && "text-brand-800",
+                    )}
+                  >
+                    {formatCurrencyNpr(stat.value)}
                   </CardContent>
                 </Card>
               ))}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Cash Balance</CardTitle>
-                </CardHeader>
-                <CardContent className="text-2xl font-semibold text-brand-700">
-                  {formatCurrencyNpr(dashboardQuery.data?.cashBalanceNpr ?? 0)}
-                </CardContent>
-              </Card>
             </div>
 
-            <div className="grid gap-6 xl:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Recent Fee Collections</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(dashboardQuery.data?.recentCollections ?? []).length ===
-                  0 ? (
-                    <EmptyState
-                      title="No collections yet"
-                      description="Collected fees will appear here."
-                    />
-                  ) : (
-                    (dashboardQuery.data?.recentCollections ?? []).map(
-                      (collection) => (
-                        <div
-                          key={collection._id}
-                          className="flex items-center justify-between rounded-xl border p-3 text-sm"
+            <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+              {(
+                [
+                  {
+                    title: "Recent Fee Collections",
+                    items: dashboardQuery.data?.recentFees ?? [],
+                    amountClass: "text-brand-700",
+                  },
+                  {
+                    title: "Recent Salary Payments",
+                    items: dashboardQuery.data?.recentSalaries ?? [],
+                    amountClass: "text-emerald-800",
+                  },
+                  {
+                    title: "Recent Purchases",
+                    items: dashboardQuery.data?.recentPurchases ?? [],
+                    amountClass: "text-indigo-800",
+                  },
+                  {
+                    title: "Recent Expenses",
+                    items: dashboardQuery.data?.recentExpenseItems ?? [],
+                    amountClass: "text-rose-700",
+                  },
+                  {
+                    title: "Recent Refunds",
+                    items: dashboardQuery.data?.recentRefunds ?? [],
+                    amountClass: "text-violet-800",
+                  },
+                ] as const
+              ).map((section) => (
+                <Card key={section.title}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">{section.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {section.items.length === 0 ? (
+                      <p className="text-sm text-slate-500">No records yet.</p>
+                    ) : (
+                      section.items.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white p-3 text-left text-sm transition hover:border-brand-200 hover:bg-brand-50/40"
+                          onClick={() => {
+                            if (item.linkTab) setTab(item.linkTab as Tab);
+                          }}
                         >
-                          <div>
-                            <div className="font-medium">
-                              {collection.receiptNumber}
+                          <div className="min-w-0">
+                            <div className="truncate font-medium text-slate-900">
+                              {item.party}
                             </div>
-                            <div className="text-slate-500">
-                              {collection.paidDateBs}
-                            </div>
-                          </div>
-                          <div className="font-semibold text-brand-700">
-                            {formatCurrencyNpr(collection.amountPaidNpr)}
-                          </div>
-                        </div>
-                      ),
-                    )
-                  )}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Recent Expenses</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(dashboardQuery.data?.recentExpenses ?? []).length === 0 ? (
-                    <EmptyState
-                      title="No expenses yet"
-                      description="Recorded expenses will appear here."
-                    />
-                  ) : (
-                    (dashboardQuery.data?.recentExpenses ?? []).map(
-                      (expense) => (
-                        <div
-                          key={expense._id}
-                          className="flex items-center justify-between rounded-xl border p-3 text-sm"
-                        >
-                          <div>
-                            <div className="font-medium">
-                              {expense.category}
-                            </div>
-                            <div className="text-slate-500">
-                              {expense.vendor} · {expense.dateBs}
+                            <div className="text-xs text-slate-500">
+                              {item.dateBs} · {item.voucherNo}
+                              {item.status ? (
+                                <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
+                                  {String(item.status).replace(/_/g, " ")}
+                                </span>
+                              ) : null}
                             </div>
                           </div>
-                          <div className="font-semibold text-rose-700">
-                            {formatCurrencyNpr(expense.amountNpr)}
+                          <div
+                            className={cn(
+                              "shrink-0 font-semibold",
+                              section.amountClass,
+                            )}
+                          >
+                            {formatCurrencyNpr(item.amountNpr)}
                           </div>
-                        </div>
-                      ),
-                    )
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {dashboardQuery.data ? (
-              <AccountingDashboardCharts data={dashboardQuery.data} />
-            ) : null}
-
-            <div className="grid gap-6 xl:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Fee Collection by Month</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {(dashboardQuery.data?.feeChart ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      No fee collection data yet.
-                    </p>
-                  ) : (
-                    (dashboardQuery.data?.feeChart ?? []).map((item) => (
-                      <div
-                        key={item.label}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span>{item.label}</span>
-                        <span className="font-medium">
-                          {formatCurrencyNpr(item.amount)}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Expenses by Category</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {(dashboardQuery.data?.expenseChart ?? []).length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      No expense data yet.
-                    </p>
-                  ) : (
-                    (dashboardQuery.data?.expenseChart ?? []).map((item) => (
-                      <div
-                        key={item.label}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span>{item.label}</span>
-                        <span className="font-medium">
-                          {formatCurrencyNpr(item.amount)}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
+                        </button>
+                      ))
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </div>
         )
@@ -1162,6 +1103,7 @@ export const AccountingManager = () => {
       {tab === "fee-records" ? <StudentFeeRecordsPanel /> : null}
       {tab === "salary-records" ? <SalaryPaymentRecordsPanel /> : null}
       {tab === "refund-records" ? <RefundRecordsPanel /> : null}
+      {tab === "ledger" ? <LedgerPanel /> : null}
 
       {/* Legacy fee-collection UI disabled — replaced by Student Fee Records */}
       {false && tab === "fee-records" ? (
@@ -2136,11 +2078,21 @@ export const AccountingManager = () => {
           <Card>
             <CardHeader>
               <CardTitle>
-                {editingExpense ? "Edit Expense" : "Record Expense"}
+                {editingExpense ? "Edit Expense" : "Daily Expense Register"}
               </CardTitle>
+              <p className="text-sm text-slate-500">
+                Posts journal (Dr expense · Cr cash/bank) and updates ledger
+                automatically.
+              </p>
             </CardHeader>
             <CardContent className="space-y-3">
-              <FormField label="Category">
+              <FormField label="Date">
+                <NepaliDateField
+                  value={expenseForm.dateBs}
+                  onChange={(v) => setExpenseForm((c) => ({ ...c, dateBs: v }))}
+                />
+              </FormField>
+              <FormField label="Expense Category">
                 <Select
                   value={expenseForm.category}
                   onChange={(e) =>
@@ -2158,18 +2110,15 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Vendor">
-                <Input
-                  value={expenseForm.vendor}
+              <FormField label="Description">
+                <Textarea
+                  value={expenseForm.description}
                   onChange={(e) =>
-                    setExpenseForm((c) => ({ ...c, vendor: e.target.value }))
+                    setExpenseForm((c) => ({
+                      ...c,
+                      description: e.target.value,
+                    }))
                   }
-                />
-              </FormField>
-              <FormField label="Date">
-                <NepaliDateField
-                  value={expenseForm.dateBs}
-                  onChange={(v) => setExpenseForm((c) => ({ ...c, dateBs: v }))}
                 />
               </FormField>
               <FormField label="Amount">
@@ -2201,16 +2150,69 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Description">
-                <Textarea
-                  value={expenseForm.description}
+              <FormField label="Voucher Number (optional)">
+                <Input
+                  value={expenseForm.voucherNumber ?? ""}
+                  placeholder="Auto if blank"
                   onChange={(e) =>
                     setExpenseForm((c) => ({
                       ...c,
-                      description: e.target.value,
+                      voucherNumber: e.target.value,
                     }))
                   }
                 />
+              </FormField>
+              <FormField label="Approved By">
+                <Input
+                  value={expenseForm.approvedBy ?? ""}
+                  onChange={(e) =>
+                    setExpenseForm((c) => ({
+                      ...c,
+                      approvedBy: e.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Vendor (optional)">
+                <Input
+                  value={expenseForm.vendor ?? ""}
+                  onChange={(e) =>
+                    setExpenseForm((c) => ({ ...c, vendor: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Attachment">
+                <Input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const fd = new FormData();
+                      fd.append("files", file);
+                      const res = await unwrap<{
+                        files: Array<{ url: string }>;
+                      }>(
+                        api.post("/uploads/accounting", fd, {
+                          headers: {
+                            "Content-Type": "multipart/form-data",
+                          },
+                        }),
+                      );
+                      const url = res.files?.[0]?.url ?? "";
+                      setExpenseForm((c) => ({ ...c, attachmentUrl: url }));
+                      toast.success("Attachment uploaded");
+                    } catch (err) {
+                      toast.error(parseErrorMessage(err));
+                    }
+                  }}
+                />
+                {expenseForm.attachmentUrl ? (
+                  <p className="mt-1 text-xs text-emerald-700">
+                    Attached · {expenseForm.attachmentUrl}
+                  </p>
+                ) : null}
               </FormField>
               <div className="flex gap-2">
                 {editingExpense ? (
@@ -2229,7 +2231,10 @@ export const AccountingManager = () => {
                   onClick={() => {
                     const parsed =
                       accountingExpenseSchema.safeParse(expenseForm);
-                    if (!parsed.success) return toast.error("Invalid expense");
+                    if (!parsed.success)
+                      return toast.error(
+                        parsed.error.issues[0]?.message ?? "Invalid expense",
+                      );
                     if (editingExpense) {
                       void updateExpense.mutateAsync({
                         id: editingExpense._id,
@@ -2254,8 +2259,8 @@ export const AccountingManager = () => {
                 <TableHead>
                   <tr>
                     <Th>Date</Th>
+                    <Th>Voucher</Th>
                     <Th>Category</Th>
-                    <Th>Vendor</Th>
                     <Th>Amount</Th>
                     <Th />
                   </tr>
@@ -2264,11 +2269,40 @@ export const AccountingManager = () => {
                   {(expensesQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
                       <Td>{row.dateBs}</Td>
+                      <Td className="font-mono text-xs">
+                        {row.voucherNumber ?? "—"}
+                      </Td>
                       <Td>{row.category}</Td>
-                      <Td>{row.vendor}</Td>
                       <Td>{formatCurrencyNpr(row.amountNpr)}</Td>
                       <Td>
-                        <div className="flex gap-1">
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              printRegisterVoucher({
+                                kind: "Expense",
+                                voucherNumber: row.voucherNumber,
+                                dateBs: row.dateBs,
+                                amountNpr: row.amountNpr,
+                                narration: row.description,
+                                fields: [
+                                  { label: "Category", value: row.category },
+                                  { label: "Vendor", value: row.vendor || "—" },
+                                  {
+                                    label: "Payment",
+                                    value: row.paymentMethod.replace(/_/g, " "),
+                                  },
+                                  {
+                                    label: "Approved By",
+                                    value: row.approvedBy || "—",
+                                  },
+                                ],
+                              })
+                            }
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -2277,11 +2311,13 @@ export const AccountingManager = () => {
                               setExpenseForm({
                                 category:
                                   row.category as AccountingExpenseInput["category"],
-                                vendor: row.vendor,
+                                vendor: row.vendor ?? "",
                                 dateBs: row.dateBs,
                                 amountNpr: row.amountNpr,
                                 paymentMethod: row.paymentMethod,
                                 description: row.description,
+                                voucherNumber: row.voucherNumber ?? "",
+                                approvedBy: row.approvedBy ?? "",
                                 attachmentUrl: row.attachmentUrl ?? "",
                               });
                             }}
@@ -2315,10 +2351,41 @@ export const AccountingManager = () => {
           <Card>
             <CardHeader>
               <CardTitle>
-                {editingPurchase ? "Edit Purchase" : "Record Purchase"}
+                {editingPurchase ? "Edit Purchase" : "Purchase Register"}
               </CardTitle>
+              <p className="text-sm text-slate-500">
+                Auto journal + ledger. Printable purchase voucher available on
+                each row.
+              </p>
             </CardHeader>
             <CardContent className="space-y-3">
+              <FormField label="Purchase Date">
+                <NepaliDateField
+                  value={purchaseForm.purchaseDateBs}
+                  onChange={(v) =>
+                    setPurchaseForm((c) => ({ ...c, purchaseDateBs: v }))
+                  }
+                />
+              </FormField>
+              <FormField label="Vendor">
+                <Input
+                  value={purchaseForm.vendor}
+                  onChange={(e) =>
+                    setPurchaseForm((c) => ({ ...c, vendor: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Bill Number">
+                <Input
+                  value={purchaseForm.invoiceNumber}
+                  onChange={(e) =>
+                    setPurchaseForm((c) => ({
+                      ...c,
+                      invoiceNumber: e.target.value,
+                    }))
+                  }
+                />
+              </FormField>
               <FormField label="Category">
                 <Select
                   value={purchaseForm.category}
@@ -2337,54 +2404,64 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Vendor">
+              <FormField label="Item">
                 <Input
-                  value={purchaseForm.vendor}
+                  value={purchaseForm.item ?? ""}
                   onChange={(e) =>
-                    setPurchaseForm((c) => ({ ...c, vendor: e.target.value }))
+                    setPurchaseForm((c) => ({ ...c, item: e.target.value }))
                   }
                 />
               </FormField>
-              <FormField label="Invoice">
-                <Input
-                  value={purchaseForm.invoiceNumber}
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Quantity">
+                  <NumberInput
+                    value={purchaseForm.quantity}
+                    onChange={(e) =>
+                      setPurchaseForm((c) => ({
+                        ...c,
+                        quantity: e.target.valueAsNumber,
+                      }))
+                    }
+                  />
+                </FormField>
+                <FormField label="Unit Price">
+                  <NumberInput
+                    value={purchaseForm.unitPriceNpr}
+                    onChange={(e) =>
+                      setPurchaseForm((c) => ({
+                        ...c,
+                        unitPriceNpr: e.target.valueAsNumber,
+                      }))
+                    }
+                  />
+                </FormField>
+              </div>
+              <p className="text-sm text-slate-600">
+                Total:{" "}
+                <strong>
+                  {formatCurrencyNpr(
+                    (purchaseForm.quantity || 0) *
+                      (purchaseForm.unitPriceNpr || 0),
+                  )}
+                </strong>
+              </p>
+              <FormField label="Payment Mode">
+                <Select
+                  value={purchaseForm.paymentMethod}
                   onChange={(e) =>
                     setPurchaseForm((c) => ({
                       ...c,
-                      invoiceNumber: e.target.value,
+                      paymentMethod: e.target
+                        .value as AccountingPurchaseInput["paymentMethod"],
                     }))
                   }
-                />
-              </FormField>
-              <FormField label="Date">
-                <NepaliDateField
-                  value={purchaseForm.purchaseDateBs}
-                  onChange={(v) =>
-                    setPurchaseForm((c) => ({ ...c, purchaseDateBs: v }))
-                  }
-                />
-              </FormField>
-              <FormField label="Quantity">
-                <NumberInput
-                  value={purchaseForm.quantity}
-                  onChange={(e) =>
-                    setPurchaseForm((c) => ({
-                      ...c,
-                      quantity: e.target.valueAsNumber,
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField label="Unit Price">
-                <NumberInput
-                  value={purchaseForm.unitPriceNpr}
-                  onChange={(e) =>
-                    setPurchaseForm((c) => ({
-                      ...c,
-                      unitPriceNpr: e.target.valueAsNumber,
-                    }))
-                  }
-                />
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m} value={m}>
+                      {m.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </Select>
               </FormField>
               <FormField label="Payment Status">
                 <Select
@@ -2404,25 +2481,7 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Payment Method">
-                <Select
-                  value={purchaseForm.paymentMethod}
-                  onChange={(e) =>
-                    setPurchaseForm((c) => ({
-                      ...c,
-                      paymentMethod: e.target
-                        .value as AccountingPurchaseInput["paymentMethod"],
-                    }))
-                  }
-                >
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m} value={m}>
-                      {m.replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-              <FormField label="Description">
+              <FormField label="Remarks">
                 <Textarea
                   value={purchaseForm.description ?? ""}
                   onChange={(e) =>
@@ -2432,6 +2491,41 @@ export const AccountingManager = () => {
                     }))
                   }
                 />
+              </FormField>
+              <FormField label="Attachment (Bill PDF/Image)">
+                <Input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const fd = new FormData();
+                      fd.append("files", file);
+                      const res = await unwrap<{
+                        files: Array<{ url: string }>;
+                      }>(
+                        api.post("/uploads/accounting", fd, {
+                          headers: {
+                            "Content-Type": "multipart/form-data",
+                          },
+                        }),
+                      );
+                      setPurchaseForm((c) => ({
+                        ...c,
+                        attachmentUrl: res.files?.[0]?.url ?? "",
+                      }));
+                      toast.success("Bill attached");
+                    } catch (err) {
+                      toast.error(parseErrorMessage(err));
+                    }
+                  }}
+                />
+                {purchaseForm.attachmentUrl ? (
+                  <p className="mt-1 text-xs text-emerald-700">
+                    Attached · {purchaseForm.attachmentUrl}
+                  </p>
+                ) : null}
               </FormField>
               <div className="flex gap-2">
                 {editingPurchase ? (
@@ -2450,7 +2544,10 @@ export const AccountingManager = () => {
                   onClick={() => {
                     const parsed =
                       accountingPurchaseSchema.safeParse(purchaseForm);
-                    if (!parsed.success) return toast.error("Invalid purchase");
+                    if (!parsed.success)
+                      return toast.error(
+                        parsed.error.issues[0]?.message ?? "Invalid purchase",
+                      );
                     if (editingPurchase) {
                       void updatePurchase.mutateAsync({
                         id: editingPurchase._id,
@@ -2475,8 +2572,8 @@ export const AccountingManager = () => {
                 <TableHead>
                   <tr>
                     <Th>Date</Th>
-                    <Th>Category</Th>
-                    <Th>Invoice</Th>
+                    <Th>Voucher</Th>
+                    <Th>Vendor / Item</Th>
                     <Th>Total</Th>
                     <Th>Status</Th>
                     <Th />
@@ -2486,14 +2583,53 @@ export const AccountingManager = () => {
                   {(purchasesQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
                       <Td>{row.purchaseDateBs}</Td>
-                      <Td>{row.category}</Td>
-                      <Td>{row.invoiceNumber}</Td>
+                      <Td className="font-mono text-xs">
+                        {row.voucherNumber ?? "—"}
+                      </Td>
+                      <Td>
+                        <div className="font-medium">{row.vendor}</div>
+                        <div className="text-xs text-slate-500">
+                          {row.item || row.category} · Bill {row.invoiceNumber}
+                        </div>
+                      </Td>
                       <Td>{formatCurrencyNpr(row.totalAmountNpr)}</Td>
                       <Td>
                         <Badge>{row.paymentStatus}</Badge>
                       </Td>
                       <Td>
-                        <div className="flex gap-1">
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              printRegisterVoucher({
+                                kind: "Purchase",
+                                voucherNumber: row.voucherNumber,
+                                dateBs: row.purchaseDateBs,
+                                amountNpr: row.totalAmountNpr,
+                                narration: row.description,
+                                fields: [
+                                  { label: "Vendor", value: row.vendor },
+                                  {
+                                    label: "Bill Number",
+                                    value: row.invoiceNumber,
+                                  },
+                                  { label: "Category", value: row.category },
+                                  { label: "Item", value: row.item || "—" },
+                                  {
+                                    label: "Qty × Price",
+                                    value: `${row.quantity} × ${row.unitPriceNpr}`,
+                                  },
+                                  {
+                                    label: "Payment",
+                                    value: `${row.paymentMethod.replace(/_/g, " ")} (${row.paymentStatus})`,
+                                  },
+                                ],
+                              })
+                            }
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -2505,11 +2641,14 @@ export const AccountingManager = () => {
                                 vendor: row.vendor,
                                 purchaseDateBs: row.purchaseDateBs,
                                 invoiceNumber: row.invoiceNumber,
+                                item: row.item ?? "",
                                 quantity: row.quantity,
                                 unitPriceNpr: row.unitPriceNpr,
                                 paymentStatus: row.paymentStatus,
                                 paymentMethod: row.paymentMethod,
                                 description: row.description ?? "",
+                                voucherNumber: row.voucherNumber ?? "",
+                                attachmentUrl: row.attachmentUrl ?? "",
                               });
                             }}
                           >
@@ -2555,11 +2694,21 @@ export const AccountingManager = () => {
           <Card>
             <CardHeader>
               <CardTitle>
-                {editingIncome ? "Edit Income" : "Record Income"}
+                {editingIncome ? "Edit Income" : "Other Income Register"}
               </CardTitle>
+              <p className="text-sm text-slate-500">
+                Non-fee income (donation, certificate, form sales, fine,
+                interest). Auto journal + ledger.
+              </p>
             </CardHeader>
             <CardContent className="space-y-3">
-              <FormField label="Category">
+              <FormField label="Date">
+                <NepaliDateField
+                  value={incomeForm.dateBs}
+                  onChange={(v) => setIncomeForm((c) => ({ ...c, dateBs: v }))}
+                />
+              </FormField>
+              <FormField label="Income Type">
                 <Select
                   value={incomeForm.category}
                   onChange={(e) =>
@@ -2585,10 +2734,15 @@ export const AccountingManager = () => {
                   }
                 />
               </FormField>
-              <FormField label="Date">
-                <NepaliDateField
-                  value={incomeForm.dateBs}
-                  onChange={(v) => setIncomeForm((c) => ({ ...c, dateBs: v }))}
+              <FormField label="Description">
+                <Textarea
+                  value={incomeForm.description ?? ""}
+                  onChange={(e) =>
+                    setIncomeForm((c) => ({
+                      ...c,
+                      description: e.target.value,
+                    }))
+                  }
                 />
               </FormField>
               <FormField label="Amount">
@@ -2602,7 +2756,7 @@ export const AccountingManager = () => {
                   }
                 />
               </FormField>
-              <FormField label="Payment Method">
+              <FormField label="Payment Mode">
                 <Select
                   value={incomeForm.paymentMethod}
                   onChange={(e) =>
@@ -2620,6 +2774,18 @@ export const AccountingManager = () => {
                   ))}
                 </Select>
               </FormField>
+              <FormField label="Receipt Number (optional)">
+                <Input
+                  value={incomeForm.receiptNumber ?? ""}
+                  placeholder="Auto if blank"
+                  onChange={(e) =>
+                    setIncomeForm((c) => ({
+                      ...c,
+                      receiptNumber: e.target.value,
+                    }))
+                  }
+                />
+              </FormField>
               <div className="flex gap-2">
                 {editingIncome ? (
                   <Button
@@ -2636,7 +2802,10 @@ export const AccountingManager = () => {
                 <Button
                   onClick={() => {
                     const parsed = accountingIncomeSchema.safeParse(incomeForm);
-                    if (!parsed.success) return toast.error("Invalid income");
+                    if (!parsed.success)
+                      return toast.error(
+                        parsed.error.issues[0]?.message ?? "Invalid income",
+                      );
                     if (editingIncome) {
                       void updateIncome.mutateAsync({
                         id: editingIncome._id,
@@ -2661,7 +2830,8 @@ export const AccountingManager = () => {
                 <TableHead>
                   <tr>
                     <Th>Date</Th>
-                    <Th>Category</Th>
+                    <Th>Receipt</Th>
+                    <Th>Type</Th>
                     <Th>Source</Th>
                     <Th>Amount</Th>
                     <Th />
@@ -2671,11 +2841,38 @@ export const AccountingManager = () => {
                   {(incomeQuery.data ?? []).map((row) => (
                     <tr key={row._id}>
                       <Td>{row.dateBs}</Td>
+                      <Td className="font-mono text-xs">
+                        {row.receiptNumber ?? row.voucherNumber ?? "—"}
+                      </Td>
                       <Td>{row.category}</Td>
                       <Td>{row.source}</Td>
                       <Td>{formatCurrencyNpr(row.amountNpr)}</Td>
                       <Td>
-                        <div className="flex gap-1">
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              printRegisterVoucher({
+                                kind: "Income",
+                                voucherNumber:
+                                  row.receiptNumber || row.voucherNumber,
+                                dateBs: row.dateBs,
+                                amountNpr: row.amountNpr,
+                                narration: row.description,
+                                fields: [
+                                  { label: "Income Type", value: row.category },
+                                  { label: "Source", value: row.source },
+                                  {
+                                    label: "Payment Mode",
+                                    value: row.paymentMethod.replace(/_/g, " "),
+                                  },
+                                ],
+                              })
+                            }
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -2689,6 +2886,8 @@ export const AccountingManager = () => {
                                 amountNpr: row.amountNpr,
                                 paymentMethod: row.paymentMethod,
                                 description: row.description ?? "",
+                                receiptNumber: row.receiptNumber ?? "",
+                                voucherNumber: row.voucherNumber ?? "",
                               });
                             }}
                           >
@@ -2716,7 +2915,7 @@ export const AccountingManager = () => {
         </div>
       ) : null}
 
-      {tab === "cash-book" ? (
+      {false ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
@@ -2829,8 +3028,9 @@ export const AccountingManager = () => {
           <CardHeader>
             <CardTitle>Financial Reports</CardTitle>
             <p className="text-sm text-slate-500">
-              Generate fee, income, expense, purchase, and salary reports. Use
-              Financial Summary for a complete monthly overview.
+              Ledger, student fees, salary, refunds, purchases, expenses,
+              income, journal, and monthly summary — with date filters, print,
+              PDF/CSV, and Excel export.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -2859,9 +3059,33 @@ export const AccountingManager = () => {
                 <Input
                   value={reportMonth}
                   onChange={(e) => setReportMonth(e.target.value)}
-                  placeholder="YYYY-MM"
+                  placeholder="YYYY-MM (BS month)"
                 />
               ) : null}
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const printRoot = document.getElementById(
+                    "accounting-report-print",
+                  );
+                  if (!printRoot) {
+                    toast.error("Nothing to print");
+                    return;
+                  }
+                  printSimpleDocument({
+                    title:
+                      reportTypes.find((r) => r.id === selectedReport)?.label ??
+                      "Report",
+                    subtitle: reportUsesMonthFilter(selectedReport)
+                      ? `Period: ${reportMonth}`
+                      : undefined,
+                    bodyHtml: printRoot.innerHTML,
+                  });
+                }}
+              >
+                <Printer className="mr-1.5 h-4 w-4" />
+                Print / PDF
+              </Button>
               <Button variant="outline" onClick={() => exportReport("csv")}>
                 Export CSV
               </Button>
@@ -2872,7 +3096,7 @@ export const AccountingManager = () => {
             {reportQuery.isLoading ? (
               <LoadingState />
             ) : financialSummary ? (
-              <div className="space-y-6">
+              <div id="accounting-report-print" className="space-y-6">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                   {[
                     {
@@ -3016,7 +3240,7 @@ export const AccountingManager = () => {
                 </div>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div id="accounting-report-print" className="overflow-x-auto">
                 <Table>
                   <TableHead>
                     <tr>
@@ -3059,11 +3283,8 @@ export const AccountingManager = () => {
       {tab === "journal-entries" ? (
         <JournalEntriesPanel canWrite={canWrite && !isCashier} />
       ) : null}
-      {tab === "vendors" ? (
-        <VendorsPanel canWrite={canWrite && !isCashier} />
-      ) : null}
 
-      {tab === "settings" && isAdmin ? (
+      {false ? (
         <Card>
           <CardHeader>
             <CardTitle>Accounting Settings</CardTitle>
@@ -3172,11 +3393,11 @@ export const AccountingManager = () => {
         </Card>
       ) : null}
 
-      {tab === "approvals" ? (
-        <FinancialApprovalsPanel canApprove={canApprove} />
+      {false ? (
+        <div />
       ) : null}
 
-      {tab === "audit-logs" && canViewAudit ? (
+      {false ? (
         <Card>
           <CardHeader>
             <CardTitle>Accounting Audit Trail</CardTitle>
@@ -3240,7 +3461,7 @@ export const AccountingManager = () => {
         </Card>
       ) : null}
 
-      {tab === "accountants" && isAdmin ? (
+      {false ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>

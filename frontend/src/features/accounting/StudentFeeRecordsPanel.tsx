@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  BatchRecord,
   EnhancedFeeCollectionRecord,
   ExtendedFeeStructureInput,
   ProgramYearFeeSummary,
   StudentAccountSummary,
   StudentFinancialHistory,
   StudentRecord,
+  YearRecord,
 } from "@phit-erp/shared";
 import { PAYMENT_METHODS } from "@phit-erp/shared";
 import {
@@ -17,9 +19,9 @@ import {
   Plus,
   Printer,
   Receipt,
-  Search,
   Upload,
   Wallet,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -118,6 +120,12 @@ export const StudentFeeRecordsPanel = () => {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<PanelTab>("ledger");
   const [search, setSearch] = useState("");
+  /** Ledger filters */
+  const [ledgerBatchId, setLedgerBatchId] = useState("");
+  const [ledgerYearId, setLedgerYearId] = useState("");
+  /** Record / scholarship student picker filters */
+  const [pickerBatchId, setPickerBatchId] = useState("");
+  const [pickerYearId, setPickerYearId] = useState("");
   const [method, setMethod] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -162,6 +170,16 @@ export const StudentFeeRecordsPanel = () => {
     queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
   });
 
+  const batchesQuery = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
+  });
+
+  const yearsQuery = useQuery({
+    queryKey: ["years"],
+    queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
+  });
+
   const historyQuery = useQuery({
     queryKey: ["accounting-student-financial", selectedStudentId],
     queryFn: () =>
@@ -174,15 +192,10 @@ export const StudentFeeRecordsPanel = () => {
   });
 
   const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["accounting"] });
-    await queryClient.invalidateQueries({ queryKey: ["accounting-fee-records"] });
-    await queryClient.invalidateQueries({
-      queryKey: ["accounting-student-accounts"],
-    });
-    await queryClient.invalidateQueries({
-      queryKey: ["accounting-student-financial"],
-    });
-    await queryClient.invalidateQueries({ queryKey: ["student-financial-history"] });
+    const { invalidateAccountingQueries } = await import(
+      "./invalidateAccountingQueries"
+    );
+    await invalidateAccountingQueries();
   };
 
   const collectMutation = useMutation({
@@ -220,16 +233,64 @@ export const StudentFeeRecordsPanel = () => {
 
   const students = studentsQuery.data ?? [];
   const accounts = accountsQuery.data ?? [];
+  const batches = batchesQuery.data ?? [];
+  const years = yearsQuery.data ?? [];
+
+  const yearsForLedgerBatch = useMemo(() => {
+    if (!ledgerBatchId) return years;
+    return years.filter((y) => y.batchId === ledgerBatchId);
+  }, [years, ledgerBatchId]);
+
+  const yearsForPickerBatch = useMemo(() => {
+    if (!pickerBatchId) return years;
+    return years.filter((y) => y.batchId === pickerBatchId);
+  }, [years, pickerBatchId]);
+
+  const asId = (value: unknown): string => {
+    if (value == null) return "";
+    if (typeof value === "object" && value && "_id" in value) {
+      return String((value as { _id: unknown })._id);
+    }
+    return String(value);
+  };
+
+  const studentMatchesGroup = (
+    student: { batchId?: unknown; yearId?: unknown } | undefined,
+    batchId: string,
+    yearId: string,
+  ) => {
+    if (!student) return !batchId && !yearId;
+    if (batchId && asId(student.batchId) !== batchId) return false;
+    if (yearId && asId(student.yearId) !== yearId) return false;
+    return true;
+  };
 
   const filteredAccounts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return accounts;
     return accounts.filter((a) => {
+      if (!studentMatchesGroup(a.student, ledgerBatchId, ledgerYearId)) {
+        return false;
+      }
+      if (!q) return true;
       const name = a.student?.user?.fullName?.toLowerCase() ?? "";
       const adm = a.student?.admissionNumber?.toLowerCase() ?? "";
-      return name.includes(q) || adm.includes(q);
+      const batchName = (a.className ?? "").toLowerCase();
+      const yearName = (a.sectionName ?? "").toLowerCase();
+      return (
+        name.includes(q) ||
+        adm.includes(q) ||
+        batchName.includes(q) ||
+        yearName.includes(q)
+      );
     });
-  }, [accounts, search]);
+  }, [accounts, search, ledgerBatchId, ledgerYearId]);
+
+  /** Students available in payment / scholarship pickers after batch+year filter */
+  const pickerStudents = useMemo(() => {
+    return students.filter((s) =>
+      studentMatchesGroup(s, pickerBatchId, pickerYearId),
+    );
+  }, [students, pickerBatchId, pickerYearId]);
 
   const filteredReceipts = useMemo(() => {
     let rows = receiptsQuery.data ?? [];
@@ -249,6 +310,17 @@ export const StudentFeeRecordsPanel = () => {
     if (toDate) rows = rows.filter((r) => r.paidDateBs <= toDate);
     return rows;
   }, [receiptsQuery.data, search, method, fromDate, toDate]);
+
+  const clearLedgerFilters = () => {
+    setSearch("");
+    setLedgerBatchId("");
+    setLedgerYearId("");
+  };
+
+  const clearPickerFilters = () => {
+    setPickerBatchId("");
+    setPickerYearId("");
+  };
 
   const uploadAttachments = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -430,23 +502,97 @@ export const StudentFeeRecordsPanel = () => {
       {/* ─── Ledger ─── */}
       {tab === "ledger" ? (
         <Card>
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardHeader>
             <CardTitle className="text-base">Student fee ledger</CardTitle>
-            <div className="relative max-w-sm flex-1">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
-              <Input
-                className="pl-8"
-                placeholder="Search student name or admission no."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+            <p className="text-sm text-slate-500">
+              Filter by batch and year, or search by name / admission number.
+            </p>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <FormField label="Search">
+                  <div className="relative">
+                    <Input
+                      className="h-10 pr-9"
+                      placeholder="Name or admission no."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                    {search ? (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                        onClick={() => setSearch("")}
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                </FormField>
+                <FormField label="Batch">
+                  <Select
+                    value={ledgerBatchId}
+                    onChange={(e) => {
+                      setLedgerBatchId(e.target.value);
+                      setLedgerYearId("");
+                    }}
+                  >
+                    <option value="">All batches</option>
+                    {batches.map((b) => (
+                      <option key={b._id} value={b._id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Year">
+                  <Select
+                    value={ledgerYearId}
+                    onChange={(e) => setLedgerYearId(e.target.value)}
+                    disabled={Boolean(ledgerBatchId) && yearsForLedgerBatch.length === 0}
+                  >
+                    <option value="">
+                      {ledgerBatchId ? "All years in batch" : "All years"}
+                    </option>
+                    {yearsForLedgerBatch.map((y) => (
+                      <option key={y._id} value={y._id}>
+                        {y.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={!search && !ledgerBatchId && !ledgerYearId}
+                    onClick={clearLedgerFilters}
+                  >
+                    <X className="mr-1.5 h-4 w-4" />
+                    Clear filters
+                  </Button>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Showing {filteredAccounts.length} of {accounts.length} student
+                {accounts.length === 1 ? "" : "s"}
+                {ledgerBatchId || ledgerYearId || search
+                  ? " (filtered)"
+                  : ""}
+              </p>
+            </div>
+
             {filteredAccounts.length === 0 ? (
               <EmptyState
-                title="No student accounts"
-                description="Students will appear here with paid / remaining balances once enrolled."
+                title="No students match"
+                description={
+                  accounts.length === 0
+                    ? "Students will appear here with paid / remaining balances once enrolled."
+                    : "Try another batch, year, or search term — or clear filters."
+                }
               />
             ) : (
               <div className="overflow-x-auto">
@@ -527,6 +673,12 @@ export const StudentFeeRecordsPanel = () => {
                                   ...f,
                                   studentId: acc.student._id,
                                 }));
+                                if (acc.student.batchId) {
+                                  setPickerBatchId(asId(acc.student.batchId));
+                                }
+                                if (acc.student.yearId) {
+                                  setPickerYearId(asId(acc.student.yearId));
+                                }
                                 setTab("record");
                               }}
                             >
@@ -556,6 +708,72 @@ export const StudentFeeRecordsPanel = () => {
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Find student by batch &amp; year
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <FormField label="Batch">
+                    <Select
+                      value={pickerBatchId}
+                      onChange={(e) => {
+                        setPickerBatchId(e.target.value);
+                        setPickerYearId("");
+                        setPaymentForm((f) => ({ ...f, studentId: "" }));
+                        setSelectedStudentId("");
+                      }}
+                    >
+                      <option value="">All batches</option>
+                      {batches.map((b) => (
+                        <option key={b._id} value={b._id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Year">
+                    <Select
+                      value={pickerYearId}
+                      onChange={(e) => {
+                        setPickerYearId(e.target.value);
+                        setPaymentForm((f) => ({ ...f, studentId: "" }));
+                        setSelectedStudentId("");
+                      }}
+                    >
+                      <option value="">
+                        {pickerBatchId ? "All years in batch" : "All years"}
+                      </option>
+                      {yearsForPickerBatch.map((y) => (
+                        <option key={y._id} value={y._id}>
+                          {y.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      disabled={!pickerBatchId && !pickerYearId}
+                      onClick={() => {
+                        clearPickerFilters();
+                        setPaymentForm((f) => ({ ...f, studentId: "" }));
+                        setSelectedStudentId("");
+                      }}
+                    >
+                      <X className="mr-1.5 h-4 w-4" />
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  {pickerStudents.length} student
+                  {pickerStudents.length === 1 ? "" : "s"} in list
+                  {pickerBatchId || pickerYearId ? " (filtered)" : ""}
+                </p>
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <FormField label="Student *">
                   <Select
@@ -564,10 +782,18 @@ export const StudentFeeRecordsPanel = () => {
                       const id = e.target.value;
                       setPaymentForm((f) => ({ ...f, studentId: id }));
                       setSelectedStudentId(id);
+                      // Sync picker filters from student so ledger/history stay consistent
+                      const st = students.find((s) => s._id === id);
+                      if (st?.batchId) setPickerBatchId(asId(st.batchId));
+                      if (st?.yearId) setPickerYearId(asId(st.yearId));
                     }}
                   >
-                    <option value="">Select student</option>
-                    {students.map((s) => (
+                    <option value="">
+                      {pickerStudents.length === 0
+                        ? "No students in this batch/year"
+                        : "Select student"}
+                    </option>
+                    {pickerStudents.map((s) => (
                       <option key={s._id} value={s._id}>
                         {s.user?.fullName ?? "Student"} ({s.admissionNumber})
                       </option>
@@ -929,6 +1155,63 @@ export const StudentFeeRecordsPanel = () => {
             </p>
           </CardHeader>
           <CardContent className="grid max-w-3xl gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                Find student by batch &amp; year
+              </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <FormField label="Batch">
+                  <Select
+                    value={pickerBatchId}
+                    onChange={(e) => {
+                      setPickerBatchId(e.target.value);
+                      setPickerYearId("");
+                      setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                    }}
+                  >
+                    <option value="">All batches</option>
+                    {batches.map((b) => (
+                      <option key={b._id} value={b._id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Year">
+                  <Select
+                    value={pickerYearId}
+                    onChange={(e) => {
+                      setPickerYearId(e.target.value);
+                      setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                    }}
+                  >
+                    <option value="">
+                      {pickerBatchId ? "All years in batch" : "All years"}
+                    </option>
+                    {yearsForPickerBatch.map((y) => (
+                      <option key={y._id} value={y._id}>
+                        {y.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={!pickerBatchId && !pickerYearId}
+                    onClick={() => {
+                      clearPickerFilters();
+                      setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                    }}
+                  >
+                    <X className="mr-1.5 h-4 w-4" />
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            </div>
             <FormField label="Student *">
               <Select
                 value={scholarshipForm.studentId}
@@ -936,8 +1219,12 @@ export const StudentFeeRecordsPanel = () => {
                   setScholarshipForm((f) => ({ ...f, studentId: e.target.value }))
                 }
               >
-                <option value="">Select student</option>
-                {students.map((s) => (
+                <option value="">
+                  {pickerStudents.length === 0
+                    ? "No students in this batch/year"
+                    : "Select student"}
+                </option>
+                {pickerStudents.map((s) => (
                   <option key={s._id} value={s._id}>
                     {s.user?.fullName} ({s.admissionNumber})
                   </option>

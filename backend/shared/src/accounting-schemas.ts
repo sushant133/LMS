@@ -87,11 +87,14 @@ export const accountantSchema = z.object({
 
 export const accountingExpenseSchema = z.object({
   category: z.enum(EXPENSE_CATEGORIES),
-  vendor: z.string().min(1),
+  /** Optional for legacy; new daily expenses often omit vendor */
+  vendor: z.string().optional().or(z.literal("")).default(""),
   dateBs: bsDateSchema,
   amountNpr: moneySchema,
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
   description: z.string().min(1),
+  voucherNumber: z.string().optional().or(z.literal("")),
+  approvedBy: z.string().optional().or(z.literal("")),
   attachmentUrl: z.string().optional().or(z.literal(""))
 });
 
@@ -99,12 +102,16 @@ export const accountingPurchaseSchema = z.object({
   category: z.enum(PURCHASE_CATEGORIES),
   vendor: z.string().min(1),
   purchaseDateBs: bsDateSchema,
+  /** Bill / invoice number */
   invoiceNumber: z.string().min(1),
+  item: z.string().optional().or(z.literal("")),
   quantity: z.coerce.number().int().min(1),
   unitPriceNpr: moneySchema,
   paymentStatus: z.enum(PAYMENT_STATUSES).default("PENDING"),
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
-  description: z.string().optional().or(z.literal(""))
+  description: z.string().optional().or(z.literal("")),
+  voucherNumber: z.string().optional().or(z.literal("")),
+  attachmentUrl: z.string().optional().or(z.literal(""))
 });
 
 export const accountingIncomeSchema = z.object({
@@ -113,37 +120,65 @@ export const accountingIncomeSchema = z.object({
   dateBs: bsDateSchema,
   amountNpr: moneySchema,
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
-  description: z.string().optional().or(z.literal(""))
+  description: z.string().optional().or(z.literal("")),
+  receiptNumber: z.string().optional().or(z.literal("")),
+  voucherNumber: z.string().optional().or(z.literal(""))
 });
 
-export const salaryPaymentSchema = z.object({
-  employeeType: z.enum(["TEACHER", "STAFF"]),
-  teacherId: optionalObjectIdSchema,
-  staffId: optionalObjectIdSchema,
-  staffName: z.string().optional().or(z.literal("")),
-  monthBs: z.string().regex(/^\d{4}-\d{2}$/),
-  basicSalaryNpr: moneySchema,
-  allowancesNpr: moneySchema.default(0),
-  bonusNpr: moneySchema.default(0),
-  advanceSalaryNpr: moneySchema.default(0),
-  loanDeductionNpr: moneySchema.default(0),
-  taxNpr: moneySchema.default(0),
-  otherDeductionsNpr: moneySchema.default(0),
-  status: z.enum(["DRAFT", "PROCESSED", "PAID"]).default("DRAFT"),
-  paidDateBs: bsDateSchema.optional().or(z.literal("")),
-  paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER")
-}).superRefine((value, ctx) => {
-  if (value.employeeType === "TEACHER" && !value.teacherId) {
-    ctx.addIssue({ code: "custom", message: "teacherId is required for teacher salaries", path: ["teacherId"] });
-  }
-  if (value.employeeType === "STAFF" && !value.staffId && !value.staffName?.trim()) {
-    ctx.addIssue({
-      code: "custom",
-      message: "Select a college staff member or provide a staff name",
-      path: ["staffId"]
-    });
-  }
-});
+export const salaryPaymentSchema = z
+  .object({
+    employeeType: z.enum(["TEACHER", "STAFF"]),
+    teacherId: optionalObjectIdSchema,
+    staffId: optionalObjectIdSchema,
+    staffName: z.string().optional().or(z.literal("")),
+    monthBs: z.string().regex(/^\d{4}-\d{2}$/, "Use YYYY-MM (BS month)"),
+    basicSalaryNpr: moneySchema,
+    allowancesNpr: moneySchema.default(0),
+    bonusNpr: moneySchema.default(0),
+    advanceSalaryNpr: moneySchema.default(0),
+    loanDeductionNpr: moneySchema.default(0),
+    taxNpr: moneySchema.default(0),
+    otherDeductionsNpr: moneySchema.default(0),
+    status: z.enum(["DRAFT", "PROCESSED", "PAID"]).default("DRAFT"),
+    paidDateBs: bsDateSchema.optional().or(z.literal("")),
+    paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),
+    transactionNumber: z.string().optional().or(z.literal("")),
+    notes: z.string().optional().or(z.literal("")),
+    attachments: z
+      .array(
+        z.object({
+          name: z.string().optional().or(z.literal("")),
+          url: z.string().min(1),
+          mimeType: z.string().optional().or(z.literal("")),
+          size: z.coerce.number().optional()
+        })
+      )
+      .optional()
+      .default([])
+  })
+  .superRefine((value, ctx) => {
+    if (value.employeeType === "TEACHER" && !value.teacherId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select a teacher",
+        path: ["teacherId"]
+      });
+    }
+    if (value.employeeType === "STAFF" && !value.staffId && !value.staffName?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select a college staff member",
+        path: ["staffId"]
+      });
+    }
+    if (value.status === "PAID" && !value.paidDateBs) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Paid date (BS) is required when status is Paid",
+        path: ["paidDateBs"]
+      });
+    }
+  });
 
 export const bankAccountSchema = z.object({
   bankName: z.string().min(2),

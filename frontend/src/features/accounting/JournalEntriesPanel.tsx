@@ -62,6 +62,7 @@ const emptyPrintLine = (): PrintLine => ({
 /** Suggested defaults — user can clear or change freely (not forced on save/print) */
 const SUGGESTED_INSTITUTE = "पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी";
 const SUGGESTED_ADDRESS = "धनगढीमाई वडा नं. ३";
+// Journal Entries tab = गोश्वारा भौचर (manual + auto-posted from fees/salary/refunds)
 
 /** Voucher type labels in Nepali for the form */
 const VOUCHER_TYPE_NP: Record<VoucherType, string> = {
@@ -180,10 +181,10 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
       unwrap(api.post(`/accounting/journal-entries/${id}/reverse`)),
     onSuccess: async () => {
       toast.success("जर्नल प्रविष्टि उल्ट्याइयो");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["journal-entries"] }),
-        queryClient.invalidateQueries({ queryKey: ["goshwara-vouchers"] }),
-      ]);
+      const { invalidateAccountingQueries } = await import(
+        "./invalidateAccountingQueries"
+      );
+      await invalidateAccountingQueries();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
@@ -192,13 +193,19 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
     mutationFn: (payload: GoshwaraVoucherInput) =>
       unwrap<CreateVoucherResponse>(api.post("/accounting/goshwara-vouchers", payload)),
     onSuccess: async (data) => {
-      toast.success(`भौचर ${data.voucher.voucherNo} सुरक्षित भयो`);
+      toast.success(`भौचर ${data.voucher.voucherNo} सुरक्षित भयो — PDF खोल्दै…`);
       resetForm();
       setShowForm(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["journal-entries"] }),
-        queryClient.invalidateQueries({ queryKey: ["goshwara-vouchers"] }),
-      ]);
+      const { invalidateAccountingQueries } = await import(
+        "./invalidateAccountingQueries"
+      );
+      await invalidateAccountingQueries();
+      // Open PDF immediately so line-level विवरण (particulars) is visible on print
+      window.open(
+        `${api.defaults.baseURL}/accounting/goshwara-vouchers/${data.voucher._id}/pdf`,
+        "_blank",
+        "noopener,noreferrer",
+      );
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
@@ -293,22 +300,29 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
   const submitVoucher = (e: React.FormEvent) => {
     e.preventDefault();
     if (!particulars.trim()) {
-      toast.error("विवरण लेख्नुहोस्");
+      toast.error("मुख्य विवरण / कैफियत लेख्नुहोस्");
       return;
     }
     if (!totals.balanced) {
       toast.error("डेबिट र क्रेडिट जम्मा बराबर हुनुपर्छ");
       return;
     }
-    for (const line of lines) {
+    for (const [i, line] of lines.entries()) {
       if (!line.accountCode) {
-        toast.error("प्रत्येक जर्नल लाइनमा खाता छान्नुहोस्");
+        toast.error(`लाइन ${i + 1}: खाता छान्नुहोस्`);
         return;
       }
       const d = Number(line.debitNpr) || 0;
       const c = Number(line.creditNpr) || 0;
       if ((d > 0 && c > 0) || (d <= 0 && c <= 0)) {
-        toast.error("प्रत्येक लाइनमा डेबिट वा क्रेडिट मध्ये एउटा मात्र राख्नुहोस्");
+        toast.error(`लाइन ${i + 1}: डेबिट वा क्रेडिट मध्ये एउटा मात्र राख्नुहोस्`);
+        return;
+      }
+      // Each debit/credit line needs its own Nepali particular (reason)
+      if (!(line.description ?? "").trim()) {
+        toast.error(
+          `लाइन ${i + 1}: यस डेबिट/क्रेडिटको विवरण (कारण) नेपालीमा लेख्नुहोस् — जस्तै «नगद प्राप्त», «शुल्क आम्दानी»`,
+        );
         return;
       }
     }
@@ -317,6 +331,45 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
     const words =
       amountInWords.trim() ||
       (totals.debit > 0 ? amountToWordsNepali(totals.debit) : undefined);
+
+    // Prefer explicit print rows; else build from journal lines with per-line विवरण
+    const resolvedPrintLines = (
+      printLines.some(
+        (l) =>
+          l.particulars || l.account || l.ledgerNo || l.debit > 0 || l.credit > 0,
+      )
+        ? printLines
+        : lines.map((l, i) => ({
+            sn: String(i + 1),
+            particulars: (l.description ?? "").trim(),
+            account: l.accountName || "",
+            ledgerNo: l.accountCode || "",
+            debit: Number(l.debitNpr) || 0,
+            credit: Number(l.creditNpr) || 0,
+          }))
+    )
+      .filter(
+        (l) =>
+          l.particulars || l.account || l.ledgerNo || l.debit > 0 || l.credit > 0,
+      )
+      .map((l) => ({
+        sn: l.sn || undefined,
+        particulars: l.particulars || undefined,
+        account: l.account || undefined,
+        ledgerNo: l.ledgerNo || undefined,
+        debit: l.debit > 0 ? l.debit : undefined,
+        credit: l.credit > 0 ? l.credit : undefined,
+      }));
+
+    // Print rows that have amount must also have particulars
+    for (const [i, pl] of resolvedPrintLines.entries()) {
+      if ((pl.debit || pl.credit) && !(pl.particulars ?? "").trim()) {
+        toast.error(
+          `प्रिन्ट तालिका लाइन ${i + 1}: डेबिट/क्रेडिटसँग विवरण (नेपालीमा) लेख्नुहोस्`,
+        );
+        return;
+      }
+    }
 
     const payload: GoshwaraVoucherInput = {
       voucherType,
@@ -336,25 +389,13 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
       chequeDate: chequeDate.trim() || undefined,
       chequeRank: chequeRank.trim() || undefined,
       amountInWords: words,
-      printLines: printLines
-        .filter(
-          (l) =>
-            l.particulars || l.account || l.ledgerNo || l.debit > 0 || l.credit > 0,
-        )
-        .map((l) => ({
-          sn: l.sn || undefined,
-          particulars: l.particulars || undefined,
-          account: l.account || undefined,
-          ledgerNo: l.ledgerNo || undefined,
-          debit: l.debit > 0 ? l.debit : undefined,
-          credit: l.credit > 0 ? l.credit : undefined,
-        })),
+      printLines: resolvedPrintLines,
       lines: lines.map((l) => ({
         accountCode: l.accountCode,
         accountName: l.accountName,
         debitNpr: Number(l.debitNpr) || 0,
         creditNpr: Number(l.creditNpr) || 0,
-        description: l.description || particulars.trim(),
+        description: (l.description ?? "").trim(),
       })),
     };
     createVoucher.mutate(payload);
@@ -549,7 +590,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                                 placeholder={String(index + 1)}
                               />
                             </Td>
-                            <Td>
+                            <Td className="min-w-[200px]">
                               <Input
                                 lang="ne"
                                 className={npInputClass}
@@ -559,7 +600,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                                     particulars: e.target.value,
                                   })
                                 }
-                                placeholder="नेपाली विवरण"
+                                placeholder="कारण नेपालीमा — नगद प्राप्त, शुल्क आम्दानी…"
                               />
                             </Td>
                             <Td>
@@ -633,7 +674,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                   </p>
                 </div>
 
-                {/* Journal GL — system accounts */}
+                {/* Journal GL — each debit/credit needs its own Nepali particular */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">
@@ -650,13 +691,18 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    यो भाग खाता किताब (ledger) का लागि हो — खाता सूचीबाट छान्नुहोस्।
+                    प्रत्येक डेबिट/क्रेडिटसँग <strong>विवरण (कारण)</strong> नेपालीमा
+                    अनिवार्य छ — जस्तै «नगद प्राप्त», «बैंक जम्मा», «शुल्क आम्दानी»,
+                    «तलब भुक्तानी»। यो भौचरको «विवरण» स्तम्भमा छापिन्छ।
                   </p>
                   <div className="overflow-x-auto rounded-lg border">
                     <Table>
                       <TableHead>
                         <tr>
                           <Th>खाता</Th>
+                          <Th className="min-w-[240px]">
+                            विवरण / कारण (नेपाली) *
+                          </Th>
                           <Th>डेबिट (रु.)</Th>
                           <Th>क्रेडिट (रु.)</Th>
                           <Th className="w-12" />
@@ -665,7 +711,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                       <TableBody>
                         {lines.map((line, index) => (
                           <tr key={index}>
-                            <Td className="min-w-[220px]">
+                            <Td className="min-w-[200px]">
                               <Select
                                 value={line.accountCode}
                                 onChange={(e) =>
@@ -680,6 +726,26 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                                   </option>
                                 ))}
                               </Select>
+                            </Td>
+                            <Td>
+                              <Input
+                                lang="ne"
+                                className={npInputClass}
+                                value={line.description ?? ""}
+                                onChange={(e) =>
+                                  updateLine(index, {
+                                    description: e.target.value,
+                                  })
+                                }
+                                required
+                                placeholder={
+                                  Number(line.debitNpr) > 0
+                                    ? "उदा. नगद प्राप्त / बैंकमा जम्मा"
+                                    : Number(line.creditNpr) > 0
+                                      ? "उदा. शुल्क आम्दानी / खर्च"
+                                      : "यस रकमको कारण नेपालीमा…"
+                                }
+                              />
                             </Td>
                             <Td>
                               <NumberInput
@@ -724,7 +790,9 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                           </tr>
                         ))}
                         <tr className="bg-muted/40 font-medium">
-                          <Td className="text-right">जम्मा</Td>
+                          <Td colSpan={2} className="text-right">
+                            जम्मा
+                          </Td>
                           <Td>{formatCurrencyNpr(totals.debit)}</Td>
                           <Td>{formatCurrencyNpr(totals.credit)}</Td>
                           <Td>
@@ -866,45 +934,90 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                   <Th>गो. भी. नं.</Th>
                   <Th>मिति</Th>
                   <Th>संस्था / कार्यालय</Th>
-                  <Th>विवरण</Th>
+                  <Th>लाइन विवरण (डेबिट/क्रेडिट कारण)</Th>
                   <Th>रकम</Th>
                   <Th>छाप्नुहोस्</Th>
                 </tr>
               </TableHead>
               <TableBody>
-                {(vouchersQuery.data ?? []).map((v) => (
-                  <tr key={v._id}>
-                    <Td className="font-mono text-sm">{v.voucherNo}</Td>
-                    <Td>{v.dateBs}</Td>
-                    <Td className="max-w-[180px] truncate text-sm">
-                      {v.instituteName || v.govOfficeName || v.officeName || "—"}
-                    </Td>
-                    <Td className="max-w-xs truncate" title={v.particulars}>
-                      {v.particulars}
-                    </Td>
-                    <Td>{formatCurrencyNpr(v.totalAmount)}</Td>
-                    <Td>
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openVoucherPdf(v._id)}
-                        >
-                          <Printer className="mr-1 h-3.5 w-3.5" />
-                          छाप्नुहोस्
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          title="खाली फारम"
-                          onClick={() => openVoucherPdf(v._id, true)}
-                        >
-                          खाली
-                        </Button>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
+                {(vouchersQuery.data ?? []).map((v) => {
+                  const lineDetails =
+                    (v.lines ?? [])
+                      .map((l) => {
+                        const reason = (l.description || "").trim();
+                        if (!reason) return null;
+                        const side =
+                          (l.debitNpr ?? 0) > 0
+                            ? `डेबिट ${formatCurrencyNpr(l.debitNpr)}`
+                            : (l.creditNpr ?? 0) > 0
+                              ? `क्रेडिट ${formatCurrencyNpr(l.creditNpr)}`
+                              : "";
+                        return `${reason}${side ? ` (${side})` : ""}`;
+                      })
+                      .filter(Boolean)
+                      .join(" · ") ||
+                    (v.printLines ?? [])
+                      .map((l) => (l.particulars || "").trim())
+                      .filter(Boolean)
+                      .join(" · ") ||
+                    v.particulars;
+                  return (
+                    <tr key={v._id}>
+                      <Td className="font-mono text-sm">{v.voucherNo}</Td>
+                      <Td>{v.dateBs}</Td>
+                      <Td className="max-w-[160px] truncate text-sm">
+                        {v.instituteName || v.govOfficeName || v.officeName || "—"}
+                      </Td>
+                      <Td
+                        className="max-w-md text-sm font-nepali"
+                        title={lineDetails}
+                      >
+                        <div className="space-y-0.5">
+                          {(v.lines ?? []).length > 0
+                            ? (v.lines ?? []).map((l, i) => (
+                                <div key={i} className="leading-snug">
+                                  <span className="font-medium">
+                                    {(l.description || "—").trim()}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {" "}
+                                    · {l.accountName}
+                                    {(l.debitNpr ?? 0) > 0
+                                      ? ` · डेबिट ${formatCurrencyNpr(l.debitNpr)}`
+                                      : ""}
+                                    {(l.creditNpr ?? 0) > 0
+                                      ? ` · क्रेडिट ${formatCurrencyNpr(l.creditNpr)}`
+                                      : ""}
+                                  </span>
+                                </div>
+                              ))
+                            : lineDetails}
+                        </div>
+                      </Td>
+                      <Td>{formatCurrencyNpr(v.totalAmount)}</Td>
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openVoucherPdf(v._id)}
+                          >
+                            <Printer className="mr-1 h-3.5 w-3.5" />
+                            छाप्नुहोस्
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="खाली फारम"
+                            onClick={() => openVoucherPdf(v._id, true)}
+                          >
+                            खाली
+                          </Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent>

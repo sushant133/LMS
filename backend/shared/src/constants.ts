@@ -324,38 +324,57 @@ export const PAYMENT_METHOD_LABELS: Record<(typeof PAYMENT_METHODS)[number], str
 
 export const FEE_STRUCTURE_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
 
+/** Daily expense register categories (Nepal college). Legacy labels kept for old records. */
 export const EXPENSE_CATEGORIES = [
-  "Office Expenses",
   "Electricity",
   "Water",
   "Internet",
-  "Furniture",
+  "Fuel",
   "Maintenance",
+  "Office",
+  "Office Expenses",
+  "Printing",
+  "Travel",
+  "Community Field",
+  "Hospital",
   "Library",
   "Laboratory",
+  "Furniture",
   "Sports",
   "Transport",
   "Events",
   "Miscellaneous"
 ] as const;
 
+/** Purchase register categories. Legacy labels kept for old records. */
 export const PURCHASE_CATEGORIES = [
-  "Books",
-  "Computers",
   "Laboratory Equipment",
+  "Books",
   "Furniture",
   "Stationery",
+  "Computer Equipment",
+  "Computers",
+  "Chemicals",
+  "Medical Equipment",
+  "Office Supplies",
   "Sports Equipment",
-  "Other Assets"
+  "Other Assets",
+  "Others"
 ] as const;
 
+/** Non-fee income categories. Legacy labels kept for old records. */
 export const INCOME_CATEGORIES = [
+  "Donation",
   "Donations",
+  "Certificate Fee",
+  "Form Sales",
+  "Fine",
+  "Interest",
+  "Miscellaneous Income",
   "Government Grants",
   "Admission Income",
   "Transport Income",
-  "Hostel Income",
-  "Miscellaneous Income"
+  "Hostel Income"
 ] as const;
 
 export const PAYMENT_STATUSES = ["PENDING", "PARTIAL", "PAID"] as const;

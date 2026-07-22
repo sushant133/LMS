@@ -300,6 +300,10 @@ export interface StudentRecord {
   guardianName: string;
   guardianPhone: string;
   feesDueNpr: number;
+  /** Security / caution deposit held from admission (NPR). */
+  securityDepositNpr?: number;
+  /** Amount of deposit already refunded (NPR). */
+  securityDepositRefundedNpr?: number;
   /** When true, student is on full scholarship (no fee amount due). */
   hasScholarship?: boolean;
   remarks?: string;

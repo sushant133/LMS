@@ -18,7 +18,27 @@ const salaryPaymentSchema = new Schema(
     netSalaryNpr: { type: Number, required: true },
     status: { type: String, enum: ["DRAFT", "PROCESSED", "PAID"], default: "DRAFT" },
     paidDateBs: { type: String },
-    paymentMethod: { type: String, enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "OTHER"], default: "BANK_TRANSFER" },
+    paymentMethod: {
+      type: String,
+      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      default: "BANK_TRANSFER"
+    },
+    /** Bank / cheque / Fonepay reference */
+    transactionNumber: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    /** Payslip / bank advice attachments */
+    attachments: {
+      type: [
+        {
+          _id: false,
+          name: { type: String, default: "" },
+          url: { type: String, required: true },
+          mimeType: { type: String, default: "" },
+          size: { type: Number, default: 0 }
+        }
+      ],
+      default: []
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },

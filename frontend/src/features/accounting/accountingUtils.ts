@@ -164,6 +164,9 @@ export const reportUsesMonthFilter = (
   reportType === "expenses" ||
   reportType === "purchases" ||
   reportType === "income" ||
+  reportType === "refunds" ||
+  reportType === "journal" ||
+  reportType === "ledger" ||
   reportType === "cash-summary" ||
   reportType === "financial-summary";
 

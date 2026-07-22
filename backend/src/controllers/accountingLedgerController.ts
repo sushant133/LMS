@@ -105,7 +105,8 @@ export const listJournalEntries = asyncHandler(async (req: Request, res: Respons
     filter.dateBs = { ...existing, $lte: req.query.toDateBs };
   }
 
-  const entries = await JournalEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).limit(500);
+  // Higher limit so Ledger / Reports stay in sync with posted history
+  const entries = await JournalEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).limit(3000);
   return sendSuccess(res, "Journal entries fetched", entries);
 });
 
@@ -387,22 +388,42 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
     accountName: line.accountName || nameByCode.get(line.accountCode) || line.accountCode,
     debitNpr: line.debitNpr ?? 0,
     creditNpr: line.creditNpr ?? 0,
-    description: line.description || payload.particulars
+    // Per-line particular (reason) — required for PDF विवरण column
+    description: (line.description || "").trim() || payload.particulars
   }));
 
   const totalDebitNpr = lines.reduce((s, l) => s + l.debitNpr, 0);
   const totalCreditNpr = lines.reduce((s, l) => s + l.creditNpr, 0);
 
-  const printLines = (payload.printLines ?? [])
-    .map((l) => ({
-      sn: (l.sn || "").trim(),
-      particulars: (l.particulars || "").trim(),
-      account: (l.account || "").trim(),
-      ledgerNo: (l.ledgerNo || "").trim(),
-      debit: l.debit && l.debit > 0 ? l.debit : undefined,
-      credit: l.credit && l.credit > 0 ? l.credit : undefined
-    }))
-    .filter((l) => l.particulars || l.account || l.ledgerNo || l.debit || l.credit);
+  const rawPrint = (payload.printLines ?? []).map((l) => ({
+    sn: (l.sn || "").trim(),
+    particulars: (l.particulars || "").trim(),
+    account: (l.account || "").trim(),
+    ledgerNo: (l.ledgerNo || "").trim(),
+    debit: l.debit && l.debit > 0 ? l.debit : undefined,
+    credit: l.credit && l.credit > 0 ? l.credit : undefined
+  }));
+
+  // Always persist print lines with per-line विवरण (from print form or journal description)
+  const printLines =
+    rawPrint.length > 0
+      ? rawPrint.map((pl, i) => ({
+          ...pl,
+          sn: pl.sn || String(i + 1),
+          particulars: pl.particulars || lines[i]?.description || payload.particulars,
+          account: pl.account || lines[i]?.accountName || "",
+          ledgerNo: pl.ledgerNo || lines[i]?.accountCode || "",
+          debit: pl.debit ?? (lines[i] && lines[i]!.debitNpr > 0 ? lines[i]!.debitNpr : undefined),
+          credit: pl.credit ?? (lines[i] && lines[i]!.creditNpr > 0 ? lines[i]!.creditNpr : undefined)
+        }))
+      : lines.map((l, i) => ({
+          sn: String(i + 1),
+          particulars: l.description,
+          account: l.accountName,
+          ledgerNo: l.accountCode,
+          debit: l.debitNpr > 0 ? l.debitNpr : undefined,
+          credit: l.creditNpr > 0 ? l.creditNpr : undefined
+        }));
 
   try {
     const result = await withTransaction(async (session) => {
@@ -585,22 +606,76 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
   const payload = feeRefundSchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);
   const schoolId = tenantObjectId(req);
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, payload.dateBs);
 
   const student = await Student.findOne({ _id: payload.studentId, schoolId });
   if (!student) throw new ApiError(404, "Student not found");
+
+  const refundType = payload.refundType ?? "OTHER";
+  const amountNpr = payload.amountNpr;
+
+  // ── Admission security deposit refund (pass-out / withdrawal) ───────────
+  if (refundType === "DEPOSIT_REFUND") {
+    // Register deposit if never stored but accountant provides original amount
+    if (
+      (!(student.securityDepositNpr > 0) || student.securityDepositNpr === 0) &&
+      payload.originalDepositNpr &&
+      payload.originalDepositNpr > 0
+    ) {
+      student.securityDepositNpr = payload.originalDepositNpr;
+    }
+
+    const held = student.securityDepositNpr ?? 0;
+    const alreadyRefunded = student.securityDepositRefundedNpr ?? 0;
+    const remaining = Math.max(0, held - alreadyRefunded);
+
+    if (held <= 0) {
+      throw new ApiError(
+        400,
+        "No security deposit on record for this student. Enter the original admission deposit amount, then refund."
+      );
+    }
+    if (amountNpr > remaining + 0.001) {
+      throw new ApiError(
+        400,
+        `Refund amount exceeds remaining deposit. Held ${held}, already refunded ${alreadyRefunded}, remaining ${remaining}.`
+      );
+    }
+
+    const passoutStatuses = new Set(["PASSED_OUT", "ALUMNI", "WITHDRAWN", "CANCELLED"]);
+    if (!passoutStatuses.has(String(student.academicStatus || "ACTIVE"))) {
+      // Allow but warn via notes — still process (admin may refund early on special approval)
+      // Prefer pass-out; no hard block so college can handle edge cases.
+    }
+
+    student.securityDepositRefundedNpr = alreadyRefunded + amountNpr;
+    await student.save();
+  }
 
   const refundCount = await FeeRefund.countDocuments({ schoolId });
   const refundNumber = generateRefundNumber("RFND", refundCount + 1);
 
   const refund = await FeeRefund.create({
-    ...payload,
     schoolId,
+    studentId: payload.studentId,
+    feeCollectionId: payload.feeCollectionId,
     refundNumber,
+    refundType,
+    amountNpr,
+    dateBs: payload.dateBs,
+    reason: payload.reason,
+    paymentMethod: payload.paymentMethod,
+    bankAccountId: payload.bankAccountId,
+    transactionNumber: payload.transactionNumber ?? "",
+    notes: payload.notes ?? "",
+    approvedBy: payload.approvedBy?.trim() || "",
+    attachments: payload.attachments ?? [],
     createdBy: req.user!.userId
   });
 
-  student.feesDueNpr = (student.feesDueNpr ?? 0) + payload.amountNpr;
-  await student.save();
+  // Deposit refunds are liability returns — do not inflate feesDue.
+  // Other refunds: cash out + journal only (do not auto-increase student debt).
 
   await postFeeRefundJournal({
     schoolId,
@@ -608,7 +683,7 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
     refundId: refund._id,
     studentId: payload.studentId,
     dateBs: payload.dateBs,
-    amountNpr: payload.amountNpr,
+    amountNpr,
     paymentMethod: payload.paymentMethod,
     bankAccountId: payload.bankAccountId,
     refundNumber
@@ -617,16 +692,29 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
   await recordCashEntry(req, {
     dateBs: payload.dateBs,
     entryType: "DEBIT",
-    category: "Fee Refund",
-    description: `Refund ${refundNumber}`,
-    amountNpr: payload.amountNpr,
+    category:
+      refundType === "DEPOSIT_REFUND" ? "Security Deposit Refund" : "Fee Refund",
+    description: `${refundType === "DEPOSIT_REFUND" ? "Deposit refund" : "Refund"} ${refundNumber}`,
+    amountNpr,
     paymentMethod: payload.paymentMethod,
     referenceType: "FeeRefund",
     referenceId: refund._id.toString()
   });
 
-  await recordAudit(req, { action: "accounting.refund.create", entity: "FeeRefund", entityId: refund._id.toString(), after: refund });
-  return sendSuccess(res, "Fee refund processed", refund, 201);
+  await recordAudit(req, {
+    action: "accounting.refund.create",
+    entity: "FeeRefund",
+    entityId: refund._id.toString(),
+    after: refund
+  });
+  return sendSuccess(
+    res,
+    refundType === "DEPOSIT_REFUND"
+      ? "Admission deposit refund processed"
+      : "Student refund processed",
+    refund,
+    201
+  );
 });
 
 export const listFiscalYears = asyncHandler(async (req: Request, res: Response) => {

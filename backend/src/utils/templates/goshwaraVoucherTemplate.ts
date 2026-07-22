@@ -153,7 +153,10 @@ export const buildExactGoshwaraVoucherHtml = (
         ? escapeHtml(String(line.sn))
         : toNepaliDigits(i + 1);
     snStack.push(`<div class="entry">${sn}</div>`);
-    partStack.push(`<div class="entry">${escapeHtml(line.particulars || "")}</div>`);
+    // विवरण = line particular (reason for this debit/credit), e.g. नगद प्राप्त
+    partStack.push(
+      `<div class="entry entry-part">${escapeHtml((line.particulars || "").trim())}</div>`
+    );
     accStack.push(`<div class="entry">${escapeHtml(line.account || "")}</div>`);
     ledStack.push(`<div class="entry">${escapeHtml(line.ledgerNo || "")}</div>`);
     drStack.push(
@@ -358,10 +361,15 @@ export const buildExactGoshwaraVoucherHtml = (
     }
 
     .entry {
-      min-height: 18px;
-      margin-bottom: 4px;
-      line-height: 1.3;
+      min-height: 22px;
+      margin-bottom: 8px;
+      line-height: 1.35;
       word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .entry.entry-part {
+      font-weight: 600;
+      text-align: left;
     }
     .entry.amt { text-align: right; }
 
@@ -590,34 +598,58 @@ export const buildPdfDataFromVoucherRecord = (voucher: {
   chequeRank?: string | null;
   amountInWords?: string | null;
 }): ExactGoshwaraVoucherPdfData => {
-  const printLines = (voucher.printLines ?? []).filter(
-    (l) =>
-      l &&
-      (l.particulars ||
-        l.account ||
-        l.ledgerNo ||
-        (l.debit && l.debit > 0) ||
-        (l.credit && l.credit > 0))
-  );
+  const printLines = voucher.printLines ?? [];
+  const journalLines = voucher.lines ?? [];
 
+  /**
+   * Prefer journal lines (always have description + amounts).
+   * Merge print-line overrides; never drop per-line विवरण (description).
+   */
   const lines =
-    printLines.length > 0
-      ? printLines.map((l, i) => ({
-          sn: l.sn || toNepaliDigits(i + 1),
-          particulars: l.particulars || "",
-          account: l.account || "",
-          ledgerNo: l.ledgerNo || "",
-          debit: l.debit && l.debit > 0 ? l.debit : undefined,
-          credit: l.credit && l.credit > 0 ? l.credit : undefined
-        }))
-      : (voucher.lines ?? []).map((line, index) => ({
-          sn: toNepaliDigits(index + 1),
-          particulars: line.description?.trim() || voucher.particulars,
-          account: line.accountName || "",
-          ledgerNo: line.accountCode || "",
-          debit: line.debitNpr > 0 ? line.debitNpr : undefined,
-          credit: line.creditNpr > 0 ? line.creditNpr : undefined
-        }));
+    journalLines.length > 0
+      ? journalLines.map((line, index) => {
+          const pl = printLines[index];
+          const particular =
+            (pl?.particulars || "").trim() ||
+            (line.description || "").trim() ||
+            (voucher.particulars || "").trim();
+          return {
+            sn: (pl?.sn || "").trim() || toNepaliDigits(index + 1),
+            particulars: particular,
+            account: (pl?.account || "").trim() || line.accountName || "",
+            ledgerNo: (pl?.ledgerNo || "").trim() || line.accountCode || "",
+            debit:
+              pl?.debit && pl.debit > 0
+                ? pl.debit
+                : line.debitNpr > 0
+                  ? line.debitNpr
+                  : undefined,
+            credit:
+              pl?.credit && pl.credit > 0
+                ? pl.credit
+                : line.creditNpr > 0
+                  ? line.creditNpr
+                  : undefined
+          };
+        })
+      : printLines
+          .filter(
+            (l) =>
+              l &&
+              (l.particulars ||
+                l.account ||
+                l.ledgerNo ||
+                (l.debit && l.debit > 0) ||
+                (l.credit && l.credit > 0))
+          )
+          .map((l, i) => ({
+            sn: l.sn || toNepaliDigits(i + 1),
+            particulars: (l.particulars || "").trim(),
+            account: l.account || "",
+            ledgerNo: l.ledgerNo || "",
+            debit: l.debit && l.debit > 0 ? l.debit : undefined,
+            credit: l.credit && l.credit > 0 ? l.credit : undefined
+          }));
 
   return {
     govOfficeName: voucher.govOfficeName || "",
@@ -681,9 +713,10 @@ export const buildExactPdfDataFromJournal = (params: {
     debit: entry.totalDebitNpr,
     credit: entry.totalCreditNpr,
     amountInWords: amountToWordsNepali(entry.totalDebitNpr),
+    // Each journal line description → PDF विवरण (e.g. नगद प्राप्त / शुल्क आम्दानी)
     lines: entry.lines.map((line, index) => ({
       sn: toNepaliDigits(index + 1),
-      particulars: line.description?.trim() || entry.narration,
+      particulars: (line.description || "").trim() || entry.narration,
       account: line.accountName,
       ledgerNo: line.accountCode,
       debit: line.debitNpr > 0 ? line.debitNpr : undefined,

@@ -23,7 +23,7 @@ export const adjustPrimaryBankBalance = async (
   bankAccountId?: string,
   session?: ClientSession | null
 ): Promise<void> => {
-  const bankMethods = ["BANK_TRANSFER", "CHEQUE", "FONEPAY"];
+  const bankMethods = ["BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE"];
   if (!bankMethods.includes(paymentMethod) || amountNpr <= 0) return;
 
   const findOpts = session ? { session } : undefined;

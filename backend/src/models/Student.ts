@@ -77,6 +77,13 @@ const studentSchema = new Schema(
     guardianName: { type: String, default: "" },
     guardianPhone: { type: String, default: "" },
     feesDueNpr: { type: Number, default: 0 },
+    /**
+     * Security / caution deposit collected at admission (NPR).
+     * Refunded on pass-out (or withdrawal) via FeeRefund type DEPOSIT_REFUND.
+     */
+    securityDepositNpr: { type: Number, default: 0 },
+    /** Cumulative deposit already refunded to the student. */
+    securityDepositRefundedNpr: { type: Number, default: 0 },
     /** Full scholarship — UI shows "Scholarship" instead of a fee amount. */
     hasScholarship: { type: Boolean, default: false },
     remarks: { type: String },
