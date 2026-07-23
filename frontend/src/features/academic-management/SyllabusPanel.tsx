@@ -17,7 +17,7 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -129,6 +129,9 @@ export const SyllabusPanel = ({
   const [form, setForm] = useState<SyllabusFormState>(() =>
     blankSyllabusForm(filters),
   );
+  /** Always latest form for save — avoids stale closure if button fires mid-batch. */
+  const formRef = useRef(form);
+  formRef.current = form;
   const [viewExpanded, setViewExpanded] = useState<Record<string, boolean>>({});
   const [globalExpand, setGlobalExpand] = useState(false);
 
@@ -208,7 +211,71 @@ export const SyllabusPanel = ({
     setForm(blankSyllabusForm(filters));
   };
 
+  const scrollToEditor = () => {
+    window.setTimeout(() => {
+      document
+        .getElementById("syllabus-edit-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  };
+
+  const openEditForm = (plan: AcademicSyllabusRecord, opts?: { silent?: boolean }) => {
+    if (!canMutate) {
+      toast.error("You do not have write access to edit this syllabus");
+      return;
+    }
+    if (
+      !isAdmin &&
+      plan.status !== "DRAFT" &&
+      plan.status !== "REJECTED"
+    ) {
+      toast.error(
+        plan.status === "APPROVED"
+          ? "This syllabus is approved. Ask an administrator to Unlock it before editing structure."
+          : "This syllabus is submitted. Ask an administrator to unlock or reject it before editing.",
+      );
+      return;
+    }
+    setEditingId(plan._id);
+    setForm(recordToForm(plan));
+    setShowForm(true);
+    if (!opts?.silent) {
+      scrollToEditor();
+    }
+  };
+
+  /**
+   * Prefer continuing an existing DRAFT/REJECTED syllabus for the selected subject
+   * instead of opening a blank create form (which hits unique index + confuses users).
+   */
   const openCreateSyllabusForm = () => {
+    // Resume draft for currently selected subject when one already exists
+    if (selectedSubject) {
+      const existingEditable = (plansQuery.data ?? []).filter((plan) => {
+        if (plan.status !== "DRAFT" && plan.status !== "REJECTED") return false;
+        if (!selectedSubject.subjectIds.includes(plan.subjectId)) return false;
+        return true;
+      });
+      const levelMap = buildYearIdToLevelKeyMap(years);
+      const matched = recordsForCurriculumSubject(
+        existingEditable,
+        selectedSubject.subjectIds,
+        selectedYearKey,
+        levelMap,
+        isCollege,
+      );
+      const resume = dedupePlansByCurriculum(matched, subjects, false)[0];
+      if (resume) {
+        toast.message(
+          resume.status === "REJECTED"
+            ? "Opening rejected syllabus so you can continue editing"
+            : "Continuing existing draft — add more units and save again anytime",
+        );
+        openEditForm(resume);
+        return;
+      }
+    }
+
     const base = blankSyllabusForm(filters);
     // Prefill from tree selection when available
     if (selectedSubject) {
@@ -249,46 +316,50 @@ export const SyllabusPanel = ({
     }
     setEditingId(null);
     setShowForm(true);
+    scrollToEditor();
   };
 
-  const openEditForm = (plan: AcademicSyllabusRecord) => {
-    if (!canMutate) {
-      toast.error("You do not have write access to edit this syllabus");
-      return;
-    }
-    if (
-      !isAdmin &&
-      plan.status !== "DRAFT" &&
-      plan.status !== "REJECTED"
-    ) {
-      toast.error(
-        plan.status === "APPROVED"
-          ? "This syllabus is approved. Ask an administrator to Unlock it before editing structure."
-          : "This syllabus is submitted. Ask an administrator to unlock or reject it before editing.",
-      );
-      return;
-    }
-    setEditingId(plan._id);
-    setForm(recordToForm(plan));
+  const applySavedPlanToEditor = (saved: AcademicSyllabusRecord) => {
+    setEditingId(saved._id);
+    setForm(recordToForm(saved));
     setShowForm(true);
-    // Scroll to the editor so full hierarchy is visible for editing
-    window.setTimeout(() => {
-      document
-        .getElementById("syllabus-edit-form")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
   };
 
   const createMutation = useMutation({
     mutationFn: (payload: AcademicSyllabusInput) =>
-      unwrap(api.post("/academic-management/syllabi", payload)),
-    onSuccess: () => {
-      toast.success("Syllabus saved as draft");
+      unwrap<AcademicSyllabusRecord>(
+        api.post("/academic-management/syllabi", payload),
+      ),
+    onSuccess: (saved) => {
+      toast.success(
+        "Draft saved — keep adding units here, or close when finished. Submit when ready for review.",
+      );
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
-      setShowForm(false);
-      resetForm();
+      // Stay open so user can continue unit 3, 4, … without reopening
+      if (saved?._id) {
+        applySavedPlanToEditor(saved);
+      }
     },
-    onError: (error) => toast.error(parseErrorMessage(error)),
+    onError: (error) => {
+      const message = parseErrorMessage(error);
+      toast.error(message);
+      // Unique constraint: open the existing syllabus instead of stranding the user
+      if (/already exists/i.test(message) && formRef.current.subjectId) {
+        const subjectId = formRef.current.subjectId;
+        const yearId = formRef.current.yearId;
+        const classId = formRef.current.classId;
+        const existing = (plansQuery.data ?? []).find((plan) => {
+          if (plan.subjectId !== subjectId) return false;
+          if (yearId && plan.yearId && plan.yearId !== yearId) return false;
+          if (classId && plan.classId && plan.classId !== classId) return false;
+          return plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin;
+        });
+        if (existing) {
+          toast.message("Opening the existing syllabus so you can continue editing");
+          openEditForm(existing, { silent: true });
+        }
+      }
+    },
   });
 
   const updateMutation = useMutation({
@@ -298,12 +369,19 @@ export const SyllabusPanel = ({
     }: {
       id: string;
       payload: AcademicSyllabusInput;
-    }) => unwrap(api.put(`/academic-management/syllabi/${id}`, payload)),
-    onSuccess: () => {
-      toast.success("Syllabus updated");
+    }) =>
+      unwrap<AcademicSyllabusRecord>(
+        api.put(`/academic-management/syllabi/${id}`, payload),
+      ),
+    onSuccess: (saved) => {
+      toast.success(
+        "Draft updated — you can keep adding units, or close when finished.",
+      );
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
-      setShowForm(false);
-      resetForm();
+      // Keep editor open with server-synced ids/numbers for continued editing
+      if (saved?._id) {
+        applySavedPlanToEditor(saved);
+      }
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -336,21 +414,23 @@ export const SyllabusPanel = ({
   });
 
   const saveSyllabus = () => {
-    if (!form.subjectId) {
+    const latest = formRef.current;
+    if (!latest.subjectId) {
       toast.error("Subject is required");
       return;
     }
-    if (!form.academicYearBs?.trim()) {
+    if (!latest.academicYearBs?.trim()) {
       toast.error("Academic year (BS) is required — set it in filters or form");
       return;
     }
-    if (!form.chapters.length) {
+    if (!latest.chapters.length) {
       toast.error("Add at least one section with units");
       return;
     }
 
     let hasUnit = false;
-    for (const ch of form.chapters as ChapterDraft[]) {
+    const missingUnitIndexes: string[] = [];
+    for (const [ci, ch] of (latest.chapters as ChapterDraft[]).entries()) {
       const kind = ch.sectionKind || "NONE";
       if ((kind === "CHAPTER" || kind === "PART") && !ch.title?.trim()) {
         toast.error(
@@ -360,41 +440,71 @@ export const SyllabusPanel = ({
         );
         return;
       }
-      for (const u of ch.units as UnitDraft[]) {
-        if (!u.title?.trim()) continue;
+      const units = (ch.units as UnitDraft[]) ?? [];
+      // Ignore a single completely empty default row only when it is the sole unit
+      // in a section that has no other content yet — still require titles for real rows.
+      for (const [ui, u] of units.entries()) {
+        const title = String(u.title ?? "").trim();
+        const hasAnySub =
+          (u.subUnits ?? []).some(
+            (s) => s.heading?.trim() || (s.children?.length ?? 0) > 0,
+          );
+        if (!title) {
+          // Allow one blank starter row only when it is the only unit and empty
+          if (units.length === 1 && !hasAnySub) {
+            continue;
+          }
+          missingUnitIndexes.push(`Unit ${u.unitNo || ui + 1}`);
+          continue;
+        }
         hasUnit = true;
         // Sub-units are optional. Only validate headings on rows the user started.
-        if (
-          (u.subUnits ?? []).some((s) => s.heading?.trim() || s.children?.length) &&
-          !allSubHeadingsFilled(u.subUnits ?? [])
-        ) {
+        if (hasAnySub && !allSubHeadingsFilled(u.subUnits ?? [])) {
           toast.error(
             "If you add a sub-unit, fill its heading (or remove the empty row)",
           );
           return;
         }
       }
+      void ci;
+    }
+    // Block save when extra empty unit rows exist (would be silently dropped before)
+    if (missingUnitIndexes.length > 0) {
+      toast.error(
+        `Enter a title for: ${missingUnitIndexes.slice(0, 5).join(", ")} — or remove empty unit rows before saving.`,
+      );
+      return;
     }
     if (!hasUnit) {
-      toast.error("Add at least one unit with a title");
+      toast.error(
+        "Add at least one unit with a title. Type in the Unit title field on the unit row.",
+      );
       return;
     }
 
-    const optionalTeacher = (form.teacherId || teacherId || "").trim();
+    const optionalTeacher = (latest.teacherId || teacherId || "").trim();
+    // formNepaliText is derived from subject — recompute from latest subjectId
+    const subjectForNepali = subjectOptions.find(
+      (s) =>
+        s._id === latest.subjectId ||
+        ((s as { subjectIds?: string[] }).subjectIds ?? []).includes(
+          latest.subjectId,
+        ),
+    );
+    const nepaliMode = isNepaliSubject(subjectForNepali);
     const payload = formToPayload(
       {
-        ...form,
-        academicYearBs: form.academicYearBs || filters.academicYearBs || "",
+        ...latest,
+        academicYearBs: latest.academicYearBs || filters.academicYearBs || "",
         session:
-          form.session ||
-          form.academicYearBs ||
+          latest.session ||
+          latest.academicYearBs ||
           filters.session ||
           filters.academicYearBs ||
           "",
         teacherId: optionalTeacher,
       },
-      // Preeti→Unicode only for Nepali subject — other subjects unchanged
-      { nepaliMode: formNepaliText },
+      { nepaliMode },
     );
     if (!payload.academicYearBs?.trim() || !payload.session?.trim()) {
       toast.error(
@@ -402,8 +512,10 @@ export const SyllabusPanel = ({
       );
       return;
     }
-    if (!payload.chapters?.length) {
-      toast.error("Add at least one unit with a title before saving");
+    if (!payload.chapters?.length && !payload.units?.length) {
+      toast.error(
+        "Add at least one unit with a title before saving. Type in the Unit title field (not only Chapter/Part).",
+      );
       return;
     }
     if (editingId) {
@@ -671,10 +783,16 @@ export const SyllabusPanel = ({
               <Button
                 size="sm"
                 onClick={() => openEditForm(plan)}
-                title="Edit all sections, units, sub-units and nested children"
+                title={
+                  plan.status === "DRAFT" || plan.status === "REJECTED"
+                    ? "Continue this draft — add more units and save again"
+                    : "Edit all sections, units, sub-units and nested children"
+                }
               >
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                Edit full syllabus
+                {plan.status === "DRAFT" || plan.status === "REJECTED"
+                  ? "Continue / Add units"
+                  : "Edit full syllabus"}
               </Button>
             ) : canMutate && isAdmin ? (
               <Button
@@ -1095,7 +1213,13 @@ export const SyllabusPanel = ({
             }}
           >
             <Plus className="mr-2 h-4 w-4" />
-            {showForm ? "Close Form" : "New Syllabus"}
+            {showForm
+              ? "Close Form"
+              : selectedPlans.some(
+                    (p) => p.status === "DRAFT" || p.status === "REJECTED",
+                  )
+                ? "Continue Draft / Add Units"
+                : "New Syllabus"}
           </Button>
         ) : null}
       </div>
@@ -1105,13 +1229,13 @@ export const SyllabusPanel = ({
           <CardHeader>
             <CardTitle>
               {editingId
-                ? "Edit Syllabus — sections, units, sub-units & children"
-                : "Create Complete Syllabus"}
+                ? "Continue syllabus draft — add or edit units"
+                : "Create syllabus (saved as draft)"}
             </CardTitle>
             <p className="text-sm text-slate-600">
               {editingId
-                ? "Edit chapters/parts and unit titles. Sub-units are optional — add them only when needed. Click Update Syllabus to save."
-                : "Define subject metadata and unit titles. Sub-units (headings) are optional and not required to save. Save as draft anytime; submit when ready for review."}
+                ? "Your previous units are loaded below. Add Unit 3, 4, … with the Unit button, then Save draft. The form stays open so you can keep going. Submit only when the syllabus is ready for review."
+                : "Add unit titles and click Save as draft anytime. After save, the form stays open so you can keep adding units. Chapter/Part grouping and sub-units are optional."}
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -1360,16 +1484,16 @@ export const SyllabusPanel = ({
             <SyllabusHierarchyEditor
               key={editingId || "new-syllabus"}
               chapters={form.chapters}
-              defaultExpandAll={Boolean(editingId)}
+              defaultExpandAll
               nepaliText={formNepaliText}
               onChange={(chapters) =>
-                setForm((current) => ({
-                  ...current,
-                  chapters:
+                setForm((current) => {
+                  const nextChapters =
                     typeof chapters === "function"
                       ? chapters(current.chapters)
-                      : chapters,
-                }))
+                      : chapters;
+                  return { ...current, chapters: nextChapters };
+                })
               }
             />
 
@@ -1388,7 +1512,7 @@ export const SyllabusPanel = ({
                   updateMutation.isPending
                 }
               >
-                {editingId ? "Update Syllabus" : "Save Complete Syllabus"}
+                {editingId ? "Save draft" : "Save as draft"}
               </Button>
               <Button
                 variant="outline"
@@ -1397,9 +1521,14 @@ export const SyllabusPanel = ({
                   resetForm();
                 }}
               >
-                Cancel
+                Close
               </Button>
             </div>
+            <p className="text-xs text-slate-500">
+              Drafts are not submitted for approval until you use Submit on the
+              syllabus card. You can save partially (e.g. Unit 1–2), then continue
+              later with more units.
+            </p>
           </CardContent>
         </Card>
       ) : null}

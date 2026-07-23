@@ -33,34 +33,66 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
     );
   }
 
-  // Subjects from scope.subjectIds — do not require teacherIds membership for auth
+  // Subjects from scope.subjectIds only — do not also require yearIds/classIds membership
+  // on the subject document (over-filtering hid assigned subjects in Academic Management).
   if (college) {
+    const subjectFilter: Record<string, unknown> = {
+      schoolId,
+      _id: { $in: scope.subjectIds.length ? scope.subjectIds : ["__none__"] }
+    };
+    const batchFilter: Record<string, unknown> = {
+      schoolId,
+      ...(scope.batchIds.length ? { _id: { $in: scope.batchIds } } : { _id: { $in: [] } })
+    };
+    const yearFilter: Record<string, unknown> = {
+      schoolId,
+      ...(scope.yearIds.length ? { _id: { $in: scope.yearIds } } : { _id: { $in: [] } })
+    };
+    if (scope.batchIds.length) {
+      yearFilter.batchId = { $in: scope.batchIds };
+    }
+
     const [subjects, batches, years, students] = await Promise.all([
-      Subject.find({
-        _id: { $in: scope.subjectIds },
-        schoolId,
-        ...(scope.yearIds.length ? { yearIds: { $in: scope.yearIds } } : {})
-      }).sort({ name: 1 }),
-      Batch.find({ _id: { $in: scope.batchIds }, schoolId }).sort({ name: 1 }),
-      Year.find({
-        _id: { $in: scope.yearIds },
-        schoolId,
-        ...(scope.batchIds.length ? { batchId: { $in: scope.batchIds } } : {})
-      }).sort({ level: 1 }),
+      Subject.find(subjectFilter).sort({ name: 1 }),
+      Batch.find(batchFilter).sort({ name: 1 }),
+      Year.find(yearFilter).sort({ level: 1 }),
       Student.find({
         schoolId,
-        batchId: { $in: scope.batchIds },
-        yearId: { $in: scope.yearIds }
+        ...(scope.batchIds.length ? { batchId: { $in: scope.batchIds } } : { batchId: { $in: [] } }),
+        ...(scope.yearIds.length ? { yearId: { $in: scope.yearIds } } : { yearId: { $in: [] } })
       })
         .populate("user", "-password")
         .sort({ rollNumber: 1 })
     ]);
 
+    // If years are empty but subjects have yearIds, still return those years so the UI tree builds
+    let yearsOut = years;
+    if (yearsOut.length === 0 && subjects.length > 0) {
+      const yearIdSet = new Set<string>();
+      for (const s of subjects) {
+        for (const yid of s.yearIds ?? []) yearIdSet.add(yid.toString());
+      }
+      for (const a of scope.assignments) {
+        if (a.yearId) yearIdSet.add(a.yearId);
+      }
+      if (yearIdSet.size > 0) {
+        yearsOut = await Year.find({ schoolId, _id: { $in: [...yearIdSet] } }).sort({ level: 1 });
+      }
+    }
+
+    let batchesOut = batches;
+    if (batchesOut.length === 0 && yearsOut.length > 0) {
+      const batchIds = [...new Set(yearsOut.map((y) => y.batchId?.toString()).filter(Boolean))];
+      if (batchIds.length > 0) {
+        batchesOut = await Batch.find({ schoolId, _id: { $in: batchIds } }).sort({ name: 1 });
+      }
+    }
+
     return sendSuccess(res, "Teacher scope fetched", {
       scope,
       subjects,
-      batches,
-      years,
+      batches: batchesOut,
+      years: yearsOut,
       students: students.filter((student) => Boolean(student.user)),
       classes: [],
       sections: []
@@ -69,20 +101,21 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
 
   const [subjects, classes, sections, students] = await Promise.all([
     Subject.find({
-      _id: { $in: scope.subjectIds },
       schoolId,
-      ...(scope.classIds.length ? { classIds: { $in: scope.classIds } } : {})
+      _id: { $in: scope.subjectIds.length ? scope.subjectIds : ["__none__"] }
     }).sort({ name: 1 }),
-    SchoolClass.find({ _id: { $in: scope.classIds }, schoolId }).sort({ name: 1 }),
-    Section.find({
-      _id: { $in: scope.sectionIds },
+    SchoolClass.find({
       schoolId,
-      ...(scope.classIds.length ? { classId: { $in: scope.classIds } } : {})
+      ...(scope.classIds.length ? { _id: { $in: scope.classIds } } : { _id: { $in: [] } })
+    }).sort({ name: 1 }),
+    Section.find({
+      schoolId,
+      ...(scope.sectionIds.length ? { _id: { $in: scope.sectionIds } } : { _id: { $in: [] } })
     }).sort({ name: 1 }),
     Student.find({
       schoolId,
-      classId: { $in: scope.classIds },
-      sectionId: { $in: scope.sectionIds }
+      ...(scope.classIds.length ? { classId: { $in: scope.classIds } } : { classId: { $in: [] } }),
+      ...(scope.sectionIds.length ? { sectionId: { $in: scope.sectionIds } } : { sectionId: { $in: [] } })
     })
       .populate("user", "-password")
       .sort({ rollNumber: 1 })

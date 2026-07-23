@@ -513,6 +513,67 @@ export const hasConfiguredModuleAccess = (
 const hasExplicitModuleAccess = hasConfiguredModuleAccess;
 
 /**
+ * Modules every teacher needs for day-to-day teaching.
+ * Saving Module Access (e.g. Principal designation + admin sections) must not
+ * wipe these — admins still can set READ_ONLY, but NONE is treated as WRITE
+ * while the account has the TEACHER role (primary or secondary).
+ */
+export const TEACHER_BASELINE_MODULE_KEYS: readonly ErpModuleKey[] = [
+  "dashboard",
+  "profile",
+  "students",
+  "attendance",
+  "daily-attendance",
+  "academic-management",
+  "academic-calendar",
+  "timetable",
+  "examinations",
+  "results",
+  "homework",
+  "notices",
+  "complaints",
+  "library",
+  "laboratory"
+] as const;
+
+/** Draft map for a teacher: teaching tools Manage, other admin sections Hidden. */
+export const buildTeacherBaselineModuleAccess = (): Record<
+  ErpModuleKey,
+  ModuleAccessMode
+> => {
+  const result = {} as Record<ErpModuleKey, ModuleAccessMode>;
+  const baseline = new Set<string>(TEACHER_BASELINE_MODULE_KEYS);
+  for (const key of ERP_MODULE_KEYS) {
+    if (key === "profile" || key === "dashboard") {
+      result[key] = "WRITE";
+      continue;
+    }
+    result[key] = baseline.has(key) ? "WRITE" : "NONE";
+  }
+  return result;
+};
+
+/**
+ * Keep teaching tools available when a custom module-access map was saved.
+ * Does not downgrade READ_ONLY / WRITE; only elevates missing/NONE baseline keys.
+ */
+export const applyTeacherRoleBaseline = (
+  map: ModuleAccessMap | null | undefined
+): ModuleAccessMap => {
+  if (!map || !hasConfiguredModuleAccess(map)) {
+    return map ?? {};
+  }
+  const next: ModuleAccessMap = { ...map };
+  for (const key of TEACHER_BASELINE_MODULE_KEYS) {
+    const mode = next[key];
+    if (mode === undefined || mode === "NONE") {
+      next[key] = "WRITE";
+    }
+  }
+  return next;
+};
+
+/**
  * Admin UI groups — only modules an admin typically assigns to staff/teachers.
  * Dashboard & profile are always available (self-service) and not listed here.
  */

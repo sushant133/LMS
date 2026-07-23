@@ -6,7 +6,9 @@ import {
   MODULE_PERMISSION_ACTIONS,
   MODULE_PERMISSION_ACTION_LABELS,
   PERMISSION_PRESETS,
+  applyTeacherRoleBaseline,
   buildPresetModuleAccess,
+  buildTeacherBaselineModuleAccess,
   expandModuleAccessMap,
   expandModuleActionsMap,
   hasConfiguredModuleAccess,
@@ -72,14 +74,22 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
     }
   }
 
-  const map = mapFromDoc(user.moduleAccess);
+  let map = mapFromDoc(user.moduleAccess);
   const actions = actionsFromDoc(user.moduleActions);
+  const secondaryRoles = (user.secondaryRoles as UserRole[]) ?? [];
+  const isTeacher =
+    user.role === "TEACHER" || secondaryRoles.includes("TEACHER");
+  if (isTeacher && hasConfiguredModuleAccess(map)) {
+    map = applyTeacherRoleBaseline(map);
+  }
   const configured = hasConfiguredModuleAccess(map);
-  // Unconfigured accounts: show a clean "start from no access" draft in the admin UI
-  // (runtime still uses legacy role defaults until the first save).
+  // Unconfigured: teachers start with teaching tools on; others start from no access.
+  // (Runtime still uses legacy full access until the first save for non-teachers.)
   const expanded = configured
     ? expandModuleAccessMap(map)
-    : buildPresetModuleAccess("NO_ACCESS");
+    : isTeacher
+      ? buildTeacherBaselineModuleAccess()
+      : buildPresetModuleAccess("NO_ACCESS");
   const expandedActions = expandModuleActionsMap(
     configured ? map : expanded,
     actions
@@ -93,7 +103,7 @@ export const getUserModuleAccess = asyncHandler(async (req: Request, res: Respon
     role: user.role,
     designation: user.designation,
     department: user.department,
-    secondaryRoles: (user.secondaryRoles as UserRole[]) ?? [],
+    secondaryRoles,
     configured,
     moduleAccess: expanded,
     moduleActions: expandedActions,

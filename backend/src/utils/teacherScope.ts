@@ -96,13 +96,20 @@ const buildLegacyScope = (
   scopeSource: "legacy"
 });
 
+/** Normalize BS academic year for loose matching (e.g. "2082/083" vs "2082 / 083"). */
+const normalizeAcademicYearBs = (value: string | undefined | null): string =>
+  (value ?? "").trim().replace(/\s+/g, "").toLowerCase();
+
 /**
  * Dual-mode precedence:
- * - legacy mode → always legacy arrays
- * - assignment mode → always ACTIVE SubjectAssignment for current AY
- * - dual + ACCEPTED|NA → assignments (HR-only teachers; empty until rows exist)
- * - dual + PENDING|NEEDS_REVIEW → **prefer ACTIVE assignment rows when present**,
- *   else fall back to legacy Teacher arrays (existing teachers keep working)
+ * - legacy mode → prefer ACTIVE SubjectAssignment rows when present (admin assign UI),
+ *   else legacy Teacher arrays
+ * - assignment mode → always ACTIVE SubjectAssignment
+ * - dual + ACCEPTED|NA → assignments
+ * - dual + PENDING|NEEDS_REVIEW → hybrid = assignments if any, else legacy
+ *
+ * Critical: when admin assigns via Subject Assignment, teachers must see those subjects
+ * even if the school is still on "legacy" scope mode or migration is PENDING.
  */
 const preferAssignmentWhenRowsExist = (
   mode: ScopeMode,
@@ -110,7 +117,8 @@ const preferAssignmentWhenRowsExist = (
 ): "legacy" | "assignment" | "hybrid" => {
   const status = migrationStatus ?? "PENDING";
 
-  if (mode === "legacy") return "legacy";
+  // Even "legacy" mode is hybrid so Subject Assignment rows are never ignored.
+  if (mode === "legacy") return "hybrid";
   if (mode === "assignment") return "assignment";
 
   // dual
@@ -118,6 +126,20 @@ const preferAssignmentWhenRowsExist = (
   // Existing teachers (PENDING / NEEDS_REVIEW): hybrid = assignments if any, else legacy
   return "hybrid";
 };
+
+/** Merge assignment scope with legacy arrays so neither path hides access. */
+const mergeScopes = (primary: TeacherScope, secondary: TeacherScope): TeacherScope => ({
+  teacherId: primary.teacherId,
+  subjectIds: unique([...primary.subjectIds, ...secondary.subjectIds]),
+  classIds: unique([...primary.classIds, ...secondary.classIds]),
+  sectionIds: unique([...primary.sectionIds, ...secondary.sectionIds]),
+  batchIds: unique([...primary.batchIds, ...secondary.batchIds]),
+  yearIds: unique([...primary.yearIds, ...secondary.yearIds]),
+  // Prefer assignment matrix pairs; keep unique by assignmentId/subject+group
+  assignments: primary.assignments.length > 0 ? primary.assignments : secondary.assignments,
+  academicYearBs: primary.academicYearBs || secondary.academicYearBs,
+  scopeSource: primary.assignments.length > 0 ? "assignment" : secondary.scopeSource
+});
 
 export const getTeacherScope = async (req: Request): Promise<TeacherScope | null> => {
   if (!req.user || req.user.role !== "TEACHER") {
@@ -144,32 +166,69 @@ export const getTeacherScope = async (req: Request): Promise<TeacherScope | null
   const mode = await getScopeMode(schoolId);
   const source = preferAssignmentWhenRowsExist(mode, teacher.assignmentMigrationStatus);
 
-  const loadAssignmentRows = async () =>
-    academicYearBs
-      ? await SubjectAssignment.find({
-          schoolId,
-          teacherId: teacher._id,
-          academicYearBs,
-          status: "ACTIVE"
-        }).lean()
-      : [];
+  /**
+   * Load ACTIVE subject assignments for this teacher.
+   * 1) Exact academic year match (settings)
+   * 2) Normalized year match (spacing/case)
+   * 3) Any ACTIVE row (so a just-assigned subject is never invisible)
+   */
+  const loadAssignmentRows = async () => {
+    const base = {
+      schoolId,
+      teacherId: teacher._id,
+      status: "ACTIVE" as const
+    };
 
-  if (source === "legacy") {
-    return buildLegacyScope(teacher, academicYearBs);
-  }
+    if (academicYearBs) {
+      const exact = await SubjectAssignment.find({
+        ...base,
+        academicYearBs
+      }).lean();
+      if (exact.length > 0) return exact;
 
-  if (source === "hybrid") {
-    const rows = await loadAssignmentRows();
-    if (rows.length > 0) {
-      return buildScopeFromAssignments(teacher._id.toString(), academicYearBs, rows);
+      const allActive = await SubjectAssignment.find(base).lean();
+      if (allActive.length === 0) return [];
+
+      const target = normalizeAcademicYearBs(academicYearBs);
+      const normalized = allActive.filter(
+        (row) => normalizeAcademicYearBs(row.academicYearBs) === target
+      );
+      if (normalized.length > 0) return normalized;
+
+      // Fallback: show all active assignments so teachers can work after admin assign
+      return allActive;
     }
-    // Existing teachers: keep legacy multi-select arrays until SubjectAssignment rows exist
-    return buildLegacyScope(teacher, academicYearBs);
+
+    return SubjectAssignment.find(base).lean();
+  };
+
+  const legacy = buildLegacyScope(teacher, academicYearBs);
+  const rows = await loadAssignmentRows();
+
+  if (source === "assignment") {
+    // Assignment-only mode, but never strand a teacher with zero rows if legacy has subjects
+    if (rows.length > 0) {
+      const fromAssign = buildScopeFromAssignments(
+        teacher._id.toString(),
+        academicYearBs || rows[0]?.academicYearBs || "",
+        rows
+      );
+      return mergeScopes(fromAssign, legacy);
+    }
+    return legacy;
   }
 
-  // assignment-only
-  const rows = await loadAssignmentRows();
-  return buildScopeFromAssignments(teacher._id.toString(), academicYearBs, rows);
+  // hybrid (includes former pure-legacy): assignment rows win when present
+  if (rows.length > 0) {
+    const fromAssign = buildScopeFromAssignments(
+      teacher._id.toString(),
+      academicYearBs || rows[0]?.academicYearBs || "",
+      rows
+    );
+    return mergeScopes(fromAssign, legacy);
+  }
+
+  return legacy;
 };
 
 export const requireTeacherScope = async (req: Request): Promise<TeacherScope> => {

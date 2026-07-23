@@ -252,19 +252,17 @@ export const SyllabusHierarchyEditor = ({
   defaultExpandAll = false,
   nepaliText = false,
 }: SyllabusHierarchyEditorProps) => {
+  // Always expand sections + units by default so Unit title is visible without hunting
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(
     () => new Set(chapters.map((c) => c.clientKey)),
   );
-  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() =>
-    defaultExpandAll
-      ? new Set(chapters.flatMap((c) => c.units.map((u) => u.clientKey)))
-      : new Set(),
+  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(
+    () => new Set(chapters.flatMap((c) => c.units.map((u) => u.clientKey))),
   );
   const [dragChapterKey, setDragChapterKey] = useState<string | null>(null);
 
-  // When loading an existing syllabus for edit, expand everything once
+  // Re-expand when switching into edit mode / remount with defaultExpandAll
   useEffect(() => {
-    if (!defaultExpandAll) return;
     setExpandedChapters(new Set(chapters.map((c) => c.clientKey)));
     setExpandedUnits(
       new Set(chapters.flatMap((c) => c.units.map((u) => u.clientKey))),
@@ -273,15 +271,17 @@ export const SyllabusHierarchyEditor = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultExpandAll]);
 
-  /** Always apply renumber + support functional updates (no lost nested adds). */
+  /**
+   * Always update via functional form so rapid title edits / adds never
+   * overwrite each other with a stale chapters snapshot.
+   */
   const setChapters = (
     next: ChapterDraft[] | ((prev: ChapterDraft[]) => ChapterDraft[]),
   ) => {
-    if (typeof next === "function") {
-      onChange((prev) => renumberChapters(next(prev)));
-    } else {
-      onChange(renumberChapters(next));
-    }
+    onChange((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      return renumberChapters(resolved);
+    });
   };
 
   const allExpanded = useMemo(() => {
@@ -374,8 +374,8 @@ export const SyllabusHierarchyEditor = ({
           </p>
           <p className="text-xs text-slate-500">
             {nepaliText
-              ? "विषय → वैकल्पिक अध्याय वा भाग → एकाइ → उप–एकाइ। नम्बर: एकाइ १, क. ख. ग.… युनिकोड नेपाली सिधै पेस्ट गर्न सकिन्छ।"
-              : "Subject → optional Chapter or Part (pick one) → Unit → Sub Unit. Sub-units are heading-only (1.1, 1.1.1…)."}
+              ? "विषय → वैकल्पिक अध्याय वा भाग → एकाइ → उप–एकाइ। एकाइ नम्बर अध्यायभर निरन्तर: अध्याय-१ (एकाइ १–५), अध्याय-२ (एकाइ ६–१०)… उप–एकाइ: क. ख. ग.…"
+              : "Subject → optional Chapter or Part (pick one) → Unit → Sub Unit. Unit numbers continue across chapters (Ch-1: units 1–5, Ch-2: units 6–10…). Sub-units: 1.1, 6.1, …"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -397,8 +397,42 @@ export const SyllabusHierarchyEditor = ({
               </>
             )}
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              // Always append a unit to the last section (or create a units-only section)
+              if (chapters.length === 0) {
+                const ch = emptyChapter(1, "NONE");
+                const unit = emptyUnit(1);
+                setChapters([{ ...ch, units: [unit] }]);
+                setExpandedChapters((s) => new Set(s).add(ch.clientKey));
+                setExpandedUnits((s) => new Set(s).add(unit.clientKey));
+                return;
+              }
+              const lastIdx = chapters.length - 1;
+              const last = chapters[lastIdx]!;
+              const unit = emptyUnit(
+                chapters.reduce((n, c) => n + c.units.length, 0) + 1,
+              );
+              setChapters(
+                chapters.map((ch, i) =>
+                  i === lastIdx
+                    ? { ...ch, units: [...ch.units, unit] }
+                    : ch,
+                ),
+              );
+              setExpandedChapters((s) => new Set(s).add(last.clientKey));
+              setExpandedUnits((s) => new Set(s).add(unit.clientKey));
+            }}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            {nepaliText ? "एकाइ थप्नुहोस्" : "Add Unit"}
+          </Button>
           <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-1">
-            <span className="px-1.5 text-xs text-slate-500">Add</span>
+            <span className="px-1.5 text-xs text-slate-500">
+              {nepaliText ? "खण्ड" : "Section"}
+            </span>
             <Select
               className="h-8 w-[130px] border-0 bg-white text-sm shadow-sm"
               defaultValue=""
@@ -415,7 +449,7 @@ export const SyllabusHierarchyEditor = ({
               }}
             >
               <option value="" disabled>
-                {nepaliText ? "खण्ड प्रकार…" : "Section type…"}
+                {nepaliText ? "खण्ड प्रकार…" : "Optional…"}
               </option>
               <option value="NONE">
                 {nepaliText ? "एकाइ मात्र" : "Units only"}
@@ -527,12 +561,15 @@ export const SyllabusHierarchyEditor = ({
                   size="sm"
                   variant="outline"
                   onClick={() => {
+                    const newUnit = emptyUnit(units.length + 1);
                     updateChapter(cIndex, {
-                      units: [...units, emptyUnit(units.length + 1)],
+                      units: [...units, newUnit],
                     });
                     setExpandedChapters(
                       (s) => new Set(s).add(chapter.clientKey),
                     );
+                    // Expand so the required Unit title field is immediately visible
+                    setExpandedUnits((s) => new Set(s).add(newUnit.clientKey));
                   }}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />
@@ -748,20 +785,35 @@ export const SyllabusHierarchyEditor = ({
                           </button>
                           <p
                             className={cn(
-                              "min-w-0 flex-1 text-sm font-medium text-slate-800",
+                              "shrink-0 text-sm font-medium text-slate-800",
                               nepaliText && nepaliTextClass,
                             )}
                           >
                             {formatUnitLabel(unit.unitNo || uIndex + 1, {
                               nepali: nepaliText,
                             })}
-                            {unit.title ? (
-                              <span className="font-normal text-slate-600">
-                                {" "}
-                                · {unit.title}
-                              </span>
-                            ) : null}
                           </p>
+                          {/* Title always editable (even when row is collapsed) — required to save */}
+                          <Input
+                            className="min-w-[10rem] flex-1"
+                            value={unit.title}
+                            nepali={nepaliText}
+                            onChange={(e) =>
+                              updateUnit(cIndex, uIndex, {
+                                title: e.target.value,
+                              })
+                            }
+                            placeholder={
+                              nepaliText
+                                ? "एकाइको शीर्षक (आवश्यक)"
+                                : "Unit title (required)"
+                            }
+                            aria-label={
+                              nepaliText
+                                ? "एकाइको शीर्षक"
+                                : "Unit title (required)"
+                            }
+                          />
                           <Button
                             type="button"
                             size="sm"
@@ -878,8 +930,8 @@ export const SyllabusHierarchyEditor = ({
                               <FormField
                                 label={
                                   nepaliText
-                                    ? nepaliStructuralLabels.unitTitle
-                                    : "Unit title"
+                                    ? `${nepaliStructuralLabels.unitTitle} (आवश्यक)`
+                                    : "Unit title (required)"
                                 }
                               >
                                 <Input

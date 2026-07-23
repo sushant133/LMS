@@ -1,8 +1,10 @@
 import type { Request } from "express";
 import {
+  applyTeacherRoleBaseline,
   canManageInstitution,
   expandModuleAccessMap,
   expandModuleActionsMap,
+  hasConfiguredModuleAccess,
   MODULE_ACCESS_DENIED_MESSAGE,
   MODULE_ACCESS_DISABLED_MESSAGE,
   normalizeModuleAccessMode,
@@ -17,6 +19,14 @@ import {
 import { User } from "../models/User.js";
 import { ApiError } from "./apiError.js";
 import { recordAudit } from "./audit.js";
+
+const userHasTeacherRole = (
+  role: string | undefined,
+  secondaryRoles?: UserRole[] | string[] | null
+): boolean => {
+  if (role === "TEACHER") return true;
+  return (secondaryRoles ?? []).some((r) => r === "TEACHER");
+};
 
 const mapFromUserDoc = (raw: unknown): ModuleAccessMap => {
   if (!raw) return {};
@@ -49,12 +59,23 @@ const actionsFromUserDoc = (raw: unknown): ModuleActionsMap => {
 };
 
 export const getUserModuleAccessMap = async (userId: string): Promise<ModuleAccessMap> => {
-  const user = await User.findById(userId).select("moduleAccess role").lean();
+  const user = await User.findById(userId)
+    .select("moduleAccess role secondaryRoles")
+    .lean();
   if (!user) return {};
   if (canManageInstitution(user.role)) {
     return expandModuleAccessMap({});
   }
-  return mapFromUserDoc(user.moduleAccess);
+  let map = mapFromUserDoc(user.moduleAccess);
+  // Teachers keep syllabus/plans/attendance tools even after an admin saves
+  // module access (e.g. Principal designation + admin sections).
+  if (
+    userHasTeacherRole(user.role, user.secondaryRoles as UserRole[] | undefined) &&
+    hasConfiguredModuleAccess(map)
+  ) {
+    map = applyTeacherRoleBaseline(map);
+  }
+  return map;
 };
 
 export const getUserModuleActionsMap = async (userId: string): Promise<ModuleActionsMap> => {
@@ -111,12 +132,19 @@ export const getFullPermissionStateForUser = async (
     };
   }
 
-  const map = mapFromUserDoc(user.moduleAccess);
+  let map = mapFromUserDoc(user.moduleAccess);
+  const secondary = (user.secondaryRoles as UserRole[]) ?? [];
+  if (
+    userHasTeacherRole(role ?? user.role, secondary) &&
+    hasConfiguredModuleAccess(map)
+  ) {
+    map = applyTeacherRoleBaseline(map);
+  }
   const actions = actionsFromUserDoc(user.moduleActions);
   return {
     moduleAccess: expandModuleAccessMap(map),
     moduleActions: expandModuleActionsMap(map, actions),
-    secondaryRoles: (user.secondaryRoles as UserRole[]) ?? [],
+    secondaryRoles: secondary,
     designation: user.designation
   };
 };
@@ -202,11 +230,24 @@ export const updateUserModuleAccess = async (
     user.designation = options.designation || undefined;
   }
 
+  // Persist teacher baseline so saved maps don't hide teaching tools
+  const finalSecondary = (user.secondaryRoles as UserRole[]) ?? [];
+  if (userHasTeacherRole(user.role, finalSecondary)) {
+    const withBaseline = applyTeacherRoleBaseline(
+      mapFromUserDoc(user.moduleAccess)
+    );
+    user.set("moduleAccess", withBaseline);
+    user.markModified("moduleAccess");
+  }
+
   await user.save();
 
-  const afterAccess = mapFromUserDoc(user.moduleAccess);
+  let afterAccess = mapFromUserDoc(user.moduleAccess);
   const afterActions = actionsFromUserDoc(user.moduleActions);
   const afterSecondary = (user.secondaryRoles as UserRole[]) ?? [];
+  if (userHasTeacherRole(user.role, afterSecondary)) {
+    afterAccess = applyTeacherRoleBaseline(afterAccess);
+  }
 
   await recordAudit(req, {
     action: "user.module_access.update",

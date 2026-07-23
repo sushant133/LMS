@@ -480,6 +480,24 @@ export const AppLayout = () => {
     const moduleKey = resolveModuleFromRoutePath(path);
     if (!moduleKey) return true;
     if (moduleKey === "profile") return true;
+    // Teaching role: always show My Work teaching paths even if a custom
+    // module map was saved with Hidden for admin sections only.
+    if (
+      hasTeachingCapability &&
+      (path === "/academic-management" ||
+        path === "/homework" ||
+        path === "/timetable" ||
+        path === "/exams" ||
+        path === "/attendance" ||
+        path === "/students" ||
+        path === "/my-library" ||
+        path === "/laboratory" ||
+        path === "/notices" ||
+        path === "/academic-calendar" ||
+        path === "/complains")
+    ) {
+      return true;
+    }
     return canAccessModule(moduleAccessMap, moduleKey);
   };
 

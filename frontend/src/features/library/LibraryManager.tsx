@@ -36,6 +36,7 @@ import { NepaliDateField } from "components/shared/NepaliDateField";
 import { ModuleReadOnlyBanner } from "components/shared/ModuleReadOnlyBanner";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
+import { useIsCollege } from "hooks/useInstitutionType";
 import { LibraryReturnsPanel } from "features/library/LibraryReturnsPanel";
 import { StockStatusBadge } from "features/library/StockStatusBadge";
 import { Badge } from "components/ui/badge";
@@ -50,6 +51,27 @@ import { api, unwrap } from "lib/api";
 import { resolveStudentId } from "lib/resolveStudentId";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
+
+/** Student fields used for issue-book borrower filtering (limited library roster). */
+type IssueStudentRow = {
+  _id: string;
+  admissionNumber?: string;
+  rollNumber?: number;
+  batchId?: string;
+  batchName?: string;
+  yearId?: string;
+  yearName?: string;
+  classId?: string;
+  className?: string;
+  sectionId?: string;
+  sectionName?: string;
+  user?: { fullName?: string } | null;
+};
+
+type IssueTeacherRow = {
+  _id: string;
+  user?: { fullName?: string } | null;
+};
 
 type Tab = "dashboard" | "inventory" | "issue" | "returns" | "staff";
 
@@ -149,6 +171,7 @@ const tabs: Array<{
 
 export const LibraryManager = () => {
   const { user } = useAuth();
+  const isCollege = useIsCollege();
   const isAdmin = canManageInstitution(user?.role ?? "");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [bookForm, setBookForm] = useState<LibraryBookInput>(defaultBook);
@@ -162,6 +185,15 @@ export const LibraryManager = () => {
   const [staffForm, setStaffForm] = useState<ModuleStaffInput>(defaultStaff);
   const [inventorySearch, setInventorySearch] = useState("");
   const [yearFilter, setYearFilter] = useState<"ALL" | LibraryYearLevel>("ALL");
+
+  // Issue-book filters & search
+  const [issueStudentSearch, setIssueStudentSearch] = useState("");
+  const [issueTeacherSearch, setIssueTeacherSearch] = useState("");
+  const [issueBookSearch, setIssueBookSearch] = useState("");
+  const [issueBatchId, setIssueBatchId] = useState("");
+  const [issueYearId, setIssueYearId] = useState("");
+  const [issueClassId, setIssueClassId] = useState("");
+  const [issueSectionId, setIssueSectionId] = useState("");
 
   const dashboardQuery = useQuery({
     queryKey: ["library-dashboard"],
@@ -193,19 +225,15 @@ export const LibraryManager = () => {
   const libraryReadOnly = !libraryModuleWrite;
 
   const studentsQuery = useQuery({
-    queryKey: ["students"],
-    queryFn: () =>
-      unwrap<Array<{ _id: string; user: { fullName: string } }>>(
-        api.get("/students"),
-      ),
+    queryKey: ["students", "library-issue"],
+    queryFn: () => unwrap<IssueStudentRow[]>(api.get("/students")),
+    enabled: tab === "issue",
   });
 
   const teachersQuery = useQuery({
-    queryKey: ["teachers"],
-    queryFn: () =>
-      unwrap<Array<{ _id: string; user: { fullName: string } }>>(
-        api.get("/teachers"),
-      ),
+    queryKey: ["teachers", "library-issue"],
+    queryFn: () => unwrap<IssueTeacherRow[]>(api.get("/teachers")),
+    enabled: tab === "issue",
   });
 
   const staffQuery = useQuery({
@@ -227,6 +255,177 @@ export const LibraryManager = () => {
       ) as LibraryBookCopyRecord[],
     [selectedBook],
   );
+
+  /** Filter options derived from the student roster (works for library staff without academics module). */
+  const issueBatchOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of studentsQuery.data ?? []) {
+      if (s.batchId) map.set(s.batchId, s.batchName || "Batch");
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ _id: id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [studentsQuery.data]);
+
+  const issueYearOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of studentsQuery.data ?? []) {
+      if (issueBatchId && s.batchId !== issueBatchId) continue;
+      if (s.yearId) map.set(s.yearId, s.yearName || "Year");
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ _id: id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [studentsQuery.data, issueBatchId]);
+
+  const issueClassOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of studentsQuery.data ?? []) {
+      if (s.classId) map.set(s.classId, s.className || "Class");
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ _id: id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [studentsQuery.data]);
+
+  const issueSectionOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of studentsQuery.data ?? []) {
+      if (issueClassId && s.classId !== issueClassId) continue;
+      if (s.sectionId) map.set(s.sectionId, s.sectionName || "Section");
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ _id: id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [studentsQuery.data, issueClassId]);
+
+  const filteredIssueStudents = useMemo(() => {
+    let list = studentsQuery.data ?? [];
+    if (isCollege) {
+      if (issueBatchId) {
+        list = list.filter((s) => s.batchId === issueBatchId);
+      }
+      if (issueYearId) {
+        list = list.filter((s) => s.yearId === issueYearId);
+      }
+    } else {
+      if (issueClassId) {
+        list = list.filter((s) => s.classId === issueClassId);
+      }
+      if (issueSectionId) {
+        list = list.filter((s) => s.sectionId === issueSectionId);
+      }
+    }
+    const q = issueStudentSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((s) => {
+      const name = (s.user?.fullName ?? "").toLowerCase();
+      const admission = (s.admissionNumber ?? "").toLowerCase();
+      const roll = String(s.rollNumber ?? "");
+      return (
+        name.includes(q) ||
+        admission.includes(q) ||
+        roll.includes(q)
+      );
+    });
+  }, [
+    studentsQuery.data,
+    isCollege,
+    issueBatchId,
+    issueYearId,
+    issueClassId,
+    issueSectionId,
+    issueStudentSearch,
+  ]);
+
+  const filteredIssueTeachers = useMemo(() => {
+    const list = teachersQuery.data ?? [];
+    const q = issueTeacherSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((t) =>
+      (t.user?.fullName ?? "").toLowerCase().includes(q),
+    );
+  }, [teachersQuery.data, issueTeacherSearch]);
+
+  /** Books with at least one available copy, filtered by title/author/isbn/code. */
+  const filteredIssueBooks = useMemo(() => {
+    const q = issueBookSearch.trim().toLowerCase();
+    const books = (booksQuery.data ?? []).filter(
+      (b) =>
+        (b.copies ?? []).some((c) => c.status === "AVAILABLE") ||
+        b.availableCopies > 0,
+    );
+    if (!q) return books;
+    return books.filter((book) => {
+      const inMeta =
+        book.title.toLowerCase().includes(q) ||
+        book.author.toLowerCase().includes(q) ||
+        (book.isbn ?? "").toLowerCase().includes(q) ||
+        book.category.toLowerCase().includes(q) ||
+        (book.yearLevel ?? "").toLowerCase().includes(q);
+      const inCodes = (book.copies ?? []).some((c) =>
+        c.bookCode.toLowerCase().includes(q),
+      );
+      return inMeta || inCodes;
+    });
+  }, [booksQuery.data, issueBookSearch]);
+
+  /** Flat available copies matching book search (for quick pick by code). */
+  const matchingAvailableCopies = useMemo(() => {
+    const q = issueBookSearch.trim().toLowerCase();
+    if (!q) return [] as Array<LibraryBookCopyRecord & { bookTitle: string; bookId: string }>;
+    const out: Array<LibraryBookCopyRecord & { bookTitle: string; bookId: string }> = [];
+    for (const book of booksQuery.data ?? []) {
+      for (const copy of book.copies ?? []) {
+        if (copy.status !== "AVAILABLE") continue;
+        if (
+          copy.bookCode.toLowerCase().includes(q) ||
+          book.title.toLowerCase().includes(q)
+        ) {
+          out.push({
+            ...copy,
+            bookTitle: book.title,
+            bookId: book._id,
+          });
+        }
+      }
+    }
+    return out.slice(0, 40);
+  }, [booksQuery.data, issueBookSearch]);
+
+  const selectedStudent = useMemo(() => {
+    if (!issueForm.studentId) return null;
+    return (
+      (studentsQuery.data ?? []).find((s) => s._id === issueForm.studentId) ??
+      null
+    );
+  }, [studentsQuery.data, issueForm.studentId]);
+
+  const selectedTeacher = useMemo(() => {
+    if (!issueForm.teacherId) return null;
+    return (
+      (teachersQuery.data ?? []).find((t) => t._id === issueForm.teacherId) ??
+      null
+    );
+  }, [teachersQuery.data, issueForm.teacherId]);
+
+  const selectBookForIssue = (bookId: string) => {
+    setIssueForm((c) => ({
+      ...c,
+      bookId,
+      copyId: "",
+      bookCode: "",
+    }));
+  };
+
+  const selectCopyForIssue = (bookId: string, copyId: string, bookCode?: string) => {
+    setIssueForm((c) => ({
+      ...c,
+      bookId,
+      copyId,
+      bookCode: bookCode ?? "",
+    }));
+  };
 
   const filteredBooks = useMemo(() => {
     const q = inventorySearch.trim().toLowerCase();
@@ -390,6 +589,9 @@ export const LibraryManager = () => {
     onSuccess: async () => {
       toast.success("Book issued by copy code");
       setIssueForm(defaultIssue);
+      setIssueStudentSearch("");
+      setIssueTeacherSearch("");
+      setIssueBookSearch("");
       await invalidateLibrary();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -1397,151 +1599,454 @@ export const LibraryManager = () => {
       )}
 
       {tab === "issue" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Issue book by code</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <FormField label="Book title">
-              <Select
-                value={issueForm.bookId}
-                onChange={(e) =>
-                  setIssueForm((c) => ({
-                    ...c,
-                    bookId: e.target.value,
-                    copyId: "",
-                  }))
-                }
-              >
-                <option value="">Select book</option>
-                {(booksQuery.data ?? [])
-                  .filter(
-                    (b) =>
-                      (b.copies ?? []).some((c) => c.status === "AVAILABLE") ||
-                      b.availableCopies > 0,
-                  )
-                  .map((b) => (
-                    <option key={b._id} value={b._id}>
-                      [{b.yearLevel ?? "All Years"}] {b.title} (
-                      {(b.copies ?? []).filter((c) => c.status === "AVAILABLE")
-                        .length || b.availableCopies}{" "}
-                      available)
-                    </option>
-                  ))}
-              </Select>
-            </FormField>
-            <FormField label="Physical book code">
-              <Select
-                value={issueForm.copyId ?? ""}
-                onChange={(e) =>
-                  setIssueForm((c) => ({ ...c, copyId: e.target.value }))
-                }
-                disabled={!issueForm.bookId}
-              >
-                <option value="">Select code to issue</option>
-                {availableCopies.map((copy) => (
-                  <option key={copy._id} value={copy._id}>
-                    {copy.bookCode}
-                    {copy.shelfLocation ? ` · ${copy.shelfLocation}` : ""}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-            <FormField label="Borrower type">
-              <Select
-                value={issueForm.borrowerType}
-                onChange={(e) =>
-                  setIssueForm((c) => ({
-                    ...c,
-                    borrowerType: e.target.value as "STUDENT" | "TEACHER",
-                    studentId: "",
-                    teacherId: "",
-                  }))
-                }
-              >
-                <option value="STUDENT">Student</option>
-                <option value="TEACHER">Teacher</option>
-              </Select>
-            </FormField>
-            {issueForm.borrowerType === "STUDENT" ? (
-              <FormField label="Student">
-                <Select
-                  value={issueForm.studentId}
-                  onChange={(e) =>
-                    setIssueForm((c) => ({ ...c, studentId: e.target.value }))
-                  }
-                >
-                  <option value="">Select student</option>
-                  {(studentsQuery.data ?? []).map((s) => (
-                    <option key={s._id} value={s._id}>
-                      {s.user.fullName}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-            ) : (
-              <FormField label="Teacher">
-                <Select
-                  value={issueForm.teacherId}
-                  onChange={(e) =>
-                    setIssueForm((c) => ({ ...c, teacherId: e.target.value }))
-                  }
-                >
-                  <option value="">Select teacher</option>
-                  {(teachersQuery.data ?? []).map((t) => (
-                    <option key={t._id} value={t._id}>
-                      {t.user.fullName}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-            )}
-            <FormField label="Issued (BS)">
-              <NepaliDateField
-                value={issueForm.issuedDateBs}
-                onChange={(v) =>
-                  setIssueForm((c) => ({ ...c, issuedDateBs: v }))
-                }
-              />
-            </FormField>
-            <FormField label="Due (BS)">
-              <NepaliDateField
-                value={issueForm.dueDateBs}
-                onChange={(v) => setIssueForm((c) => ({ ...c, dueDateBs: v }))}
-              />
-            </FormField>
-            <div className="flex items-end">
-              <Button
-                onClick={() => {
-                  const parsed = libraryIssueSchema.safeParse(issueForm);
-                  if (!parsed.success) {
-                    return toast.error(
-                      parsed.error.issues[0]?.message ??
-                        "Select book, code, borrower, and dates",
-                    );
-                  }
-                  issueBook.mutate(parsed.data);
-                }}
-                disabled={issueBook.isPending}
-              >
-                Issue this copy
-              </Button>
-            </div>
-            {issueForm.copyId && selectedBook ? (
-              <p className="md:col-span-2 xl:col-span-3 text-sm text-slate-600">
-                Issuing{" "}
-                <span className="font-mono font-semibold">
-                  {
-                    availableCopies.find((c) => c._id === issueForm.copyId)
-                      ?.bookCode
-                  }
-                </span>{" "}
-                of <strong>{selectedBook.title}</strong>. Only this code will
-                become ISSUED; other copies stay available.
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Issue book</CardTitle>
+              <p className="text-sm text-slate-600">
+                Search and filter students by batch/year, search books by name or
+                code, pick a physical copy, then issue.
               </p>
-            ) : null}
-          </CardContent>
-        </Card>
+            </CardHeader>
+          </Card>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            {/* —— Borrower —— */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">1. Select borrower</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <FormField label="Borrower type">
+                  <Select
+                    value={issueForm.borrowerType}
+                    onChange={(e) => {
+                      setIssueForm((c) => ({
+                        ...c,
+                        borrowerType: e.target.value as "STUDENT" | "TEACHER",
+                        studentId: "",
+                        teacherId: "",
+                      }));
+                      setIssueStudentSearch("");
+                      setIssueTeacherSearch("");
+                    }}
+                  >
+                    <option value="STUDENT">Student</option>
+                    <option value="TEACHER">Teacher</option>
+                  </Select>
+                </FormField>
+
+                {issueForm.borrowerType === "STUDENT" ? (
+                  <>
+                    {isCollege ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <FormField label="Batch">
+                          <Select
+                            value={issueBatchId}
+                            onChange={(e) => {
+                              setIssueBatchId(e.target.value);
+                              setIssueYearId("");
+                              setIssueForm((c) => ({ ...c, studentId: "" }));
+                            }}
+                          >
+                            <option value="">All batches</option>
+                            {issueBatchOptions.map((b) => (
+                              <option key={b._id} value={b._id}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </FormField>
+                        <FormField label="Year">
+                          <Select
+                            value={issueYearId}
+                            onChange={(e) => {
+                              setIssueYearId(e.target.value);
+                              setIssueForm((c) => ({ ...c, studentId: "" }));
+                            }}
+                          >
+                            <option value="">All years</option>
+                            {issueYearOptions.map((y) => (
+                              <option key={y._id} value={y._id}>
+                                {y.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </FormField>
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <FormField label="Class">
+                          <Select
+                            value={issueClassId}
+                            onChange={(e) => {
+                              setIssueClassId(e.target.value);
+                              setIssueSectionId("");
+                              setIssueForm((c) => ({ ...c, studentId: "" }));
+                            }}
+                          >
+                            <option value="">All classes</option>
+                            {issueClassOptions.map((c) => (
+                              <option key={c._id} value={c._id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </FormField>
+                        <FormField label="Section">
+                          <Select
+                            value={issueSectionId}
+                            onChange={(e) => {
+                              setIssueSectionId(e.target.value);
+                              setIssueForm((c) => ({ ...c, studentId: "" }));
+                            }}
+                          >
+                            <option value="">All sections</option>
+                            {issueSectionOptions.map((s) => (
+                              <option key={s._id} value={s._id}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </FormField>
+                      </div>
+                    )}
+
+                    <FormField label="Search student">
+                      <Input
+                        value={issueStudentSearch}
+                        onChange={(e) =>
+                          setIssueStudentSearch(e.target.value)
+                        }
+                        placeholder="Name, roll no., or admission no."
+                      />
+                    </FormField>
+
+                    <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200">
+                      {studentsQuery.isLoading ? (
+                        <p className="p-3 text-sm text-slate-500">
+                          Loading students…
+                        </p>
+                      ) : filteredIssueStudents.length === 0 ? (
+                        <p className="p-3 text-sm text-slate-500">
+                          No students match these filters. Adjust batch/year or
+                          search.
+                        </p>
+                      ) : (
+                        <ul className="divide-y divide-slate-100">
+                          {filteredIssueStudents.slice(0, 80).map((s) => {
+                            const selected = issueForm.studentId === s._id;
+                            return (
+                              <li key={s._id}>
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "flex w-full items-start gap-2 px-3 py-2 text-left text-sm transition",
+                                    selected
+                                      ? "bg-brand-50 text-brand-900"
+                                      : "hover:bg-slate-50",
+                                  )}
+                                  onClick={() =>
+                                    setIssueForm((c) => ({
+                                      ...c,
+                                      studentId: s._id,
+                                    }))
+                                  }
+                                >
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block font-medium">
+                                      {s.user?.fullName ?? "Student"}
+                                    </span>
+                                    <span className="block text-xs text-slate-500">
+                                      Roll {s.rollNumber ?? "—"}
+                                      {s.admissionNumber
+                                        ? ` · ${s.admissionNumber}`
+                                        : ""}
+                                      {s.batchName ? ` · ${s.batchName}` : ""}
+                                      {s.yearName ? ` · ${s.yearName}` : ""}
+                                      {s.className ? ` · ${s.className}` : ""}
+                                      {s.sectionName
+                                        ? ` · ${s.sectionName}`
+                                        : ""}
+                                    </span>
+                                  </span>
+                                  {selected ? (
+                                    <Badge className="bg-brand-100 text-brand-800">
+                                      Selected
+                                    </Badge>
+                                  ) : null}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    {filteredIssueStudents.length > 80 ? (
+                      <p className="text-xs text-slate-500">
+                        Showing first 80 of {filteredIssueStudents.length}.
+                        Narrow batch/year or search.
+                      </p>
+                    ) : null}
+                    {selectedStudent ? (
+                      <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
+                        Borrower:{" "}
+                        <strong>
+                          {selectedStudent.user?.fullName ?? "Student"}
+                        </strong>
+                        {selectedStudent.rollNumber != null
+                          ? ` · Roll ${selectedStudent.rollNumber}`
+                          : ""}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <FormField label="Search teacher">
+                      <Input
+                        value={issueTeacherSearch}
+                        onChange={(e) =>
+                          setIssueTeacherSearch(e.target.value)
+                        }
+                        placeholder="Teacher name"
+                      />
+                    </FormField>
+                    <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200">
+                      {filteredIssueTeachers.length === 0 ? (
+                        <p className="p-3 text-sm text-slate-500">
+                          No teachers match this search.
+                        </p>
+                      ) : (
+                        <ul className="divide-y divide-slate-100">
+                          {filteredIssueTeachers.slice(0, 80).map((t) => {
+                            const selected = issueForm.teacherId === t._id;
+                            return (
+                              <li key={t._id}>
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "flex w-full items-center justify-between px-3 py-2 text-left text-sm",
+                                    selected
+                                      ? "bg-brand-50 text-brand-900"
+                                      : "hover:bg-slate-50",
+                                  )}
+                                  onClick={() =>
+                                    setIssueForm((c) => ({
+                                      ...c,
+                                      teacherId: t._id,
+                                    }))
+                                  }
+                                >
+                                  <span className="font-medium">
+                                    {t.user?.fullName ?? "Teacher"}
+                                  </span>
+                                  {selected ? (
+                                    <Badge className="bg-brand-100 text-brand-800">
+                                      Selected
+                                    </Badge>
+                                  ) : null}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    {selectedTeacher ? (
+                      <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
+                        Borrower:{" "}
+                        <strong>
+                          {selectedTeacher.user?.fullName ?? "Teacher"}
+                        </strong>
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* —— Book —— */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">2. Select book &amp; code</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <FormField label="Search book (name or code)">
+                  <Input
+                    value={issueBookSearch}
+                    onChange={(e) => setIssueBookSearch(e.target.value)}
+                    placeholder="e.g. Anatomy, ANA001, ISBN…"
+                  />
+                </FormField>
+
+                {issueBookSearch.trim() && matchingAvailableCopies.length > 0 ? (
+                  <div>
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Quick pick by code
+                    </p>
+                    <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-200">
+                      <ul className="divide-y divide-slate-100">
+                        {matchingAvailableCopies.map((copy) => {
+                          const selected = issueForm.copyId === copy._id;
+                          return (
+                            <li key={copy._id}>
+                              <button
+                                type="button"
+                                className={cn(
+                                  "flex w-full items-start gap-2 px-3 py-2 text-left text-sm",
+                                  selected
+                                    ? "bg-brand-50 text-brand-900"
+                                    : "hover:bg-slate-50",
+                                )}
+                                onClick={() =>
+                                  selectCopyForIssue(
+                                    copy.bookId,
+                                    copy._id,
+                                    copy.bookCode,
+                                  )
+                                }
+                              >
+                                <span className="min-w-0 flex-1">
+                                  <span className="font-mono font-semibold">
+                                    {copy.bookCode}
+                                  </span>
+                                  <span className="mt-0.5 block text-xs text-slate-500">
+                                    {copy.bookTitle}
+                                    {copy.shelfLocation
+                                      ? ` · ${copy.shelfLocation}`
+                                      : ""}
+                                  </span>
+                                </span>
+                                {selected ? (
+                                  <Badge className="bg-brand-100 text-brand-800">
+                                    Selected
+                                  </Badge>
+                                ) : null}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  </div>
+                ) : null}
+
+                <FormField label="Book title">
+                  <Select
+                    value={issueForm.bookId}
+                    onChange={(e) => selectBookForIssue(e.target.value)}
+                  >
+                    <option value="">Select book</option>
+                    {filteredIssueBooks.map((b) => (
+                      <option key={b._id} value={b._id}>
+                        [{b.yearLevel ?? "All Years"}] {b.title} (
+                        {(b.copies ?? []).filter((c) => c.status === "AVAILABLE")
+                          .length || b.availableCopies}{" "}
+                        available)
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                {issueBookSearch.trim() && filteredIssueBooks.length === 0 ? (
+                  <p className="text-xs text-rose-600">
+                    No available books match “{issueBookSearch.trim()}”.
+                  </p>
+                ) : null}
+
+                <FormField label="Physical book code">
+                  <Select
+                    value={issueForm.copyId ?? ""}
+                    onChange={(e) => {
+                      const copyId = e.target.value;
+                      const copy = availableCopies.find((c) => c._id === copyId);
+                      setIssueForm((c) => ({
+                        ...c,
+                        copyId,
+                        bookCode: copy?.bookCode ?? "",
+                      }));
+                    }}
+                    disabled={!issueForm.bookId}
+                  >
+                    <option value="">Select code to issue</option>
+                    {availableCopies.map((copy) => (
+                      <option key={copy._id} value={copy._id}>
+                        {copy.bookCode}
+                        {copy.shelfLocation ? ` · ${copy.shelfLocation}` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                {issueForm.bookId && availableCopies.length === 0 ? (
+                  <p className="text-xs text-amber-700">
+                    This title has no available copies right now.
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* —— Dates & submit —— */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">3. Dates &amp; issue</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <FormField label="Issued (BS)">
+                <NepaliDateField
+                  value={issueForm.issuedDateBs}
+                  onChange={(v) =>
+                    setIssueForm((c) => ({ ...c, issuedDateBs: v }))
+                  }
+                />
+              </FormField>
+              <FormField label="Due (BS)">
+                <NepaliDateField
+                  value={issueForm.dueDateBs}
+                  onChange={(v) =>
+                    setIssueForm((c) => ({ ...c, dueDateBs: v }))
+                  }
+                />
+              </FormField>
+              <div className="flex items-end md:col-span-2">
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={() => {
+                    const parsed = libraryIssueSchema.safeParse(issueForm);
+                    if (!parsed.success) {
+                      return toast.error(
+                        parsed.error.issues[0]?.message ??
+                          "Select book, code, borrower, and dates",
+                      );
+                    }
+                    issueBook.mutate(parsed.data);
+                  }}
+                  disabled={issueBook.isPending}
+                >
+                  {issueBook.isPending ? "Issuing…" : "Issue this copy"}
+                </Button>
+              </div>
+              {issueForm.copyId && selectedBook ? (
+                <p className="md:col-span-2 xl:col-span-4 text-sm text-slate-600">
+                  Issuing{" "}
+                  <span className="font-mono font-semibold">
+                    {
+                      availableCopies.find((c) => c._id === issueForm.copyId)
+                        ?.bookCode
+                    }
+                  </span>{" "}
+                  of <strong>{selectedBook.title}</strong>
+                  {issueForm.borrowerType === "STUDENT" && selectedStudent
+                    ? ` to ${selectedStudent.user?.fullName ?? "student"}`
+                    : issueForm.borrowerType === "TEACHER" && selectedTeacher
+                      ? ` to ${selectedTeacher.user?.fullName ?? "teacher"}`
+                      : ""}
+                  . Only this code will become ISSUED; other copies stay
+                  available.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {tab === "returns" && <LibraryReturnsPanel />}

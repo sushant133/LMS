@@ -167,7 +167,10 @@ export const listSubjects = asyncHandler(async (req: Request, res: Response) => 
 
   // Scope.subjectIds is authoritative — do not require Subject.teacherIds membership
   if (teacherScope) {
-    filter._id = { $in: teacherScope.subjectIds };
+    // Empty $in matches nothing; use a sentinel so teachers with no assignment see empty list cleanly
+    filter._id = {
+      $in: teacherScope.subjectIds.length > 0 ? teacherScope.subjectIds : ["__none__"]
+    };
   }
 
   const studentProfile = await getStudentProfile(req);
@@ -181,7 +184,9 @@ export const listSubjects = asyncHandler(async (req: Request, res: Response) => 
     }
   }
 
-  if (typeof req.query.yearId === "string") {
+  // Teachers: do not further restrict by yearId query if it would hide assigned subjects
+  // that are provisioned for a different year id sibling under the same curriculum.
+  if (typeof req.query.yearId === "string" && !teacherScope) {
     filter.yearIds = req.query.yearId;
   }
 
@@ -281,7 +286,26 @@ export const listBatches = asyncHandler(async (req: Request, res: Response) => {
   const teacherScope = await getTeacherScope(req);
 
   if (teacherScope) {
-    Object.assign(filter, { _id: { $in: teacherScope.batchIds } });
+    let batchIds = teacherScope.batchIds;
+    // Derive batches from assigned years when batchIds not mirrored on teacher
+    if (batchIds.length === 0 && teacherScope.yearIds.length > 0) {
+      const years = await Year.find({
+        schoolId: tenantObjectId(req),
+        _id: { $in: teacherScope.yearIds }
+      })
+        .select("batchId")
+        .lean();
+      batchIds = [
+        ...new Set(
+          years
+            .map((y) => y.batchId?.toString())
+            .filter((id): id is string => Boolean(id))
+        )
+      ];
+    }
+    Object.assign(filter, {
+      _id: { $in: batchIds.length > 0 ? batchIds : ["__none__"] }
+    });
   }
 
   const studentProfile = await getStudentProfile(req);
@@ -381,7 +405,24 @@ export const listYears = asyncHandler(async (req: Request, res: Response) => {
 
   const teacherScope = await getTeacherScope(req);
   if (teacherScope) {
-    query._id = { $in: teacherScope.yearIds };
+    // Prefer assigned year ids; if empty, fall back to years linked on assigned subjects
+    let yearIds = teacherScope.yearIds;
+    if (yearIds.length === 0 && teacherScope.subjectIds.length > 0) {
+      const assignedSubjects = await Subject.find({
+        schoolId,
+        _id: { $in: teacherScope.subjectIds }
+      })
+        .select("yearIds")
+        .lean();
+      yearIds = [
+        ...new Set(
+          assignedSubjects.flatMap((s) =>
+            (s.yearIds ?? []).map((id: { toString(): string }) => id.toString())
+          )
+        )
+      ];
+    }
+    query._id = { $in: yearIds.length > 0 ? yearIds : ["__none__"] };
     if (typeof req.query.batchId === "string") {
       query.batchId = req.query.batchId;
     }

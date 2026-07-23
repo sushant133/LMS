@@ -188,8 +188,14 @@ const renumberSubTree = (subs: SubUnitDraft[]): SubUnitDraft[] =>
     children: renumberSubTree(sub.children ?? []),
   }));
 
-export const renumberChapters = (chapters: ChapterDraft[]): ChapterDraft[] =>
-  chapters.map((chapter, cIndex) => {
+/**
+ * Renumber chapters 1..N and units continuously across the whole syllabus:
+ * Chapter 1 → units 1..5, Chapter 2 → units 6..10, etc.
+ * Sub-unit sibling numbers stay local under each unit (1.1, 6.1, …).
+ */
+export const renumberChapters = (chapters: ChapterDraft[]): ChapterDraft[] => {
+  let unitSeq = 0;
+  return chapters.map((chapter, cIndex) => {
     const kind = (chapter.sectionKind as SectionKind) || "NONE";
     return {
       ...chapter,
@@ -197,13 +203,17 @@ export const renumberChapters = (chapters: ChapterDraft[]): ChapterDraft[] =>
       sectionKind: kind,
       // Clear title when grouping is skipped
       title: kind === "NONE" ? "" : chapter.title || "",
-      units: chapter.units.map((unit, uIndex) => ({
-        ...unit,
-        unitNo: uIndex + 1,
-        subUnits: renumberSubTree(unit.subUnits ?? []),
-      })),
+      units: chapter.units.map((unit) => {
+        unitSeq += 1;
+        return {
+          ...unit,
+          unitNo: unitSeq,
+          subUnits: renumberSubTree(unit.subUnits ?? []),
+        };
+      }),
     };
   });
+};
 
 /** Build display number for a sub-unit path under a unit (e.g. 1.2.1). */
 export const displayNoForPath = (unitNo: number, path: number[]): string => {
@@ -391,6 +401,13 @@ const mapRecordSub = (sub: RecordSubLike): SubUnitDraft => ({
   children: (sub.children ?? []).map(mapRecordSub),
 });
 
+/** Strip "Unit 3 : " / "Unit 3 - " prefixes from legacy headings for cleaner re-edit. */
+const stripLegacyUnitPrefix = (raw: string): string => {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/^unit\s*\d+\s*[:\-–—.]?\s*/i, "").trim() || trimmed;
+};
+
 export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState => {
   if (plan.chapters && plan.chapters.length > 0) {
     return {
@@ -418,6 +435,7 @@ export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState =>
               : chapter.title
                 ? ("CHAPTER" as const)
                 : ("NONE" as const);
+          const units = Array.isArray(chapter.units) ? chapter.units : [];
           return {
             clientKey: chapter._id || nextClientKey("ch"),
             chapterNo: chapter.chapterNo,
@@ -429,54 +447,64 @@ export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState =>
             references: chapter.references || "",
             remarks: chapter.remarks || "",
             tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
-            units: chapter.units.map((unit) => ({
-              clientKey: unit._id || nextClientKey("unit"),
-              unitNo: unit.unitNo,
-              title: unit.title,
-              description: unit.description || "",
-              teachingHours: unit.teachingHours ?? 0,
-              learningObjective: unit.learningObjective || "",
-              references: unit.references || "",
-              remarks: unit.remarks || "",
-              practicalRequired: Boolean(unit.practicalRequired),
-              subUnits: unit.subUnits.map(mapRecordSub),
-            })),
+            // Keep at least one unit row so user can always continue typing
+            units:
+              units.length > 0
+                ? units.map((unit) => ({
+                    clientKey: unit._id || nextClientKey("unit"),
+                    unitNo: unit.unitNo,
+                    title: unit.title || "",
+                    description: unit.description || "",
+                    teachingHours: unit.teachingHours ?? 0,
+                    learningObjective: unit.learningObjective || "",
+                    references: unit.references || "",
+                    remarks: unit.remarks || "",
+                    practicalRequired: Boolean(unit.practicalRequired),
+                    subUnits: (unit.subUnits ?? []).map(mapRecordSub),
+                  }))
+                : [emptyUnit(1)],
           };
         }),
       ),
     };
   }
 
-  // Fallback: legacy flat units → one chapter container with one unit each
+  // Fallback: legacy flat units → ONE "units only" section (not one section per unit).
+  // One-section-per-unit looked like duplicate/broken UI when reopening a draft.
+  const legacyUnits = Array.isArray(plan.units) ? plan.units : [];
   const chapters: ChapterDraft[] =
-    plan.units.length > 0
-      ? plan.units.map((unit, index) => {
-          const topics = (unit.topicsCovered || "")
-            .split(/[\n;|]+/)
-            .map((t) => t.trim())
-            .filter(Boolean);
-          return {
-            clientKey: unit._id || nextClientKey("ch"),
-            chapterNo: index + 1,
+    legacyUnits.length > 0
+      ? [
+          {
+            clientKey: nextClientKey("ch"),
+            chapterNo: 1,
             sectionKind: "NONE" as const,
             title: "",
             description: "",
-            estimatedHours: unit.estimatedTeachingHours ?? 0,
+            estimatedHours: 0,
             weightagePercent: 0,
-            references: unit.references || "",
+            references: "",
             remarks: "",
-            tentativeCompletionMonth: unit.tentativeCompletionMonth || "",
-            units: [
-              {
-                clientKey: nextClientKey("unit"),
+            tentativeCompletionMonth: "",
+            units: legacyUnits.map((unit, index) => {
+              const topics = (unit.topicsCovered || "")
+                .split(/[\n;|]+/)
+                .map((t) => t.trim())
+                .filter(Boolean);
+              const cleanTitle = stripLegacyUnitPrefix(
+                unit.chapterName || `Unit ${unit.unitNo || index + 1}`,
+              );
+              return {
+                clientKey: unit._id || nextClientKey("unit"),
                 unitNo: unit.unitNo || index + 1,
-                title: unit.chapterName || "Unit 1",
+                title: cleanTitle,
                 description: unit.topicsCovered || "",
                 teachingHours: unit.estimatedTeachingHours ?? 0,
                 learningObjective: unit.learningOutcomes || "",
                 references: unit.references || "",
                 remarks: "",
                 practicalRequired: Boolean(unit.practicalRequired),
+                // Do not invent placeholder sub-units — they are optional
                 subUnits:
                   topics.length > 0
                     ? topics.map((heading, sIndex) => ({
@@ -490,25 +518,11 @@ export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState =>
                           freeText: unit.references || "",
                         },
                       }))
-                    : [
-                        {
-                          ...emptySubUnit(1),
-                          heading: unit.chapterName || "Topic 1",
-                          description: unit.topicsCovered || "",
-                          learningOutcomes: unit.learningOutcomes || "",
-                          practicalRequired: Boolean(unit.practicalRequired),
-                          internalAssessment: unit.internalAssessment || "",
-                          teachingHours: unit.estimatedTeachingHours ?? 0,
-                          references: {
-                            ...emptyReferences(),
-                            freeText: unit.references || "",
-                          },
-                        },
-                      ],
-              },
-            ],
-          };
-        })
+                    : [],
+              };
+            }),
+          },
+        ]
       : [emptyChapter(1)];
 
   return {
@@ -610,17 +624,42 @@ export const formToPayload = (
   const nepaliMode = Boolean(options?.nepaliMode);
   const t = (s: string | undefined | null) => textForPayload(s, nepaliMode);
 
-  const chapters = renumberChapters(form.chapters)
+  // Drop blank unit rows first, then renumber so unit numbers stay continuous
+  // across chapters (Ch1: 1–5, Ch2: 6–10, …) even when empty drafts are stripped.
+  const chaptersWithoutBlankUnits = form.chapters.map((chapter) => ({
+    ...chapter,
+    units: (chapter.units ?? []).filter((unit) => {
+      const rawTitle = String(
+        (unit as { title?: unknown }).title ??
+          (unit as { chapterName?: unknown }).chapterName ??
+          (unit as { name?: unknown }).name ??
+          "",
+      );
+      return Boolean(t(rawTitle).trim());
+    }),
+  }));
+
+  const chapters = renumberChapters(chaptersWithoutBlankUnits)
     .map((chapter) => {
       const kind = (chapter.sectionKind as SectionKind) || "NONE";
-      const units = chapter.units
-        .filter((unit) => unit.title.trim())
-        .map((unit) => ({
+      const units = (chapter.units ?? []).map((unit) => {
+        const rawTitle = String(
+          (unit as { title?: unknown }).title ??
+            (unit as { chapterName?: unknown }).chapterName ??
+            (unit as { name?: unknown }).name ??
+            "",
+        );
+        const title = t(rawTitle).trim();
+        return {
           clientKey: unit.clientKey,
           unitNo: unit.unitNo,
-          title: t(unit.title).trim(),
+          title,
           description: t(unit.description),
-          teachingHours: unit.teachingHours ?? 0,
+          teachingHours:
+            typeof unit.teachingHours === "number" &&
+            Number.isFinite(unit.teachingHours)
+              ? unit.teachingHours
+              : 0,
           learningObjective: t(unit.learningObjective),
           references: t(unit.references),
           remarks: t(unit.remarks),
@@ -628,15 +667,24 @@ export const formToPayload = (
           subUnits: pruneEmptySubUnits(unit.subUnits ?? []).map((sub) =>
             subToPayload(sub, nepaliMode),
           ),
-        }));
+        };
+      });
       return {
         clientKey: chapter.clientKey,
         chapterNo: chapter.chapterNo,
         sectionKind: kind,
         title: kind === "NONE" ? "" : t(chapter.title).trim(),
         description: t(chapter.description),
-        estimatedHours: chapter.estimatedHours ?? 0,
-        weightagePercent: chapter.weightagePercent ?? 0,
+        estimatedHours:
+          typeof chapter.estimatedHours === "number" &&
+          Number.isFinite(chapter.estimatedHours)
+            ? chapter.estimatedHours
+            : 0,
+        weightagePercent:
+          typeof chapter.weightagePercent === "number" &&
+          Number.isFinite(chapter.weightagePercent)
+            ? chapter.weightagePercent
+            : 0,
         references: t(chapter.references),
         remarks: t(chapter.remarks),
         tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
@@ -644,6 +692,29 @@ export const formToPayload = (
       };
     })
     .filter((chapter) => chapter.units.length > 0);
+
+  // Legacy flat units (backup path on server if hierarchy shape is dropped)
+  let legacyUnitSeq = 0;
+  const legacyUnits = chapters.flatMap((chapter) =>
+    chapter.units.map((unit) => {
+      legacyUnitSeq += 1;
+      return {
+        unitNo: unit.unitNo || legacyUnitSeq,
+        chapterName: unit.title,
+        estimatedTeachingHours: unit.teachingHours ?? 0,
+        learningOutcomes: unit.learningObjective || "",
+        topicsCovered: (unit.subUnits ?? [])
+          .map((s) => s.heading)
+          .filter(Boolean)
+          .join("\n"),
+        references: unit.references || "",
+        practicalRequired: Boolean(unit.practicalRequired),
+        internalAssessment: "",
+        tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
+        status: "PENDING" as const,
+      };
+    }),
+  );
 
   // Curriculum-shared syllabus: do not pin to a single batch
   const batchId = form.batchId?.trim() ? form.batchId : undefined;
@@ -666,6 +737,8 @@ export const formToPayload = (
     remarks: t(form.remarks),
     attachmentUrl: form.attachmentUrl,
     chapters,
+    // Server prefers chapters; units is a safety net
+    units: legacyUnits.length > 0 ? legacyUnits : undefined,
   };
 };
 

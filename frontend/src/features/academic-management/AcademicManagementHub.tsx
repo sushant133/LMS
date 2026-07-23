@@ -258,34 +258,86 @@ export const AcademicManagementHub = () => {
 
   const teacherId = teacherScopeQuery.data?.scope.teacherId;
 
+  /**
+   * Teachers: prefer subjects/years/classes returned by /teacher/scope
+   * (built from Subject Assignment + legacy). Filtering /academics/* alone
+   * often returned empty when year scope or assignment AY did not line up.
+   */
   const subjects = useMemo(() => {
-    const all = subjectsQuery.data ?? [];
-    if (!isTeacher || !teacherScopeQuery.data) return all;
-    return all.filter((subject) =>
-      teacherScopeQuery.data.scope.subjectIds.includes(subject._id),
-    );
+    if (isTeacher && teacherScopeQuery.data) {
+      const fromScope = teacherScopeQuery.data.subjects ?? [];
+      if (fromScope.length > 0) return fromScope;
+      const allowed = new Set(teacherScopeQuery.data.scope.subjectIds ?? []);
+      return (subjectsQuery.data ?? []).filter((subject) => allowed.has(subject._id));
+    }
+    return subjectsQuery.data ?? [];
   }, [isTeacher, subjectsQuery.data, teacherScopeQuery.data]);
 
-  const years = useMemo(
-    () =>
-      (yearsQuery.data ?? []).map((item) => ({
-        _id: item._id,
-        name: item.name,
-        level: item.level,
-        batchId: item.batchId,
-        isActive: item.isActive,
-      })),
-    [yearsQuery.data],
-  );
+  const years = useMemo(() => {
+    const source =
+      isTeacher && (teacherScopeQuery.data?.years?.length ?? 0) > 0
+        ? teacherScopeQuery.data!.years
+        : (yearsQuery.data ?? []);
+    return source.map((item) => ({
+      _id: item._id,
+      name: item.name,
+      level: item.level,
+      batchId: item.batchId,
+      isActive: item.isActive,
+    }));
+  }, [isTeacher, yearsQuery.data, teacherScopeQuery.data]);
 
-  const classes = useMemo(
+  const classes = useMemo(() => {
+    const source =
+      isTeacher && (teacherScopeQuery.data?.classes?.length ?? 0) > 0
+        ? teacherScopeQuery.data!.classes
+        : (classesQuery.data ?? []);
+    return source.map((item) => ({
+      _id: item._id,
+      name: item.name,
+      isActive: item.isActive,
+    }));
+  }, [isTeacher, classesQuery.data, teacherScopeQuery.data]);
+
+  /** Build assignment rows for hierarchy tree (teachers cannot list all assignments). */
+  const teacherAssignmentRows = useMemo((): SubjectAssignmentRecord[] => {
+    if (!isTeacher || !teacherScopeQuery.data) return [];
+    const scope = teacherScopeQuery.data.scope;
+    const subjectById = new Map(
+      (teacherScopeQuery.data.subjects ?? []).map((s) => [s._id, s]),
+    );
+    return (scope.assignments ?? []).map((pair) => {
+      const subject = subjectById.get(pair.subjectId);
+      return {
+        _id: pair.assignmentId,
+        schoolId: "",
+        academicYearBs: scope.academicYearBs || appliedFilters.academicYearBs || "",
+        subjectId: subject
+          ? { _id: subject._id, name: subject.name, code: subject.code }
+          : pair.subjectId,
+        teacherId: scope.teacherId,
+        classId: pair.classId ?? null,
+        sectionId: pair.sectionId ?? null,
+        batchId: pair.batchId ?? null,
+        yearId: pair.yearId ?? null,
+        assignmentType: pair.assignmentType ?? "FULL",
+        unitFrom: pair.unitFrom ?? null,
+        unitTo: pair.unitTo ?? null,
+        assignedPercentage: pair.assignedPercentage ?? null,
+        status: "ACTIVE",
+        effectiveFromBs: "",
+        effectiveToBs: null,
+        remarks: "",
+        createdBy: "",
+      } as SubjectAssignmentRecord;
+    });
+  }, [isTeacher, teacherScopeQuery.data, appliedFilters.academicYearBs]);
+  const hierarchyAssignments = useMemo(
     () =>
-      (classesQuery.data ?? []).map((item) => ({
-        _id: item._id,
-        name: item.name,
-        isActive: item.isActive,
-      })),
-    [classesQuery.data],
+      isTeacher
+        ? teacherAssignmentRows
+        : (assignmentsQuery.data ?? []),
+    [isTeacher, teacherAssignmentRows, assignmentsQuery.data],
   );
 
   const displayInstitutionName =
@@ -383,7 +435,7 @@ export const AcademicManagementHub = () => {
   const hierarchyProps = {
     years,
     classes,
-    assignments: assignmentsQuery.data ?? [],
+    assignments: hierarchyAssignments,
     isCollege,
     institutionName: displayInstitutionName,
   };
@@ -422,20 +474,28 @@ export const AcademicManagementHub = () => {
         onExportPdf={handleExportPdf}
         onPrint={handlePrint}
         activeTab={activeTab}
-        classes={(classesQuery.data ?? []).map((item) => ({
+        classes={classes.map((item) => ({
           _id: item._id,
           name: item.name,
         }))}
-        sections={(sectionsQuery.data ?? []).map((item) => ({
+        sections={(
+          isTeacher && (teacherScopeQuery.data?.sections?.length ?? 0) > 0
+            ? teacherScopeQuery.data!.sections
+            : (sectionsQuery.data ?? [])
+        ).map((item) => ({
           _id: item._id,
           name: item.name,
           classId: item.classId,
         }))}
-        batches={(batchesQuery.data ?? []).map((item) => ({
+        batches={(
+          isTeacher && (teacherScopeQuery.data?.batches?.length ?? 0) > 0
+            ? teacherScopeQuery.data!.batches
+            : (batchesQuery.data ?? [])
+        ).map((item) => ({
           _id: item._id,
           name: item.name,
         }))}
-        years={(yearsQuery.data ?? []).map((item) => ({
+        years={years.map((item) => ({
           _id: item._id,
           name: item.name,
           batchId: item.batchId,

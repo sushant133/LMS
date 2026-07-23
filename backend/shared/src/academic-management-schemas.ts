@@ -155,19 +155,33 @@ export const academicSyllabusSubUnitSchema: z.ZodType<AcademicSyllabusSubUnitInp
 );
 
 /** Unit (topic) under a Chapter (or subject when chapter is optional). */
-export const academicSyllabusTopicSchema = z.object({
-  clientKey: z.string().optional(),
-  unitNo: z.coerce.number().int().min(1).optional(),
-  title: z.string().min(1),
-  description: z.string().default(""),
-  teachingHours: z.coerce.number().min(0).default(0),
-  learningObjective: z.string().default(""),
-  references: z.string().default(""),
-  remarks: z.string().default(""),
-  /** Unit-level practical flag (also tracked on sub-units when needed). */
-  practicalRequired: z.boolean().default(false),
-  subUnits: z.array(academicSyllabusSubUnitSchema).default([])
-});
+export const academicSyllabusTopicSchema = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    const u = raw as Record<string, unknown>;
+    // Normalize alternate client field names into `title`
+    const titleSrc =
+      u.title ?? u.chapterName ?? u.name ?? u.heading ?? u.unitTitle ?? u.unitName;
+    return {
+      ...u,
+      title: titleSrc === undefined || titleSrc === null ? u.title : String(titleSrc)
+    };
+  },
+  z.object({
+    clientKey: z.string().optional(),
+    unitNo: z.coerce.number().int().min(1).optional(),
+    title: z.string().trim().min(1, "Unit title is required"),
+    description: z.string().default(""),
+    /** Coerce NaN/empty from number inputs so save does not fail spuriously. */
+    teachingHours: teachingHoursSchema,
+    learningObjective: z.string().default(""),
+    references: z.string().default(""),
+    remarks: z.string().default(""),
+    /** Unit-level practical flag (also tracked on sub-units when needed). */
+    practicalRequired: z.boolean().default(false),
+    subUnits: z.array(academicSyllabusSubUnitSchema).default([])
+  })
+);
 
 /**
  * Optional grouping under a Subject syllabus.
@@ -182,13 +196,51 @@ export const academicSyllabusChapterSchema = z.object({
   sectionKind: syllabusSectionKindSchema.default("NONE"),
   title: z.string().default(""),
   description: z.string().default(""),
-  estimatedHours: z.coerce.number().min(0).default(0),
+  estimatedHours: teachingHoursSchema,
   weightagePercent: z.coerce.number().min(0).max(100).default(0),
   references: z.string().default(""),
   remarks: z.string().default(""),
   tentativeCompletionMonth: z.string().default(""),
   units: z.array(academicSyllabusTopicSchema).default([])
 });
+
+/** Count units that have a non-empty title (chapter headings alone are not enough). */
+export const countTitledSyllabusUnits = (data: {
+  chapters?: Array<{
+    title?: string;
+    sectionKind?: string;
+    units?: Array<Record<string, unknown>>;
+  }>;
+  units?: unknown[];
+}): number => {
+  const fromChapters = (data.chapters ?? []).reduce((sum, chapter) => {
+    const titled = (chapter.units ?? []).filter((u) => {
+      const title = String(
+        u?.title ?? u?.chapterName ?? u?.name ?? u?.heading ?? ""
+      ).trim();
+      return title.length > 0;
+    });
+    // Chapter/part heading can stand in as one unit when nested units are empty
+    if (
+      titled.length === 0 &&
+      String(chapter.title ?? "").trim() &&
+      (chapter.sectionKind === "CHAPTER" ||
+        chapter.sectionKind === "PART" ||
+        String(chapter.title ?? "").trim().length > 0)
+    ) {
+      return sum + 1;
+    }
+    return sum + titled.length;
+  }, 0);
+  const fromLegacy = Array.isArray(data.units)
+    ? data.units.filter((u) => {
+        if (!u || typeof u !== "object") return false;
+        const row = u as Record<string, unknown>;
+        return String(row.chapterName ?? row.title ?? "").trim().length > 0;
+      }).length
+    : 0;
+  return fromChapters + fromLegacy;
+};
 
 /** Base shape (supports .partial() for updates). */
 export const academicSyllabusBaseSchema = scopeSchema.extend({
@@ -201,9 +253,9 @@ export const academicSyllabusBaseSchema = scopeSchema.extend({
   teacherId: z.string().optional().default(""),
   /** Optional display code; falls back to subject code when empty. */
   subjectCode: z.string().optional().default(""),
-  totalTheoryHours: z.coerce.number().min(0).optional().default(0),
-  totalPracticalHours: z.coerce.number().min(0).optional().default(0),
-  creditHours: z.coerce.number().min(0).optional().default(0),
+  totalTheoryHours: teachingHoursSchema.optional().default(0),
+  totalPracticalHours: teachingHoursSchema.optional().default(0),
+  creditHours: teachingHoursSchema.optional().default(0),
   remarks: z.string().optional().default(""),
   attachmentUrl: z.string().optional(),
   /** Preferred hierarchical structure. */
@@ -212,20 +264,39 @@ export const academicSyllabusBaseSchema = scopeSchema.extend({
   units: z.array(academicSyllabusUnitSchema).optional()
 });
 
-export const academicSyllabusSchema = academicSyllabusBaseSchema.superRefine((data, ctx) => {
-  const hasChapters = Array.isArray(data.chapters) && data.chapters.length > 0;
-  const hasUnits = Array.isArray(data.units) && data.units.length > 0;
-  if (!hasChapters && !hasUnits) {
+const refineSyllabusHasUnits = (
+  data: {
+    chapters?: Array<{ units?: Array<{ title?: string }> }>;
+    units?: unknown[];
+  },
+  ctx: z.RefinementCtx,
+  /** When true, missing chapters/units is an error (create). When false, only validate if structure is sent (update). */
+  requireStructure: boolean
+) => {
+  const hasStructureField =
+    data.chapters !== undefined || data.units !== undefined;
+  if (!requireStructure && !hasStructureField) return;
+
+  if (countTitledSyllabusUnits(data) === 0) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "At least one chapter or unit is required",
+      message:
+        "At least one unit with a title is required (Chapter/Part alone is not enough — expand each Unit and enter its title)",
       path: ["chapters"]
     });
   }
+};
+
+export const academicSyllabusSchema = academicSyllabusBaseSchema.superRefine((data, ctx) => {
+  refineSyllabusHasUnits(data, ctx, true);
 });
 
 /** Partial update schema (header and/or hierarchy). */
-export const academicSyllabusUpdateSchema = academicSyllabusBaseSchema.partial();
+export const academicSyllabusUpdateSchema = academicSyllabusBaseSchema
+  .partial()
+  .superRefine((data, ctx) => {
+    refineSyllabusHasUnits(data, ctx, false);
+  });
 
 /** Teacher-only progress update on a sub-unit (no structure changes). */
 export const academicSyllabusSubUnitProgressSchema = z.object({

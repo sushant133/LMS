@@ -247,10 +247,22 @@ export const applyTeacherSubjectScopeToFilter = async (
 ): Promise<void> => {
   const scope = await getTeacherScope(req);
   if (!scope) return;
-  const allowed = new Set(scope.subjectIds.map(String));
+
+  // Expand each assigned subject to curriculum siblings so teachers see plans
+  // created under any batch-year instance of the same master subject.
+  const schoolId = tenantObjectId(req);
+  const allowed = new Set<string>();
+  for (const id of scope.subjectIds.map(String)) {
+    allowed.add(id);
+    for (const sib of await expandCurriculumSubjectIds(schoolId, id)) {
+      allowed.add(sib);
+    }
+  }
+  const allowedList = [...allowed];
+
   const existing = filter.subjectId;
   if (existing == null) {
-    filter.subjectId = { $in: scope.subjectIds };
+    filter.subjectId = { $in: allowedList.length > 0 ? allowedList : ["__none__"] };
     return;
   }
   const existingIds: string[] =
@@ -262,11 +274,8 @@ export const applyTeacherSubjectScopeToFilter = async (
         ? (existing as { $in: unknown[] }).$in.map(String)
         : [];
   // Prefer intersection of curriculum-expanded filter with teacher subjects.
-  // If none match (sibling id only in filter, assigned sibling not expanded yet),
-  // expand filter ids once more against assignments.
   let intersected = existingIds.filter((id) => allowed.has(id));
   if (intersected.length === 0 && existingIds.length > 0) {
-    const schoolId = tenantObjectId(req);
     const expanded = new Set<string>();
     for (const id of existingIds) {
       for (const sib of await expandCurriculumSubjectIds(schoolId, id)) {
@@ -277,7 +286,7 @@ export const applyTeacherSubjectScopeToFilter = async (
   }
   filter.subjectId =
     intersected.length === 0
-      ? { $in: [] }
+      ? { $in: ["__none__"] }
       : intersected.length === 1
         ? intersected[0]
         : { $in: intersected };
@@ -304,6 +313,12 @@ export const assertSyllabusAccess = async (
   const scope = await requireTeacherScope(req);
   if (params.teacherId && params.teacherId === scope.teacherId) return;
   if (scope.subjectIds.includes(params.subjectId)) return;
+
+  // Curriculum siblings: assignment may be on one batch-year instance while syllabus uses another
+  const schoolId = tenantObjectId(req);
+  const expanded = await expandCurriculumSubjectIds(schoolId, params.subjectId);
+  if (expanded.some((id) => scope.subjectIds.includes(id))) return;
+
   throw new ApiError(403, "You can only access syllabi for subjects assigned to you");
 };
 

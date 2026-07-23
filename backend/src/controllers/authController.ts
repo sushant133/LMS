@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import {
   activeSchoolSchema,
+  applyTeacherRoleBaseline,
   expandModuleAccessMap,
   getInstitutionPermissions,
   loginSchema,
@@ -91,7 +92,7 @@ const getSafeUser = async (userId: string) => {
       ? (user.schoolId as unknown as SchoolRecord)
       : null;
 
-  const rawAccess = mapModuleAccess((user as { moduleAccess?: unknown }).moduleAccess);
+  let rawAccess = mapModuleAccess((user as { moduleAccess?: unknown }).moduleAccess);
   const rawActions = (() => {
     const raw = (user as { moduleActions?: unknown }).moduleActions;
     if (!raw) return {};
@@ -99,11 +100,18 @@ const getSafeUser = async (userId: string) => {
     if (typeof raw === "object") return { ...(raw as Record<string, string[]>) };
     return {};
   })();
-  const moduleAccess = expandModuleAccessMap(rawAccess);
-  const moduleAccessConfigured = Object.keys(rawAccess).length > 0;
   const secondaryRoles = ((user as { secondaryRoles?: string[] }).secondaryRoles ?? []).map((role) =>
     normalizeUserRole(role)
   );
+  const isTeacherAccount =
+    normalizeUserRole(user.role as string) === "TEACHER" ||
+    secondaryRoles.includes("TEACHER");
+  // Teachers keep teaching modules even when admin saved a custom access map
+  if (isTeacherAccount && Object.keys(rawAccess).length > 0) {
+    rawAccess = applyTeacherRoleBaseline(rawAccess);
+  }
+  const moduleAccess = expandModuleAccessMap(rawAccess);
+  const moduleAccessConfigured = Object.keys(rawAccess).length > 0;
 
   return {
     _id: user._id.toString(),

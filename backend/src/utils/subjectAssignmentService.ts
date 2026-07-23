@@ -302,11 +302,28 @@ const addTeacherToSubjectCache = async (
   schoolId: ObjectId,
   subjectId: string | ObjectId,
   teacherId: string | ObjectId,
-  session: ClientSession | null
+  session: ClientSession | null,
+  group?: GroupKeys
 ): Promise<void> => {
   await Subject.updateOne(
     { _id: subjectId, schoolId },
     { $addToSet: { teacherIds: teacherId } },
+    getSessionOption(session)
+  );
+
+  // Keep Teacher legacy multi-select arrays in sync so teacher scope / LMS lists
+  // show the subject even before pure assignment-mode is enabled everywhere.
+  const addToSet: Record<string, unknown> = {
+    subjects: subjectId
+  };
+  if (group?.yearId) addToSet.assignedYearIds = group.yearId;
+  if (group?.batchId) addToSet.assignedBatchIds = group.batchId;
+  if (group?.classId) addToSet.assignedClassIds = group.classId;
+  if (group?.sectionId) addToSet.assignedSectionIds = group.sectionId;
+
+  await Teacher.updateOne(
+    { _id: teacherId, schoolId },
+    { $addToSet: addToSet },
     getSessionOption(session)
   );
 };
@@ -434,7 +451,13 @@ export const createSubjectAssignment = async (
       getSessionOption(session)
     );
 
-    await addTeacherToSubjectCache(schoolId, payload.subjectId, payload.teacherId, session);
+    await addTeacherToSubjectCache(
+      schoolId,
+      payload.subjectId,
+      payload.teacherId,
+      session,
+      group
+    );
 
     const populated = await SubjectAssignment.findById(created!._id)
       .populate("subjectId", "name code")
@@ -529,7 +552,13 @@ export const bulkCreateSubjectAssignments = async (
     const created = await SubjectAssignment.insertMany(docs, { ...getSessionOption(session), ordered: true });
 
     for (const t of payload.teachers) {
-      await addTeacherToSubjectCache(schoolId, payload.subjectId, t.teacherId, session);
+      await addTeacherToSubjectCache(
+        schoolId,
+        payload.subjectId,
+        t.teacherId,
+        session,
+        group
+      );
     }
 
     const ids = created.map((c) => c._id);
@@ -879,7 +908,12 @@ export const reassignSubjectAssignment = async (
     await existing.save({ ...getSessionOption(session) });
 
     await pullTeacherFromSubjectCacheIfUnused(schoolId, existing.subjectId, existing.teacherId, session);
-    await addTeacherToSubjectCache(schoolId, existing.subjectId, payload.teacherId, session);
+    await addTeacherToSubjectCache(schoolId, existing.subjectId, payload.teacherId, session, {
+      classId: existing.classId?.toString() ?? null,
+      sectionId: existing.sectionId?.toString() ?? null,
+      batchId: existing.batchId?.toString() ?? null,
+      yearId: existing.yearId?.toString() ?? null
+    });
 
     const populated = await SubjectAssignment.findById(created!._id)
       .populate("subjectId", "name code")
@@ -1023,7 +1057,12 @@ export const copyYearAssignments = async (
           ],
           getSessionOption(session)
         );
-        await addTeacherToSubjectCache(schoolId, row.subjectId, row.teacherId, session);
+        await addTeacherToSubjectCache(schoolId, row.subjectId, row.teacherId, session, {
+          classId: row.classId?.toString() ?? null,
+          sectionId: row.sectionId?.toString() ?? null,
+          batchId: row.batchId?.toString() ?? null,
+          yearId: row.yearId?.toString() ?? null
+        });
         copied += 1;
       } catch (error) {
         skipped += 1;

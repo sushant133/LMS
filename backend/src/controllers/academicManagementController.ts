@@ -539,6 +539,19 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, "Syllabi fetched", filtered);
 });
 
+/** Read unit title from hierarchical or legacy-shaped rows. */
+const unitTitleOf = (unit: Record<string, unknown> | undefined | null): string => {
+  if (!unit || typeof unit !== "object") return "";
+  const raw =
+    unit.title ??
+    unit.chapterName ??
+    unit.name ??
+    unit.heading ??
+    unit.unitTitle ??
+    unit.unitName;
+  return String(raw ?? "").trim();
+};
+
 const resolveSyllabusChapters = (payload: {
   chapters?: AcademicSyllabusChapterInput[];
   units?: Array<{
@@ -556,19 +569,87 @@ const resolveSyllabusChapters = (payload: {
   }>;
 }): AcademicSyllabusChapterInput[] => {
   if (payload.chapters && payload.chapters.length > 0) {
-    // Drop empty draft sections; sub-units are optional
-    return payload.chapters
-      .map((chapter) => ({
-        ...chapter,
-        units: (chapter.units ?? []).filter((u) => (u.title ?? "").trim().length > 0)
-      }))
+    // Drop blank unit rows; accept alternate title field names from clients
+    const fromHierarchy = payload.chapters
+      .map((chapter, cIndex) => {
+        const rawUnits = (chapter.units ?? []) as Array<Record<string, unknown>>;
+        const units = rawUnits
+          .map((u) => {
+            const title = unitTitleOf(u);
+            if (!title) return null;
+            return {
+              ...u,
+              // Temporary; reassigned continuously across chapters below
+              unitNo:
+                typeof u.unitNo === "number" && Number.isFinite(u.unitNo) && u.unitNo > 0
+                  ? Math.floor(u.unitNo)
+                  : 0,
+              title,
+              description: String(u.description ?? ""),
+              teachingHours:
+                typeof u.teachingHours === "number" && Number.isFinite(u.teachingHours)
+                  ? u.teachingHours
+                  : 0,
+              learningObjective: String(u.learningObjective ?? u.learningOutcomes ?? ""),
+              references: String(u.references ?? ""),
+              remarks: String(u.remarks ?? ""),
+              practicalRequired: Boolean(u.practicalRequired),
+              subUnits: Array.isArray(u.subUnits) ? u.subUnits : []
+            };
+          })
+          .filter((u): u is NonNullable<typeof u> => Boolean(u));
+
+        // If client sent a chapter/part heading but forgot nested units, promote heading → unit
+        if (
+          units.length === 0 &&
+          (chapter.title ?? "").trim() &&
+          (chapter.sectionKind === "CHAPTER" ||
+            chapter.sectionKind === "PART" ||
+            (chapter.title ?? "").trim().length > 0)
+        ) {
+          units.push({
+            unitNo: 0,
+            title: (chapter.title ?? "").trim(),
+            description: chapter.description || "",
+            teachingHours: chapter.estimatedHours ?? 0,
+            learningObjective: "",
+            references: chapter.references || "",
+            remarks: "",
+            practicalRequired: false,
+            subUnits: []
+          });
+        }
+
+        return {
+          ...chapter,
+          chapterNo: chapter.chapterNo || cIndex + 1,
+          units
+        } as AcademicSyllabusChapterInput;
+      })
       .filter((chapter) => (chapter.units ?? []).length > 0);
+
+    // Continuous unit numbering across chapters: Ch1 units 1–5, Ch2 units 6–10, …
+    if (fromHierarchy.length > 0) {
+      let unitSeq = 0;
+      return fromHierarchy.map((chapter, cIndex) => ({
+        ...chapter,
+        chapterNo: chapter.chapterNo || cIndex + 1,
+        units: (chapter.units ?? []).map((unit) => {
+          unitSeq += 1;
+          return { ...unit, unitNo: unitSeq };
+        })
+      }));
+    }
+    // Fall through: chapters present but empty (e.g. units only in legacy field)
   }
   if (payload.units && payload.units.length > 0) {
     return legacyUnitsToChapters(payload.units);
   }
   return [];
 };
+
+const SYLLABUS_STRUCTURE_REQUIRED_MSG =
+  "At least one unit with a title is required. Open each Unit row and enter Unit title (Chapter/Part heading alone is not enough).";
 
 export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
   const plan = await AcademicSyllabus.findOne({
@@ -592,7 +673,7 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
   const optionalTeacherId = payload.teacherId?.trim() || undefined;
   const chapters = resolveSyllabusChapters(payload);
   if (chapters.length === 0) {
-    throw new ApiError(400, "At least one chapter or unit is required");
+    throw new ApiError(400, SYLLABUS_STRUCTURE_REQUIRED_MSG);
   }
 
   if (req.user?.role === "TEACHER") {
@@ -606,6 +687,77 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
     }
   }
 
+  // Avoid empty strings for ObjectId fields
+  const yearId = payload.yearId?.trim() || undefined;
+  const batchId = payload.batchId?.trim() || undefined;
+  const classId = payload.classId?.trim() || undefined;
+  const sectionId = payload.sectionId?.trim() || undefined;
+
+  /**
+   * Resume flow: one syllabus per subject+year (or class). If a DRAFT/REJECTED
+   * already exists, update its hierarchy instead of failing with duplicate key.
+   * This lets teachers save Unit 1–2, then continue with Unit 3 later.
+   */
+  const existingDraftFilter: Record<string, unknown> = {
+    schoolId: tenantObjectId(req),
+    subjectId: payload.subjectId,
+    academicYearBs: payload.academicYearBs,
+    isDeleted: false,
+    status: { $in: ["DRAFT", "REJECTED"] }
+  };
+  if (yearId) existingDraftFilter.yearId = yearId;
+  if (classId) existingDraftFilter.classId = classId;
+
+  const existingDraft = await AcademicSyllabus.findOne(existingDraftFilter);
+  if (existingDraft) {
+    await assertSyllabusAccess(req, {
+      teacherId: existingDraft.teacherId?.toString(),
+      subjectId: existingDraft.subjectId.toString()
+    });
+
+    await withTransaction(async (session) => {
+      const sessionOpt = getSessionOption(session);
+      existingDraft.session = payload.session || existingDraft.session;
+      existingDraft.faculty = payload.faculty ?? existingDraft.faculty;
+      existingDraft.semesterBs = payload.semesterBs ?? existingDraft.semesterBs;
+      existingDraft.subjectCode = payload.subjectCode ?? existingDraft.subjectCode;
+      existingDraft.totalTheoryHours =
+        payload.totalTheoryHours ?? existingDraft.totalTheoryHours;
+      existingDraft.totalPracticalHours =
+        payload.totalPracticalHours ?? existingDraft.totalPracticalHours;
+      existingDraft.creditHours = payload.creditHours ?? existingDraft.creditHours;
+      existingDraft.remarks = payload.remarks ?? existingDraft.remarks;
+      existingDraft.attachmentUrl =
+        payload.attachmentUrl ?? existingDraft.attachmentUrl;
+      if (optionalTeacherId) existingDraft.teacherId = optionalTeacherId as never;
+      existingDraft.hierarchyMigratedAt = new Date();
+      existingDraft.audit = {
+        ...existingDraft.audit,
+        updatedBy: actorObjectId(req)
+      };
+      await existingDraft.save(sessionOpt);
+
+      await saveSyllabusHierarchy(
+        {
+          schoolId: tenantObjectId(req).toString(),
+          syllabusId: existingDraft._id.toString(),
+          chapters
+        },
+        session ?? undefined
+      );
+
+      await recordAudit(req, {
+        action: "academic.syllabus.resumeDraft",
+        entity: "SYLLABUS",
+        entityId: existingDraft._id.toString(),
+        after: existingDraft
+      });
+    });
+
+    const serialized = await serializeSyllabus(existingDraft._id.toString());
+    return sendSuccess(res, "Draft syllabus updated", serialized);
+  }
+
   let result: string;
   try {
     result = await withTransaction(async (session) => {
@@ -616,12 +768,6 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
         teacherId: _teacherId,
         ...headerFields
       } = payload;
-
-      // Avoid empty strings for ObjectId fields
-      const yearId = headerFields.yearId?.trim() || undefined;
-      const batchId = headerFields.batchId?.trim() || undefined;
-      const classId = headerFields.classId?.trim() || undefined;
-      const sectionId = headerFields.sectionId?.trim() || undefined;
 
       const created = await AcademicSyllabus.create(
         [
@@ -686,8 +832,12 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
   });
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
+  // Empty array is truthy in JS — only non-empty structure rewrites hierarchy
+  const structureChanging =
+    (Array.isArray(payload.chapters) && payload.chapters.length > 0) ||
+    (Array.isArray(payload.units) && payload.units.length > 0);
+
   // Teachers may only change structure while draft/rejected; approved structure is admin-only
-  const structureChanging = Boolean(payload.chapters || payload.units);
   if (
     structureChanging &&
     req.user?.role === "TEACHER" &&
@@ -723,7 +873,7 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
         units: payload.units
       });
       if (chapters.length === 0) {
-        throw new ApiError(400, "At least one chapter or unit is required");
+        throw new ApiError(400, SYLLABUS_STRUCTURE_REQUIRED_MSG);
       }
       await saveSyllabusHierarchy(
         {

@@ -3,7 +3,9 @@ import {
   ERP_MODULES,
   LEADERSHIP_DESIGNATIONS,
   MODULE_ACCESS_UI_GROUPS,
+  TEACHER_BASELINE_MODULE_KEYS,
   buildPresetModuleAccess,
+  buildTeacherBaselineModuleAccess,
   type ErpModuleKey,
   type ModuleAccessMode,
   type ModulePermissionAction,
@@ -144,6 +146,23 @@ export const ModuleAccessControlPanel = ({
     setDirty(false);
   }, [accessQuery.data]);
 
+  const primaryRole = (accessQuery.data?.role ?? "") as UserRole | "";
+  const isPrimaryTeacher = primaryRole === "TEACHER";
+
+  /** When enabling "Also teaches", turn on teaching modules in the draft. */
+  const ensureTeacherModulesInDraft = () => {
+    setDraftAccess((current) => {
+      const next = { ...current };
+      const baseline = buildTeacherBaselineModuleAccess();
+      for (const key of TEACHER_BASELINE_MODULE_KEYS) {
+        if (next[key] === "NONE" || !next[key]) {
+          next[key] = baseline[key] ?? "WRITE";
+        }
+      }
+      return next;
+    });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (payload: {
       moduleAccess: Record<string, ModuleAccessMode>;
@@ -181,6 +200,11 @@ export const ModuleAccessControlPanel = ({
 
   const applyQuickStart = (preset: "NO_ACCESS" | "READ_ONLY" | "FULL_ACCESS") => {
     setDirty(true);
+    if (preset === "NO_ACCESS" && (isPrimaryTeacher || secondaryRoles.includes("TEACHER"))) {
+      // Never wipe teaching tools for teacher accounts with "No access" quick start
+      setDraftAccess(buildTeacherBaselineModuleAccess());
+      return;
+    }
     setDraftAccess(buildPresetModuleAccess(preset));
   };
 
@@ -289,16 +313,18 @@ export const ModuleAccessControlPanel = ({
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             <p className="font-medium">Access not customized yet</p>
             <p className="mt-1 text-amber-900/90">
-              Right now they only see menus from their job role. Save the options
-              below to control exactly which admin sections they get.
+              {isPrimaryTeacher
+                ? "This is a teacher account. Teaching tools (syllabus, plans, attendance, homework, etc.) stay available. Turn on View/Manage only for extra admin sections they need. Job title (e.g. Principal) is display-only."
+                : "Right now they only see menus from their job role. Save the options below to control exactly which admin sections they get. If they also teach, enable “Also teaches” under Advanced."}
             </p>
           </div>
         ) : (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950">
             <p className="font-medium">Custom access is active</p>
             <p className="mt-1 text-emerald-900/90">
-              Their menu only includes the sections you allow below (plus their
-              personal tools such as dashboard and profile).
+              {isPrimaryTeacher || secondaryRoles.includes("TEACHER")
+                ? "Admin sections you enable appear in their menu. Teaching tools stay available for teacher accounts even when job title is Principal."
+                : "Their menu only includes the sections you allow below (plus their personal tools such as dashboard and profile)."}
             </p>
           </div>
         )}
@@ -537,13 +563,24 @@ export const ModuleAccessControlPanel = ({
                   Extra job roles (optional)
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Only when they need a second portal on the same login (for
-                  example a principal who also teaches). Prefer module toggles
-                  above for admin sections.
+                  Use when one person has two jobs on the same login (for
+                  example Principal who also teaches). Teaching tools stay
+                  available for teacher accounts when you save access.
                 </p>
+                {isPrimaryTeacher ? (
+                  <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                    This account is already a <strong>Teacher</strong>. Set job
+                    title to Principal above if needed — teaching modules stay
+                    on after you save. Check extra roles only if they also need
+                    another portal (lab, library, etc.).
+                  </p>
+                ) : null}
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {SECONDARY_ROLE_OPTIONS.map((option) => {
-                    const checked = secondaryRoles.includes(option.value);
+                    // Primary role already covers this — show as fixed on
+                    const isPrimary = option.value === primaryRole;
+                    const checked =
+                      isPrimary || secondaryRoles.includes(option.value);
                     return (
                       <label
                         key={option.value}
@@ -552,28 +589,36 @@ export const ModuleAccessControlPanel = ({
                           checked
                             ? "border-brand-300 bg-brand-50/40"
                             : "border-slate-200 bg-white",
-                          readOnly && "cursor-default",
+                          (readOnly || isPrimary) && "cursor-default",
                         )}
                       >
                         <input
                           type="checkbox"
                           className="mt-0.5 h-4 w-4 rounded border-slate-300"
                           checked={checked}
-                          disabled={readOnly}
+                          disabled={readOnly || isPrimary}
                           onChange={(event) => {
                             setDirty(true);
-                            setSecondaryRoles((current) =>
-                              event.target.checked
-                                ? Array.from(
-                                    new Set([...current, option.value]),
-                                  )
-                                : current.filter((r) => r !== option.value),
-                            );
+                            if (event.target.checked) {
+                              setSecondaryRoles((current) =>
+                                Array.from(
+                                  new Set([...current, option.value]),
+                                ),
+                              );
+                              if (option.value === "TEACHER") {
+                                ensureTeacherModulesInDraft();
+                              }
+                            } else {
+                              setSecondaryRoles((current) =>
+                                current.filter((r) => r !== option.value),
+                              );
+                            }
                           }}
                         />
                         <span>
                           <span className="block font-medium text-slate-900">
                             {option.label}
+                            {isPrimary ? " (primary role)" : ""}
                           </span>
                           <span className="block text-xs text-slate-500">
                             {option.hint}

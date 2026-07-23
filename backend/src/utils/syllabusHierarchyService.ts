@@ -388,6 +388,9 @@ export const saveSyllabusHierarchy = async (
 
   await deleteSyllabusHierarchy(syllabusId, session);
 
+  // Unit numbers run continuously across chapters (Ch1: 1–5, Ch2: 6–10, …).
+  let globalUnitNo = 0;
+
   for (let cIndex = 0; cIndex < chapters.length; cIndex++) {
     const chapter = chapters[cIndex]!;
     const chapterNo = chapter.chapterNo || cIndex + 1;
@@ -426,7 +429,9 @@ export const saveSyllabusHierarchy = async (
     const units = chapter.units ?? [];
     for (let uIndex = 0; uIndex < units.length; uIndex++) {
       const unit = units[uIndex]!;
-      const unitNo = unit.unitNo || uIndex + 1;
+      // Continuous across all chapters (never reset to 1 at each chapter).
+      globalUnitNo += 1;
+      const unitNo = globalUnitNo;
       const forcedUnitId = forcedObjectId(
         (unit as { clientKey?: string }).clientKey
       );
@@ -819,6 +824,9 @@ export const renumberAfterReorder = async (syllabusId: string, session?: ClientS
     .sort({ sortOrder: 1, chapterNo: 1 })
     .session(session ?? null);
 
+  // Units number continuously across chapters (not restarting at 1 each chapter).
+  let globalUnitNo = 0;
+
   for (let cIndex = 0; cIndex < chapters.length; cIndex++) {
     const chapter = chapters[cIndex]!;
     chapter.chapterNo = cIndex + 1;
@@ -831,7 +839,8 @@ export const renumberAfterReorder = async (syllabusId: string, session?: ClientS
 
     for (let uIndex = 0; uIndex < units.length; uIndex++) {
       const unit = units[uIndex]!;
-      unit.unitNo = uIndex + 1;
+      globalUnitNo += 1;
+      unit.unitNo = globalUnitNo;
       unit.sortOrder = uIndex;
       await unit.save(opts);
 

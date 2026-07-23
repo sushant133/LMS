@@ -35,5 +35,7 @@ export const useTeacherScope = (enabled = true) =>
     queryKey: ["teacher-scope"],
     queryFn: () => unwrap<TeacherScopeData>(api.get("/teacher/scope")),
     enabled,
-    staleTime: 5 * 60 * 1000
+    // Refresh soon after admin assigns a subject so Academic Management updates
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
   });

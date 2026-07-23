@@ -37,35 +37,61 @@ const getReadableStudentFilter = async (req: Request): Promise<Record<string, un
   return getStudentScopeFilter(req);
 };
 
+const refIdAndName = (
+  value: unknown
+): { id?: string; name?: string } => {
+  if (value == null) return {};
+  if (typeof value === "object" && value !== null && "_id" in value) {
+    const row = value as { _id: { toString(): string }; name?: string };
+    return { id: row._id.toString(), name: row.name };
+  }
+  return { id: String(value) };
+};
+
 /**
  * Limited roster fields for teachers / library staff — not full personal / guardian / fee data.
- * Library staff need this for the issue-book borrower picker only.
+ * Library staff need this for the issue-book borrower picker (batch/year labels for filters).
  */
 const sanitizeStudentForLimitedStaffList = (student: {
   toObject?: () => Record<string, unknown>;
   _id: { toString(): string };
   admissionNumber: string;
   rollNumber: number;
-  classId?: { toString(): string };
-  sectionId?: { toString(): string };
-  batchId?: { toString(): string };
-  yearId?: { toString(): string };
+  classId?: unknown;
+  sectionId?: unknown;
+  batchId?: unknown;
+  yearId?: unknown;
   academicStatus?: string;
   gender: string;
   photoUrl?: string;
   user?: { _id?: { toString(): string }; fullName?: string; role?: string } | null;
 }) => {
-  const plain = typeof student.toObject === "function" ? student.toObject() : (student as unknown as Record<string, unknown>);
-  const user = plain.user as { _id?: unknown; fullName?: string; role?: string } | null | undefined;
+  const plain =
+    typeof student.toObject === "function"
+      ? student.toObject()
+      : (student as unknown as Record<string, unknown>);
+  const user = plain.user as
+    | { _id?: unknown; fullName?: string; role?: string }
+    | null
+    | undefined;
+  const batch = refIdAndName(plain.batchId ?? student.batchId);
+  const year = refIdAndName(plain.yearId ?? student.yearId);
+  const klass = refIdAndName(plain.classId ?? student.classId);
+  const section = refIdAndName(plain.sectionId ?? student.sectionId);
+
   return {
     _id: student._id,
     schoolId: plain.schoolId,
     admissionNumber: student.admissionNumber,
     rollNumber: student.rollNumber,
-    classId: student.classId,
-    sectionId: student.sectionId,
-    batchId: student.batchId,
-    yearId: student.yearId,
+    classId: klass.id,
+    className: klass.name,
+    sectionId: section.id,
+    sectionName: section.name,
+    batchId: batch.id,
+    batchName: batch.name,
+    yearId: year.id,
+    yearName: year.name,
     academicStatus: student.academicStatus,
     gender: student.gender,
     photoUrl: student.photoUrl,
@@ -92,8 +118,13 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
     filter.academicStatus = "ACTIVE";
   }
 
+  // Always populate academic group labels for roster filters (library issue, etc.)
   const students = await Student.find(filter)
     .populate("user", limitedView ? "fullName role" : "-password")
+    .populate("batchId", "name")
+    .populate("yearId", "name level batchId")
+    .populate("classId", "name")
+    .populate("sectionId", "name classId")
     .sort(isTeacher ? { rollNumber: 1, createdAt: -1 } : { createdAt: -1 });
 
   // Drop orphaned rows where the linked User was deleted (populate returns null)
@@ -107,16 +138,45 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
     );
   }
 
-  return sendSuccess(res, "Students fetched", linked);
+  // Flatten populated refs so clients get stable string ids + optional names
+  const adminRows = linked.map((s) => {
+    const plain = s.toObject() as Record<string, unknown>;
+    const batch = refIdAndName(plain.batchId);
+    const year = refIdAndName(plain.yearId);
+    const klass = refIdAndName(plain.classId);
+    const section = refIdAndName(plain.sectionId);
+    return {
+      ...plain,
+      _id: s._id,
+      batchId: batch.id,
+      batchName: batch.name,
+      yearId: year.id,
+      yearName: year.name,
+      classId: klass.id,
+      className: klass.name,
+      sectionId: section.id,
+      sectionName: section.name
+    };
+  });
+
+  return sendSuccess(res, "Students fetched", adminRows);
 });
 
 export const getStudentById = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
   const limitedView = usesLimitedStudentView(req.user?.role);
-  const student = await Student.findOne({ ...filter, _id: req.params.id }).populate(
+  let studentQuery = Student.findOne({ ...filter, _id: req.params.id }).populate(
     "user",
     limitedView ? "fullName role" : "-password"
   );
+  if (limitedView) {
+    studentQuery = studentQuery
+      .populate("batchId", "name")
+      .populate("yearId", "name level batchId")
+      .populate("classId", "name")
+      .populate("sectionId", "name classId");
+  }
+  const student = await studentQuery;
 
   if (!student) {
     throw new ApiError(404, "Student not found");
