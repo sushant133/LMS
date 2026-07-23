@@ -435,16 +435,32 @@ export const AppLayout = () => {
   const collegeName = getCollegeDisplayName(availableSchools, user);
   const showCollegeContext = !institutionAccess;
 
-  /** Explicit department grant (not legacy unconfigured full access) */
-  const hasExplicitModuleGrant = (path: string): boolean => {
-    if (!moduleAccessConfigured) return false;
-    const moduleKey = resolveModuleFromRoutePath(path);
-    if (!moduleKey) return false;
-    return canAccessModule(moduleAccessMap, moduleKey);
-  };
+  /**
+   * Modules that power a teacher's "My Work" tools.
+   * These must NOT open the Administration section for a pure teacher —
+   * otherwise the same pages appear twice (My Students + Student Management).
+   */
+  const TEACHING_MY_WORK_MODULES = new Set([
+    "students",
+    "attendance",
+    "daily-attendance",
+    "academic-management",
+    "timetable",
+    "examinations",
+    "results",
+    "homework",
+    "library",
+    "laboratory",
+    "notices",
+    "academic-calendar",
+    "complaints",
+    "dashboard",
+    "profile",
+  ]);
 
   const hasTeachingCapability =
     effectiveRoles.has("TEACHER") || isTeacherUser;
+  /** Real management / office roles (not teaching baseline). */
   const hasAdminCapability =
     isAdmin ||
     institutionAccess ||
@@ -455,7 +471,33 @@ export const AppLayout = () => {
     effectiveRoles.has("ACCOUNTANT") ||
     effectiveRoles.has("CASHIER") ||
     effectiveRoles.has("AUDITOR");
-  // hasAdminCapability still used for myWork vs administration path de-dupe only
+
+  /** Explicit department grant (not legacy unconfigured full access) */
+  const hasExplicitModuleGrant = (path: string): boolean => {
+    if (!moduleAccessConfigured) return false;
+    const moduleKey = resolveModuleFromRoutePath(path);
+    if (!moduleKey) return false;
+    return canAccessModule(moduleAccessMap, moduleKey);
+  };
+
+  /**
+   * Unlock an Administration menu item via Module Access.
+   * Pure teachers: only non-teaching departments (Settings, Reports, Accounting…).
+   * Teaching modules stay under My Work only.
+   */
+  const hasExplicitAdminNavGrant = (path: string): boolean => {
+    if (!hasExplicitModuleGrant(path)) return false;
+    const moduleKey = resolveModuleFromRoutePath(path);
+    if (!moduleKey) return false;
+    if (
+      hasTeachingCapability &&
+      !hasAdminCapability &&
+      TEACHING_MY_WORK_MODULES.has(moduleKey)
+    ) {
+      return false;
+    }
+    return true;
+  };
 
   const isModuleAllowedForNav = (path: string): boolean => {
     if (isAdmin) return true;
@@ -514,11 +556,11 @@ export const AppLayout = () => {
   const filteredItems = useMemo(() => {
     const roleMatched = navItems
       .filter((item) => {
-        // Role match OR explicit module grant unlocks admin sections for staff/teachers
+        // Role match OR explicit admin-department grant unlocks Administration
         if (hasAnyRole(item.roles)) return true;
         if (
           item.section === "administration" &&
-          hasExplicitModuleGrant(item.path)
+          hasExplicitAdminNavGrant(item.path)
         ) {
           return true;
         }
@@ -528,11 +570,10 @@ export const AppLayout = () => {
         // Lab: teachers only if assigned (unless lab staff / admin)
         if (item.path === "/laboratory") {
           if (isAdmin || effectiveRoles.has("LABORATORY_STAFF")) return true;
-          if (hasExplicitModuleGrant(item.path)) return true;
+          if (hasExplicitAdminNavGrant(item.path)) return true;
           if (item.section === "myWork") {
             return hasTeachingCapability && teacherHasLaboratory;
           }
-          // administration laboratory without lab role: need module access only
           return isModuleAllowedForNav(item.path);
         }
         // Field Management: staff only when assigned as primary/assistant coordinator
@@ -542,7 +583,7 @@ export const AppLayout = () => {
             return isModuleAllowedForNav(item.path);
           }
           if (effectiveRoles.has("STUDENT")) return true;
-          if (hasExplicitModuleGrant(item.path)) return true;
+          if (hasExplicitAdminNavGrant(item.path)) return true;
           if (effectiveRoles.has("COLLEGE_STAFF")) {
             return (
               staffMaySeeFieldManagement ||
@@ -561,6 +602,7 @@ export const AppLayout = () => {
       }));
 
     // Multi-role path collision: same path in myWork + administration
+    // Pure teacher → always keep My Work label (My Students, not Student Management)
     const byPath = new Map<string, NavItem[]>();
     for (const item of roleMatched) {
       const list = byPath.get(item.path) ?? [];
@@ -574,7 +616,6 @@ export const AppLayout = () => {
         result.push(group[0]!);
         continue;
       }
-      // Prefer administration when user has management roles; else my work
       const adminItem = group.find((g) => g.section === "administration");
       const workItem = group.find((g) => g.section === "myWork");
       const generalItem = group.find((g) => g.section === "general");
@@ -582,12 +623,20 @@ export const AppLayout = () => {
         result.push(generalItem);
         continue;
       }
+      // Prefer My Work for teaching-only users when both exist
+      if (
+        workItem &&
+        hasTeachingCapability &&
+        !hasAdminCapability
+      ) {
+        result.push(workItem);
+        continue;
+      }
       if (
         adminItem &&
         ((hasAdminCapability && hasAnyRole(adminItem.roles)) ||
-          hasExplicitModuleGrant(adminItem.path))
+          hasExplicitAdminNavGrant(adminItem.path))
       ) {
-        // Multi-role or module grant: show management label under Administration
         result.push(adminItem);
         continue;
       }
