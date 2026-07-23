@@ -695,7 +695,9 @@ export const SyllabusPanel = ({
 
   const selectedPlans = useMemo(() => {
     if (!selectedSubject) return [];
-    const matched = recordsForCurriculumSubject(
+    // Prefer year-level match (1st/2nd Year), but syllabus may be stored on another
+    // batch's year document id. If year-scoped match is empty, fall back progressively.
+    let matched = recordsForCurriculumSubject(
       keywordFilteredPlans,
       selectedSubject.subjectIds,
       selectedYearKey,
@@ -703,6 +705,46 @@ export const SyllabusPanel = ({
       isCollege,
       subjects,
     );
+    if (matched.length === 0 && selectedYearKey) {
+      matched = recordsForCurriculumSubject(
+        keywordFilteredPlans,
+        selectedSubject.subjectIds,
+        null,
+        yearIdToLevelKey,
+        isCollege,
+        subjects,
+      );
+    }
+    // Last resort: name / code match (admin may use a different batch subject instance)
+    if (matched.length === 0) {
+      const wantName = (selectedSubject.subjectName || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+      const wantCode = (selectedSubject.subjectCode || "").trim().toLowerCase();
+      const idSet = new Set(selectedSubject.subjectIds.filter(Boolean));
+      matched = keywordFilteredPlans.filter((plan) => {
+        if (idSet.has(plan.subjectId)) return true;
+        const planName = (plan.subject?.name || "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, " ");
+        const planCode = (plan.subjectCode || plan.subject?.code || "")
+          .trim()
+          .toLowerCase();
+        if (wantCode && planCode && wantCode === planCode) return true;
+        if (wantName && planName && wantName === planName) return true;
+        // "Anatomy And Physiology" ↔ "Anatomy" / "Physiology"
+        if (
+          wantName &&
+          planName &&
+          (wantName.includes(planName) || planName.includes(wantName))
+        ) {
+          return true;
+        }
+        return false;
+      });
+    }
     // One syllabus per curriculum subject (not one per batch-provisioned subject id)
     return dedupePlansByCurriculum(matched, subjects, false);
   }, [
@@ -1565,7 +1607,13 @@ export const SyllabusPanel = ({
                 isAdmin
                   ? "No syllabus created for this subject yet."
                   : isTeacher
-                    ? "No syllabus has been published for this assigned subject yet. Ask an administrator to create it. You can still use Session Plan, Lesson Plan, and Log Book once a syllabus exists."
+                    ? plansQuery.isError
+                      ? `Could not load syllabi: ${parseErrorMessage(plansQuery.error)}. Check Academic Management module access or try again.`
+                      : plansQuery.isLoading
+                        ? "Loading syllabi…"
+                        : allPlans.length > 0
+                          ? `Loaded ${allPlans.length} syllabus record(s) for your school, but none matched this subject/year selection. Try clearing filters (subject, faculty, status, keyword) or pick the matching year level.`
+                          : "No syllabus has been published for this assigned subject yet. Ask an administrator to create it for the same academic year and curriculum subject. You can still use Session Plan, Lesson Plan, and Log Book once a syllabus exists."
                     : "No syllabus available for this subject."
               }
             />

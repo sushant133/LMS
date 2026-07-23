@@ -155,6 +155,11 @@ export const enforceModuleAccess = async (
     ) {
       mode = "WRITE";
     }
+    // Teachers need academic year (and school name) from settings for Academic Management filters.
+    // Bypass granular action checks — settings is often NONE in the matrix for pure teachers.
+    if (isTeacherRole && moduleKey === "settings" && READ_METHODS.has(req.method)) {
+      return next();
+    }
 
     if (mode === "NONE") {
       void recordAudit(req, {

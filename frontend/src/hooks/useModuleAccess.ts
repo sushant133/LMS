@@ -1,10 +1,12 @@
 import {
+  applyTeacherRoleBaseline,
   canAccessModule,
   canManageInstitution,
   canWriteModule,
   hasModuleAction,
   resolveModuleAccessMode,
   resolveModuleFromRoutePath,
+  TEACHER_BASELINE_MODULE_KEYS,
   type ErpModuleKey,
   type ModuleAccessMap,
   type ModuleAccessMode,
@@ -19,13 +21,26 @@ import { useAuth } from "features/auth/AuthProvider";
  * Resolve module access for the signed-in user.
  * Admins always have full write.
  * Staff only see / use modules the admin granted (NONE modules are hidden).
+ * Teachers always keep teaching baseline modules (Academic Management, etc.).
  * Do not surface “disabled by administrator” messages — simply hide or disable actions.
  */
 export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
   const { user } = useAuth();
   const location = useLocation();
 
-  const map = (user?.moduleAccess ?? {}) as ModuleAccessMap;
+  const isTeacher =
+    user?.role === "TEACHER" ||
+    (user?.secondaryRoles ?? []).includes("TEACHER");
+
+  const map = useMemo(() => {
+    const raw = (user?.moduleAccess ?? {}) as ModuleAccessMap;
+    // Mirror backend applyTeacherRoleBaseline so client nav/actions match API
+    if (isTeacher && Object.keys(raw).length > 0) {
+      return applyTeacherRoleBaseline(raw) as ModuleAccessMap;
+    }
+    return raw;
+  }, [user?.moduleAccess, isTeacher]);
+
   const actionsMap = (user?.moduleActions ?? {}) as ModuleActionsMap;
   const isAdmin = canManageInstitution(user?.role ?? "");
 
@@ -35,13 +50,33 @@ export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
   const mode: ModuleAccessMode = useMemo(() => {
     if (isAdmin) return "WRITE";
     if (!resolvedKey) return "WRITE";
-    return resolveModuleAccessMode(map, resolvedKey);
-  }, [isAdmin, map, resolvedKey]);
+    let m = resolveModuleAccessMode(map, resolvedKey);
+    // Teaching tools: never treat baseline modules as denied for teachers
+    if (
+      isTeacher &&
+      m === "NONE" &&
+      (TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(resolvedKey)
+    ) {
+      m = "WRITE";
+    }
+    return m;
+  }, [isAdmin, isTeacher, map, resolvedKey]);
 
-  const canAccess = isAdmin || !resolvedKey || canAccessModule(map, resolvedKey);
+  const canAccess =
+    isAdmin ||
+    !resolvedKey ||
+    mode !== "NONE" ||
+    canAccessModule(map, resolvedKey);
   const canWrite =
     isAdmin ||
-    (resolvedKey ? canWriteModule(map, resolvedKey) : true);
+    (resolvedKey
+      ? mode === "WRITE" ||
+        (isTeacher &&
+          (TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(
+            resolvedKey,
+          ) &&
+          mode !== "READ_ONLY")
+      : true);
   const isReadOnly = canAccess && !canWrite;
   const isDenied = !canAccess;
 

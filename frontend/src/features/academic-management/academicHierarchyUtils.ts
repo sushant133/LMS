@@ -545,6 +545,29 @@ export const buildAcademicHierarchy = (params: {
       } else {
         yearPlaces = [{ key: UNASSIGNED_YEAR_KEY, label: yearLevelLabel(UNASSIGNED_YEAR_KEY) }];
       }
+      // If plan year is another batch instance (unmapped / unassigned), still attach
+      // counts to every year level that already has this curriculum subject (assignments).
+      if (
+        yearPlaces.length === 0 ||
+        yearPlaces.every((p) => p.key === UNASSIGNED_YEAR_KEY)
+      ) {
+        const existingLevels = new Map<string, string>();
+        for (const byYear of tree.values()) {
+          for (const [yk, bySubject] of byYear.entries()) {
+            if (yk === UNASSIGNED_YEAR_KEY) continue;
+            if (bySubject.has(subjectKey)) {
+              const sample = bySubject.get(subjectKey)!;
+              existingLevels.set(yk, sample.yearLabel);
+            }
+          }
+        }
+        if (existingLevels.size > 0) {
+          yearPlaces = [...existingLevels.entries()].map(([key, label]) => ({
+            key,
+            label,
+          }));
+        }
+      }
     } else if (record.classId) {
       const cls = classes.find((c) => c._id === record.classId);
       yearPlaces = [{ key: `class:${record.classId}`, label: cls?.name ?? "Class" }];

@@ -46,6 +46,9 @@ export const academicListApiParams = (
 ): Record<string, string> => {
   const params = filtersToParams(filters);
   delete params.batchId;
+  // Session often mirrors academic year with spacing differences and hides valid rows.
+  // Academic year is the canonical period filter; session is display-only for plans.
+  delete params.session;
   if (options?.isCollege !== false) {
     // College: year level filtering is client-side via hierarchy tree
     delete params.yearId;

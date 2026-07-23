@@ -108,7 +108,15 @@ export const AcademicManagementHub = () => {
       unwrap<{ academicYearBs: string; schoolName?: string }>(
         api.get("/settings"),
       ),
+    // Teachers often lack the Settings module grant; fall back to school on auth.
+    retry: false,
   });
+
+  /** Academic year for filters — settings when allowed, else school profile from login. */
+  const institutionAcademicYearBs =
+    settingsQuery.data?.academicYearBs ||
+    user?.school?.academicYearBs ||
+    "";
 
   const classesQuery = useQuery({
     queryKey: ["academics", "classes"],
@@ -235,14 +243,14 @@ export const AcademicManagementHub = () => {
   });
 
   useEffect(() => {
-    if (!settingsQuery.data?.academicYearBs) return;
+    if (!institutionAcademicYearBs) return;
     setDraftFilters((current) =>
       current.academicYearBs
         ? current
         : {
             ...current,
-            academicYearBs: settingsQuery.data.academicYearBs,
-            session: settingsQuery.data.academicYearBs,
+            academicYearBs: institutionAcademicYearBs,
+            session: institutionAcademicYearBs,
           },
     );
     setAppliedFilters((current) =>
@@ -250,11 +258,11 @@ export const AcademicManagementHub = () => {
         ? current
         : {
             ...current,
-            academicYearBs: settingsQuery.data.academicYearBs,
-            session: settingsQuery.data.academicYearBs,
+            academicYearBs: institutionAcademicYearBs,
+            session: institutionAcademicYearBs,
           },
     );
-  }, [settingsQuery.data?.academicYearBs]);
+  }, [institutionAcademicYearBs]);
 
   const teacherId = teacherScopeQuery.data?.scope.teacherId;
 
@@ -341,14 +349,17 @@ export const AcademicManagementHub = () => {
   );
 
   const displayInstitutionName =
-    settingsQuery.data?.schoolName || institutionName || "Institution";
+    settingsQuery.data?.schoolName ||
+    user?.school?.name ||
+    institutionName ||
+    "Institution";
 
   const handleSearch = () => setAppliedFilters({ ...draftFilters });
   const handleReset = () => {
     const reset = {
       ...defaultAcademicFilters(),
-      academicYearBs: settingsQuery.data?.academicYearBs ?? "",
-      session: settingsQuery.data?.academicYearBs ?? "",
+      academicYearBs: institutionAcademicYearBs,
+      session: institutionAcademicYearBs,
     };
     setDraftFilters(reset);
     setAppliedFilters(reset);
@@ -509,7 +520,7 @@ export const AcademicManagementHub = () => {
           yearIds: item.yearIds,
         }))}
         teachers={teachersQuery.data ?? []}
-        academicYearBs={settingsQuery.data?.academicYearBs ?? ""}
+        academicYearBs={institutionAcademicYearBs}
         showTeacherFilter={isAdmin}
       />
 

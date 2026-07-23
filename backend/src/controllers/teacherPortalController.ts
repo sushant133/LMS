@@ -92,24 +92,55 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
         .sort({ rollNumber: 1 })
     ]);
 
-    // If years are empty but subjects have yearIds, still return those years so the UI tree builds
+    /**
+     * Years for Academic Management hierarchy:
+     * - Start from assignment years + yearIds on expanded curriculum subjects
+     * - Then include ALL years at the same level(s) across batches so a syllabus
+     *   stored on "1st Year / Batch B" still maps to level:1 for a teacher on Batch A.
+     * Students stay scoped to assignment pairs above (not expanded).
+     */
     let yearsOut = years;
-    if (yearsOut.length === 0 && subjects.length > 0) {
-      const yearIdSet = new Set<string>();
+    {
+      const yearIdSet = new Set<string>(yearsOut.map((y) => y._id.toString()));
       for (const s of subjects) {
         for (const yid of s.yearIds ?? []) yearIdSet.add(yid.toString());
       }
       for (const a of scope.assignments) {
         if (a.yearId) yearIdSet.add(a.yearId);
       }
-      if (yearIdSet.size > 0) {
-        yearsOut = await Year.find({ schoolId, _id: { $in: [...yearIdSet] } }).sort({ level: 1 });
+      let seedYears =
+        yearIdSet.size > 0
+          ? await Year.find({ schoolId, _id: { $in: [...yearIdSet] } }).sort({ level: 1 })
+          : yearsOut;
+
+      const levels = [
+        ...new Set(
+          seedYears
+            .map((y) => y.level)
+            .filter((level): level is number => typeof level === "number" && level > 0),
+        ),
+      ];
+      if (levels.length > 0) {
+        yearsOut = await Year.find({ schoolId, level: { $in: levels } }).sort({
+          level: 1,
+          name: 1,
+        });
+      } else if (seedYears.length > 0) {
+        yearsOut = seedYears;
       }
     }
 
     let batchesOut = batches;
-    if (batchesOut.length === 0 && yearsOut.length > 0) {
-      const batchIds = [...new Set(yearsOut.map((y) => y.batchId?.toString()).filter(Boolean))];
+    // Include batches for expanded same-level years (needed for year labels / filters)
+    {
+      const batchIds = [
+        ...new Set(
+          [
+            ...batchesOut.map((b) => b._id.toString()),
+            ...yearsOut.map((y) => y.batchId?.toString()).filter(Boolean),
+          ].filter(Boolean) as string[],
+        ),
+      ];
       if (batchIds.length > 0) {
         batchesOut = await Batch.find({ schoolId, _id: { $in: batchIds } }).sort({ name: 1 });
       }

@@ -414,7 +414,8 @@ export const listYears = asyncHandler(async (req: Request, res: Response) => {
 
   const teacherScope = await getTeacherScope(req);
   if (teacherScope) {
-    // Prefer assigned year ids; if empty, fall back to years linked on assigned subjects
+    // Prefer assigned year ids; if empty, fall back to years linked on assigned subjects.
+    // Then expand to all years at the same level so syllabus year docs from other batches map.
     let yearIds = teacherScope.yearIds;
     if (yearIds.length === 0 && teacherScope.subjectIds.length > 0) {
       const assignedSubjects = await Subject.find({
@@ -431,9 +432,26 @@ export const listYears = asyncHandler(async (req: Request, res: Response) => {
         )
       ];
     }
-    query._id = { $in: yearIds.length > 0 ? yearIds : ["__none__"] };
-    if (typeof req.query.batchId === "string") {
-      query.batchId = req.query.batchId;
+    if (yearIds.length > 0) {
+      const seedYears = await Year.find({ schoolId, _id: { $in: yearIds } })
+        .select("level")
+        .lean();
+      const levels = [
+        ...new Set(
+          seedYears
+            .map((y) => y.level)
+            .filter((level): level is number => typeof level === "number" && level > 0)
+        )
+      ];
+      if (levels.length > 0) {
+        // Same year level across all batches (do not pin to assignment batch only)
+        delete query.batchId;
+        query.level = { $in: levels };
+      } else {
+        query._id = { $in: yearIds };
+      }
+    } else {
+      query._id = { $in: ["__none__"] };
     }
   }
 

@@ -75,7 +75,7 @@ import { User } from "../models/User.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { tenantObjectId } from "../utils/tenant.js";
 import { sendSuccess } from "../utils/response.js";
-import { requireTeacherScope } from "../utils/teacherScope.js";
+import { getTeacherScope, requireTeacherScope } from "../utils/teacherScope.js";
 
 const getActorName = async (userId: string): Promise<string> => {
   const user = await User.findById(userId).select("fullName email").lean();
@@ -482,6 +482,31 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
   await applyCurriculumSubjectFilter(req, filter, filters.subjectId);
   // Teachers see syllabi for subjects they are assigned (not only their teacherId)
   await applyTeacherSubjectScopeToFilter(req, filter);
+
+  /**
+   * Syllabus is curriculum-level (shared). For teachers, drop filters that commonly
+   * hide admin-created rows: session (often duplicates AY with spacing differences),
+   * faculty free-text, teacherId, and batch/class/year instance ids.
+   * Subject + school + (optional) academic year remain.
+   */
+  const teacherScope = await getTeacherScope(req);
+  if (teacherScope) {
+    delete filter.session;
+    delete filter.faculty;
+    delete filter.teacherId;
+    delete filter.classId;
+    delete filter.sectionId;
+    delete filter.batchId;
+    delete filter.yearId;
+    // Soft academic year: match ignoring whitespace/case differences
+    if (typeof filter.academicYearBs === "string" && filter.academicYearBs.trim()) {
+      const raw = filter.academicYearBs.trim();
+      const compact = raw.replace(/\s+/g, "");
+      filter.academicYearBs = {
+        $in: [...new Set([raw, compact, raw.replace(/\s*\/\s*/g, "/")])]
+      };
+    }
+  }
 
   const rows = await AcademicSyllabus.find(filter).sort({ updatedAt: -1 }).lean();
   const serialized = (await Promise.all(rows.map((row) => serializeSyllabus(row._id.toString())))).filter(Boolean);
