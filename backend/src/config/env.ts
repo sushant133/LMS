@@ -166,10 +166,56 @@ const envSchema = z.object({
    * When true (and Setting does not override), new timetable slots require subjectAssignmentId.
    * Enable only after backfill is clean for the school.
    */
-  SUBJECT_ASSIGNMENT_TIMETABLE_REQUIRE_LINK: boolFromEnv(false)
+  SUBJECT_ASSIGNMENT_TIMETABLE_REQUIRE_LINK: boolFromEnv(false),
+  /**
+   * Biometric / electronic attendance foundation (device punch ingest).
+   * Default off — no UI; enable only when machines are ready.
+   */
+  BIOMETRIC_ATTENDANCE_ENABLED: boolFromEnv(false),
+  /**
+   * Shared secret for device / bridge POST /api/biometric/punches.
+   * Required when BIOMETRIC_ATTENDANCE_ENABLED=true (min 16 chars).
+   * Send as header X-API-Key or Authorization: Bearer <key>.
+   */
+  BIOMETRIC_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : undefined;
+    }),
+  /**
+   * Default school for punches that omit schoolId (single-college installs).
+   * MongoDB ObjectId string.
+   */
+  BIOMETRIC_DEFAULT_SCHOOL_ID: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : undefined;
+    }),
+  /** Staff/teacher check-in after this HH:mm (Nepal) → LATE. Default 09:15. */
+  BIOMETRIC_STAFF_LATE_AFTER: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "BIOMETRIC_STAFF_LATE_AFTER must be HH:mm")
+    .default("09:15"),
+  /** Student first punch after this HH:mm (Nepal) → LATE. Default 10:00. */
+  BIOMETRIC_STUDENT_LATE_AFTER: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "BIOMETRIC_STUDENT_LATE_AFTER must be HH:mm")
+    .default("10:00")
 });
 
 export const env = envSchema.parse(process.env);
+
+if (env.BIOMETRIC_ATTENDANCE_ENABLED) {
+  if (!env.BIOMETRIC_API_KEY || env.BIOMETRIC_API_KEY.length < 16) {
+    throw new Error(
+      "BIOMETRIC_API_KEY must be at least 16 characters when BIOMETRIC_ATTENDANCE_ENABLED=true"
+    );
+  }
+}
 
 /** Effective refresh secret — separate secret if set, else JWT_SECRET. */
 export const getJwtRefreshSecret = (): string => env.JWT_REFRESH_SECRET ?? env.JWT_SECRET;

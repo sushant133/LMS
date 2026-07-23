@@ -9,6 +9,7 @@ import attendanceRoutes from "./attendanceRoutes.js";
 import dailyAttendanceRoutes from "./dailyAttendanceRoutes.js";
 import fieldDutyRoutes from "./fieldDutyRoutes.js";
 import employeeAttendanceRoutes from "./employeeAttendanceRoutes.js";
+import biometricRoutes from "./biometricRoutes.js";
 import authRoutes from "./authRoutes.js";
 import dashboardRoutes from "./dashboardRoutes.js";
 import examRoutes from "./examRoutes.js";
@@ -57,6 +58,8 @@ router.use("/attendance", attendanceRoutes);
 router.use("/daily-attendance", dailyAttendanceRoutes);
 router.use("/field-duty", fieldDutyRoutes);
 router.use("/employee-attendance", employeeAttendanceRoutes);
+/** Device punch ingest foundation (API key; hidden from LMS UI). */
+router.use("/biometric", biometricRoutes);
 router.use("/exams", examRoutes);
 router.use("/fees", feeRoutes);
 router.use("/notices", noticeRoutes);
