@@ -107,22 +107,51 @@ const yearSortOrder = (key: string): number => {
   return 100;
 };
 
-/** Curriculum identity: prefer master subject, else code, else name — not batch instance _id. */
-export const curriculumSubjectKey = (subject: {
-  _id: string;
+type CurriculumSubjectRef = {
+  _id?: string;
   masterSubjectId?: string | null;
   code?: string;
   name?: string;
-}): string => {
-  // masterSubjectId may arrive as string or nested {_id}
+};
+
+/**
+ * All curriculum identity keys for a subject (master, code, name, id).
+ * Used so "English" with masterSubjectId still matches a syllabus that only
+ * has name/code populated (common for teachers who only see assigned instances).
+ */
+export const curriculumSubjectKeys = (subject: CurriculumSubjectRef): string[] => {
+  const keys: string[] = [];
   const masterId = idOf(subject.masterSubjectId);
-  if (masterId && masterId !== "[object Object]") return `master:${masterId}`;
+  if (masterId && masterId !== "[object Object]") keys.push(`master:${masterId}`);
   const code = (subject.code ?? "").trim().toLowerCase();
-  if (code) return `code:${code}`;
+  if (code) keys.push(`code:${code}`);
   // Normalize whitespace so "Anatomy " and "Anatomy" collapse
   const name = (subject.name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-  if (name) return `name:${name}`;
-  return `id:${idOf(subject._id) || subject._id}`;
+  if (name) keys.push(`name:${name}`);
+  const sid = idOf(subject._id);
+  if (sid) keys.push(`id:${sid}`);
+  return keys.length > 0 ? keys : ["id:unknown"];
+};
+
+/** Preferred single key for display grouping: master > code > name > id. */
+export const curriculumSubjectKey = (subject: CurriculumSubjectRef): string => {
+  const keys = curriculumSubjectKeys(subject);
+  const master = keys.find((k) => k.startsWith("master:"));
+  if (master) return master;
+  const code = keys.find((k) => k.startsWith("code:"));
+  if (code) return code;
+  const name = keys.find((k) => k.startsWith("name:"));
+  if (name) return name;
+  return keys[0] ?? "id:unknown";
+};
+
+/** True when any identity key overlaps (same curriculum subject across batch instances). */
+export const curriculumSubjectsMatch = (
+  a: CurriculumSubjectRef,
+  b: CurriculumSubjectRef,
+): boolean => {
+  const aKeys = new Set(curriculumSubjectKeys(a));
+  return curriculumSubjectKeys(b).some((k) => aKeys.has(k));
 };
 
 const teacherNameOf = (
@@ -157,6 +186,8 @@ export const buildAcademicHierarchy = (params: {
     teacherId: string;
     faculty?: string;
     subjectName?: string;
+    subjectCode?: string;
+    masterSubjectId?: string | null;
     teacherName?: string;
   }>;
   teachers?: Array<{ _id: string; user?: { fullName?: string } }>;
@@ -207,6 +238,29 @@ export const buildAcademicHierarchy = (params: {
   const filterClassKey = filterClassId ? `class:${filterClassId}` : undefined;
 
   const subjectById = new Map(subjects.map((s) => [s._id, s]));
+
+  /**
+   * Alias map: any identity key (master/code/name/id) → canonical subjectKey.
+   * Prevents splitting one curriculum subject into two tree nodes when one
+   * side has masterSubjectId and the other only has name (syllabus populate).
+   */
+  const aliasToSubjectKey = new Map<string, string>();
+
+  const resolveCanonicalSubjectKey = (ref: CurriculumSubjectRef): string => {
+    const keys = curriculumSubjectKeys(ref);
+    for (const k of keys) {
+      const existing = aliasToSubjectKey.get(k);
+      if (existing) {
+        for (const k2 of keys) {
+          if (!aliasToSubjectKey.has(k2)) aliasToSubjectKey.set(k2, existing);
+        }
+        return existing;
+      }
+    }
+    const primary = curriculumSubjectKey(ref);
+    for (const k of keys) aliasToSubjectKey.set(k, primary);
+    return primary;
+  };
 
   type Acc = {
     subjectKey: string;
@@ -310,15 +364,12 @@ export const buildAcademicHierarchy = (params: {
     if (filterSubjectId && subject._id !== filterSubjectId) {
       // Allow match if filter is another instance of same curriculum
       const filtered = subjectById.get(filterSubjectId);
-      if (
-        !filtered ||
-        curriculumSubjectKey(filtered) !== curriculumSubjectKey(subject)
-      ) {
+      if (!filtered || !curriculumSubjectsMatch(filtered, subject)) {
         continue;
       }
     }
 
-    const subjectKey = curriculumSubjectKey(subject);
+    const subjectKey = resolveCanonicalSubjectKey(subject);
     const places = resolveYearPlacesForSubject(subject);
 
     for (const place of places) {
@@ -347,27 +398,30 @@ export const buildAcademicHierarchy = (params: {
     if (!subjectId) continue;
 
     const subject = subjectById.get(subjectId);
-    const subjectKey = subject
-      ? curriculumSubjectKey(subject)
-      : curriculumSubjectKey({
-          _id: subjectId,
-          name:
-            typeof assignment.subjectId === "object" &&
-            assignment.subjectId &&
-            "name" in assignment.subjectId
-              ? String((assignment.subjectId as { name?: string }).name ?? "")
-              : "",
-          code:
-            typeof assignment.subjectId === "object" &&
-            assignment.subjectId &&
-            "code" in assignment.subjectId
-              ? String((assignment.subjectId as { code?: string }).code ?? "")
-              : "",
-        });
+    const assignmentSubjectRef: CurriculumSubjectRef = subject ?? {
+      _id: subjectId,
+      name:
+        typeof assignment.subjectId === "object" &&
+        assignment.subjectId &&
+        "name" in assignment.subjectId
+          ? String((assignment.subjectId as { name?: string }).name ?? "")
+          : "",
+      code:
+        typeof assignment.subjectId === "object" &&
+        assignment.subjectId &&
+        "code" in assignment.subjectId
+          ? String((assignment.subjectId as { code?: string }).code ?? "")
+          : "",
+    };
+    const subjectKey = resolveCanonicalSubjectKey(assignmentSubjectRef);
 
     if (filterSubjectId) {
       const filtered = subjectById.get(filterSubjectId);
-      if (filtered && curriculumSubjectKey(filtered) !== subjectKey && filterSubjectId !== subjectId) {
+      if (
+        filtered &&
+        !curriculumSubjectsMatch(filtered, assignmentSubjectRef) &&
+        filterSubjectId !== subjectId
+      ) {
         continue;
       }
     }
@@ -453,18 +507,20 @@ export const buildAcademicHierarchy = (params: {
     if (filterTeacherId && record.teacherId !== filterTeacherId) continue;
 
     const subject = subjectById.get(record.subjectId);
-    const subjectKey = subject
-      ? curriculumSubjectKey(subject)
-      : curriculumSubjectKey({
-          _id: record.subjectId,
-          name: record.subjectName ?? "",
-        });
+    const recordSubjectRef: CurriculumSubjectRef = {
+      _id: record.subjectId,
+      masterSubjectId: subject?.masterSubjectId ?? record.masterSubjectId,
+      code: subject?.code || record.subjectCode,
+      name: subject?.name || record.subjectName,
+    };
+    // Alias map collapses master/code/name so syllabus rows join the assigned subject node
+    const subjectKey = resolveCanonicalSubjectKey(recordSubjectRef);
 
     if (filterSubjectId) {
       const filtered = subjectById.get(filterSubjectId);
       if (
         filtered &&
-        curriculumSubjectKey(filtered) !== subjectKey &&
+        !curriculumSubjectsMatch(filtered, recordSubjectRef) &&
         filterSubjectId !== record.subjectId
       ) {
         continue;
@@ -794,6 +850,8 @@ export const dedupePlansByCurriculum = <
     teacherId?: string;
     status?: string;
     updatedAt?: string;
+    subject?: { name?: string; code?: string; masterSubjectId?: string | null };
+    subjectCode?: string;
   },
 >(
   plans: T[],
@@ -808,6 +866,22 @@ export const dedupePlansByCurriculum = <
 ): T[] => {
   if (plans.length <= 1) return plans;
   const subjectById = new Map(subjects.map((s) => [s._id, s]));
+  const aliasToKey = new Map<string, string>();
+  const resolveKey = (ref: CurriculumSubjectRef): string => {
+    const keys = curriculumSubjectKeys(ref);
+    for (const k of keys) {
+      const existing = aliasToKey.get(k);
+      if (existing) {
+        for (const k2 of keys) {
+          if (!aliasToKey.has(k2)) aliasToKey.set(k2, existing);
+        }
+        return existing;
+      }
+    }
+    const primary = curriculumSubjectKey(ref);
+    for (const k of keys) aliasToKey.set(k, primary);
+    return primary;
+  };
   const statusRank = (status?: string) => {
     switch (status) {
       case "APPROVED":
@@ -827,9 +901,14 @@ export const dedupePlansByCurriculum = <
   const best = new Map<string, T>();
   for (const plan of plans) {
     const subject = subjectById.get(plan.subjectId);
-    const curriculumKey = subject
-      ? curriculumSubjectKey(subject)
-      : `id:${plan.subjectId}`;
+    const curriculumKey = resolveKey(
+      subject ?? {
+        _id: plan.subjectId,
+        masterSubjectId: plan.subject?.masterSubjectId,
+        code: plan.subjectCode || plan.subject?.code,
+        name: plan.subject?.name,
+      },
+    );
     const teacherPart = splitByTeacher ? plan.teacherId || "shared" : "all";
     const key = `${plan.academicYearBs || ""}::${curriculumKey}::${teacherPart}`;
     const existing = best.get(key);
@@ -898,17 +977,83 @@ export const flattenHierarchyYears = (
  * under a year *level* (not a batch-specific year document id).
  */
 export const recordsForCurriculumSubject = <
-  T extends { subjectId: string; yearId?: string; classId?: string },
+  T extends {
+    subjectId: string;
+    yearId?: string;
+    classId?: string;
+    subject?: { name?: string; code?: string; masterSubjectId?: string | null };
+    subjectCode?: string;
+  },
 >(
   records: T[],
   subjectIds: string[],
   yearKey?: string | null,
   yearIdToLevelKey?: Map<string, string>,
   isCollege?: boolean,
+  /**
+   * Optional subject catalog used to expand batch-instance ids into curriculum keys
+   * so a teacher assigned "English (Batch A)" still sees syllabus stored on "English (Batch B)".
+   */
+  subjectsCatalog?: Array<{
+    _id: string;
+    masterSubjectId?: string | null;
+    code?: string;
+    name?: string;
+  }>,
 ): T[] => {
-  const idSet = new Set(subjectIds);
+  const idSet = new Set(subjectIds.filter(Boolean));
+  /** All identity keys (master/code/name/id) for the selected curriculum subject */
+  const curriculumKeys = new Set<string>();
+
+  const catalog = subjectsCatalog ?? [];
+  const byId = new Map(catalog.map((s) => [s._id, s]));
+
+  const addKeysFrom = (ref: CurriculumSubjectRef) => {
+    for (const k of curriculumSubjectKeys(ref)) curriculumKeys.add(k);
+  };
+
+  for (const id of idSet) {
+    const sub = byId.get(id);
+    if (sub) addKeysFrom(sub);
+    else curriculumKeys.add(`id:${id}`);
+  }
+  // Expand: any catalog subject that shares ANY identity key → include its id + keys
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const sub of catalog) {
+      const keys = curriculumSubjectKeys(sub);
+      const overlaps = keys.some((k) => curriculumKeys.has(k)) || idSet.has(sub._id);
+      if (!overlaps) continue;
+      if (!idSet.has(sub._id)) {
+        idSet.add(sub._id);
+        expanded = true;
+      }
+      for (const k of keys) {
+        if (!curriculumKeys.has(k)) {
+          curriculumKeys.add(k);
+          expanded = true;
+        }
+      }
+    }
+  }
+
   return records.filter((record) => {
-    if (!idSet.has(record.subjectId)) return false;
+    let subjectMatch = idSet.has(record.subjectId);
+    if (!subjectMatch) {
+      const planSub = byId.get(record.subjectId);
+      const planKeys = curriculumSubjectKeys(
+        planSub ?? {
+          _id: record.subjectId,
+          masterSubjectId: record.subject?.masterSubjectId,
+          code: record.subjectCode || record.subject?.code,
+          name: record.subject?.name,
+        },
+      );
+      subjectMatch = planKeys.some((k) => curriculumKeys.has(k));
+    }
+    if (!subjectMatch) return false;
+
     if (!yearKey || yearKey === UNASSIGNED_YEAR_KEY) return true;
     if (isCollege) {
       if (!record.yearId) return true; // unscoped plan still belongs to curriculum subject

@@ -287,7 +287,13 @@ export interface AcademicSyllabusRecord extends AcademicManagementScope {
   teachingHoursCovered: number;
   remainingTeachingHours: number;
   audit: AcademicAuditTrail;
-  subject?: { _id: string; name: string; code: string };
+  subject?: {
+    _id: string;
+    name: string;
+    code: string;
+    /** Present when linked to a master — used to match teacher assigned batch instances. */
+    masterSubjectId?: string | null;
+  };
   teacher?: { _id: string; teacherCode: string; user?: { fullName: string } };
 }
 

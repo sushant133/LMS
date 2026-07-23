@@ -173,11 +173,17 @@ export const expandCurriculumSubjectIds = async (
   }
   const code = (subject.code ?? "").trim();
   if (code) {
-    or.push({ code: new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") });
+    or.push({
+      code: new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+    });
   }
+  // Always match by name too — batch instances sometimes differ on code/master
+  // but share the display name (e.g. "English").
   const name = (subject.name ?? "").trim();
-  if (name && !code && !subject.masterSubjectId) {
-    or.push({ name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") });
+  if (name) {
+    or.push({
+      name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+    });
   }
 
   if (or.length === 0) return [subjectId];
@@ -316,8 +322,14 @@ export const assertSyllabusAccess = async (
 
   // Curriculum siblings: assignment may be on one batch-year instance while syllabus uses another
   const schoolId = tenantObjectId(req);
-  const expanded = await expandCurriculumSubjectIds(schoolId, params.subjectId);
-  if (expanded.some((id) => scope.subjectIds.includes(id))) return;
+  const syllabusExpanded = await expandCurriculumSubjectIds(schoolId, params.subjectId);
+  if (syllabusExpanded.some((id) => scope.subjectIds.includes(id))) return;
+
+  // Reverse expand each assigned subject (covers incomplete sibling graphs)
+  for (const assignedId of scope.subjectIds) {
+    const assignedExpanded = await expandCurriculumSubjectIds(schoolId, assignedId);
+    if (assignedExpanded.includes(params.subjectId)) return;
+  }
 
   throw new ApiError(403, "You can only access syllabi for subjects assigned to you");
 };
@@ -961,7 +973,8 @@ export const serializeSessionPlan = async (planId: string) => {
 
 export const serializeSyllabus = async (syllabusId: string) => {
   const plan = await AcademicSyllabus.findById(syllabusId)
-    .populate("subjectId", "name code")
+    // masterSubjectId needed so teachers can match syllabus to assigned batch-instance subjects
+    .populate("subjectId", "name code masterSubjectId")
     .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
     .lean();
 
@@ -986,9 +999,22 @@ export const serializeSyllabus = async (syllabusId: string) => {
         : 0;
   const remainingPercent = Math.max(0, 100 - completedPercent);
 
-  const subject = plan.subjectId as unknown as { _id: string; name: string; code: string } | undefined;
+  const subject = plan.subjectId as unknown as
+    | {
+        _id: string;
+        name: string;
+        code: string;
+        masterSubjectId?: string | { toString(): string } | null;
+      }
+    | undefined;
   const subjectCode =
     (plan as { subjectCode?: string }).subjectCode || subject?.code || "";
+  const subjectMasterId =
+    subject?.masterSubjectId == null
+      ? null
+      : typeof subject.masterSubjectId === "object"
+        ? subject.masterSubjectId.toString()
+        : String(subject.masterSubjectId);
 
   return {
     _id: plan._id.toString(),
@@ -1047,7 +1073,14 @@ export const serializeSyllabus = async (syllabusId: string) => {
     teachingHoursCovered: stats.teachingHoursCovered,
     remainingTeachingHours: stats.remainingTeachingHours,
     audit: formatAudit(plan),
-    subject,
+    subject: subject
+      ? {
+          _id: subject._id?.toString?.() ?? String(subject._id),
+          name: subject.name,
+          code: subject.code,
+          masterSubjectId: subjectMasterId
+        }
+      : undefined,
     teacher: plan.teacherId
       ? (plan.teacherId as unknown as { _id: string; teacherCode: string; user?: { fullName: string } })
       : undefined

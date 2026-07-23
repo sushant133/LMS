@@ -11,6 +11,7 @@ import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { resolveLabAccess } from "../utils/laboratoryAccess.js";
 import { getScopeMode } from "../utils/subjectAssignmentService.js";
 import { sendSuccess } from "../utils/response.js";
+import { expandCurriculumSubjectIds } from "../utils/academicManagementService.js";
 import { requireTeacherScope } from "../utils/teacherScope.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
@@ -33,12 +34,20 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
     );
   }
 
-  // Subjects from scope.subjectIds only — do not also require yearIds/classIds membership
-  // on the subject document (over-filtering hid assigned subjects in Academic Management).
+  // Subjects from scope.subjectIds + curriculum siblings (syllabus may live on another batch instance).
+  // Do not also require yearIds/classIds membership on the subject document.
+  const expandedSubjectIds = new Set<string>();
+  for (const id of scope.subjectIds) {
+    for (const sib of await expandCurriculumSubjectIds(schoolId, id)) {
+      expandedSubjectIds.add(sib);
+    }
+  }
+  const subjectIdList = expandedSubjectIds.size > 0 ? [...expandedSubjectIds] : ["__none__"];
+
   if (college) {
     const subjectFilter: Record<string, unknown> = {
       schoolId,
-      _id: { $in: scope.subjectIds.length ? scope.subjectIds : ["__none__"] }
+      _id: { $in: subjectIdList }
     };
     const batchFilter: Record<string, unknown> = {
       schoolId,
@@ -173,7 +182,7 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
   const [subjects, classes, sections, students] = await Promise.all([
     Subject.find({
       schoolId,
-      _id: { $in: scope.subjectIds.length ? scope.subjectIds : ["__none__"] }
+      _id: { $in: subjectIdList }
     }).sort({ name: 1 }),
     SchoolClass.find({
       schoolId,

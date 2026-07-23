@@ -21,6 +21,7 @@ import {
 } from "../utils/masterSubjectProvisioning.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { getTeacherScope } from "../utils/teacherScope.js";
+import { expandCurriculumSubjectIds } from "../utils/academicManagementService.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
@@ -165,11 +166,19 @@ export const listSubjects = asyncHandler(async (req: Request, res: Response) => 
   const filter: Record<string, unknown> = withTenantScope(req);
   const teacherScope = await getTeacherScope(req);
 
-  // Scope.subjectIds is authoritative — do not require Subject.teacherIds membership
+  // Scope.subjectIds is authoritative — do not require Subject.teacherIds membership.
+  // Expand to curriculum siblings so teachers see syllabi stored on another batch instance
+  // of the same master subject (e.g. English Batch A vs Batch B).
   if (teacherScope) {
-    // Empty $in matches nothing; use a sentinel so teachers with no assignment see empty list cleanly
+    const schoolId = tenantObjectId(req);
+    const expanded = new Set<string>();
+    for (const id of teacherScope.subjectIds) {
+      for (const sib of await expandCurriculumSubjectIds(schoolId, id)) {
+        expanded.add(sib);
+      }
+    }
     filter._id = {
-      $in: teacherScope.subjectIds.length > 0 ? teacherScope.subjectIds : ["__none__"]
+      $in: expanded.size > 0 ? [...expanded] : ["__none__"]
     };
   }
 

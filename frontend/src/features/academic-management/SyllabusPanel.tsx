@@ -260,6 +260,7 @@ export const SyllabusPanel = ({
         selectedYearKey,
         levelMap,
         isCollege,
+        subjects,
       );
       const resume = dedupePlansByCurriculum(matched, subjects, false)[0];
       if (resume) {
@@ -599,16 +600,21 @@ export const SyllabusPanel = ({
         filterYearId: filters.yearId,
         filterClassId: filters.classId,
         filterSubjectId: filters.subjectId,
-        filterTeacherId: filters.teacherId || teacherId,
+        // Syllabus is subject-level (shared). Do NOT pin to current teacherId —
+        // that hid admin-created syllabi for assigned teachers.
+        filterTeacherId: isAdmin ? filters.teacherId : undefined,
         filterFaculty: filters.faculty,
         keyword: filters.keyword,
         records: keywordFilteredPlans.map((plan) => ({
           subjectId: plan.subjectId,
           yearId: plan.yearId,
           classId: plan.classId,
+          // Keep plan teacher for display counts only; hierarchy must not filter it out
           teacherId: plan.teacherId || "",
           faculty: plan.faculty,
           subjectName: plan.subject?.name,
+          subjectCode: plan.subjectCode || plan.subject?.code,
+          masterSubjectId: plan.subject?.masterSubjectId ?? null,
           teacherName: plan.teacher?.user?.fullName,
         })),
       }),
@@ -625,7 +631,7 @@ export const SyllabusPanel = ({
       filters.teacherId,
       filters.faculty,
       filters.keyword,
-      teacherId,
+      isAdmin,
       keywordFilteredPlans,
     ],
   );
@@ -695,6 +701,7 @@ export const SyllabusPanel = ({
       selectedYearKey,
       yearIdToLevelKey,
       isCollege,
+      subjects,
     );
     // One syllabus per curriculum subject (not one per batch-provisioned subject id)
     return dedupePlansByCurriculum(matched, subjects, false);
