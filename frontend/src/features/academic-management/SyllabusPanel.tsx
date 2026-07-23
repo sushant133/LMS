@@ -117,7 +117,12 @@ export const SyllabusPanel = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "");
-  const canMutate = writeAccess;
+  const isTeacher =
+    user?.role === "TEACHER" ||
+    (user?.secondaryRoles ?? []).includes("TEACHER");
+  /** Teachers only view syllabi; admins create/edit structure. */
+  const canManageStructure = writeAccess && isAdmin;
+  const canMutate = writeAccess && !isTeacher;
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
@@ -220,19 +225,11 @@ export const SyllabusPanel = ({
   };
 
   const openEditForm = (plan: AcademicSyllabusRecord, opts?: { silent?: boolean }) => {
-    if (!canMutate) {
-      toast.error("You do not have write access to edit this syllabus");
-      return;
-    }
-    if (
-      !isAdmin &&
-      plan.status !== "DRAFT" &&
-      plan.status !== "REJECTED"
-    ) {
+    if (!canManageStructure) {
       toast.error(
-        plan.status === "APPROVED"
-          ? "This syllabus is approved. Ask an administrator to Unlock it before editing structure."
-          : "This syllabus is submitted. Ask an administrator to unlock or reject it before editing.",
+        isTeacher
+          ? "Syllabus is view-only for teachers. Create Session Plan, Lesson Plan, and Log Book from this syllabus."
+          : "You do not have write access to edit this syllabus",
       );
       return;
     }
@@ -730,12 +727,14 @@ export const SyllabusPanel = ({
   };
 
   const canEditStructure = (plan: AcademicSyllabusRecord) =>
-    canMutate &&
-    (isAdmin || plan.status === "DRAFT" || plan.status === "REJECTED");
+    canManageStructure &&
+    (plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin);
 
+  /** Teachers may mark sub-unit progress while teaching; structure stays admin-only. */
   const canUpdateProgress = (plan: AcademicSyllabusRecord) =>
-    canMutate &&
+    writeAccess &&
     (isAdmin ||
+      isTeacher ||
       plan.status === "APPROVED" ||
       plan.status === "SUBMITTED" ||
       plan.status === "PENDING_APPROVAL" ||
@@ -794,7 +793,7 @@ export const SyllabusPanel = ({
                   ? "Continue / Add units"
                   : "Edit full syllabus"}
               </Button>
-            ) : canMutate && isAdmin ? (
+            ) : canManageStructure ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -814,15 +813,8 @@ export const SyllabusPanel = ({
               >
                 Unlock &amp; edit
               </Button>
-            ) : canMutate ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled
-                title="Unlock required from administrator to edit structure"
-              >
-                Locked
-              </Button>
+            ) : isTeacher ? (
+              <Badge className="bg-slate-100 text-slate-700">View only</Badge>
             ) : null}
           </div>
         </CardHeader>
@@ -1090,14 +1082,14 @@ export const SyllabusPanel = ({
             </div>
           )}
 
-          {canMutate ? (
+          {canManageStructure ? (
             <div className="flex flex-wrap gap-2 no-print">
               {editable ? (
                 <Button size="sm" onClick={() => openEditForm(plan)}>
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit units &amp; sub-units
                 </Button>
-              ) : isAdmin ? (
+              ) : (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1111,15 +1103,14 @@ export const SyllabusPanel = ({
                 >
                   Unlock &amp; edit all
                 </Button>
-              ) : null}
+              )}
               {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
                 <Button size="sm" onClick={() => submitMutation.mutate(plan._id)}>
                   <Send className="mr-2 h-4 w-4" />
                   Submit
                 </Button>
               ) : null}
-              {isAdmin &&
-              (plan.status === "SUBMITTED" ||
+              {(plan.status === "SUBMITTED" ||
                 plan.status === "PENDING_APPROVAL") ? (
                 <>
                   <Button
@@ -1141,7 +1132,7 @@ export const SyllabusPanel = ({
                   </Button>
                 </>
               ) : null}
-              {isAdmin && plan.status === "APPROVED" ? (
+              {plan.status === "APPROVED" ? (
                 <Button
                   size="sm"
                   variant="outline"
@@ -1150,19 +1141,20 @@ export const SyllabusPanel = ({
                   Unlock only
                 </Button>
               ) : null}
-              {(plan.status === "DRAFT" ||
-                plan.status === "REJECTED" ||
-                isAdmin) && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => deleteMutation.mutate(plan._id)}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete
-                </Button>
-              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => deleteMutation.mutate(plan._id)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
             </div>
+          ) : isTeacher ? (
+            <p className="text-xs text-slate-500 no-print">
+              Syllabus is view-only. Use Session Plan, Lesson Plan, and Log Book
+              for your teaching work.
+            </p>
           ) : null}
           {plan.attachmentUrl ? (
             <a
@@ -1193,15 +1185,15 @@ export const SyllabusPanel = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">
-            Complete Syllabus
+            {isTeacher ? "Subject syllabus" : "Complete Syllabus"}
           </h2>
           <p className="text-sm text-slate-600">
-            Hierarchical syllabus: Chapter → Unit → Sub Unit with progress tracking,
-            auto-numbering, and integration-ready links for lesson plans, attendance,
-            and homework.
+            {isTeacher
+              ? "View the official syllabus for your assigned subjects. Create Session Plan, Lesson Plan, and Log Book from this content — you cannot create or edit the syllabus."
+              : "Hierarchical syllabus: Chapter → Unit → Sub Unit with progress tracking, auto-numbering, and integration-ready links for lesson plans, attendance, and homework."}
           </p>
         </div>
-        {canMutate ? (
+        {canManageStructure ? (
           <Button
             onClick={() => {
               if (showForm) {
@@ -1224,7 +1216,7 @@ export const SyllabusPanel = ({
         ) : null}
       </div>
 
-      {showForm && canMutate ? (
+      {showForm && canManageStructure ? (
         <Card id="syllabus-edit-form" className="no-print border-brand-200 shadow-md">
           <CardHeader>
             <CardTitle>
@@ -1565,7 +1557,9 @@ export const SyllabusPanel = ({
               description={
                 isAdmin
                   ? "No syllabus created for this subject yet."
-                  : "Create a Syllabus for this subject to start yearly planning."
+                  : isTeacher
+                    ? "No syllabus has been published for this assigned subject yet. Ask an administrator to create it. You can still use Session Plan, Lesson Plan, and Log Book once a syllabus exists."
+                    : "No syllabus available for this subject."
               }
             />
           ) : (

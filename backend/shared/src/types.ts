@@ -273,6 +273,8 @@ export interface StudentRecord {
   schoolId: string;
   user: UserProfile;
   admissionNumber: string;
+  /** College registration number (optional). */
+  registrationNumber?: string;
   rollNumber: number;
   classId?: string;
   sectionId?: string;
@@ -300,6 +302,10 @@ export interface StudentRecord {
   guardianName: string;
   guardianPhone: string;
   feesDueNpr: number;
+  /** Planned tuition by program year (NPR). */
+  year1FeeNpr?: number;
+  year2FeeNpr?: number;
+  year3FeeNpr?: number;
   /** Security / caution deposit held from admission (NPR). */
   securityDepositNpr?: number;
   /** Amount of deposit already refunded (NPR). */

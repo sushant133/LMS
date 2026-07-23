@@ -30,6 +30,25 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * Login and self-service profile/password remain available.
  * Must run after `protect` so `req.user` is set.
  */
+/** Teaching modules that TEACHER role may always use (My Work), subject to teacher scope in controllers. */
+const TEACHER_MY_WORK_MODULE_KEYS = new Set([
+  "students",
+  "attendance",
+  "daily-attendance",
+  "academic-management",
+  "academic-calendar",
+  "timetable",
+  "examinations",
+  "results",
+  "homework",
+  "notices",
+  "complaints",
+  "library",
+  "laboratory",
+  "dashboard",
+  "profile"
+]);
+
 export const enforceModuleAccess = async (
   req: Request,
   _res: Response,
@@ -114,12 +133,28 @@ export const enforceModuleAccess = async (
     const moduleKey = resolveModuleForRequest(req);
     if (!moduleKey) return next();
 
-    const [accessMap, actionsMap] = await Promise.all([
+    const [accessMap, actionsMap, secondaryRoles] = await Promise.all([
       getUserModuleAccessMap(req.user.userId),
-      getUserModuleActionsMap(req.user.userId)
+      getUserModuleActionsMap(req.user.userId),
+      (async () => {
+        const { getUserSecondaryRoles } = await import("../utils/moduleAccessService.js");
+        return getUserSecondaryRoles(req.user!.userId);
+      })()
     ]);
 
-    const mode: ModuleAccessMode = normalizeModuleAccessMode(accessMap[moduleKey]);
+    const isTeacherRole =
+      req.user.role === "TEACHER" || secondaryRoles.includes("TEACHER");
+
+    // Teachers always keep My Work APIs (students, attendance, exams, homework, …)
+    // even if module-access matrix was saved with Hidden for admin departments.
+    let mode: ModuleAccessMode = normalizeModuleAccessMode(accessMap[moduleKey]);
+    if (
+      isTeacherRole &&
+      TEACHER_MY_WORK_MODULE_KEYS.has(moduleKey) &&
+      (mode === "NONE" || accessMap[moduleKey] === undefined)
+    ) {
+      mode = "WRITE";
+    }
 
     if (mode === "NONE") {
       void recordAudit(req, {
@@ -137,6 +172,10 @@ export const enforceModuleAccess = async (
     }
 
     if (READ_METHODS.has(req.method)) {
+      // Teacher My Work elevated to WRITE — always allow read
+      if (isTeacherRole && TEACHER_MY_WORK_MODULE_KEYS.has(moduleKey) && mode === "WRITE") {
+        return next();
+      }
       // View allowed for READ_ONLY and WRITE
       if (!hasModuleAction(accessMap, actionsMap, moduleKey, "view")) {
         return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
@@ -158,6 +197,11 @@ export const enforceModuleAccess = async (
         }
       });
       return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
+    }
+
+    // Teacher My Work WRITE — allow create/edit without granular matrix
+    if (isTeacherRole && TEACHER_MY_WORK_MODULE_KEYS.has(moduleKey) && mode === "WRITE") {
+      return next();
     }
 
     const requiredAction = inferActionFromApiPath(req.method, req.originalUrl || req.path || "");

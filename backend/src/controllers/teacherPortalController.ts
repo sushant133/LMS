@@ -52,16 +52,34 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
       yearFilter.batchId = { $in: scope.batchIds };
     }
 
+    // Students for My Students: exact batch+year pairs from assignments (not cartesian product)
+    const groupPairs = scope.assignments
+      .filter((a) => a.batchId && a.yearId)
+      .map((a) => ({ batchId: a.batchId!, yearId: a.yearId! }));
+    const uniquePairs = [
+      ...new Map(groupPairs.map((p) => [`${p.batchId}:${p.yearId}`, p])).values()
+    ];
+    const studentFilter: Record<string, unknown> = {
+      schoolId,
+      academicStatus: "ACTIVE"
+    };
+    if (uniquePairs.length > 0) {
+      studentFilter.$or = uniquePairs;
+    } else if (scope.batchIds.length || scope.yearIds.length) {
+      if (scope.batchIds.length) studentFilter.batchId = { $in: scope.batchIds };
+      if (scope.yearIds.length) studentFilter.yearId = { $in: scope.yearIds };
+    } else {
+      studentFilter._id = { $in: [] };
+    }
+
     const [subjects, batches, years, students] = await Promise.all([
       Subject.find(subjectFilter).sort({ name: 1 }),
       Batch.find(batchFilter).sort({ name: 1 }),
       Year.find(yearFilter).sort({ level: 1 }),
-      Student.find({
-        schoolId,
-        ...(scope.batchIds.length ? { batchId: { $in: scope.batchIds } } : { batchId: { $in: [] } }),
-        ...(scope.yearIds.length ? { yearId: { $in: scope.yearIds } } : { yearId: { $in: [] } })
-      })
-        .populate("user", "-password")
+      Student.find(studentFilter)
+        .populate("user", "fullName email phone role")
+        .populate("batchId", "name")
+        .populate("yearId", "name level")
         .sort({ rollNumber: 1 })
     ]);
 
@@ -88,15 +106,68 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
       }
     }
 
+    const flattenStudent = (s: {
+      toObject?: () => Record<string, unknown>;
+      _id: { toString(): string };
+      user?: unknown;
+      batchId?: unknown;
+      yearId?: unknown;
+      classId?: unknown;
+      sectionId?: unknown;
+      [key: string]: unknown;
+    }) => {
+      const plain =
+        typeof s.toObject === "function"
+          ? s.toObject()
+          : (s as unknown as Record<string, unknown>);
+      const idOf = (v: unknown): string | undefined => {
+        if (v == null) return undefined;
+        if (typeof v === "object" && v !== null && "_id" in v) {
+          return String((v as { _id: { toString(): string } })._id);
+        }
+        return String(v);
+      };
+      return {
+        ...plain,
+        _id: s._id.toString(),
+        batchId: idOf(plain.batchId),
+        yearId: idOf(plain.yearId),
+        classId: idOf(plain.classId),
+        sectionId: idOf(plain.sectionId),
+        user: plain.user
+      };
+    };
+
     return sendSuccess(res, "Teacher scope fetched", {
       scope,
       subjects,
       batches: batchesOut,
       years: yearsOut,
-      students: students.filter((student) => Boolean(student.user)),
+      students: students
+        .filter((student) => Boolean(student.user))
+        .map((s) => flattenStudent(s as never)),
       classes: [],
       sections: []
     });
+  }
+
+  const schoolGroupPairs = scope.assignments
+    .filter((a) => a.classId && a.sectionId)
+    .map((a) => ({ classId: a.classId!, sectionId: a.sectionId! }));
+  const uniqueSchoolPairs = [
+    ...new Map(schoolGroupPairs.map((p) => [`${p.classId}:${p.sectionId}`, p])).values()
+  ];
+  const schoolStudentFilter: Record<string, unknown> = {
+    schoolId,
+    academicStatus: "ACTIVE"
+  };
+  if (uniqueSchoolPairs.length > 0) {
+    schoolStudentFilter.$or = uniqueSchoolPairs;
+  } else if (scope.classIds.length || scope.sectionIds.length) {
+    if (scope.classIds.length) schoolStudentFilter.classId = { $in: scope.classIds };
+    if (scope.sectionIds.length) schoolStudentFilter.sectionId = { $in: scope.sectionIds };
+  } else {
+    schoolStudentFilter._id = { $in: [] };
   }
 
   const [subjects, classes, sections, students] = await Promise.all([
@@ -112,14 +183,39 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
       schoolId,
       ...(scope.sectionIds.length ? { _id: { $in: scope.sectionIds } } : { _id: { $in: [] } })
     }).sort({ name: 1 }),
-    Student.find({
-      schoolId,
-      ...(scope.classIds.length ? { classId: { $in: scope.classIds } } : { classId: { $in: [] } }),
-      ...(scope.sectionIds.length ? { sectionId: { $in: scope.sectionIds } } : { sectionId: { $in: [] } })
-    })
-      .populate("user", "-password")
+    Student.find(schoolStudentFilter)
+      .populate("user", "fullName email phone role")
+      .populate("classId", "name")
+      .populate("sectionId", "name")
       .sort({ rollNumber: 1 })
   ]);
+
+  const flattenSchoolStudent = (s: {
+    toObject?: () => Record<string, unknown>;
+    _id: { toString(): string };
+    user?: unknown;
+  }) => {
+    const plain =
+      typeof s.toObject === "function"
+        ? s.toObject()
+        : (s as unknown as Record<string, unknown>);
+    const idOf = (v: unknown): string | undefined => {
+      if (v == null) return undefined;
+      if (typeof v === "object" && v !== null && "_id" in v) {
+        return String((v as { _id: { toString(): string } })._id);
+      }
+      return String(v);
+    };
+    return {
+      ...plain,
+      _id: s._id.toString(),
+      classId: idOf(plain.classId),
+      sectionId: idOf(plain.sectionId),
+      batchId: idOf(plain.batchId),
+      yearId: idOf(plain.yearId),
+      user: plain.user
+    };
+  };
 
   return sendSuccess(res, "Teacher scope fetched", {
     scope,
@@ -128,7 +224,9 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
     sections,
     batches: [],
     years: [],
-    students: students.filter((student) => Boolean(student.user))
+    students: students
+      .filter((student) => Boolean(student.user))
+      .map((s) => flattenSchoolStudent(s as never))
   });
 });
 

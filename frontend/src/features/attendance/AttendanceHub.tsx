@@ -11,6 +11,7 @@ import { useAuth } from "features/auth/AuthProvider";
 import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { api, unwrap } from "lib/api";
+import { userIsTeacher } from "lib/teacherRole";
 import { AttendanceManager } from "./AttendanceManager";
 import { DailyAttendanceManager } from "./DailyAttendanceManager";
 import { EmployeeAttendancePanel } from "./EmployeeAttendancePanel";
@@ -53,7 +54,7 @@ export const AttendanceHub = () => {
   const { user } = useAuth();
   const hasInstitutionRead = hasInstitutionAccess(user?.role ?? "");
   const canWriteAdmin = canManageInstitution(user?.role ?? "");
-  const isTeacher = user?.role === "TEACHER";
+  const isTeacher = userIsTeacher(user);
   const isStaff = user?.role === "COLLEGE_STAFF";
   const isStudent = user?.role === "STUDENT";
 
@@ -65,21 +66,20 @@ export const AttendanceHub = () => {
   });
 
   const perms = permsQuery.data;
-  const showTeacher =
-    canWriteAdmin ||
-    Boolean(perms?.teacher.view) ||
-    isTeacher;
+  // HR "Teacher Attendance" is admin/staff only — never on a teacher's My Attendance
+  const showTeacherHr =
+    !isTeacher &&
+    (canWriteAdmin || Boolean(perms?.teacher.view));
   const showStaff =
     canWriteAdmin ||
     Boolean(perms?.staff.view) ||
     isStaff;
 
+  // Teachers: only student daily + subject-wise
   const defaultTab: AttendanceTab =
-    isTeacher && !canWriteAdmin && !hasInstitutionRead
-      ? "teacher"
-      : isStaff && !canWriteAdmin && !hasInstitutionRead
-        ? "staff"
-        : "daily";
+    isStaff && !canWriteAdmin && !hasInstitutionRead && !isTeacher
+      ? "staff"
+      : "daily";
 
   const [activeTab, setActiveTab] = useState<AttendanceTab>(defaultTab);
 
@@ -94,24 +94,25 @@ export const AttendanceHub = () => {
     if (hasInstitutionRead || isTeacher || canWriteAdmin) {
       list.push({
         id: "daily",
-        label: "Student Daily",
+        label: isTeacher && !canWriteAdmin ? "Daily" : "Student Daily",
         icon: CalendarCheck,
       });
       list.push({
         id: "subject",
-        label: "Student Subject-wise",
+        label:
+          isTeacher && !canWriteAdmin ? "Subject-wise" : "Student Subject-wise",
         icon: ClipboardList,
       });
     }
 
-    if (showTeacher) {
+    if (showTeacherHr) {
       list.push({
         id: "teacher",
         label: "Teacher Attendance",
         icon: UserCheck,
       });
     }
-    if (showStaff) {
+    if (showStaff && !isTeacher) {
       list.push({
         id: "staff",
         label: "Staff Attendance",
@@ -124,7 +125,7 @@ export const AttendanceHub = () => {
     hasInstitutionRead,
     isTeacher,
     canWriteAdmin,
-    showTeacher,
+    showTeacherHr,
     showStaff,
   ]);
 
@@ -135,8 +136,12 @@ export const AttendanceHub = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Attendance Management"
-        description="Student classroom attendance, teacher attendance, and staff attendance. Laboratory and field postings stay in their own modules."
+        title={isTeacher && !canWriteAdmin ? "My Attendance" : "Attendance Management"}
+        description={
+          isTeacher && !canWriteAdmin
+            ? "Mark daily class attendance (1st period locks the day and syncs subject-wise for that period) or take subject-wise attendance for your teaching periods."
+            : "Student classroom attendance, teacher attendance, and staff attendance. Laboratory and field postings stay in their own modules."
+        }
       />
 
       <div className="flex flex-wrap gap-2">

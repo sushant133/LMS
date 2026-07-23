@@ -70,6 +70,7 @@ import {
   RESULT_SUBMISSION_STATUS_LABELS,
   defaultExamValue,
 } from "features/exams/examDefaults";
+import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
 import {
   useHasInstitutionAccess,
@@ -80,6 +81,7 @@ import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, resolveApiUrl, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
+import { userIsTeacher } from "lib/teacherRole";
 import {
   filterSectionsByClass,
   filterSubjectsByClass,
@@ -98,8 +100,9 @@ interface MarksheetResponse {
 }
 
 export const ExamManager = () => {
+  const { user } = useAuth();
   const role = useNormalizedRole();
-  const isTeacher = role === "TEACHER";
+  const isTeacher = userIsTeacher(user) || role === "TEACHER";
   const canManage = useIsTenantAdmin();
   const hasInstitutionRead = useHasInstitutionAccess();
   /** Write admins + college viewers (read-only admin surfaces). */

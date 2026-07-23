@@ -384,16 +384,40 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
         awards as unknown as Array<Record<string, unknown>>
       );
 
+      // When ledger has no rows yet, surface planned admission fees as charged amounts
+      const planned = {
+        1: Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0,
+        2: Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0,
+        3: Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0
+      };
+      const yearWiseWithPlan = yearWise.map((y) => {
+        if (y.status !== "NO_RECORD") return y;
+        const plannedAmt = planned[y.programYear as 1 | 2 | 3] ?? 0;
+        if (plannedAmt <= 0) return y;
+        return {
+          ...y,
+          chargedNpr: plannedAmt,
+          remainingNpr: plannedAmt,
+          status: "DUE" as const
+        };
+      });
+
       return {
         studentId: student._id.toString(),
         fullName: (student.user as unknown as { fullName: string }).fullName,
         className: primaryDoc?.name ?? "—",
         sectionName: secondaryDoc?.name ?? "—",
         rollNumber: student.rollNumber,
+        admissionNumber: student.admissionNumber,
+        registrationNumber: (student as { registrationNumber?: string }).registrationNumber || "",
         feesDueNpr: student.feesDueNpr,
+        year1FeeNpr: planned[1],
+        year2FeeNpr: planned[2],
+        year3FeeNpr: planned[3],
+        securityDepositNpr: Number((student as { securityDepositNpr?: number }).securityDepositNpr) || 0,
         totalPaidNpr,
         totalScholarshipNpr,
-        yearWise,
+        yearWise: yearWiseWithPlan,
         attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
         pendingHomework: submissions.length,
         relationship: link?.relationship ?? "GUARDIAN"

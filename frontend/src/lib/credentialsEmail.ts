@@ -128,46 +128,85 @@ export const toastAdminCredentialsUpdated = (
 };
 
 /**
- * Feedback after student/teacher portal login ID and/or password was updated and re-emailed.
+ * Feedback after student/teacher portal update.
+ * - Profile-only saves: success without credential noise
+ * - Login already set / unchanged: note that credentials were left alone
+ * - Password explicitly set: show email delivery result
  */
 export const toastCredentialUpdateResult = (
-  data: CredentialCreatePayload & { credentialsChanged?: boolean },
-  options?: { successTitle?: string; noCredentialChangeTitle?: string }
+  data: CredentialCreatePayload & {
+    credentialsChanged?: boolean;
+    loginIdChanged?: boolean;
+    passwordChanged?: boolean;
+    loginIdAlreadySet?: boolean;
+  },
+  options?: {
+    successTitle?: string;
+    noCredentialChangeTitle?: string;
+    /** Server success message (preferred for profile-only updates). */
+    serverMessage?: string;
+  }
 ): void => {
-  if (!data.credentialsChanged && !data.credentialsEmail) {
-    toast.success(options?.noCredentialChangeTitle ?? "Updated successfully");
-    return;
-  }
+  // Explicit password set → credential email flow
+  if (data.credentialsChanged && data.credentialsEmail) {
+    const emailResult = data.credentialsEmail;
+    const email = emailResult?.email ?? data.loginEmail;
+    const title = options?.successTitle ?? "Login details updated";
 
-  const emailResult = data.credentialsEmail;
-  const email = emailResult?.email ?? data.loginEmail;
-  const title = options?.successTitle ?? "Login details updated";
+    if (emailResult?.sent) {
+      toast.success(title, {
+        description: `Updated login credentials have been sent to: ${email}`
+      });
+      return;
+    }
 
-  if (emailResult?.sent) {
-    toast.success(title, {
-      description: `Updated login credentials have been sent to: ${email}`
-    });
-    return;
-  }
-
-  if (emailResult) {
     const passwordHint = data.defaultPassword
       ? `\nLogin ID: ${data.loginEmail ?? email}\nPassword: ${data.defaultPassword}`
       : data.loginEmail
         ? `\nLogin ID: ${data.loginEmail}`
         : "";
     toast.warning(title, {
-      description: `Credential email could not be delivered.\nReason: ${emailResult.error ?? "Unknown error"}${passwordHint}`,
+      description: `Credential email could not be delivered.\nReason: ${emailResult?.error ?? "Unknown error"}${passwordHint}`,
       duration: 15_000
     });
     return;
   }
 
-  toast.success(title, {
-    description: data.loginEmail
-      ? data.defaultPassword
-        ? `Login ID: ${data.loginEmail} · Password: ${data.defaultPassword}`
-        : `Login ID: ${data.loginEmail}`
-      : undefined
-  });
+  // Login ID changed without password reset
+  if (data.loginIdChanged && !data.passwordChanged) {
+    toast.success(
+      options?.serverMessage ??
+        "Student updated successfully. Login ID was updated; password was left unchanged.",
+      {
+        description: data.loginEmail
+          ? `Login ID is now: ${data.loginEmail}`
+          : undefined
+      }
+    );
+    return;
+  }
+
+  // Profile / documents / contact only — or same login ID already set
+  if (data.loginIdAlreadySet) {
+    toast.success(
+      options?.serverMessage ??
+        options?.noCredentialChangeTitle ??
+        "Student updated successfully",
+      {
+        description: data.loginEmail
+          ? `Login ID already set: ${data.loginEmail} (unchanged)`
+          : "Login credentials were not changed"
+      }
+    );
+    return;
+  }
+
+  toast.success(
+    options?.serverMessage ??
+      options?.noCredentialChangeTitle ??
+      "Updated successfully",
+    {
+      description: "Login credentials were not changed"
+    }
+  );
 };

@@ -669,22 +669,19 @@ export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createSyllabus = asyncHandler(async (req: Request, res: Response) => {
+  // Official syllabus is admin-owned; teachers only view and plan from it
+  if (req.user?.role === "TEACHER") {
+    throw new ApiError(
+      403,
+      "Teachers cannot create syllabi. View the syllabus for your assigned subjects and create Session Plan, Lesson Plan, and Log Book instead."
+    );
+  }
+
   const payload = academicSyllabusSchema.parse(req.body);
   const optionalTeacherId = payload.teacherId?.trim() || undefined;
   const chapters = resolveSyllabusChapters(payload);
   if (chapters.length === 0) {
     throw new ApiError(400, SYLLABUS_STRUCTURE_REQUIRED_MSG);
-  }
-
-  if (req.user?.role === "TEACHER") {
-    const scope = await requireTeacherScope(req);
-    // Teachers may only create for subjects they teach
-    if (!scope.subjectIds.includes(payload.subjectId)) {
-      throw new ApiError(403, "You can only create syllabi for subjects assigned to you");
-    }
-    if (optionalTeacherId && optionalTeacherId !== scope.teacherId) {
-      throw new ApiError(403, "Teachers cannot assign a syllabus to another teacher");
-    }
   }
 
   // Avoid empty strings for ObjectId fields
@@ -830,25 +827,18 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
     teacherId: existing.teacherId?.toString(),
     subjectId: existing.subjectId.toString()
   });
+  if (req.user?.role === "TEACHER") {
+    throw new ApiError(
+      403,
+      "Teachers cannot edit the syllabus. Use Session Plan, Lesson Plan, and Log Book for teaching work. Sub-unit progress can be updated from the syllabus view if needed."
+    );
+  }
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
   // Empty array is truthy in JS — only non-empty structure rewrites hierarchy
   const structureChanging =
     (Array.isArray(payload.chapters) && payload.chapters.length > 0) ||
     (Array.isArray(payload.units) && payload.units.length > 0);
-
-  // Teachers may only change structure while draft/rejected; approved structure is admin-only
-  if (
-    structureChanging &&
-    req.user?.role === "TEACHER" &&
-    existing.status !== "DRAFT" &&
-    existing.status !== "REJECTED"
-  ) {
-    throw new ApiError(
-      403,
-      "Teachers cannot modify syllabus structure after submission. Use progress updates on sub-units instead."
-    );
-  }
 
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   if (safePayload.teacherId === "") {

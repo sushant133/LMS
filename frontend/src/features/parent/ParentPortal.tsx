@@ -86,6 +86,17 @@ export const ParentPortal = () => {
                       {formatCurrencyNpr(child.feesDueNpr)}
                     </p>
                   </div>
+                  {(child as { securityDepositNpr?: number }).securityDepositNpr ? (
+                    <div>
+                      <p className="text-slate-500">Security deposit</p>
+                      <p className="font-semibold text-slate-800">
+                        {formatCurrencyNpr(
+                          (child as { securityDepositNpr?: number })
+                            .securityDepositNpr ?? 0,
+                        )}
+                      </p>
+                    </div>
+                  ) : null}
                   <div>
                     <p className="text-slate-500">Total paid</p>
                     <p className="font-semibold text-emerald-700">

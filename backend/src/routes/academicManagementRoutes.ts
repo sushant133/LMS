@@ -54,10 +54,11 @@ router.get("/dashboard", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEW
 
 router.get("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listSyllabi);
 router.get("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getSyllabus);
-router.post("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), createSyllabus);
-router.put("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), updateSyllabus);
-router.delete("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), deleteSyllabus);
-router.post("/syllabi/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), submitSyllabus);
+// Syllabus structure is admin-only; teachers view + progress only
+router.post("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), createSyllabus);
+router.put("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), updateSyllabus);
+router.delete("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), deleteSyllabus);
+router.post("/syllabi/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), submitSyllabus);
 router.post("/syllabi/:id/approve", authorizeInstitutionAdmin, approveSyllabus);
 router.post("/syllabi/:id/reject", authorizeInstitutionAdmin, rejectSyllabus);
 router.post("/syllabi/:id/unlock", authorizeInstitutionAdmin, unlockSyllabus);
@@ -68,7 +69,7 @@ router.patch(
 );
 router.post(
   "/syllabi/:id/reorder",
-  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
   reorderSyllabusHierarchy
 );
 

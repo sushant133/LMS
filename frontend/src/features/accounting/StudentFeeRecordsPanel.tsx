@@ -621,7 +621,10 @@ export const StudentFeeRecordsPanel = () => {
                               {acc.student.user?.fullName ?? "—"}
                             </div>
                             <div className="text-xs text-slate-500">
-                              {acc.student.admissionNumber}
+                              Adm: {acc.student.admissionNumber}
+                              {acc.student.registrationNumber
+                                ? ` · Reg: ${acc.student.registrationNumber}`
+                                : ""}
                             </div>
                           </Td>
                           <Td className="text-sm">

@@ -783,10 +783,13 @@ export const DashboardPage = () => {
       {isTeacher ? (
         <QuickActions
           actions={[
-            { label: "Mark Attendance", href: "/attendance" },
-            { label: "Assignments", href: "/homework" },
-            { label: "Timetable", href: "/timetable" },
-            { label: "Exams", href: "/exams" }
+            { label: "My Students", href: "/students" },
+            { label: "My Timetable", href: "/timetable" },
+            { label: "My Assignments", href: "/homework" },
+            { label: "My Attendance", href: "/attendance" },
+            { label: "My Examinations", href: "/exams" },
+            { label: "Academic Plans", href: "/academic-management" },
+            { label: "My Library", href: "/my-library" }
           ]}
         />
       ) : null}

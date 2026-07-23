@@ -198,8 +198,13 @@ export const StudentProfileView = () => {
           </h2>
           <div className="mt-3 flex flex-wrap justify-center gap-2 text-sm text-slate-600">
             <Badge className="bg-white text-slate-700 ring-1 ring-slate-200">
-              Reg: {student.admissionNumber}
+              Adm: {student.admissionNumber}
             </Badge>
+            {student.registrationNumber ? (
+              <Badge className="bg-white text-slate-700 ring-1 ring-slate-200">
+                Reg: {student.registrationNumber}
+              </Badge>
+            ) : null}
             <Badge className="bg-white text-slate-700 ring-1 ring-slate-200">
               Roll: {student.rollNumber}
             </Badge>
@@ -285,8 +290,12 @@ export const StudentProfileView = () => {
                             value: student.user?.fullName ?? "—",
                           },
                           {
-                            label: "Registration / Admission No.",
+                            label: "Admission No.",
                             value: student.admissionNumber,
+                          },
+                          {
+                            label: "Registration No.",
+                            value: student.registrationNumber || "—",
                           },
                           { label: "Roll Number", value: student.rollNumber },
                           {
@@ -305,8 +314,12 @@ export const StudentProfileView = () => {
                             value: student.user?.fullName ?? "—",
                           },
                           {
-                            label: "Registration / Admission No.",
+                            label: "Admission No.",
                             value: student.admissionNumber,
+                          },
+                          {
+                            label: "Registration No.",
+                            value: student.registrationNumber || "—",
                           },
                           { label: "Roll Number", value: student.rollNumber },
                           {
@@ -340,10 +353,34 @@ export const StudentProfileView = () => {
                             value: student.bloodGroup ?? "—",
                           },
                           {
-                            label: "Total Fee",
+                            label: "1st Year fee",
+                            value: student.hasScholarship
+                              ? "Scholarship"
+                              : formatCurrencyNpr(student.year1FeeNpr ?? 0),
+                          },
+                          {
+                            label: "2nd Year fee",
+                            value: student.hasScholarship
+                              ? "Scholarship"
+                              : formatCurrencyNpr(student.year2FeeNpr ?? 0),
+                          },
+                          {
+                            label: "3rd Year fee",
+                            value: student.hasScholarship
+                              ? "Scholarship"
+                              : formatCurrencyNpr(student.year3FeeNpr ?? 0),
+                          },
+                          {
+                            label: "Total tuition due",
                             value: student.hasScholarship
                               ? "Scholarship"
                               : formatCurrencyNpr(student.feesDueNpr ?? 0),
+                          },
+                          {
+                            label: "Security deposit",
+                            value: formatCurrencyNpr(
+                              student.securityDepositNpr ?? 0,
+                            ),
                           },
                         ]
                   }

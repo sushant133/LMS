@@ -87,7 +87,9 @@ const isProgramYear = (year: ScopeOption & { level?: number; name?: string }) =>
 
 export const TimetableManager = () => {
   const { user } = useAuth();
-  const isTeacher = user?.role === "TEACHER";
+  const isTeacher =
+    user?.role === "TEACHER" ||
+    (user?.secondaryRoles ?? []).includes("TEACHER");
   const isStudent = user?.role === "STUDENT";
   const isAdmin = canManageInstitution(user?.role ?? "");
   const canWrite = isAdmin || isTeacher;

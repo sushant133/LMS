@@ -36,21 +36,16 @@ import {
   type PendingStudentDocument,
 } from "./studentDocumentUtils";
 
-type StudentWriteResult =
-  | {
-      student: StudentRecord;
-      loginEmail: string;
-      defaultPassword?: string;
-      credentialsEmail?: CredentialsEmailResult;
-      credentialsChanged?: boolean;
-    }
-  | {
-      student: StudentRecord;
-      loginEmail?: string;
-      defaultPassword?: string;
-      credentialsEmail?: CredentialsEmailResult;
-      credentialsChanged?: boolean;
-    };
+type StudentWriteResult = {
+  student: StudentRecord;
+  loginEmail?: string;
+  defaultPassword?: string;
+  credentialsEmail?: CredentialsEmailResult;
+  credentialsChanged?: boolean;
+  loginIdChanged?: boolean;
+  passwordChanged?: boolean;
+  loginIdAlreadySet?: boolean;
+};
 
 export const CreateStudentManager = () => {
   const { user } = useAuth();
@@ -154,9 +149,10 @@ export const CreateStudentManager = () => {
           </CardTitle>
           {editing ? (
             <p className="mt-1 text-sm text-slate-600">
-              Changing Login ID or password emails the student their new access
-              details. You can also resend credentials without editing other
-              fields.
+              Saving profile, documents, or contact does not change login.
+              Update Login ID and/or password only when needed — a new password
+              is emailed only if you set one. Use Resend credentials to force a
+              new password email without editing other fields.
             </p>
           ) : null}
         </div>

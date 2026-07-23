@@ -45,6 +45,7 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   email: "",
   phone: "",
   admissionNumber: "",
+  registrationNumber: "",
   rollNumber: 0,
   classId: isCollege ? undefined : "",
   sectionId: isCollege ? undefined : "",
@@ -70,6 +71,10 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   guardianName: "",
   guardianPhone: "",
   feesDueNpr: 0,
+  year1FeeNpr: 0,
+  year2FeeNpr: 0,
+  year3FeeNpr: 0,
+  securityDepositNpr: 0,
   hasScholarship: false,
   remarks: "",
   academicStatus: "ACTIVE",
@@ -138,13 +143,26 @@ export const StudentForm = ({
     }
 
     const hasScholarship = Boolean(form.hasScholarship);
+    const year1 = hasScholarship ? 0 : Number(form.year1FeeNpr) || 0;
+    const year2 = hasScholarship ? 0 : Number(form.year2FeeNpr) || 0;
+    const year3 = hasScholarship ? 0 : Number(form.year3FeeNpr) || 0;
+    const yearTotal = year1 + year2 + year3;
     const parsed = studentSchema.safeParse({
       ...form,
       email: (form.email ?? "").trim(),
       password: password.trim() || undefined,
+      registrationNumber: (form.registrationNumber ?? "").trim(),
       hasScholarship,
-      // Scholarship students do not carry a fee amount
-      feesDueNpr: hasScholarship ? 0 : Number(form.feesDueNpr) || 0,
+      year1FeeNpr: year1,
+      year2FeeNpr: year2,
+      year3FeeNpr: year3,
+      securityDepositNpr: Number(form.securityDepositNpr) || 0,
+      // Total tuition due = sum of year fees when set, else manual total
+      feesDueNpr: hasScholarship
+        ? 0
+        : yearTotal > 0
+          ? yearTotal
+          : Number(form.feesDueNpr) || 0,
       bloodGroup: form.bloodGroup || undefined,
       disabilityCategory: form.disabilityCategory || undefined,
       ethnicityCategory: form.ethnicityCategory || undefined,
@@ -233,6 +251,18 @@ export const StudentForm = ({
                 admissionNumber: event.target.value,
               }))
             }
+          />
+        </FormField>
+        <FormField label="Registration No.">
+          <Input
+            value={form.registrationNumber ?? ""}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                registrationNumber: event.target.value,
+              }))
+            }
+            placeholder="Optional college registration no."
           />
         </FormField>
         <FormField label="Roll No.">
@@ -426,10 +456,13 @@ export const StudentForm = ({
                 ...current,
                 hasScholarship: isScholarship,
                 feesDueNpr: isScholarship ? 0 : current.feesDueNpr,
+                year1FeeNpr: isScholarship ? 0 : current.year1FeeNpr,
+                year2FeeNpr: isScholarship ? 0 : current.year2FeeNpr,
+                year3FeeNpr: isScholarship ? 0 : current.year3FeeNpr,
               }));
             }}
           >
-            <option value="TOTAL_FEE">Total Fee</option>
+            <option value="TOTAL_FEE">Program fees</option>
             <option value="SCHOLARSHIP">Scholarship</option>
           </Select>
         </FormField>
@@ -438,21 +471,99 @@ export const StudentForm = ({
             <Input value="Scholarship" readOnly className="bg-slate-50 font-medium text-emerald-800" />
           </FormField>
         ) : (
-          <FormField label="Total Fee (NPR)">
-            <NumberInput
-              min={0}
-              value={form.feesDueNpr}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  feesDueNpr: Number.isFinite(event.target.valueAsNumber)
+          <>
+            <FormField label="1st Year fee (NPR)">
+              <NumberInput
+                min={0}
+                value={form.year1FeeNpr ?? 0}
+                onChange={(event) => {
+                  const year1FeeNpr = Number.isFinite(event.target.valueAsNumber)
                     ? event.target.valueAsNumber
-                    : 0,
-                }))
-              }
-              placeholder="Enter full fee amount"
-            />
-          </FormField>
+                    : 0;
+                  setForm((current) => {
+                    const year2 = Number(current.year2FeeNpr) || 0;
+                    const year3 = Number(current.year3FeeNpr) || 0;
+                    return {
+                      ...current,
+                      year1FeeNpr,
+                      feesDueNpr: year1FeeNpr + year2 + year3,
+                    };
+                  });
+                }}
+                placeholder="1st year amount"
+              />
+            </FormField>
+            <FormField label="2nd Year fee (NPR)">
+              <NumberInput
+                min={0}
+                value={form.year2FeeNpr ?? 0}
+                onChange={(event) => {
+                  const year2FeeNpr = Number.isFinite(event.target.valueAsNumber)
+                    ? event.target.valueAsNumber
+                    : 0;
+                  setForm((current) => {
+                    const year1 = Number(current.year1FeeNpr) || 0;
+                    const year3 = Number(current.year3FeeNpr) || 0;
+                    return {
+                      ...current,
+                      year2FeeNpr,
+                      feesDueNpr: year1 + year2FeeNpr + year3,
+                    };
+                  });
+                }}
+                placeholder="2nd year amount"
+              />
+            </FormField>
+            <FormField label="3rd Year fee (NPR)">
+              <NumberInput
+                min={0}
+                value={form.year3FeeNpr ?? 0}
+                onChange={(event) => {
+                  const year3FeeNpr = Number.isFinite(event.target.valueAsNumber)
+                    ? event.target.valueAsNumber
+                    : 0;
+                  setForm((current) => {
+                    const year1 = Number(current.year1FeeNpr) || 0;
+                    const year2 = Number(current.year2FeeNpr) || 0;
+                    return {
+                      ...current,
+                      year3FeeNpr,
+                      feesDueNpr: year1 + year2 + year3FeeNpr,
+                    };
+                  });
+                }}
+                placeholder="3rd year amount"
+              />
+            </FormField>
+            <FormField label="Total tuition (NPR)">
+              <Input
+                readOnly
+                className="bg-slate-50 font-medium"
+                value={String(
+                  (Number(form.year1FeeNpr) || 0) +
+                    (Number(form.year2FeeNpr) || 0) +
+                    (Number(form.year3FeeNpr) || 0) ||
+                    form.feesDueNpr ||
+                    0,
+                )}
+              />
+            </FormField>
+            <FormField label="Security deposit (NPR)">
+              <NumberInput
+                min={0}
+                value={form.securityDepositNpr ?? 0}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    securityDepositNpr: Number.isFinite(event.target.valueAsNumber)
+                      ? event.target.valueAsNumber
+                      : 0,
+                  }))
+                }
+                placeholder="Caution / security deposit"
+              />
+            </FormField>
+          </>
         )}
         <FormField label="Academic Status">
           <Select
@@ -583,7 +694,7 @@ export const StudentForm = ({
         showReset={!isEditing}
         credentialsHint={
           isEditing
-            ? "If you change Login ID or set a new password, updated credentials are emailed to the student automatically. Changing only the Login ID also generates a new password so both can be sent."
+            ? "Leave Login ID and password as they are to keep the existing login. Only type a new Login ID and/or password if you want to change access — a new password is emailed only when you set one."
             : undefined
         }
       />

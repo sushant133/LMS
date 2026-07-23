@@ -28,6 +28,8 @@ import {
   useNormalizedRole,
 } from "hooks/useNormalizedRole";
 import { useTeacherScope } from "hooks/useTeacherScope";
+import { useAuth } from "features/auth/AuthProvider";
+import { userIsTeacher } from "lib/teacherRole";
 import {
   filterSectionsByClass,
   filterYearsByBatch,
@@ -43,12 +45,13 @@ import { countPendingRequiredDocuments } from "./studentDocumentUtils";
 
 export const StudentListManager = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const role = useNormalizedRole();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const isAdmin = useIsTenantAdmin();
   const hasInstitutionRead = useHasInstitutionAccess();
-  const isTeacher = role === "TEACHER";
+  const isTeacher = userIsTeacher(user) || role === "TEACHER";
   const canManage = isAdmin;
   const canReadList = hasInstitutionRead || isTeacher;
   const teacherScopeQuery = useTeacherScope(isTeacher);
@@ -240,11 +243,20 @@ export const StudentListManager = () => {
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle>
-            {canManage ? "All Students" : "Assigned Students"}
+            {canManage ? "All Students" : "My Students"}
           </CardTitle>
           <p className="mt-1 text-sm text-slate-500">
+            {isTeacher && !canManage
+              ? "Students in your assigned subject batch/year (or class/section)."
+              : null}{" "}
             Showing {filteredStudents.length} of {students.length} student
             {students.length === 1 ? "" : "s"}
+            {isTeacher &&
+            !canManage &&
+            students.length === 0 &&
+            !teacherScopeQuery.isLoading
+              ? " — ask admin to assign you a subject with batch and year under Subject Assignment."
+              : ""}
           </p>
         </div>
         <Button
@@ -411,7 +423,16 @@ export const StudentListManager = () => {
                     </Td>
                     <Td>{displayPhone}</Td>
                     <Td>{student.rollNumber}</Td>
-                    <Td>{student.admissionNumber}</Td>
+                    <Td>
+                      <div className="space-y-0.5">
+                        <p>{student.admissionNumber}</p>
+                        {student.registrationNumber ? (
+                          <p className="text-xs text-slate-500">
+                            Reg: {student.registrationNumber}
+                          </p>
+                        ) : null}
+                      </div>
+                    </Td>
                     <Td>
                       {primaryMap.get(
                         (isCollege ? student.batchId : student.classId) ?? "",

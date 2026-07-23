@@ -43,6 +43,8 @@ const studentSchema = new Schema(
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     user: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
     admissionNumber: { type: String, required: true, trim: true },
+    /** College registration number (optional; distinct from admission no.). */
+    registrationNumber: { type: String, trim: true, default: "" },
     rollNumber: { type: Number, default: 0 },
     classId: { type: Schema.Types.ObjectId, ref: "SchoolClass" },
     sectionId: { type: Schema.Types.ObjectId, ref: "Section" },
@@ -76,7 +78,12 @@ const studentSchema = new Schema(
     motherPhone: { type: String, trim: true, default: "" },
     guardianName: { type: String, default: "" },
     guardianPhone: { type: String, default: "" },
+    /** Outstanding tuition due (derived from year fees + payments). */
     feesDueNpr: { type: Number, default: 0 },
+    /** Planned tuition by program year (HA 1st / 2nd / 3rd). */
+    year1FeeNpr: { type: Number, default: 0, min: 0 },
+    year2FeeNpr: { type: Number, default: 0, min: 0 },
+    year3FeeNpr: { type: Number, default: 0, min: 0 },
     /**
      * Security / caution deposit collected at admission (NPR).
      * Refunded on pass-out (or withdrawal) via FeeRefund type DEPOSIT_REFUND.
@@ -95,6 +102,15 @@ const studentSchema = new Schema(
 );
 
 studentSchema.index({ schoolId: 1, admissionNumber: 1 }, { unique: true });
+studentSchema.index(
+  { schoolId: 1, registrationNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      registrationNumber: { $type: "string", $gt: "" }
+    }
+  }
+);
 studentSchema.index({ schoolId: 1, academicStatus: 1 });
 studentSchema.index(
   { schoolId: 1, rollNumber: 1, classId: 1, sectionId: 1 },

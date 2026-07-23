@@ -36,7 +36,9 @@ const STATUS_FILTER_OPTIONS = [
 
 export const HomeworkManager = () => {
   const { user } = useAuth();
-  const isTeacher = user?.role === "TEACHER";
+  const isTeacher =
+    user?.role === "TEACHER" ||
+    (user?.secondaryRoles ?? []).includes("TEACHER");
   const isStudent = user?.role === "STUDENT";
   const isParent = user?.role === "PARENT";
   const isPortalUser = isStudent || isParent;

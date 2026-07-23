@@ -223,10 +223,21 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
   await validateStudentAdmissionScope(institutionType, schoolId, payload);
 
   const hasScholarship = Boolean(payload.hasScholarship);
-  const feesDueNpr = hasScholarship ? 0 : (payload.feesDueNpr ?? 0);
+  const year1FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year1FeeNpr) || 0);
+  const year2FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year2FeeNpr) || 0);
+  const year3FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year3FeeNpr) || 0);
+  const securityDepositNpr = Math.max(0, Number(payload.securityDepositNpr) || 0);
+  const yearFeeTotal = year1FeeNpr + year2FeeNpr + year3FeeNpr;
+  // Prefer year plan sum when any year fee is set; else legacy total fee field
+  const feesDueNpr = hasScholarship
+    ? 0
+    : yearFeeTotal > 0
+      ? yearFeeTotal
+      : Math.max(0, Number(payload.feesDueNpr) || 0);
   const fullName = (payload.fullName || "").trim() || "Student";
   const admissionNumber =
     (payload.admissionNumber || "").trim() || generateAdmissionNumber();
+  const registrationNumber = (payload.registrationNumber || "").trim();
   let loginEmail = (payload.email || "").trim().toLowerCase();
   if (!loginEmail) {
     loginEmail = generateStudentLoginId(admissionNumber);
@@ -258,12 +269,23 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
     );
     const user = createdUsers[0]!;
 
+    if (registrationNumber) {
+      const dupReg = await Student.findOne({
+        schoolId,
+        registrationNumber
+      }).session(session);
+      if (dupReg) {
+        throw new ApiError(409, "A student with this registration number already exists");
+      }
+    }
+
     const createdStudents = await Student.create(
       [
         {
           schoolId,
           user: user._id,
           admissionNumber,
+          registrationNumber,
           rollNumber: payload.rollNumber ?? 0,
           ...(isCollege(institutionType)
             ? {
@@ -289,6 +311,10 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           guardianName: payload.guardianName || "",
           guardianPhone: payload.guardianPhone || "",
           feesDueNpr,
+          year1FeeNpr,
+          year2FeeNpr,
+          year3FeeNpr,
+          securityDepositNpr,
           hasScholarship,
           remarks: payload.remarks,
           photoUrl: payload.photoUrl || undefined,
@@ -301,14 +327,39 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
     );
     const student = createdStudents[0]!;
 
+    // Seed year-wise tuition charges for Accounts / parent fee ledger
+    const { seedStudentYearFeeCharges } = await import("../utils/studentFeeAdmission.js");
+    await seedStudentYearFeeCharges({
+      schoolId,
+      studentId: student._id,
+      admissionNumber,
+      plan: { year1FeeNpr, year2FeeNpr, year3FeeNpr },
+      hasScholarship,
+      paidDateBs: payload.admissionDateBs || "",
+      createdBy: req.user?.userId ?? user._id.toString(),
+      session
+    });
+
     await commitTransaction(session);
-    await student.populate("user", "-password");
+
+    const savedStudent = await Student.findById(student._id).populate(
+      "user",
+      "-password"
+    );
 
     await recordAudit(req, {
       action: "student.create",
       entity: "Student",
       entityId: student._id.toString(),
-      after: { admissionNumber: student.admissionNumber, fullName }
+      after: {
+        admissionNumber: student.admissionNumber,
+        registrationNumber,
+        fullName,
+        year1FeeNpr,
+        year2FeeNpr,
+        year3FeeNpr,
+        securityDepositNpr
+      }
     });
 
     const credentialsEmail = await notifyAccountCredentials({
@@ -325,7 +376,7 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
       res,
       buildCredentialsAdminMessage(credentialsEmail),
       {
-        student,
+        student: savedStudent ?? student,
         loginEmail,
         defaultPassword: portalPassword,
         credentialsEmail
@@ -358,29 +409,88 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   const fullName = (payload.fullName || "").trim() || "Student";
   const admissionNumber =
     (payload.admissionNumber || "").trim() || student.admissionNumber || generateAdmissionNumber();
+  const registrationNumber = (payload.registrationNumber || "").trim();
   const hasScholarship = Boolean(payload.hasScholarship);
-  const feesDueNpr = hasScholarship ? 0 : (payload.feesDueNpr ?? 0);
+  const year1FeeNpr = hasScholarship
+    ? 0
+    : Math.max(0, Number(payload.year1FeeNpr) || 0);
+  const year2FeeNpr = hasScholarship
+    ? 0
+    : Math.max(0, Number(payload.year2FeeNpr) || 0);
+  const year3FeeNpr = hasScholarship
+    ? 0
+    : Math.max(0, Number(payload.year3FeeNpr) || 0);
+  const securityDepositNpr = Math.max(0, Number(payload.securityDepositNpr) || 0);
+  const yearFeeTotal = year1FeeNpr + year2FeeNpr + year3FeeNpr;
+  // Keep existing outstanding if no year plan provided; otherwise use plan sum as baseline
+  // (recalc after seeding will align with ledger when collections exist)
+  let feesDueNpr = hasScholarship
+    ? 0
+    : yearFeeTotal > 0
+      ? yearFeeTotal
+      : Math.max(0, Number(payload.feesDueNpr) || 0);
 
-  let loginEmail = (payload.email || "").trim().toLowerCase();
-  if (!loginEmail) {
-    const current = await User.findById(student.user).select("email").lean();
-    loginEmail = current?.email || generateStudentLoginId(admissionNumber);
+  if (registrationNumber && registrationNumber !== (student.registrationNumber || "")) {
+    const dupReg = await Student.findOne({
+      schoolId,
+      registrationNumber,
+      _id: { $ne: student._id }
+    });
+    if (dupReg) {
+      throw new ApiError(409, "A student with this registration number already exists");
+    }
   }
 
   const currentUser = await User.findById(student.user).select("email").lean();
+  if (!currentUser) {
+    throw new ApiError(404, "User account not found for this student");
+  }
 
-  if (loginEmail !== currentUser?.email) {
-    const duplicate = await User.findOne({ email: loginEmail, _id: { $ne: student.user } });
+  const currentEmail = (currentUser.email ?? "").toLowerCase().trim();
+  const submittedEmail = (payload.email || "").trim().toLowerCase();
+  const submittedPassword = payload.password?.trim() || "";
+
+  /**
+   * Login credentials rules on edit:
+   * - Profile / documents / contact alone → keep existing login, never invent password
+   * - New Login ID only when admin types a different value
+   * - Password only when admin types a new one (never auto-generate on update)
+   * - Same Login ID as current → treat as already set (no credential churn)
+   */
+  let loginEmail = currentEmail;
+  let loginIdChanged = false;
+  let loginIdAlreadySet = false;
+
+  if (!submittedEmail) {
+    // Empty field: keep existing login ID (do not generate a random one on edit)
+    if (currentEmail) {
+      loginIdAlreadySet = true;
+    } else {
+      // Rare: student has no portal login yet — create a stable one once
+      loginEmail = generateStudentLoginId(admissionNumber);
+      loginIdChanged = true;
+    }
+  } else if (submittedEmail === currentEmail) {
+    loginIdAlreadySet = true;
+    loginEmail = currentEmail;
+  } else {
+    const duplicate = await User.findOne({
+      email: submittedEmail,
+      _id: { $ne: student.user }
+    });
     if (duplicate) {
       throw new ApiError(409, "A user with this login ID already exists");
     }
+    loginEmail = submittedEmail;
+    loginIdChanged = true;
   }
 
   const portalUpdate = await updatePortalUser(student.user, {
     fullName,
     email: loginEmail,
     phone: payload.phone,
-    password: payload.password
+    // Only pass password when admin explicitly set one — never blank-reset
+    password: submittedPassword || undefined
   });
 
   const previousPhotoUrl = student.photoUrl;
@@ -390,6 +500,7 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
 
   Object.assign(student, {
     admissionNumber,
+    registrationNumber,
     rollNumber: payload.rollNumber ?? 0,
     ...(isCollege(institutionType)
       ? {
@@ -418,6 +529,10 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     guardianName: payload.guardianName || "",
     guardianPhone: payload.guardianPhone || "",
     feesDueNpr,
+    year1FeeNpr,
+    year2FeeNpr,
+    year3FeeNpr,
+    securityDepositNpr,
     hasScholarship,
     remarks: payload.remarks,
     academicStatus: payload.academicStatus ?? student.academicStatus ?? "ACTIVE",
@@ -426,6 +541,26 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   });
 
   await student.save();
+
+  // Seed any missing year fee charges for accounts (does not wipe payment history)
+  if (!hasScholarship && yearFeeTotal > 0) {
+    const { seedStudentYearFeeCharges } = await import("../utils/studentFeeAdmission.js");
+    await seedStudentYearFeeCharges({
+      schoolId,
+      studentId: student._id,
+      admissionNumber,
+      plan: { year1FeeNpr, year2FeeNpr, year3FeeNpr },
+      hasScholarship,
+      paidDateBs: payload.admissionDateBs || "",
+      createdBy: req.user?.userId ?? student.user.toString(),
+      onlyMissingYears: true
+    });
+    const { recalculateStudentFeesDue } = await import("../utils/accountingCalculations.js");
+    feesDueNpr = await recalculateStudentFeesDue(student._id, schoolId);
+    student.feesDueNpr = feesDueNpr;
+    await student.save();
+  }
+
   await student.populate("user", "-password");
 
   // Cleanup replaced/removed media (Cloudinary + legacy local)
@@ -458,57 +593,63 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   });
 
   /**
-   * When login ID and/or password change, email the student their new access details.
-   * Password is only included when the admin set a new one (hashed passwords cannot be recovered).
-   * If only the login ID changed, a fresh password is generated so both can be emailed.
+   * Email new credentials only when the admin explicitly set a new password
+   * (optionally with a new Login ID). Never invent a random password on edit.
    */
-  const credentialsChanged = portalUpdate.loginIdChanged || portalUpdate.passwordChanged;
+  const passwordChanged = portalUpdate.passwordChanged && Boolean(portalUpdate.password);
+  const credentialsChanged = loginIdChanged || passwordChanged;
   let credentialsEmail: Awaited<ReturnType<typeof notifyAccountCredentials>> | undefined;
-  let emailedPassword: string | undefined;
 
-  if (credentialsChanged) {
-    if (portalUpdate.passwordChanged && portalUpdate.password) {
-      emailedPassword = portalUpdate.password;
-    } else if (portalUpdate.loginIdChanged) {
-      // Login ID moved — issue a new password so we can send a complete access email
-      const user = await User.findById(student.user);
-      if (user) {
-        const { password: generated } = resolvePortalPassword(undefined);
-        user.password = generated;
-        user.mustChangePassword = true;
-        await user.save();
-        emailedPassword = generated;
-      }
-    }
+  if (passwordChanged && portalUpdate.password) {
+    credentialsEmail = await notifyAccountCredentials({
+      userId: student.user.toString(),
+      fullName,
+      email: portalUpdate.email,
+      password: portalUpdate.password,
+      schoolId: schoolId.toString(),
+      req,
+      emailType: "PASSWORD_RESET",
+      accountKind: "STUDENT"
+    });
 
-    if (emailedPassword) {
-      credentialsEmail = await notifyAccountCredentials({
-        userId: student.user.toString(),
-        fullName,
-        email: portalUpdate.email,
-        password: emailedPassword,
-        schoolId: schoolId.toString(),
-        req,
-        emailType: "PASSWORD_RESET",
-        accountKind: "STUDENT"
-      });
-    }
-  }
-
-  if (credentialsChanged && credentialsEmail) {
     return sendSuccess(res, buildPortalCredentialsUpdatedMessage(credentialsEmail, "STUDENT"), {
       student,
       loginEmail: portalUpdate.email,
-      // Only return plaintext password when delivery failed (admin must share manually)
-      ...(credentialsEmail.sent ? {} : { defaultPassword: emailedPassword }),
+      ...(credentialsEmail.sent ? {} : { defaultPassword: portalUpdate.password }),
       credentialsEmail,
-      credentialsChanged: true
+      credentialsChanged: true,
+      loginIdChanged,
+      passwordChanged: true
     });
   }
 
-  return sendSuccess(res, "Student updated successfully", {
+  if (loginIdChanged && !passwordChanged) {
+    return sendSuccess(
+      res,
+      "Student updated successfully. Login ID was updated; password was left unchanged (set a new password only if you want to reset and email it).",
+      {
+        student,
+        loginEmail: portalUpdate.email,
+        credentialsChanged: false,
+        loginIdChanged: true,
+        passwordChanged: false,
+        loginIdAlreadySet: false
+      }
+    );
+  }
+
+  // Profile / documents / contact only — login untouched
+  const message = loginIdAlreadySet
+    ? "Student updated successfully. Login ID is already set for this student (unchanged)."
+    : "Student updated successfully";
+
+  return sendSuccess(res, message, {
     student,
-    credentialsChanged: false
+    loginEmail: portalUpdate.email,
+    credentialsChanged: false,
+    loginIdChanged: false,
+    passwordChanged: false,
+    loginIdAlreadySet
   });
 });
 

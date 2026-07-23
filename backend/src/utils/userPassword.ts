@@ -18,6 +18,7 @@ export const updatePortalUser = async (
     fullName: string;
     email: string;
     phone?: string;
+    /** Only set when admin explicitly provides a new password. */
     password?: string;
   }
 ): Promise<UpdatePortalUserResult> => {
@@ -28,14 +29,19 @@ export const updatePortalUser = async (
   }
 
   const previousEmail = (user.email ?? "").toLowerCase().trim();
-  const nextEmail = updates.email.toLowerCase().trim();
-  const loginIdChanged = previousEmail !== nextEmail;
+  const nextEmail = (updates.email ?? "").toLowerCase().trim();
+  const loginIdChanged = Boolean(nextEmail) && previousEmail !== nextEmail;
   const trimmedPassword = updates.password?.trim();
   const passwordChanged = Boolean(trimmedPassword);
 
   user.fullName = updates.fullName;
-  user.email = nextEmail;
-  user.phone = updates.phone;
+  // Keep existing email when caller passes the same/current value; only rewrite when provided
+  if (nextEmail) {
+    user.email = nextEmail;
+  }
+  if (updates.phone !== undefined) {
+    user.phone = updates.phone;
+  }
 
   if (trimmedPassword) {
     user.password = trimmedPassword;
@@ -45,11 +51,13 @@ export const updatePortalUser = async (
 
   await user.save();
 
+  const resolvedEmail = (user.email || nextEmail || previousEmail).toLowerCase().trim();
+
   return {
     loginIdChanged,
     passwordChanged,
     previousEmail,
-    email: nextEmail,
+    email: resolvedEmail,
     fullName: updates.fullName,
     password: trimmedPassword || undefined
   };
