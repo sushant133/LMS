@@ -712,14 +712,15 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
 
   const payload = academicSyllabusSchema.parse(req.body);
   const optionalTeacherId = payload.teacherId?.trim() || undefined;
-  // Unit/chapter titles are optional — blank structure still saves as draft.
-  // If no hierarchy was sent, start with one empty section + unit.
+  // Unit titles are optional. Never reject with the old
+  // "At least one unit with a title is required…" message — blank titles save as "".
   let chapters = resolveSyllabusChapters(payload);
   if (chapters.length === 0) {
+    // Soft fallback: keep a single blank unit so create never hard-fails structure
     chapters = [
       {
         chapterNo: 1,
-        sectionKind: "NONE",
+        sectionKind: "NONE" as const,
         title: "",
         description: "",
         estimatedHours: 0,
@@ -743,6 +744,16 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
       }
     ];
   }
+  // Ensure every unit has a title string (may be "") for persistence
+  chapters = chapters.map((ch, ci) => ({
+    ...ch,
+    chapterNo: ci + 1,
+    units: (ch.units ?? []).map((u, ui) => ({
+      ...u,
+      unitNo: u.unitNo || ui + 1,
+      title: typeof u.title === "string" ? u.title : String(u.title ?? "")
+    }))
+  }));
 
   // Avoid empty strings for ObjectId fields
   const yearId = payload.yearId?.trim() || undefined;

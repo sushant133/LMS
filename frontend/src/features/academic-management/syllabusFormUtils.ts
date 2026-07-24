@@ -638,73 +638,80 @@ export const formToPayload = (
   const nepaliMode = Boolean(options?.nepaliMode);
   const t = (s: string | undefined | null) => textForPayload(s, nepaliMode);
 
-  // Keep all unit rows (including blank titles). Admins can save partial drafts
-  // and fill unit titles later; sub-units alone under a blank unit title are valid.
-  // Renumber so unit numbers stay continuous across chapters (Ch1: 1–5, Ch2: 6–10, …).
-  const chapters = renumberChapters(form.chapters)
-    .map((chapter) => {
-      const kind = (chapter.sectionKind as SectionKind) || "NONE";
-      const units = (chapter.units ?? []).map((unit) => {
-        const rawTitle = String(
-          (unit as { title?: unknown }).title ??
-            (unit as { chapterName?: unknown }).chapterName ??
-            (unit as { name?: unknown }).name ??
-            "",
-        );
-        // Blank title is intentional and must be persisted
-        const title = t(rawTitle).trim();
-        return {
-          clientKey: unit.clientKey,
-          unitNo: unit.unitNo,
-          title,
-          description: t(unit.description),
-          teachingHours: safeHours(unit.teachingHours),
-          learningObjective: t(unit.learningObjective),
-          references: t(unit.references),
-          remarks: t(unit.remarks),
-          practicalRequired: Boolean(unit.practicalRequired),
-          // Keep sub-units with content; blank heading-only empty rows still pruned
-          subUnits: pruneEmptySubUnits(unit.subUnits ?? []).map((sub) =>
-            subToPayload(sub, nepaliMode),
-          ),
-        };
-      });
-      // Ensure every section has at least one unit row (blank title OK)
-      const ensuredUnits =
-        units.length > 0
-          ? units
-          : [
-              {
-                clientKey: nextClientKey("unit"),
-                unitNo: 1,
-                title: "",
-                description: "",
-                teachingHours: 0,
-                learningObjective: "",
-                references: "",
-                remarks: "",
-                practicalRequired: false,
-                subUnits: [] as ReturnType<typeof subToPayload>[],
-              },
-            ];
+  // Keep ALL unit rows. Renumber continuously across chapters (Ch1: 1–5, Ch2: 6–10, …).
+  //
+  // IMPORTANT (production / older API compatibility):
+  // Some deployed APIs still reject empty unit titles or drop blank rows, then return
+  // "At least one unit with a title is required…". Always send a non-empty title:
+  // use the typed title, or fall back to "Unit N" so every unit survives validation.
+  const sourceChapters =
+    Array.isArray(form.chapters) && form.chapters.length > 0
+      ? form.chapters
+      : [emptyChapter(1, "NONE")];
+
+  const chapters = renumberChapters(sourceChapters).map((chapter) => {
+    const kind = (chapter.sectionKind as SectionKind) || "NONE";
+    const units = (chapter.units ?? []).map((unit) => {
+      const rawTitle = String(
+        (unit as { title?: unknown }).title ??
+          (unit as { chapterName?: unknown }).chapterName ??
+          (unit as { name?: unknown }).name ??
+          "",
+      );
+      const typedTitle = t(rawTitle).trim();
+      const unitNo =
+        typeof unit.unitNo === "number" && unit.unitNo > 0 ? unit.unitNo : 1;
+      // Never send empty title to API (fixes old VPS validators + blank-drop logic)
+      const title = typedTitle || `Unit ${unitNo}`;
       return {
-        clientKey: chapter.clientKey,
-        chapterNo: chapter.chapterNo,
-        sectionKind: kind,
-        // Chapter/Part titles are optional too
-        title: kind === "NONE" ? "" : t(chapter.title).trim(),
-        description: t(chapter.description),
-        estimatedHours: safeHours(chapter.estimatedHours),
-        weightagePercent: Math.min(100, safeHours(chapter.weightagePercent)),
-        references: t(chapter.references),
-        remarks: t(chapter.remarks),
-        tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
-        units: ensuredUnits,
+        clientKey: unit.clientKey,
+        unitNo,
+        title,
+        description: t(unit.description),
+        teachingHours: safeHours(unit.teachingHours),
+        learningObjective: t(unit.learningObjective),
+        references: t(unit.references),
+        remarks: t(unit.remarks),
+        practicalRequired: Boolean(unit.practicalRequired),
+        subUnits: pruneEmptySubUnits(unit.subUnits ?? []).map((sub) =>
+          subToPayload(sub, nepaliMode),
+        ),
       };
     });
+    // Ensure every section has at least one unit row
+    const ensuredUnits =
+      units.length > 0
+        ? units
+        : [
+            {
+              clientKey: nextClientKey("unit"),
+              unitNo: 1,
+              title: "Unit 1",
+              description: "",
+              teachingHours: 0,
+              learningObjective: "",
+              references: "",
+              remarks: "",
+              practicalRequired: false,
+              subUnits: [] as ReturnType<typeof subToPayload>[],
+            },
+          ];
+    return {
+      clientKey: chapter.clientKey,
+      chapterNo: chapter.chapterNo,
+      sectionKind: kind,
+      title: kind === "NONE" ? "" : t(chapter.title).trim(),
+      description: t(chapter.description),
+      estimatedHours: safeHours(chapter.estimatedHours),
+      weightagePercent: Math.min(100, safeHours(chapter.weightagePercent)),
+      references: t(chapter.references),
+      remarks: t(chapter.remarks),
+      tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
+      units: ensuredUnits,
+    };
+  });
 
-  // Legacy flat units (backup path on server if hierarchy shape is dropped).
-  // Always give a non-empty chapterName so older validators never reject the payload.
+  // Legacy flat units (safety net). Always non-empty chapterName for older APIs.
   let legacyUnitSeq = 0;
   const legacyUnits = chapters.flatMap((chapter) =>
     chapter.units.map((unit) => {

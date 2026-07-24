@@ -491,6 +491,7 @@ export const SyllabusPanel = ({
   });
 
   const buildSavePayload = (): AcademicSyllabusInput | null => {
+    // Always use formRef (updated synchronously in setForm) so Save never loses units
     const latest = formRef.current;
     if (!latest.subjectId) {
       toast.error("Subject is required");
@@ -500,11 +501,22 @@ export const SyllabusPanel = ({
       toast.error("Academic year (BS) is required — set it in filters or form");
       return null;
     }
-    // Content fields are all optional: blank unit titles, blank chapter/part titles,
-    // and units that only have sub-units must all save without errors.
+    if (!Array.isArray(latest.chapters) || latest.chapters.length === 0) {
+      toast.error(
+        "Syllabus structure is missing. Close the form, open the syllabus again, and retry.",
+      );
+      return null;
+    }
+    const unitCount = latest.chapters.reduce(
+      (n, ch) => n + ((ch.units as unknown[] | undefined)?.length ?? 0),
+      0,
+    );
+    if (unitCount === 0) {
+      toast.error("Add at least one unit before saving");
+      return null;
+    }
 
     const optionalTeacher = (latest.teacherId || teacherId || "").trim();
-    // formNepaliText is derived from subject — recompute from latest subjectId
     const subjectForNepali = subjectOptions.find(
       (s) =>
         s._id === latest.subjectId ||
@@ -533,8 +545,11 @@ export const SyllabusPanel = ({
       );
       return null;
     }
-    if (!payload.chapters?.length) {
-      toast.error("Add at least one section before saving");
+    // formToPayload always ensures titled units (fallback "Unit N") for API compatibility
+    const payloadUnits =
+      payload.chapters?.reduce((n, ch) => n + (ch.units?.length ?? 0), 0) ?? 0;
+    if (!payload.chapters?.length || payloadUnits === 0) {
+      toast.error("Could not build syllabus units — try again");
       return null;
     }
     return payload;
