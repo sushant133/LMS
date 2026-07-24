@@ -945,7 +945,10 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
               units: payload.units
             });
       if (resolved.length === 0) {
-        throw new ApiError(400, "Syllabus structure is empty — add at least one unit before saving.");
+        throw new ApiError(
+          400,
+          "Syllabus structure is empty — add at least one unit row (title may be blank)."
+        );
       }
       await saveSyllabusHierarchy(
         {

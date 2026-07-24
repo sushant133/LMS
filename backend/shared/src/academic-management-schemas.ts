@@ -48,12 +48,18 @@ export const academicSessionPlanUnitSchema = z.object({
 });
 
 /**
- * Syllabus legacy flat unit — titles are optional so partial drafts can save
- * (unit title blank + sub-units only, etc.). Session-plan units stay required separately.
+ * Syllabus legacy flat unit — titles are fully optional so partial drafts can save
+ * (blank unit title + sub-units only, etc.). Session-plan units stay required separately.
+ * Use omit+extend so session-plan's chapterName.min(1) never applies to syllabus.
  */
-export const academicSyllabusUnitSchema = academicSessionPlanUnitSchema.extend({
-  chapterName: z.string().default("")
-});
+export const academicSyllabusUnitSchema = academicSessionPlanUnitSchema
+  .omit({ chapterName: true })
+  .extend({
+    chapterName: z.preprocess(
+      (v) => (v === undefined || v === null ? "" : String(v)),
+      z.string().default("")
+    )
+  });
 
 /** Hierarchical syllabus progress status (sub-unit level). */
 export const syllabusSubUnitStatusSchema = z.enum([
