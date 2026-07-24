@@ -568,7 +568,7 @@ export const SyllabusHierarchyEditor = ({
                     setExpandedChapters(
                       (s) => new Set(s).add(chapter.clientKey),
                     );
-                    // Expand so the required Unit title field is immediately visible
+                    // Expand so the Unit title field is immediately visible
                     setExpandedUnits((s) => new Set(s).add(newUnit.clientKey));
                   }}
                 >
@@ -793,7 +793,7 @@ export const SyllabusHierarchyEditor = ({
                               nepali: nepaliText,
                             })}
                           </p>
-                          {/* Title always editable (even when row is collapsed) — required to save */}
+                          {/* Title always editable (even when row is collapsed) — optional to save */}
                           <Input
                             className="min-w-[10rem] flex-1"
                             value={unit.title}
@@ -805,13 +805,13 @@ export const SyllabusHierarchyEditor = ({
                             }
                             placeholder={
                               nepaliText
-                                ? "एकाइको शीर्षक (आवश्यक)"
-                                : "Unit title (required)"
+                                ? "एकाइको शीर्षक (वैकल्पिक)"
+                                : "Unit title (optional)"
                             }
                             aria-label={
                               nepaliText
                                 ? "एकाइको शीर्षक"
-                                : "Unit title (required)"
+                                : "Unit title (optional)"
                             }
                           />
                           <Button
@@ -930,8 +930,8 @@ export const SyllabusHierarchyEditor = ({
                               <FormField
                                 label={
                                   nepaliText
-                                    ? `${nepaliStructuralLabels.unitTitle} (आवश्यक)`
-                                    : "Unit title (required)"
+                                    ? `${nepaliStructuralLabels.unitTitle} (वैकल्पिक)`
+                                    : "Unit title (optional)"
                                 }
                               >
                                 <Input

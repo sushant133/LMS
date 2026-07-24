@@ -7,7 +7,8 @@ const topicSchema = new Schema(
     syllabusId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabus", required: true, index: true },
     chapterId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabusChapter", required: true, index: true },
     unitNo: { type: Number, required: true, min: 1 },
-    title: { type: String, required: true, trim: true },
+    /** Optional — blank titles are allowed for partial / draft syllabus units. */
+    title: { type: String, default: "", trim: true },
     description: { type: String, default: "" },
     teachingHours: { type: Number, default: 0, min: 0 },
     learningObjective: { type: String, default: "" },

@@ -5,7 +5,8 @@ const unitSchema = new Schema(
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     syllabusId: { type: Schema.Types.ObjectId, ref: "AcademicSyllabus", required: true },
     unitNo: { type: Number, required: true, min: 1 },
-    chapterName: { type: String, required: true },
+    /** Optional — blank unit title is allowed for partial syllabus drafts. */
+    chapterName: { type: String, default: "", trim: true },
     estimatedTeachingHours: { type: Number, default: 0, min: 0 },
     learningOutcomes: { type: String, default: "" },
     topicsCovered: { type: String, default: "" },

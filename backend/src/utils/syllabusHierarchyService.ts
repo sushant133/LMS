@@ -272,7 +272,10 @@ export const chaptersToLegacyUnits = (
       rows.push({
         syllabusId,
         unitNo: sequentialNo,
-        chapterName: formatUnitHeading(unitNo, unit.title || `Unit ${unitNo}`),
+        // Preserve blank titles in hierarchy; legacy row uses a display fallback only when empty
+        chapterName: unit.title?.trim()
+          ? formatUnitHeading(unitNo, unit.title)
+          : formatUnitHeading(unitNo, ""),
         estimatedTeachingHours,
         learningOutcomes,
         topicsCovered,
@@ -330,7 +333,7 @@ const insertSubUnitTree = async (
           unitId,
           parentSubUnitId,
           subUnitNo,
-          heading: sub.heading.trim(),
+          heading: (sub.heading || "").trim(),
           description: sub.description || "",
           learningOutcomes: sub.learningOutcomes || "",
           internalAssessment: sub.internalAssessment || "",
@@ -443,7 +446,7 @@ export const saveSyllabusHierarchy = async (
             syllabusId,
             chapterId: chapterDoc._id,
             unitNo,
-            title: unit.title.trim(),
+            title: (unit.title || "").trim(),
             description: unit.description || "",
             teachingHours: unit.teachingHours ?? 0,
             learningObjective: unit.learningObjective || "",

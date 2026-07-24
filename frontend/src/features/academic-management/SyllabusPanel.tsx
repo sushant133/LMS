@@ -14,6 +14,7 @@ import {
   ChevronsUpDown,
   Pencil,
   Plus,
+  Printer,
   Send,
   Trash2,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import {
   nepaliStructuralLabels,
   nepaliTextClass,
 } from "lib/nepaliSubject";
+import { printElementById } from "lib/printUtils";
 import { cn, parseErrorMessage } from "lib/utils";
 import {
   academicListApiParams,
@@ -70,17 +72,15 @@ import {
   type HierarchyScopeOption,
   type HierarchySubjectNode,
 } from "./academicHierarchyUtils";
+import { SyllabusDocumentView } from "./SyllabusDocumentView";
 import { SyllabusHierarchyEditor } from "./SyllabusHierarchyEditor";
 import {
-  allSubHeadingsFilled,
   blankSyllabusForm,
   formToPayload,
   recordToForm,
   SUB_UNIT_STATUS_OPTIONS,
   subUnitStatusBadgeClass,
-  type ChapterDraft,
   type SyllabusFormState,
-  type UnitDraft,
 } from "./syllabusFormUtils";
 
 interface SyllabusPanelProps {
@@ -139,6 +139,9 @@ export const SyllabusPanel = ({
   formRef.current = form;
   const [viewExpanded, setViewExpanded] = useState<Record<string, boolean>>({});
   const [globalExpand, setGlobalExpand] = useState(false);
+  /** When set, print area contains only this syllabus (individual print). */
+  const [printFocusId, setPrintFocusId] = useState<string | null>(null);
+  const [printingPlanId, setPrintingPlanId] = useState<string | null>(null);
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
@@ -421,64 +424,8 @@ export const SyllabusPanel = ({
       toast.error("Academic year (BS) is required — set it in filters or form");
       return;
     }
-    if (!latest.chapters.length) {
-      toast.error("Add at least one section with units");
-      return;
-    }
-
-    let hasUnit = false;
-    const missingUnitIndexes: string[] = [];
-    for (const [ci, ch] of (latest.chapters as ChapterDraft[]).entries()) {
-      const kind = ch.sectionKind || "NONE";
-      if ((kind === "CHAPTER" || kind === "PART") && !ch.title?.trim()) {
-        toast.error(
-          kind === "CHAPTER"
-            ? "Chapter title is required when section type is Chapter"
-            : "Part title is required when section type is Part",
-        );
-        return;
-      }
-      const units = (ch.units as UnitDraft[]) ?? [];
-      // Ignore a single completely empty default row only when it is the sole unit
-      // in a section that has no other content yet — still require titles for real rows.
-      for (const [ui, u] of units.entries()) {
-        const title = String(u.title ?? "").trim();
-        const hasAnySub =
-          (u.subUnits ?? []).some(
-            (s) => s.heading?.trim() || (s.children?.length ?? 0) > 0,
-          );
-        if (!title) {
-          // Allow one blank starter row only when it is the only unit and empty
-          if (units.length === 1 && !hasAnySub) {
-            continue;
-          }
-          missingUnitIndexes.push(`Unit ${u.unitNo || ui + 1}`);
-          continue;
-        }
-        hasUnit = true;
-        // Sub-units are optional. Only validate headings on rows the user started.
-        if (hasAnySub && !allSubHeadingsFilled(u.subUnits ?? [])) {
-          toast.error(
-            "If you add a sub-unit, fill its heading (or remove the empty row)",
-          );
-          return;
-        }
-      }
-      void ci;
-    }
-    // Block save when extra empty unit rows exist (would be silently dropped before)
-    if (missingUnitIndexes.length > 0) {
-      toast.error(
-        `Enter a title for: ${missingUnitIndexes.slice(0, 5).join(", ")} — or remove empty unit rows before saving.`,
-      );
-      return;
-    }
-    if (!hasUnit) {
-      toast.error(
-        "Add at least one unit with a title. Type in the Unit title field on the unit row.",
-      );
-      return;
-    }
+    // Content fields are all optional: blank unit titles, blank chapter/part titles,
+    // and units that only have sub-units must all save without errors.
 
     const optionalTeacher = (latest.teacherId || teacherId || "").trim();
     // formNepaliText is derived from subject — recompute from latest subjectId
@@ -510,12 +457,7 @@ export const SyllabusPanel = ({
       );
       return;
     }
-    if (!payload.chapters?.length && !payload.units?.length) {
-      toast.error(
-        "Add at least one unit with a title before saving. Type in the Unit title field (not only Chapter/Part).",
-      );
-      return;
-    }
+    // formToPayload always produces at least one chapter with a (possibly blank) unit
     if (editingId) {
       updateMutation.mutate({ id: editingId, payload });
     } else {
@@ -762,9 +704,42 @@ export const SyllabusPanel = ({
   );
 
   const printPlans = useMemo(() => {
+    // Individual syllabus print (admin / teacher Print button on a card)
+    if (printFocusId) {
+      const one =
+        allPlans.find((p) => p._id === printFocusId) ??
+        selectedPlans.find((p) => p._id === printFocusId) ??
+        keywordFilteredPlans.find((p) => p._id === printFocusId);
+      return one ? [one] : [];
+    }
     if (selectedSubject && selectedPlans.length > 0) return selectedPlans;
     return keywordFilteredPlans;
-  }, [selectedSubject, selectedPlans, keywordFilteredPlans]);
+  }, [
+    printFocusId,
+    allPlans,
+    selectedSubject,
+    selectedPlans,
+    keywordFilteredPlans,
+  ]);
+
+  const printSingleSyllabus = async (plan: AcademicSyllabusRecord) => {
+    setPrintingPlanId(plan._id);
+    setPrintFocusId(plan._id);
+    try {
+      // Wait for React to paint the single-plan print area
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      });
+      await printElementById("syllabus-print-area", "syllabus");
+    } catch (error) {
+      toast.error(parseErrorMessage(error) || "Could not print syllabus");
+    } finally {
+      setPrintFocusId(null);
+      setPrintingPlanId(null);
+    }
+  };
 
   const isExpanded = (key: string, defaultOpen = false) => {
     if (viewExpanded[key] !== undefined) return viewExpanded[key];
@@ -827,6 +802,16 @@ export const SyllabusPanel = ({
             <Badge className={statusBadgeClass(plan.status)}>
               {plan.status.replace(/_/g, " ")}
             </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={printingPlanId === plan._id}
+              onClick={() => void printSingleSyllabus(plan)}
+              title="Print this syllabus only"
+            >
+              <Printer className="mr-1.5 h-3.5 w-3.5" />
+              {printingPlanId === plan._id ? "Printing…" : "Print"}
+            </Button>
             {editable ? (
               <Button
                 size="sm"
@@ -1276,7 +1261,7 @@ export const SyllabusPanel = ({
             <p className="text-sm text-slate-600">
               {editingId
                 ? "Your previous units are loaded below. Add Unit 3, 4, … with the Unit button, then Save draft. The form stays open so you can keep going. Submit only when the syllabus is ready for review."
-                : "Add unit titles and click Save as draft anytime. After save, the form stays open so you can keep adding units. Chapter/Part grouping and sub-units are optional."}
+                : "All unit, chapter, and sub-unit fields are optional. Save anytime — blank unit titles are kept. After save, the form stays open so you can keep adding content."}
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -1567,8 +1552,8 @@ export const SyllabusPanel = ({
             </div>
             <p className="text-xs text-slate-500">
               Drafts are not submitted for approval until you use Submit on the
-              syllabus card. You can save partially (e.g. Unit 1–2), then continue
-              later with more units.
+              syllabus card. Unit titles, chapter titles, and sub-units are all
+              optional — blank titles are saved and can be filled later.
             </p>
           </CardContent>
         </Card>
@@ -1666,68 +1651,33 @@ export const SyllabusPanel = ({
       <div id="syllabus-print-area" className="hidden print:block">
         <AcademicPrintHeader
           institutionName={institutionName}
-          title="Syllabus Report"
+          title={
+            printPlans.length === 1
+              ? "Syllabus"
+              : "Syllabus Report"
+          }
           subtitle={
-            selectedSubjectMeta
-              ? `${selectedSubjectMeta.faculty.label} · ${selectedSubjectMeta.year.label} · ${selectedSubjectMeta.subject.subjectName}`
-              : "Filtered Syllabi"
+            printPlans.length === 1
+              ? `${printPlans[0]?.subject?.name ?? "Subject"}${
+                  printPlans[0]?.subjectCode || printPlans[0]?.subject?.code
+                    ? ` (${printPlans[0]?.subjectCode || printPlans[0]?.subject?.code})`
+                    : ""
+                } · ${printPlans[0]?.academicYearBs ?? ""}`
+              : selectedSubjectMeta
+                ? `${selectedSubjectMeta.faculty.label} · ${selectedSubjectMeta.year.label} · ${selectedSubjectMeta.subject.subjectName}`
+                : "Filtered Syllabi"
+          }
+          academicYearBs={
+            printPlans.length === 1 ? printPlans[0]?.academicYearBs : undefined
           }
         />
-        {printPlans.map((plan) => (
-          <div key={plan._id} className="mb-6 break-inside-avoid">
-            <h3 className="font-semibold">
-              {plan.subject?.name} ({plan.subjectCode || plan.subject?.code || "—"}) ·{" "}
-              {plan.academicYearBs} · {plan.completedPercent}%
-            </h3>
-            {(plan.chapters ?? []).map((chapter) => {
-              const printNepali = isNepaliSubject(plan.subject);
-              return (
-              <div key={chapter._id} className="mt-2">
-                <p className={cn("font-medium", printNepali && nepaliTextClass)}>
-                  {chapter.sectionKind === "PART"
-                    ? formatPartLabel(chapter.chapterNo, {
-                        title: chapter.title,
-                        nepali: printNepali,
-                      })
-                    : chapter.sectionKind === "NONE" && !chapter.title
-                      ? printNepali
-                        ? nepaliStructuralLabels.units
-                        : "Units"
-                      : formatChapterLabel(chapter.chapterNo, {
-                          title: chapter.title,
-                          nepali: printNepali,
-                        })}
-                </p>
-                {chapter.units.map((unit) => (
-                  <div key={unit._id} className="ml-3 mt-1">
-                    <p className={cn(printNepali && nepaliTextClass)}>
-                      {formatUnitLabel(unit.unitNo, {
-                        title: unit.title,
-                        nepali: printNepali,
-                      })}
-                    </p>
-                    <ul className="ml-4 list-disc text-sm">
-                      {unit.subUnits.map((sub) => (
-                        <li
-                          key={sub._id}
-                          className={cn(printNepali && nepaliTextClass)}
-                        >
-                          {formatStoredSubUnitDisplayNo(
-                            sub.displayNo,
-                            unit.unitNo,
-                            printNepali,
-                          )}{" "}
-                          {sub.heading} — {sub.status} ({sub.teachingHours}h)
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-              );
-            })}
-          </div>
-        ))}
+        {printPlans.length === 0 ? (
+          <p className="text-sm text-slate-600">No syllabus selected to print.</p>
+        ) : (
+          printPlans.map((plan) => (
+            <SyllabusDocumentView key={plan._id} plan={plan} mode="print" />
+          ))
+        )}
         <AcademicPrintFooter />
       </div>
     </div>

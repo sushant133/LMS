@@ -43,7 +43,8 @@ const subUnitSchema = new Schema(
       index: true
     },
     subUnitNo: { type: Number, required: true, min: 1 },
-    heading: { type: String, required: true, trim: true },
+    /** Optional — blank heading is allowed for partial drafts. */
+    heading: { type: String, default: "", trim: true },
     description: { type: String, default: "" },
     learningOutcomes: { type: String, default: "" },
     internalAssessment: { type: String, default: "" },

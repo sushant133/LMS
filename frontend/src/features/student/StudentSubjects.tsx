@@ -1,7 +1,20 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { StudentSubjectDetail } from "@phit-erp/shared";
-import { BookOpen, ChevronLeft, ChevronRight, ExternalLink, Link2 } from "lucide-react";
+import type {
+  AcademicSyllabusRecord,
+  AssignmentAttachment,
+  AssignmentLink,
+  StudentSubjectDetail,
+} from "@phit-erp/shared";
+import {
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Link2,
+  Printer,
+} from "lucide-react";
+import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
@@ -10,12 +23,19 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { AttachmentViewer } from "components/shared/AttachmentViewer";
-import type { AssignmentAttachment, AssignmentLink } from "@phit-erp/shared";
 import { PageContent } from "components/layout/PageContent";
 import { FieldDutyPortalPanel } from "features/attendance/FieldDutyPortalPanel";
+import {
+  AcademicPrintFooter,
+  AcademicPrintHeader,
+} from "features/academic-management/AcademicPrintHeader";
+import { SyllabusDocumentView } from "features/academic-management/SyllabusDocumentView";
 import { PostDetailPanel } from "features/homework/PostDetailPanel";
+import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
+import { parseErrorMessage } from "lib/utils";
 
 type SubjectPost = {
   _id: string;
@@ -87,10 +107,12 @@ interface EnrolledSubject {
 }
 
 export const StudentSubjects = () => {
+  const { availableSchools, activeSchoolId } = useAuth();
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
     null,
   );
   const [openAssignmentId, setOpenAssignmentId] = useState<string | null>(null);
+  const [printingSyllabus, setPrintingSyllabus] = useState(false);
 
   const subjectsQuery = useQuery({
     queryKey: ["student-subjects"],
@@ -116,6 +138,11 @@ export const StudentSubjects = () => {
   const resolvedStudentId =
     profileQuery.data?.studentId ?? detailQuery.data?.studentId;
 
+  const activeSchool =
+    availableSchools.find((school) => school._id === activeSchoolId) ??
+    availableSchools[0];
+  const institutionName = activeSchool?.name || "Institution";
+
   if (subjectsQuery.isLoading) {
     return <LoadingState />;
   }
@@ -127,6 +154,55 @@ export const StudentSubjects = () => {
   if (selectedSubjectId && detailQuery.data) {
     const detail = detailQuery.data;
     const subject = detail.subject as EnrolledSubject;
+    const syllabus = detail.syllabus ?? null;
+
+    /** Map student syllabus payload to the shared document view shape. */
+    const syllabusForView = syllabus
+      ? ({
+          ...syllabus,
+          schoolId: "",
+          session: syllabus.academicYearBs,
+          subjectId: subject._id,
+          chapters: syllabus.chapters ?? [],
+          units: [],
+          completedPercent: 0,
+          remainingPercent: 100,
+          completedUnits: 0,
+          remainingUnits: 0,
+          completedSubUnits: 0,
+          remainingSubUnits: 0,
+          totalSubUnits: 0,
+          totalChapters: (syllabus.chapters ?? []).length,
+          totalTopics: 0,
+          theoryHoursCovered: 0,
+          practicalHoursCovered: 0,
+          teachingHoursCovered: 0,
+          remainingTeachingHours: 0,
+          audit: {},
+          subject: syllabus.subject ?? {
+            _id: subject._id,
+            name: subject.name,
+            code: subject.code,
+          },
+        } as unknown as AcademicSyllabusRecord)
+      : null;
+
+    const printStudentSyllabus = async () => {
+      if (!syllabusForView) return;
+      setPrintingSyllabus(true);
+      try {
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve());
+          });
+        });
+        await printElementById("student-syllabus-print-area", "syllabus");
+      } catch (error) {
+        toast.error(parseErrorMessage(error) || "Could not print syllabus");
+      } finally {
+        setPrintingSyllabus(false);
+      }
+    };
 
     return (
       <PageContent className="space-y-6">
@@ -142,9 +218,42 @@ export const StudentSubjects = () => {
           </Button>
           <PageHeader
             title={subject.name}
-            description={`Subject code: ${subject.code} — attendance, marks, and assignments from your teachers. Open an assignment to view details or submit work.`}
+            description={`Subject code: ${subject.code} — syllabus, attendance, marks, and assignments. Open an assignment to view details or submit work.`}
           />
         </div>
+
+        <Card className="border-brand-100">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">Subject syllabus</CardTitle>
+              <p className="text-sm text-slate-600">
+                Official curriculum for this subject (chapter → unit → sub-unit).
+              </p>
+            </div>
+            {syllabusForView ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="no-print"
+                disabled={printingSyllabus}
+                onClick={() => void printStudentSyllabus()}
+              >
+                <Printer className="mr-1.5 h-3.5 w-3.5" />
+                {printingSyllabus ? "Printing…" : "Print syllabus"}
+              </Button>
+            ) : null}
+          </CardHeader>
+          <CardContent>
+            {!syllabusForView ? (
+              <p className="text-sm text-slate-500">
+                No syllabus has been published for this subject yet. Check back
+                later or ask your teacher/admin.
+              </p>
+            ) : (
+              <SyllabusDocumentView plan={syllabusForView} mode="view" />
+            )}
+          </CardContent>
+        </Card>
 
         <div className="grid min-w-0 gap-4 md:grid-cols-2">
           <Card>
@@ -333,6 +442,19 @@ export const StudentSubjects = () => {
             }}
           />
         ) : null}
+
+        {syllabusForView ? (
+          <div id="student-syllabus-print-area" className="hidden print:block">
+            <AcademicPrintHeader
+              institutionName={institutionName}
+              title="Subject Syllabus"
+              subtitle={`${subject.name}${subject.code ? ` (${subject.code})` : ""}`}
+              academicYearBs={syllabusForView.academicYearBs}
+            />
+            <SyllabusDocumentView plan={syllabusForView} mode="print" />
+            <AcademicPrintFooter />
+          </div>
+        ) : null}
       </PageContent>
     );
   }
@@ -343,7 +465,7 @@ export const StudentSubjects = () => {
     <PageContent className="space-y-6">
       <PageHeader
         title="My Subjects"
-        description="View all subjects you are enrolled in. Open a subject to see attendance, marks, assignments, notes, and announcements."
+        description="View all subjects you are enrolled in. Open a subject to see syllabus, attendance, marks, assignments, notes, and announcements."
       />
 
       <FieldDutyPortalPanel title="Field Attendance" />

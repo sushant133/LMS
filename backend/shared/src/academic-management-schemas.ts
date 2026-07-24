@@ -47,8 +47,13 @@ export const academicSessionPlanUnitSchema = z.object({
   syllabusUnitId: z.string().optional().default("")
 });
 
-/** Syllabus unit box — same structure as session-plan units (legacy flat shape; still accepted). */
-export const academicSyllabusUnitSchema = academicSessionPlanUnitSchema;
+/**
+ * Syllabus legacy flat unit — titles are optional so partial drafts can save
+ * (unit title blank + sub-units only, etc.). Session-plan units stay required separately.
+ */
+export const academicSyllabusUnitSchema = academicSessionPlanUnitSchema.extend({
+  chapterName: z.string().default("")
+});
 
 /** Hierarchical syllabus progress status (sub-unit level). */
 export const syllabusSubUnitStatusSchema = z.enum([
@@ -79,7 +84,8 @@ const academicSyllabusSubUnitBaseFields = {
   /** Client temp id or existing Mongo id (optional on create). */
   clientKey: z.string().optional(),
   subUnitNo: z.coerce.number().int().min(1).optional(),
-  heading: z.string().min(1),
+  /** Optional — blank heading is allowed (draft / partial syllabus). */
+  heading: z.string().default(""),
   description: z.string().default(""),
   learningOutcomes: z.string().default(""),
   internalAssessment: z.string().default(""),
@@ -170,7 +176,11 @@ export const academicSyllabusTopicSchema = z.preprocess(
   z.object({
     clientKey: z.string().optional(),
     unitNo: z.coerce.number().int().min(1).optional(),
-    title: z.string().trim().min(1, "Unit title is required"),
+    /** Optional — blank unit title is allowed and stored as empty string. */
+    title: z.preprocess(
+      (v) => (v === undefined || v === null ? "" : String(v)),
+      z.string().trim().default("")
+    ),
     description: z.string().default(""),
     /** Coerce NaN/empty from number inputs so save does not fail spuriously. */
     teachingHours: teachingHoursSchema,
@@ -204,7 +214,10 @@ export const academicSyllabusChapterSchema = z.object({
   units: z.array(academicSyllabusTopicSchema).default([])
 });
 
-/** Count units that have a non-empty title (chapter headings alone are not enough). */
+/**
+ * Count units present in the payload (titles may be blank — still counted).
+ * Used for diagnostics / UI hints only; blank unit titles are valid.
+ */
 export const countTitledSyllabusUnits = (data: {
   chapters?: Array<{
     title?: string;
@@ -214,15 +227,10 @@ export const countTitledSyllabusUnits = (data: {
   units?: unknown[];
 }): number => {
   const fromChapters = (data.chapters ?? []).reduce((sum, chapter) => {
-    const titled = (chapter.units ?? []).filter((u) => {
-      const title = String(
-        u?.title ?? u?.chapterName ?? u?.name ?? u?.heading ?? ""
-      ).trim();
-      return title.length > 0;
-    });
+    const unitCount = (chapter.units ?? []).length;
     // Chapter/part heading can stand in as one unit when nested units are empty
     if (
-      titled.length === 0 &&
+      unitCount === 0 &&
       String(chapter.title ?? "").trim() &&
       (chapter.sectionKind === "CHAPTER" ||
         chapter.sectionKind === "PART" ||
@@ -230,15 +238,9 @@ export const countTitledSyllabusUnits = (data: {
     ) {
       return sum + 1;
     }
-    return sum + titled.length;
+    return sum + unitCount;
   }, 0);
-  const fromLegacy = Array.isArray(data.units)
-    ? data.units.filter((u) => {
-        if (!u || typeof u !== "object") return false;
-        const row = u as Record<string, unknown>;
-        return String(row.chapterName ?? row.title ?? "").trim().length > 0;
-      }).length
-    : 0;
+  const fromLegacy = Array.isArray(data.units) ? data.units.length : 0;
   return fromChapters + fromLegacy;
 };
 
@@ -264,39 +266,14 @@ export const academicSyllabusBaseSchema = scopeSchema.extend({
   units: z.array(academicSyllabusUnitSchema).optional()
 });
 
-const refineSyllabusHasUnits = (
-  data: {
-    chapters?: Array<{ units?: Array<{ title?: string }> }>;
-    units?: unknown[];
-  },
-  ctx: z.RefinementCtx,
-  /** When true, missing chapters/units is an error (create). When false, only validate if structure is sent (update). */
-  requireStructure: boolean
-) => {
-  const hasStructureField =
-    data.chapters !== undefined || data.units !== undefined;
-  if (!requireStructure && !hasStructureField) return;
-
-  if (countTitledSyllabusUnits(data) === 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message:
-        "At least one unit with a title is required (Chapter/Part alone is not enough — expand each Unit and enter its title)",
-      path: ["chapters"]
-    });
-  }
-};
-
-export const academicSyllabusSchema = academicSyllabusBaseSchema.superRefine((data, ctx) => {
-  refineSyllabusHasUnits(data, ctx, true);
-});
+/**
+ * Syllabus content (unit titles, chapter titles, sub-units) is fully optional.
+ * Admins can save drafts with blank unit titles and fill them later.
+ */
+export const academicSyllabusSchema = academicSyllabusBaseSchema;
 
 /** Partial update schema (header and/or hierarchy). */
-export const academicSyllabusUpdateSchema = academicSyllabusBaseSchema
-  .partial()
-  .superRefine((data, ctx) => {
-    refineSyllabusHasUnits(data, ctx, false);
-  });
+export const academicSyllabusUpdateSchema = academicSyllabusBaseSchema.partial();
 
 /** Teacher-only progress update on a sub-unit (no structure changes). */
 export const academicSyllabusSubUnitProgressSchema = z.object({

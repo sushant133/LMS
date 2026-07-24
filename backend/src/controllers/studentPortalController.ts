@@ -4,6 +4,7 @@ import { Attendance } from "../models/Attendance.js";
 import { FeeCollection } from "../models/FeeCollection.js";
 import { Notice } from "../models/Notice.js";
 import { Result } from "../models/Result.js";
+import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { Batch } from "../models/Batch.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
@@ -17,6 +18,10 @@ import {
   PROGRAM_YEAR_LABELS
 } from "../utils/accountingCalculations.js";
 import { buildStudentAcademicFilter } from "../utils/academicScope.js";
+import {
+  expandCurriculumSubjectIds,
+  serializeSyllabus
+} from "../utils/academicManagementService.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getTodayBs } from "../utils/nepaliDate.js";
 import { sendSuccess } from "../utils/response.js";
@@ -241,6 +246,82 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
     links: Array.isArray(item.links) ? item.links : []
   });
 
+  /**
+   * Subject syllabus for students (read-only). Match curriculum siblings so a
+   * syllabus stored on another batch-year subject instance still appears.
+   * Prefer APPROVED, then submitted, then latest non-rejected draft.
+   */
+  let syllabus: Awaited<ReturnType<typeof serializeSyllabus>> = null;
+  try {
+    const subjectIds = await expandCurriculumSubjectIds(
+      schoolId,
+      subject._id.toString()
+    );
+    const syllabusRows = await AcademicSyllabus.find({
+      schoolId,
+      subjectId: { $in: subjectIds },
+      isDeleted: false,
+      status: { $ne: "REJECTED" }
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const preferred =
+      syllabusRows.find((row) => row.status === "APPROVED") ??
+      syllabusRows.find(
+        (row) => row.status === "SUBMITTED" || row.status === "PENDING_APPROVAL"
+      ) ??
+      syllabusRows[0];
+
+    if (preferred) {
+      syllabus = await serializeSyllabus(preferred._id.toString());
+    }
+  } catch {
+    syllabus = null;
+  }
+
+  // Student-facing payload: hierarchy only (no audit / internal progress noise)
+  const studentSyllabus = syllabus
+    ? {
+        _id: syllabus._id,
+        academicYearBs: syllabus.academicYearBs,
+        subjectCode: syllabus.subjectCode,
+        totalTheoryHours: syllabus.totalTheoryHours,
+        totalPracticalHours: syllabus.totalPracticalHours,
+        creditHours: syllabus.creditHours,
+        remarks: syllabus.remarks,
+        status: syllabus.status,
+        subject: syllabus.subject
+          ? {
+              _id: syllabus.subject._id,
+              name: syllabus.subject.name,
+              code: syllabus.subject.code
+            }
+          : {
+              _id: subject._id.toString(),
+              name: (subject as { name?: string }).name ?? "",
+              code: (subject as { code?: string }).code ?? ""
+            },
+        chapters: (syllabus.chapters ?? []).map((chapter) => ({
+          _id: chapter._id,
+          chapterNo: chapter.chapterNo,
+          sectionKind: chapter.sectionKind,
+          title: chapter.title,
+          description: chapter.description,
+          units: (chapter.units ?? []).map((unit) => ({
+            _id: unit._id,
+            unitNo: unit.unitNo,
+            title: unit.title,
+            description: unit.description,
+            teachingHours: unit.teachingHours,
+            learningObjective: unit.learningObjective,
+            practicalRequired: unit.practicalRequired,
+            subUnits: unit.subUnits ?? []
+          }))
+        }))
+      }
+    : null;
+
   return sendSuccess(res, "Subject detail fetched", {
     subject,
     studentId: profile.studentId,
@@ -249,7 +330,8 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
     assignments: homework.map(mapAssignment),
     notes: notes.map(mapAssignment),
     submissions,
-    notices
+    notices,
+    syllabus: studentSyllabus
   });
 });
 

@@ -594,87 +594,94 @@ const resolveSyllabusChapters = (payload: {
   }>;
 }): AcademicSyllabusChapterInput[] => {
   if (payload.chapters && payload.chapters.length > 0) {
-    // Drop blank unit rows; accept alternate title field names from clients
-    const fromHierarchy = payload.chapters
-      .map((chapter, cIndex) => {
-        const rawUnits = (chapter.units ?? []) as Array<Record<string, unknown>>;
-        const units = rawUnits
-          .map((u) => {
-            const title = unitTitleOf(u);
-            if (!title) return null;
-            return {
-              ...u,
-              // Temporary; reassigned continuously across chapters below
-              unitNo:
-                typeof u.unitNo === "number" && Number.isFinite(u.unitNo) && u.unitNo > 0
-                  ? Math.floor(u.unitNo)
-                  : 0,
-              title,
-              description: String(u.description ?? ""),
-              teachingHours:
-                typeof u.teachingHours === "number" && Number.isFinite(u.teachingHours)
-                  ? u.teachingHours
-                  : 0,
-              learningObjective: String(u.learningObjective ?? u.learningOutcomes ?? ""),
-              references: String(u.references ?? ""),
-              remarks: String(u.remarks ?? ""),
-              practicalRequired: Boolean(u.practicalRequired),
-              subUnits: Array.isArray(u.subUnits) ? u.subUnits : []
-            };
-          })
-          .filter((u): u is NonNullable<typeof u> => Boolean(u));
-
-        // If client sent a chapter/part heading but forgot nested units, promote heading → unit
-        if (
-          units.length === 0 &&
-          (chapter.title ?? "").trim() &&
-          (chapter.sectionKind === "CHAPTER" ||
-            chapter.sectionKind === "PART" ||
-            (chapter.title ?? "").trim().length > 0)
-        ) {
-          units.push({
-            unitNo: 0,
-            title: (chapter.title ?? "").trim(),
-            description: chapter.description || "",
-            teachingHours: chapter.estimatedHours ?? 0,
-            learningObjective: "",
-            references: chapter.references || "",
-            remarks: "",
-            practicalRequired: false,
-            subUnits: []
-          });
-        }
-
+    // Keep all unit rows (including blank titles) so partial drafts and
+    // "sub-unit filled, unit title empty" cases persist correctly.
+    const fromHierarchy = payload.chapters.map((chapter, cIndex) => {
+      const rawUnits = (chapter.units ?? []) as Array<Record<string, unknown>>;
+      const units = rawUnits.map((u) => {
+        // Blank title is valid — store as "" (do not drop the unit)
+        const title = unitTitleOf(u);
         return {
-          ...chapter,
-          chapterNo: chapter.chapterNo || cIndex + 1,
-          units
-        } as AcademicSyllabusChapterInput;
-      })
-      .filter((chapter) => (chapter.units ?? []).length > 0);
+          ...u,
+          // Temporary; reassigned continuously across chapters below
+          unitNo:
+            typeof u.unitNo === "number" && Number.isFinite(u.unitNo) && u.unitNo > 0
+              ? Math.floor(u.unitNo)
+              : 0,
+          title,
+          description: String(u.description ?? ""),
+          teachingHours:
+            typeof u.teachingHours === "number" && Number.isFinite(u.teachingHours)
+              ? u.teachingHours
+              : 0,
+          learningObjective: String(u.learningObjective ?? u.learningOutcomes ?? ""),
+          references: String(u.references ?? ""),
+          remarks: String(u.remarks ?? ""),
+          practicalRequired: Boolean(u.practicalRequired),
+          subUnits: Array.isArray(u.subUnits) ? u.subUnits : []
+        };
+      });
 
-    // Continuous unit numbering across chapters: Ch1 units 1–5, Ch2 units 6–10, …
-    if (fromHierarchy.length > 0) {
-      let unitSeq = 0;
-      return fromHierarchy.map((chapter, cIndex) => ({
+      // If client sent a chapter/part heading but no nested units, add one blank unit
+      // (or promote heading only when they explicitly typed a section title).
+      if (
+        units.length === 0 &&
+        (chapter.title ?? "").trim() &&
+        (chapter.sectionKind === "CHAPTER" ||
+          chapter.sectionKind === "PART" ||
+          (chapter.title ?? "").trim().length > 0)
+      ) {
+        units.push({
+          unitNo: 0,
+          title: "",
+          description: chapter.description || "",
+          teachingHours: chapter.estimatedHours ?? 0,
+          learningObjective: "",
+          references: chapter.references || "",
+          remarks: "",
+          practicalRequired: false,
+          subUnits: []
+        });
+      }
+
+      // Sections with zero units still keep a blank unit so the row is editable later
+      if (units.length === 0) {
+        units.push({
+          unitNo: 0,
+          title: "",
+          description: "",
+          teachingHours: 0,
+          learningObjective: "",
+          references: "",
+          remarks: "",
+          practicalRequired: false,
+          subUnits: []
+        });
+      }
+
+      return {
         ...chapter,
         chapterNo: chapter.chapterNo || cIndex + 1,
-        units: (chapter.units ?? []).map((unit) => {
-          unitSeq += 1;
-          return { ...unit, unitNo: unitSeq };
-        })
-      }));
-    }
-    // Fall through: chapters present but empty (e.g. units only in legacy field)
+        units
+      } as AcademicSyllabusChapterInput;
+    });
+
+    // Continuous unit numbering across chapters: Ch1 units 1–5, Ch2 units 6–10, …
+    let unitSeq = 0;
+    return fromHierarchy.map((chapter, cIndex) => ({
+      ...chapter,
+      chapterNo: chapter.chapterNo || cIndex + 1,
+      units: (chapter.units ?? []).map((unit) => {
+        unitSeq += 1;
+        return { ...unit, unitNo: unitSeq };
+      })
+    }));
   }
   if (payload.units && payload.units.length > 0) {
     return legacyUnitsToChapters(payload.units);
   }
   return [];
 };
-
-const SYLLABUS_STRUCTURE_REQUIRED_MSG =
-  "At least one unit with a title is required. Open each Unit row and enter Unit title (Chapter/Part heading alone is not enough).";
 
 export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
   const plan = await AcademicSyllabus.findOne({
@@ -704,9 +711,36 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
 
   const payload = academicSyllabusSchema.parse(req.body);
   const optionalTeacherId = payload.teacherId?.trim() || undefined;
-  const chapters = resolveSyllabusChapters(payload);
+  // Unit/chapter titles are optional — blank structure still saves as draft.
+  // If no hierarchy was sent, start with one empty section + unit.
+  let chapters = resolveSyllabusChapters(payload);
   if (chapters.length === 0) {
-    throw new ApiError(400, SYLLABUS_STRUCTURE_REQUIRED_MSG);
+    chapters = [
+      {
+        chapterNo: 1,
+        sectionKind: "NONE",
+        title: "",
+        description: "",
+        estimatedHours: 0,
+        weightagePercent: 0,
+        references: "",
+        remarks: "",
+        tentativeCompletionMonth: "",
+        units: [
+          {
+            unitNo: 1,
+            title: "",
+            description: "",
+            teachingHours: 0,
+            learningObjective: "",
+            references: "",
+            remarks: "",
+            practicalRequired: false,
+            subUnits: []
+          }
+        ]
+      }
+    ];
   }
 
   // Avoid empty strings for ObjectId fields
@@ -887,14 +921,42 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
         chapters: payload.chapters,
         units: payload.units
       });
-      if (chapters.length === 0) {
-        throw new ApiError(400, SYLLABUS_STRUCTURE_REQUIRED_MSG);
-      }
+      // Blank unit titles are valid; only skip hierarchy write if nothing was resolved
+      // and client sent an empty structure intentionally — still persist empty-safe default.
+      const toSave =
+        chapters.length > 0
+          ? chapters
+          : [
+              {
+                chapterNo: 1,
+                sectionKind: "NONE" as const,
+                title: "",
+                description: "",
+                estimatedHours: 0,
+                weightagePercent: 0,
+                references: "",
+                remarks: "",
+                tentativeCompletionMonth: "",
+                units: [
+                  {
+                    unitNo: 1,
+                    title: "",
+                    description: "",
+                    teachingHours: 0,
+                    learningObjective: "",
+                    references: "",
+                    remarks: "",
+                    practicalRequired: false,
+                    subUnits: []
+                  }
+                ]
+              }
+            ];
       await saveSyllabusHierarchy(
         {
           schoolId: tenantObjectId(req).toString(),
           syllabusId: existing._id.toString(),
-          chapters
+          chapters: toSave
         },
         session ?? undefined
       );

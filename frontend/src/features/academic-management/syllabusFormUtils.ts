@@ -624,22 +624,10 @@ export const formToPayload = (
   const nepaliMode = Boolean(options?.nepaliMode);
   const t = (s: string | undefined | null) => textForPayload(s, nepaliMode);
 
-  // Drop blank unit rows first, then renumber so unit numbers stay continuous
-  // across chapters (Ch1: 1–5, Ch2: 6–10, …) even when empty drafts are stripped.
-  const chaptersWithoutBlankUnits = form.chapters.map((chapter) => ({
-    ...chapter,
-    units: (chapter.units ?? []).filter((unit) => {
-      const rawTitle = String(
-        (unit as { title?: unknown }).title ??
-          (unit as { chapterName?: unknown }).chapterName ??
-          (unit as { name?: unknown }).name ??
-          "",
-      );
-      return Boolean(t(rawTitle).trim());
-    }),
-  }));
-
-  const chapters = renumberChapters(chaptersWithoutBlankUnits)
+  // Keep all unit rows (including blank titles). Admins can save partial drafts
+  // and fill unit titles later; sub-units alone under a blank unit title are valid.
+  // Renumber so unit numbers stay continuous across chapters (Ch1: 1–5, Ch2: 6–10, …).
+  const chapters = renumberChapters(form.chapters)
     .map((chapter) => {
       const kind = (chapter.sectionKind as SectionKind) || "NONE";
       const units = (chapter.units ?? []).map((unit) => {
@@ -649,6 +637,7 @@ export const formToPayload = (
             (unit as { name?: unknown }).name ??
             "",
         );
+        // Blank title is intentional and must be persisted
         const title = t(rawTitle).trim();
         return {
           clientKey: unit.clientKey,
@@ -664,15 +653,35 @@ export const formToPayload = (
           references: t(unit.references),
           remarks: t(unit.remarks),
           practicalRequired: Boolean(unit.practicalRequired),
+          // Keep sub-units with content; blank heading-only empty rows still pruned
           subUnits: pruneEmptySubUnits(unit.subUnits ?? []).map((sub) =>
             subToPayload(sub, nepaliMode),
           ),
         };
       });
+      // Ensure every section has at least one unit row (blank title OK)
+      const ensuredUnits =
+        units.length > 0
+          ? units
+          : [
+              {
+                clientKey: nextClientKey("unit"),
+                unitNo: 1,
+                title: "",
+                description: "",
+                teachingHours: 0,
+                learningObjective: "",
+                references: "",
+                remarks: "",
+                practicalRequired: false,
+                subUnits: [] as ReturnType<typeof subToPayload>[],
+              },
+            ];
       return {
         clientKey: chapter.clientKey,
         chapterNo: chapter.chapterNo,
         sectionKind: kind,
+        // Chapter/Part titles are optional too
         title: kind === "NONE" ? "" : t(chapter.title).trim(),
         description: t(chapter.description),
         estimatedHours:
@@ -688,10 +697,9 @@ export const formToPayload = (
         references: t(chapter.references),
         remarks: t(chapter.remarks),
         tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
-        units,
+        units: ensuredUnits,
       };
-    })
-    .filter((chapter) => chapter.units.length > 0);
+    });
 
   // Legacy flat units (backup path on server if hierarchy shape is dropped)
   let legacyUnitSeq = 0;

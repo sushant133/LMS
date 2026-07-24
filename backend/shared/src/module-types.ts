@@ -405,6 +405,44 @@ export interface StudentParentCandidatesResponse {
   candidates: ParentCandidateFromStudent[];
 }
 
+/** Syllabus hierarchy exposed on student subject detail (read-only). */
+export interface StudentSubjectSyllabus {
+  _id: string;
+  academicYearBs: string;
+  subjectCode?: string;
+  totalTheoryHours?: number;
+  totalPracticalHours?: number;
+  creditHours?: number;
+  remarks?: string;
+  status: string;
+  subject?: { _id: string; name: string; code: string };
+  chapters: Array<{
+    _id: string;
+    chapterNo: number;
+    sectionKind?: string;
+    title: string;
+    description?: string;
+    units: Array<{
+      _id: string;
+      unitNo: number;
+      title: string;
+      description?: string;
+      teachingHours?: number;
+      learningObjective?: string;
+      practicalRequired?: boolean;
+      subUnits: Array<{
+        _id: string;
+        displayNo: string;
+        heading: string;
+        description?: string;
+        teachingHours?: number;
+        status?: string;
+        children?: StudentSubjectSyllabus["chapters"][number]["units"][number]["subUnits"];
+      }>;
+    }>;
+  }>;
+}
+
 export interface StudentSubjectDetail {
   subject: {
     _id: string;
@@ -426,4 +464,6 @@ export interface StudentSubjectDetail {
   notes: AssignmentRecord[];
   submissions: AssignmentSubmissionRecord[];
   notices: Array<{ _id: string; title: string; content: string; publishDateBs: string }>;
+  /** Official syllabus for this subject when available (not rejected). */
+  syllabus?: StudentSubjectSyllabus | null;
 }
