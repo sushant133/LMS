@@ -227,7 +227,7 @@ export const StudentSubjects = () => {
             <div>
               <CardTitle className="text-base">Subject syllabus</CardTitle>
               <p className="text-sm text-slate-600">
-                Official curriculum for this subject (chapter → unit → sub-unit).
+                Approved curriculum for this subject (chapter → unit → sub-unit).
               </p>
             </div>
             {syllabusForView ? (
@@ -246,8 +246,8 @@ export const StudentSubjects = () => {
           <CardContent>
             {!syllabusForView ? (
               <p className="text-sm text-slate-500">
-                No syllabus has been published for this subject yet. Check back
-                later or ask your teacher/admin.
+                No approved syllabus has been published for this subject yet.
+                Ask your administrator to approve the syllabus when it is ready.
               </p>
             ) : (
               <SyllabusDocumentView plan={syllabusForView} mode="view" />

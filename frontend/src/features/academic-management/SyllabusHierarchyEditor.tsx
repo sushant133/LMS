@@ -171,8 +171,7 @@ const SubUnitNodeEditor = ({
               size="sm"
               variant="outline"
               className="h-8 shrink-0 text-rose-600 border-rose-200"
-              disabled={siblingCount <= 1 && path.length === 1}
-              title="Remove this heading"
+              title="Remove this sub-unit (optional — can leave unit with none)"
               onClick={() =>
                 onUpdateTree((subs) => removeSubAtPath(subs, path))
               }
@@ -261,15 +260,27 @@ export const SyllabusHierarchyEditor = ({
   );
   const [dragChapterKey, setDragChapterKey] = useState<string | null>(null);
 
-  // Re-expand when switching into edit mode / remount with defaultExpandAll
+  // Re-expand when structure keys change (after save IDs swap, or new unit/chapter added)
+  // so newly saved units/sub-units stay visible instead of looking "missing".
+  const structureKey = useMemo(
+    () =>
+      chapters
+        .map(
+          (c) =>
+            `${c.clientKey}:${c.units.map((u) => u.clientKey).join(",")}`,
+        )
+        .join("|"),
+    [chapters],
+  );
+
   useEffect(() => {
+    if (!defaultExpandAll && structureKey.length === 0) return;
     setExpandedChapters(new Set(chapters.map((c) => c.clientKey)));
     setExpandedUnits(
       new Set(chapters.flatMap((c) => c.units.map((u) => u.clientKey))),
     );
-    // only on mount / when editing key remounts editor
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultExpandAll]);
+  }, [defaultExpandAll, structureKey]);
 
   /**
    * Always update via functional form so rapid title edits / adds never
@@ -402,28 +413,35 @@ export const SyllabusHierarchyEditor = ({
             size="sm"
             onClick={() => {
               // Always append a unit to the last section (or create a units-only section)
-              if (chapters.length === 0) {
-                const ch = emptyChapter(1, "NONE");
-                const unit = emptyUnit(1);
-                setChapters([{ ...ch, units: [unit] }]);
-                setExpandedChapters((s) => new Set(s).add(ch.clientKey));
-                setExpandedUnits((s) => new Set(s).add(unit.clientKey));
-                return;
-              }
-              const lastIdx = chapters.length - 1;
-              const last = chapters[lastIdx]!;
-              const unit = emptyUnit(
-                chapters.reduce((n, c) => n + c.units.length, 0) + 1,
-              );
-              setChapters(
-                chapters.map((ch, i) =>
+              let newUnitKey = "";
+              let expandChapterKey = "";
+              setChapters((prev) => {
+                if (prev.length === 0) {
+                  const ch = emptyChapter(1, "NONE");
+                  const unit = emptyUnit(1);
+                  newUnitKey = unit.clientKey;
+                  expandChapterKey = ch.clientKey;
+                  return [{ ...ch, units: [unit] }];
+                }
+                const lastIdx = prev.length - 1;
+                const last = prev[lastIdx]!;
+                const unit = emptyUnit(
+                  prev.reduce((n, c) => n + c.units.length, 0) + 1,
+                );
+                newUnitKey = unit.clientKey;
+                expandChapterKey = last.clientKey;
+                return prev.map((ch, i) =>
                   i === lastIdx
                     ? { ...ch, units: [...ch.units, unit] }
                     : ch,
-                ),
-              );
-              setExpandedChapters((s) => new Set(s).add(last.clientKey));
-              setExpandedUnits((s) => new Set(s).add(unit.clientKey));
+                );
+              });
+              if (expandChapterKey) {
+                setExpandedChapters((s) => new Set(s).add(expandChapterKey));
+              }
+              if (newUnitKey) {
+                setExpandedUnits((s) => new Set(s).add(newUnitKey));
+              }
             }}
           >
             <Plus className="mr-1 h-3.5 w-3.5" />
@@ -440,9 +458,9 @@ export const SyllabusHierarchyEditor = ({
               onChange={(e) => {
                 const kind = e.target.value as SectionKind | "";
                 if (!kind) return;
-                setChapters([
-                  ...chapters,
-                  emptyChapter(chapters.length + 1, kind),
+                setChapters((prev) => [
+                  ...prev,
+                  emptyChapter(prev.length + 1, kind),
                 ]);
                 // reset select to placeholder
                 e.target.value = "";
@@ -615,7 +633,7 @@ export const SyllabusHierarchyEditor = ({
                   disabled={chapters.length <= 1}
                   onClick={() => {
                     if (chapters.length <= 1) return;
-                    setChapters(chapters.filter((_, i) => i !== cIndex));
+                    setChapters((prev) => prev.filter((_, i) => i !== cIndex));
                   }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -692,10 +710,18 @@ export const SyllabusHierarchyEditor = ({
                       <FormField label="Estimated hours">
                         <NumberInput
                           min={0}
-                          value={chapter.estimatedHours ?? 0}
+                          value={
+                            Number.isFinite(chapter.estimatedHours)
+                              ? chapter.estimatedHours
+                              : ""
+                          }
                           onChange={(e) =>
                             updateChapter(cIndex, {
-                              estimatedHours: e.target.valueAsNumber || 0,
+                              estimatedHours: Number.isFinite(
+                                e.target.valueAsNumber,
+                              )
+                                ? e.target.valueAsNumber
+                                : Number.NaN,
                             })
                           }
                         />
@@ -704,10 +730,18 @@ export const SyllabusHierarchyEditor = ({
                         <NumberInput
                           min={0}
                           max={100}
-                          value={chapter.weightagePercent ?? 0}
+                          value={
+                            Number.isFinite(chapter.weightagePercent)
+                              ? chapter.weightagePercent
+                              : ""
+                          }
                           onChange={(e) =>
                             updateChapter(cIndex, {
-                              weightagePercent: e.target.valueAsNumber || 0,
+                              weightagePercent: Number.isFinite(
+                                e.target.valueAsNumber,
+                              )
+                                ? e.target.valueAsNumber
+                                : Number.NaN,
                             })
                           }
                         />
@@ -872,9 +906,18 @@ export const SyllabusHierarchyEditor = ({
                             disabled={units.length <= 1}
                             onClick={() => {
                               if (units.length <= 1) return;
-                              updateChapter(cIndex, {
-                                units: units.filter((_, i) => i !== uIndex),
-                              });
+                              setChapters((prev) =>
+                                prev.map((ch, i) =>
+                                  i !== cIndex
+                                    ? ch
+                                    : {
+                                        ...ch,
+                                        units: ch.units.filter(
+                                          (_, j) => j !== uIndex,
+                                        ),
+                                      },
+                                ),
+                              );
                             }}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -958,11 +1001,18 @@ export const SyllabusHierarchyEditor = ({
                               >
                                 <NumberInput
                                   min={0}
-                                  value={unit.teachingHours ?? 0}
+                                  value={
+                                    Number.isFinite(unit.teachingHours)
+                                      ? unit.teachingHours
+                                      : ""
+                                  }
                                   onChange={(e) =>
                                     updateUnit(cIndex, uIndex, {
-                                      teachingHours:
-                                        e.target.valueAsNumber || 0,
+                                      teachingHours: Number.isFinite(
+                                        e.target.valueAsNumber,
+                                      )
+                                        ? e.target.valueAsNumber
+                                        : Number.NaN,
                                     })
                                   }
                                 />

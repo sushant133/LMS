@@ -247,9 +247,9 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
   });
 
   /**
-   * Subject syllabus for students (read-only). Match curriculum siblings so a
-   * syllabus stored on another batch-year subject instance still appears.
-   * Prefer APPROVED, then submitted, then latest non-rejected draft.
+   * Official (APPROVED) syllabus only for students. Match curriculum siblings
+   * so a syllabus on another batch-year subject instance still appears.
+   * Prefer exact subjectId match, then approved siblings.
    */
   let syllabus: Awaited<ReturnType<typeof serializeSyllabus>> = null;
   try {
@@ -261,16 +261,13 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
       schoolId,
       subjectId: { $in: subjectIds },
       isDeleted: false,
-      status: { $ne: "REJECTED" }
+      status: "APPROVED"
     })
       .sort({ updatedAt: -1 })
       .lean();
 
     const preferred =
-      syllabusRows.find((row) => row.status === "APPROVED") ??
-      syllabusRows.find(
-        (row) => row.status === "SUBMITTED" || row.status === "PENDING_APPROVAL"
-      ) ??
+      syllabusRows.find((row) => row.subjectId.toString() === subject._id.toString()) ??
       syllabusRows[0];
 
     if (preferred) {
@@ -280,7 +277,26 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
     syllabus = null;
   }
 
-  // Student-facing payload: hierarchy only (no audit / internal progress noise)
+  type SubLike = {
+    _id: string;
+    displayNo?: string;
+    heading?: string;
+    description?: string;
+    teachingHours?: number;
+    learningOutcomes?: string;
+    children?: SubLike[];
+  };
+  const mapStudentSub = (sub: SubLike): SubLike => ({
+    _id: sub._id,
+    displayNo: sub.displayNo,
+    heading: sub.heading,
+    description: sub.description,
+    teachingHours: sub.teachingHours,
+    learningOutcomes: sub.learningOutcomes,
+    children: (sub.children ?? []).map(mapStudentSub)
+  });
+
+  // Student-facing payload: curriculum only (no teacher notes / progress fields)
   const studentSyllabus = syllabus
     ? {
         _id: syllabus._id,
@@ -316,7 +332,7 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
             teachingHours: unit.teachingHours,
             learningObjective: unit.learningObjective,
             practicalRequired: unit.practicalRequired,
-            subUnits: unit.subUnits ?? []
+            subUnits: (unit.subUnits ?? []).map((s) => mapStudentSub(s as SubLike))
           }))
         }))
       }

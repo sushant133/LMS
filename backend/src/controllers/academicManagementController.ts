@@ -51,6 +51,7 @@ import {
   assertTeacherOwnership,
   buildAcademicFilter,
   buildDashboard,
+  expandCurriculumSubjectIds,
   getAttendanceForSession,
   getNepaliMonthNameFromBsDate,
   getOrCreateLogBook,
@@ -666,11 +667,11 @@ const resolveSyllabusChapters = (payload: {
       } as AcademicSyllabusChapterInput;
     });
 
-    // Continuous unit numbering across chapters: Ch1 units 1–5, Ch2 units 6–10, …
+    // Always renumber chapters 1..N and units continuously (ignore client duplicates)
     let unitSeq = 0;
     return fromHierarchy.map((chapter, cIndex) => ({
       ...chapter,
-      chapterNo: chapter.chapterNo || cIndex + 1,
+      chapterNo: cIndex + 1,
       units: (chapter.units ?? []).map((unit) => {
         unitSeq += 1;
         return { ...unit, unitNo: unitSeq };
@@ -752,11 +753,13 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
   /**
    * Resume flow: one syllabus per subject+year (or class). If a DRAFT/REJECTED
    * already exists, update its hierarchy instead of failing with duplicate key.
-   * This lets teachers save Unit 1–2, then continue with Unit 3 later.
+   * Also match curriculum sibling subject ids (batch-year subject instances).
    */
+  const schoolOid = tenantObjectId(req);
+  const subjectIds = await expandCurriculumSubjectIds(schoolOid, payload.subjectId);
   const existingDraftFilter: Record<string, unknown> = {
-    schoolId: tenantObjectId(req),
-    subjectId: payload.subjectId,
+    schoolId: schoolOid,
+    subjectId: { $in: subjectIds },
     academicYearBs: payload.academicYearBs,
     isDeleted: false,
     status: { $in: ["DRAFT", "REJECTED"] }
@@ -764,7 +767,9 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
   if (yearId) existingDraftFilter.yearId = yearId;
   if (classId) existingDraftFilter.classId = classId;
 
-  const existingDraft = await AcademicSyllabus.findOne(existingDraftFilter);
+  const existingDraft = await AcademicSyllabus.findOne(existingDraftFilter).sort({
+    updatedAt: -1
+  });
   if (existingDraft) {
     await assertSyllabusAccess(req, {
       teacherId: existingDraft.teacherId?.toString(),
@@ -894,10 +899,23 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
   }
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
-  // Empty array is truthy in JS — only non-empty structure rewrites hierarchy
-  const structureChanging =
-    (Array.isArray(payload.chapters) && payload.chapters.length > 0) ||
-    (Array.isArray(payload.units) && payload.units.length > 0);
+  // Rewrite hierarchy when client sends structure (including blank unit titles).
+  // Empty arrays are rejected so a bad client cannot wipe the tree by accident.
+  const hasChaptersField = payload.chapters !== undefined;
+  const hasUnitsField = payload.units !== undefined;
+  const structureChanging = hasChaptersField || hasUnitsField;
+
+  if (
+    structureChanging &&
+    Array.isArray(payload.chapters) &&
+    payload.chapters.length === 0 &&
+    (!Array.isArray(payload.units) || payload.units.length === 0)
+  ) {
+    throw new ApiError(
+      400,
+      "Cannot clear syllabus hierarchy with an empty chapters list. Keep at least one unit row."
+    );
+  }
 
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   if (safePayload.teacherId === "") {
@@ -914,49 +932,26 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
     if (payload.teacherId !== undefined && !payload.teacherId?.trim()) {
       existing.teacherId = undefined;
     }
+    existing.hierarchyMigratedAt = new Date();
     await existing.save(sessionOpt);
 
     if (structureChanging) {
-      const chapters = resolveSyllabusChapters({
-        chapters: payload.chapters,
-        units: payload.units
-      });
-      // Blank unit titles are valid; only skip hierarchy write if nothing was resolved
-      // and client sent an empty structure intentionally — still persist empty-safe default.
-      const toSave =
-        chapters.length > 0
-          ? chapters
-          : [
-              {
-                chapterNo: 1,
-                sectionKind: "NONE" as const,
-                title: "",
-                description: "",
-                estimatedHours: 0,
-                weightagePercent: 0,
-                references: "",
-                remarks: "",
-                tentativeCompletionMonth: "",
-                units: [
-                  {
-                    unitNo: 1,
-                    title: "",
-                    description: "",
-                    teachingHours: 0,
-                    learningObjective: "",
-                    references: "",
-                    remarks: "",
-                    practicalRequired: false,
-                    subUnits: []
-                  }
-                ]
-              }
-            ];
+      // Prefer hierarchical chapters; only fall back to legacy units when chapters omitted
+      const resolved =
+        hasChaptersField && Array.isArray(payload.chapters) && payload.chapters.length > 0
+          ? resolveSyllabusChapters({ chapters: payload.chapters })
+          : resolveSyllabusChapters({
+              chapters: payload.chapters,
+              units: payload.units
+            });
+      if (resolved.length === 0) {
+        throw new ApiError(400, "Syllabus structure is empty — add at least one unit before saving.");
+      }
       await saveSyllabusHierarchy(
         {
           schoolId: tenantObjectId(req).toString(),
           syllabusId: existing._id.toString(),
-          chapters: toSave
+          chapters: resolved
         },
         session ?? undefined
       );
@@ -1029,17 +1024,24 @@ export const updateSyllabusSubUnitProgress = asyncHandler(async (req: Request, r
   if (payload.remarks !== undefined) subUnit.remarks = payload.remarks;
   await subUnit.save();
 
-  // Keep legacy flat unit status roughly in sync
-  const chapterSubs = await AcademicSyllabusSubUnit.find({ chapterId: subUnit.chapterId }).lean();
-  const allDone = chapterSubs.every((s) => s.status === "COMPLETED" || s.status === "SKIPPED");
-  const anyProgress = chapterSubs.some(
-    (s) => s.status === "IN_PROGRESS" || s.status === "COMPLETED" || s.status === "SKIPPED"
-  );
-  const chapter = await AcademicSyllabusChapter.findById(subUnit.chapterId).lean();
-  if (chapter) {
-    const legacyStatus = allDone ? "COMPLETED" : anyProgress ? "IN_PROGRESS" : "PENDING";
+  // Keep legacy flat unit status in sync for THIS topic (unitNo), not chapter number
+  const topic = await AcademicSyllabusTopic.findById(subUnit.unitId).lean();
+  if (topic) {
+    const unitSubs = await AcademicSyllabusSubUnit.find({ unitId: topic._id }).lean();
+    const allDone =
+      unitSubs.length > 0 &&
+      unitSubs.every((s) => s.status === "COMPLETED" || s.status === "SKIPPED");
+    const anyProgress = unitSubs.some(
+      (s) =>
+        s.status === "IN_PROGRESS" || s.status === "COMPLETED" || s.status === "SKIPPED"
+    );
+    const legacyStatus = allDone
+      ? "COMPLETED"
+      : anyProgress
+        ? "IN_PROGRESS"
+        : "PENDING";
     await AcademicSyllabusUnit.updateOne(
-      { syllabusId: existing._id, unitNo: chapter.chapterNo },
+      { syllabusId: existing._id, unitNo: topic.unitNo },
       { $set: { status: legacyStatus } }
     );
   }

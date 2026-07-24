@@ -131,12 +131,21 @@ export const SyllabusPanel = ({
   const [selectedYearKey, setSelectedYearKey] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] =
     useState<HierarchySubjectNode | null>(null);
-  const [form, setForm] = useState<SyllabusFormState>(() =>
+  const [form, setFormState] = useState<SyllabusFormState>(() =>
     blankSyllabusForm(filters),
   );
-  /** Always latest form for save — avoids stale closure if button fires mid-batch. */
+  /** Always latest form for save — updated synchronously so Save never sees stale chapters. */
   const formRef = useRef(form);
   formRef.current = form;
+  const setForm = (
+    updater: SyllabusFormState | ((prev: SyllabusFormState) => SyllabusFormState),
+  ) => {
+    setFormState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      formRef.current = next;
+      return next;
+    });
+  };
   const [viewExpanded, setViewExpanded] = useState<Record<string, boolean>>({});
   const [globalExpand, setGlobalExpand] = useState(false);
   /** When set, print area contains only this syllabus (individual print). */
@@ -320,7 +329,67 @@ export const SyllabusPanel = ({
     scrollToEditor();
   };
 
-  const applySavedPlanToEditor = (saved: AcademicSyllabusRecord) => {
+  const countPayloadSubs = (payload?: AcademicSyllabusInput | null): number => {
+    if (!payload?.chapters) return 0;
+    const walk = (subs: Array<{ children?: unknown[] }>): number =>
+      subs.reduce(
+        (n, s) =>
+          n + 1 + walk((s.children as Array<{ children?: unknown[] }>) ?? []),
+        0,
+      );
+    return payload.chapters.reduce(
+      (n, ch) =>
+        n +
+        (ch.units ?? []).reduce(
+          (un, u) => un + walk((u.subUnits as Array<{ children?: unknown[] }>) ?? []),
+          0,
+        ),
+      0,
+    );
+  };
+
+  const countRecordSubs = (plan: AcademicSyllabusRecord): number => {
+    const walk = (
+      subs: Array<{ children?: Array<{ children?: unknown[] }> }>,
+    ): number =>
+      subs.reduce((n, s) => n + 1 + walk(s.children ?? []), 0);
+    return (plan.chapters ?? []).reduce(
+      (n, ch) =>
+        n +
+        (ch.units ?? []).reduce(
+          (un, u) => un + walk(u.subUnits ?? []),
+          0,
+        ),
+      0,
+    );
+  };
+
+  const applySavedPlanToEditor = (
+    saved: AcademicSyllabusRecord,
+    sentPayload?: AcademicSyllabusInput,
+  ) => {
+    const savedUnitCount = (saved.chapters ?? []).reduce(
+      (n, ch) => n + (ch.units?.length ?? 0),
+      0,
+    );
+    const sentUnitCount = (sentPayload?.chapters ?? []).reduce(
+      (n, ch) => n + (ch.units?.length ?? 0),
+      0,
+    );
+    const savedSubCount = countRecordSubs(saved);
+    const sentSubCount = countPayloadSubs(sentPayload);
+    // If server returned fewer units/sub-units than we sent, keep local form
+    if (
+      (sentUnitCount > 0 && savedUnitCount < sentUnitCount) ||
+      (sentSubCount > 0 && savedSubCount < sentSubCount)
+    ) {
+      toast.error(
+        "Saved, but some units/sub-units did not reload from the server. Your local draft is kept — try Save draft again.",
+      );
+      setEditingId(saved._id);
+      setShowForm(true);
+      return;
+    }
     setEditingId(saved._id);
     setForm(recordToForm(saved));
     setShowForm(true);
@@ -330,21 +399,21 @@ export const SyllabusPanel = ({
     mutationFn: (payload: AcademicSyllabusInput) =>
       unwrap<AcademicSyllabusRecord>(
         api.post("/academic-management/syllabi", payload),
-      ),
-    onSuccess: (saved) => {
+      ).then((saved) => ({ saved, payload })),
+    onSuccess: ({ saved, payload }) => {
       toast.success(
         "Draft saved — keep adding units here, or close when finished. Submit when ready for review.",
       );
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       // Stay open so user can continue unit 3, 4, … without reopening
       if (saved?._id) {
-        applySavedPlanToEditor(saved);
+        applySavedPlanToEditor(saved, payload);
       }
     },
     onError: (error) => {
       const message = parseErrorMessage(error);
       toast.error(message);
-      // Unique constraint: open the existing syllabus instead of stranding the user
+      // Unique constraint: resume existing DRAFT by PUTting local form (do not wipe unsaved work)
       if (/already exists/i.test(message) && formRef.current.subjectId) {
         const subjectId = formRef.current.subjectId;
         const yearId = formRef.current.yearId;
@@ -353,11 +422,18 @@ export const SyllabusPanel = ({
           if (plan.subjectId !== subjectId) return false;
           if (yearId && plan.yearId && plan.yearId !== yearId) return false;
           if (classId && plan.classId && plan.classId !== classId) return false;
-          return plan.status === "DRAFT" || plan.status === "REJECTED" || isAdmin;
+          return plan.status === "DRAFT" || plan.status === "REJECTED";
         });
         if (existing) {
-          toast.message("Opening the existing syllabus so you can continue editing");
-          openEditForm(existing, { silent: true });
+          const payload = buildSavePayload();
+          if (payload) {
+            toast.message("Updating the existing draft with your current units…");
+            setEditingId(existing._id);
+            updateMutation.mutate({ id: existing._id, payload });
+          } else {
+            toast.message("Opening the existing draft so you can continue editing");
+            openEditForm(existing, { silent: true });
+          }
         }
       }
     },
@@ -373,15 +449,15 @@ export const SyllabusPanel = ({
     }) =>
       unwrap<AcademicSyllabusRecord>(
         api.put(`/academic-management/syllabi/${id}`, payload),
-      ),
-    onSuccess: (saved) => {
+      ).then((saved) => ({ saved, payload })),
+    onSuccess: ({ saved, payload }) => {
       toast.success(
         "Draft updated — you can keep adding units, or close when finished.",
       );
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       // Keep editor open with server-synced ids/numbers for continued editing
       if (saved?._id) {
-        applySavedPlanToEditor(saved);
+        applySavedPlanToEditor(saved, payload);
       }
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -414,15 +490,15 @@ export const SyllabusPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const saveSyllabus = () => {
+  const buildSavePayload = (): AcademicSyllabusInput | null => {
     const latest = formRef.current;
     if (!latest.subjectId) {
       toast.error("Subject is required");
-      return;
+      return null;
     }
     if (!latest.academicYearBs?.trim()) {
       toast.error("Academic year (BS) is required — set it in filters or form");
-      return;
+      return null;
     }
     // Content fields are all optional: blank unit titles, blank chapter/part titles,
     // and units that only have sub-units must all save without errors.
@@ -455,9 +531,18 @@ export const SyllabusPanel = ({
       toast.error(
         "Academic year (BS) is required. Set it in the filter bar or on the form.",
       );
-      return;
+      return null;
     }
-    // formToPayload always produces at least one chapter with a (possibly blank) unit
+    if (!payload.chapters?.length) {
+      toast.error("Add at least one section before saving");
+      return null;
+    }
+    return payload;
+  };
+
+  const saveSyllabus = () => {
+    const payload = buildSavePayload();
+    if (!payload) return;
     if (editingId) {
       updateMutation.mutate({ id: editingId, payload });
     } else {
@@ -466,11 +551,30 @@ export const SyllabusPanel = ({
   };
 
   const submitMutation = useMutation({
-    mutationFn: (id: string) =>
-      unwrap(api.post(`/academic-management/syllabi/${id}/submit`)),
+    mutationFn: async (id: string) => {
+      // If this syllabus is open in the editor, persist units/sub-units first
+      // via the same update mutation path (serialized — avoids concurrent wipe races).
+      if (showForm && editingId === id) {
+        const payload = buildSavePayload();
+        if (!payload) {
+          throw new Error("Fix the form before submitting");
+        }
+        const saved = await unwrap<AcademicSyllabusRecord>(
+          api.put(`/academic-management/syllabi/${id}`, payload),
+        );
+        applySavedPlanToEditor(saved, payload);
+      }
+      return unwrap(api.post(`/academic-management/syllabi/${id}/submit`));
+    },
     onSuccess: () => {
       toast.success("Syllabus submitted");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+      if (showForm && editingId) {
+        setForm((current) => ({
+          ...current,
+          // Reflect submitted status in editor without wiping hierarchy
+        }));
+      }
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -674,16 +778,9 @@ export const SyllabusPanel = ({
         const planCode = (plan.subjectCode || plan.subject?.code || "")
           .trim()
           .toLowerCase();
+        // Exact code or exact name only (substring match can attach the wrong subject)
         if (wantCode && planCode && wantCode === planCode) return true;
         if (wantName && planName && wantName === planName) return true;
-        // "Anatomy And Physiology" ↔ "Anatomy" / "Physiology"
-        if (
-          wantName &&
-          planName &&
-          (wantName.includes(planName) || planName.includes(wantName))
-        ) {
-          return true;
-        }
         return false;
       });
     }
@@ -993,7 +1090,12 @@ export const SyllabusPanel = ({
                         ) : null}
                         {chapter.units.map((unit) => {
                           const uKey = `${plan._id}-u-${unit._id}`;
-                          const uOpen = isExpanded(uKey, false);
+                          // Default open so sub-units remain visible after save/refetch
+                          const uOpen = isExpanded(
+                            uKey,
+                            (unit.subUnits?.length ?? 0) > 0 ||
+                              Boolean(unit.title?.trim()),
+                          );
                           return (
                             <div
                               key={unit._id}
@@ -1139,9 +1241,17 @@ export const SyllabusPanel = ({
                 </Button>
               )}
               {plan.status === "DRAFT" || plan.status === "REJECTED" ? (
-                <Button size="sm" onClick={() => submitMutation.mutate(plan._id)}>
+                <Button
+                  size="sm"
+                  disabled={
+                    submitMutation.isPending ||
+                    createMutation.isPending ||
+                    updateMutation.isPending
+                  }
+                  onClick={() => submitMutation.mutate(plan._id)}
+                >
                   <Send className="mr-2 h-4 w-4" />
-                  Submit
+                  {submitMutation.isPending ? "Submitting…" : "Submit"}
                 </Button>
               ) : null}
               {(plan.status === "SUBMITTED" ||
@@ -1425,11 +1535,19 @@ export const SyllabusPanel = ({
               >
                 <NumberInput
                   min={0}
-                  value={form.totalTheoryHours ?? 0}
+                  value={
+                    Number.isFinite(form.totalTheoryHours)
+                      ? form.totalTheoryHours
+                      : ""
+                  }
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      totalTheoryHours: event.target.valueAsNumber || 0,
+                      totalTheoryHours: Number.isFinite(
+                        event.target.valueAsNumber,
+                      )
+                        ? event.target.valueAsNumber
+                        : Number.NaN,
                     }))
                   }
                 />
@@ -1443,11 +1561,19 @@ export const SyllabusPanel = ({
               >
                 <NumberInput
                   min={0}
-                  value={form.totalPracticalHours ?? 0}
+                  value={
+                    Number.isFinite(form.totalPracticalHours)
+                      ? form.totalPracticalHours
+                      : ""
+                  }
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      totalPracticalHours: event.target.valueAsNumber || 0,
+                      totalPracticalHours: Number.isFinite(
+                        event.target.valueAsNumber,
+                      )
+                        ? event.target.valueAsNumber
+                        : Number.NaN,
                     }))
                   }
                 />
@@ -1461,11 +1587,15 @@ export const SyllabusPanel = ({
               >
                 <NumberInput
                   min={0}
-                  value={form.creditHours ?? 0}
+                  value={
+                    Number.isFinite(form.creditHours) ? form.creditHours : ""
+                  }
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      creditHours: event.target.valueAsNumber || 0,
+                      creditHours: Number.isFinite(event.target.valueAsNumber)
+                        ? event.target.valueAsNumber
+                        : Number.NaN,
                     }))
                   }
                 />
@@ -1535,7 +1665,8 @@ export const SyllabusPanel = ({
                 disabled={
                   !form.subjectId ||
                   createMutation.isPending ||
-                  updateMutation.isPending
+                  updateMutation.isPending ||
+                  submitMutation.isPending
                 }
               >
                 {editingId ? "Save draft" : "Save as draft"}

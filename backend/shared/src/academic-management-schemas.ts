@@ -83,7 +83,12 @@ const syllabusReferencesSchema = z.object({
 const academicSyllabusSubUnitBaseFields = {
   /** Client temp id or existing Mongo id (optional on create). */
   clientKey: z.string().optional(),
-  subUnitNo: z.coerce.number().int().min(1).optional(),
+  /** Empty/0 → undefined; server renumbers siblings. */
+  subUnitNo: z.preprocess((v) => {
+    if (v === "" || v === null || v === undefined) return undefined;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
+  }, z.number().int().min(1).optional()),
   /** Optional — blank heading is allowed (draft / partial syllabus). */
   heading: z.string().default(""),
   description: z.string().default(""),
@@ -93,7 +98,8 @@ const academicSyllabusSubUnitBaseFields = {
   labName: z.string().default(""),
   requiredEquipment: z.string().default(""),
   hospitalPosting: z.string().default(""),
-  clinicalHours: z.coerce.number().min(0).default(0),
+  /** Coerce NaN/empty so partial drafts never fail validation. */
+  clinicalHours: teachingHoursSchema,
   references: syllabusReferencesSchema.optional().default({
     textbooks: "",
     journal: "",
@@ -101,7 +107,8 @@ const academicSyllabusSubUnitBaseFields = {
     internetResources: "",
     freeText: ""
   }),
-  teachingHours: z.coerce.number().min(0).default(0),
+  /** Coerce NaN/empty so partial drafts never fail validation. */
+  teachingHours: teachingHoursSchema,
   attachments: z.array(syllabusAttachmentSchema).default([]),
   remarks: z.string().default(""),
   status: syllabusSubUnitStatusSchema.default("NOT_STARTED"),
@@ -175,7 +182,12 @@ export const academicSyllabusTopicSchema = z.preprocess(
   },
   z.object({
     clientKey: z.string().optional(),
-    unitNo: z.coerce.number().int().min(1).optional(),
+    /** Empty/0 from forms → undefined; server renumbers continuously. */
+    unitNo: z.preprocess((v) => {
+      if (v === "" || v === null || v === undefined) return undefined;
+      const n = typeof v === "number" ? v : Number(v);
+      return Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
+    }, z.number().int().min(1).optional()),
     /** Optional — blank unit title is allowed and stored as empty string. */
     title: z.preprocess(
       (v) => (v === undefined || v === null ? "" : String(v)),
@@ -201,7 +213,12 @@ export const syllabusSectionKindSchema = z.enum(["NONE", "CHAPTER", "PART"]);
 
 export const academicSyllabusChapterSchema = z.object({
   clientKey: z.string().optional(),
-  chapterNo: z.coerce.number().int().min(1).optional(),
+  /** Empty/0 from forms → undefined; server renumbers 1..N. */
+  chapterNo: z.preprocess((v) => {
+    if (v === "" || v === null || v === undefined) return undefined;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
+  }, z.number().int().min(1).optional()),
   /** NONE = ungrouped units; CHAPTER or PART = optional heading type (pick one). */
   sectionKind: syllabusSectionKindSchema.default("NONE"),
   title: z.string().default(""),

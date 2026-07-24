@@ -33,6 +33,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       onCompositionEnd,
       nepali = false,
       lang,
+      onWheel,
+      onKeyDown,
       ...props
     },
     ref,
@@ -40,6 +42,31 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     const isNumberInput = type === "number";
     /** Track IME composition so we never rewrite mid-syllable (Windows/Mac Nepali). */
     const composingRef = React.useRef(false);
+    const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+    const setRefs = React.useCallback(
+      (node: HTMLInputElement | null) => {
+        inputRef.current = node;
+        if (typeof ref === "function") {
+          ref(node);
+        } else if (ref) {
+          ref.current = node;
+        }
+      },
+      [ref],
+    );
+
+    // Non-passive wheel block for legacy type="number" inputs
+    React.useEffect(() => {
+      if (!isNumberInput) return;
+      const el = inputRef.current;
+      if (!el) return;
+      const onWheelNative = (event: WheelEvent) => {
+        event.preventDefault();
+      };
+      el.addEventListener("wheel", onWheelNative, { passive: false });
+      return () => el.removeEventListener("wheel", onWheelNative);
+    }, [isNumberInput]);
 
     const resolvedValue = isNumberInput
       ? formatNumberInputValue(
@@ -132,15 +159,37 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       onBlur?.(event);
     };
 
+    const handleWheel: React.WheelEventHandler<HTMLInputElement> = (event) => {
+      if (isNumberInput) {
+        event.preventDefault();
+      }
+      onWheel?.(event);
+    };
+
+    const handleKeyDown: React.KeyboardEventHandler<HTMLInputElement> = (
+      event,
+    ) => {
+      // Number fields: no arrow-key rolling
+      if (
+        isNumberInput &&
+        (event.key === "ArrowUp" || event.key === "ArrowDown")
+      ) {
+        event.preventDefault();
+      }
+      onKeyDown?.(event);
+    };
+
     return (
       <input
-        ref={ref}
+        ref={setRefs}
         type={type}
         {...props}
         value={resolvedValue}
         onChange={handleChange}
         onPaste={handlePaste}
         onBlur={handleBlur}
+        onWheel={handleWheel}
+        onKeyDown={handleKeyDown}
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         lang={nepali ? lang || "ne" : lang}
@@ -148,10 +197,17 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         autoCorrect={nepali ? "off" : props.autoCorrect}
         autoCapitalize={nepali ? "off" : props.autoCapitalize}
         autoComplete={nepali ? "off" : props.autoComplete}
-        inputMode={nepali && !isNumberInput ? "text" : props.inputMode}
+        inputMode={
+          nepali && !isNumberInput
+            ? "text"
+            : isNumberInput
+              ? props.inputMode ?? "decimal"
+              : props.inputMode
+        }
         dir={nepali ? "auto" : props.dir}
         className={cn(
           "flex h-10 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
+          isNumberInput && "number-input-no-spin",
           /* Nepali: drop fixed h-10 (clips matras); font-nepali CSS sets min-height */
           nepali && "h-auto min-h-11 text-base",
           nepali && nepaliTextClass,

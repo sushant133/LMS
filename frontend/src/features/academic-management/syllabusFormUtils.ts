@@ -546,6 +546,13 @@ export const recordToForm = (plan: AcademicSyllabusRecord): SyllabusFormState =>
   };
 };
 
+/** Coerce hours so NaN/null never leave the client (would fail Zod coerce.number). */
+const safeHours = (value: unknown): number => {
+  if (value === "" || value === null || value === undefined) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+};
+
 /** Keep clientKey (existing Mongo id) so updates preserve hierarchy links. */
 const subToPayload = (
   sub: SubUnitDraft,
@@ -554,6 +561,13 @@ const subToPayload = (
   const children = (sub.children ?? []) as SubUnitDraft[];
   const refs = sub.references;
   const t = (s: string | undefined | null) => textForPayload(s, nepaliMode);
+  // Drop invalid/empty attachments so Zod min(1) url never rejects the whole save
+  const attachments = (sub.attachments ?? []).filter(
+    (a) => a && typeof a.url === "string" && a.url.trim().length > 0,
+  );
+  const teacherAttachments = (sub.teacherAttachments ?? []).filter(
+    (a) => a && typeof a.url === "string" && a.url.trim().length > 0,
+  );
   return {
     clientKey: sub.clientKey,
     subUnitNo: sub.subUnitNo,
@@ -565,7 +579,7 @@ const subToPayload = (
     labName: t(sub.labName),
     requiredEquipment: t(sub.requiredEquipment),
     hospitalPosting: t(sub.hospitalPosting),
-    clinicalHours: sub.clinicalHours ?? 0,
+    clinicalHours: safeHours(sub.clinicalHours),
     references: refs
       ? {
           textbooks: t(refs.textbooks),
@@ -575,12 +589,12 @@ const subToPayload = (
           freeText: t(refs.freeText),
         }
       : refs,
-    teachingHours: sub.teachingHours ?? 0,
-    attachments: sub.attachments ?? [],
+    teachingHours: safeHours(sub.teachingHours),
+    attachments,
     remarks: t(sub.remarks),
     status: sub.status || "NOT_STARTED",
     teachingNotes: t(sub.teachingNotes),
-    teacherAttachments: sub.teacherAttachments ?? [],
+    teacherAttachments,
     todaysCoverage: t(sub.todaysCoverage),
     children: children.map((c) => subToPayload(c, nepaliMode)),
   };
@@ -644,11 +658,7 @@ export const formToPayload = (
           unitNo: unit.unitNo,
           title,
           description: t(unit.description),
-          teachingHours:
-            typeof unit.teachingHours === "number" &&
-            Number.isFinite(unit.teachingHours)
-              ? unit.teachingHours
-              : 0,
+          teachingHours: safeHours(unit.teachingHours),
           learningObjective: t(unit.learningObjective),
           references: t(unit.references),
           remarks: t(unit.remarks),
@@ -684,16 +694,8 @@ export const formToPayload = (
         // Chapter/Part titles are optional too
         title: kind === "NONE" ? "" : t(chapter.title).trim(),
         description: t(chapter.description),
-        estimatedHours:
-          typeof chapter.estimatedHours === "number" &&
-          Number.isFinite(chapter.estimatedHours)
-            ? chapter.estimatedHours
-            : 0,
-        weightagePercent:
-          typeof chapter.weightagePercent === "number" &&
-          Number.isFinite(chapter.weightagePercent)
-            ? chapter.weightagePercent
-            : 0,
+        estimatedHours: safeHours(chapter.estimatedHours),
+        weightagePercent: Math.min(100, safeHours(chapter.weightagePercent)),
         references: t(chapter.references),
         remarks: t(chapter.remarks),
         tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
@@ -701,17 +703,19 @@ export const formToPayload = (
       };
     });
 
-  // Legacy flat units (backup path on server if hierarchy shape is dropped)
+  // Legacy flat units (backup path on server if hierarchy shape is dropped).
+  // Always give a non-empty chapterName so older validators never reject the payload.
   let legacyUnitSeq = 0;
   const legacyUnits = chapters.flatMap((chapter) =>
     chapter.units.map((unit) => {
       legacyUnitSeq += 1;
+      const unitNo = unit.unitNo || legacyUnitSeq;
       return {
-        unitNo: unit.unitNo || legacyUnitSeq,
-        chapterName: unit.title,
-        estimatedTeachingHours: unit.teachingHours ?? 0,
+        unitNo,
+        chapterName: unit.title?.trim() || `Unit ${unitNo}`,
+        estimatedTeachingHours: safeHours(unit.teachingHours),
         learningOutcomes: unit.learningObjective || "",
-        topicsCovered: (unit.subUnits ?? [])
+        topicsCovered: flattenSubUnitDrafts(unit.subUnits ?? [])
           .map((s) => s.heading)
           .filter(Boolean)
           .join("\n"),
@@ -739,11 +743,12 @@ export const formToPayload = (
     subjectId: form.subjectId,
     teacherId: form.teacherId || "",
     subjectCode: form.subjectCode || "",
-    totalTheoryHours: form.totalTheoryHours ?? 0,
-    totalPracticalHours: form.totalPracticalHours ?? 0,
-    creditHours: form.creditHours ?? 0,
+    totalTheoryHours: safeHours(form.totalTheoryHours),
+    totalPracticalHours: safeHours(form.totalPracticalHours),
+    creditHours: safeHours(form.creditHours),
     remarks: t(form.remarks),
     attachmentUrl: form.attachmentUrl,
+    // Always send chapters (even blank-title units) so hierarchy is rewritten on every save
     chapters,
     // Server prefers chapters; units is a safety net
     units: legacyUnits.length > 0 ? legacyUnits : undefined,

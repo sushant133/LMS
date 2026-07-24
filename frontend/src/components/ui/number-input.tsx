@@ -25,31 +25,84 @@ export type NumberInputProps = Omit<
 
 /**
  * Standardized ERP number input.
- * - Keeps the native spinner (type="number")
+ * - No spinner / step buttons (CSS)
+ * - No mouse-wheel rolling
+ * - No arrow-key up/down rolling
  * - Allows full clear while editing (empty string, not forced 0)
- * - Typing, spinner, and keyboard all work together
  * - Validation should run on submit/blur, not by auto-filling 0 on change
  */
 export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
-  ({ className, value, onChange, onValueChange, ...props }, ref) => {
+  (
+    {
+      className,
+      value,
+      onChange,
+      onValueChange,
+      onWheel,
+      onKeyDown,
+      ...props
+    },
+    ref,
+  ) => {
+    const innerRef = React.useRef<HTMLInputElement | null>(null);
     const displayValue = formatNumberInputValue(value);
+
+    const setRefs = React.useCallback(
+      (node: HTMLInputElement | null) => {
+        innerRef.current = node;
+        if (typeof ref === "function") {
+          ref(node);
+        } else if (ref) {
+          ref.current = node;
+        }
+      },
+      [ref],
+    );
+
+    // Non-passive wheel listener: browsers ignore preventDefault on passive handlers
+    React.useEffect(() => {
+      const el = innerRef.current;
+      if (!el) return;
+      const onWheelNative = (event: WheelEvent) => {
+        event.preventDefault();
+      };
+      el.addEventListener("wheel", onWheelNative, { passive: false });
+      return () => el.removeEventListener("wheel", onWheelNative);
+    }, []);
 
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
       onValueChange?.(parseNumberInput(event));
       onChange?.(event);
     };
 
+    const handleWheel: React.WheelEventHandler<HTMLInputElement> = (event) => {
+      event.preventDefault();
+      onWheel?.(event);
+    };
+
+    const handleKeyDown: React.KeyboardEventHandler<HTMLInputElement> = (
+      event,
+    ) => {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+      }
+      onKeyDown?.(event);
+    };
+
     return (
       <input
-        ref={ref}
+        ref={setRefs}
         type="number"
+        inputMode="decimal"
+        {...props}
         value={displayValue}
         onChange={handleChange}
+        onWheel={handleWheel}
+        onKeyDown={handleKeyDown}
         className={cn(
-          "flex h-10 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
+          "number-input-no-spin flex h-10 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
           className,
         )}
-        {...props}
       />
     );
   },

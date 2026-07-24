@@ -272,10 +272,10 @@ export const chaptersToLegacyUnits = (
       rows.push({
         syllabusId,
         unitNo: sequentialNo,
-        // Preserve blank titles in hierarchy; legacy row uses a display fallback only when empty
+        // Preserve blank unit titles in legacy rows too (partial drafts)
         chapterName: unit.title?.trim()
           ? formatUnitHeading(unitNo, unit.title)
-          : formatUnitHeading(unitNo, ""),
+          : "",
         estimatedTeachingHours,
         learningOutcomes,
         topicsCovered,
@@ -305,6 +305,45 @@ export const deleteSyllabusHierarchy = async (
 
 type SubUnitInput = AcademicSyllabusSubUnitInputShape;
 
+const safeHours = (value: unknown): number => {
+  if (value === "" || value === null || value === undefined) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+};
+
+const isDuplicateKeyError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: number }).code;
+  return code === 11000;
+};
+
+/** Create doc; if forced _id collides, retry without forced id (only on duplicate key). */
+const createWithOptionalId = async <T>(
+  model: {
+    create: (
+      docs: Record<string, unknown>[],
+      opts?: { session?: ClientSession }
+    ) => Promise<T[]>;
+  },
+  doc: Record<string, unknown>,
+  forcedId: Types.ObjectId | undefined,
+  opts: { session?: ClientSession }
+): Promise<T | undefined> => {
+  try {
+    const created = await model.create(
+      [forcedId ? { _id: forcedId, ...doc } : doc],
+      opts
+    );
+    return created[0];
+  } catch (error) {
+    if (forcedId && isDuplicateKeyError(error)) {
+      const created = await model.create([doc], opts);
+      return created[0];
+    }
+    throw error;
+  }
+};
+
 const insertSubUnitTree = async (
   params: {
     schoolId: string;
@@ -321,41 +360,48 @@ const insertSubUnitTree = async (
 
   for (let sIndex = 0; sIndex < subUnits.length; sIndex++) {
     const sub = subUnits[sIndex]!;
-    const subUnitNo = sub.subUnitNo || sIndex + 1;
+    // Always renumber siblings server-side to avoid unique-index collisions
+    const subUnitNo = sIndex + 1;
     const forcedId = forcedObjectId(sub.clientKey);
-    const [subDoc] = await AcademicSyllabusSubUnit.create(
-      [
-        {
-          ...(forcedId ? { _id: forcedId } : {}),
-          schoolId,
-          syllabusId,
-          chapterId,
-          unitId,
-          parentSubUnitId,
-          subUnitNo,
-          heading: (sub.heading || "").trim(),
-          description: sub.description || "",
-          learningOutcomes: sub.learningOutcomes || "",
-          internalAssessment: sub.internalAssessment || "",
-          practicalRequired: Boolean(sub.practicalRequired),
-          labName: sub.labName || "",
-          requiredEquipment: sub.requiredEquipment || "",
-          hospitalPosting: sub.hospitalPosting || "",
-          clinicalHours: sub.clinicalHours ?? 0,
-          references: {
-            ...emptyRefs(),
-            ...(sub.references ?? {})
-          },
-          teachingHours: sub.teachingHours ?? 0,
-          attachments: sub.attachments ?? [],
-          remarks: sub.remarks || "",
-          status: sub.status || "NOT_STARTED",
-          teachingNotes: sub.teachingNotes || "",
-          teacherAttachments: sub.teacherAttachments ?? [],
-          todaysCoverage: sub.todaysCoverage || "",
-          sortOrder: sIndex
-        }
-      ],
+    const attachments = (sub.attachments ?? []).filter(
+      (a) => a && typeof a.url === "string" && a.url.trim().length > 0
+    );
+    const teacherAttachments = (sub.teacherAttachments ?? []).filter(
+      (a) => a && typeof a.url === "string" && a.url.trim().length > 0
+    );
+    const subPayload: Record<string, unknown> = {
+      schoolId,
+      syllabusId,
+      chapterId,
+      unitId,
+      parentSubUnitId,
+      subUnitNo,
+      heading: (sub.heading || "").trim(),
+      description: sub.description || "",
+      learningOutcomes: sub.learningOutcomes || "",
+      internalAssessment: sub.internalAssessment || "",
+      practicalRequired: Boolean(sub.practicalRequired),
+      labName: sub.labName || "",
+      requiredEquipment: sub.requiredEquipment || "",
+      hospitalPosting: sub.hospitalPosting || "",
+      clinicalHours: safeHours(sub.clinicalHours),
+      references: {
+        ...emptyRefs(),
+        ...(sub.references ?? {})
+      },
+      teachingHours: safeHours(sub.teachingHours),
+      attachments,
+      remarks: sub.remarks || "",
+      status: sub.status || "NOT_STARTED",
+      teachingNotes: sub.teachingNotes || "",
+      teacherAttachments,
+      todaysCoverage: sub.todaysCoverage || "",
+      sortOrder: sIndex
+    };
+    const subDoc = await createWithOptionalId(
+      AcademicSyllabusSubUnit as never,
+      subPayload,
+      forcedId,
       opts
     );
     if (!subDoc) continue;
@@ -368,7 +414,7 @@ const insertSubUnitTree = async (
           syllabusId,
           chapterId,
           unitId,
-          parentSubUnitId: subDoc._id as Types.ObjectId,
+          parentSubUnitId: (subDoc as { _id: Types.ObjectId })._id,
           subUnits: children
         },
         session
@@ -389,113 +435,157 @@ export const saveSyllabusHierarchy = async (
   const { schoolId, syllabusId, chapters } = params;
   const opts = session ? { session } : {};
 
-  await deleteSyllabusHierarchy(syllabusId, session);
+  // On standalone Mongo (no transaction), snapshot before wipe so we can restore if insert fails.
+  let backup: {
+    chapters: Awaited<ReturnType<typeof AcademicSyllabusChapter.find>>;
+    topics: Awaited<ReturnType<typeof AcademicSyllabusTopic.find>>;
+    subUnits: Awaited<ReturnType<typeof AcademicSyllabusSubUnit.find>>;
+    legacy: Awaited<ReturnType<typeof AcademicSyllabusUnit.find>>;
+  } | null = null;
+  if (!session) {
+    const [ch, topics, subUnits, legacy] = await Promise.all([
+      AcademicSyllabusChapter.find({ syllabusId }).lean(),
+      AcademicSyllabusTopic.find({ syllabusId }).lean(),
+      AcademicSyllabusSubUnit.find({ syllabusId }).lean(),
+      AcademicSyllabusUnit.find({ syllabusId }).lean()
+    ]);
+    backup = { chapters: ch as never, topics: topics as never, subUnits: subUnits as never, legacy: legacy as never };
+  }
 
-  // Unit numbers run continuously across chapters (Ch1: 1–5, Ch2: 6–10, …).
-  let globalUnitNo = 0;
+  const writeTree = async () => {
+    await deleteSyllabusHierarchy(syllabusId, session);
 
-  for (let cIndex = 0; cIndex < chapters.length; cIndex++) {
-    const chapter = chapters[cIndex]!;
-    const chapterNo = chapter.chapterNo || cIndex + 1;
-    const sectionKind =
-      (chapter as { sectionKind?: string }).sectionKind === "CHAPTER" ||
-      (chapter as { sectionKind?: string }).sectionKind === "PART"
-        ? (chapter as { sectionKind: "CHAPTER" | "PART" }).sectionKind
-        : (chapter.title || "").trim()
-          ? "CHAPTER"
-          : "NONE";
-    const forcedChapterId = forcedObjectId(
-      (chapter as { clientKey?: string }).clientKey
-    );
-    const [chapterDoc] = await AcademicSyllabusChapter.create(
-      [
-        {
-          ...(forcedChapterId ? { _id: forcedChapterId } : {}),
-          schoolId,
-          syllabusId,
-          chapterNo,
-          sectionKind,
-          title: sectionKind === "NONE" ? "" : (chapter.title || "").trim(),
-          description: chapter.description || "",
-          estimatedHours: chapter.estimatedHours ?? 0,
-          weightagePercent: chapter.weightagePercent ?? 0,
-          references: chapter.references || "",
-          remarks: chapter.remarks || "",
-          tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
-          sortOrder: cIndex
-        }
-      ],
-      opts
-    );
-    if (!chapterDoc) continue;
+    // Unit numbers run continuously across chapters (Ch1: 1–5, Ch2: 6–10, …).
+    // Chapter numbers always 1..N server-side (ignore client duplicates).
+    let globalUnitNo = 0;
 
-    const units = chapter.units ?? [];
-    for (let uIndex = 0; uIndex < units.length; uIndex++) {
-      const unit = units[uIndex]!;
-      // Continuous across all chapters (never reset to 1 at each chapter).
-      globalUnitNo += 1;
-      const unitNo = globalUnitNo;
-      const forcedUnitId = forcedObjectId(
-        (unit as { clientKey?: string }).clientKey
+    for (let cIndex = 0; cIndex < chapters.length; cIndex++) {
+      const chapter = chapters[cIndex]!;
+      const chapterNo = cIndex + 1;
+      const sectionKind =
+        (chapter as { sectionKind?: string }).sectionKind === "CHAPTER" ||
+        (chapter as { sectionKind?: string }).sectionKind === "PART"
+          ? (chapter as { sectionKind: "CHAPTER" | "PART" }).sectionKind
+          : (chapter.title || "").trim()
+            ? "CHAPTER"
+            : "NONE";
+      const forcedChapterId = forcedObjectId(
+        (chapter as { clientKey?: string }).clientKey
       );
-      const [unitDoc] = await AcademicSyllabusTopic.create(
-        [
-          {
-            ...(forcedUnitId ? { _id: forcedUnitId } : {}),
-            schoolId,
-            syllabusId,
-            chapterId: chapterDoc._id,
-            unitNo,
-            title: (unit.title || "").trim(),
-            description: unit.description || "",
-            teachingHours: unit.teachingHours ?? 0,
-            learningObjective: unit.learningObjective || "",
-            references: unit.references || "",
-            remarks: unit.remarks || "",
-            practicalRequired: Boolean(unit.practicalRequired),
-            sortOrder: uIndex
-          }
-        ],
+      const chapterPayload: Record<string, unknown> = {
+        schoolId,
+        syllabusId,
+        chapterNo,
+        sectionKind,
+        title: sectionKind === "NONE" ? "" : (chapter.title || "").trim(),
+        description: chapter.description || "",
+        estimatedHours: safeHours(chapter.estimatedHours),
+        weightagePercent: Math.min(100, safeHours(chapter.weightagePercent)),
+        references: chapter.references || "",
+        remarks: chapter.remarks || "",
+        tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
+        sortOrder: cIndex
+      };
+      const chapterDoc = await createWithOptionalId(
+        AcademicSyllabusChapter as never,
+        chapterPayload,
+        forcedChapterId,
         opts
       );
-      if (!unitDoc) continue;
+      if (!chapterDoc) continue;
+      const chapterId = (chapterDoc as { _id: Types.ObjectId })._id;
 
-      const subUnits = unit.subUnits ?? [];
-      if (subUnits.length === 0) continue;
-
-      await insertSubUnitTree(
-        {
+      const units = chapter.units ?? [];
+      for (let uIndex = 0; uIndex < units.length; uIndex++) {
+        const unit = units[uIndex]!;
+        globalUnitNo += 1;
+        const unitNo = globalUnitNo;
+        const forcedUnitId = forcedObjectId(
+          (unit as { clientKey?: string }).clientKey
+        );
+        const unitPayload: Record<string, unknown> = {
           schoolId,
           syllabusId,
-          chapterId: chapterDoc._id as Types.ObjectId,
-          unitId: unitDoc._id as Types.ObjectId,
-          parentSubUnitId: null,
-          subUnits
-        },
-        session
-      );
-    }
-  }
+          chapterId,
+          unitNo,
+          title: (unit.title || "").trim(),
+          description: unit.description || "",
+          teachingHours: safeHours(unit.teachingHours),
+          learningObjective: unit.learningObjective || "",
+          references: unit.references || "",
+          remarks: unit.remarks || "",
+          practicalRequired: Boolean(unit.practicalRequired),
+          sortOrder: uIndex
+        };
+        const unitDoc = await createWithOptionalId(
+          AcademicSyllabusTopic as never,
+          unitPayload,
+          forcedUnitId,
+          opts
+        );
+        if (!unitDoc) continue;
 
-  // Keep legacy flat units synced for Session Plan + older clients (one row per Unit)
-  const legacyUnits = chaptersToLegacyUnits(chapters, syllabusId);
-  await AcademicSyllabusUnit.deleteMany({ syllabusId }, opts);
-  if (legacyUnits.length > 0) {
-    await AcademicSyllabusUnit.insertMany(
-      legacyUnits.map((unit) => ({
-        ...unit,
-        schoolId,
-        syllabusId
-      })),
+        const subUnits = unit.subUnits ?? [];
+        if (subUnits.length === 0) continue;
+
+        await insertSubUnitTree(
+          {
+            schoolId,
+            syllabusId,
+            chapterId,
+            unitId: (unitDoc as { _id: Types.ObjectId })._id,
+            parentSubUnitId: null,
+            subUnits
+          },
+          session
+        );
+      }
+    }
+
+    // Keep legacy flat units synced (one row per Unit)
+    const legacyUnits = chaptersToLegacyUnits(chapters, syllabusId).map((unit) => ({
+      ...unit,
+      schoolId,
+      syllabusId
+    }));
+    await AcademicSyllabusUnit.deleteMany({ syllabusId }, opts);
+    if (legacyUnits.length > 0) {
+      await AcademicSyllabusUnit.insertMany(legacyUnits, opts);
+    }
+
+    await AcademicSyllabus.updateOne(
+      { _id: syllabusId },
+      { $set: { hierarchyMigratedAt: new Date() } },
       opts
     );
-  }
+  };
 
-  await AcademicSyllabus.updateOne(
-    { _id: syllabusId },
-    { $set: { hierarchyMigratedAt: new Date() } },
-    opts
-  );
+  try {
+    await writeTree();
+  } catch (error) {
+    // Restore previous hierarchy when no Mongo transaction can roll back
+    if (!session && backup) {
+      try {
+        await deleteSyllabusHierarchy(syllabusId);
+        await AcademicSyllabusUnit.deleteMany({ syllabusId });
+        if (backup.chapters.length > 0) {
+          await AcademicSyllabusChapter.insertMany(backup.chapters as never[]);
+        }
+        if (backup.topics.length > 0) {
+          await AcademicSyllabusTopic.insertMany(backup.topics as never[]);
+        }
+        if (backup.subUnits.length > 0) {
+          await AcademicSyllabusSubUnit.insertMany(backup.subUnits as never[]);
+        }
+        if (backup.legacy.length > 0) {
+          await AcademicSyllabusUnit.insertMany(backup.legacy as never[]);
+        }
+      } catch {
+        // Keep original error
+      }
+    }
+    throw error;
+  }
 };
 
 /** Auto-migrate legacy flat units into hierarchy when chapters are missing. */
