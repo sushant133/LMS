@@ -1,11 +1,14 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  BANNER_TARGET_ROLE_LABELS,
+  BANNER_TARGET_ROLES,
   bannerSchema,
   type BannerInput,
   type BannerRecord,
+  type BannerTargetRole,
 } from "@phit-erp/shared";
-import { Eye, ImageIcon, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Eye, ImageIcon, Pencil, RefreshCw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -25,10 +28,13 @@ import {
   type UploadedBannerImage,
 } from "./bannerUtils";
 
+const defaultVisibleTo = (): BannerTargetRole[] => [...BANNER_TARGET_ROLES];
+
 const defaultBanner: BannerInput = {
   imageUrl: "",
   thumbnailUrl: "",
   isActive: true,
+  visibleTo: defaultVisibleTo(),
 };
 
 const statusStyles: Record<string, string> = {
@@ -43,8 +49,17 @@ const formatDateTime = (iso?: string) => {
   return date.toLocaleString();
 };
 
+const formatVisibleToSummary = (visibleTo?: BannerTargetRole[]): string => {
+  const roles = visibleTo?.length ? visibleTo : defaultVisibleTo();
+  if (roles.length === BANNER_TARGET_ROLES.length) {
+    return "Everyone";
+  }
+  return roles.map((role) => BANNER_TARGET_ROLE_LABELS[role] ?? role).join(", ");
+};
+
 export const BannerManager = () => {
   const [form, setForm] = useState<BannerInput>(defaultBanner);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [preview, setPreview] = useState<UploadedBannerImage | null>(null);
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [viewingBanner, setViewingBanner] = useState<BannerRecord | null>(null);
@@ -64,13 +79,23 @@ export const BannerManager = () => {
     ]);
   };
 
+  const resetForm = () => {
+    setForm({
+      ...defaultBanner,
+      visibleTo: defaultVisibleTo(),
+    });
+    setPreview(null);
+    setEditingId(null);
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (payload: BannerInput) =>
-      unwrap<BannerRecord>(api.post("/banners", payload)),
+      editingId
+        ? unwrap<BannerRecord>(api.put(`/banners/${editingId}`, payload))
+        : unwrap<BannerRecord>(api.post("/banners", payload)),
     onSuccess: async () => {
-      toast.success("Banner saved");
-      setForm(defaultBanner);
-      setPreview(null);
+      toast.success(editingId ? "Banner updated" : "Banner saved");
+      resetForm();
       await invalidateBannerQueries();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -108,6 +133,9 @@ export const BannerManager = () => {
     },
     onSuccess: async () => {
       toast.success("Banner deleted");
+      if (editingId) {
+        resetForm();
+      }
       await invalidateBannerQueries();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -136,6 +164,43 @@ export const BannerManager = () => {
       height: uploaded.height,
       originalFileName: uploaded.originalFileName,
     }));
+  };
+
+  const startEdit = (banner: BannerRecord) => {
+    setEditingId(banner._id);
+    setViewingBanner(null);
+    setPreview(null);
+    setForm({
+      imageUrl: banner.imageUrl,
+      thumbnailUrl: banner.thumbnailUrl ?? "",
+      isActive: banner.isActive,
+      visibleTo:
+        banner.visibleTo?.length > 0
+          ? [...banner.visibleTo]
+          : defaultVisibleTo(),
+      fileSizeBytes: banner.fileSizeBytes,
+      width: banner.width,
+      height: banner.height,
+      originalFileName: banner.originalFileName,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const toggleVisibleTo = (role: BannerTargetRole, checked: boolean) => {
+    setForm((current) => {
+      const next = checked
+        ? [...current.visibleTo, role]
+        : current.visibleTo.filter((item) => item !== role);
+      return { ...current, visibleTo: next };
+    });
+  };
+
+  const selectAllVisibleTo = () => {
+    setForm((current) => ({ ...current, visibleTo: defaultVisibleTo() }));
+  };
+
+  const clearVisibleTo = () => {
+    setForm((current) => ({ ...current, visibleTo: [] }));
   };
 
   const handleImageUpload = async (
@@ -170,10 +235,13 @@ export const BannerManager = () => {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Upload Banner</CardTitle>
+          <CardTitle>
+            {editingId ? "Edit Banner" : "Upload Banner"}
+          </CardTitle>
           <p className="text-sm text-slate-500">
-            Upload a banner image and enable it. Active banners appear as a
-            popup on the dashboard.
+            Upload a banner image, choose who can see it, and enable it. Active
+            banners appear as a popup on matching users&apos; dashboards.
+            Banner visibility is managed separately from notice visibility.
           </p>
         </CardHeader>
         <CardContent>
@@ -197,7 +265,9 @@ export const BannerManager = () => {
                   <Upload className="h-4 w-4" />
                   {isUploading
                     ? "Uploading..."
-                    : "Choose image (JPG, JPEG, PNG, WEBP)"}
+                    : editingId
+                      ? "Replace image (JPG, JPEG, PNG, WEBP)"
+                      : "Choose image (JPG, JPEG, PNG, WEBP)"}
                   <input
                     ref={createInputRef}
                     type="file"
@@ -229,17 +299,22 @@ export const BannerManager = () => {
                           preview?.fileSizeBytes ?? form.fileSizeBytes,
                         )}
                       </span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setPreview(null);
-                          setForm(defaultBanner);
-                        }}
-                      >
-                        Remove
-                      </Button>
+                      {!editingId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setPreview(null);
+                            setForm({
+                              ...defaultBanner,
+                              visibleTo: defaultVisibleTo(),
+                            });
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -248,6 +323,55 @@ export const BannerManager = () => {
                     Upload an image to preview it here before saving.
                   </div>
                 )}
+              </div>
+            </FormField>
+
+            <FormField label="Visible to">
+              <div className="space-y-3">
+                <p className="text-xs text-slate-500">
+                  Choose which roles see this banner on their dashboard. This is
+                  separate from notice &quot;Visible to&quot; settings.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={selectAllVisibleTo}
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={clearVisibleTo}
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {BANNER_TARGET_ROLES.map((role) => (
+                    <label
+                      key={role}
+                      className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.visibleTo.includes(role)}
+                        onChange={(event) =>
+                          toggleVisibleTo(role, event.target.checked)
+                        }
+                      />
+                      {BANNER_TARGET_ROLE_LABELS[role]}
+                    </label>
+                  ))}
+                </div>
+                {form.visibleTo.length === 0 ? (
+                  <p className="text-xs text-rose-600">
+                    Select at least one audience.
+                  </p>
+                ) : null}
               </div>
             </FormField>
 
@@ -265,12 +389,21 @@ export const BannerManager = () => {
               Enable banner on dashboard
             </label>
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              {editingId ? (
+                <Button type="button" variant="secondary" onClick={resetForm}>
+                  Cancel edit
+                </Button>
+              ) : null}
               <Button
                 type="submit"
-                disabled={saveMutation.isPending || !form.imageUrl}
+                disabled={
+                  saveMutation.isPending ||
+                  !form.imageUrl ||
+                  form.visibleTo.length === 0
+                }
               >
-                Save Banner
+                {editingId ? "Update Banner" : "Save Banner"}
               </Button>
             </div>
           </form>
@@ -290,12 +423,16 @@ export const BannerManager = () => {
               Close
             </Button>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <img
               src={viewingBanner.imageUrl}
               alt="Banner preview"
               className="max-h-[70vh] w-full rounded-2xl object-contain"
             />
+            <p className="text-sm text-slate-600">
+              <span className="font-medium text-slate-800">Visible to: </span>
+              {formatVisibleToSummary(viewingBanner.visibleTo)}
+            </p>
           </CardContent>
         </Card>
       ) : null}
@@ -303,6 +440,9 @@ export const BannerManager = () => {
       <Card>
         <CardHeader>
           <CardTitle>Banner Management</CardTitle>
+          <p className="text-sm text-slate-500">
+            Manage images, active status, and who each banner is visible to.
+          </p>
         </CardHeader>
         <CardContent>
           <input
@@ -324,14 +464,14 @@ export const BannerManager = () => {
             />
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-[960px]">
                 <TableHead>
                   <tr>
                     <Th>Preview</Th>
                     <Th>Upload Date</Th>
                     <Th>Uploaded By</Th>
                     <Th>Status</Th>
-                    <Th>Visibility</Th>
+                    <Th>Visible to</Th>
                     <Th>File Size</Th>
                     <Th>Resolution</Th>
                     <Th />
@@ -339,7 +479,12 @@ export const BannerManager = () => {
                 </TableHead>
                 <TableBody>
                   {banners.map((banner) => (
-                    <tr key={banner._id}>
+                    <tr
+                      key={banner._id}
+                      className={
+                        editingId === banner._id ? "bg-brand-50/50" : undefined
+                      }
+                    >
                       <Td>
                         <img
                           src={banner.thumbnailUrl || banner.imageUrl}
@@ -362,9 +507,8 @@ export const BannerManager = () => {
                           {banner.isActive ? "Active" : "Inactive"}
                         </Badge>
                       </Td>
-                      <Td className="text-xs">
-                        {banner.visibilityStatus ??
-                          (banner.isActive ? "Visible" : "Hidden")}
+                      <Td className="max-w-[14rem] text-xs text-slate-700">
+                        {formatVisibleToSummary(banner.visibleTo)}
                       </Td>
                       <Td className="text-xs">
                         {formatFileSize(banner.fileSizeBytes)}
@@ -382,6 +526,15 @@ export const BannerManager = () => {
                           >
                             <Eye className="mr-1 h-3.5 w-3.5" />
                             View
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => startEdit(banner)}
+                          >
+                            <Pencil className="mr-1 h-3.5 w-3.5" />
+                            Edit
                           </Button>
                           <Button
                             type="button"

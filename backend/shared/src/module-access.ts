@@ -30,6 +30,8 @@ export const ERP_MODULE_KEYS = [
   "laboratory",
   "inventory",
   "accounts",
+  /** Independent institutional finance archive (Admin/Superadmin). Not Accounting ledger. */
+  "finance-management",
   "fees",
   "transport",
   "hr",
@@ -313,6 +315,15 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     apiPrefixes: ["/accounting"],
     routePrefixes: ["/accounting"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "configure"]
+  },
+  {
+    key: "finance-management",
+    label: "Finance Management",
+    description:
+      "Institutional finance archive (expenses, income, documents) — separate from Accounting",
+    apiPrefixes: ["/finance"],
+    routePrefixes: ["/finance"],
+    availableActions: ["view", "create", "edit", "delete", "export", "print", "manage"]
   },
   {
     key: "fees",
@@ -625,8 +636,8 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
   {
     id: "finance",
     title: "Finance & HR",
-    description: "Accounting, fees, and payroll",
-    keys: ["accounts", "fees", "hr"]
+    description: "Accounting, institutional finance archive, fees, and payroll",
+    keys: ["accounts", "finance-management", "fees", "hr"]
   },
   {
     id: "system",

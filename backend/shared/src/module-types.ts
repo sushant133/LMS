@@ -282,6 +282,20 @@ export interface LibraryIssueRecord {
   teacherId?: string;
   borrowerName?: string;
   bookTitle?: string;
+  /** User who issued the book (admin or library staff). */
+  issuedByUserId?: string;
+  issuedByName?: string;
+  /** Role of issuer for display (e.g. LIBRARY_STAFF, COLLEGE_ADMIN). */
+  issuedByRole?: string;
+  /** Student academic placement (when borrower is a student). */
+  studentBatchId?: string;
+  studentBatchName?: string;
+  studentYearId?: string;
+  studentYearName?: string;
+  studentClassId?: string;
+  studentClassName?: string;
+  studentSectionId?: string;
+  studentSectionName?: string;
   issuedDateBs: string;
   dueDateBs: string;
   returnedDateBs?: string;
@@ -383,6 +397,23 @@ export interface ParentPortalResponse {
   children: ParentPortalChildSummary[];
   recentNotifications: NotificationRecord[];
   upcomingHomework: AssignmentRecord[];
+  /** School-level parent portal section switches (admin-configured). */
+  portalAccess?: Partial<
+    Record<
+      | "overview"
+      | "attendance"
+      | "fees"
+      | "homework"
+      | "results"
+      | "timetable"
+      | "field-attendance"
+      | "notices"
+      | "notifications"
+      | "complaints"
+      | "library",
+      boolean
+    >
+  >;
 }
 
 export interface ParentCandidateFromStudent {

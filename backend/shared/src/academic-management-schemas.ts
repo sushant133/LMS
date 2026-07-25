@@ -77,6 +77,33 @@ const syllabusAttachmentSchema = z.object({
   kind: z.enum(["FILE", "IMAGE", "PDF", "VIDEO", "LINK", "WORD", "EXCEL", "POWERPOINT"]).optional()
 });
 
+/** Drop empty attachment stubs so a blank {url:""} never fails the whole syllabus save. */
+const syllabusAttachmentsArraySchema = z.preprocess((value) => {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      typeof (item as { url?: unknown }).url === "string" &&
+      String((item as { url: string }).url).trim().length > 0
+  );
+}, z.array(syllabusAttachmentSchema).default([]));
+
+/** Coerce weightage; NaN/empty → 0 so form clear does not 400. */
+const weightagePercentSchema = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) return 0;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, n));
+}, z.number().min(0).max(100).default(0));
+
+/** Empty string ObjectId fields → undefined (avoids mongoose CastError 400). */
+const optionalObjectIdString = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) return undefined;
+  const s = String(value).trim();
+  return s.length > 0 ? s : undefined;
+}, z.string().optional());
+
 const syllabusReferencesSchema = z.object({
   textbooks: z.string().default(""),
   journal: z.string().default(""),
@@ -115,11 +142,11 @@ const academicSyllabusSubUnitBaseFields = {
   }),
   /** Coerce NaN/empty so partial drafts never fail validation. */
   teachingHours: teachingHoursSchema,
-  attachments: z.array(syllabusAttachmentSchema).default([]),
+  attachments: syllabusAttachmentsArraySchema,
   remarks: z.string().default(""),
   status: syllabusSubUnitStatusSchema.default("NOT_STARTED"),
   teachingNotes: z.string().default(""),
-  teacherAttachments: z.array(syllabusAttachmentSchema).default([]),
+  teacherAttachments: syllabusAttachmentsArraySchema,
   todaysCoverage: z.string().default("")
 };
 
@@ -225,12 +252,18 @@ export const academicSyllabusChapterSchema = z.object({
     const n = typeof v === "number" ? v : Number(v);
     return Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
   }, z.number().int().min(1).optional()),
-  /** NONE = ungrouped units; CHAPTER or PART = optional heading type (pick one). */
-  sectionKind: syllabusSectionKindSchema.default("NONE"),
+  /**
+   * NONE | CHAPTER | PART. Invalid/empty values coerce to NONE so save never 400s.
+   */
+  sectionKind: z.preprocess((value) => {
+    const v = String(value ?? "NONE").toUpperCase();
+    if (v === "CHAPTER" || v === "PART" || v === "NONE") return v;
+    return "NONE";
+  }, syllabusSectionKindSchema.default("NONE")),
   title: z.string().default(""),
   description: z.string().default(""),
   estimatedHours: teachingHoursSchema,
-  weightagePercent: z.coerce.number().min(0).max(100).default(0),
+  weightagePercent: weightagePercentSchema,
   references: z.string().default(""),
   remarks: z.string().default(""),
   tentativeCompletionMonth: z.string().default(""),
@@ -268,35 +301,84 @@ export const countTitledSyllabusUnits = (data: {
 };
 
 /** Base shape (supports .partial() for updates). */
-export const academicSyllabusBaseSchema = scopeSchema.extend({
-  academicYearBs: z.string().min(1),
-  session: z.string().min(1),
+export const academicSyllabusBaseSchema = z.object({
+  classId: optionalObjectIdString,
+  sectionId: optionalObjectIdString,
+  batchId: optionalObjectIdString,
+  yearId: optionalObjectIdString,
+  academicYearBs: z.string().min(1, "Academic year (BS) is required"),
+  /** Empty session falls back to academicYearBs in preprocess on create/update wrappers. */
+  session: z.string().default(""),
   faculty: z.string().optional(),
-  semesterBs: z.string().optional(),
-  subjectId: z.string().min(1),
+  semesterBs: z.string().optional().default(""),
+  subjectId: z.string().min(1, "Subject is required"),
   /** Optional — syllabus is subject-level; teachers access via subject assignment. */
-  teacherId: z.string().optional().default(""),
+  teacherId: z.preprocess(
+    (v) => (v === null || v === undefined ? "" : String(v)),
+    z.string().default("")
+  ),
   /** Optional display code; falls back to subject code when empty. */
   subjectCode: z.string().optional().default(""),
   totalTheoryHours: teachingHoursSchema.optional().default(0),
   totalPracticalHours: teachingHoursSchema.optional().default(0),
   creditHours: teachingHoursSchema.optional().default(0),
   remarks: z.string().optional().default(""),
-  attachmentUrl: z.string().optional(),
+  attachmentUrl: z.preprocess((v) => {
+    if (v === null || v === undefined) return undefined;
+    const s = String(v).trim();
+    return s.length > 0 ? s : undefined;
+  }, z.string().optional()),
   /** Preferred hierarchical structure. */
   chapters: z.array(academicSyllabusChapterSchema).optional(),
   /** Legacy flat units — still accepted and auto-migrated into hierarchy. */
   units: z.array(academicSyllabusUnitSchema).optional()
 });
 
+const withSessionFallback = <T extends { academicYearBs?: string; session?: string }>(
+  data: T
+): T => {
+  const ay = (data.academicYearBs || "").trim();
+  const session = (data.session || "").trim() || ay;
+  return { ...data, academicYearBs: ay, session };
+};
+
 /**
  * Syllabus content (unit titles, chapter titles, sub-units) is fully optional.
  * Admins can save drafts with blank unit titles and fill them later.
  */
-export const academicSyllabusSchema = academicSyllabusBaseSchema;
+export const academicSyllabusSchema = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    return withSessionFallback(raw as { academicYearBs?: string; session?: string });
+  },
+  academicSyllabusBaseSchema.superRefine((data, ctx) => {
+    if (!(data.session || "").trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Academic year / session is required",
+        path: ["session"]
+      });
+    }
+  })
+);
 
 /** Partial update schema (header and/or hierarchy). */
-export const academicSyllabusUpdateSchema = academicSyllabusBaseSchema.partial();
+export const academicSyllabusUpdateSchema = z.preprocess((raw) => {
+  if (!raw || typeof raw !== "object") return raw;
+  const data = { ...(raw as Record<string, unknown>) };
+  // If session is explicitly empty, drop it so partial update does not fail min(1)
+  if (data.session === "") {
+    const ay = String(data.academicYearBs ?? "").trim();
+    if (ay) data.session = ay;
+    else delete data.session;
+  }
+  // Empty ObjectId-like strings → omit
+  for (const key of ["classId", "sectionId", "batchId", "yearId", "teacherId"] as const) {
+    if (data[key] === "") delete data[key];
+  }
+  if (data.attachmentUrl === "") delete data.attachmentUrl;
+  return data;
+}, academicSyllabusBaseSchema.partial());
 
 /** Teacher-only progress update on a sub-unit (no structure changes). */
 export const academicSyllabusSubUnitProgressSchema = z.object({

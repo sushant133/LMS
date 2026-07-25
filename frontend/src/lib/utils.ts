@@ -77,16 +77,26 @@ export const parseErrorMessage = (error: unknown): string => {
             message?: string;
             errors?: Array<{ path?: string; message?: string }>;
           };
+          status?: number;
         };
       }
     ).response;
     const data = response?.data;
     if (data?.errors?.length) {
-      const first = data.errors[0];
-      const path = first?.path ? `${first.path}: ` : "";
-      return `${data.message ?? "Validation failed"} — ${path}${first?.message ?? ""}`.trim();
+      // Surface up to 3 field errors so syllabus 400s are actionable
+      const parts = data.errors.slice(0, 3).map((issue) => {
+        const path = issue?.path ? `${issue.path}: ` : "";
+        return `${path}${issue?.message ?? ""}`.trim();
+      });
+      const detail = parts.filter(Boolean).join(" · ");
+      return detail
+        ? `${data.message ?? "Validation failed"} — ${detail}`
+        : (data.message ?? "Validation failed");
     }
-    return data?.message ?? "Something went wrong";
+    if (data?.message) return data.message;
+    if (response?.status === 400) return "Bad request — check the form and try again";
+    if (response?.status === 404) return "Record not found";
+    return "Something went wrong";
   }
 
   if (error instanceof Error) {

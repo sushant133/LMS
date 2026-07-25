@@ -21,15 +21,27 @@ export const AcademicCommentsPanel = ({
 }: AcademicCommentsPanelProps) => {
   const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
+  const hasEntity = Boolean(entityId?.trim());
 
   const commentsQuery = useQuery({
     queryKey: ["academic-management", "comments", entityType, entityId],
-    queryFn: () =>
-      unwrap<AcademicCommentRecord[]>(
-        api.get("/academic-management/comments", {
-          params: { entityType, entityId },
-        }),
-      ),
+    queryFn: async () => {
+      try {
+        return await unwrap<AcademicCommentRecord[]>(
+          api.get("/academic-management/comments", {
+            params: { entityType, entityId },
+          }),
+        );
+      } catch (error) {
+        // Do not break the syllabus card if comments fail to load
+        const status = (error as { response?: { status?: number } })?.response
+          ?.status;
+        if (status === 404) return [];
+        throw error;
+      }
+    },
+    enabled: hasEntity,
+    retry: false,
   });
 
   const addMutation = useMutation({
@@ -51,12 +63,18 @@ export const AcademicCommentsPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  if (!hasEntity) return null;
+
   return (
     <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
       <p className="text-sm font-medium text-slate-800">
         Comments & Review Notes
       </p>
-      {(commentsQuery.data ?? []).length === 0 ? (
+      {commentsQuery.isError ? (
+        <p className="text-sm text-amber-700">
+          Comments could not be loaded right now.
+        </p>
+      ) : (commentsQuery.data ?? []).length === 0 ? (
         <p className="text-sm text-slate-500">No comments yet.</p>
       ) : (
         <div className="space-y-2">
@@ -82,7 +100,7 @@ export const AcademicCommentsPanel = ({
           />
           <Button
             size="sm"
-            disabled={!comment.trim()}
+            disabled={!comment.trim() || addMutation.isPending}
             onClick={() => addMutation.mutate(comment.trim())}
           >
             <MessageSquarePlus className="mr-2 h-4 w-4" />

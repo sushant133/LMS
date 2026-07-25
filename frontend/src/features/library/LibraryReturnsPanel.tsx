@@ -12,7 +12,10 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
-import { filterLibraryIssues } from "features/library/libraryUtils";
+import {
+  filterLibraryIssues,
+  formatIssuedByLabel,
+} from "features/library/libraryUtils";
 import { api, unwrap } from "lib/api";
 import { resolveStudentId } from "lib/resolveStudentId";
 import { queryClient } from "lib/queryClient";
@@ -150,8 +153,15 @@ export const LibraryReturnsPanel = () => {
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
-        <Card className={selectedIssue ? "border-brand-200" : ""}>
+      <div className="grid gap-6 xl:grid-cols-[360px_1fr] xl:items-start">
+        {/* Process return: sticky on desktop so controls stay near viewport top */}
+        <Card
+          className={
+            selectedIssue
+              ? "border-brand-200 xl:sticky xl:top-4 xl:z-10"
+              : "xl:sticky xl:top-4 xl:z-10"
+          }
+        >
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <RotateCcw className="h-5 w-5 text-brand-600" />
@@ -178,13 +188,16 @@ export const LibraryReturnsPanel = () => {
                       name={selectedIssue.borrowerName?.trim() || "Student"}
                     />
                   ) : (
-                    (selectedIssue.borrowerName?.trim() || "—")
+                    selectedIssue.borrowerName?.trim() || "—"
                   )}
                 </p>
                 <p className="text-slate-600">
                   Issued: {selectedIssue.issuedDateBs}
                 </p>
                 <p className="text-slate-600">Due: {selectedIssue.dueDateBs}</p>
+                <p className="text-slate-600">
+                  Issued by: {formatIssuedByLabel(selectedIssue)}
+                </p>
                 <div className="mt-2">
                   <Badge
                     className={issueStatusStyles[selectedIssue.status] ?? ""}
@@ -233,7 +246,7 @@ export const LibraryReturnsPanel = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
             <CardTitle>Books to return</CardTitle>
             <div className="relative w-full max-w-xs">
@@ -246,38 +259,130 @@ export const LibraryReturnsPanel = () => {
               />
             </div>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHead>
+          <CardContent className="p-0 sm:p-0">
+            {/*
+              Constrained height so horizontal/vertical sliders sit at the bottom
+              of this table viewport (near the desktop bottom when focused),
+              not at the far bottom of the whole page after return history.
+            */}
+            <div className="max-h-[min(calc(100vh-16rem),560px)] overflow-auto overscroll-contain border-t border-slate-100">
+              <Table className="min-w-[720px]">
+                <TableHead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
+                  <tr>
+                    <Th>Book</Th>
+                    <Th>Code</Th>
+                    <Th>Borrower</Th>
+                    <Th>Issued</Th>
+                    <Th>Due</Th>
+                    <Th>Issued by</Th>
+                    <Th>Status</Th>
+                    <Th />
+                  </tr>
+                </TableHead>
+                <TableBody>
+                  {filteredActiveIssues.length === 0 ? (
+                    <tr>
+                      <Td
+                        colSpan={8}
+                        className="py-8 text-center text-slate-500"
+                      >
+                        {activeIssues.length === 0
+                          ? "No books are currently borrowed."
+                          : "No active borrows match your search."}
+                      </Td>
+                    </tr>
+                  ) : (
+                    filteredActiveIssues.map((issue) => (
+                      <tr
+                        key={issue._id}
+                        className={
+                          selectedIssueId === issue._id
+                            ? "bg-brand-50/60"
+                            : undefined
+                        }
+                      >
+                        <Td className="font-medium">
+                          {issue.bookTitle ?? "—"}
+                        </Td>
+                        <Td className="font-mono text-sm">
+                          {issue.bookCode ?? "—"}
+                        </Td>
+                        <Td>
+                          {issue.borrowerType === "STUDENT" &&
+                          resolveStudentId(issue.studentId) ? (
+                            <StudentNameLink
+                              studentId={resolveStudentId(issue.studentId)!}
+                              name={issue.borrowerName?.trim() || "Student"}
+                            />
+                          ) : (
+                            issue.borrowerName?.trim() || "—"
+                          )}
+                        </Td>
+                        <Td>{issue.issuedDateBs}</Td>
+                        <Td>{issue.dueDateBs}</Td>
+                        <Td className="max-w-[10rem] truncate text-sm">
+                          {formatIssuedByLabel(issue)}
+                        </Td>
+                        <Td>
+                          <Badge
+                            className={issueStatusStyles[issue.status] ?? ""}
+                          >
+                            {issue.status}
+                          </Badge>
+                        </Td>
+                        <Td>
+                          <Button
+                            size="sm"
+                            variant={
+                              selectedIssueId === issue._id
+                                ? "default"
+                                : "secondary"
+                            }
+                            onClick={() => selectIssue(issue)}
+                          >
+                            {selectedIssueId === issue._id
+                              ? "Selected"
+                              : "Return"}
+                          </Button>
+                        </Td>
+                      </tr>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Return history</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="max-h-[min(40vh,360px)] overflow-auto">
+            <Table className="min-w-[640px]">
+              <TableHead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                 <tr>
                   <Th>Book</Th>
                   <Th>Code</Th>
                   <Th>Borrower</Th>
                   <Th>Issued</Th>
                   <Th>Due</Th>
-                  <Th>Status</Th>
-                  <Th />
+                  <Th>Returned</Th>
+                  <Th>Issued by</Th>
                 </tr>
               </TableHead>
               <TableBody>
-                {filteredActiveIssues.length === 0 ? (
+                {(returnedIssuesQuery.data ?? []).length === 0 ? (
                   <tr>
                     <Td colSpan={7} className="py-8 text-center text-slate-500">
-                      {activeIssues.length === 0
-                        ? "No books are currently borrowed."
-                        : "No active borrows match your search."}
+                      No returned books recorded yet.
                     </Td>
                   </tr>
                 ) : (
-                  filteredActiveIssues.map((issue) => (
-                    <tr
-                      key={issue._id}
-                      className={
-                        selectedIssueId === issue._id
-                          ? "bg-brand-50/60"
-                          : undefined
-                      }
-                    >
+                  (returnedIssuesQuery.data ?? []).map((issue) => (
+                    <tr key={issue._id}>
                       <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
                       <Td className="font-mono text-sm">
                         {issue.bookCode ?? "—"}
@@ -290,91 +395,21 @@ export const LibraryReturnsPanel = () => {
                             name={issue.borrowerName?.trim() || "Student"}
                           />
                         ) : (
-                          (issue.borrowerName?.trim() || "—")
+                          issue.borrowerName?.trim() || "—"
                         )}
                       </Td>
                       <Td>{issue.issuedDateBs}</Td>
                       <Td>{issue.dueDateBs}</Td>
-                      <Td>
-                        <Badge
-                          className={issueStatusStyles[issue.status] ?? ""}
-                        >
-                          {issue.status}
-                        </Badge>
-                      </Td>
-                      <Td>
-                        <Button
-                          size="sm"
-                          variant={
-                            selectedIssueId === issue._id
-                              ? "default"
-                              : "secondary"
-                          }
-                          onClick={() => selectIssue(issue)}
-                        >
-                          {selectedIssueId === issue._id
-                            ? "Selected"
-                            : "Return"}
-                        </Button>
+                      <Td>{issue.returnedDateBs ?? "—"}</Td>
+                      <Td className="text-sm">
+                        {formatIssuedByLabel(issue)}
                       </Td>
                     </tr>
                   ))
                 )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Return history</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHead>
-              <tr>
-                <Th>Book</Th>
-                <Th>Code</Th>
-                <Th>Borrower</Th>
-                <Th>Issued</Th>
-                <Th>Due</Th>
-                <Th>Returned</Th>
-              </tr>
-            </TableHead>
-            <TableBody>
-              {(returnedIssuesQuery.data ?? []).length === 0 ? (
-                <tr>
-                  <Td colSpan={6} className="py-8 text-center text-slate-500">
-                    No returned books recorded yet.
-                  </Td>
-                </tr>
-              ) : (
-                (returnedIssuesQuery.data ?? []).map((issue) => (
-                  <tr key={issue._id}>
-                    <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
-                    <Td className="font-mono text-sm">
-                      {issue.bookCode ?? "—"}
-                    </Td>
-                    <Td>
-                      {issue.borrowerType === "STUDENT" &&
-                      resolveStudentId(issue.studentId) ? (
-                        <StudentNameLink
-                          studentId={resolveStudentId(issue.studentId)!}
-                          name={issue.borrowerName?.trim() || "Student"}
-                        />
-                      ) : (
-                        (issue.borrowerName?.trim() || "—")
-                      )}
-                    </Td>
-                    <Td>{issue.issuedDateBs}</Td>
-                    <Td>{issue.dueDateBs}</Td>
-                    <Td>{issue.returnedDateBs ?? "—"}</Td>
-                  </tr>
-                ))
-              )}
-            </TableBody>
-          </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

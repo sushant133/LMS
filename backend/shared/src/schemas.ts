@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-
+  BANNER_TARGET_ROLES,
   BLOOD_GROUPS,
   CLASS_LEVELS,
   COLLEGE_STAFF_CATEGORIES,
@@ -635,6 +635,8 @@ export const bannerSchema = z.object({
   imageUrl: z.string().min(1, "Banner image is required"),
   thumbnailUrl: z.string().optional(),
   isActive: z.boolean().default(true),
+  /** Who can see this banner on their dashboard (independent of notice visibility). */
+  visibleTo: z.array(z.enum(BANNER_TARGET_ROLES)).min(1, "Select at least one audience"),
   fileSizeBytes: z.number().optional(),
   width: z.number().optional(),
   height: z.number().optional(),

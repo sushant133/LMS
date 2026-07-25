@@ -20,6 +20,7 @@ import { cn } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
 import { useFieldCoordinatorAccess } from "hooks/useFieldCoordinatorAccess";
+import { useParentPortalAccess } from "hooks/useParentPortalAccess";
 import { useTeacherLabAccess } from "hooks/useTeacherLabAccess";
 import {
   getCollegeDisplayName,
@@ -284,6 +285,13 @@ const navItems: NavItem[] = [
     section: "administration",
   },
   {
+    /** Institutional finance archive — Admin / Superadmin only (not Accounting). */
+    labelKey: "financeManagement",
+    path: "/finance",
+    roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"],
+    section: "administration",
+  },
+  {
     labelKey: "transportManagement",
     path: "/transport",
     roles: [...institutionRoles, "COLLEGE_STAFF"],
@@ -393,6 +401,8 @@ export const AppLayout = () => {
   const staffMaySeeFieldManagement =
     hasFieldCoordinatorAccess ||
     (isStaffUser && fieldCoordAccessQuery.isLoading);
+  /** School-level parent portal section switches (Admin → Parent Management). */
+  const parentPortalAccess = useParentPortalAccess();
 
   useEffect(() => {
     if (!open) return;
@@ -501,6 +511,15 @@ export const AppLayout = () => {
 
   const isModuleAllowedForNav = (path: string): boolean => {
     if (isAdmin) return true;
+
+    // Parents: school-level portal access matrix (Parent Management)
+    if (effectiveRoles.has("PARENT") && normalizedRole === "PARENT") {
+      if (path.startsWith("/dashboard")) return true;
+      // While loading, show full parent menu to avoid flicker; API still enforces data.
+      if (parentPortalAccess.isLoading) return true;
+      return parentPortalAccess.canAccessPath(path);
+    }
+
     if (
       path.startsWith("/dashboard") ||
       path === "/notifications" ||
@@ -657,6 +676,8 @@ export const AppLayout = () => {
     staffMaySeeFieldManagement,
     moduleAccessConfigured,
     isAdmin,
+    parentPortalAccess.isLoading,
+    JSON.stringify(parentPortalAccess.modules),
     JSON.stringify(moduleAccessMap),
     hasTeachingCapability,
     hasAdminCapability,

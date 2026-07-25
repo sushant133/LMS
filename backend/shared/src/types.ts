@@ -992,6 +992,8 @@ export interface BannerRecord {
   imageUrl: string;
   thumbnailUrl?: string;
   isActive: boolean;
+  /** Roles/audiences that can see this banner on the dashboard. */
+  visibleTo: BannerTargetRole[];
   fileSizeBytes?: number;
   width?: number;
   height?: number;
@@ -1027,6 +1029,26 @@ export interface SchoolSettingsRecord {
     countLateAsPresent: boolean;
   };
   libraryInventoryAccess?: LibraryInventoryAccessConfig;
+  /**
+   * Which parent-facing portal sections are enabled for this school.
+   * Managed under Parent Management by Admin.
+   */
+  parentPortalAccess?: Partial<
+    Record<
+      | "overview"
+      | "attendance"
+      | "fees"
+      | "homework"
+      | "results"
+      | "timetable"
+      | "field-attendance"
+      | "notices"
+      | "notifications"
+      | "complaints"
+      | "library",
+      boolean
+    >
+  >;
   /** Per-school subject-assignment scope mode override (unset → env default) */
   subjectAssignmentScopeMode?: "legacy" | "dual" | "assignment";
   /** When true, new timetable slots must link subjectAssignmentId */

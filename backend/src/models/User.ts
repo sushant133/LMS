@@ -35,6 +35,11 @@ export interface UserDocument {
    * Keys: ERP module keys. Values: arrays of action strings.
    */
   moduleActions?: Record<string, string[]>;
+  /**
+   * Parent-only: per-parent portal section access (homework, results, fees, …).
+   * When unset/null, school defaults from Settings.parentPortalAccess apply.
+   */
+  parentPortalAccess?: Record<string, boolean> | null;
   comparePassword(candidate: string): Promise<boolean>;
 }
 
@@ -66,6 +71,11 @@ const userSchema = new Schema<UserDocument, UserModel>(
     moduleActions: {
       type: Map,
       of: [{ type: String, enum: MODULE_PERMISSION_ACTIONS }],
+      default: undefined
+    },
+    /** Parent portal section toggles; null/undefined → use school defaults */
+    parentPortalAccess: {
+      type: Schema.Types.Mixed,
       default: undefined
     }
   },

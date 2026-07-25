@@ -546,7 +546,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    await User.create(
+    const [libraryStaffUser] = await User.create(
       [
         {
           schoolId,
@@ -920,6 +920,7 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
           copyId: demoCopies[0]!._id,
           bookCode: demoCopies[0]!.bookCode,
           studentId: students[0]!.profile._id,
+          issuedByUserId: libraryStaffUser!._id,
           issuedDateBs: "2081-09-01",
           dueDateBs: "2081-09-20",
           status: "ISSUED"

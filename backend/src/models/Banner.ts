@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { BANNER_TARGET_ROLES } from "@phit-erp/shared";
 
 const bannerSchema = new Schema(
   {
@@ -6,6 +7,15 @@ const bannerSchema = new Schema(
     imageUrl: { type: String, required: true },
     thumbnailUrl: { type: String },
     isActive: { type: Boolean, default: true },
+    /** Dashboard audiences who can see this banner (separate from notice visibility). */
+    visibleTo: {
+      type: [{ type: String, enum: BANNER_TARGET_ROLES }],
+      default: () => [...BANNER_TARGET_ROLES],
+      validate: {
+        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
+        message: "Select at least one audience for Visible to"
+      }
+    },
     fileSizeBytes: { type: Number },
     width: { type: Number },
     height: { type: Number },

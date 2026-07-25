@@ -771,7 +771,8 @@ export const DashboardPage = () => {
           actions={[
             { label: "Students", href: "/students" },
             { label: "Attendance", href: "/attendance-view" },
-            { label: "Financial Records", href: "/accounting" },
+            { label: "Accounting", href: "/accounting" },
+            { label: "Finance Management", href: "/finance" },
             { label: "Exams & Results", href: "/exams-view" },
             { label: "Timetable", href: "/timetable" },
             { label: "IEMIS Reports", href: "/reports" },

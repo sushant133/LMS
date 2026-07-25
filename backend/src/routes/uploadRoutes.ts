@@ -3,6 +3,7 @@ import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 import {
   uploadAccountingHandler,
+  uploadFinanceHandler,
   uploadBannerImageHandler,
   uploadClassroomAttachmentsHandler,
   uploadAcademicAttachmentsHandler,
@@ -23,6 +24,7 @@ import {
 import {
   uploadAcademicAttachments,
   uploadAccountingAttachments,
+  uploadFinanceAttachments,
   uploadAssignmentAttachments,
   uploadBannerImage,
   uploadClassroomAttachments,
@@ -198,6 +200,16 @@ router.post(
   authorize(...adminRoles, "ACCOUNTANT", "CASHIER", "AUDITOR"),
   uploadAccountingAttachments,
   uploadAccountingHandler
+);
+
+// ─── Finance Management (Admin / Superadmin only — no accountant/viewer) ────
+router.post(
+  "/finance",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
+  // Note: COLLEGE_VIEWER gets GET-only pass on authorize when COLLEGE_ADMIN is listed;
+  // POST is still blocked for viewers. Only SUPER_ADMIN / COLLEGE_ADMIN may upload.
+  uploadFinanceAttachments,
+  uploadFinanceHandler
 );
 
 // ─── Academic management ────────────────────────────────────────────────────

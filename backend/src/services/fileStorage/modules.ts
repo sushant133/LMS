@@ -23,6 +23,8 @@ export const UPLOAD_MODULES = {
   LABORATORY: "laboratory",
   INVENTORY: "inventory",
   ACCOUNTING: "accounting",
+  /** Finance Management archive (bills, receipts) — separate from Accounting */
+  FINANCE: "finance",
   PROFILE: "profile",
   TEMP: "temp",
   /** Operational modules used by existing features */
@@ -50,6 +52,7 @@ export const REQUIRED_UPLOAD_FOLDERS: readonly UploadModuleKey[] = [
   UPLOAD_MODULES.LABORATORY,
   UPLOAD_MODULES.INVENTORY,
   UPLOAD_MODULES.ACCOUNTING,
+  UPLOAD_MODULES.FINANCE,
   UPLOAD_MODULES.PROFILE,
   UPLOAD_MODULES.TEMP,
   UPLOAD_MODULES.COMPLAINTS,

@@ -4,9 +4,13 @@ import {
   createParentLink,
   deleteParentLink,
   getParentPortal,
+  getParentPortalAccess,
+  getParentUserPortalAccess,
   getStudentParentCandidates,
   listParentLinks,
-  listParentUsers
+  listParentUsers,
+  updateParentPortalAccess,
+  updateParentUserPortalAccess
 } from "../controllers/parentController.js";
 import {
   approveParentRegistration,
@@ -20,6 +24,25 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/portal", getParentPortal);
+/** Parents: own effective access. Admins: school defaults. */
+router.get("/portal-access", getParentPortalAccess);
+/** School-wide defaults (used when a parent has no personal override). */
+router.put(
+  "/portal-access",
+  authorizeInstitutionAdmin,
+  updateParentPortalAccess
+);
+/** Per-parent module access (Admin only). */
+router.get(
+  "/users/:parentUserId/portal-access",
+  authorizeInstitutionAdmin,
+  getParentUserPortalAccess
+);
+router.put(
+  "/users/:parentUserId/portal-access",
+  authorizeInstitutionAdmin,
+  updateParentUserPortalAccess
+);
 router.get("/users", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listParentUsers);
 router.get("/students/:studentId/candidates", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getStudentParentCandidates);
 router.get("/links", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listParentLinks);

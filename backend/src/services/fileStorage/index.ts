@@ -74,6 +74,7 @@ export {
   uploadLaboratoryAttachments,
   uploadInventoryAttachments,
   uploadAccountingAttachments,
+  uploadFinanceAttachments,
   uploadProfilePhoto,
   uploadComplaintAttachments,
   uploadAcademicAttachments,

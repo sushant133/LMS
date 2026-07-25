@@ -52,6 +52,7 @@ const MyLibraryPage = lazy(() => import("pages/MyLibraryPage").then((module) => 
 const TransportPage = lazy(() => import("pages/TransportPage").then((module) => ({ default: module.TransportPage })));
 const HrPage = lazy(() => import("pages/HrPage").then((module) => ({ default: module.HrPage })));
 const AccountingPage = lazy(() => import("pages/AccountingPage").then((module) => ({ default: module.AccountingPage })));
+const FinancePage = lazy(() => import("pages/FinancePage").then((module) => ({ default: module.FinancePage })));
 const AdminManagementPage = lazy(() => import("pages/AdminManagementPage").then((module) => ({ default: module.AdminManagementPage })));
 const CollegeAdministratorManagementPage = lazy(() =>
   import("pages/CollegeAdministratorManagementPage").then((module) => ({ default: module.CollegeAdministratorManagementPage }))
@@ -277,6 +278,18 @@ export default function App() {
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"]} />}>
               <Route path="/accounting" element={<AccountingPage />} />
+            </Route>
+
+            {/* Finance Management: Admin & Superadmin only — independent of Accounting */}
+            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
+              <Route
+                path="/finance"
+                element={
+                  <LazyRoute>
+                    <FinancePage />
+                  </LazyRoute>
+                }
+              />
             </Route>
 
             <Route

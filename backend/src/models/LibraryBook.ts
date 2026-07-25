@@ -75,6 +75,8 @@ const libraryIssueSchema = new Schema(
     borrowerType: { type: String, enum: ["STUDENT", "TEACHER"], default: "STUDENT" },
     studentId: { type: Schema.Types.ObjectId, ref: "Student" },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher" },
+    /** User who issued the book (admin or library staff). */
+    issuedByUserId: { type: Schema.Types.ObjectId, ref: "User" },
     issuedDateBs: { type: String, required: true },
     dueDateBs: { type: String, required: true },
     returnedDateBs: { type: String },

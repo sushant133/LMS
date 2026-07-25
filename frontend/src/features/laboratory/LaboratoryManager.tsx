@@ -54,6 +54,7 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
@@ -1576,27 +1577,64 @@ export const LaboratoryManager = () => {
                   {/* Panel 2: Equipment inventory */}
                   <div className="w-1/2 shrink-0 px-1 sm:px-0">
                     <Card className="border-0 shadow-none">
-                      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                        <div>
-                          <CardTitle className="text-base">
-                            Equipment inventory
-                          </CardTitle>
-                          <p className="mt-0.5 text-xs text-slate-500">
-                            {equipmentQuery.isLoading
-                              ? "Loading…"
-                              : `${equipment.length} item${equipment.length === 1 ? "" : "s"}`}
-                            {labFilter ? ` · filtered by laboratory` : ""}
-                          </p>
+                      <CardHeader className="space-y-3 border-b border-slate-100 pb-3">
+                        <div className="flex flex-row flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <CardTitle className="text-base">
+                              Equipment inventory
+                            </CardTitle>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              {equipmentQuery.isLoading
+                                ? "Loading…"
+                                : `${equipment.length} item${equipment.length === 1 ? "" : "s"}`}
+                              {labFilter
+                                ? ` · ${
+                                    labOptions.find((l) => l._id === labFilter)
+                                      ?.name ?? "selected lab"
+                                  }`
+                                : " · all laboratories"}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setInventorySlide(0)}
+                          >
+                            <ChevronLeft className="mr-1 h-4 w-4" />
+                            Update stock
+                          </Button>
                         </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setInventorySlide(0)}
-                        >
-                          <ChevronLeft className="mr-1 h-4 w-4" />
-                          Update stock
-                        </Button>
+                        <div className="flex flex-wrap items-end gap-2">
+                          <div className="min-w-[12rem] flex-1">
+                            <label className="mb-1 block text-xs font-medium text-slate-600">
+                              Filter by laboratory
+                            </label>
+                            <Select
+                              value={labFilter}
+                              onChange={(e) => setLabFilter(e.target.value)}
+                            >
+                              <option value="">All laboratories</option>
+                              {labOptions.map((lab) => (
+                                <option key={lab._id} value={lab._id}>
+                                  {lab.yearLevel ? `[${lab.yearLevel}] ` : ""}
+                                  {lab.name}
+                                </option>
+                              ))}
+                            </Select>
+                          </div>
+                          {labFilter ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-10"
+                              onClick={() => setLabFilter("")}
+                            >
+                              Clear lab
+                            </Button>
+                          ) : null}
+                        </div>
                       </CardHeader>
                       <CardContent className="p-0">
                         {equipmentQuery.isLoading ? (
@@ -1615,143 +1653,193 @@ export const LaboratoryManager = () => {
                             </p>
                           </div>
                         ) : (
-                          <div className="overflow-x-auto">
-                            <Table>
-                              <TableHead>
-                                <tr className="bg-slate-50/80">
-                                  <Th>Item</Th>
-                                  <Th>Lab</Th>
-                                  <Th>Code</Th>
-                                  <Th className="text-right">Total</Th>
-                                  <Th className="text-right">Avail.</Th>
-                                  <Th className="text-right">Min</Th>
-                                  <Th className="text-right">Max</Th>
-                                  <Th>Condition</Th>
-                                  <Th>Stock</Th>
-                                  <Th className="text-right">Actions</Th>
-                                </tr>
-                              </TableHead>
-                              <TableBody>
-                                {equipment.map((item) => {
-                                  const isSelected =
-                                    stockAction.equipmentId === item._id;
-                                  return (
-                                    <tr
-                                      key={item._id}
-                                      className={cn(
-                                        "transition-colors",
-                                        isSelected && "bg-brand-50/70",
-                                      )}
-                                    >
-                                      <Td className="min-w-[160px]">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <span className="font-medium text-slate-900">
-                                            {item.name}
-                                          </span>
-                                          <Badge className="bg-indigo-100 text-indigo-800">
-                                            {item.yearLevel ?? "All Years"}
-                                          </Badge>
-                                        </div>
-                                        <div className="mt-0.5 text-xs text-slate-500">
-                                          {item.itemKind === "DISPOSABLE"
-                                            ? "Disposable / Destroyable"
-                                            : "Non-Disposable / Non-Destroyable"}
-                                          {item.categoryName
-                                            ? ` · ${item.categoryName}`
-                                            : ""}
-                                          {item.storageLocation
-                                            ? ` · ${item.storageLocation}`
-                                            : ""}
-                                        </div>
-                                      </Td>
-                                      <Td className="text-sm text-slate-700">
-                                        {item.laboratoryName ?? "—"}
-                                      </Td>
-                                      <Td className="font-mono text-xs text-slate-600">
-                                        {item.itemCode || "—"}
-                                      </Td>
-                                      <Td className="text-right tabular-nums">
-                                        {item.quantity}
-                                      </Td>
-                                      <Td className="text-right tabular-nums font-medium text-emerald-700">
-                                        {item.availableQuantity}
-                                      </Td>
-                                      <Td className="text-right tabular-nums text-slate-600">
-                                        {item.minimumStockLevel ?? 0}
-                                      </Td>
-                                      <Td className="text-right tabular-nums text-slate-600">
-                                        {(item.maximumStockLevel ?? 0) > 0
-                                          ? item.maximumStockLevel
-                                          : "—"}
-                                      </Td>
-                                      <Td className="text-sm">
-                                        {item.condition ?? "—"}
-                                      </Td>
-                                      <Td>
-                                        <StockStatusBadge status={item.status} />
-                                      </Td>
-                                      <Td className="text-right">
-                                        <div className="flex flex-wrap justify-end gap-1">
-                                          <Button
-                                            size="sm"
-                                            variant={
-                                              isSelected ? "default" : "secondary"
-                                            }
-                                            title="Adjust stock"
-                                            onClick={() => beginStockAdjust(item)}
-                                          >
-                                            <Package className="mr-1 h-3.5 w-3.5" />
-                                            Stock
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            title="Edit equipment"
-                                            onClick={() =>
-                                              beginEditEquipment(item)
-                                            }
-                                          >
-                                            <Pencil className="mr-1 h-3.5 w-3.5" />
-                                            Edit
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            title="Create purchase request"
-                                            onClick={() =>
-                                              fillRequestFromEquipment(item)
-                                            }
-                                          >
-                                            <ShoppingCart className="mr-1 h-3.5 w-3.5" />
-                                            Request
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                                            title="Delete equipment"
-                                            disabled={deleteEquipment.isPending}
-                                            onClick={() => {
-                                              if (
-                                                confirm(
-                                                  `Delete equipment "${item.name}" (${item.itemCode || "no code"})?\n\nThis cannot be undone. Items with active issues cannot be deleted.`,
-                                                )
-                                              ) {
-                                                deleteEquipment.mutate(item._id);
+                          <StickyTableScroll
+                            header={
+                              <Table className="w-full min-w-[1100px] table-fixed">
+                                <colgroup>
+                                  <col className="w-[20%]" />
+                                  <col className="w-[12%]" />
+                                  <col className="w-[9%]" />
+                                  <col className="w-[7%]" />
+                                  <col className="w-[7%]" />
+                                  <col className="w-[6%]" />
+                                  <col className="w-[6%]" />
+                                  <col className="w-[9%]" />
+                                  <col className="w-[8%]" />
+                                  <col className="w-[16%]" />
+                                </colgroup>
+                                <TableHead>
+                                  <tr>
+                                    <Th className="bg-slate-50">Item</Th>
+                                    <Th className="bg-slate-50">Lab</Th>
+                                    <Th className="bg-slate-50">Code</Th>
+                                    <Th className="bg-slate-50 text-right">
+                                      Total
+                                    </Th>
+                                    <Th className="bg-slate-50 text-right">
+                                      Avail.
+                                    </Th>
+                                    <Th className="bg-slate-50 text-right">
+                                      Min
+                                    </Th>
+                                    <Th className="bg-slate-50 text-right">
+                                      Max
+                                    </Th>
+                                    <Th className="bg-slate-50">Condition</Th>
+                                    <Th className="bg-slate-50">Stock</Th>
+                                    <Th className="bg-slate-50 text-right">
+                                      Actions
+                                    </Th>
+                                  </tr>
+                                </TableHead>
+                              </Table>
+                            }
+                            body={
+                              <Table className="w-full min-w-[1100px] table-fixed">
+                                <colgroup>
+                                  <col className="w-[20%]" />
+                                  <col className="w-[12%]" />
+                                  <col className="w-[9%]" />
+                                  <col className="w-[7%]" />
+                                  <col className="w-[7%]" />
+                                  <col className="w-[6%]" />
+                                  <col className="w-[6%]" />
+                                  <col className="w-[9%]" />
+                                  <col className="w-[8%]" />
+                                  <col className="w-[16%]" />
+                                </colgroup>
+                                <TableBody>
+                                  {equipment.map((item) => {
+                                    const isSelected =
+                                      stockAction.equipmentId === item._id;
+                                    return (
+                                      <tr
+                                        key={item._id}
+                                        className={cn(
+                                          "transition-colors",
+                                          isSelected && "bg-brand-50/70",
+                                        )}
+                                      >
+                                        <Td>
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="font-medium text-slate-900">
+                                              {item.name}
+                                            </span>
+                                            <Badge className="bg-indigo-100 text-indigo-800">
+                                              {item.yearLevel ?? "All Years"}
+                                            </Badge>
+                                          </div>
+                                          <div className="mt-0.5 text-xs text-slate-500">
+                                            {item.itemKind === "DISPOSABLE"
+                                              ? "Disposable / Destroyable"
+                                              : "Non-Disposable / Non-Destroyable"}
+                                            {item.categoryName
+                                              ? ` · ${item.categoryName}`
+                                              : ""}
+                                            {item.storageLocation
+                                              ? ` · ${item.storageLocation}`
+                                              : ""}
+                                          </div>
+                                        </Td>
+                                        <Td className="text-sm text-slate-700">
+                                          {item.laboratoryName ?? "—"}
+                                        </Td>
+                                        <Td className="font-mono text-xs text-slate-600">
+                                          {item.itemCode || "—"}
+                                        </Td>
+                                        <Td className="text-right tabular-nums">
+                                          {item.quantity}
+                                        </Td>
+                                        <Td className="text-right tabular-nums font-medium text-emerald-700">
+                                          {item.availableQuantity}
+                                        </Td>
+                                        <Td className="text-right tabular-nums text-slate-600">
+                                          {item.minimumStockLevel ?? 0}
+                                        </Td>
+                                        <Td className="text-right tabular-nums text-slate-600">
+                                          {(item.maximumStockLevel ?? 0) > 0
+                                            ? item.maximumStockLevel
+                                            : "—"}
+                                        </Td>
+                                        <Td className="text-sm">
+                                          {item.condition ?? "—"}
+                                        </Td>
+                                        <Td>
+                                          <StockStatusBadge
+                                            status={item.status}
+                                          />
+                                        </Td>
+                                        <Td className="text-right">
+                                          <div className="flex flex-wrap justify-end gap-1">
+                                            <Button
+                                              size="sm"
+                                              variant={
+                                                isSelected
+                                                  ? "default"
+                                                  : "secondary"
                                               }
-                                            }}
-                                          >
-                                            <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                            Delete
-                                          </Button>
-                                        </div>
-                                      </Td>
-                                    </tr>
-                                  );
-                                })}
-                              </TableBody>
-                            </Table>
-                          </div>
+                                              title="Adjust stock"
+                                              onClick={() =>
+                                                beginStockAdjust(item)
+                                              }
+                                            >
+                                              <Package className="mr-1 h-3.5 w-3.5" />
+                                              Stock
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="secondary"
+                                              title="Edit equipment"
+                                              onClick={() =>
+                                                beginEditEquipment(item)
+                                              }
+                                            >
+                                              <Pencil className="mr-1 h-3.5 w-3.5" />
+                                              Edit
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="secondary"
+                                              title="Create purchase request"
+                                              onClick={() =>
+                                                fillRequestFromEquipment(item)
+                                              }
+                                            >
+                                              <ShoppingCart className="mr-1 h-3.5 w-3.5" />
+                                              Request
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                              title="Delete equipment"
+                                              disabled={
+                                                deleteEquipment.isPending
+                                              }
+                                              onClick={() => {
+                                                if (
+                                                  confirm(
+                                                    `Delete equipment "${item.name}" (${item.itemCode || "no code"})?\n\nThis cannot be undone. Items with active issues cannot be deleted.`,
+                                                  )
+                                                ) {
+                                                  deleteEquipment.mutate(
+                                                    item._id,
+                                                  );
+                                                }
+                                              }}
+                                            >
+                                              <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                              Delete
+                                            </Button>
+                                          </div>
+                                        </Td>
+                                      </tr>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            }
+                          />
                         )}
                       </CardContent>
                     </Card>
@@ -1870,112 +1958,234 @@ export const LaboratoryManager = () => {
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between gap-3">
-                <CardTitle>Required items / purchase workflow</CardTitle>
-                <Select
-                  value={requestStatusFilter}
-                  onChange={(e) => setRequestStatusFilter(e.target.value)}
-                  className="w-40"
-                >
-                  <option value="">All statuses</option>
-                  <option value="PENDING">Pending</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="PURCHASED">Purchased</option>
-                  <option value="RECEIVED">Received</option>
-                  <option value="REJECTED">Rejected</option>
-                </Select>
+              <CardHeader className="space-y-3">
+                <div className="flex flex-row flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>Required items / purchase workflow</CardTitle>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {requestsQuery.isLoading
+                        ? "Loading…"
+                        : `${requests.length} request${requests.length === 1 ? "" : "s"}`}
+                      {labFilter
+                        ? ` · ${
+                            labOptions.find((l) => l._id === labFilter)?.name ??
+                            "selected lab"
+                          }`
+                        : " · all laboratories"}
+                      {requestStatusFilter
+                        ? ` · status: ${requestStatusFilter}`
+                        : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[12rem] flex-1 sm:flex-none sm:w-56">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Laboratory
+                    </label>
+                    <Select
+                      value={labFilter}
+                      onChange={(e) => setLabFilter(e.target.value)}
+                    >
+                      <option value="">All laboratories</option>
+                      {labOptions.map((lab) => (
+                        <option key={lab._id} value={lab._id}>
+                          {lab.yearLevel ? `[${lab.yearLevel}] ` : ""}
+                          {lab.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="min-w-[10rem] flex-1 sm:flex-none sm:w-44">
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Status
+                    </label>
+                    <Select
+                      value={requestStatusFilter}
+                      onChange={(e) => setRequestStatusFilter(e.target.value)}
+                    >
+                      <option value="">All statuses</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="APPROVED">Approved</option>
+                      <option value="PURCHASED">Purchased</option>
+                      <option value="RECEIVED">Received</option>
+                      <option value="REJECTED">Rejected</option>
+                    </Select>
+                  </div>
+                  {labFilter || requestStatusFilter ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-10"
+                      onClick={() => {
+                        setLabFilter("");
+                        setRequestStatusFilter("");
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  ) : null}
+                </div>
               </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Lab</Th>
-                      <Th>Equipment</Th>
-                      <Th>Current</Th>
-                      <Th>Min</Th>
-                      <Th>Required</Th>
-                      <Th>Priority</Th>
-                      <Th>Requested by</Th>
-                      <Th>Date</Th>
-                      <Th>Status</Th>
-                      {isAdmin ? <Th>Actions</Th> : null}
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {requests.map((req) => (
-                      <tr key={req._id}>
-                        <Td>{req.laboratoryName ?? "—"}</Td>
-                        <Td>
-                          <div className="font-medium">{req.equipmentName}</div>
-                          <div className="text-xs text-slate-500">
-                            {req.autoGenerated ? "Auto low-stock" : "Manual"}
-                            {req.categoryName ? ` · ${req.categoryName}` : ""}
-                          </div>
-                        </Td>
-                        <Td>{req.currentStock}</Td>
-                        <Td>{req.minimumStock}</Td>
-                        <Td>{req.requiredQuantity}</Td>
-                        <Td>{req.priority}</Td>
-                        <Td>{req.requestedByName ?? "—"}</Td>
-                        <Td>{req.requestDateBs}</Td>
-                        <Td>
-                          <Badge className={requestStatusStyles[req.status]}>{req.status}</Badge>
-                        </Td>
-                        {isAdmin ? (
-                          <Td className="space-x-1 whitespace-nowrap">
-                            {req.status === "PENDING" ? (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() =>
-                                    updateRequestStatus.mutate({ id: req._id, status: "APPROVED" })
-                                  }
+              <CardContent className="p-0">
+                {requests.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-sm text-slate-500">
+                    No stock requests match this filter.
+                    {labFilter || requestStatusFilter
+                      ? " Try another laboratory or status."
+                      : ""}
+                  </div>
+                ) : (
+                  <StickyTableScroll
+                    header={
+                      <Table className="w-full min-w-[1100px] table-fixed">
+                        <colgroup>
+                          <col className="w-[12%]" />
+                          <col className="w-[18%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[6%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[12%]" />
+                          <col className="w-[9%]" />
+                          <col className="w-[9%]" />
+                          {isAdmin ? <col className="w-[11%]" /> : null}
+                        </colgroup>
+                        <TableHead>
+                          <tr>
+                            <Th className="bg-slate-50">Lab</Th>
+                            <Th className="bg-slate-50">Equipment</Th>
+                            <Th className="bg-slate-50">Current</Th>
+                            <Th className="bg-slate-50">Min</Th>
+                            <Th className="bg-slate-50">Required</Th>
+                            <Th className="bg-slate-50">Priority</Th>
+                            <Th className="bg-slate-50">Requested by</Th>
+                            <Th className="bg-slate-50">Date</Th>
+                            <Th className="bg-slate-50">Status</Th>
+                            {isAdmin ? (
+                              <Th className="bg-slate-50 text-right">Actions</Th>
+                            ) : null}
+                          </tr>
+                        </TableHead>
+                      </Table>
+                    }
+                    body={
+                      <Table className="w-full min-w-[1100px] table-fixed">
+                        <colgroup>
+                          <col className="w-[12%]" />
+                          <col className="w-[18%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[6%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[12%]" />
+                          <col className="w-[9%]" />
+                          <col className="w-[9%]" />
+                          {isAdmin ? <col className="w-[11%]" /> : null}
+                        </colgroup>
+                        <TableBody>
+                          {requests.map((req) => (
+                            <tr
+                              key={req._id}
+                              className="bg-white hover:bg-slate-50/80"
+                            >
+                              <Td>{req.laboratoryName ?? "—"}</Td>
+                              <Td>
+                                <div className="font-medium">
+                                  {req.equipmentName}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                  {req.autoGenerated
+                                    ? "Auto low-stock"
+                                    : "Manual"}
+                                  {req.categoryName
+                                    ? ` · ${req.categoryName}`
+                                    : ""}
+                                </div>
+                              </Td>
+                              <Td>{req.currentStock}</Td>
+                              <Td>{req.minimumStock}</Td>
+                              <Td>{req.requiredQuantity}</Td>
+                              <Td>{req.priority}</Td>
+                              <Td>{req.requestedByName ?? "—"}</Td>
+                              <Td>{req.requestDateBs}</Td>
+                              <Td>
+                                <Badge
+                                  className={requestStatusStyles[req.status]}
                                 >
-                                  Approve
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() =>
-                                    updateRequestStatus.mutate({ id: req._id, status: "REJECTED" })
-                                  }
-                                >
-                                  Reject
-                                </Button>
-                              </>
-                            ) : null}
-                            {req.status === "APPROVED" ? (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() =>
-                                  updateRequestStatus.mutate({ id: req._id, status: "PURCHASED" })
-                                }
-                              >
-                                Purchased
-                              </Button>
-                            ) : null}
-                            {req.status === "PURCHASED" || req.status === "APPROVED" ? (
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  updateRequestStatus.mutate({
-                                    id: req._id,
-                                    status: "RECEIVED",
-                                    receivedQuantity: req.requiredQuantity,
-                                  })
-                                }
-                              >
-                                Received
-                              </Button>
-                            ) : null}
-                          </Td>
-                        ) : null}
-                      </tr>
-                    ))}
-                  </TableBody>
-                </Table>
+                                  {req.status}
+                                </Badge>
+                              </Td>
+                              {isAdmin ? (
+                                <Td className="space-x-1 whitespace-nowrap text-right">
+                                  {req.status === "PENDING" ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() =>
+                                          updateRequestStatus.mutate({
+                                            id: req._id,
+                                            status: "APPROVED",
+                                          })
+                                        }
+                                      >
+                                        Approve
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() =>
+                                          updateRequestStatus.mutate({
+                                            id: req._id,
+                                            status: "REJECTED",
+                                          })
+                                        }
+                                      >
+                                        Reject
+                                      </Button>
+                                    </>
+                                  ) : null}
+                                  {req.status === "APPROVED" ? (
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      onClick={() =>
+                                        updateRequestStatus.mutate({
+                                          id: req._id,
+                                          status: "PURCHASED",
+                                        })
+                                      }
+                                    >
+                                      Purchased
+                                    </Button>
+                                  ) : null}
+                                  {req.status === "PURCHASED" ||
+                                  req.status === "APPROVED" ? (
+                                    <Button
+                                      size="sm"
+                                      onClick={() =>
+                                        updateRequestStatus.mutate({
+                                          id: req._id,
+                                          status: "RECEIVED",
+                                          receivedQuantity:
+                                            req.requiredQuantity,
+                                        })
+                                      }
+                                    >
+                                      Received
+                                    </Button>
+                                  ) : null}
+                                </Td>
+                              ) : null}
+                            </tr>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    }
+                  />
+                )}
               </CardContent>
             </Card>
           </div>

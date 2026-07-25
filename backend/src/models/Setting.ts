@@ -65,6 +65,27 @@ const libraryInventoryAccessSchema = new Schema(
   { _id: false }
 );
 
+/**
+ * Which parent portal / My Work sections parents may use.
+ * Stored as a flat map of module key → boolean (defaults true when unset).
+ */
+const parentPortalAccessSchema = new Schema(
+  {
+    overview: { type: Boolean, default: true },
+    attendance: { type: Boolean, default: true },
+    fees: { type: Boolean, default: true },
+    homework: { type: Boolean, default: true },
+    results: { type: Boolean, default: true },
+    timetable: { type: Boolean, default: true },
+    "field-attendance": { type: Boolean, default: true },
+    notices: { type: Boolean, default: true },
+    notifications: { type: Boolean, default: true },
+    complaints: { type: Boolean, default: true },
+    library: { type: Boolean, default: true }
+  },
+  { _id: false }
+);
+
 const settingSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, unique: true, index: true },
@@ -80,6 +101,7 @@ const settingSchema = new Schema(
     dailyAttendance: { type: dailyAttendanceConfigSchema, default: () => ({}) },
     fieldAttendance: { type: fieldAttendanceConfigSchema, default: () => ({}) },
     libraryInventoryAccess: { type: libraryInventoryAccessSchema, default: () => ({}) },
+    parentPortalAccess: { type: parentPortalAccessSchema, default: () => ({}) },
     /** Per-school override for subject-assignment scope mode (unset → env default) */
     subjectAssignmentScopeMode: {
       type: String,

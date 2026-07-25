@@ -30,6 +30,13 @@ import {
   resolveUniqueParentLoginId
 } from "../utils/parentProfile.js";
 import { approvedParentLinkFilter, getLinkedStudentIds } from "../utils/parentScope.js";
+import {
+  getEffectiveParentPortalAccess,
+  getParentPortalAccessForSchool,
+  setParentPortalAccessForSchool,
+  setParentUserPortalAccess,
+  toParentPortalAccessResponse
+} from "../utils/parentPortalAccess.js";
 import { sendSuccess } from "../utils/response.js";
 import {
   abortTransaction,
@@ -313,12 +320,171 @@ export const deleteParentLink = asyncHandler(async (req: Request, res: Response)
   return sendSuccess(res, "Parent link removed");
 });
 
+/** Current user's effective access (parents) or school defaults (admin). */
+export const getParentPortalAccess = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  if (!schoolId) {
+    throw new ApiError(400, "School context required");
+  }
+
+  // Parent: effective access for self
+  if (req.user?.role === "PARENT") {
+    const effective = await getEffectiveParentPortalAccess(
+      schoolId.toString(),
+      req.user.userId
+    );
+    return sendSuccess(
+      res,
+      "Parent portal access fetched",
+      toParentPortalAccessResponse(effective.modules, {
+        parentUserId: req.user.userId,
+        useSchoolDefaults: effective.useSchoolDefaults,
+        schoolDefaults: effective.schoolDefaults,
+        customModules: effective.customModules
+      })
+    );
+  }
+
+  // Admin: school defaults (legacy endpoint)
+  const modules = await getParentPortalAccessForSchool(schoolId.toString());
+  return sendSuccess(
+    res,
+    "Parent portal access (school defaults) fetched",
+    toParentPortalAccessResponse(modules, {
+      useSchoolDefaults: true,
+      schoolDefaults: modules,
+      customModules: null
+    })
+  );
+});
+
+/** School-wide defaults used when a parent has no personal override. */
+export const updateParentPortalAccess = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  if (!schoolId) {
+    throw new ApiError(400, "School context required");
+  }
+
+  const body = req.body as { modules?: Record<string, boolean> };
+  if (!body?.modules || typeof body.modules !== "object") {
+    throw new ApiError(400, "modules map is required");
+  }
+
+  const modules = await setParentPortalAccessForSchool(
+    schoolId.toString(),
+    body.modules
+  );
+  return sendSuccess(
+    res,
+    "School parent portal defaults updated",
+    toParentPortalAccessResponse(modules, {
+      useSchoolDefaults: true,
+      schoolDefaults: modules,
+      customModules: null
+    })
+  );
+});
+
+const paramId = (value: string | string[] | undefined): string =>
+  Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+
+/** Admin: effective + custom access for one parent. */
+export const getParentUserPortalAccess = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  if (!schoolId) {
+    throw new ApiError(400, "School context required");
+  }
+  const parentUserId = paramId(req.params.parentUserId);
+  if (!parentUserId) {
+    throw new ApiError(400, "Parent id is required");
+  }
+  const parent = await User.findOne({
+    _id: parentUserId,
+    role: "PARENT",
+    schoolId
+  })
+    .select("fullName email")
+    .lean();
+  if (!parent) {
+    throw new ApiError(404, "Parent not found");
+  }
+
+  const effective = await getEffectiveParentPortalAccess(
+    schoolId.toString(),
+    parentUserId
+  );
+  return sendSuccess(
+    res,
+    "Parent user portal access fetched",
+    toParentPortalAccessResponse(effective.modules, {
+      parentUserId,
+      parentName: parent.fullName,
+      parentEmail: parent.email,
+      useSchoolDefaults: effective.useSchoolDefaults,
+      schoolDefaults: effective.schoolDefaults,
+      customModules: effective.customModules
+    })
+  );
+});
+
+/** Admin: set or clear personal module access for one parent. */
+export const updateParentUserPortalAccess = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  if (!schoolId) {
+    throw new ApiError(400, "School context required");
+  }
+  const parentUserId = paramId(req.params.parentUserId);
+  if (!parentUserId) {
+    throw new ApiError(400, "Parent id is required");
+  }
+  const body = req.body as {
+    modules?: Record<string, boolean>;
+    useSchoolDefaults?: boolean;
+  };
+
+  try {
+    const effective = await setParentUserPortalAccess(schoolId.toString(), parentUserId, {
+      useSchoolDefaults: body.useSchoolDefaults === true,
+      modules: body.modules
+    });
+    const parent = await User.findById(parentUserId).select("fullName email").lean();
+    return sendSuccess(
+      res,
+      body.useSchoolDefaults
+        ? "Parent now uses school default portal access"
+        : "Parent portal access updated",
+      toParentPortalAccessResponse(effective.modules, {
+        parentUserId,
+        parentName: parent?.fullName,
+        parentEmail: parent?.email,
+        useSchoolDefaults: effective.useSchoolDefaults,
+        schoolDefaults: effective.schoolDefaults,
+        customModules: effective.customModules
+      })
+    );
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "";
+    if (msg === "PARENT_NOT_FOUND") {
+      throw new ApiError(404, "Parent not found");
+    }
+    if (msg === "MODULES_REQUIRED") {
+      throw new ApiError(400, "modules map is required when not using school defaults");
+    }
+    throw error;
+  }
+});
+
 export const getParentPortal = asyncHandler(async (req: Request, res: Response) => {
   if (req.user?.role !== "PARENT") {
     throw new ApiError(403, "Parent portal is only available to parent accounts");
   }
 
   const schoolId = tenantObjectId(req);
+  const effective = await getEffectiveParentPortalAccess(
+    String(schoolId),
+    req.user.userId
+  );
+  const portalAccess = effective.modules;
   const college = isCollege(await getInstitutionType(req));
   const studentIds = await getLinkedStudentIds(req);
   const students = await Student.find({ schoolId, _id: { $in: studentIds } }).populate("user", "-password").lean();
@@ -456,14 +622,54 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
     assignmentScope._id = { $in: [] };
   }
 
+  const canHomework = portalAccess.homework !== false;
+  const canNotifications = portalAccess.notifications !== false;
+  const canFees = portalAccess.fees !== false;
+  const canAttendance = portalAccess.attendance !== false;
+  const canField = portalAccess["field-attendance"] !== false;
+  const canOverview = portalAccess.overview !== false;
+
   const [recentNotifications, upcomingHomework] = await Promise.all([
-    Notification.find({ schoolId, recipientUserId: req.user.userId }).sort({ createdAt: -1 }).limit(10).lean(),
-    Assignment.find(assignmentScope).sort({ dueDateBs: 1 }).limit(5).lean()
+    canNotifications
+      ? Notification.find({ schoolId, recipientUserId: req.user.userId })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .lean()
+      : Promise.resolve([]),
+    canHomework
+      ? Assignment.find(assignmentScope).sort({ dueDateBs: 1 }).limit(5).lean()
+      : Promise.resolve([])
   ]);
 
+  const childrenFiltered = canOverview
+    ? children.map((child) => {
+        const next = { ...child };
+        if (!canFees) {
+          next.feesDueNpr = 0;
+          next.totalPaidNpr = 0;
+          next.totalScholarshipNpr = 0;
+          next.year1FeeNpr = 0;
+          next.year2FeeNpr = 0;
+          next.year3FeeNpr = 0;
+          next.securityDepositNpr = 0;
+          next.yearWise = [];
+        }
+        if (!canAttendance) {
+          next.attendanceRate = 0;
+        }
+        if (!canHomework) {
+          next.pendingHomework = 0;
+        }
+        return next;
+      })
+    : [];
+
   return sendSuccess(res, "Parent portal data fetched", {
-    children,
-    recentNotifications,
-    upcomingHomework
+    children: childrenFiltered,
+    recentNotifications: canNotifications ? recentNotifications : [],
+    upcomingHomework: canHomework ? upcomingHomework : [],
+    portalAccess,
+    /** Hint for field attendance panels on the client */
+    fieldAttendanceEnabled: canField
   });
 });

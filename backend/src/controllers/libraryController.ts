@@ -37,13 +37,27 @@ import { sendSuccess } from "../utils/response.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { withTenantScope } from "../utils/tenant.js";
 
-/** Nested populate so borrower fullName is available on issue lists. */
-const issueBorrowerPopulate = [
+/** Nested populate so borrower fullName and issuer are available on issue lists. */
+const issueBorrowerPopulate: Array<{
+  path: string;
+  select?: string;
+  populate?: Array<{ path: string; select?: string }> | { path: string; select?: string };
+}> = [
   { path: "bookId", select: "title author" },
   { path: "copyId", select: "bookCode status shelfLocation" },
-  { path: "studentId", populate: { path: "user", select: "fullName" } },
-  { path: "teacherId", populate: { path: "user", select: "fullName" } }
-] as const;
+  {
+    path: "studentId",
+    populate: [
+      { path: "user", select: "fullName" },
+      { path: "batchId", select: "name" },
+      { path: "yearId", select: "name" },
+      { path: "classId", select: "name" },
+      { path: "sectionId", select: "name" }
+    ]
+  },
+  { path: "teacherId", populate: { path: "user", select: "fullName" } },
+  { path: "issuedByUserId", select: "fullName role" }
+];
 
 const refId = (value: unknown): string | undefined => {
   if (!value) return undefined;
@@ -67,6 +81,21 @@ const personFullName = (person: unknown): string | undefined => {
   return fullName?.trim() || undefined;
 };
 
+const refIdAndName = (
+  value: unknown
+): { id?: string; name?: string } => {
+  if (!value) return {};
+  if (typeof value === "string") return { id: value };
+  if (typeof value === "object" && value !== null) {
+    const obj = value as { _id?: { toString(): string } | string; name?: string };
+    const id =
+      typeof obj._id === "string" ? obj._id : obj._id?.toString();
+    const name = typeof obj.name === "string" ? obj.name.trim() : undefined;
+    return { id, name: name || undefined };
+  }
+  return {};
+};
+
 const formatIssue = (issue: Record<string, unknown>) => {
   const book = issue.bookId as { title?: string } | null | undefined;
   const copy = issue.copyId as { bookCode?: string; _id?: { toString: () => string } } | string | null | undefined;
@@ -87,6 +116,35 @@ const formatIssue = (issue: Record<string, unknown>) => {
   const bookCodeFromCopy =
     typeof copy === "object" && copy && "bookCode" in copy ? copy.bookCode : undefined;
 
+  const issuer = issue.issuedByUserId as
+    | { _id?: { toString(): string } | string; fullName?: string; role?: string }
+    | string
+    | null
+    | undefined;
+  const issuedByUserId =
+    typeof issuer === "string"
+      ? issuer
+      : issuer && typeof issuer === "object"
+        ? refId(issuer)
+        : refId(issue.issuedByUserId);
+  const issuedByName =
+    issuer && typeof issuer === "object" && typeof issuer.fullName === "string"
+      ? issuer.fullName.trim() || undefined
+      : undefined;
+  const issuedByRole =
+    issuer && typeof issuer === "object" && typeof issuer.role === "string"
+      ? issuer.role
+      : undefined;
+
+  const studentDoc =
+    issue.studentId && typeof issue.studentId === "object"
+      ? (issue.studentId as Record<string, unknown>)
+      : null;
+  const batch = refIdAndName(studentDoc?.batchId);
+  const year = refIdAndName(studentDoc?.yearId);
+  const klass = refIdAndName(studentDoc?.classId);
+  const section = refIdAndName(studentDoc?.sectionId);
+
   return {
     ...issue,
     bookId: refId(issue.bookId) ?? issue.bookId,
@@ -95,7 +153,18 @@ const formatIssue = (issue: Record<string, unknown>) => {
     copyId,
     bookCode: (issue.bookCode as string | undefined) ?? bookCodeFromCopy,
     bookTitle: book?.title,
-    borrowerName: borrowerName ?? null
+    borrowerName: borrowerName ?? null,
+    issuedByUserId,
+    issuedByName: issuedByName ?? null,
+    issuedByRole: issuedByRole ?? null,
+    studentBatchId: batch.id,
+    studentBatchName: batch.name ?? null,
+    studentYearId: year.id,
+    studentYearName: year.name ?? null,
+    studentClassId: klass.id,
+    studentClassName: klass.name ?? null,
+    studentSectionId: section.id,
+    studentSectionName: section.name ?? null
   };
 };
 
@@ -628,6 +697,7 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     borrowerType: payload.borrowerType,
     studentId: payload.studentId,
     teacherId: payload.teacherId,
+    issuedByUserId: req.user?.userId,
     issuedDateBs: payload.issuedDateBs,
     dueDateBs: payload.dueDateBs,
     status: "ISSUED"

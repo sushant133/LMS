@@ -32,6 +32,7 @@ import laboratoryRoutes from "./laboratoryRoutes.js";
 import transportRoutes from "./transportRoutes.js";
 import hrRoutes from "./hrRoutes.js";
 import accountingRoutes from "./accountingRoutes.js";
+import financeRoutes from "./financeRoutes.js";
 import adminRoutes from "./adminRoutes.js";
 import collegeAdministratorRoutes from "./collegeAdministratorRoutes.js";
 import complaintRoutes from "./complaintRoutes.js";
@@ -79,6 +80,8 @@ router.use("/laboratory", laboratoryRoutes);
 router.use("/transport", transportRoutes);
 router.use("/hr", hrRoutes);
 router.use("/accounting", accountingRoutes);
+/** Institutional finance archive — Admin/Superadmin only; not ERP Accounting. */
+router.use("/finance", financeRoutes);
 router.use("/student", studentPortalRoutes);
 router.use("/teacher", teacherPortalRoutes);
 

@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -53,7 +54,6 @@ export const StudentListManager = () => {
   const hasInstitutionRead = useHasInstitutionAccess();
   const isTeacher = userIsTeacher(user) || role === "TEACHER";
   const canManage = isAdmin;
-  const canReadList = hasInstitutionRead || isTeacher;
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -145,10 +145,10 @@ export const StudentListManager = () => {
 
   const hasActiveFilters = Boolean(
     searchQuery.trim() ||
-    batchFilter ||
-    yearFilter ||
-    classFilter ||
-    sectionFilter,
+      batchFilter ||
+      yearFilter ||
+      classFilter ||
+      sectionFilter,
   );
 
   const filteredStudents = useMemo(() => {
@@ -379,176 +379,194 @@ export const StudentListManager = () => {
             description="Try a different name, mobile number, login ID, or filter selection."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHead>
-                <tr>
-                  <Th>Name</Th>
-                  <Th>Mobile</Th>
-                  <Th>Roll No.</Th>
-                  <Th>Admission No.</Th>
-                  <Th>{labels.primary}</Th>
-                  <Th>{labels.secondary}</Th>
-                  {isCollege ? <Th>Status</Th> : null}
-                  <Th>Guardian</Th>
-                  {canManage ? <Th>Total Fee</Th> : null}
-                  <Th />
-                </tr>
-              </TableHead>
-              <TableBody>
-                {filteredStudents.map((student) => {
-                  const pendingDocs = countPendingRequiredDocuments(
-                    student.documents ?? [],
-                  );
-                  const displayName =
-                    student.user?.fullName ?? "Unknown student";
-                  const displayEmail = student.user?.email ?? "—";
-                  const displayPhone = student.user?.phone || "—";
-                  return (
-                  <tr key={student._id}>
-                    <Td>
-                      <div className="space-y-1">
-                        <StudentNameLink
-                          studentId={student._id}
-                          name={displayName}
-                          subtitle={displayEmail}
-                        />
-                        {pendingDocs > 0 ? (
-                          <Badge className="bg-amber-100 text-amber-900">
-                            {pendingDocs} doc{pendingDocs === 1 ? "" : "s"}{" "}
-                            pending
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </Td>
-                    <Td>{displayPhone}</Td>
-                    <Td>{student.rollNumber}</Td>
-                    <Td>
-                      <div className="space-y-0.5">
-                        <p>{student.admissionNumber}</p>
-                        {student.registrationNumber ? (
-                          <p className="text-xs text-slate-500">
-                            Reg: {student.registrationNumber}
-                          </p>
-                        ) : null}
-                      </div>
-                    </Td>
-                    <Td>
-                      {primaryMap.get(
-                        (isCollege ? student.batchId : student.classId) ?? "",
-                      ) ?? "—"}
-                    </Td>
-                    <Td>
-                      {secondaryMap.get(
-                        (isCollege ? student.yearId : student.sectionId) ?? "",
-                      ) ?? "—"}
-                    </Td>
+          <StickyTableScroll
+            header={
+              <Table className="w-full min-w-[1100px] table-fixed">
+                <TableHead>
+                  <tr>
+                    <Th className="bg-slate-50">Name</Th>
+                    <Th className="bg-slate-50">Mobile</Th>
+                    <Th className="bg-slate-50">Roll No.</Th>
+                    <Th className="bg-slate-50">Admission No.</Th>
+                    <Th className="bg-slate-50">{labels.primary}</Th>
+                    <Th className="bg-slate-50">{labels.secondary}</Th>
                     {isCollege ? (
-                      <Td>
-                        <span
-                          className={
-                            (student.academicStatus ?? "ACTIVE") === "ACTIVE"
-                              ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800"
-                              : (student.academicStatus ?? "") ===
-                                    "PENDING_NOT_PASSED"
-                                ? "rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-900"
-                                : (student.academicStatus ?? "") ===
-                                      "PASSED_OUT" ||
-                                    (student.academicStatus ?? "") === "ALUMNI"
-                                  ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
-                                  : "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
-                          }
-                        >
-                          {STUDENT_ACADEMIC_STATUS_LABELS[
-                            (student.academicStatus ??
-                              "ACTIVE") as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
-                          ] ??
-                            (student.academicStatus ?? "ACTIVE").replace(
-                              /_/g,
-                              " ",
-                            )}
-                        </span>
-                      </Td>
+                      <Th className="bg-slate-50">Status</Th>
                     ) : null}
-                    <Td>{student.guardianName}</Td>
+                    <Th className="bg-slate-50">Guardian</Th>
                     {canManage ? (
-                      <Td>
-                        {student.hasScholarship ? (
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-                            Scholarship
-                          </span>
-                        ) : (
-                          formatCurrencyNpr(student.feesDueNpr)
-                        )}
-                      </Td>
+                      <Th className="bg-slate-50">Total Fee</Th>
                     ) : null}
-                    <Td className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            navigate(`/students/${student._id}/profile`)
-                          }
-                        >
-                          View Profile
-                        </Button>
+                    <Th className="bg-slate-50" />
+                  </tr>
+                </TableHead>
+              </Table>
+            }
+            body={
+              <Table className="w-full min-w-[1100px] table-fixed">
+                <TableBody>
+                  {filteredStudents.map((student) => {
+                    const pendingDocs = countPendingRequiredDocuments(
+                      student.documents ?? [],
+                    );
+                    const displayName =
+                      student.user?.fullName ?? "Unknown student";
+                    const displayEmail = student.user?.email ?? "—";
+                    const displayPhone = student.user?.phone || "—";
+                    return (
+                      <tr key={student._id}>
+                        <Td>
+                          <div className="space-y-1">
+                            <StudentNameLink
+                              studentId={student._id}
+                              name={displayName}
+                              subtitle={displayEmail}
+                            />
+                            {pendingDocs > 0 ? (
+                              <Badge className="bg-amber-100 text-amber-900">
+                                {pendingDocs} doc
+                                {pendingDocs === 1 ? "" : "s"} pending
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </Td>
+                        <Td>{displayPhone}</Td>
+                        <Td>{student.rollNumber}</Td>
+                        <Td>
+                          <div className="space-y-0.5">
+                            <p>{student.admissionNumber}</p>
+                            {student.registrationNumber ? (
+                              <p className="text-xs text-slate-500">
+                                Reg: {student.registrationNumber}
+                              </p>
+                            ) : null}
+                          </div>
+                        </Td>
+                        <Td>
+                          {primaryMap.get(
+                            (isCollege ? student.batchId : student.classId) ??
+                              "",
+                          ) ?? "—"}
+                        </Td>
+                        <Td>
+                          {secondaryMap.get(
+                            (isCollege ? student.yearId : student.sectionId) ??
+                              "",
+                          ) ?? "—"}
+                        </Td>
+                        {isCollege ? (
+                          <Td>
+                            <span
+                              className={
+                                (student.academicStatus ?? "ACTIVE") ===
+                                "ACTIVE"
+                                  ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800"
+                                  : (student.academicStatus ?? "") ===
+                                      "PENDING_NOT_PASSED"
+                                    ? "rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-900"
+                                    : (student.academicStatus ?? "") ===
+                                          "PASSED_OUT" ||
+                                        (student.academicStatus ?? "") ===
+                                          "ALUMNI"
+                                      ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
+                                      : "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
+                              }
+                            >
+                              {STUDENT_ACADEMIC_STATUS_LABELS[
+                                (student.academicStatus ??
+                                  "ACTIVE") as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
+                              ] ??
+                                (student.academicStatus ?? "ACTIVE").replace(
+                                  /_/g,
+                                  " ",
+                                )}
+                            </span>
+                          </Td>
+                        ) : null}
+                        <Td>{student.guardianName}</Td>
                         {canManage ? (
-                          <>
+                          <Td>
+                            {student.hasScholarship ? (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                                Scholarship
+                              </span>
+                            ) : (
+                              formatCurrencyNpr(student.feesDueNpr)
+                            )}
+                          </Td>
+                        ) : null}
+                        <Td className="text-right">
+                          <div className="flex justify-end gap-2">
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleEdit(student)}
+                              onClick={() =>
+                                navigate(`/students/${student._id}/profile`)
+                              }
                             >
-                              Edit
+                              View Profile
                             </Button>
-                            {student.user?._id ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={resendCredentialsMutation.isPending}
-                                onClick={() => {
-                                  if (
-                                    !window.confirm(
-                                      `Resend login credentials to ${displayName} (${student.user.email})?\n\nA new password will be generated and emailed to the student.`,
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  void resendCredentialsMutation.mutateAsync(
-                                    student.user._id,
-                                  );
-                                }}
-                              >
-                                Resend credentials
-                              </Button>
+                            {canManage ? (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleEdit(student)}
+                                >
+                                  Edit
+                                </Button>
+                                {student.user?._id ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={
+                                      resendCredentialsMutation.isPending
+                                    }
+                                    onClick={() => {
+                                      if (
+                                        !window.confirm(
+                                          `Resend login credentials to ${displayName} (${student.user.email})?\n\nA new password will be generated and emailed to the student.`,
+                                        )
+                                      ) {
+                                        return;
+                                      }
+                                      void resendCredentialsMutation.mutateAsync(
+                                        student.user._id,
+                                      );
+                                    }}
+                                  >
+                                    Resend credentials
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        `Permanently delete ${displayName} (${student.admissionNumber})?\n\nThis removes the student record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    void deleteMutation.mutateAsync(
+                                      student._id,
+                                    );
+                                  }}
+                                >
+                                  Delete
+                                </Button>
+                              </>
                             ) : null}
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => {
-                                if (
-                                  !window.confirm(
-                                    `Permanently delete ${displayName} (${student.admissionNumber})?\n\nThis removes the student record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
-                                  )
-                                ) {
-                                  return;
-                                }
-                                void deleteMutation.mutateAsync(student._id);
-                              }}
-                            >
-                              Delete
-                            </Button>
-                          </>
-                        ) : null}
-                      </div>
-                    </Td>
-                  </tr>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                          </div>
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            }
+          />
         )}
       </CardContent>
     </Card>

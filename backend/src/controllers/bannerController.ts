@@ -1,11 +1,22 @@
 import type { Request, Response } from "express";
 import type { Types } from "mongoose";
-import { bannerImageReplaceSchema, bannerSchema } from "@phit-erp/shared";
+import {
+  BANNER_TARGET_ROLE_LABELS,
+  BANNER_TARGET_ROLES,
+  bannerImageReplaceSchema,
+  bannerSchema,
+  type BannerTargetRole,
+  type UserRole
+} from "@phit-erp/shared";
 import { Banner } from "../models/Banner.js";
 import { BannerDismissal } from "../models/BannerDismissal.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  normalizeBannerVisibleTo,
+  userMatchesBannerTarget
+} from "../utils/bannerScope.js";
 import { deleteReplacedMedia, deleteStoredMediaUrls } from "../utils/mediaCleanup.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
@@ -16,6 +27,7 @@ type BannerLean = {
   imageUrl: string;
   thumbnailUrl?: string;
   isActive: boolean;
+  visibleTo?: BannerTargetRole[] | string[];
   fileSizeBytes?: number;
   width?: number;
   height?: number;
@@ -25,30 +37,47 @@ type BannerLean = {
   updatedAt?: Date;
 };
 
-const serializeBanner = (banner: BannerLean, creatorName?: string) => ({
-  _id: banner._id.toString(),
-  schoolId: banner.schoolId.toString(),
-  imageUrl: banner.imageUrl,
-  thumbnailUrl: banner.thumbnailUrl,
-  isActive: banner.isActive,
-  fileSizeBytes: banner.fileSizeBytes,
-  width: banner.width,
-  height: banner.height,
-  originalFileName: banner.originalFileName,
-  createdBy: banner.createdBy.toString(),
-  createdByName: creatorName,
-  displayStatus: banner.isActive ? ("ACTIVE" as const) : ("INACTIVE" as const),
-  visibilityStatus: banner.isActive ? "Visible on dashboard" : "Hidden",
-  createdAt: banner.createdAt?.toISOString(),
-  updatedAt: banner.updatedAt?.toISOString()
-});
+const formatVisibleToLabel = (visibleTo: BannerTargetRole[]): string => {
+  if (visibleTo.length === BANNER_TARGET_ROLES.length) {
+    return "Everyone";
+  }
+  return visibleTo
+    .map((role) => BANNER_TARGET_ROLE_LABELS[role] ?? role)
+    .join(", ");
+};
+
+const serializeBanner = (banner: BannerLean, creatorName?: string) => {
+  const visibleTo = normalizeBannerVisibleTo(banner.visibleTo);
+  return {
+    _id: banner._id.toString(),
+    schoolId: banner.schoolId.toString(),
+    imageUrl: banner.imageUrl,
+    thumbnailUrl: banner.thumbnailUrl,
+    isActive: banner.isActive,
+    visibleTo,
+    fileSizeBytes: banner.fileSizeBytes,
+    width: banner.width,
+    height: banner.height,
+    originalFileName: banner.originalFileName,
+    createdBy: banner.createdBy.toString(),
+    createdByName: creatorName,
+    displayStatus: banner.isActive ? ("ACTIVE" as const) : ("INACTIVE" as const),
+    visibilityStatus: banner.isActive
+      ? `Visible to: ${formatVisibleToLabel(visibleTo)}`
+      : "Hidden",
+    createdAt: banner.createdAt?.toISOString(),
+    updatedAt: banner.updatedAt?.toISOString()
+  };
+};
 
 const enrichBanners = async (banners: BannerLean[]) => {
   const userIds = [...new Set(banners.map((banner) => banner.createdBy.toString()))];
   const users = await User.find({ _id: { $in: userIds } }).select("fullName").lean();
   const userById = new Map(users.map((user) => [user._id.toString(), user.fullName]));
 
-  return banners.map((banner) => serializeBanner(banner, userById.get(banner.createdBy.toString())));
+  return banners.map((banner) =>
+    serializeBanner(banner, userById.get(banner.createdBy.toString()))
+  );
 };
 
 const getActiveBannerDocs = async (schoolId: ReturnType<typeof tenantObjectId>) =>
@@ -60,6 +89,9 @@ const getActiveBannerDocs = async (schoolId: ReturnType<typeof tenantObjectId>) 
     .sort({ createdAt: -1 })
     .lean();
 
+const filterBannersForUser = (banners: BannerLean[], userRole: UserRole | undefined) =>
+  banners.filter((banner) => userMatchesBannerTarget(userRole, banner.visibleTo));
+
 export const listBanners = asyncHandler(async (req: Request, res: Response) => {
   const banners = await Banner.find(withTenantScope(req)).sort({ createdAt: -1 }).lean();
   return sendSuccess(res, "Banners fetched", await enrichBanners(banners as BannerLean[]));
@@ -68,16 +100,19 @@ export const listBanners = asyncHandler(async (req: Request, res: Response) => {
 export const listActiveBanners = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
   const banners = await getActiveBannerDocs(schoolId);
-  return sendSuccess(res, "Active banners fetched", (await enrichBanners(banners as BannerLean[])));
+  const visible = filterBannersForUser(banners as BannerLean[], req.user?.role as UserRole | undefined);
+  return sendSuccess(res, "Active banners fetched", await enrichBanners(visible));
 });
 
 export const createBanner = asyncHandler(async (req: Request, res: Response) => {
   const payload = bannerSchema.parse(req.body);
+  const visibleTo = normalizeBannerVisibleTo(payload.visibleTo);
 
   const banner = await Banner.create({
     imageUrl: payload.imageUrl,
     thumbnailUrl: payload.thumbnailUrl,
     isActive: payload.isActive,
+    visibleTo,
     fileSizeBytes: payload.fileSizeBytes,
     width: payload.width,
     height: payload.height,
@@ -87,11 +122,17 @@ export const createBanner = asyncHandler(async (req: Request, res: Response) => 
   });
 
   const creator = await User.findById(req.user?.userId).select("fullName").lean();
-  return sendSuccess(res, "Banner created successfully", serializeBanner(banner.toObject() as BannerLean, creator?.fullName), 201);
+  return sendSuccess(
+    res,
+    "Banner created successfully",
+    serializeBanner(banner.toObject() as BannerLean, creator?.fullName),
+    201
+  );
 });
 
 export const updateBanner = asyncHandler(async (req: Request, res: Response) => {
   const payload = bannerSchema.parse(req.body);
+  const visibleTo = normalizeBannerVisibleTo(payload.visibleTo);
 
   const existing = await Banner.findOne(withTenantScope(req, { _id: req.params.id })).lean();
   if (!existing) {
@@ -104,6 +145,7 @@ export const updateBanner = asyncHandler(async (req: Request, res: Response) => 
       imageUrl: payload.imageUrl,
       thumbnailUrl: payload.thumbnailUrl,
       isActive: payload.isActive,
+      visibleTo,
       fileSizeBytes: payload.fileSizeBytes,
       width: payload.width,
       height: payload.height,
@@ -123,7 +165,11 @@ export const updateBanner = asyncHandler(async (req: Request, res: Response) => 
   ]);
 
   const creator = await User.findById(banner.createdBy).select("fullName").lean();
-  return sendSuccess(res, "Banner updated successfully", serializeBanner(banner as BannerLean, creator?.fullName));
+  return sendSuccess(
+    res,
+    "Banner updated successfully",
+    serializeBanner(banner as BannerLean, creator?.fullName)
+  );
 });
 
 export const replaceBannerImage = asyncHandler(async (req: Request, res: Response) => {
@@ -157,7 +203,11 @@ export const replaceBannerImage = asyncHandler(async (req: Request, res: Respons
   ]);
 
   const creator = await User.findById(banner.createdBy).select("fullName").lean();
-  return sendSuccess(res, "Banner image replaced", serializeBanner(banner as BannerLean, creator?.fullName));
+  return sendSuccess(
+    res,
+    "Banner image replaced",
+    serializeBanner(banner as BannerLean, creator?.fullName)
+  );
 });
 
 export const toggleBannerActive = asyncHandler(async (req: Request, res: Response) => {
@@ -195,5 +245,9 @@ export const dismissBanner = asyncHandler(async (_req: Request, res: Response) =
 export const getActiveBannersForUser = async (req: Request) => {
   const schoolId = tenantObjectId(req);
   const banners = await getActiveBannerDocs(schoolId);
-  return enrichBanners(banners as BannerLean[]);
+  const visible = filterBannersForUser(
+    banners as BannerLean[],
+    req.user?.role as UserRole | undefined
+  );
+  return enrichBanners(visible);
 };

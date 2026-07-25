@@ -32,6 +32,8 @@ import { AccountingExpense } from "../models/AccountingExpense.js";
 import { AccountingIncome } from "../models/AccountingIncome.js";
 import { AccountingPurchase } from "../models/AccountingPurchase.js";
 import { AccountingSettings } from "../models/AccountingSettings.js";
+import { FinanceCategory } from "../models/FinanceCategory.js";
+import { FinanceTransaction } from "../models/FinanceTransaction.js";
 import { BankAccount } from "../models/BankAccount.js";
 import { CashBookEntry } from "../models/CashBookEntry.js";
 import { ChartOfAccount } from "../models/ChartOfAccount.js";
@@ -134,6 +136,8 @@ export const deleteSchoolCascade = async (
     AccountingExpense.deleteMany(filter, options),
     AccountingPurchase.deleteMany(filter, options),
     AccountingIncome.deleteMany(filter, options),
+    FinanceTransaction.deleteMany(filter, options),
+    FinanceCategory.deleteMany(filter, options),
     SalaryPayment.deleteMany(filter, options),
     BankAccount.deleteMany(filter, options),
     CashBookEntry.deleteMany(filter, options),

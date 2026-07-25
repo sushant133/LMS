@@ -1,12 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   PARENT_RELATIONSHIPS,
   createParentFromStudentSchema,
+  normalizeParentPortalAccess,
   parentChildLinkSchema,
   type CreateParentFromStudentInput,
   type ParentChildLinkInput,
   type ParentFromStudentRelationship,
+  type ParentPortalAccessMap,
+  type ParentPortalAccessResponse,
   type StudentParentCandidatesResponse,
 } from "@phit-erp/shared";
 import { toast } from "sonner";
@@ -116,6 +119,86 @@ export const ParentLinkManager = () => {
     queryKey: ["parent-links"],
     queryFn: () => unwrap<ParentLinkRecord[]>(api.get("/parent/links")),
   });
+  const [accessParentId, setAccessParentId] = useState("");
+  const [portalDraft, setPortalDraft] = useState<ParentPortalAccessMap | null>(
+    null,
+  );
+  const [useSchoolDefaults, setUseSchoolDefaults] = useState(true);
+
+  /** School-wide defaults (fallback when a parent has no personal override). */
+  const schoolDefaultsQuery = useQuery({
+    queryKey: ["parent-portal-access", "school-defaults"],
+    queryFn: () =>
+      unwrap<ParentPortalAccessResponse>(api.get("/parent/portal-access")),
+    enabled: canManage,
+  });
+
+  /** Per-parent access for the selected parent. */
+  const parentAccessQuery = useQuery({
+    queryKey: ["parent-portal-access", "user", accessParentId],
+    queryFn: () =>
+      unwrap<ParentPortalAccessResponse>(
+        api.get(`/parent/users/${accessParentId}/portal-access`),
+      ),
+    enabled: canManage && Boolean(accessParentId),
+  });
+
+  useEffect(() => {
+    if (!accessParentId) {
+      setPortalDraft(null);
+      setUseSchoolDefaults(true);
+      return;
+    }
+    if (parentAccessQuery.data) {
+      setPortalDraft(
+        normalizeParentPortalAccess(parentAccessQuery.data.modules),
+      );
+      setUseSchoolDefaults(parentAccessQuery.data.useSchoolDefaults !== false);
+    }
+  }, [accessParentId, parentAccessQuery.data]);
+
+  const saveSchoolDefaults = useMutation({
+    mutationFn: (modules: ParentPortalAccessMap) =>
+      unwrap<ParentPortalAccessResponse>(
+        api.put("/parent/portal-access", { modules }),
+      ),
+    onSuccess: async () => {
+      toast.success("School default parent access updated");
+      await queryClient.invalidateQueries({
+        queryKey: ["parent-portal-access"],
+      });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const saveParentAccess = useMutation({
+    mutationFn: (payload: {
+      parentUserId: string;
+      modules?: ParentPortalAccessMap;
+      useSchoolDefaults?: boolean;
+    }) =>
+      unwrap<ParentPortalAccessResponse>(
+        api.put(`/parent/users/${payload.parentUserId}/portal-access`, {
+          modules: payload.modules,
+          useSchoolDefaults: payload.useSchoolDefaults,
+        }),
+      ),
+    onSuccess: async (data) => {
+      toast.success(
+        data.useSchoolDefaults
+          ? "Parent uses school defaults"
+          : "Parent portal access saved",
+      );
+      setPortalDraft(normalizeParentPortalAccess(data.modules));
+      setUseSchoolDefaults(data.useSchoolDefaults !== false);
+      await queryClient.invalidateQueries({
+        queryKey: ["parent-portal-access"],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["parent-portal"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const pendingQuery = useQuery({
     queryKey: ["parent-registrations-pending"],
     queryFn: () =>
@@ -253,9 +336,263 @@ export const ParentLinkManager = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Parent–Student Links"
-        description="Create parent portal accounts from student guardian details, or manually link an existing parent account."
+        title="Parent Management"
+        description="Link parent accounts to students, approve registrations, and choose which portal sections parents can use."
       />
+
+      {canManage ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Parent portal module access</CardTitle>
+            <p className="mt-1 text-sm text-slate-500">
+              Set which portal sections each parent can use (homework, results,
+              fees, notices, and more). You can give different parents different
+              access. School defaults apply when a parent has no personal
+              settings.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <FormField label="Select parent">
+              <Select
+                value={accessParentId}
+                onChange={(e) => setAccessParentId(e.target.value)}
+              >
+                <option value="">Choose a parent account…</option>
+                {(parentsQuery.data ?? []).map((parent) => (
+                  <option key={parent._id} value={parent._id}>
+                    {parent.fullName} ({parent.email})
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+
+            {!accessParentId ? (
+              <p className="text-sm text-slate-500">
+                Select a parent above to view and edit their portal modules.
+              </p>
+            ) : parentAccessQuery.isLoading || !portalDraft ? (
+              <p className="text-sm text-slate-500">
+                Loading access for this parent…
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-slate-900">
+                      {parentAccessQuery.data?.parentName ?? "Parent"}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {parentAccessQuery.data?.parentEmail}
+                      {useSchoolDefaults
+                        ? " · Using school defaults"
+                        : " · Custom access"}
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={useSchoolDefaults}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setUseSchoolDefaults(next);
+                        if (next && parentAccessQuery.data?.schoolDefaults) {
+                          setPortalDraft(
+                            normalizeParentPortalAccess(
+                              parentAccessQuery.data.schoolDefaults,
+                            ),
+                          );
+                        }
+                      }}
+                    />
+                    Use school defaults
+                  </label>
+                </div>
+
+                <div
+                  className={
+                    useSchoolDefaults
+                      ? "pointer-events-none grid gap-3 opacity-60 sm:grid-cols-2 xl:grid-cols-3"
+                      : "grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+                  }
+                >
+                  {(parentAccessQuery.data?.meta ?? []).map((item) => (
+                    <label
+                      key={item.key}
+                      className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        disabled={useSchoolDefaults}
+                        checked={portalDraft[item.key] !== false}
+                        onChange={(e) =>
+                          setPortalDraft((current) =>
+                            current
+                              ? { ...current, [item.key]: e.target.checked }
+                              : current,
+                          )
+                        }
+                      />
+                      <span>
+                        <span className="font-medium text-slate-900">
+                          {item.label}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-500">
+                          {item.description}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {!useSchoolDefaults ? (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const allOn = { ...portalDraft };
+                          for (const key of Object.keys(allOn) as Array<
+                            keyof ParentPortalAccessMap
+                          >) {
+                            allOn[key] = true;
+                          }
+                          setPortalDraft(allOn);
+                        }}
+                      >
+                        Enable all
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const allOff = { ...portalDraft };
+                          for (const key of Object.keys(allOff) as Array<
+                            keyof ParentPortalAccessMap
+                          >) {
+                            allOff[key] = key === "overview";
+                          }
+                          setPortalDraft(allOff);
+                        }}
+                      >
+                        Minimal
+                      </Button>
+                    </>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={saveParentAccess.isPending}
+                    onClick={() => {
+                      if (useSchoolDefaults) {
+                        saveParentAccess.mutate({
+                          parentUserId: accessParentId,
+                          useSchoolDefaults: true,
+                        });
+                        return;
+                      }
+                      if (!portalDraft) return;
+                      saveParentAccess.mutate({
+                        parentUserId: accessParentId,
+                        modules: portalDraft,
+                        useSchoolDefaults: false,
+                      });
+                    }}
+                  >
+                    {saveParentAccess.isPending
+                      ? "Saving…"
+                      : useSchoolDefaults
+                        ? "Save (use school defaults)"
+                        : "Save this parent's access"}
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {/* School defaults editor */}
+            <details className="rounded-xl border border-slate-200 bg-slate-50/50">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-slate-800">
+                School defaults (for parents without custom access)
+              </summary>
+              <div className="space-y-3 border-t border-slate-200 px-4 py-3">
+                <p className="text-xs text-slate-500">
+                  These apply to every parent who is set to “Use school
+                  defaults”. Edit and save defaults separately from individual
+                  parents.
+                </p>
+                {schoolDefaultsQuery.isLoading || !schoolDefaultsQuery.data ? (
+                  <p className="text-sm text-slate-500">Loading defaults…</p>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {schoolDefaultsQuery.data.meta.map((item) => (
+                        <label
+                          key={`default-${item.key}`}
+                          className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={
+                              schoolDefaultsQuery.data!.modules[item.key] !==
+                              false
+                            }
+                            onChange={(e) => {
+                              const next = normalizeParentPortalAccess({
+                                ...schoolDefaultsQuery.data!.modules,
+                                [item.key]: e.target.checked,
+                              });
+                              // Optimistic local update via query cache
+                              queryClient.setQueryData(
+                                ["parent-portal-access", "school-defaults"],
+                                {
+                                  ...schoolDefaultsQuery.data!,
+                                  modules: next,
+                                  meta: schoolDefaultsQuery.data!.meta.map(
+                                    (m) =>
+                                      m.key === item.key
+                                        ? { ...m, enabled: e.target.checked }
+                                        : m,
+                                  ),
+                                },
+                              );
+                            }}
+                          />
+                          <span>
+                            <span className="font-medium text-slate-900">
+                              {item.label}
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={saveSchoolDefaults.isPending}
+                      onClick={() => {
+                        if (!schoolDefaultsQuery.data?.modules) return;
+                        saveSchoolDefaults.mutate(
+                          normalizeParentPortalAccess(
+                            schoolDefaultsQuery.data.modules,
+                          ),
+                        );
+                      }}
+                    >
+                      {saveSchoolDefaults.isPending
+                        ? "Saving…"
+                        : "Save school defaults"}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </details>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

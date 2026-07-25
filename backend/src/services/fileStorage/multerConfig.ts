@@ -183,6 +183,12 @@ export const uploadAccountingAttachments = multer({
   fileFilter: documentFilter
 }).array("files", 10);
 
+export const uploadFinanceAttachments = multer({
+  storage: createModuleStorage(UPLOAD_MODULES.FINANCE),
+  limits: { fileSize: FILE_SIZE_LIMITS.document.maxBytes },
+  fileFilter: documentFilter
+}).array("files", 10);
+
 export const uploadProfilePhoto = multer({
   storage: createModuleStorage(UPLOAD_MODULES.PROFILE),
   limits: { fileSize: FILE_SIZE_LIMITS.photo.maxBytes },

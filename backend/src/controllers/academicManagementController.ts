@@ -890,7 +890,14 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const updateSyllabus = asyncHandler(async (req: Request, res: Response) => {
-  const payload = academicSyllabusUpdateSchema.parse(req.body);
+  let payload: ReturnType<typeof academicSyllabusUpdateSchema.parse>;
+  try {
+    payload = academicSyllabusUpdateSchema.parse(req.body ?? {});
+  } catch (error) {
+    // Re-throw Zod as-is (errorHandler → 400 with field paths)
+    throw error;
+  }
+
   const existing = await AcademicSyllabus.findOne({
     _id: req.params.id,
     schoolId: tenantObjectId(req),
@@ -911,24 +918,20 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
   // Rewrite hierarchy when client sends structure (including blank unit titles).
-  // Empty arrays are rejected so a bad client cannot wipe the tree by accident.
   const hasChaptersField = payload.chapters !== undefined;
   const hasUnitsField = payload.units !== undefined;
   const structureChanging = hasChaptersField || hasUnitsField;
 
-  if (
-    structureChanging &&
-    Array.isArray(payload.chapters) &&
-    payload.chapters.length === 0 &&
-    (!Array.isArray(payload.units) || payload.units.length === 0)
-  ) {
-    throw new ApiError(
-      400,
-      "Cannot clear syllabus hierarchy with an empty chapters list. Keep at least one unit row."
-    );
+  const safePayload = sanitizeTeacherOwnedUpdate(
+    req,
+    payload as Record<string, unknown>
+  ) as Record<string, unknown>;
+  // Never assign empty strings to ObjectId fields (mongoose CastError → 400)
+  for (const key of ["classId", "sectionId", "batchId", "yearId", "teacherId"] as const) {
+    if (safePayload[key] === "" || safePayload[key] === null) {
+      safePayload[key] = undefined;
+    }
   }
-
-  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   if (safePayload.teacherId === "") {
     safePayload.teacherId = undefined;
   }
@@ -943,24 +946,58 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
     if (payload.teacherId !== undefined && !payload.teacherId?.trim()) {
       existing.teacherId = undefined;
     }
+    // Clear ObjectId fields when client sent empty
+    for (const key of ["classId", "sectionId", "batchId", "yearId"] as const) {
+      if (safePayload[key] === undefined && key in (req.body ?? {})) {
+        const raw = (req.body as Record<string, unknown>)[key];
+        if (raw === "" || raw === null) {
+          (existing as unknown as Record<string, unknown>)[key] = undefined;
+        }
+      }
+    }
     existing.hierarchyMigratedAt = new Date();
     await existing.save(sessionOpt);
 
     if (structureChanging) {
-      // Prefer hierarchical chapters; only fall back to legacy units when chapters omitted
-      const resolved =
+      // Prefer hierarchical chapters; fall back to legacy units when needed
+      let resolved =
         hasChaptersField && Array.isArray(payload.chapters) && payload.chapters.length > 0
           ? resolveSyllabusChapters({ chapters: payload.chapters })
           : resolveSyllabusChapters({
               chapters: payload.chapters,
               units: payload.units
             });
+
+      // Soft default — never 400 with "title required" / empty structure on update
       if (resolved.length === 0) {
-        throw new ApiError(
-          400,
-          "Syllabus structure is empty — add at least one unit row (title may be blank)."
-        );
+        resolved = [
+          {
+            chapterNo: 1,
+            sectionKind: "NONE",
+            title: "",
+            description: "",
+            estimatedHours: 0,
+            weightagePercent: 0,
+            references: "",
+            remarks: "",
+            tentativeCompletionMonth: "",
+            units: [
+              {
+                unitNo: 1,
+                title: "",
+                description: "",
+                teachingHours: 0,
+                learningObjective: "",
+                references: "",
+                remarks: "",
+                practicalRequired: false,
+                subUnits: []
+              }
+            ]
+          }
+        ];
       }
+
       await saveSyllabusHierarchy(
         {
           schoolId: tenantObjectId(req).toString(),
@@ -1969,25 +2006,64 @@ export const getSessionAttendance = asyncHandler(async (req: Request, res: Respo
   return sendSuccess(res, "Attendance summary fetched", summary);
 });
 
+const findCommentEntity = async (
+  req: Request,
+  entityType: string,
+  entityId: string
+) => {
+  const schoolId = tenantObjectId(req);
+  // Use $ne: true so older docs without isDeleted still match
+  const notDeleted = { isDeleted: { $ne: true } as const };
+  const id = String(entityId || "").trim();
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    return null;
+  }
+
+  switch (entityType) {
+    case "SYLLABUS":
+      return AcademicSyllabus.findOne({ _id: id, schoolId, ...notDeleted });
+    case "SESSION_PLAN":
+      return AcademicSessionPlan.findOne({ _id: id, schoolId, ...notDeleted });
+    case "LESSON_PLAN":
+      return AcademicLessonPlan.findOne({ _id: id, schoolId, ...notDeleted });
+    case "LOG_BOOK_ENTRY":
+      return AcademicLogBookEntry.findOne({ _id: id, schoolId, ...notDeleted });
+    default:
+      return null;
+  }
+};
+
 export const addComment = asyncHandler(async (req: Request, res: Response) => {
   const payload = academicCommentSchema.parse(req.body);
 
-  const entity =
-    payload.entityType === "SESSION_PLAN"
-      ? await AcademicSessionPlan.findOne({ _id: payload.entityId, schoolId: tenantObjectId(req), isDeleted: false })
-      : payload.entityType === "LESSON_PLAN"
-        ? await AcademicLessonPlan.findOne({ _id: payload.entityId, schoolId: tenantObjectId(req), isDeleted: false })
-        : await AcademicLogBookEntry.findOne({ _id: payload.entityId, schoolId: tenantObjectId(req), isDeleted: false });
-
+  const entity = await findCommentEntity(req, payload.entityType, payload.entityId);
   if (!entity) throw new ApiError(404, "Entity not found for comment");
-  if ("teacherId" in entity && entity.teacherId) {
+
+  // Access: syllabus is subject-scoped; other entities use teacher ownership
+  if (payload.entityType === "SYLLABUS") {
+    const syllabus = entity as { teacherId?: { toString(): string }; subjectId: { toString(): string } };
+    await assertSyllabusAccess(req, {
+      teacherId: syllabus.teacherId?.toString(),
+      subjectId: syllabus.subjectId.toString()
+    });
+  } else if ("teacherId" in entity && entity.teacherId) {
     await assertTeacherOwnership(req, entity.teacherId.toString());
   }
 
   const comment = await addAcademicComment(req, payload.entityType, payload.entityId, payload.comment);
 
-  if ("teacherId" in entity && entity.teacherId && isAcademicAdmin(req.user?.role ?? "")) {
-    await notifyTeacher(req, entity.teacherId.toString(), "Admin Comment Added", payload.comment, { entityId: payload.entityId });
+  if (
+    "teacherId" in entity &&
+    entity.teacherId &&
+    isAcademicAdmin(req.user?.role ?? "")
+  ) {
+    await notifyTeacher(
+      req,
+      entity.teacherId.toString(),
+      "Admin Comment Added",
+      payload.comment,
+      { entityId: payload.entityId }
+    );
   }
 
   return sendSuccess(res, "Comment added", comment, 201);
@@ -2022,27 +2098,60 @@ export const exportAcademicReport = asyncHandler(async (req: Request, res: Respo
 });
 
 export const listComments = asyncHandler(async (req: Request, res: Response) => {
-  const entityType = req.query.entityType;
-  const entityId = req.query.entityId;
-  if (typeof entityType !== "string" || typeof entityId !== "string") {
+  // Support string or single-element array (proxies sometimes duplicate query keys)
+  const rawType = req.query.entityType;
+  const rawId = req.query.entityId;
+  const entityType = Array.isArray(rawType) ? String(rawType[0] ?? "") : String(rawType ?? "");
+  const entityId = Array.isArray(rawId) ? String(rawId[0] ?? "") : String(rawId ?? "");
+  if (!entityType.trim() || !entityId.trim()) {
     throw new ApiError(400, "entityType and entityId are required");
   }
 
-  const entity =
-    entityType === "SESSION_PLAN"
-      ? await AcademicSessionPlan.findOne({ _id: entityId, schoolId: tenantObjectId(req), isDeleted: false }).select("teacherId").lean()
-      : entityType === "LESSON_PLAN"
-        ? await AcademicLessonPlan.findOne({ _id: entityId, schoolId: tenantObjectId(req), isDeleted: false }).select("teacherId").lean()
-        : await AcademicLogBookEntry.findOne({ _id: entityId, schoolId: tenantObjectId(req), isDeleted: false }).select("teacherId").lean();
+  const entity = await findCommentEntity(req, entityType, entityId);
 
-  if (!entity) throw new ApiError(404, "Entity not found");
-  if (entity.teacherId) await assertTeacherOwnership(req, entity.teacherId.toString());
+  // Soft-fail list: panel should not hard-break if entity lookup fails.
+  // Still enforce access when the entity is found.
+  if (entity) {
+    if (entityType === "SYLLABUS") {
+      const syllabus = entity as {
+        teacherId?: { toString(): string } | null;
+        subjectId: { toString(): string };
+      };
+      const subjectId =
+        typeof syllabus.subjectId === "object" && syllabus.subjectId
+          ? syllabus.subjectId.toString()
+          : String(syllabus.subjectId ?? "");
+      if (subjectId) {
+        await assertSyllabusAccess(req, {
+          teacherId: syllabus.teacherId?.toString?.() ?? undefined,
+          subjectId
+        });
+      }
+    } else if ("teacherId" in entity && entity.teacherId) {
+      await assertTeacherOwnership(req, entity.teacherId.toString());
+    }
+  } else if (!isAcademicAdmin(req.user?.role ?? "")) {
+    // Non-admins cannot list comments for unknown entities
+    throw new ApiError(404, "Entity not found");
+  }
 
   const comments = await AcademicComment.find({
     schoolId: tenantObjectId(req),
     entityType,
     entityId
-  }).sort({ createdAt: -1 });
+  })
+    .sort({ createdAt: -1 })
+    .lean();
 
-  return sendSuccess(res, "Comments fetched", comments);
+  return sendSuccess(
+    res,
+    "Comments fetched",
+    comments.map((c) => ({
+      ...c,
+      _id: c._id.toString(),
+      schoolId: c.schoolId?.toString?.() ?? c.schoolId,
+      entityId: c.entityId?.toString?.() ?? c.entityId,
+      authorUserId: c.authorUserId?.toString?.() ?? c.authorUserId
+    }))
+  );
 });

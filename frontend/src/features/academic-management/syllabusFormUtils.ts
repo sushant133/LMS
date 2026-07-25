@@ -738,24 +738,28 @@ export const formToPayload = (
   // Curriculum-shared syllabus: do not pin to a single batch
   const batchId = form.batchId?.trim() ? form.batchId : undefined;
 
+  const academicYearBs = (form.academicYearBs || "").trim();
+  const session = (form.session || academicYearBs || "").trim();
+
   return {
-    academicYearBs: form.academicYearBs,
-    session: form.session || form.academicYearBs,
-    faculty: form.faculty,
-    semesterBs: form.semesterBs,
-    classId: form.classId || undefined,
-    sectionId: form.sectionId || undefined,
+    academicYearBs,
+    session: session || academicYearBs,
+    faculty: form.faculty || undefined,
+    semesterBs: form.semesterBs || undefined,
+    // Never send "" for ObjectId fields (server CastError → 400)
+    classId: form.classId?.trim() || undefined,
+    sectionId: form.sectionId?.trim() || undefined,
     batchId,
-    yearId: form.yearId || undefined,
+    yearId: form.yearId?.trim() || undefined,
     subjectId: form.subjectId,
-    teacherId: form.teacherId || "",
+    teacherId: (form.teacherId || "").trim(),
     subjectCode: form.subjectCode || "",
     totalTheoryHours: safeHours(form.totalTheoryHours),
     totalPracticalHours: safeHours(form.totalPracticalHours),
     creditHours: safeHours(form.creditHours),
     remarks: t(form.remarks),
-    attachmentUrl: form.attachmentUrl,
-    // Always send chapters (even blank-title units) so hierarchy is rewritten on every save
+    attachmentUrl: form.attachmentUrl?.trim() || undefined,
+    // Always send chapters so hierarchy is rewritten on every save
     chapters,
     // Server prefers chapters; units is a safety net
     units: legacyUnits.length > 0 ? legacyUnits : undefined,

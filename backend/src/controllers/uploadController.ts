@@ -294,3 +294,15 @@ export const uploadAccountingHandler = asyncHandler(async (req: Request, res: Re
     files: finalized.map((f) => toFileResponse(f))
   });
 });
+
+export const uploadFinanceHandler = asyncHandler(async (req: Request, res: Response) => {
+  const files = (req as { files?: Express.Multer.File[] }).files;
+  if (!files || files.length === 0) {
+    throw new ApiError(400, "No files uploaded");
+  }
+
+  const finalized = await finalizeUploadedFiles(req, files, UPLOAD_MODULES.FINANCE);
+  return sendSuccess(res, "Finance files uploaded", {
+    files: finalized.map((f) => toFileResponse(f))
+  });
+});
