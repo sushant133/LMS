@@ -716,9 +716,18 @@ export const createSyllabus = asyncHandler(async (req: Request, res: Response) =
 
   const payload = academicSyllabusSchema.parse(req.body);
   const optionalTeacherId = payload.teacherId?.trim() || undefined;
+  // Deep-clone structure so later header mutations cannot drop units/subs
+  const structureSource = {
+    chapters: Array.isArray(payload.chapters)
+      ? (JSON.parse(JSON.stringify(payload.chapters)) as AcademicSyllabusChapterInput[])
+      : payload.chapters,
+    units: Array.isArray(payload.units)
+      ? (JSON.parse(JSON.stringify(payload.units)) as NonNullable<typeof payload.units>)
+      : payload.units
+  };
   // Unit titles are optional. Never reject with the old
   // "At least one unit with a title is required…" message — blank titles save as "".
-  let chapters = resolveSyllabusChapters(payload);
+  let chapters = resolveSyllabusChapters(structureSource);
   if (chapters.length === 0) {
     // Soft fallback: keep a single blank unit so create never hard-fails structure
     chapters = [
@@ -943,9 +952,21 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
   const hasUnitsField = payload.units !== undefined;
   const structureChanging = hasChaptersField || hasUnitsField;
 
-  // ALWAYS shallow-clone. sanitizeTeacherOwnedUpdate returns the same object
-  // for admins; deleting chapters/units on that reference would wipe payload
-  // before resolveSyllabusChapters runs (draft hierarchy never saved).
+  /**
+   * Deep-clone structure BEFORE any sanitize/delete.
+   * Shallow clone of payload is not enough if a later step mutates nested arrays;
+   * hierarchy rewrite must always see the original units/sub-units from the request.
+   */
+  const chaptersSnapshot: AcademicSyllabusChapterInput[] | undefined = Array.isArray(
+    payload.chapters
+  )
+    ? (JSON.parse(JSON.stringify(payload.chapters)) as AcademicSyllabusChapterInput[])
+    : undefined;
+  const unitsSnapshot = Array.isArray(payload.units)
+    ? (JSON.parse(JSON.stringify(payload.units)) as NonNullable<typeof payload.units>)
+    : undefined;
+
+  // ALWAYS shallow-clone header fields so delete of chapters/units cannot touch payload.
   const safePayload = {
     ...sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>)
   } as Record<string, unknown>;
@@ -984,21 +1005,24 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
     if (structureChanging) {
       // Prefer hierarchical chapters; fall back to legacy units when needed
       const resolved =
-        hasChaptersField && Array.isArray(payload.chapters) && payload.chapters.length > 0
-          ? resolveSyllabusChapters({ chapters: payload.chapters })
+        hasChaptersField &&
+        Array.isArray(chaptersSnapshot) &&
+        chaptersSnapshot.length > 0
+          ? resolveSyllabusChapters({ chapters: chaptersSnapshot })
           : resolveSyllabusChapters({
-              chapters: payload.chapters,
-              units: payload.units
+              chapters: chaptersSnapshot,
+              units: unitsSnapshot
             });
 
       // Hierarchy rewrite is ALWAYS scoped to this one syllabus document only.
-      // saveSyllabusHierarchy also refuses empty/placeholder wipes and invalid ids.
       const syllabusIdStr = existing._id.toString();
+      const countFilter = { syllabusId: existing._id };
+      const countOpts = getSessionOption(session);
       const [existingTopicCount, existingChapterCount, existingSubCount] =
         await Promise.all([
-          AcademicSyllabusTopic.countDocuments({ syllabusId: existing._id }),
-          AcademicSyllabusChapter.countDocuments({ syllabusId: existing._id }),
-          AcademicSyllabusSubUnit.countDocuments({ syllabusId: existing._id })
+          AcademicSyllabusTopic.countDocuments(countFilter, countOpts),
+          AcademicSyllabusChapter.countDocuments(countFilter, countOpts),
+          AcademicSyllabusSubUnit.countDocuments(countFilter, countOpts)
         ]);
       const existingHasHierarchy =
         existingTopicCount > 0 || existingChapterCount > 0 || existingSubCount > 0;
@@ -1006,26 +1030,30 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
       const incomingUnitCount = countUnitsInChapters(resolved);
       const incomingSubCount = countAllSubsInChapters(resolved);
       const incomingEmptyShell = isEmptyHierarchyShell(resolved);
+      // Growth: more units/subs than DB → always rewrite (never treat as empty shell)
+      const isGrowing =
+        incomingUnitCount > existingTopicCount ||
+        incomingSubCount > existingSubCount;
 
       /**
        * CRITICAL SAFETY (VPS wipe bug):
-       * saveSyllabusHierarchy deletes THIS syllabus's chapters/units/sub-units then re-inserts.
-       * Never run that wipe when the client sent an empty shell while the database
-       * already has hierarchy (e.g. edit form loaded without chapters).
-       * Other subjects' syllabi are never touched (filter is always { syllabusId }).
-       * Partial multi-unit drafts with "Unit N" titles are still allowed to save.
+       * Never wipe with an empty shell. Multi-unit drafts and growth always save.
        */
-      if (existingHasHierarchy && (!resolved.length || incomingEmptyShell)) {
+      if (
+        existingHasHierarchy &&
+        !isGrowing &&
+        (!resolved.length || incomingEmptyShell)
+      ) {
         // Keep existing hierarchy; only metadata above was updated.
       } else if (
         existingHasHierarchy &&
+        !isGrowing &&
         existingTopicCount >= 2 &&
         incomingUnitCount <= 1 &&
         incomingSubCount === 0 &&
         existingSubCount > 0 &&
         !chaptersHaveRealContent(resolved)
       ) {
-        // Rich tree collapsed to a blank shell — refuse destructive rewrite
         throw new ApiError(
           400,
           "Cannot replace syllabus structure with empty units. Reload the syllabus and try again, or keep existing units in the form before saving."
@@ -1040,7 +1068,6 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
           session ?? undefined
         );
       }
-      // If no existing hierarchy and resolved empty: leave hierarchy empty (new draft shell)
     }
 
     await recordAudit(req, {
@@ -1280,6 +1307,19 @@ export const submitSyllabus = asyncHandler(async (req: Request, res: Response) =
     teacherId: existing.teacherId?.toString(),
     subjectId: existing.subjectId.toString()
   });
+
+  // Submit is status-only. Never touch hierarchy here (prevents wipe-on-submit).
+  // Client may PUT first when the editor is open with a full safe payload.
+  const [topicCount, chapterCount] = await Promise.all([
+    AcademicSyllabusTopic.countDocuments({ syllabusId: existing._id }),
+    AcademicSyllabusChapter.countDocuments({ syllabusId: existing._id })
+  ]);
+  if (topicCount === 0 && chapterCount === 0) {
+    throw new ApiError(
+      400,
+      "Cannot submit an empty syllabus. Add at least one unit, Save draft, then Submit."
+    );
+  }
 
   existing.status = "PENDING_APPROVAL";
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };

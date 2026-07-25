@@ -75,8 +75,9 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       onChange?.(event);
     };
 
+    // Do NOT call preventDefault on React's onWheel — React registers passive
+    // listeners and spams console. Native non-passive listener above handles it.
     const handleWheel: React.WheelEventHandler<HTMLInputElement> = (event) => {
-      event.preventDefault();
       onWheel?.(event);
     };
 

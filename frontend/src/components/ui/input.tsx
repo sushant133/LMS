@@ -159,10 +159,9 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       onBlur?.(event);
     };
 
+    // Do NOT preventDefault on React onWheel (passive listener → console spam).
+    // Native non-passive wheel blocker above is the real fix for number scroll.
     const handleWheel: React.WheelEventHandler<HTMLInputElement> = (event) => {
-      if (isNumberInput) {
-        event.preventDefault();
-      }
       onWheel?.(event);
     };
 

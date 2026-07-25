@@ -14,12 +14,14 @@ import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 
-/** Preserve existing Mongo ids from form clientKey when re-saving hierarchy. */
-const forcedObjectId = (clientKey?: string): Types.ObjectId | undefined => {
-  if (!clientKey || !mongoose.isValidObjectId(clientKey)) return undefined;
-  // Ignore temporary client keys like "sub-123-1"
-  if (!/^[a-f\d]{24}$/i.test(clientKey)) return undefined;
-  return new mongoose.Types.ObjectId(clientKey);
+/**
+ * Preserve existing Mongo ids from form clientKey when re-saving hierarchy.
+ * DISABLED for forced re-insert after delete: reusing _ids after deleteMany
+ * has caused empty trees on some VPS/Atlas timing cases. Always allocate new ids.
+ * clientKey is still accepted on the payload for client-side React keys only.
+ */
+const forcedObjectId = (_clientKey?: string): Types.ObjectId | undefined => {
+  return undefined;
 };
 
 type LegacyUnitLike = {
@@ -539,22 +541,32 @@ export const saveSyllabusHierarchy = async (
   const opts = session ? { session } : {};
   const countOpts = session ? { session } : {};
 
-  // On standalone Mongo (no transaction), snapshot before wipe so we can restore if insert fails.
-  let backup: {
-    chapters: Awaited<ReturnType<typeof AcademicSyllabusChapter.find>>;
-    topics: Awaited<ReturnType<typeof AcademicSyllabusTopic.find>>;
-    subUnits: Awaited<ReturnType<typeof AcademicSyllabusSubUnit.find>>;
-    legacy: Awaited<ReturnType<typeof AcademicSyllabusUnit.find>>;
-  } | null = null;
-  if (!session) {
-    const [ch, topics, subUnits, legacy] = await Promise.all([
-      AcademicSyllabusChapter.find({ syllabusId }).lean(),
-      AcademicSyllabusTopic.find({ syllabusId }).lean(),
-      AcademicSyllabusSubUnit.find({ syllabusId }).lean(),
-      AcademicSyllabusUnit.find({ syllabusId }).lean()
-    ]);
-    backup = { chapters: ch as never, topics: topics as never, subUnits: subUnits as never, legacy: legacy as never };
-  }
+  // ALWAYS snapshot before wipe so we can restore if insert fails after delete
+  // (standalone Mongo, or partial failures on VPS before transaction abort).
+  const leanScoped = async <T>(
+    model: {
+      find: (f: object) => {
+        session: (s: ClientSession) => { lean: () => Promise<T[]> };
+        lean: () => Promise<T[]>;
+      };
+    }
+  ): Promise<T[]> => {
+    const q = model.find({ syllabusId });
+    if (session) return q.session(session).lean();
+    return q.lean();
+  };
+  const [ch, topics, subUnits, legacy] = await Promise.all([
+    leanScoped(AcademicSyllabusChapter as never),
+    leanScoped(AcademicSyllabusTopic as never),
+    leanScoped(AcademicSyllabusSubUnit as never),
+    leanScoped(AcademicSyllabusUnit as never)
+  ]);
+  const backup = {
+    chapters: ch as never[],
+    topics: topics as never[],
+    subUnits: subUnits as never[],
+    legacy: legacy as never[]
+  };
 
   // ── SAFETY (scoped to THIS syllabusId only — never other subjects) ──
   // Refuse wipe when client sends an empty shell while DB already has structure.
@@ -572,7 +584,11 @@ export const saveSyllabusHierarchy = async (
   const existingHasHierarchy =
     existingTopicCount > 0 || existingChapterCount > 0 || existingSubCount > 0;
 
-  if (existingHasHierarchy && incomingEmptyShell) {
+  // Growth always rewrites (user added units/subs). Empty shell only blocks shrink.
+  const isGrowing =
+    incomingUnitCount > existingTopicCount || incomingSubCount > existingSubCount;
+
+  if (existingHasHierarchy && incomingEmptyShell && !isGrowing) {
     // Leave THIS syllabus's hierarchy unchanged; metadata-only updates stay safe.
     return;
   }
@@ -581,6 +597,7 @@ export const saveSyllabusHierarchy = async (
   // Intentional deletes that still send real content (titles/subs) still proceed.
   if (
     existingHasHierarchy &&
+    !isGrowing &&
     existingTopicCount >= 2 &&
     incomingUnitCount <= 1 &&
     incomingSubCount === 0 &&
@@ -630,7 +647,11 @@ export const saveSyllabusHierarchy = async (
         forcedChapterId,
         opts
       );
-      if (!chapterDoc) continue;
+      if (!chapterDoc) {
+        throw new Error(
+          `Failed to create syllabus chapter ${chapterNo} for ${syllabusId}`
+        );
+      }
       const chapterId = (chapterDoc as { _id: Types.ObjectId })._id;
 
       const units = chapter.units ?? [];
@@ -661,7 +682,11 @@ export const saveSyllabusHierarchy = async (
           forcedUnitId,
           opts
         );
-        if (!unitDoc) continue;
+        if (!unitDoc) {
+          throw new Error(
+            `Failed to create syllabus unit ${unitNo} for ${syllabusId}`
+          );
+        }
 
         const subUnits = unit.subUnits ?? [];
         if (subUnits.length === 0) continue;
@@ -696,31 +721,42 @@ export const saveSyllabusHierarchy = async (
       { $set: { hierarchyMigratedAt: new Date() } },
       opts
     );
+
+    // Verify write completed — surface incomplete trees instead of silent loss
+    const writtenTopics = await AcademicSyllabusTopic.countDocuments(
+      { syllabusId },
+      countOpts
+    );
+    if (incomingUnitCount > 0 && writtenTopics < incomingUnitCount) {
+      throw new Error(
+        `Syllabus hierarchy incomplete after save: expected ${incomingUnitCount} units, wrote ${writtenTopics}`
+      );
+    }
   };
 
   try {
     await writeTree();
   } catch (error) {
-    // Restore previous hierarchy when no Mongo transaction can roll back
-    if (!session && backup) {
-      try {
-        await deleteSyllabusHierarchy(syllabusId);
-        await AcademicSyllabusUnit.deleteMany({ syllabusId });
-        if (backup.chapters.length > 0) {
-          await AcademicSyllabusChapter.insertMany(backup.chapters as never[]);
-        }
-        if (backup.topics.length > 0) {
-          await AcademicSyllabusTopic.insertMany(backup.topics as never[]);
-        }
-        if (backup.subUnits.length > 0) {
-          await AcademicSyllabusSubUnit.insertMany(backup.subUnits as never[]);
-        }
-        if (backup.legacy.length > 0) {
-          await AcademicSyllabusUnit.insertMany(backup.legacy as never[]);
-        }
-      } catch {
-        // Keep original error
+    // Restore previous hierarchy if insert failed after delete.
+    // With a Mongo transaction the abort also rolls back; this is a safety net
+    // for standalone Mongo and partial transaction edge cases on VPS.
+    try {
+      await deleteSyllabusHierarchy(syllabusId, session);
+      await AcademicSyllabusUnit.deleteMany({ syllabusId }, opts);
+      if (backup.chapters.length > 0) {
+        await AcademicSyllabusChapter.insertMany(backup.chapters as never[], opts);
       }
+      if (backup.topics.length > 0) {
+        await AcademicSyllabusTopic.insertMany(backup.topics as never[], opts);
+      }
+      if (backup.subUnits.length > 0) {
+        await AcademicSyllabusSubUnit.insertMany(backup.subUnits as never[], opts);
+      }
+      if (backup.legacy.length > 0) {
+        await AcademicSyllabusUnit.insertMany(backup.legacy as never[], opts);
+      }
+    } catch {
+      // Keep original error
     }
     throw error;
   }

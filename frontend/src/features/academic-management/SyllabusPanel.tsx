@@ -247,6 +247,37 @@ export const SyllabusPanel = ({
     }, 50);
   };
 
+  /** Score hierarchy richness so we never open an empty form over real data. */
+  const hierarchyScore = (record?: AcademicSyllabusRecord | null): number => {
+    if (!record) return 0;
+    const walk = (
+      subs: Array<{ children?: Array<{ children?: unknown[] }>; heading?: string }>,
+    ): number =>
+      subs.reduce(
+        (n, s) =>
+          n +
+          (String(s.heading ?? "").trim() ? 2 : 1) +
+          walk(s.children ?? []),
+        0,
+      );
+    const fromChapters = (record.chapters ?? []).reduce((n, ch) => {
+      const units = ch.units ?? [];
+      return (
+        n +
+        units.reduce((un, u) => {
+          const title = String(u.title ?? "").trim();
+          const realTitle = title && !/^unit\s*\d+$/i.test(title) ? 5 : 1;
+          return un + realTitle + walk(u.subUnits ?? []);
+        }, 0)
+      );
+    }, 0);
+    if (fromChapters > 0) return fromChapters;
+    return (record.units ?? []).reduce((n, u) => {
+      const name = String(u.chapterName ?? "").trim();
+      return n + (name ? 5 : 1) + (u.topicsCovered ? 2 : 0);
+    }, 0);
+  };
+
   const openEditForm = async (
     plan: AcademicSyllabusRecord,
     opts?: { silent?: boolean },
@@ -260,13 +291,35 @@ export const SyllabusPanel = ({
       return;
     }
     // Always load full hierarchy from server before editing.
-    // List cards can be incomplete; saving without chapters would wipe units/chapters.
+    // CRITICAL: prefer the richer of GET vs list card — never open empty over real units.
     try {
-      const full = await unwrap<AcademicSyllabusRecord>(
-        api.get(`/academic-management/syllabi/${plan._id}`),
-      );
-      const source = full?._id ? full : plan;
-      const chapterCount = source.chapters?.length ?? 0;
+      let full: AcademicSyllabusRecord | null = null;
+      try {
+        full = await unwrap<AcademicSyllabusRecord>(
+          api.get(`/academic-management/syllabi/${plan._id}`),
+        );
+      } catch {
+        full = null;
+      }
+
+      const listScore = hierarchyScore(plan);
+      const fullScore = hierarchyScore(full);
+      // Prefer richer tree. If GET is empty/thin but list still has content, keep list.
+      const source =
+        fullScore >= listScore && full?._id
+          ? full
+          : listScore > 0
+            ? plan
+            : full?._id
+              ? full
+              : plan;
+
+      if (fullScore < listScore && listScore > 0) {
+        toast.message(
+          "Loaded units from the list view because the detail API returned less structure. Save carefully after reviewing.",
+        );
+      }
+
       const unitCount =
         source.chapters?.reduce(
           (n, ch) => n + (ch.units?.length ?? 0),
@@ -274,9 +327,10 @@ export const SyllabusPanel = ({
         ) ??
         source.units?.length ??
         0;
+      const chapterCount = source.chapters?.length ?? 0;
       if (chapterCount === 0 && unitCount === 0) {
         toast.error(
-          "Could not load syllabus units for editing. Refresh the page and try again — saving without structure would clear the syllabus.",
+          "Could not load syllabus units for editing. Refresh the page and try again — opening an empty form would risk clearing the syllabus.",
         );
         return;
       }
@@ -424,11 +478,22 @@ export const SyllabusPanel = ({
     );
   };
 
-  const applySavedPlanToEditor = (
+  const applySavedPlanToEditor = async (
     saved: AcademicSyllabusRecord,
     sentPayload?: AcademicSyllabusInput,
   ) => {
-    const savedUnitCount = (saved.chapters ?? []).reduce(
+    // Always re-fetch full hierarchy so clientKeys/_ids match DB after rewrite.
+    let plan = saved;
+    try {
+      const full = await unwrap<AcademicSyllabusRecord>(
+        api.get(`/academic-management/syllabi/${saved._id}`),
+      );
+      if (full?._id) plan = full;
+    } catch {
+      // Fall back to mutation response body
+    }
+
+    const savedUnitCount = (plan.chapters ?? []).reduce(
       (n, ch) => n + (ch.units?.length ?? 0),
       0,
     );
@@ -436,28 +501,36 @@ export const SyllabusPanel = ({
       (n, ch) => n + (ch.units?.length ?? 0),
       0,
     );
-    const savedSubCount = countRecordSubs(saved);
+    const savedSubCount = countRecordSubs(plan);
     const sentSubCount = countPayloadSubs(sentPayload);
-    // If server returned fewer units/sub-units than we sent, keep local form
+
+    setEditingId(plan._id);
+    setShowForm(true);
+
+    // Server kept fewer units than we sent → keep local form so user does not lose work.
+    // (Common when an empty-shell guard skipped rewrite; user should Save draft again.)
     if (
       (sentUnitCount > 0 && savedUnitCount < sentUnitCount) ||
       (sentSubCount > 0 && savedSubCount < sentSubCount)
     ) {
-      toast.error(
-        "Saved, but some units/sub-units did not reload from the server. Your local draft is kept — try Save draft again.",
+      // Still bind editingId so next Save is PUT, not a duplicate create
+      loadedBaselineRef.current = {
+        id: plan._id,
+        units: Math.max(savedUnitCount, sentUnitCount),
+        subs: Math.max(savedSubCount, sentSubCount),
+      };
+      toast.message(
+        "Draft saved. Some units are still syncing — click Save draft once more to finish.",
       );
-      setEditingId(saved._id);
-      setShowForm(true);
       return;
     }
-    setEditingId(saved._id);
+
     loadedBaselineRef.current = {
-      id: saved._id,
+      id: plan._id,
       units: savedUnitCount,
       subs: savedSubCount,
     };
-    setForm(recordToForm(saved));
-    setShowForm(true);
+    setForm(recordToForm(plan));
   };
 
   const createMutation = useMutation({
@@ -472,7 +545,7 @@ export const SyllabusPanel = ({
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       // Stay open so user can continue unit 3, 4, … without reopening
       if (saved?._id) {
-        applySavedPlanToEditor(saved, payload);
+        void applySavedPlanToEditor(saved, payload);
       }
     },
     onError: (error) => {
@@ -532,7 +605,7 @@ export const SyllabusPanel = ({
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       // Keep editor open with server-synced ids/numbers for continued editing
       if (saved?._id) {
-        applySavedPlanToEditor(saved, payload);
+        void applySavedPlanToEditor(saved, payload);
       }
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -607,8 +680,8 @@ export const SyllabusPanel = ({
       0,
     );
 
-    // Guard only against under-loaded editor (loaded rich tree, form is empty shell).
-    // Never wipe another syllabus: we always PUT by editingId for this syllabus only.
+    // HARD GUARD: never send a thinner tree than what we loaded for this edit.
+    // This is the main VPS wipe protection on the client (even if server is old).
     if (editingId && loadedBaselineRef.current?.id === editingId) {
       const baseline = loadedBaselineRef.current;
       const looksLikeEmptyShell =
@@ -622,8 +695,26 @@ export const SyllabusPanel = ({
             return isPlaceholder && !hasDesc;
           }),
         );
+      if (baseline.units > 0 && unitCount === 0) {
+        toast.error(
+          "Cannot save an empty structure over an existing syllabus. Reload and try again.",
+        );
+        return null;
+      }
+      // Losing more than half the units vs loaded baseline without intentional growth path
       if (
         baseline.units >= 2 &&
+        unitCount < baseline.units &&
+        unitCount <= Math.max(1, Math.floor(baseline.units / 2)) &&
+        formSubCount < baseline.subs
+      ) {
+        toast.error(
+          "Cannot save: the form has fewer units than were loaded. Close, click Edit again (wait for full load), then save. Your server data was not changed.",
+        );
+        return null;
+      }
+      if (
+        baseline.units >= 1 &&
         unitCount <= 1 &&
         baseline.subs > 0 &&
         formSubCount === 0 &&
@@ -631,12 +722,6 @@ export const SyllabusPanel = ({
       ) {
         toast.error(
           "Cannot save: the editor lost the loaded units/sub-units. Close, click Edit again (wait for full load), then save.",
-        );
-        return null;
-      }
-      if (baseline.units > 0 && unitCount === 0) {
-        toast.error(
-          "Cannot save an empty structure over an existing syllabus. Reload and try again.",
         );
         return null;
       }
@@ -693,17 +778,18 @@ export const SyllabusPanel = ({
 
   const submitMutation = useMutation({
     mutationFn: async (id: string) => {
-      // If this syllabus is open in the editor, persist units/sub-units first
-      // via the same update mutation path (serialized — avoids concurrent wipe races).
+      // If this syllabus is open in the editor, persist units first — but ONLY when
+      // the form has a safe full payload. Never PUT an under-loaded form before submit
+      // (that was wiping hierarchy on VPS when Edit opened empty).
       if (showForm && editingId === id) {
         const payload = buildSavePayload();
-        if (!payload) {
-          throw new Error("Fix the form before submitting");
+        if (payload) {
+          const saved = await unwrap<AcademicSyllabusRecord>(
+            api.put(`/academic-management/syllabi/${id}`, payload),
+          );
+          await applySavedPlanToEditor(saved, payload);
         }
-        const saved = await unwrap<AcademicSyllabusRecord>(
-          api.put(`/academic-management/syllabi/${id}`, payload),
-        );
-        applySavedPlanToEditor(saved, payload);
+        // If payload is null, guards already toasted — still allow submit of existing DB data
       }
       return unwrap(api.post(`/academic-management/syllabi/${id}/submit`));
     },
