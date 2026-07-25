@@ -617,6 +617,12 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
 
   // ── Admission security deposit refund (pass-out / withdrawal) ───────────
   if (refundType === "DEPOSIT_REFUND") {
+    if (student.securityDepositWaived) {
+      throw new ApiError(
+        400,
+        "Security deposit was not taken / cancelled for this student. No deposit refund is due."
+      );
+    }
     // Register deposit if never stored but accountant provides original amount
     if (
       (!(student.securityDepositNpr > 0) || student.securityDepositNpr === 0) &&

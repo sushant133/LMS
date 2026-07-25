@@ -91,6 +91,11 @@ const studentSchema = new Schema(
     securityDepositNpr: { type: Number, default: 0 },
     /** Cumulative deposit already refunded to the student. */
     securityDepositRefundedNpr: { type: Number, default: 0 },
+    /**
+     * When true, college did not take a security deposit for this student
+     * (waived / cancelled / not applicable). Amount is forced to 0.
+     */
+    securityDepositWaived: { type: Boolean, default: false },
     /** Full scholarship — UI shows "Scholarship" instead of a fee amount. */
     hasScholarship: { type: Boolean, default: false },
     remarks: { type: String },

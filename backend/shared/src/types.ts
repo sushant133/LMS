@@ -310,6 +310,11 @@ export interface StudentRecord {
   securityDepositNpr?: number;
   /** Amount of deposit already refunded (NPR). */
   securityDepositRefundedNpr?: number;
+  /**
+   * When true, college did not take a security deposit for this student
+   * (waived / cancelled / not collected).
+   */
+  securityDepositWaived?: boolean;
   /** When true, student is on full scholarship (no fee amount due). */
   hasScholarship?: boolean;
   remarks?: string;

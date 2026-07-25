@@ -28,7 +28,10 @@ export const mapStudentToInput = (student: StudentRecord): StudentInput => ({
   year1FeeNpr: student.year1FeeNpr ?? 0,
   year2FeeNpr: student.year2FeeNpr ?? 0,
   year3FeeNpr: student.year3FeeNpr ?? 0,
-  securityDepositNpr: student.securityDepositNpr ?? 0,
+  securityDepositNpr: student.securityDepositWaived
+    ? 0
+    : (student.securityDepositNpr ?? 0),
+  securityDepositWaived: Boolean(student.securityDepositWaived),
   hasScholarship: Boolean(student.hasScholarship),
   remarks: student.remarks ?? "",
   academicStatus: student.academicStatus ?? "ACTIVE",

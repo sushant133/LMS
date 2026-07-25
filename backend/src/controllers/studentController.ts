@@ -223,10 +223,13 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
   await validateStudentAdmissionScope(institutionType, schoolId, payload);
 
   const hasScholarship = Boolean(payload.hasScholarship);
+  const securityDepositWaived = Boolean(payload.securityDepositWaived);
   const year1FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year1FeeNpr) || 0);
   const year2FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year2FeeNpr) || 0);
   const year3FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year3FeeNpr) || 0);
-  const securityDepositNpr = Math.max(0, Number(payload.securityDepositNpr) || 0);
+  const securityDepositNpr = securityDepositWaived
+    ? 0
+    : Math.max(0, Number(payload.securityDepositNpr) || 0);
   const yearFeeTotal = year1FeeNpr + year2FeeNpr + year3FeeNpr;
   // Prefer year plan sum when any year fee is set; else legacy total fee field
   const feesDueNpr = hasScholarship
@@ -315,6 +318,7 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           year2FeeNpr,
           year3FeeNpr,
           securityDepositNpr,
+          securityDepositWaived,
           hasScholarship,
           remarks: payload.remarks,
           photoUrl: payload.photoUrl || undefined,
@@ -420,7 +424,10 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   const year3FeeNpr = hasScholarship
     ? 0
     : Math.max(0, Number(payload.year3FeeNpr) || 0);
-  const securityDepositNpr = Math.max(0, Number(payload.securityDepositNpr) || 0);
+  const securityDepositWaived = Boolean(payload.securityDepositWaived);
+  const securityDepositNpr = securityDepositWaived
+    ? 0
+    : Math.max(0, Number(payload.securityDepositNpr) || 0);
   const yearFeeTotal = year1FeeNpr + year2FeeNpr + year3FeeNpr;
   // Keep existing outstanding if no year plan provided; otherwise use plan sum as baseline
   // (recalc after seeding will align with ledger when collections exist)
@@ -533,6 +540,7 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     year2FeeNpr,
     year3FeeNpr,
     securityDepositNpr,
+    securityDepositWaived,
     hasScholarship,
     remarks: payload.remarks,
     academicStatus: payload.academicStatus ?? student.academicStatus ?? "ACTIVE",

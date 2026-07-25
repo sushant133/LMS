@@ -214,6 +214,11 @@ export const studentSchema = z.object({
   year3FeeNpr: moneySchema.default(0),
   /** Security / caution deposit at admission (NPR). */
   securityDepositNpr: moneySchema.default(0),
+  /**
+   * When true, college did not collect a security deposit (waived/cancelled).
+   * Server forces securityDepositNpr to 0.
+   */
+  securityDepositWaived: z.boolean().optional().default(false),
   /** When true, student is on scholarship — no fee amount; UI shows "Scholarship". */
   hasScholarship: z.boolean().optional().default(false),
   remarks: z.string().optional().or(z.literal("")).default(""),

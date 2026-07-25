@@ -378,9 +378,11 @@ export const StudentProfileView = () => {
                           },
                           {
                             label: "Security deposit",
-                            value: formatCurrencyNpr(
-                              student.securityDepositNpr ?? 0,
-                            ),
+                            value: student.securityDepositWaived
+                              ? "Not taken / cancelled"
+                              : formatCurrencyNpr(
+                                  student.securityDepositNpr ?? 0,
+                                ),
                           },
                         ]
                   }

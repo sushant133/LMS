@@ -75,6 +75,7 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   year2FeeNpr: 0,
   year3FeeNpr: 0,
   securityDepositNpr: 0,
+  securityDepositWaived: false,
   hasScholarship: false,
   remarks: "",
   academicStatus: "ACTIVE",
@@ -143,6 +144,7 @@ export const StudentForm = ({
     }
 
     const hasScholarship = Boolean(form.hasScholarship);
+    const securityDepositWaived = Boolean(form.securityDepositWaived);
     const year1 = hasScholarship ? 0 : Number(form.year1FeeNpr) || 0;
     const year2 = hasScholarship ? 0 : Number(form.year2FeeNpr) || 0;
     const year3 = hasScholarship ? 0 : Number(form.year3FeeNpr) || 0;
@@ -153,10 +155,13 @@ export const StudentForm = ({
       password: password.trim() || undefined,
       registrationNumber: (form.registrationNumber ?? "").trim(),
       hasScholarship,
+      securityDepositWaived,
       year1FeeNpr: year1,
       year2FeeNpr: year2,
       year3FeeNpr: year3,
-      securityDepositNpr: Number(form.securityDepositNpr) || 0,
+      securityDepositNpr: securityDepositWaived
+        ? 0
+        : Number(form.securityDepositNpr) || 0,
       // Total tuition due = sum of year fees when set, else manual total
       feesDueNpr: hasScholarship
         ? 0
@@ -548,23 +553,54 @@ export const StudentForm = ({
                 )}
               />
             </FormField>
-            <FormField label="Security deposit (NPR)">
-              <NumberInput
-                min={0}
-                value={form.securityDepositNpr ?? 0}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    securityDepositNpr: Number.isFinite(event.target.valueAsNumber)
-                      ? event.target.valueAsNumber
-                      : 0,
-                  }))
-                }
-                placeholder="Caution / security deposit"
-              />
-            </FormField>
           </>
         )}
+        <FormField label="Security deposit (NPR)">
+          <NumberInput
+            min={0}
+            disabled={Boolean(form.securityDepositWaived)}
+            value={
+              form.securityDepositWaived ? 0 : (form.securityDepositNpr ?? 0)
+            }
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                securityDepositNpr: Number.isFinite(event.target.valueAsNumber)
+                  ? event.target.valueAsNumber
+                  : 0,
+                securityDepositWaived: false,
+              }))
+            }
+            placeholder="Caution / security deposit"
+          />
+        </FormField>
+        <div className="md:col-span-2 xl:col-span-2">
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={Boolean(form.securityDepositWaived)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  securityDepositWaived: event.target.checked,
+                  securityDepositNpr: event.target.checked
+                    ? 0
+                    : current.securityDepositNpr,
+                }))
+              }
+            />
+            <span>
+              <span className="font-medium text-slate-900">
+                Security deposit not taken / cancelled by college
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                Use when the college does not collect a security deposit for
+                this student. Amount is set to zero and shown as not taken.
+              </span>
+            </span>
+          </label>
+        </div>
         <FormField label="Academic Status">
           <Select
             value={form.academicStatus ?? "ACTIVE"}
