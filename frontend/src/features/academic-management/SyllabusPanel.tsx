@@ -137,6 +137,16 @@ export const SyllabusPanel = ({
   /** Always latest form for save — updated synchronously so Save never sees stale chapters. */
   const formRef = useRef(form);
   formRef.current = form;
+  /**
+   * Baseline hierarchy counts from the last full GET on Edit.
+   * Used to refuse under-populated destructive saves without blocking normal drafts
+   * that only have "Unit N" titles yet.
+   */
+  const loadedBaselineRef = useRef<{
+    id: string;
+    units: number;
+    subs: number;
+  } | null>(null);
   const setForm = (
     updater: SyllabusFormState | ((prev: SyllabusFormState) => SyllabusFormState),
   ) => {
@@ -225,6 +235,7 @@ export const SyllabusPanel = ({
 
   const resetForm = () => {
     setEditingId(null);
+    loadedBaselineRef.current = null;
     setForm(blankSyllabusForm(filters));
   };
 
@@ -236,7 +247,10 @@ export const SyllabusPanel = ({
     }, 50);
   };
 
-  const openEditForm = (plan: AcademicSyllabusRecord, opts?: { silent?: boolean }) => {
+  const openEditForm = async (
+    plan: AcademicSyllabusRecord,
+    opts?: { silent?: boolean },
+  ) => {
     if (!canManageStructure) {
       toast.error(
         isTeacher
@@ -245,11 +259,56 @@ export const SyllabusPanel = ({
       );
       return;
     }
-    setEditingId(plan._id);
-    setForm(recordToForm(plan));
-    setShowForm(true);
-    if (!opts?.silent) {
-      scrollToEditor();
+    // Always load full hierarchy from server before editing.
+    // List cards can be incomplete; saving without chapters would wipe units/chapters.
+    try {
+      const full = await unwrap<AcademicSyllabusRecord>(
+        api.get(`/academic-management/syllabi/${plan._id}`),
+      );
+      const source = full?._id ? full : plan;
+      const chapterCount = source.chapters?.length ?? 0;
+      const unitCount =
+        source.chapters?.reduce(
+          (n, ch) => n + (ch.units?.length ?? 0),
+          0,
+        ) ??
+        source.units?.length ??
+        0;
+      if (chapterCount === 0 && unitCount === 0) {
+        toast.error(
+          "Could not load syllabus units for editing. Refresh the page and try again — saving without structure would clear the syllabus.",
+        );
+        return;
+      }
+      const walkSubs = (
+        subs: Array<{ children?: Array<{ children?: unknown[] }> }>,
+      ): number =>
+        subs.reduce((n, s) => n + 1 + walkSubs(s.children ?? []), 0);
+      const subCount = (source.chapters ?? []).reduce(
+        (n, ch) =>
+          n +
+          (ch.units ?? []).reduce(
+            (un, u) => un + walkSubs(u.subUnits ?? []),
+            0,
+          ),
+        0,
+      );
+      loadedBaselineRef.current = {
+        id: source._id,
+        units: unitCount,
+        subs: subCount,
+      };
+      setEditingId(source._id);
+      setForm(recordToForm(source));
+      setShowForm(true);
+      if (!opts?.silent) {
+        scrollToEditor();
+      }
+    } catch (error) {
+      toast.error(
+        parseErrorMessage(error) ||
+          "Failed to load syllabus for editing. Please refresh and try again.",
+      );
     }
   };
 
@@ -281,7 +340,7 @@ export const SyllabusPanel = ({
             ? "Opening rejected syllabus so you can continue editing"
             : "Continuing existing draft — add more units and save again anytime",
         );
-        openEditForm(resume);
+        void openEditForm(resume);
         return;
       }
     }
@@ -325,6 +384,7 @@ export const SyllabusPanel = ({
       setForm(base);
     }
     setEditingId(null);
+    loadedBaselineRef.current = null;
     setShowForm(true);
     scrollToEditor();
   };
@@ -391,6 +451,11 @@ export const SyllabusPanel = ({
       return;
     }
     setEditingId(saved._id);
+    loadedBaselineRef.current = {
+      id: saved._id,
+      units: savedUnitCount,
+      subs: savedSubCount,
+    };
     setForm(recordToForm(saved));
     setShowForm(true);
   };
@@ -413,8 +478,12 @@ export const SyllabusPanel = ({
     onError: (error) => {
       const message = parseErrorMessage(error);
       toast.error(message);
-      // Unique constraint: resume existing DRAFT by PUTting local form (do not wipe unsaved work)
-      if (/already exists/i.test(message) && formRef.current.subjectId) {
+      // Unique constraint: resume existing DRAFT by PUTting local form (do not wipe unsaved work).
+      // Server resume path + hierarchy guards ensure we never clear another subject.
+      if (
+        (/already exists/i.test(message) || /duplicate/i.test(message)) &&
+        formRef.current.subjectId
+      ) {
         const subjectId = formRef.current.subjectId;
         const yearId = formRef.current.yearId;
         const classId = formRef.current.classId;
@@ -426,13 +495,19 @@ export const SyllabusPanel = ({
         });
         if (existing) {
           const payload = buildSavePayload();
-          if (payload) {
+          if (payload && (payload.chapters?.length ?? 0) > 0) {
             toast.message("Updating the existing draft with your current units…");
             setEditingId(existing._id);
+            // Baseline unknown until server responds; update path has server-side wipe guards
+            loadedBaselineRef.current = {
+              id: existing._id,
+              units: 0,
+              subs: 0,
+            };
             updateMutation.mutate({ id: existing._id, payload });
           } else {
             toast.message("Opening the existing draft so you can continue editing");
-            openEditForm(existing, { silent: true });
+            void openEditForm(existing, { silent: true });
           }
         }
       }
@@ -503,7 +578,7 @@ export const SyllabusPanel = ({
     }
     if (!Array.isArray(latest.chapters) || latest.chapters.length === 0) {
       toast.error(
-        "Syllabus structure is missing. Close the form, open the syllabus again, and retry.",
+        "Syllabus structure is missing. Close the form, open the syllabus again, and retry. Do not save — an empty structure can clear units on the server.",
       );
       return null;
     }
@@ -514,6 +589,57 @@ export const SyllabusPanel = ({
     if (unitCount === 0) {
       toast.error("Add at least one unit before saving");
       return null;
+    }
+
+    // Count form sub-units for under-population checks (do NOT block normal
+    // drafts that only have "Unit N" titles — those are valid partial saves).
+    const walkFormSubs = (
+      subs: Array<{ children?: Array<{ children?: unknown[] }> }>,
+    ): number =>
+      subs.reduce((n, s) => n + 1 + walkFormSubs(s.children ?? []), 0);
+    const formSubCount = latest.chapters.reduce(
+      (n, ch) =>
+        n +
+        (ch.units ?? []).reduce(
+          (un, u) => un + walkFormSubs(u.subUnits ?? []),
+          0,
+        ),
+      0,
+    );
+
+    // Guard only against under-loaded editor (loaded rich tree, form is empty shell).
+    // Never wipe another syllabus: we always PUT by editingId for this syllabus only.
+    if (editingId && loadedBaselineRef.current?.id === editingId) {
+      const baseline = loadedBaselineRef.current;
+      const looksLikeEmptyShell =
+        formSubCount === 0 &&
+        latest.chapters.every((ch) =>
+          (ch.units ?? []).every((u) => {
+            const title = String(u.title ?? "").trim();
+            const isPlaceholder =
+              !title || /^unit\s*\d+$/i.test(title);
+            const hasDesc = Boolean(String(u.description ?? "").trim());
+            return isPlaceholder && !hasDesc;
+          }),
+        );
+      if (
+        baseline.units >= 2 &&
+        unitCount <= 1 &&
+        baseline.subs > 0 &&
+        formSubCount === 0 &&
+        looksLikeEmptyShell
+      ) {
+        toast.error(
+          "Cannot save: the editor lost the loaded units/sub-units. Close, click Edit again (wait for full load), then save.",
+        );
+        return null;
+      }
+      if (baseline.units > 0 && unitCount === 0) {
+        toast.error(
+          "Cannot save an empty structure over an existing syllabus. Reload and try again.",
+        );
+        return null;
+      }
     }
 
     const optionalTeacher = (latest.teacherId || teacherId || "").trim();
@@ -927,7 +1053,7 @@ export const SyllabusPanel = ({
             {editable ? (
               <Button
                 size="sm"
-                onClick={() => openEditForm(plan)}
+                onClick={() => void openEditForm(plan)}
                 title={
                   plan.status === "DRAFT" || plan.status === "REJECTED"
                     ? "Continue this draft — add more units and save again"
@@ -951,7 +1077,7 @@ export const SyllabusPanel = ({
                       void queryClient
                         .invalidateQueries({ queryKey: ["academic-management"] })
                         .then(() => {
-                          openEditForm({ ...plan, status: "DRAFT" });
+                          void openEditForm({ ...plan, status: "DRAFT" });
                         });
                     },
                   });
@@ -1236,7 +1362,7 @@ export const SyllabusPanel = ({
           {canManageStructure ? (
             <div className="flex flex-wrap gap-2 no-print">
               {editable ? (
-                <Button size="sm" onClick={() => openEditForm(plan)}>
+                <Button size="sm" onClick={() => void openEditForm(plan)}>
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit units &amp; sub-units
                 </Button>
@@ -1247,7 +1373,7 @@ export const SyllabusPanel = ({
                   onClick={() => {
                     unlockMutation.mutate(plan._id, {
                       onSuccess: () => {
-                        openEditForm({ ...plan, status: "DRAFT" });
+                        void openEditForm({ ...plan, status: "DRAFT" });
                       },
                     });
                   }}

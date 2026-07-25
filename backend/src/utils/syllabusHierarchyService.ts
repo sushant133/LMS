@@ -293,14 +293,101 @@ export const chaptersToLegacyUnits = (
   return rows;
 };
 
+/**
+ * Hierarchy mutations MUST always be scoped to one syllabusId.
+ * Never accept empty/invalid ids (would risk broader deletes if filters ever widen).
+ */
+const assertScopedSyllabusId = (syllabusId: string): string => {
+  const id = String(syllabusId ?? "").trim();
+  if (!id || !mongoose.isValidObjectId(id)) {
+    throw new Error("Invalid syllabusId for hierarchy mutation — refused to run.");
+  }
+  return id;
+};
+
+/** Count nested sub-units (including children) in a payload tree. */
+export const countSubUnitsInPayload = (subs: unknown[] | undefined): number => {
+  if (!Array.isArray(subs)) return 0;
+  return subs.reduce((n: number, s) => {
+    const row = s as { children?: unknown[] };
+    return n + 1 + countSubUnitsInPayload(row.children);
+  }, 0);
+};
+
+/**
+ * True when the payload has labeled structure (real titles, descriptions, or subs).
+ * Note: multi-unit drafts with only "Unit N" fallback titles ARE still valid to save —
+ * use `isEmptyHierarchyShell` for wipe protection, not this alone.
+ */
+export const chaptersHaveRealContent = (
+  chapters: AcademicSyllabusChapterInput[] | undefined | null
+): boolean => {
+  if (!Array.isArray(chapters) || chapters.length === 0) return false;
+  return chapters.some((ch) =>
+    (ch.units ?? []).some((u) => {
+      const title = String(u.title ?? "").trim();
+      const hasTitle = Boolean(title) && !/^unit\s*\d+$/i.test(title);
+      const hasDesc = Boolean(String(u.description ?? "").trim());
+      const hasSubs = Array.isArray(u.subUnits) && u.subUnits.length > 0;
+      return hasTitle || hasDesc || hasSubs;
+    })
+  );
+};
+
+export const countUnitsInChapters = (
+  chapters: AcademicSyllabusChapterInput[] | undefined | null
+): number => {
+  if (!Array.isArray(chapters)) return 0;
+  return chapters.reduce((n, ch) => n + ((ch.units ?? []).length), 0);
+};
+
+export const countAllSubsInChapters = (
+  chapters: AcademicSyllabusChapterInput[] | undefined | null
+): number => {
+  if (!Array.isArray(chapters)) return 0;
+  return chapters.reduce(
+    (n, ch) =>
+      n +
+      (ch.units ?? []).reduce(
+        (un, u) => un + countSubUnitsInPayload((u as { subUnits?: unknown[] }).subUnits),
+        0
+      ),
+    0
+  );
+};
+
+/**
+ * True for a destructive empty shell: no chapters, zero units, or a single
+ * placeholder unit ("Unit 1" / blank) with no description and no sub-units.
+ * Multi-unit drafts (even with "Unit N" titles) are NOT empty shells.
+ */
+export const isEmptyHierarchyShell = (
+  chapters: AcademicSyllabusChapterInput[] | undefined | null
+): boolean => {
+  if (!Array.isArray(chapters) || chapters.length === 0) return true;
+  const unitCount = countUnitsInChapters(chapters);
+  if (unitCount === 0) return true;
+  const subCount = countAllSubsInChapters(chapters);
+  if (unitCount > 1 || subCount > 0) return false;
+  // Single unit, no subs — empty shell if title is placeholder and no description
+  const unit = chapters.flatMap((ch) => ch.units ?? [])[0];
+  if (!unit) return true;
+  const title = String(unit.title ?? "").trim();
+  const isPlaceholder = !title || /^unit\s*\d+$/i.test(title);
+  const hasDesc = Boolean(String(unit.description ?? "").trim());
+  return isPlaceholder && !hasDesc;
+};
+
 export const deleteSyllabusHierarchy = async (
   syllabusId: string,
   session?: ClientSession
 ) => {
+  const scopedId = assertScopedSyllabusId(syllabusId);
   const opts = session ? { session } : {};
-  await AcademicSyllabusSubUnit.deleteMany({ syllabusId }, opts);
-  await AcademicSyllabusTopic.deleteMany({ syllabusId }, opts);
-  await AcademicSyllabusChapter.deleteMany({ syllabusId }, opts);
+  // Strict scope: only this syllabus — never school-wide or unfiltered deletes.
+  await AcademicSyllabusSubUnit.deleteMany({ syllabusId: scopedId }, opts);
+  await AcademicSyllabusTopic.deleteMany({ syllabusId: scopedId }, opts);
+  await AcademicSyllabusChapter.deleteMany({ syllabusId: scopedId }, opts);
 };
 
 type SubUnitInput = AcademicSyllabusSubUnitInputShape;
@@ -317,7 +404,11 @@ const isDuplicateKeyError = (error: unknown): boolean => {
   return code === 11000;
 };
 
-/** Create doc; if forced _id collides, retry without forced id (only on duplicate key). */
+/**
+ * Create doc; if forced _id collides (stale clientKey from another doc),
+ * retry without forced id so draft save still succeeds.
+ * Only swallows _id collisions — other unique-index errors rethrow.
+ */
 const createWithOptionalId = async <T>(
   model: {
     create: (
@@ -337,8 +428,18 @@ const createWithOptionalId = async <T>(
     return created[0];
   } catch (error) {
     if (forcedId && isDuplicateKeyError(error)) {
-      const created = await model.create([doc], opts);
-      return created[0];
+      const keyPattern = (error as { keyPattern?: Record<string, unknown> })
+        .keyPattern;
+      // Only retry when the collision is on _id (stale forced clientKey).
+      // Other unique keys (chapterNo, unitNo, subUnitNo) must surface.
+      const isIdCollision =
+        !keyPattern ||
+        Object.keys(keyPattern).length === 0 ||
+        "_id" in keyPattern;
+      if (isIdCollision) {
+        const created = await model.create([doc], opts);
+        return created[0];
+      }
     }
     throw error;
   }
@@ -432,8 +533,11 @@ export const saveSyllabusHierarchy = async (
   },
   session?: ClientSession
 ) => {
-  const { schoolId, syllabusId, chapters } = params;
+  const schoolId = String(params.schoolId ?? "").trim();
+  const syllabusId = assertScopedSyllabusId(params.syllabusId);
+  const chapters = Array.isArray(params.chapters) ? params.chapters : [];
   const opts = session ? { session } : {};
+  const countOpts = session ? { session } : {};
 
   // On standalone Mongo (no transaction), snapshot before wipe so we can restore if insert fails.
   let backup: {
@@ -450,6 +554,40 @@ export const saveSyllabusHierarchy = async (
       AcademicSyllabusUnit.find({ syllabusId }).lean()
     ]);
     backup = { chapters: ch as never, topics: topics as never, subUnits: subUnits as never, legacy: legacy as never };
+  }
+
+  // ── SAFETY (scoped to THIS syllabusId only — never other subjects) ──
+  // Refuse wipe when client sends an empty shell while DB already has structure.
+  // Multi-unit drafts with "Unit N" titles ARE allowed (partial draft saves).
+  const incomingEmptyShell = isEmptyHierarchyShell(chapters);
+  const incomingUnitCount = countUnitsInChapters(chapters);
+  const incomingSubCount = countAllSubsInChapters(chapters);
+
+  const [existingTopicCount, existingChapterCount, existingSubCount] =
+    await Promise.all([
+      AcademicSyllabusTopic.countDocuments({ syllabusId }, countOpts),
+      AcademicSyllabusChapter.countDocuments({ syllabusId }, countOpts),
+      AcademicSyllabusSubUnit.countDocuments({ syllabusId }, countOpts)
+    ]);
+  const existingHasHierarchy =
+    existingTopicCount > 0 || existingChapterCount > 0 || existingSubCount > 0;
+
+  if (existingHasHierarchy && incomingEmptyShell) {
+    // Leave THIS syllabus's hierarchy unchanged; metadata-only updates stay safe.
+    return;
+  }
+
+  // Catastrophic shrink: rich tree (many units/subs) → tiny empty shell. Refuse.
+  // Intentional deletes that still send real content (titles/subs) still proceed.
+  if (
+    existingHasHierarchy &&
+    existingTopicCount >= 2 &&
+    incomingUnitCount <= 1 &&
+    incomingSubCount === 0 &&
+    existingSubCount > 0 &&
+    !chaptersHaveRealContent(chapters)
+  ) {
+    return;
   }
 
   const writeTree = async () => {

@@ -356,8 +356,10 @@ export const sanitizeTeacherOwnedUpdate = <T extends Record<string, unknown>>(
   req: Request,
   payload: T
 ): T => {
-  if (isAcademicAdmin(req.user?.role ?? "")) return payload;
+  // Always clone so callers can delete structure fields (chapters/units) without
+  // mutating the original Zod payload used for hierarchy rewrite.
   const next = { ...payload };
+  if (isAcademicAdmin(req.user?.role ?? "")) return next;
   delete next.teacherId;
   return next;
 };
