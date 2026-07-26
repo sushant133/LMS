@@ -8,7 +8,7 @@ export const Select = ({
 }: SelectHTMLAttributes<HTMLSelectElement>) => (
   <select
     className={cn(
-      "flex h-10 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand-500 disabled:cursor-not-allowed",
+      "flex h-10 w-full min-w-0 max-w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand-500 disabled:cursor-not-allowed",
       className,
     )}
     {...props}

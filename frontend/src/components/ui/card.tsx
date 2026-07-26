@@ -7,7 +7,7 @@ export const Card = ({
 }: HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "rounded-3xl border border-slate-200 bg-white shadow-sm",
+      "min-w-0 rounded-3xl border border-slate-200 bg-white shadow-sm",
       className,
     )}
     {...props}
@@ -41,5 +41,5 @@ export const CardContent = ({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("px-6 py-5", className)} {...props} />
+  <div className={cn("min-w-0 px-6 py-5", className)} {...props} />
 );

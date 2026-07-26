@@ -502,7 +502,7 @@ export const LaboratoryManager = () => {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <PageHeader
         title="Laboratory Management"
         description={
@@ -513,7 +513,7 @@ export const LaboratoryManager = () => {
       />
       <ModuleReadOnlyBanner show={labReadOnly} />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex min-w-0 flex-wrap gap-2">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
           return (
@@ -565,36 +565,46 @@ export const LaboratoryManager = () => {
             </div>
           ) : null}
 
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid min-w-0 gap-6 xl:grid-cols-2">
             <Card>
               <CardHeader>
                 <CardTitle>Low / critical stock</CardTitle>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Item</Th>
-                      <Th>Lab</Th>
-                      <Th>Available</Th>
-                      <Th>Min</Th>
-                      <Th>Status</Th>
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {(dashboardQuery.data?.lowStockItems ?? []).map((item) => (
-                      <tr key={item._id}>
-                        <Td className="font-medium">{item.name}</Td>
-                        <Td>{item.laboratoryName ?? "—"}</Td>
-                        <Td>{item.availableQuantity}</Td>
-                        <Td>{item.minimumStockLevel ?? 0}</Td>
-                        <Td>
-                          <StockStatusBadge status={item.status} />
-                        </Td>
+              <CardContent className="min-w-0">
+                <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                  <Table className="w-full min-w-[560px]">
+                    <TableHead>
+                      <tr>
+                        <Th className="whitespace-nowrap">Item</Th>
+                        <Th className="whitespace-nowrap">Lab</Th>
+                        <Th className="whitespace-nowrap">Available</Th>
+                        <Th className="whitespace-nowrap">Min</Th>
+                        <Th className="whitespace-nowrap">Status</Th>
                       </tr>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHead>
+                    <TableBody>
+                      {(dashboardQuery.data?.lowStockItems ?? []).map((item) => (
+                        <tr key={item._id}>
+                          <Td className="whitespace-nowrap font-medium">
+                            {item.name}
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {item.laboratoryName ?? "—"}
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {item.availableQuantity}
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {item.minimumStockLevel ?? 0}
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            <StockStatusBadge status={item.status} />
+                          </Td>
+                        </tr>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
 
@@ -602,29 +612,39 @@ export const LaboratoryManager = () => {
               <CardHeader>
                 <CardTitle>Recently updated inventory</CardTitle>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Item</Th>
-                      <Th>Lab</Th>
-                      <Th>Available</Th>
-                      <Th>Status</Th>
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {(dashboardQuery.data?.recentlyUpdated ?? []).map((item) => (
-                      <tr key={item._id}>
-                        <Td className="font-medium">{item.name}</Td>
-                        <Td>{item.laboratoryName ?? "—"}</Td>
-                        <Td>{item.availableQuantity}</Td>
-                        <Td>
-                          <StockStatusBadge status={item.status} />
-                        </Td>
+              <CardContent className="min-w-0">
+                <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                  <Table className="w-full min-w-[480px]">
+                    <TableHead>
+                      <tr>
+                        <Th className="whitespace-nowrap">Item</Th>
+                        <Th className="whitespace-nowrap">Lab</Th>
+                        <Th className="whitespace-nowrap">Available</Th>
+                        <Th className="whitespace-nowrap">Status</Th>
                       </tr>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHead>
+                    <TableBody>
+                      {(dashboardQuery.data?.recentlyUpdated ?? []).map(
+                        (item) => (
+                          <tr key={item._id}>
+                            <Td className="whitespace-nowrap font-medium">
+                              {item.name}
+                            </Td>
+                            <Td className="whitespace-nowrap">
+                              {item.laboratoryName ?? "—"}
+                            </Td>
+                            <Td className="whitespace-nowrap">
+                              {item.availableQuantity}
+                            </Td>
+                            <Td className="whitespace-nowrap">
+                              <StockStatusBadge status={item.status} />
+                            </Td>
+                          </tr>
+                        ),
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -632,13 +652,13 @@ export const LaboratoryManager = () => {
       )}
 
       {tab === "labs" && (
-        <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
           {canManageLabsMeta ? (
-            <Card>
+            <Card className="min-w-0">
               <CardHeader>
                 <CardTitle>{editingLabId ? "Edit laboratory" : "Create laboratory"}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="min-w-0 space-y-3">
                 <FormField label="Laboratory name *">
                   <Input
                     value={labForm.name || labForm.customName || ""}
@@ -668,7 +688,7 @@ export const LaboratoryManager = () => {
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 break-words text-xs text-slate-500">
                     Assign this lab to 1st, 2nd, or 3rd Year (or All Years for shared labs).
                   </p>
                 </FormField>
@@ -688,7 +708,7 @@ export const LaboratoryManager = () => {
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 break-words text-xs text-slate-500">
                     This does not change the lab name. It only adds default equipment groups
                     (e.g. Glassware, Chemicals) when the lab is created. Use{" "}
                     <strong>General / Custom</strong> for HA or medical labs.
@@ -742,7 +762,7 @@ export const LaboratoryManager = () => {
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 break-words text-xs text-slate-500">
                     One primary in-charge for this lab. To give one teacher{" "}
                     <strong>many labs</strong> (same login), use{" "}
                     <Link to="/teachers" className="font-medium text-brand-700 underline">
@@ -811,50 +831,59 @@ export const LaboratoryManager = () => {
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <CardContent className="py-8 text-sm text-slate-600">
+            <Card className="min-w-0">
+              <CardContent className="break-words py-8 text-sm text-slate-600">
                 You can view laboratories assigned to you. Contact an administrator to change lab
                 details or reassign in-charge.
               </CardContent>
             </Card>
           )}
 
-          <div className="space-y-6">
-            <Card>
+          <div className="min-w-0 space-y-6">
+            <Card className="min-w-0">
               <CardHeader>
                 <CardTitle>Laboratories</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[900px]">
+              <CardContent className="min-w-0">
+                {/*
+                  Horizontal slider on small/medium screens. min-w-0 on ancestors is required
+                  so overflow-x-auto actually scrolls instead of expanding past the card
+                  (main uses overflow-x-clip which otherwise clips Edit/Status).
+                */}
+                <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                  <Table className="w-full min-w-[980px]">
                     <TableHead>
                       <tr>
-                        <Th>Name</Th>
-                        <Th>Year</Th>
-                        <Th>Code</Th>
-                        <Th>Department</Th>
-                        <Th>Location</Th>
-                        <Th>In-Charge</Th>
-                        <Th>Status</Th>
-                        {canManageLabsMeta ? <Th /> : null}
+                        <Th className="whitespace-nowrap">Name</Th>
+                        <Th className="whitespace-nowrap">Year</Th>
+                        <Th className="whitespace-nowrap">Code</Th>
+                        <Th className="whitespace-nowrap">Department</Th>
+                        <Th className="whitespace-nowrap">Location</Th>
+                        <Th className="whitespace-nowrap">In-Charge</Th>
+                        <Th className="whitespace-nowrap">Status</Th>
+                        {canManageLabsMeta ? (
+                          <Th className="whitespace-nowrap text-right">Actions</Th>
+                        ) : null}
                       </tr>
                     </TableHead>
                     <TableBody>
                       {labOptions.map((lab) => (
                         <tr key={lab._id}>
-                          <Td className="font-medium">{lab.name}</Td>
-                          <Td>
+                          <Td className="font-medium whitespace-nowrap">{lab.name}</Td>
+                          <Td className="whitespace-nowrap">
                             <Badge className="bg-indigo-100 text-indigo-800">
                               {lab.yearLevel ?? "All Years"}
                             </Badge>
                           </Td>
-                          <Td>{lab.code ?? "—"}</Td>
-                          <Td>{lab.department ?? "—"}</Td>
-                          <Td>
+                          <Td className="whitespace-nowrap">{lab.code ?? "—"}</Td>
+                          <Td className="whitespace-nowrap">{lab.department ?? "—"}</Td>
+                          <Td className="whitespace-nowrap">
                             {[lab.location, lab.roomNumber].filter(Boolean).join(" / ") || "—"}
                           </Td>
-                          <Td>{lab.inChargeTeacherName ?? "—"}</Td>
-                          <Td>
+                          <Td className="whitespace-nowrap">
+                            {lab.inChargeTeacherName ?? "—"}
+                          </Td>
+                          <Td className="whitespace-nowrap">
                             <Badge
                               className={
                                 lab.isActive
@@ -866,23 +895,29 @@ export const LaboratoryManager = () => {
                             </Badge>
                           </Td>
                           {canManageLabsMeta ? (
-                            <Td className="space-x-2 whitespace-nowrap">
-                              <Button size="sm" variant="secondary" onClick={() => beginEditLab(lab)}>
-                                Edit
-                              </Button>
-                              {isAdmin ? (
+                            <Td className="whitespace-nowrap text-right">
+                              <div className="inline-flex gap-2">
                                 <Button
                                   size="sm"
                                   variant="secondary"
-                                  onClick={() => {
-                                    if (confirm(`Delete laboratory "${lab.name}"?`)) {
-                                      deleteLab.mutate(lab._id);
-                                    }
-                                  }}
+                                  onClick={() => beginEditLab(lab)}
                                 >
-                                  Delete
+                                  Edit
                                 </Button>
-                              ) : null}
+                                {isAdmin ? (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                      if (confirm(`Delete laboratory "${lab.name}"?`)) {
+                                        deleteLab.mutate(lab._id);
+                                      }
+                                    }}
+                                  >
+                                    Delete
+                                  </Button>
+                                ) : null}
+                              </div>
                             </Td>
                           ) : null}
                         </tr>
@@ -894,11 +929,11 @@ export const LaboratoryManager = () => {
             </Card>
 
             {canManageLabsMeta ? (
-              <Card>
+              <Card className="min-w-0">
                 <CardHeader>
                   <CardTitle>Manage categories</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="min-w-0 space-y-3">
                   <FormField label="Laboratory">
                     <Select
                       value={selectedLabForCategories}
@@ -912,13 +947,15 @@ export const LaboratoryManager = () => {
                       ))}
                     </Select>
                   </FormField>
-                  <div className="flex gap-2">
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
                     <Input
+                      className="min-w-0 flex-1"
                       placeholder="New category name"
                       value={newCategoryName}
                       onChange={(e) => setNewCategoryName(e.target.value)}
                     />
                     <Button
+                      className="shrink-0"
                       variant="secondary"
                       disabled={!selectedLabForCategories || !newCategoryName.trim()}
                       onClick={() =>
@@ -1008,7 +1045,7 @@ export const LaboratoryManager = () => {
             </CardContent>
           </Card>
 
-          <div className="grid gap-6 xl:grid-cols-[380px_1fr]">
+          <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
             {/* Add / Edit equipment */}
             <Card className="h-fit xl:sticky xl:top-4">
               <CardHeader className="border-b border-slate-100 pb-3">
@@ -1855,7 +1892,7 @@ export const LaboratoryManager = () => {
 
       {tab === "requests" && (
         <div className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+          <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
             <Card>
               <CardHeader>
                 <CardTitle>Submit stock request</CardTitle>
@@ -2267,51 +2304,61 @@ export const LaboratoryManager = () => {
             <CardHeader>
               <CardTitle>Equipment issues</CardTitle>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>Item</Th>
-                    <Th>Lab</Th>
-                    <Th>Teacher</Th>
-                    <Th>Qty</Th>
-                    <Th>Issued</Th>
-                    <Th>Due</Th>
-                    <Th>Returned</Th>
-                    <Th>Status</Th>
-                    <Th />
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {(issuesQuery.data ?? []).map((issue) => (
-                    <tr key={issue._id}>
-                      <Td>{issue.equipmentName ?? "—"}</Td>
-                      <Td>{issue.laboratoryName ?? "—"}</Td>
-                      <Td>{issue.teacherName ?? "—"}</Td>
-                      <Td>{issue.quantity}</Td>
-                      <Td>{issue.issuedDateBs}</Td>
-                      <Td>{issue.dueDateBs}</Td>
-                      <Td>{issue.returnedDateBs ?? "—"}</Td>
-                      <Td>
-                        <Badge className={issueStatusStyles[issue.status] ?? ""}>
-                          {issue.status}
-                        </Badge>
-                      </Td>
-                      <Td>
-                        {issue.status !== "RETURNED" ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => returnEquipment.mutate(issue._id)}
-                          >
-                            Return
-                          </Button>
-                        ) : null}
-                      </Td>
+            <CardContent className="min-w-0">
+              <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                <Table className="w-full min-w-[960px]">
+                  <TableHead>
+                    <tr>
+                      <Th className="whitespace-nowrap">Item</Th>
+                      <Th className="whitespace-nowrap">Lab</Th>
+                      <Th className="whitespace-nowrap">Teacher</Th>
+                      <Th className="whitespace-nowrap">Qty</Th>
+                      <Th className="whitespace-nowrap">Issued</Th>
+                      <Th className="whitespace-nowrap">Due</Th>
+                      <Th className="whitespace-nowrap">Returned</Th>
+                      <Th className="whitespace-nowrap">Status</Th>
+                      <Th className="whitespace-nowrap text-right">Actions</Th>
                     </tr>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {(issuesQuery.data ?? []).map((issue) => (
+                      <tr key={issue._id}>
+                        <Td className="whitespace-nowrap">
+                          {issue.equipmentName ?? "—"}
+                        </Td>
+                        <Td className="whitespace-nowrap">
+                          {issue.laboratoryName ?? "—"}
+                        </Td>
+                        <Td className="whitespace-nowrap">
+                          {issue.teacherName ?? "—"}
+                        </Td>
+                        <Td className="whitespace-nowrap">{issue.quantity}</Td>
+                        <Td className="whitespace-nowrap">{issue.issuedDateBs}</Td>
+                        <Td className="whitespace-nowrap">{issue.dueDateBs}</Td>
+                        <Td className="whitespace-nowrap">
+                          {issue.returnedDateBs ?? "—"}
+                        </Td>
+                        <Td className="whitespace-nowrap">
+                          <Badge className={issueStatusStyles[issue.status] ?? ""}>
+                            {issue.status}
+                          </Badge>
+                        </Td>
+                        <Td className="whitespace-nowrap text-right">
+                          {issue.status !== "RETURNED" ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => returnEquipment.mutate(issue._id)}
+                            >
+                              Return
+                            </Button>
+                          ) : null}
+                        </Td>
+                      </tr>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -2447,12 +2494,12 @@ export const LaboratoryManager = () => {
       )}
 
       {tab === "staff" && isAdmin && (
-        <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
-          <Card>
+        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+          <Card className="min-w-0">
             <CardHeader>
               <CardTitle>Create laboratory staff</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="min-w-0 space-y-3">
               <FormField label="Full name">
                 <Input
                   value={staffForm.fullName}
@@ -2483,28 +2530,28 @@ export const LaboratoryManager = () => {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="min-w-0">
             <CardHeader>
               <CardTitle>Laboratory staff accounts</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table className="min-w-[560px]">
+            <CardContent className="min-w-0">
+              <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                <Table className="w-full min-w-[640px]">
                   <TableHead>
                     <tr>
-                      <Th>Name</Th>
-                      <Th>Email</Th>
-                      <Th>Phone</Th>
-                      <Th>Status</Th>
+                      <Th className="whitespace-nowrap">Name</Th>
+                      <Th className="whitespace-nowrap">Email</Th>
+                      <Th className="whitespace-nowrap">Phone</Th>
+                      <Th className="whitespace-nowrap">Status</Th>
                     </tr>
                   </TableHead>
                   <TableBody>
                     {(staffQuery.data ?? []).map((member) => (
                       <tr key={member._id}>
-                        <Td>{member.fullName}</Td>
-                        <Td>{member.email}</Td>
-                        <Td>{member.phone ?? "—"}</Td>
-                        <Td>
+                        <Td className="whitespace-nowrap">{member.fullName}</Td>
+                        <Td className="whitespace-nowrap">{member.email}</Td>
+                        <Td className="whitespace-nowrap">{member.phone ?? "—"}</Td>
+                        <Td className="whitespace-nowrap">
                           <Badge
                             className={
                               member.isActive

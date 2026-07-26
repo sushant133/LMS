@@ -205,7 +205,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         }
         dir={nepali ? "auto" : props.dir}
         className={cn(
-          "flex h-10 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
+          "flex h-10 w-full min-w-0 max-w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
           isNumberInput && "number-input-no-spin",
           /* Nepali: drop fixed h-10 (clips matras); font-nepali CSS sets min-height */
           nepali && "h-auto min-h-11 text-base",

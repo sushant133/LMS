@@ -6,7 +6,7 @@ export const Label = ({
   ...props
 }: LabelHTMLAttributes<HTMLLabelElement>) => (
   <label
-    className={cn("text-sm font-medium text-slate-700", className)}
+    className={cn("break-words text-sm font-medium text-slate-700", className)}
     {...props}
   />
 );
