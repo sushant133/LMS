@@ -985,7 +985,8 @@ export const LibraryManager = () => {
                           Each physical book needs its own code. Codes must be
                           unique (e.g. ANA001 … ANA030).
                         </p>
-                        <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+                        <div className="max-h-96 overflow-auto overscroll-contain pr-1 [scrollbar-width:thin]">
+                          <div className="min-w-[480px] space-y-2">
                           {copyDrafts.map((copy, index) => (
                             <div
                               key={index}
@@ -1072,6 +1073,7 @@ export const LibraryManager = () => {
                               </FormField>
                             </div>
                           ))}
+                          </div>
                         </div>
                       </div>
                     </>
@@ -1098,7 +1100,8 @@ export const LibraryManager = () => {
                           register extra volumes with new codes.
                         </p>
                       ) : (
-                        <div className="max-h-72 space-y-2 overflow-y-auto">
+                        <div className="max-h-72 overflow-auto overscroll-contain [scrollbar-width:thin]">
+                          <div className="min-w-[480px] space-y-2">
                           {addCopyDrafts.map((copy, index) => (
                             <div
                               key={index}
@@ -1194,6 +1197,7 @@ export const LibraryManager = () => {
                               </div>
                             </div>
                           ))}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1343,291 +1347,293 @@ export const LibraryManager = () => {
                                 stock). Re-add with codes for full tracking.
                               </p>
                             ) : (
-                              <Table>
-                                <TableHead>
-                                  <tr>
-                                    <Th>Book code</Th>
-                                    <Th>Status</Th>
-                                    <Th>Shelf</Th>
-                                    <Th>Publication</Th>
-                                    <Th>Price (NPR)</Th>
-                                    {canManageInventory ? (
-                                      <Th className="text-right">Actions</Th>
-                                    ) : null}
-                                  </tr>
-                                </TableHead>
-                                <TableBody>
-                                  {copies.map((copy) => {
-                                    const isEditing =
-                                      editingCopyId === copy._id &&
-                                      copyEditDraft !== null;
-                                    const isIssued = copy.status === "ISSUED";
-                                    return (
-                                      <tr key={copy._id}>
-                                        {isEditing && copyEditDraft ? (
-                                          <>
-                                            <Td colSpan={canManageInventory ? 6 : 5}>
-                                              <div className="space-y-3 rounded-md border border-brand-200 bg-brand-50/40 p-3">
-                                                <p className="text-sm font-medium text-slate-800">
-                                                  Edit copy {copy.bookCode}
-                                                </p>
-                                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                                                  <FormField label="Book code *">
-                                                    <Input
-                                                      value={copyEditDraft.bookCode}
-                                                      onChange={(e) =>
-                                                        setCopyEditDraft((d) =>
-                                                          d
-                                                            ? {
-                                                                ...d,
-                                                                bookCode:
-                                                                  e.target.value,
-                                                              }
-                                                            : d,
-                                                        )
-                                                      }
-                                                    />
-                                                  </FormField>
-                                                  <FormField label="Status">
-                                                    {isIssued ? (
-                                                      <div className="flex h-10 items-center">
-                                                        <Badge
-                                                          className={
-                                                            copyStatusStyles.ISSUED
+                              <div className="overflow-x-auto">
+                                <Table className="min-w-[720px]">
+                                  <TableHead>
+                                    <tr>
+                                      <Th>Book code</Th>
+                                      <Th>Status</Th>
+                                      <Th>Shelf</Th>
+                                      <Th>Publication</Th>
+                                      <Th>Price (NPR)</Th>
+                                      {canManageInventory ? (
+                                        <Th className="text-right">Actions</Th>
+                                      ) : null}
+                                    </tr>
+                                  </TableHead>
+                                  <TableBody>
+                                    {copies.map((copy) => {
+                                      const isEditing =
+                                        editingCopyId === copy._id &&
+                                        copyEditDraft !== null;
+                                      const isIssued = copy.status === "ISSUED";
+                                      return (
+                                        <tr key={copy._id}>
+                                          {isEditing && copyEditDraft ? (
+                                            <>
+                                              <Td colSpan={canManageInventory ? 6 : 5}>
+                                                <div className="space-y-3 rounded-md border border-brand-200 bg-brand-50/40 p-3">
+                                                  <p className="text-sm font-medium text-slate-800">
+                                                    Edit copy {copy.bookCode}
+                                                  </p>
+                                                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                                    <FormField label="Book code *">
+                                                      <Input
+                                                        value={copyEditDraft.bookCode}
+                                                        onChange={(e) =>
+                                                          setCopyEditDraft((d) =>
+                                                            d
+                                                              ? {
+                                                                  ...d,
+                                                                  bookCode:
+                                                                    e.target.value,
+                                                                }
+                                                              : d,
+                                                          )
+                                                        }
+                                                      />
+                                                    </FormField>
+                                                    <FormField label="Status">
+                                                      {isIssued ? (
+                                                        <div className="flex h-10 items-center">
+                                                          <Badge
+                                                            className={
+                                                              copyStatusStyles.ISSUED
+                                                            }
+                                                          >
+                                                            ISSUED
+                                                          </Badge>
+                                                          <span className="ml-2 text-xs text-slate-500">
+                                                            Return to change status
+                                                          </span>
+                                                        </div>
+                                                      ) : (
+                                                        <Select
+                                                          value={
+                                                            copyEditDraft.status ===
+                                                            "ISSUED"
+                                                              ? "AVAILABLE"
+                                                              : copyEditDraft.status
+                                                          }
+                                                          onChange={(e) =>
+                                                            setCopyEditDraft((d) =>
+                                                              d
+                                                                ? {
+                                                                    ...d,
+                                                                    status: e.target
+                                                                      .value as Exclude<
+                                                                      LibraryCopyStatus,
+                                                                      "ISSUED"
+                                                                    >,
+                                                                  }
+                                                                : d,
+                                                            )
                                                           }
                                                         >
-                                                          ISSUED
-                                                        </Badge>
-                                                        <span className="ml-2 text-xs text-slate-500">
-                                                          Return to change status
-                                                        </span>
-                                                      </div>
-                                                    ) : (
-                                                      <Select
+                                                          {inventoryCopyStatuses.map(
+                                                            (status) => (
+                                                              <option
+                                                                key={status}
+                                                                value={status}
+                                                              >
+                                                                {status}
+                                                              </option>
+                                                            ),
+                                                          )}
+                                                        </Select>
+                                                      )}
+                                                    </FormField>
+                                                    <FormField label="Shelf">
+                                                      <Input
                                                         value={
-                                                          copyEditDraft.status ===
-                                                          "ISSUED"
-                                                            ? "AVAILABLE"
-                                                            : copyEditDraft.status
+                                                          copyEditDraft.shelfLocation
+                                                        }
+                                                        placeholder={
+                                                          book.shelfLocation ||
+                                                          "Shelf"
                                                         }
                                                         onChange={(e) =>
                                                           setCopyEditDraft((d) =>
                                                             d
                                                               ? {
                                                                   ...d,
-                                                                  status: e.target
-                                                                    .value as Exclude<
-                                                                    LibraryCopyStatus,
-                                                                    "ISSUED"
-                                                                  >,
+                                                                  shelfLocation:
+                                                                    e.target.value,
                                                                 }
                                                               : d,
                                                           )
                                                         }
-                                                      >
-                                                        {inventoryCopyStatuses.map(
-                                                          (status) => (
-                                                            <option
-                                                              key={status}
-                                                              value={status}
-                                                            >
-                                                              {status}
-                                                            </option>
-                                                          ),
-                                                        )}
-                                                      </Select>
-                                                    )}
-                                                  </FormField>
-                                                  <FormField label="Shelf">
-                                                    <Input
-                                                      value={
-                                                        copyEditDraft.shelfLocation
+                                                      />
+                                                    </FormField>
+                                                    <FormField label="Publication">
+                                                      <Input
+                                                        value={
+                                                          copyEditDraft.publication
+                                                        }
+                                                        onChange={(e) =>
+                                                          setCopyEditDraft((d) =>
+                                                            d
+                                                              ? {
+                                                                  ...d,
+                                                                  publication:
+                                                                    e.target.value,
+                                                                }
+                                                              : d,
+                                                          )
+                                                        }
+                                                      />
+                                                    </FormField>
+                                                    <FormField label="Condition">
+                                                      <Input
+                                                        value={
+                                                          copyEditDraft.condition
+                                                        }
+                                                        placeholder="e.g. Good, Fair"
+                                                        onChange={(e) =>
+                                                          setCopyEditDraft((d) =>
+                                                            d
+                                                              ? {
+                                                                  ...d,
+                                                                  condition:
+                                                                    e.target.value,
+                                                                }
+                                                              : d,
+                                                          )
+                                                        }
+                                                      />
+                                                    </FormField>
+                                                    <FormField label="Price (NPR)">
+                                                      <NumberInput
+                                                        min={0}
+                                                        step={1}
+                                                        value={
+                                                          copyEditDraft.priceNpr ||
+                                                          ""
+                                                        }
+                                                        onChange={(e) =>
+                                                          setCopyEditDraft((d) =>
+                                                            d
+                                                              ? {
+                                                                  ...d,
+                                                                  priceNpr:
+                                                                    e.target
+                                                                      .valueAsNumber >=
+                                                                    0
+                                                                      ? e.target
+                                                                          .valueAsNumber
+                                                                      : 0,
+                                                                }
+                                                              : d,
+                                                          )
+                                                        }
+                                                      />
+                                                    </FormField>
+                                                  </div>
+                                                  <div className="flex flex-wrap gap-2">
+                                                    <Button
+                                                      size="sm"
+                                                      onClick={submitCopyEdit}
+                                                      disabled={
+                                                        updateCopy.isPending
                                                       }
-                                                      placeholder={
-                                                        book.shelfLocation ||
-                                                        "Shelf"
+                                                    >
+                                                      Save copy
+                                                    </Button>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="secondary"
+                                                      onClick={cancelEditCopy}
+                                                      disabled={
+                                                        updateCopy.isPending
                                                       }
-                                                      onChange={(e) =>
-                                                        setCopyEditDraft((d) =>
-                                                          d
-                                                            ? {
-                                                                ...d,
-                                                                shelfLocation:
-                                                                  e.target.value,
-                                                              }
-                                                            : d,
-                                                        )
-                                                      }
-                                                    />
-                                                  </FormField>
-                                                  <FormField label="Publication">
-                                                    <Input
-                                                      value={
-                                                        copyEditDraft.publication
-                                                      }
-                                                      onChange={(e) =>
-                                                        setCopyEditDraft((d) =>
-                                                          d
-                                                            ? {
-                                                                ...d,
-                                                                publication:
-                                                                  e.target.value,
-                                                              }
-                                                            : d,
-                                                        )
-                                                      }
-                                                    />
-                                                  </FormField>
-                                                  <FormField label="Condition">
-                                                    <Input
-                                                      value={
-                                                        copyEditDraft.condition
-                                                      }
-                                                      placeholder="e.g. Good, Fair"
-                                                      onChange={(e) =>
-                                                        setCopyEditDraft((d) =>
-                                                          d
-                                                            ? {
-                                                                ...d,
-                                                                condition:
-                                                                  e.target.value,
-                                                              }
-                                                            : d,
-                                                        )
-                                                      }
-                                                    />
-                                                  </FormField>
-                                                  <FormField label="Price (NPR)">
-                                                    <NumberInput
-                                                      min={0}
-                                                      step={1}
-                                                      value={
-                                                        copyEditDraft.priceNpr ||
-                                                        ""
-                                                      }
-                                                      onChange={(e) =>
-                                                        setCopyEditDraft((d) =>
-                                                          d
-                                                            ? {
-                                                                ...d,
-                                                                priceNpr:
-                                                                  e.target
-                                                                    .valueAsNumber >=
-                                                                  0
-                                                                    ? e.target
-                                                                        .valueAsNumber
-                                                                    : 0,
-                                                              }
-                                                            : d,
-                                                        )
-                                                      }
-                                                    />
-                                                  </FormField>
-                                                </div>
-                                                <div className="flex flex-wrap gap-2">
-                                                  <Button
-                                                    size="sm"
-                                                    onClick={submitCopyEdit}
-                                                    disabled={
-                                                      updateCopy.isPending
-                                                    }
-                                                  >
-                                                    Save copy
-                                                  </Button>
-                                                  <Button
-                                                    size="sm"
-                                                    variant="secondary"
-                                                    onClick={cancelEditCopy}
-                                                    disabled={
-                                                      updateCopy.isPending
-                                                    }
-                                                  >
-                                                    Cancel
-                                                  </Button>
-                                                </div>
-                                              </div>
-                                            </Td>
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Td className="font-mono font-medium">
-                                              {copy.bookCode}
-                                            </Td>
-                                            <Td>
-                                              <Badge
-                                                className={
-                                                  copyStatusStyles[
-                                                    copy.status
-                                                  ] ?? ""
-                                                }
-                                              >
-                                                {copy.status}
-                                              </Badge>
-                                            </Td>
-                                            <Td>
-                                              {copy.shelfLocation ||
-                                                book.shelfLocation ||
-                                                "—"}
-                                            </Td>
-                                            <Td>
-                                              {copy.publication?.trim() || "—"}
-                                            </Td>
-                                            <Td>
-                                              {typeof copy.priceNpr ===
-                                                "number" && copy.priceNpr > 0
-                                                ? copy.priceNpr.toLocaleString(
-                                                    "en-NP",
-                                                  )
-                                                : "—"}
-                                            </Td>
-                                            {canManageInventory ? (
-                                              <Td className="text-right">
-                                                <div className="flex justify-end gap-1">
-                                                  <Button
-                                                    size="sm"
-                                                    variant="secondary"
-                                                    onClick={() =>
-                                                      startEditCopy(copy)
-                                                    }
-                                                  >
-                                                    Edit
-                                                  </Button>
-                                                  <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    disabled={
-                                                      isIssued ||
-                                                      deleteCopy.isPending
-                                                    }
-                                                    title={
-                                                      isIssued
-                                                        ? "Return this copy before deleting"
-                                                        : "Delete this physical copy"
-                                                    }
-                                                    onClick={() => {
-                                                      if (
-                                                        window.confirm(
-                                                          `Delete copy "${copy.bookCode}" from "${book.title}"?`,
-                                                        )
-                                                      ) {
-                                                        deleteCopy.mutate(
-                                                          copy._id,
-                                                        );
-                                                      }
-                                                    }}
-                                                  >
-                                                    Delete
-                                                  </Button>
+                                                    >
+                                                      Cancel
+                                                    </Button>
+                                                  </div>
                                                 </div>
                                               </Td>
-                                            ) : null}
-                                          </>
-                                        )}
-                                      </tr>
-                                    );
-                                  })}
-                                </TableBody>
-                              </Table>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Td className="font-mono font-medium">
+                                                {copy.bookCode}
+                                              </Td>
+                                              <Td>
+                                                <Badge
+                                                  className={
+                                                    copyStatusStyles[
+                                                      copy.status
+                                                    ] ?? ""
+                                                  }
+                                                >
+                                                  {copy.status}
+                                                </Badge>
+                                              </Td>
+                                              <Td>
+                                                {copy.shelfLocation ||
+                                                  book.shelfLocation ||
+                                                  "—"}
+                                              </Td>
+                                              <Td>
+                                                {copy.publication?.trim() || "—"}
+                                              </Td>
+                                              <Td>
+                                                {typeof copy.priceNpr ===
+                                                  "number" && copy.priceNpr > 0
+                                                  ? copy.priceNpr.toLocaleString(
+                                                      "en-NP",
+                                                    )
+                                                  : "—"}
+                                              </Td>
+                                              {canManageInventory ? (
+                                                <Td className="text-right">
+                                                  <div className="flex justify-end gap-1">
+                                                    <Button
+                                                      size="sm"
+                                                      variant="secondary"
+                                                      onClick={() =>
+                                                        startEditCopy(copy)
+                                                      }
+                                                    >
+                                                      Edit
+                                                    </Button>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="outline"
+                                                      disabled={
+                                                        isIssued ||
+                                                        deleteCopy.isPending
+                                                      }
+                                                      title={
+                                                        isIssued
+                                                          ? "Return this copy before deleting"
+                                                          : "Delete this physical copy"
+                                                      }
+                                                      onClick={() => {
+                                                        if (
+                                                          window.confirm(
+                                                            `Delete copy "${copy.bookCode}" from "${book.title}"?`,
+                                                          )
+                                                        ) {
+                                                          deleteCopy.mutate(
+                                                            copy._id,
+                                                          );
+                                                        }
+                                                      }}
+                                                    >
+                                                      Delete
+                                                    </Button>
+                                                  </div>
+                                                </Td>
+                                              ) : null}
+                                            </>
+                                          )}
+                                        </tr>
+                                      );
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              </div>
                             )}
                           </div>
                         ) : null}

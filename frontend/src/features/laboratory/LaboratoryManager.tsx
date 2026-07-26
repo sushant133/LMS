@@ -825,69 +825,71 @@ export const LaboratoryManager = () => {
                 <CardTitle>Laboratories</CardTitle>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Name</Th>
-                      <Th>Year</Th>
-                      <Th>Code</Th>
-                      <Th>Department</Th>
-                      <Th>Location</Th>
-                      <Th>In-Charge</Th>
-                      <Th>Status</Th>
-                      {canManageLabsMeta ? <Th /> : null}
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {labOptions.map((lab) => (
-                      <tr key={lab._id}>
-                        <Td className="font-medium">{lab.name}</Td>
-                        <Td>
-                          <Badge className="bg-indigo-100 text-indigo-800">
-                            {lab.yearLevel ?? "All Years"}
-                          </Badge>
-                        </Td>
-                        <Td>{lab.code ?? "—"}</Td>
-                        <Td>{lab.department ?? "—"}</Td>
-                        <Td>
-                          {[lab.location, lab.roomNumber].filter(Boolean).join(" / ") || "—"}
-                        </Td>
-                        <Td>{lab.inChargeTeacherName ?? "—"}</Td>
-                        <Td>
-                          <Badge
-                            className={
-                              lab.isActive
-                                ? "bg-brand-100 text-brand-800"
-                                : "bg-slate-100 text-slate-600"
-                            }
-                          >
-                            {lab.isActive ? "Active" : "Inactive"}
-                          </Badge>
-                        </Td>
-                        {canManageLabsMeta ? (
-                          <Td className="space-x-2 whitespace-nowrap">
-                            <Button size="sm" variant="secondary" onClick={() => beginEditLab(lab)}>
-                              Edit
-                            </Button>
-                            {isAdmin ? (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => {
-                                  if (confirm(`Delete laboratory "${lab.name}"?`)) {
-                                    deleteLab.mutate(lab._id);
-                                  }
-                                }}
-                              >
-                                Delete
-                              </Button>
-                            ) : null}
-                          </Td>
-                        ) : null}
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[900px]">
+                    <TableHead>
+                      <tr>
+                        <Th>Name</Th>
+                        <Th>Year</Th>
+                        <Th>Code</Th>
+                        <Th>Department</Th>
+                        <Th>Location</Th>
+                        <Th>In-Charge</Th>
+                        <Th>Status</Th>
+                        {canManageLabsMeta ? <Th /> : null}
                       </tr>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHead>
+                    <TableBody>
+                      {labOptions.map((lab) => (
+                        <tr key={lab._id}>
+                          <Td className="font-medium">{lab.name}</Td>
+                          <Td>
+                            <Badge className="bg-indigo-100 text-indigo-800">
+                              {lab.yearLevel ?? "All Years"}
+                            </Badge>
+                          </Td>
+                          <Td>{lab.code ?? "—"}</Td>
+                          <Td>{lab.department ?? "—"}</Td>
+                          <Td>
+                            {[lab.location, lab.roomNumber].filter(Boolean).join(" / ") || "—"}
+                          </Td>
+                          <Td>{lab.inChargeTeacherName ?? "—"}</Td>
+                          <Td>
+                            <Badge
+                              className={
+                                lab.isActive
+                                  ? "bg-brand-100 text-brand-800"
+                                  : "bg-slate-100 text-slate-600"
+                              }
+                            >
+                              {lab.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                          </Td>
+                          {canManageLabsMeta ? (
+                            <Td className="space-x-2 whitespace-nowrap">
+                              <Button size="sm" variant="secondary" onClick={() => beginEditLab(lab)}>
+                                Edit
+                              </Button>
+                              {isAdmin ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => {
+                                    if (confirm(`Delete laboratory "${lab.name}"?`)) {
+                                      deleteLab.mutate(lab._id);
+                                    }
+                                  }}
+                                >
+                                  Delete
+                                </Button>
+                              ) : null}
+                            </Td>
+                          ) : null}
+                        </tr>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
 
@@ -2486,36 +2488,38 @@ export const LaboratoryManager = () => {
               <CardTitle>Laboratory staff accounts</CardTitle>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>Name</Th>
-                    <Th>Email</Th>
-                    <Th>Phone</Th>
-                    <Th>Status</Th>
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {(staffQuery.data ?? []).map((member) => (
-                    <tr key={member._id}>
-                      <Td>{member.fullName}</Td>
-                      <Td>{member.email}</Td>
-                      <Td>{member.phone ?? "—"}</Td>
-                      <Td>
-                        <Badge
-                          className={
-                            member.isActive
-                              ? "bg-brand-100 text-brand-800"
-                              : "bg-slate-100 text-slate-600"
-                          }
-                        >
-                          {member.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      </Td>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[560px]">
+                  <TableHead>
+                    <tr>
+                      <Th>Name</Th>
+                      <Th>Email</Th>
+                      <Th>Phone</Th>
+                      <Th>Status</Th>
                     </tr>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {(staffQuery.data ?? []).map((member) => (
+                      <tr key={member._id}>
+                        <Td>{member.fullName}</Td>
+                        <Td>{member.email}</Td>
+                        <Td>{member.phone ?? "—"}</Td>
+                        <Td>
+                          <Badge
+                            className={
+                              member.isActive
+                                ? "bg-brand-100 text-brand-800"
+                                : "bg-slate-100 text-slate-600"
+                            }
+                          >
+                            {member.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </Td>
+                      </tr>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </div>
