@@ -40,6 +40,7 @@ import {
   serializeAttendance,
   serializeSchedule
 } from "../utils/fieldDutyService.js";
+import { buildHospitalRosterAttendanceContext } from "../utils/hospitalRosterAttendance.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { getLinkedStudentIds } from "../utils/parentScope.js";
 import { sendSuccess } from "../utils/response.js";
@@ -491,6 +492,8 @@ export const assignFieldStudents = asyncHandler(async (req: Request, res: Respon
  * Roster / daily mark context for a posting.
  * Query: ?dateBs=&shift=
  * Returns full candidate pool + suggested students for that day + existing register row.
+ * When a matching Hospital Roster exists for this batch/year/hospital/month,
+ * attendance is driven by that day's duty assignments.
  */
 export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
@@ -515,6 +518,24 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
       ? "DAY"
       : String(schedule.shift || "DAY").toUpperCase());
 
+  const siteName = resolveSiteName(schedule);
+  const postingType = resolvePostingType(schedule);
+  const isHospitalPosting =
+    postingType === "HOSPITAL" ||
+    postingType === "CLINICAL_ROTATION" ||
+    postingType === "INTERNSHIP";
+
+  // Hospital Roster drives attendance when a monthly grid exists for this posting.
+  const hospitalRosterCtx = await buildHospitalRosterAttendanceContext({
+    schoolId,
+    batchId: schedule.batchId.toString(),
+    yearId: schedule.yearId.toString(),
+    dateBs,
+    siteName,
+    fieldShift: shift,
+  });
+  const fromHospitalRoster = Boolean(hospitalRosterCtx && isHospitalPosting);
+
   // Full pool for daily selection (batch/year, or manual list, or multi-shift map)
   const poolMode =
     rosterMode === "MANUAL"
@@ -525,7 +546,7 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
           ? "MULTI_SHIFT"
           : "DAILY";
 
-  const pool = await getEligibleStudentsForDuty(
+  let pool = await getEligibleStudentsForDuty(
     schedule.schoolId,
     schedule.batchId.toString(),
     schedule.yearId.toString(),
@@ -540,10 +561,41 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
 
   // Suggested: multi-shift students for this shift, else previous register, else empty for DAILY
   let suggestedStudentIds: string[] = [];
-  if (rosterMode === "MULTI_SHIFT" && filterShift) {
-    suggestedStudentIds = pool.map((s) => s._id);
-  } else if (rosterMode === "MANUAL" || rosterMode === "AUTO_BATCH_YEAR") {
-    suggestedStudentIds = pool.map((s) => s._id);
+  let suggestedStatusByStudent: Record<string, string> = {};
+  let assignmentMetaByStudent: Record<string, unknown> = {};
+
+  if (fromHospitalRoster && hospitalRosterCtx) {
+    // Restrict pool + suggestions to students assigned on the hospital roster for this day/shift
+    const onDutySet = new Set(hospitalRosterCtx.onDutyStudentIds);
+    type PoolStudent = (typeof pool)[number];
+    const rosterStudents: PoolStudent[] = hospitalRosterCtx.assignments.map((a) => ({
+      _id: a.studentId,
+      fullName: a.fullName,
+      admissionNumber: a.admissionNumber ?? "",
+      rollNumber: a.rollNumber ?? 0,
+      batchId: schedule.batchId.toString(),
+      yearId: schedule.yearId.toString(),
+      shift: a.fieldShift,
+    }));
+    // Prefer roster-ordered list; keep any existing pool students that are on duty
+    const byId = new Map<string, PoolStudent>(rosterStudents.map((s) => [s._id, s]));
+    for (const s of pool) {
+      if (onDutySet.has(s._id) && !byId.has(s._id)) byId.set(s._id, s);
+    }
+    pool = hospitalRosterCtx.onDutyStudentIds
+      .map((id) => byId.get(id))
+      .filter((s): s is PoolStudent => Boolean(s));
+
+    // If roster has no one for this shift, show empty pool (coordinator sees "no duty assigned")
+    suggestedStudentIds = [...hospitalRosterCtx.onDutyStudentIds];
+    suggestedStatusByStudent = hospitalRosterCtx.suggestedStatusByStudent;
+    assignmentMetaByStudent = hospitalRosterCtx.assignmentMetaByStudent;
+  } else {
+    if (rosterMode === "MULTI_SHIFT" && filterShift) {
+      suggestedStudentIds = pool.map((s) => s._id);
+    } else if (rosterMode === "MANUAL" || rosterMode === "AUTO_BATCH_YEAR") {
+      suggestedStudentIds = pool.map((s) => s._id);
+    }
   }
 
   const existing = await FieldDutyAttendance.findOne({
@@ -556,7 +608,27 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
 
   if (existing?.entries?.length) {
     suggestedStudentIds = existing.entries.map((e) => String(e.studentId));
-  } else if (rosterMode === "DAILY" || rosterMode === "MULTI_SHIFT") {
+    // Keep students from existing register visible even if not on today's hospital roster
+    if (fromHospitalRoster) {
+      const existingIds = new Set(suggestedStudentIds);
+      const missing = await getEligibleStudentsForDuty(
+        schedule.schoolId,
+        schedule.batchId.toString(),
+        schedule.yearId.toString(),
+        {
+          rosterMode: "MANUAL",
+          assignedStudentIds: suggestedStudentIds,
+          defaultShift: shift,
+        },
+      );
+      const have = new Set(pool.map((s) => s._id));
+      for (const s of missing) {
+        if (!have.has(s._id) && existingIds.has(s._id)) {
+          pool = [...pool, s];
+        }
+      }
+    }
+  } else if (!fromHospitalRoster && (rosterMode === "DAILY" || rosterMode === "MULTI_SHIFT")) {
     // Suggest last submitted same-shift roster so coordinators can re-use prior day picks.
     const previous = await FieldDutyAttendance.findOne({
       schoolId,
@@ -589,7 +661,21 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
     shift,
     filterShift: filterShift ?? null,
     suggestedStudentIds,
+    suggestedStatusByStudent,
+    assignmentMetaByStudent,
     existingAttendance,
+    fromHospitalRoster,
+    hospitalRoster: hospitalRosterCtx
+      ? {
+          rosterId: hospitalRosterCtx.rosterId,
+          rosterName: hospitalRosterCtx.rosterName,
+          hospitalName: hospitalRosterCtx.hospitalName,
+          monthBs: hospitalRosterCtx.monthBs,
+          day: hospitalRosterCtx.day,
+          status: hospitalRosterCtx.status,
+          assignmentCount: hospitalRosterCtx.onDutyStudentIds.length,
+        }
+      : null,
     /** @deprecated alias — use pool */
     rosterMode
   });
@@ -929,8 +1015,27 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     );
   }
 
+  const siteName = resolveSiteName(schedule);
+  const postingType = resolvePostingType(schedule);
+  const isHospitalPosting =
+    postingType === "HOSPITAL" ||
+    postingType === "CLINICAL_ROTATION" ||
+    postingType === "INTERNSHIP";
+
+  // Prefer Hospital Roster day assignments when available (hospital postings).
+  const hospitalRosterCtx = isHospitalPosting
+    ? await buildHospitalRosterAttendanceContext({
+        schoolId,
+        batchId: schedule.batchId.toString(),
+        yearId: schedule.yearId.toString(),
+        dateBs,
+        siteName,
+        fieldShift: attendanceShift,
+      })
+    : null;
+
   // Pool: who may appear on today's daily roster
-  const pool = await getEligibleStudentsForDuty(
+  let eligible = await getEligibleStudentsForDuty(
     schoolId,
     schedule.batchId.toString(),
     schedule.yearId.toString(),
@@ -949,22 +1054,48 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
   );
 
   // MANUAL stays limited to assigned list
-  const eligible =
-    rosterMode === "MANUAL"
-      ? await getEligibleStudentsForDuty(
-          schoolId,
-          schedule.batchId.toString(),
-          schedule.yearId.toString(),
-          {
-            rosterMode: "MANUAL",
-            assignedStudentIds: schedule.assignedStudentIds as unknown[],
-            defaultShift: attendanceShift
-          }
-        )
-      : pool;
+  if (rosterMode === "MANUAL") {
+    eligible = await getEligibleStudentsForDuty(
+      schoolId,
+      schedule.batchId.toString(),
+      schedule.yearId.toString(),
+      {
+        rosterMode: "MANUAL",
+        assignedStudentIds: schedule.assignedStudentIds as unknown[],
+        defaultShift: attendanceShift
+      }
+    );
+  }
+
+  // When hospital roster drives attendance, only roster day+shift students may be marked
+  // (admins can still include only students that appear on the monthly grid for that day).
+  if (hospitalRosterCtx && hospitalRosterCtx.onDutyStudentIds.length > 0) {
+    const onDuty = new Set(hospitalRosterCtx.onDutyStudentIds);
+    eligible = eligible.filter((s) => onDuty.has(s._id));
+    // Include roster students missing from pool (edge case)
+    if (eligible.length < hospitalRosterCtx.onDutyStudentIds.length) {
+      const have = new Set(eligible.map((s) => s._id));
+      const extra = await getEligibleStudentsForDuty(
+        schoolId,
+        schedule.batchId.toString(),
+        schedule.yearId.toString(),
+        {
+          rosterMode: "MANUAL",
+          assignedStudentIds: hospitalRosterCtx.onDutyStudentIds.filter((id) => !have.has(id)),
+          defaultShift: attendanceShift,
+        },
+      );
+      eligible = [...eligible, ...extra];
+    }
+  }
 
   if (eligible.length === 0) {
-    throw new ApiError(400, "No students available for this field posting roster pool");
+    throw new ApiError(
+      400,
+      hospitalRosterCtx
+        ? `No students are assigned on the hospital roster for ${dateBs} · ${attendanceShift}. Update the Hospital Roster grid first.`
+        : "No students available for this field posting roster pool",
+    );
   }
   if (!payload.entries.length) {
     throw new ApiError(400, "Select at least one student for today's roster and mark attendance");
@@ -976,7 +1107,9 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     if (!eligibleIds.has(entry.studentId)) {
       throw new ApiError(
         400,
-        "One or more selected students are not in this posting's batch/year roster pool"
+        hospitalRosterCtx
+          ? "One or more students are not on the hospital roster for this day and shift"
+          : "One or more selected students are not in this posting's batch/year roster pool"
       );
     }
     if (seenEntry.has(entry.studentId)) {
@@ -984,9 +1117,6 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
     }
     seenEntry.add(entry.studentId);
   }
-
-  const siteName = resolveSiteName(schedule);
-  const postingType = resolvePostingType(schedule);
 
   const docPayload = {
     schoolId,

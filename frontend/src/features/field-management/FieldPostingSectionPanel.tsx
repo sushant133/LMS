@@ -49,6 +49,10 @@ interface MarkRow {
   onRoster: boolean;
   status: FieldDutyStudentStatus;
   remarks: string;
+  /** From Hospital Roster cell (department / shift codes). */
+  departmentLabel?: string;
+  shiftLabel?: string;
+  rosterCode?: string;
 }
 
 const todayBsString = () => {
@@ -123,6 +127,17 @@ export const FieldPostingSectionPanel = ({
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [studentPickerOpen, setStudentPickerOpen] = useState(false);
   const [loadingMark, setLoadingMark] = useState(false);
+  /** When true, student list comes from Hospital Roster for that day. */
+  const [fromHospitalRoster, setFromHospitalRoster] = useState(false);
+  const [hospitalRosterInfo, setHospitalRosterInfo] = useState<{
+    rosterId: string;
+    rosterName: string;
+    hospitalName?: string;
+    monthBs: string;
+    day: number;
+    status: string;
+    assignmentCount: number;
+  } | null>(null);
 
   useEffect(() => {
     setForm((f) => ({
@@ -139,6 +154,8 @@ export const FieldPostingSectionPanel = ({
     setMarkShift("DAY");
     setMarkDateBs(todayBsString());
     setRosterSearch("");
+    setFromHospitalRoster(false);
+    setHospitalRosterInfo(null);
   }, [section, isCoordinatorView, canWrite]);
 
   const settingsQuery = useQuery({
@@ -455,7 +472,7 @@ export const FieldPostingSectionPanel = ({
 
   /**
    * Load daily mark context: candidate pool + suggested roster for date+shift.
-   * Coordinator then ticks who is on duty today and marks P/A/L.
+   * For hospital postings with a monthly Hospital Roster, students are taken from that grid.
    */
   const loadRosterForMarking = async (
     scheduleId: string,
@@ -475,9 +492,31 @@ export const FieldPostingSectionPanel = ({
         pool?: FieldDutyRosterStudent[];
         students: FieldDutyRosterStudent[];
         suggestedStudentIds?: string[];
+        suggestedStatusByStudent?: Partial<Record<string, FieldDutyStudentStatus>>;
+        assignmentMetaByStudent?: Record<
+          string,
+          {
+            departmentCode?: string;
+            departmentName?: string;
+            shiftCode?: string;
+            shiftName?: string;
+            fieldShift?: FieldDutyShift;
+            code?: string;
+          }
+        >;
         existingAttendance?: FieldDutyAttendanceRecord | null;
         dateBs: string;
         shift: FieldDutyShift;
+        fromHospitalRoster?: boolean;
+        hospitalRoster?: {
+          rosterId: string;
+          rosterName: string;
+          hospitalName?: string;
+          monthBs: string;
+          day: number;
+          status: string;
+          assignmentCount: number;
+        } | null;
       }>(
         api.get(`/field-duty/schedules/${scheduleId}/roster`, {
           params: { dateBs: date, shift },
@@ -487,23 +526,41 @@ export const FieldPostingSectionPanel = ({
       setSelectedSchedule(ctx.schedule);
       const attendance = existing ?? ctx.existingAttendance ?? null;
       setLoadedAttendance(attendance);
+      setFromHospitalRoster(Boolean(ctx.fromHospitalRoster));
+      setHospitalRosterInfo(ctx.hospitalRoster ?? null);
 
       const pool = ctx.pool ?? ctx.students ?? [];
       const mode = ctx.schedule.rosterMode || "DAILY";
       const suggested = new Set(ctx.suggestedStudentIds ?? []);
+      const statusHints = ctx.suggestedStatusByStudent ?? {};
+      const meta = ctx.assignmentMetaByStudent ?? {};
+      const rosterDriven = Boolean(ctx.fromHospitalRoster);
 
       setMarkRows(
         pool.map((s) => {
           const prev = attendance?.entries.find((e) => e.studentId === s._id);
+          const m = meta[s._id];
           // Existing register → those students are on roster
+          // Hospital roster → all pool students are on duty for this day/shift
           // MULTI/MANUAL/AUTO defaults → all pool selected
-          // DAILY new day → use suggested (previous same-shift register) when available
+          // DAILY new day → use suggested when available
           let onRoster = false;
           if (prev) onRoster = true;
           else if (attendance?.entries?.length) onRoster = false;
+          else if (rosterDriven) onRoster = suggested.has(s._id) || suggested.size === 0;
           else if (mode === "DAILY") onRoster = suggested.has(s._id);
           else if (suggested.size > 0) onRoster = suggested.has(s._id);
           else onRoster = true;
+
+          const suggestedStatus = statusHints[s._id];
+          const deptLabel =
+            m?.departmentCode || m?.departmentName
+              ? [m.departmentCode, m.departmentName].filter(Boolean).join(" · ")
+              : undefined;
+          const shiftLabel =
+            m?.shiftCode || m?.shiftName
+              ? [m.shiftCode, m.shiftName].filter(Boolean).join(" · ")
+              : undefined;
 
           return {
             studentId: s._id,
@@ -511,8 +568,14 @@ export const FieldPostingSectionPanel = ({
             admissionNumber: s.admissionNumber,
             rollNumber: s.rollNumber,
             onRoster,
-            status: prev?.status ?? ("PRESENT" as FieldDutyStudentStatus),
+            status:
+              prev?.status ??
+              suggestedStatus ??
+              ("PRESENT" as FieldDutyStudentStatus),
             remarks: prev?.remarks ?? "",
+            departmentLabel: deptLabel,
+            shiftLabel: shiftLabel,
+            rosterCode: m?.code,
           };
         }),
       );
@@ -1449,10 +1512,10 @@ export const FieldPostingSectionPanel = ({
                 Daily attendance register
               </CardTitle>
               <p className="text-sm font-normal text-slate-500">
-                1) Open a posting · 2) Choose <strong>attendance date</strong> (today or any
-                previous date within the posting period) and <strong>shift</strong> · 3) Tick
-                students on duty for that date · 4) Mark Present / Absent / Late / Leave ·
-                5) Save register (stored like a manual attendance book).
+                1) Open a posting · 2) Choose <strong>attendance date</strong> and{" "}
+                <strong>shift</strong> · 3) For <strong>Hospital</strong> postings, students
+                load from the <strong>Hospital Roster</strong> grid for that day · 4) Mark
+                Present / Absent / Late / Leave · 5) Save register.
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1594,13 +1657,43 @@ export const FieldPostingSectionPanel = ({
                       {" · "}
                       Pool: <span className="font-medium">{markRows.length}</span>
                       {" · "}
-                      On duty today:{" "}
+                      On duty:{" "}
                       <span className="font-medium text-indigo-700">{onDutyCount}</span>
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Rosters can change every day — tick only the students on duty for this
-                      date and shift, then mark attendance.
-                    </p>
+                    {fromHospitalRoster && hospitalRosterInfo ? (
+                      <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-900">
+                        <p className="font-semibold">
+                          Attendance from Hospital Roster
+                        </p>
+                        <p className="mt-0.5">
+                          {hospitalRosterInfo.rosterName}
+                          {hospitalRosterInfo.hospitalName
+                            ? ` · ${hospitalRosterInfo.hospitalName}`
+                            : ""}
+                          {" · "}
+                          Day {hospitalRosterInfo.day} of {hospitalRosterInfo.monthBs}
+                          {" · "}
+                          {hospitalRosterInfo.assignmentCount} assigned
+                          {hospitalRosterInfo.status === "LOCKED" ? " · Locked roster" : ""}
+                        </p>
+                        <p className="mt-1 text-emerald-800/80">
+                          Students are loaded from the monthly roster grid. Mark Present /
+                          Absent / Late / Leave only — change duty list in Hospital Roster if
+                          needed.
+                        </p>
+                      </div>
+                    ) : section === "HOSPITAL" ? (
+                      <p className="mt-1 text-xs text-amber-800">
+                        No matching Hospital Roster for this batch/year/hospital/month.
+                        Create a roster under <strong>Hospital Roster</strong> (same batch,
+                        year, hospital, month) so attendance loads from the duty grid.
+                        Meanwhile you can tick students manually.
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Tick students on duty for this date and shift, then mark attendance.
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1683,7 +1776,9 @@ export const FieldPostingSectionPanel = ({
                     <LoadingState />
                   ) : markRows.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                      No students in the batch/year pool. Check posting batch and year.
+                      {fromHospitalRoster
+                        ? "No students are assigned on the Hospital Roster for this day and shift. Update the roster grid, or pick another shift."
+                        : "No students in the batch/year pool. Check posting batch and year."}
                     </p>
                   ) : (
                     <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -1691,16 +1786,20 @@ export const FieldPostingSectionPanel = ({
                         Daily register sheet · {markDateBs || "—"} ·{" "}
                         {markShift.replace(/_/g, " ")} ·{" "}
                         {selectedSchedule.siteName || selectedSchedule.hospitalName}
+                        {fromHospitalRoster ? " · from Hospital Roster" : ""}
                       </div>
                       <Table>
                         <TableHead>
                           <tr>
-                            <Th>
-                              <span className="sr-only">On roster</span>
-                              Duty
-                            </Th>
+                            {!fromHospitalRoster ? (
+                              <Th>
+                                <span className="sr-only">On roster</span>
+                                Duty
+                              </Th>
+                            ) : null}
                             <Th>Roll</Th>
                             <Th>Student Name</Th>
+                            {fromHospitalRoster ? <Th>Dept / Shift</Th> : null}
                             <Th>Present</Th>
                             <Th>Absent</Th>
                             <Th>Late</Th>
@@ -1718,23 +1817,25 @@ export const FieldPostingSectionPanel = ({
                                 key={row.studentId}
                                 className={row.onRoster ? "" : "opacity-50"}
                               >
-                                <Td className="text-center">
-                                  <input
-                                    type="checkbox"
-                                    disabled={isReadOnly}
-                                    checked={row.onRoster}
-                                    title="Include on today's roster"
-                                    onChange={() =>
-                                      setMarkRows((rows) =>
-                                        rows.map((r, i) =>
-                                          i === idx
-                                            ? { ...r, onRoster: !r.onRoster }
-                                            : r,
-                                        ),
-                                      )
-                                    }
-                                  />
-                                </Td>
+                                {!fromHospitalRoster ? (
+                                  <Td className="text-center">
+                                    <input
+                                      type="checkbox"
+                                      disabled={isReadOnly}
+                                      checked={row.onRoster}
+                                      title="Include on today's roster"
+                                      onChange={() =>
+                                        setMarkRows((rows) =>
+                                          rows.map((r, i) =>
+                                            i === idx
+                                              ? { ...r, onRoster: !r.onRoster }
+                                              : r,
+                                          ),
+                                        )
+                                      }
+                                    />
+                                  </Td>
+                                ) : null}
                                 <Td className="text-sm">{row.rollNumber}</Td>
                                 <Td className="text-sm">
                                   {row.fullName}
@@ -1742,6 +1843,13 @@ export const FieldPostingSectionPanel = ({
                                     {row.admissionNumber}
                                   </div>
                                 </Td>
+                                {fromHospitalRoster ? (
+                                  <Td className="text-xs text-slate-600">
+                                    {[row.departmentLabel, row.shiftLabel, row.rosterCode]
+                                      .filter(Boolean)
+                                      .join(" · ") || "—"}
+                                  </Td>
+                                ) : null}
                                 {(["PRESENT", "ABSENT", "LATE", "LEAVE"] as const).map(
                                   (st) => (
                                     <Td key={st} className="text-center">
@@ -1789,28 +1897,32 @@ export const FieldPostingSectionPanel = ({
 
                   {!isReadOnly && markRows.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          setMarkRows((rows) =>
-                            rows.map((r) => ({ ...r, onRoster: true })),
-                          )
-                        }
-                      >
-                        Select all for today
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          setMarkRows((rows) =>
-                            rows.map((r) => ({ ...r, onRoster: false })),
-                          )
-                        }
-                      >
-                        Clear selection
-                      </Button>
+                      {!fromHospitalRoster ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() =>
+                              setMarkRows((rows) =>
+                                rows.map((r) => ({ ...r, onRoster: true })),
+                              )
+                            }
+                          >
+                            Select all for today
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() =>
+                              setMarkRows((rows) =>
+                                rows.map((r) => ({ ...r, onRoster: false })),
+                              )
+                            }
+                          >
+                            Clear selection
+                          </Button>
+                        </>
+                      ) : null}
                       <Button
                         type="button"
                         variant="outline"

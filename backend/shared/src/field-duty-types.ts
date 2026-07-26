@@ -267,23 +267,51 @@ export interface FieldDutyRosterStudent {
   shift?: FieldDutyShift;
 }
 
+/** Meta from Hospital Roster cell for attendance UI. */
+export interface FieldDutyHospitalRosterAssignmentMeta {
+  departmentCode?: string;
+  departmentName?: string;
+  shiftCode?: string;
+  shiftName?: string;
+  fieldShift: FieldDutyShift;
+  code?: string;
+}
+
 /**
  * Daily mark context: candidate pool + existing register row for a date/shift.
- * Coordinator selects who is on today's roster, then marks Present/Absent/Late/Leave.
+ * When fromHospitalRoster is true, pool/suggestions come from the monthly Hospital Roster grid.
  */
 export interface FieldDutyDailyMarkContext {
   dateBs: string;
   shift: FieldDutyShift;
   schedule: FieldDutyScheduleRecord;
-  /** Full candidate pool for this posting (batch/year or fixed lists). */
+  /** Candidate pool (hospital roster day list, or batch/year pool). */
   pool: FieldDutyRosterStudent[];
+  /** @deprecated alias of pool */
+  students?: FieldDutyRosterStudent[];
   /**
    * Suggested students for this date/shift (defaults to check).
-   * Coordinator may add/remove before submit.
+   * From hospital roster day assignments when available.
    */
   suggestedStudentIds: string[];
+  /** Pre-fill status (e.g. LEAVE from roster free code). */
+  suggestedStatusByStudent?: Partial<Record<string, FieldDutyStudentStatus>>;
+  /** Department / shift labels from hospital roster cells. */
+  assignmentMetaByStudent?: Record<string, FieldDutyHospitalRosterAssignmentMeta>;
   /** Existing attendance register for this date+shift, if any. */
   existingAttendance: FieldDutyAttendanceRecord | null;
+  /** True when attendance list is driven by Hospital Roster for this day. */
+  fromHospitalRoster?: boolean;
+  hospitalRoster?: {
+    rosterId: string;
+    rosterName: string;
+    hospitalName?: string;
+    monthBs: string;
+    day: number;
+    status: string;
+    assignmentCount: number;
+  } | null;
+  rosterMode?: string;
 }
 
 /** Flat register row (one student attendance line) — like a manual register book. */
