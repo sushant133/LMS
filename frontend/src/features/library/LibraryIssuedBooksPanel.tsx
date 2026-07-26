@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { LibraryIssueRecord } from "@phit-erp/shared";
 import { BookMarked, Search } from "lucide-react";
+import { toast } from "sonner";
+import { NepaliDateField } from "components/shared/NepaliDateField";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Badge } from "components/ui/badge";
+import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
@@ -17,8 +20,11 @@ import {
   uniqueYearOptionsFromIssues,
 } from "features/library/libraryUtils";
 import { useIsCollege } from "hooks/useInstitutionType";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
 import { resolveStudentId } from "lib/resolveStudentId";
+import { queryClient } from "lib/queryClient";
+import { parseErrorMessage } from "lib/utils";
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
@@ -28,6 +34,7 @@ const issueStatusStyles: Record<string, string> = {
 
 export const LibraryIssuedBooksPanel = () => {
   const isCollege = useIsCollege();
+  const canManageIssues = useIsTenantAdmin();
   const [searchQuery, setSearchQuery] = useState("");
   const [batchId, setBatchId] = useState("");
   const [yearId, setYearId] = useState("");
@@ -36,6 +43,8 @@ export const LibraryIssuedBooksPanel = () => {
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ISSUED" | "OVERDUE">(
     "ALL",
   );
+  const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
+  const [editDueDateBs, setEditDueDateBs] = useState("");
 
   const issuesQuery = useQuery({
     queryKey: ["library-issues", "active"],
@@ -86,6 +95,49 @@ export const LibraryIssuedBooksPanel = () => {
   );
 
   const overdueCount = activeIssues.filter((i) => i.status === "OVERDUE").length;
+
+  const colCount = canManageIssues ? 9 : 8;
+
+  const invalidateLibrary = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["library-issues"] });
+    await queryClient.invalidateQueries({ queryKey: ["library-books"] });
+    await queryClient.invalidateQueries({ queryKey: ["library-dashboard"] });
+  };
+
+  const updateDueDate = useMutation({
+    mutationFn: ({ id, dueDateBs }: { id: string; dueDateBs: string }) =>
+      unwrap(api.put(`/library/issues/${id}`, { dueDateBs })),
+    onSuccess: async () => {
+      toast.success("Due date updated");
+      setEditingIssueId(null);
+      setEditDueDateBs("");
+      await invalidateLibrary();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const deleteIssue = useMutation({
+    mutationFn: (id: string) => unwrap(api.delete(`/library/issues/${id}`)),
+    onSuccess: async () => {
+      toast.success("Issue removed — book restored to inventory");
+      if (editingIssueId) {
+        setEditingIssueId(null);
+        setEditDueDateBs("");
+      }
+      await invalidateLibrary();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const startEdit = (issue: LibraryIssueRecord) => {
+    setEditingIssueId(issue._id);
+    setEditDueDateBs(issue.dueDateBs);
+  };
+
+  const cancelEdit = () => {
+    setEditingIssueId(null);
+    setEditDueDateBs("");
+  };
 
   const placementLabel = (issue: LibraryIssueRecord): string => {
     if (isCollege) {
@@ -250,7 +302,7 @@ export const LibraryIssuedBooksPanel = () => {
         <CardContent className="p-0">
           {/* Scrollable region keeps the slider near the bottom of the visible table area */}
           <div className="max-h-[min(70vh,640px)] overflow-auto">
-            <Table className="min-w-[960px]">
+            <Table className={canManageIssues ? "min-w-[1120px]" : "min-w-[960px]"}>
               <TableHead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                 <tr>
                   <Th>Book</Th>
@@ -261,63 +313,163 @@ export const LibraryIssuedBooksPanel = () => {
                   <Th>Due</Th>
                   <Th>Status</Th>
                   <Th>Issued by</Th>
+                  {canManageIssues ? (
+                    <Th className="text-right">Actions</Th>
+                  ) : null}
                 </tr>
               </TableHead>
               <TableBody>
                 {issuesQuery.isLoading ? (
                   <tr>
-                    <Td colSpan={8} className="py-10 text-center text-slate-500">
+                    <Td
+                      colSpan={colCount}
+                      className="py-10 text-center text-slate-500"
+                    >
                       Loading issued books…
                     </Td>
                   </tr>
                 ) : filteredIssues.length === 0 ? (
                   <tr>
-                    <Td colSpan={8} className="py-10 text-center text-slate-500">
+                    <Td
+                      colSpan={colCount}
+                      className="py-10 text-center text-slate-500"
+                    >
                       {activeIssues.length === 0
                         ? "No books are currently issued."
                         : "No issued books match your filters."}
                     </Td>
                   </tr>
                 ) : (
-                  filteredIssues.map((issue) => (
-                    <tr key={issue._id}>
-                      <Td className="font-medium">{issue.bookTitle ?? "—"}</Td>
-                      <Td className="font-mono text-sm">
-                        {issue.bookCode ?? "—"}
-                      </Td>
-                      <Td>
-                        {issue.borrowerType === "STUDENT" &&
-                        resolveStudentId(issue.studentId) ? (
-                          <StudentNameLink
-                            studentId={resolveStudentId(issue.studentId)!}
-                            name={issue.borrowerName?.trim() || "Student"}
-                          />
-                        ) : (
-                          <span>
-                            {issue.borrowerName?.trim() || "—"}
-                            {issue.borrowerType === "TEACHER" ? (
-                              <span className="ml-1 text-xs text-slate-400">
-                                (Teacher)
-                              </span>
-                            ) : null}
-                          </span>
-                        )}
-                      </Td>
-                      <Td className="text-sm text-slate-600">
-                        {placementLabel(issue)}
-                      </Td>
-                      <Td>{issue.issuedDateBs}</Td>
-                      <Td>{issue.dueDateBs}</Td>
-                      <Td>
-                        <Badge className={issueStatusStyles[issue.status] ?? ""}>
-                          {issue.status}
-                        </Badge>
-                      </Td>
-                      <Td className="text-sm text-slate-700">
-                        {formatIssuedByLabel(issue)}
-                      </Td>
-                    </tr>
-                  ))
+                  filteredIssues.map((issue) => {
+                    const isEditing = editingIssueId === issue._id;
+                    return (
+                      <tr key={issue._id}>
+                        <Td className="font-medium">
+                          {issue.bookTitle ?? "—"}
+                        </Td>
+                        <Td className="font-mono text-sm">
+                          {issue.bookCode ?? "—"}
+                        </Td>
+                        <Td>
+                          {issue.borrowerType === "STUDENT" &&
+                          resolveStudentId(issue.studentId) ? (
+                            <StudentNameLink
+                              studentId={resolveStudentId(issue.studentId)!}
+                              name={issue.borrowerName?.trim() || "Student"}
+                            />
+                          ) : (
+                            <span>
+                              {issue.borrowerName?.trim() || "—"}
+                              {issue.borrowerType === "TEACHER" ? (
+                                <span className="ml-1 text-xs text-slate-400">
+                                  (Teacher)
+                                </span>
+                              ) : null}
+                            </span>
+                          )}
+                        </Td>
+                        <Td className="text-sm text-slate-600">
+                          {placementLabel(issue)}
+                        </Td>
+                        <Td>{issue.issuedDateBs}</Td>
+                        <Td>
+                          {isEditing ? (
+                            <div className="min-w-[140px]">
+                              <NepaliDateField
+                                value={editDueDateBs}
+                                onChange={setEditDueDateBs}
+                              />
+                            </div>
+                          ) : (
+                            issue.dueDateBs
+                          )}
+                        </Td>
+                        <Td>
+                          <Badge
+                            className={issueStatusStyles[issue.status] ?? ""}
+                          >
+                            {issue.status}
+                          </Badge>
+                        </Td>
+                        <Td className="text-sm text-slate-700">
+                          {formatIssuedByLabel(issue)}
+                        </Td>
+                        {canManageIssues ? (
+                          <Td className="text-right">
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              {isEditing ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    disabled={
+                                      updateDueDate.isPending ||
+                                      !editDueDateBs.trim()
+                                    }
+                                    onClick={() => {
+                                      if (!editDueDateBs.trim()) {
+                                        toast.error("Select a due date");
+                                        return;
+                                      }
+                                      updateDueDate.mutate({
+                                        id: issue._id,
+                                        dueDateBs: editDueDateBs.trim(),
+                                      });
+                                    }}
+                                  >
+                                    Save
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={updateDueDate.isPending}
+                                    onClick={cancelEdit}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={
+                                    updateDueDate.isPending ||
+                                    deleteIssue.isPending
+                                  }
+                                  onClick={() => startEdit(issue)}
+                                >
+                                  Edit
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={
+                                  updateDueDate.isPending ||
+                                  deleteIssue.isPending
+                                }
+                                onClick={() => {
+                                  const label =
+                                    issue.bookCode ||
+                                    issue.bookTitle ||
+                                    "this book";
+                                  if (
+                                    !window.confirm(
+                                      `Delete issue for "${label}"?\n\nThis removes the issue record and returns the copy to inventory as available. This cannot be undone.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  deleteIssue.mutate(issue._id);
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </Td>
+                        ) : null}
+                      </tr>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

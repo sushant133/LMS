@@ -4,6 +4,7 @@ import {
   createLibraryStaff,
   deleteBook,
   deleteBookCopy,
+  deleteIssue,
   deleteLibraryStaff,
   getInventoryAccess,
   getLibraryDashboard,
@@ -16,6 +17,7 @@ import {
   setInventoryAccess,
   updateBook,
   updateBookCopy,
+  updateIssue,
   updateLibraryStaff
 } from "../controllers/libraryController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
@@ -42,6 +44,9 @@ router.delete("/copies/:id", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), delete
 router.get("/issues", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), listIssues);
 router.post("/issues", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), issueBook);
 router.put("/issues/:id/return", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), returnBook);
+/** Due-date edit / void mistaken issues — institution admin only (not library staff). */
+router.put("/issues/:id", authorizeInstitutionAdmin, updateIssue);
+router.delete("/issues/:id", authorizeInstitutionAdmin, deleteIssue);
 
 router.get("/staff", authorizeInstitutionAdmin, listLibraryStaff);
 router.post("/staff", authorizeInstitutionAdmin, createLibraryStaff);

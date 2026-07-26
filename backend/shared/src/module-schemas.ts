@@ -339,6 +339,11 @@ export const libraryReturnSchema = z.object({
   fineNpr: moneySchema.default(0)
 });
 
+/** Admin-only: extend / correct due date on an active issue. */
+export const libraryIssueUpdateSchema = z.object({
+  dueDateBs: bsDateSchema
+});
+
 export const transportStopSchema = z.object({
   name: z.string().min(1),
   pickupTime: z.string().optional().or(z.literal(""))
@@ -399,6 +404,7 @@ export type LibraryBookUpdateInput = z.infer<typeof libraryBookUpdateSchema>;
 export type LibraryBookCopyInput = z.infer<typeof libraryBookCopyInputSchema>;
 export type LibraryBookCopyUpdateInput = z.infer<typeof libraryBookCopyUpdateSchema>;
 export type LibraryIssueInput = z.infer<typeof libraryIssueSchema>;
+export type LibraryIssueUpdateInput = z.infer<typeof libraryIssueUpdateSchema>;
 export type ModuleStaffInput = z.infer<typeof moduleStaffSchema>;
 export type TransportRouteInput = z.infer<typeof transportRouteSchema>;
 export type TransportAssignmentInput = z.infer<typeof transportAssignmentSchema>;

@@ -5,6 +5,7 @@ import {
   libraryBookUpdateSchema,
   libraryInventoryAccessSchema,
   libraryIssueSchema,
+  libraryIssueUpdateSchema,
   libraryReturnSchema,
   moduleStaffSchema
 } from "@phit-erp/shared";
@@ -821,6 +822,75 @@ export const returnBook = asyncHandler(async (req: Request, res: Response) => {
   }
 
   return sendSuccess(res, "Book returned", issue);
+});
+
+/**
+ * Institution admin only: update due date on an active issue (extend / correct).
+ * Status is recalculated (ISSUED vs OVERDUE) against today's BS date.
+ */
+export const updateIssue = asyncHandler(async (req: Request, res: Response) => {
+  const payload = libraryIssueUpdateSchema.parse(req.body);
+  const schoolId = req.tenantSchoolId!;
+  const issue = await LibraryIssue.findOne(
+    withTenantScope(req, { _id: req.params.id, status: { $in: ["ISSUED", "OVERDUE"] } })
+  );
+
+  if (!issue) {
+    throw new ApiError(404, "Active issue not found");
+  }
+
+  if (compareBsDates(payload.dueDateBs, issue.issuedDateBs) < 0) {
+    throw new ApiError(400, "Due date cannot be before the issue date");
+  }
+
+  issue.dueDateBs = payload.dueDateBs;
+  const todayBs = getTodayBs();
+  issue.status = compareBsDates(todayBs, payload.dueDateBs) > 0 ? "OVERDUE" : "ISSUED";
+  await issue.save();
+
+  const populated = await LibraryIssue.findById(issue._id)
+    .populate([...issueBorrowerPopulate])
+    .lean();
+
+  return sendSuccess(
+    res,
+    "Issue updated",
+    formatIssue((populated ?? issue.toObject()) as Record<string, unknown>)
+  );
+});
+
+/**
+ * Institution admin only: void a mistaken issue (hard delete).
+ * Restores the physical copy to AVAILABLE and refreshes book inventory counts.
+ */
+export const deleteIssue = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = req.tenantSchoolId!;
+  const issue = await LibraryIssue.findOne(
+    withTenantScope(req, { _id: req.params.id, status: { $in: ["ISSUED", "OVERDUE"] } })
+  );
+
+  if (!issue) {
+    throw new ApiError(404, "Active issue not found");
+  }
+
+  const bookId = issue.bookId;
+  const copyId = issue.copyId;
+
+  await LibraryIssue.deleteOne({ _id: issue._id, schoolId });
+
+  if (copyId) {
+    await LibraryBookCopy.findOneAndUpdate(
+      { _id: copyId, schoolId },
+      { $set: { status: "AVAILABLE" } }
+    );
+  } else {
+    // Legacy issues without copyId — restore aggregate availability
+    await LibraryBook.findByIdAndUpdate(bookId, { $inc: { availableCopies: 1 } });
+  }
+
+  await syncBookCopyCounts(bookId, schoolId);
+
+  return sendSuccess(res, "Issue deleted and copy restored to inventory");
 });
 
 export const listLibraryStaff = asyncHandler(async (req: Request, res: Response) => {
