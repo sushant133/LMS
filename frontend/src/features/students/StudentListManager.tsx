@@ -238,17 +238,89 @@ export const StudentListManager = () => {
     return <LoadingState />;
   }
 
+  /**
+   * StickyTableScroll uses separate header/body tables with table-fixed.
+   * Matching colgroups are required so columns align and cells don't overflow
+   * into each other.
+   */
+  const tableMinWidthClass = canManage
+    ? isCollege
+      ? "min-w-[1680px]"
+      : "min-w-[1540px]"
+    : isCollege
+      ? "min-w-[1320px]"
+      : "min-w-[1200px]";
+
+  const tableClassName = cn("w-full table-fixed", tableMinWidthClass);
+
+  const colGroup = (
+    <colgroup>
+      {canManage && isCollege ? (
+        <>
+          <col className="w-[14%]" />
+          <col className="w-[8%]" />
+          <col className="w-[6%]" />
+          <col className="w-[9%]" />
+          <col className="w-[8%]" />
+          <col className="w-[7%]" />
+          <col className="w-[9%]" />
+          <col className="w-[8%]" />
+          <col className="w-[8%]" />
+          <col className="w-[23%]" />
+        </>
+      ) : canManage ? (
+        <>
+          <col className="w-[15%]" />
+          <col className="w-[9%]" />
+          <col className="w-[7%]" />
+          <col className="w-[10%]" />
+          <col className="w-[9%]" />
+          <col className="w-[8%]" />
+          <col className="w-[10%]" />
+          <col className="w-[9%]" />
+          <col className="w-[23%]" />
+        </>
+      ) : isCollege ? (
+        <>
+          <col className="w-[17%]" />
+          <col className="w-[10%]" />
+          <col className="w-[7%]" />
+          <col className="w-[10%]" />
+          <col className="w-[10%]" />
+          <col className="w-[9%]" />
+          <col className="w-[10%]" />
+          <col className="w-[11%]" />
+          <col className="w-[16%]" />
+        </>
+      ) : (
+        <>
+          <col className="w-[19%]" />
+          <col className="w-[11%]" />
+          <col className="w-[8%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className="w-[10%]" />
+          <col className="w-[12%]" />
+          <col className="w-[18%]" />
+        </>
+      )}
+    </colgroup>
+  );
+
+  const thClass = "bg-slate-50 whitespace-nowrap";
+  const cellTruncateClass = "min-w-0 max-w-full truncate";
+
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+    <Card className="min-w-0 overflow-hidden">
+      <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
           <CardTitle>
             {canManage ? "All Students" : "My Students"}
           </CardTitle>
           <p className="mt-1 text-sm text-slate-500">
             {isTeacher && !canManage
-              ? "Students in your assigned subject batch/year (or class/section)."
-              : null}{" "}
+              ? "Students in your assigned subject batch/year (or class/section). "
+              : null}
             Showing {filteredStudents.length} of {students.length} student
             {students.length === 1 ? "" : "s"}
             {isTeacher &&
@@ -256,11 +328,12 @@ export const StudentListManager = () => {
             students.length === 0 &&
             !teacherScopeQuery.isLoading
               ? " — ask admin to assign you a subject with batch and year under Subject Assignment."
-              : ""}
+              : null}
           </p>
         </div>
         <Button
           variant="outline"
+          className="w-full shrink-0 sm:w-auto"
           disabled={filteredStudents.length === 0}
           onClick={() => {
             downloadStudentsExcel(filteredStudents, {
@@ -277,8 +350,8 @@ export const StudentListManager = () => {
           Export Excel
         </Button>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-2 xl:grid-cols-4">
+      <CardContent className="min-w-0 space-y-4">
+        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 xl:grid-cols-4">
           <FormField label="Search">
             <Input
               placeholder="Name, mobile number, or login ID"
@@ -379,194 +452,234 @@ export const StudentListManager = () => {
             description="Try a different name, mobile number, login ID, or filter selection."
           />
         ) : (
-          <StickyTableScroll
-            header={
-              <Table className="w-full min-w-[1100px] table-fixed">
-                <TableHead>
-                  <tr>
-                    <Th className="bg-slate-50">Name</Th>
-                    <Th className="bg-slate-50">Mobile</Th>
-                    <Th className="bg-slate-50">Roll No.</Th>
-                    <Th className="bg-slate-50">Admission No.</Th>
-                    <Th className="bg-slate-50">{labels.primary}</Th>
-                    <Th className="bg-slate-50">{labels.secondary}</Th>
-                    {isCollege ? (
-                      <Th className="bg-slate-50">Status</Th>
-                    ) : null}
-                    <Th className="bg-slate-50">Guardian</Th>
-                    {canManage ? (
-                      <Th className="bg-slate-50">Total Fee</Th>
-                    ) : null}
-                    <Th className="bg-slate-50" />
-                  </tr>
-                </TableHead>
-              </Table>
-            }
-            body={
-              <Table className="w-full min-w-[1100px] table-fixed">
-                <TableBody>
-                  {filteredStudents.map((student) => {
-                    const pendingDocs = countPendingRequiredDocuments(
-                      student.documents ?? [],
-                    );
-                    const displayName =
-                      student.user?.fullName ?? "Unknown student";
-                    const displayEmail = student.user?.email ?? "—";
-                    const displayPhone = student.user?.phone || "—";
-                    return (
-                      <tr key={student._id}>
-                        <Td>
-                          <div className="space-y-1">
-                            <StudentNameLink
-                              studentId={student._id}
-                              name={displayName}
-                              subtitle={displayEmail}
-                            />
-                            {pendingDocs > 0 ? (
-                              <Badge className="bg-amber-100 text-amber-900">
-                                {pendingDocs} doc
-                                {pendingDocs === 1 ? "" : "s"} pending
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </Td>
-                        <Td>{displayPhone}</Td>
-                        <Td>{student.rollNumber}</Td>
-                        <Td>
-                          <div className="space-y-0.5">
-                            <p>{student.admissionNumber}</p>
-                            {student.registrationNumber ? (
-                              <p className="text-xs text-slate-500">
-                                Reg: {student.registrationNumber}
+          <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200">
+            <StickyTableScroll
+              header={
+                <Table className={tableClassName}>
+                  {colGroup}
+                  <TableHead>
+                    <tr>
+                      <Th className={thClass}>Name</Th>
+                      <Th className={thClass}>Mobile</Th>
+                      <Th className={thClass}>Roll No.</Th>
+                      <Th className={thClass}>Admission No.</Th>
+                      <Th className={thClass}>{labels.primary}</Th>
+                      <Th className={thClass}>{labels.secondary}</Th>
+                      {isCollege ? <Th className={thClass}>Status</Th> : null}
+                      <Th className={thClass}>Guardian</Th>
+                      {canManage ? (
+                        <Th className={cn(thClass, "text-right")}>Total Fee</Th>
+                      ) : null}
+                      <Th className={cn(thClass, "text-right")}>Actions</Th>
+                    </tr>
+                  </TableHead>
+                </Table>
+              }
+              body={
+                <Table className={tableClassName}>
+                  {colGroup}
+                  <TableBody>
+                    {filteredStudents.map((student) => {
+                      const pendingDocs = countPendingRequiredDocuments(
+                        student.documents ?? [],
+                      );
+                      const displayName =
+                        student.user?.fullName ?? "Unknown student";
+                      const displayEmail = student.user?.email ?? "—";
+                      const displayPhone = student.user?.phone || "—";
+                      const primaryLabel =
+                        primaryMap.get(
+                          (isCollege ? student.batchId : student.classId) ?? "",
+                        ) ?? "—";
+                      const secondaryLabel =
+                        secondaryMap.get(
+                          (isCollege ? student.yearId : student.sectionId) ??
+                            "",
+                        ) ?? "—";
+                      const academicStatus =
+                        student.academicStatus ?? "ACTIVE";
+                      const statusLabel =
+                        STUDENT_ACADEMIC_STATUS_LABELS[
+                          academicStatus as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
+                        ] ?? academicStatus.replace(/_/g, " ");
+                      const statusClass =
+                        academicStatus === "ACTIVE"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : academicStatus === "PENDING_NOT_PASSED"
+                            ? "bg-orange-100 text-orange-900"
+                            : academicStatus === "PASSED_OUT" ||
+                                academicStatus === "ALUMNI"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-slate-100 text-slate-700";
+
+                      return (
+                        <tr key={student._id} className="align-top">
+                          <Td className="min-w-0">
+                            <div className="min-w-0 space-y-1">
+                              <StudentNameLink
+                                studentId={student._id}
+                                name={displayName}
+                                subtitle={displayEmail}
+                              />
+                              {pendingDocs > 0 ? (
+                                <Badge className="max-w-full truncate bg-amber-100 text-amber-900">
+                                  {pendingDocs} doc
+                                  {pendingDocs === 1 ? "" : "s"} pending
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </Td>
+                          <Td
+                            className={cellTruncateClass}
+                            title={displayPhone}
+                          >
+                            {displayPhone}
+                          </Td>
+                          <Td
+                            className={cellTruncateClass}
+                            title={student.rollNumber || undefined}
+                          >
+                            {student.rollNumber || "—"}
+                          </Td>
+                          <Td className="min-w-0">
+                            <div className="min-w-0 space-y-0.5">
+                              <p
+                                className="truncate"
+                                title={student.admissionNumber || undefined}
+                              >
+                                {student.admissionNumber || "—"}
                               </p>
-                            ) : null}
-                          </div>
-                        </Td>
-                        <Td>
-                          {primaryMap.get(
-                            (isCollege ? student.batchId : student.classId) ??
-                              "",
-                          ) ?? "—"}
-                        </Td>
-                        <Td>
-                          {secondaryMap.get(
-                            (isCollege ? student.yearId : student.sectionId) ??
-                              "",
-                          ) ?? "—"}
-                        </Td>
-                        {isCollege ? (
-                          <Td>
-                            <span
-                              className={
-                                (student.academicStatus ?? "ACTIVE") ===
-                                "ACTIVE"
-                                  ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800"
-                                  : (student.academicStatus ?? "") ===
-                                      "PENDING_NOT_PASSED"
-                                    ? "rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-900"
-                                    : (student.academicStatus ?? "") ===
-                                          "PASSED_OUT" ||
-                                        (student.academicStatus ?? "") ===
-                                          "ALUMNI"
-                                      ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
-                                      : "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700"
-                              }
-                            >
-                              {STUDENT_ACADEMIC_STATUS_LABELS[
-                                (student.academicStatus ??
-                                  "ACTIVE") as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
-                              ] ??
-                                (student.academicStatus ?? "ACTIVE").replace(
-                                  /_/g,
-                                  " ",
-                                )}
-                            </span>
-                          </Td>
-                        ) : null}
-                        <Td>{student.guardianName}</Td>
-                        {canManage ? (
-                          <Td>
-                            {student.hasScholarship ? (
-                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-                                Scholarship
-                              </span>
-                            ) : (
-                              formatCurrencyNpr(student.feesDueNpr)
-                            )}
-                          </Td>
-                        ) : null}
-                        <Td className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                navigate(`/students/${student._id}/profile`)
-                              }
-                            >
-                              View Profile
-                            </Button>
-                            {canManage ? (
-                              <>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleEdit(student)}
+                              {student.registrationNumber ? (
+                                <p
+                                  className="truncate text-xs text-slate-500"
+                                  title={`Reg: ${student.registrationNumber}`}
                                 >
-                                  Edit
-                                </Button>
-                                {student.user?._id ? (
+                                  Reg: {student.registrationNumber}
+                                </p>
+                              ) : null}
+                            </div>
+                          </Td>
+                          <Td
+                            className={cellTruncateClass}
+                            title={primaryLabel}
+                          >
+                            {primaryLabel}
+                          </Td>
+                          <Td
+                            className={cellTruncateClass}
+                            title={secondaryLabel}
+                          >
+                            {secondaryLabel}
+                          </Td>
+                          {isCollege ? (
+                            <Td className="min-w-0">
+                              <span
+                                className={cn(
+                                  "inline-flex max-w-full truncate rounded-full px-2 py-0.5 text-xs font-semibold",
+                                  statusClass,
+                                )}
+                                title={statusLabel}
+                              >
+                                {statusLabel}
+                              </span>
+                            </Td>
+                          ) : null}
+                          <Td
+                            className={cellTruncateClass}
+                            title={student.guardianName || undefined}
+                          >
+                            {student.guardianName || "—"}
+                          </Td>
+                          {canManage ? (
+                            <Td className="min-w-0 text-right">
+                              {student.hasScholarship ? (
+                                <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                                  Scholarship
+                                </span>
+                              ) : (
+                                <span className="tabular-nums">
+                                  {formatCurrencyNpr(student.feesDueNpr)}
+                                </span>
+                              )}
+                            </Td>
+                          ) : null}
+                          <Td className="min-w-0 text-right">
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="shrink-0 whitespace-nowrap"
+                                onClick={() =>
+                                  navigate(`/students/${student._id}/profile`)
+                                }
+                              >
+                                Profile
+                              </Button>
+                              {canManage ? (
+                                <>
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    disabled={
-                                      resendCredentialsMutation.isPending
-                                    }
+                                    className="shrink-0 whitespace-nowrap"
+                                    onClick={() => handleEdit(student)}
+                                  >
+                                    Edit
+                                  </Button>
+                                  {student.user?._id ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="shrink-0 whitespace-nowrap"
+                                      disabled={
+                                        resendCredentialsMutation.isPending
+                                      }
+                                      onClick={() => {
+                                        if (
+                                          !window.confirm(
+                                            `Resend login credentials to ${displayName} (${student.user.email})?\n\nA new password will be generated and emailed to the student.`,
+                                          )
+                                        ) {
+                                          return;
+                                        }
+                                        void resendCredentialsMutation.mutateAsync(
+                                          student.user._id,
+                                        );
+                                      }}
+                                    >
+                                      Resend
+                                    </Button>
+                                  ) : null}
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    className="shrink-0 whitespace-nowrap"
                                     onClick={() => {
                                       if (
                                         !window.confirm(
-                                          `Resend login credentials to ${displayName} (${student.user.email})?\n\nA new password will be generated and emailed to the student.`,
+                                          `Permanently delete ${displayName} (${student.admissionNumber})?\n\nThis removes the student record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
                                         )
                                       ) {
                                         return;
                                       }
-                                      void resendCredentialsMutation.mutateAsync(
-                                        student.user._id,
+                                      void deleteMutation.mutateAsync(
+                                        student._id,
                                       );
                                     }}
                                   >
-                                    Resend credentials
+                                    Delete
                                   </Button>
-                                ) : null}
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  onClick={() => {
-                                    if (
-                                      !window.confirm(
-                                        `Permanently delete ${displayName} (${student.admissionNumber})?\n\nThis removes the student record, login ID, email, phone, password, and related data from the database. This cannot be undone.`,
-                                      )
-                                    ) {
-                                      return;
-                                    }
-                                    void deleteMutation.mutateAsync(
-                                      student._id,
-                                    );
-                                  }}
-                                >
-                                  Delete
-                                </Button>
-                              </>
-                            ) : null}
-                          </div>
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            }
-          />
+                                </>
+                              ) : null}
+                            </div>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              }
+            />
+          </div>
         )}
       </CardContent>
     </Card>

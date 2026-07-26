@@ -9,13 +9,21 @@ interface StudentNameLinkProps {
 }
 
 export const StudentNameLink = ({ studentId, name, className, subtitle }: StudentNameLinkProps) => (
-  <div>
+  <div className="min-w-0">
     <Link
       to={`/students/${studentId}/profile`}
-      className={cn("font-medium text-blue-700 hover:text-blue-900 hover:underline", className)}
+      className={cn(
+        "block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline",
+        className,
+      )}
+      title={name}
     >
       {name}
     </Link>
-    {subtitle ? <div className="text-xs text-slate-500">{subtitle}</div> : null}
+    {subtitle ? (
+      <div className="truncate text-xs text-slate-500" title={subtitle}>
+        {subtitle}
+      </div>
+    ) : null}
   </div>
 );

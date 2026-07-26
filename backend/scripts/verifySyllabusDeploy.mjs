@@ -47,8 +47,8 @@ mustContain(
 );
 mustContain(
   "dist/utils/academicManagementService.js",
-  "Always clone",
-  "sanitize clone (or check source)"
+  "const next = { ...payload }",
+  "sanitize clone payload"
 );
 
 // Source fallback if dist not built yet

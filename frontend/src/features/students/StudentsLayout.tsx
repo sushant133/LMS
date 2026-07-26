@@ -33,17 +33,19 @@ export const StudentsLayout = () => {
       {canManage ? (
         <div className="flex gap-2 rounded-2xl border border-brand-100 bg-brand-50 p-1.5">
           <NavLink to="/students/create" className={tabClass}>
-            <UserPlus className="h-4 w-4" />
+            <UserPlus className="h-4 w-4 shrink-0" />
             Create Student
           </NavLink>
           <NavLink to="/students/list" className={tabClass}>
-            <Users className="h-4 w-4" />
+            <Users className="h-4 w-4 shrink-0" />
             Students List
           </NavLink>
         </div>
       ) : null}
 
-      <Outlet />
+      <div className="min-w-0">
+        <Outlet />
+      </div>
     </div>
   );
 };

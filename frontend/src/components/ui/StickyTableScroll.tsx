@@ -56,7 +56,7 @@ export const StickyTableScroll = ({
   };
 
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
+    <div className={cn("flex min-h-0 min-w-0 flex-col isolate", className)}>
       {/* Always-visible header strip (does not scroll vertically) */}
       <div
         ref={headerRef}
@@ -70,7 +70,7 @@ export const StickyTableScroll = ({
       <div
         ref={bodyRef}
         className={cn(
-          "min-h-0 overflow-auto overscroll-contain [scrollbar-gutter:stable] [scrollbar-width:thin]",
+          "min-h-0 min-w-0 overflow-auto overscroll-contain [scrollbar-gutter:stable] [scrollbar-width:thin]",
           maxHeightClassName,
         )}
         onScroll={onBodyScroll}
