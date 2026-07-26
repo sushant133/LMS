@@ -511,6 +511,8 @@ const run = async (): Promise<void> => {
               await admin.post("/field-duty/attendance", {
                 scheduleId: createdIds[0],
                 dateBs: todayBs,
+                /** Required when schedule has a default shift / multi-shift attendance. */
+                shift: "DAY",
                 entries,
                 notes: "QA field attendance"
               })

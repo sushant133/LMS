@@ -8,6 +8,7 @@ import subjectAssignmentRoutes from "./subjectAssignmentRoutes.js";
 import attendanceRoutes from "./attendanceRoutes.js";
 import dailyAttendanceRoutes from "./dailyAttendanceRoutes.js";
 import fieldDutyRoutes from "./fieldDutyRoutes.js";
+import hospitalRosterRoutes from "./hospitalRosterRoutes.js";
 import employeeAttendanceRoutes from "./employeeAttendanceRoutes.js";
 import biometricRoutes from "./biometricRoutes.js";
 import authRoutes from "./authRoutes.js";
@@ -58,6 +59,8 @@ router.use("/academic-calendar", academicCalendarRoutes);
 router.use("/attendance", attendanceRoutes);
 router.use("/daily-attendance", dailyAttendanceRoutes);
 router.use("/field-duty", fieldDutyRoutes);
+/** Hospital Roster upgrade — additive routes under the same field-duty module. */
+router.use("/field-duty", hospitalRosterRoutes);
 router.use("/employee-attendance", employeeAttendanceRoutes);
 /** Device punch ingest foundation (API key; hidden from LMS UI). */
 router.use("/biometric", biometricRoutes);

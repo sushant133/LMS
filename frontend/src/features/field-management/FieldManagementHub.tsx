@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Building2,
+  CalendarDays,
   ClipboardCheck,
   Hospital,
   MapPin,
@@ -21,8 +22,15 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "lib/api";
 import { FieldPostingSectionPanel } from "./FieldPostingSectionPanel";
 import { FieldStudentAttendancePanel } from "./FieldStudentAttendancePanel";
+import { HospitalRosterPanel } from "./HospitalRosterPanel";
 
-type TopTab = "community" | "hospital" | "my-duties" | "my-attendance" | "monitoring";
+type TopTab =
+  | "community"
+  | "hospital"
+  | "hospital-roster"
+  | "my-duties"
+  | "my-attendance"
+  | "monitoring";
 
 export const FieldManagementHub = () => {
   const { user } = useAuth();
@@ -62,11 +70,21 @@ export const FieldManagementHub = () => {
         { id: "my-duties" as const, label: "My Field Duties", icon: MapPin },
         { id: "community" as const, label: "Community / PHC", icon: Building2 },
         { id: "hospital" as const, label: "Hospital", icon: Hospital },
+        {
+          id: "hospital-roster" as const,
+          label: "Hospital Roster",
+          icon: CalendarDays,
+        },
       ];
     }
     return [
       { id: "community" as const, label: "Community / PHC Posting", icon: Building2 },
       { id: "hospital" as const, label: "Hospital Posting", icon: Hospital },
+      {
+        id: "hospital-roster" as const,
+        label: "Hospital Roster",
+        icon: CalendarDays,
+      },
       ...(isAdmin || isViewer
         ? [{ id: "monitoring" as const, label: "Admin Monitoring", icon: Users }]
         : []),
@@ -134,6 +152,10 @@ export const FieldManagementHub = () => {
           canWrite={canWriteAttendance}
           isCoordinatorView={isCoordinator && !isAdmin}
         />
+      ) : null}
+
+      {!isStudent && topTab === "hospital-roster" ? (
+        <HospitalRosterPanel isAdmin={isAdmin} />
       ) : null}
 
       {!isStudent && topTab === "monitoring" && (isAdmin || isViewer) ? (

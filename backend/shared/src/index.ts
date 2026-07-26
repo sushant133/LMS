@@ -20,6 +20,8 @@ export * from "./module-schemas.js";
 export * from "./module-types.js";
 export * from "./field-duty-types.js";
 export * from "./field-duty-schemas.js";
+export * from "./hospital-roster-types.js";
+export * from "./hospital-roster-schemas.js";
 export * from "./employee-attendance-types.js";
 export * from "./employee-attendance-schemas.js";
 export * from "./biometric-types.js";

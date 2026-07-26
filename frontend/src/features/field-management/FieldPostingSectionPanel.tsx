@@ -249,10 +249,21 @@ export const FieldPostingSectionPanel = ({
     return counts;
   }, [form.studentShiftMap]);
 
+  /** Only the fixed 1st/2nd/3rd (etc.) years for the selected batch — never all batches. */
   const yearsForBatch = useMemo(() => {
     const years = yearsQuery.data ?? [];
-    if (!form.batchId) return years;
-    return years.filter((y) => y.batchId === form.batchId);
+    if (!form.batchId) return [];
+    return years
+      .filter((y) => {
+        const yBatch =
+          typeof y.batchId === "string"
+            ? y.batchId
+            : (y.batchId as { _id?: string } | undefined)?._id ??
+              String(y.batchId ?? "");
+        return yBatch === form.batchId;
+      })
+      .slice()
+      .sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
   }, [yearsQuery.data, form.batchId]);
 
   const invalidate = async () => {
@@ -479,17 +490,19 @@ export const FieldPostingSectionPanel = ({
 
       const pool = ctx.pool ?? ctx.students ?? [];
       const mode = ctx.schedule.rosterMode || "DAILY";
+      const suggested = new Set(ctx.suggestedStudentIds ?? []);
 
       setMarkRows(
         pool.map((s) => {
           const prev = attendance?.entries.find((e) => e.studentId === s._id);
           // Existing register → those students are on roster
           // MULTI/MANUAL/AUTO defaults → all pool selected
-          // DAILY new day → none selected (coordinator picks daily roster)
+          // DAILY new day → use suggested (previous same-shift register) when available
           let onRoster = false;
           if (prev) onRoster = true;
           else if (attendance?.entries?.length) onRoster = false;
-          else if (mode === "DAILY") onRoster = false;
+          else if (mode === "DAILY") onRoster = suggested.has(s._id);
+          else if (suggested.size > 0) onRoster = suggested.has(s._id);
           else onRoster = true;
 
           return {
@@ -699,14 +712,16 @@ export const FieldPostingSectionPanel = ({
           });
         }
       } else {
-        const sh = (shiftFilter || s.shift || "DAY") as FieldDutyShift;
-        if (shiftFilter && s.shift && s.shift !== shiftFilter && s.rosterMode !== "DAILY") {
-          // For DAILY, shift is chosen when marking — still show posting
+        const sh = (s.shift || "DAY") as FieldDutyShift;
+        // DAILY postings pick shift when marking — always show them.
+        // Fixed-shift postings (MANUAL / AUTO_BATCH_YEAR) must match the shift filter.
+        if (shiftFilter && s.rosterMode !== "DAILY" && sh !== shiftFilter) {
+          continue;
         }
         cards.push({
           key: `${s._id}:daily`,
           schedule: s,
-          shift: sh,
+          shift: (s.rosterMode === "DAILY" ? shiftFilter || sh : sh) as FieldDutyShift,
           dateBs: ctx?.dateBs ?? dateBs,
           studentCount: s.studentCount ?? ctx?.students.length ?? 0,
           existingAttendance: ctx?.existingAttendance ?? null,
@@ -806,9 +821,12 @@ export const FieldPostingSectionPanel = ({
                 <FormField label="Year">
                   <Select
                     value={form.yearId}
+                    disabled={!form.batchId}
                     onChange={(e) => setForm((f) => ({ ...f, yearId: e.target.value }))}
                   >
-                    <option value="">Select year</option>
+                    <option value="">
+                      {form.batchId ? "Select year" : "Select batch first"}
+                    </option>
                     {yearsForBatch.map((y) => (
                       <option key={y._id} value={y._id}>
                         {y.name}

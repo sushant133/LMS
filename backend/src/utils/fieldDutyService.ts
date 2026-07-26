@@ -594,7 +594,10 @@ export const serializeAttendance = async (
 ): Promise<FieldDutyAttendanceRecord> => {
   const entries = doc.entries ?? [];
   const studentIds = entries.map((e) => e.studentId);
-  const students = await Student.find({ _id: { $in: studentIds } })
+  const students = await Student.find({
+    _id: { $in: studentIds },
+    ...(doc.schoolId ? { schoolId: doc.schoolId } : {}),
+  })
     .populate("user", "fullName")
     .lean();
   const studentMap = new Map(
@@ -983,15 +986,18 @@ export const buildFieldDutyDashboard = async (req: Request): Promise<FieldDutyDa
     upcoming.map(async (sch) => {
       const rosterMode = (sch.rosterMode as string) || "AUTO_BATCH_YEAR";
       const assigned = Array.isArray(sch.assignedStudentIds) ? sch.assignedStudentIds : [];
+      const multiShifts = Array.isArray(sch.studentShifts) ? sch.studentShifts : [];
       const count =
         rosterMode === "MANUAL"
           ? assigned.length
-          : await Student.countDocuments({
-              schoolId,
-              batchId: sch.batchId,
-              yearId: sch.yearId,
-              academicStatus: "ACTIVE"
-            });
+          : rosterMode === "MULTI_SHIFT"
+            ? multiShifts.length
+            : await Student.countDocuments({
+                schoolId,
+                batchId: sch.batchId,
+                yearId: sch.yearId,
+                academicStatus: "ACTIVE"
+              });
       return {
         scheduleId: sch._id.toString(),
         siteName: resolveSiteName(sch),
@@ -1094,14 +1100,14 @@ export const buildStudentFieldDutyPortal = async (
   for (const rec of records) {
     const entry = rec.entries.find((e) => e.studentId.toString() === studentId);
     if (!entry) continue;
-    if (entry.status === "PRESENT" || entry.status === "EMERGENCY_DUTY") present += 1;
-    else if (entry.status === "ABSENT") absent += 1;
-    else if (entry.status === "LATE") {
-      late += 1;
+    // Keep counters mutually exclusive so cards don't double-count LATE as Present.
+    if (entry.status === "PRESENT") present += 1;
+    else if (entry.status === "EMERGENCY_DUTY") {
       present += 1;
-    } else if (entry.status === "LEAVE") leave += 1;
-
-    if (entry.status === "EMERGENCY_DUTY") emergencyDuty += 1;
+      emergencyDuty += 1;
+    } else if (entry.status === "ABSENT") absent += 1;
+    else if (entry.status === "LATE") late += 1;
+    else if (entry.status === "LEAVE") leave += 1;
 
     const siteName = resolveSiteName(rec);
     const postingType = resolvePostingType(rec);
@@ -1139,15 +1145,16 @@ export const buildStudentFieldDutyPortal = async (
     agg.total += 1;
     if (entry.status === "PRESENT" || entry.status === "EMERGENCY_DUTY") agg.present += 1;
     else if (entry.status === "ABSENT") agg.absent += 1;
-    else if (entry.status === "LATE") {
-      agg.late += 1;
-      agg.present += 1;
-    } else if (entry.status === "LEAVE") agg.leave += 1;
+    else if (entry.status === "LATE") agg.late += 1;
+    else if (entry.status === "LEAVE") agg.leave += 1;
     postingAgg.set(sid, agg);
   }
 
   const totalMarked = rows.length;
-  const attendancePercent = totalMarked > 0 ? Math.round((present / totalMarked) * 100) : 0;
+  // Present + emergency + late count toward attendance % (same as dashboard).
+  const presentForPct = present + late;
+  const attendancePercent =
+    totalMarked > 0 ? Math.round((presentForPct / totalMarked) * 100) : 0;
 
   // Enrich postings with schedule date range
   const scheduleIds = [...postingAgg.keys()];
@@ -1160,11 +1167,12 @@ export const buildStudentFieldDutyPortal = async (
 
   const postings = [...postingAgg.values()].map((p) => {
     const sch = scheduleMap.get(p.scheduleId);
+    const presentForPct = p.present + p.late;
     return {
       ...p,
       startDateBs: sch?.startDateBs,
       endDateBs: sch?.endDateBs,
-      attendancePercent: p.total > 0 ? Math.round((p.present / p.total) * 100) : 0
+      attendancePercent: p.total > 0 ? Math.round((presentForPct / p.total) * 100) : 0
     };
   });
 

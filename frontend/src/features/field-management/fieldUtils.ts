@@ -49,10 +49,18 @@ export const sectionLabel = (section: FieldPostingSection) =>
 export const defaultPostingTypeForSection = (section: FieldPostingSection) =>
   section === "HOSPITAL" ? "HOSPITAL" : "COMMUNITY";
 
-export const postingTypeOptionsForSection = (section: FieldPostingSection) =>
-  postingTypesForSection(section).map((value) => ({
+export const postingTypeOptionsForSection = (section: FieldPostingSection) => {
+  const types = [...postingTypesForSection(section)];
+  // Always expose Hospital on both create forms (Community and Hospital tabs).
+  if (!types.includes("HOSPITAL")) {
+    // After Community / PHC options so community types stay first on that tab
+    const insertAt = section === "COMMUNITY_PHC" ? Math.min(2, types.length) : 0;
+    types.splice(insertAt, 0, "HOSPITAL");
+  }
+  return types.map((value) => ({
     value,
     label: postingTypeLabel(value),
   }));
+};
 
 export { postingTypeToSection, postingTypesForSection };

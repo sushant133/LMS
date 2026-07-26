@@ -53,11 +53,14 @@ export const postingTypeToSection = (postingType: string): FieldPostingSection =
 
 export const postingTypesForSection = (section: FieldPostingSection): string[] => {
   if (section === "HOSPITAL") {
+    // Hospital posting types (Hospital first for create form)
     return ["HOSPITAL", "CLINICAL_ROTATION", "INTERNSHIP"];
   }
+  // Community / PHC — includes Hospital so admins can pick it from either create form
   return [
     "COMMUNITY",
     "PHC",
+    "HOSPITAL",
     "COMMUNITY_HEALTH_CAMP",
     "RURAL_HEALTH",
     "URBAN_HEALTH",

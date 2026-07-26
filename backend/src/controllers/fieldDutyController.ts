@@ -66,7 +66,8 @@ const assertStaffExists = async (schoolId: unknown, staffId: string) => {
   const staff = await CollegeStaff.findOne({
     _id: staffId,
     schoolId,
-    status: "ACTIVE"
+    status: "ACTIVE",
+    isDeleted: false
   })
     .select("_id")
     .lean();
@@ -543,9 +544,6 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
     suggestedStudentIds = pool.map((s) => s._id);
   } else if (rosterMode === "MANUAL" || rosterMode === "AUTO_BATCH_YEAR") {
     suggestedStudentIds = pool.map((s) => s._id);
-  } else {
-    // DAILY: prefer yesterday's same-shift register if any, else empty (force explicit pick)
-    suggestedStudentIds = [];
   }
 
   const existing = await FieldDutyAttendance.findOne({
@@ -558,6 +556,24 @@ export const getFieldDutyRoster = asyncHandler(async (req: Request, res: Respons
 
   if (existing?.entries?.length) {
     suggestedStudentIds = existing.entries.map((e) => String(e.studentId));
+  } else if (rosterMode === "DAILY" || rosterMode === "MULTI_SHIFT") {
+    // Suggest last submitted same-shift roster so coordinators can re-use prior day picks.
+    const previous = await FieldDutyAttendance.findOne({
+      schoolId,
+      scheduleId: schedule._id,
+      shift,
+      isDeleted: false,
+      dateBs: { $lt: dateBs },
+      status: { $in: ["SUBMITTED", "LOCKED"] },
+    })
+      .sort({ dateBs: -1 })
+      .lean();
+    if (previous?.entries?.length) {
+      const poolIds = new Set(pool.map((s) => s._id));
+      suggestedStudentIds = previous.entries
+        .map((e) => String(e.studentId))
+        .filter((id) => poolIds.has(id));
+    }
   }
 
   const serializedSchedule = await serializeSchedule(schedule as never, {
