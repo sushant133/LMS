@@ -42,11 +42,13 @@ import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
 import {
+  applyScholarshipAwardToYearCollections,
   buildProgramYearFeeSummary,
   calculateFeeTotals,
   calculateNetSalary,
   calculateSuggestedLateFee,
   computeBalanceAfterEntry,
+  ensureActiveScholarshipAwardsApplied,
   generateReceiptNumber,
   PROGRAM_YEAR_LABELS,
   recalculateStudentFeesDue
@@ -448,14 +450,49 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
         .lean()
     ]);
 
-  const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
-  const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
-  const totalScholarship = collections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
-  const totalFine = collections.reduce((sum, item) => sum + (item.lateFeeNpr ?? 0), 0);
-  const advanceBalance = collections.reduce((sum, item) => sum + (item.advancePaymentNpr ?? 0), 0);
+  let feeCollections = collections;
+  let awardRows = scholarshipAwards as unknown as Array<Record<string, unknown>>;
+  const activeBefore = awardRows.filter((a) => a.status !== "REVOKED");
+  if (activeBefore.some((a) => a.status === "ACTIVE")) {
+    awardRows = await ensureActiveScholarshipAwardsApplied({
+      schoolId,
+      studentId: student._id.toString(),
+      awards: activeBefore
+    });
+    // Re-load collections + student after ledger apply
+    feeCollections = await FeeCollection.find({
+      schoolId,
+      studentId: student._id,
+      isDeleted: false
+    })
+      .sort({ paidDateBs: -1 })
+      .lean();
+    const refreshed = await Student.findById(student._id).lean();
+    if (refreshed) {
+      (student as { feesDueNpr?: number }).feesDueNpr = refreshed.feesDueNpr ?? 0;
+    }
+    // Keep revoked awards in list for history
+    const revoked = scholarshipAwards.filter((a) => a.status === "REVOKED");
+    awardRows = [
+      ...awardRows,
+      ...(revoked as unknown as Array<Record<string, unknown>>)
+    ];
+  }
+
+  const totalPaid = feeCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
+  const totalDiscount = feeCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
+  const totalScholarship = feeCollections.reduce(
+    (sum, item) => sum + (item.scholarshipNpr ?? 0),
+    0
+  );
+  const totalFine = feeCollections.reduce((sum, item) => sum + (item.lateFeeNpr ?? 0), 0);
+  const advanceBalance = feeCollections.reduce(
+    (sum, item) => sum + (item.advancePaymentNpr ?? 0),
+    0
+  );
   const totalRefunds = refunds.reduce((sum, item) => sum + item.amountNpr, 0);
 
-  const dueInstallments = collections
+  const dueInstallments = feeCollections
     .filter((c) => c.isInstallment && c.installmentNumber && c.totalInstallments)
     .map((c) => ({
       installmentNumber: c.installmentNumber!,
@@ -464,18 +501,19 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
       dueDateBs: c.paidDateBs
     }));
 
-  const activeAwards = scholarshipAwards.filter((a) => a.status !== "REVOKED");
+  const activeAwards = awardRows.filter((a) => a.status !== "REVOKED");
   const yearWise = buildProgramYearFeeSummary(
-    collections as unknown as Array<Record<string, unknown>>,
-    activeAwards as unknown as Array<Record<string, unknown>>
+    feeCollections as unknown as Array<Record<string, unknown>>,
+    activeAwards
   );
+  const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
 
   const scholarshipStatus =
     activeAwards.length > 0
       ? activeAwards
           .map(
             (a) =>
-              `Topped ${YEAR_LABELS[a.toppedProgramYear] ?? a.toppedProgramYear} → ${YEAR_LABELS[a.coversProgramYear] ?? a.coversProgramYear} scholarship`
+              `Topped ${YEAR_LABELS[Number(a.toppedProgramYear)] ?? a.toppedProgramYear} → ${YEAR_LABELS[Number(a.coversProgramYear)] ?? a.coversProgramYear} scholarship`
           )
           .join("; ")
       : totalScholarship > 0
@@ -490,15 +528,16 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     yearName: college ? (secondaryDoc?.name ?? "") : undefined,
     guardianName: student.guardianName,
     scholarshipStatus,
-    totalPayableNpr: totalPaid + (student.feesDueNpr ?? 0) + totalDiscount + totalScholarship,
-    outstandingDueNpr: student.feesDueNpr ?? 0,
+    totalPayableNpr:
+      totalPaid + yearWiseRemaining + totalDiscount + totalScholarship,
+    outstandingDueNpr: yearWiseRemaining,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
     totalScholarshipNpr: totalScholarship,
     totalFineNpr: totalFine,
     advanceBalanceNpr: advanceBalance,
     totalRefundsNpr: totalRefunds,
-    collections,
+    collections: feeCollections,
     refunds: refunds.map((r) => ({
       _id: r._id.toString(),
       refundNumber: r.refundNumber,
@@ -508,22 +547,27 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     })),
     dueInstallments,
     yearWise,
-    scholarshipAwards: scholarshipAwards.map((a) => ({
-      _id: a._id.toString(),
+    scholarshipAwards: awardRows.map((a) => ({
+      _id: String(a._id),
       schoolId: schoolId.toString(),
-      studentId: a.studentId.toString(),
-      toppedProgramYear: a.toppedProgramYear,
-      coversProgramYear: a.coversProgramYear,
-      academicYearBs: a.academicYearBs || undefined,
-      examName: a.examName || undefined,
-      rank: a.rank ?? undefined,
-      waiverType: a.waiverType as "FULL" | "PARTIAL",
-      amountNpr: a.amountNpr ?? 0,
-      reason: a.reason || undefined,
-      status: a.status as "ACTIVE" | "APPLIED" | "REVOKED",
-      feeCollectionId: a.feeCollectionId?.toString(),
-      notes: a.notes || undefined,
-      createdAt: a.createdAt?.toISOString?.() ?? undefined
+      studentId: String(a.studentId),
+      toppedProgramYear: Number(a.toppedProgramYear),
+      coversProgramYear: Number(a.coversProgramYear),
+      academicYearBs: (a.academicYearBs as string) || undefined,
+      examName: (a.examName as string) || undefined,
+      rank: a.rank != null ? Number(a.rank) : undefined,
+      waiverType: (a.waiverType as "FULL" | "PARTIAL") || "FULL",
+      amountNpr: Number(a.amountNpr ?? 0),
+      reason: (a.reason as string) || undefined,
+      status: (a.status as "ACTIVE" | "APPLIED" | "REVOKED") || "ACTIVE",
+      feeCollectionId: a.feeCollectionId ? String(a.feeCollectionId) : undefined,
+      notes: (a.notes as string) || undefined,
+      createdAt:
+        a.createdAt instanceof Date
+          ? a.createdAt.toISOString()
+          : typeof a.createdAt === "string"
+            ? a.createdAt
+            : undefined
     }))
   });
 });
@@ -755,6 +799,32 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
     createdBy: req.user!.userId
   });
 
+  // Zero (or reduce) year fee dues on opening tuition charges for the covered year.
+  const applied = await applyScholarshipAwardToYearCollections({
+    schoolId,
+    studentId: payload.studentId,
+    coversProgramYear,
+    waiverType: payload.waiverType ?? "FULL",
+    amountNpr: payload.amountNpr ?? 0,
+    awardId: created._id.toString(),
+    scholarshipType: "TOPPER_YEAR_WAIVER"
+  });
+
+  if (applied.appliedNpr > 0) {
+    created.status = "APPLIED";
+    if (applied.collectionIds[0]) {
+      created.feeCollectionId = applied
+        .collectionIds[0] as unknown as typeof created.feeCollectionId;
+    }
+    if (payload.waiverType === "FULL" || !payload.waiverType) {
+      // Store waived amount for reporting when full waiver used ledger charges
+      if (!created.amountNpr) {
+        created.amountNpr = applied.appliedNpr;
+      }
+    }
+    await created.save();
+  }
+
   await recordAudit(req, {
     action: "accounting.scholarship.award",
     entity: "StudentScholarshipAward",
@@ -764,7 +834,11 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
 
   return sendSuccess(
     res,
-    `Scholarship recorded: ${YEAR_LABELS[coversProgramYear]} fee waiver (topped ${YEAR_LABELS[payload.toppedProgramYear]})`,
+    `Scholarship recorded: ${YEAR_LABELS[coversProgramYear]} fee waiver (topped ${YEAR_LABELS[payload.toppedProgramYear]})${
+      applied.appliedNpr > 0
+        ? ` — NPR ${applied.appliedNpr.toLocaleString("en-NP")} applied; year dues set to zero`
+        : ""
+    }`,
     created,
     201
   );

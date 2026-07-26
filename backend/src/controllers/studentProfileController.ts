@@ -14,6 +14,7 @@ import { StudentScholarshipAward } from "../models/StudentScholarshipAward.js";
 import { LibraryIssue } from "../models/LibraryBook.js";
 import {
   buildProgramYearFeeSummary,
+  ensureActiveScholarshipAwardsApplied,
   PROGRAM_YEAR_LABELS
 } from "../utils/accountingCalculations.js";
 import { Result } from "../models/Result.js";
@@ -334,18 +335,48 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
     };
   }).filter((result) => (teacherSubjectIds !== null ? result.marks.length > 0 : true));
 
-  const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
-  const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
-  const totalScholarship = collections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
-  const activeAwards = (scholarshipAwards as Array<Record<string, unknown>>).filter(
+  let feeCollections = collections as unknown as Array<Record<string, unknown>>;
+  let activeAwards = (scholarshipAwards as Array<Record<string, unknown>>).filter(
     (a) => a.status !== "REVOKED"
   );
+
+  // Apply any ACTIVE topper awards onto year fee rows so dues show zero for covered years.
+  if (permissions.canViewFinancial && activeAwards.some((a) => a.status === "ACTIVE")) {
+    activeAwards = await ensureActiveScholarshipAwardsApplied({
+      schoolId,
+      studentId,
+      awards: activeAwards
+    });
+    feeCollections = (await FeeCollection.find({
+      schoolId,
+      studentId: student._id,
+      isDeleted: false
+    })
+      .sort({ paidDateBs: -1 })
+      .lean()) as unknown as Array<Record<string, unknown>>;
+    // Refresh student feesDue after award apply
+    student = (await Student.findOne({ _id: studentId, schoolId }).populate(
+      "user",
+      "-password"
+    )) as typeof student;
+  }
+
+  const totalPaid = feeCollections.reduce(
+    (sum, item) => sum + Number(item.amountPaidNpr ?? 0),
+    0
+  );
+  const totalDiscount = feeCollections.reduce(
+    (sum, item) => sum + Number(item.discountNpr ?? 0),
+    0
+  );
+  const totalScholarship = feeCollections.reduce(
+    (sum, item) => sum + Number(item.scholarshipNpr ?? 0),
+    0
+  );
   const yearWise = permissions.canViewFinancial
-    ? buildProgramYearFeeSummary(
-        collections as unknown as Array<Record<string, unknown>>,
-        activeAwards
-      )
+    ? buildProgramYearFeeSummary(feeCollections, activeAwards)
     : [];
+  const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
   const scholarshipStatus =
     activeAwards.length > 0
       ? activeAwards
@@ -439,7 +470,9 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
     })),
     financial: permissions.canViewFinancial
       ? {
-          outstandingDueNpr: student.feesDueNpr ?? 0,
+          // Prefer year-wise remaining (scholarship-aware) when program-year fees exist
+          outstandingDueNpr:
+            yearWise.length > 0 ? yearWiseRemaining : (student.feesDueNpr ?? 0),
           totalPaidNpr: totalPaid,
           totalDiscountNpr: totalDiscount,
           totalScholarshipNpr: totalScholarship,
@@ -447,7 +480,7 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
           scholarshipStatus,
           yearWise,
           scholarshipAwards: activeAwards,
-          collections
+          collections: feeCollections
         }
       : null,
     library: permissions.canViewLibrary

@@ -15,6 +15,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import {
   buildProgramYearFeeSummary,
+  ensureActiveScholarshipAwardsApplied,
   PROGRAM_YEAR_LABELS
 } from "../utils/accountingCalculations.js";
 import { buildStudentAcademicFilter } from "../utils/academicScope.js";
@@ -379,20 +380,42 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
         .lean()
     ]);
 
-  const totalPaid = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
-  const totalDiscount = collections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
-  const totalScholarship = collections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
-  const activeAwards = awards.filter((a) => a.status !== "REVOKED");
-  const yearWise = buildProgramYearFeeSummary(
-    collections as unknown as Array<Record<string, unknown>>,
-    activeAwards as unknown as Array<Record<string, unknown>>
+  let feeCollections = collections;
+  let awardList = awards as unknown as Array<Record<string, unknown>>;
+  const activeBefore = awardList.filter((a) => a.status !== "REVOKED");
+  if (activeBefore.some((a) => a.status === "ACTIVE")) {
+    awardList = await ensureActiveScholarshipAwardsApplied({
+      schoolId,
+      studentId: student._id.toString(),
+      awards: activeBefore
+    });
+    feeCollections = await FeeCollection.find({
+      schoolId,
+      studentId: student._id,
+      isDeleted: false
+    })
+      .sort({ paidDateBs: -1 })
+      .lean();
+  }
+
+  const totalPaid = feeCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
+  const totalDiscount = feeCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
+  const totalScholarship = feeCollections.reduce(
+    (sum, item) => sum + (item.scholarshipNpr ?? 0),
+    0
   );
+  const activeAwards = awardList.filter((a) => a.status !== "REVOKED");
+  const yearWise = buildProgramYearFeeSummary(
+    feeCollections as unknown as Array<Record<string, unknown>>,
+    activeAwards
+  );
+  const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
   const scholarshipStatus =
     activeAwards.length > 0
       ? activeAwards
           .map(
             (a) =>
-              `Topped ${PROGRAM_YEAR_LABELS[a.toppedProgramYear] ?? a.toppedProgramYear} → ${PROGRAM_YEAR_LABELS[a.coversProgramYear] ?? a.coversProgramYear} scholarship`
+              `Topped ${PROGRAM_YEAR_LABELS[Number(a.toppedProgramYear)] ?? a.toppedProgramYear} → ${PROGRAM_YEAR_LABELS[Number(a.coversProgramYear)] ?? a.coversProgramYear} scholarship`
           )
           .join("; ")
       : totalScholarship > 0
@@ -405,33 +428,33 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
     sectionName: college ? (yearDoc?.name ?? "") : (sectionDoc?.name ?? ""),
     batchName: college ? (batchDoc?.name ?? "") : undefined,
     yearName: college ? (yearDoc?.name ?? "") : undefined,
-    outstandingDueNpr: student.feesDueNpr ?? 0,
+    outstandingDueNpr: yearWiseRemaining,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
     totalScholarshipNpr: totalScholarship,
-    totalPayableNpr: totalPaid + (student.feesDueNpr ?? 0) + totalDiscount + totalScholarship,
-    totalFineNpr: collections.reduce((s, c) => s + (c.lateFeeNpr ?? 0), 0),
-    advanceBalanceNpr: collections.reduce((s, c) => s + (c.advancePaymentNpr ?? 0), 0),
+    totalPayableNpr: totalPaid + yearWiseRemaining + totalDiscount + totalScholarship,
+    totalFineNpr: feeCollections.reduce((s, c) => s + (c.lateFeeNpr ?? 0), 0),
+    advanceBalanceNpr: feeCollections.reduce((s, c) => s + (c.advancePaymentNpr ?? 0), 0),
     totalRefundsNpr: 0,
     scholarshipStatus,
-    collections,
+    collections: feeCollections,
     refunds: [],
     dueInstallments: [],
     yearWise,
-    scholarshipAwards: awards.map((a) => ({
-      _id: a._id.toString(),
+    scholarshipAwards: awardList.map((a) => ({
+      _id: String(a._id),
       schoolId: schoolId.toString(),
-      studentId: a.studentId.toString(),
-      toppedProgramYear: a.toppedProgramYear,
-      coversProgramYear: a.coversProgramYear,
-      academicYearBs: a.academicYearBs || undefined,
-      examName: a.examName || undefined,
-      rank: a.rank ?? undefined,
-      waiverType: a.waiverType as "FULL" | "PARTIAL",
-      amountNpr: a.amountNpr ?? 0,
-      reason: a.reason || undefined,
-      status: a.status as "ACTIVE" | "APPLIED" | "REVOKED",
-      notes: a.notes || undefined
+      studentId: String(a.studentId),
+      toppedProgramYear: Number(a.toppedProgramYear),
+      coversProgramYear: Number(a.coversProgramYear),
+      academicYearBs: (a.academicYearBs as string) || undefined,
+      examName: (a.examName as string) || undefined,
+      rank: a.rank != null ? Number(a.rank) : undefined,
+      waiverType: (a.waiverType as "FULL" | "PARTIAL") || "FULL",
+      amountNpr: Number(a.amountNpr ?? 0),
+      reason: (a.reason as string) || undefined,
+      status: (a.status as "ACTIVE" | "APPLIED" | "REVOKED") || "ACTIVE",
+      notes: (a.notes as string) || undefined
     }))
   });
 });

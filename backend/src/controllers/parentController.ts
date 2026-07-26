@@ -557,6 +557,10 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
         3: Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0
       };
       const yearWiseWithPlan = yearWise.map((y) => {
+        // Scholarship-covered years stay at zero remaining (do not re-open planned dues).
+        if (y.status === "SCHOLARSHIP" || (y.scholarshipNote && y.remainingNpr <= 0)) {
+          return y;
+        }
         if (y.status !== "NO_RECORD") return y;
         const plannedAmt = planned[y.programYear as 1 | 2 | 3] ?? 0;
         if (plannedAmt <= 0) return y;
