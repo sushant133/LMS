@@ -29,6 +29,7 @@ export const downloadStudentsExcel = (
   filename = "students.xlsx",
 ): void => {
   const headers = [
+    "S.N.",
     "Full Name",
     "Email",
     "Phone",
@@ -50,7 +51,8 @@ export const downloadStudentsExcel = (
     "Remarks",
   ];
 
-  const rows = students.map((student) => [
+  const rows = students.map((student, index) => [
+    index + 1,
     student.user?.fullName ?? "Unknown student",
     student.user?.email ?? "",
     student.user?.phone ?? "",

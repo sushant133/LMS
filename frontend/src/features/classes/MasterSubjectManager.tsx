@@ -470,6 +470,7 @@ export const MasterSubjectManager = ({
                     <Table>
                       <TableHead>
                         <tr>
+                          <Th className="w-14 text-center">S.N.</Th>
                           <Th>Subject</Th>
                           <Th>Marks</Th>
                           <Th>Status</Th>
@@ -480,14 +481,14 @@ export const MasterSubjectManager = ({
                         {yearSubjects.length === 0 ? (
                           <tr>
                             <Td
-                              colSpan={4}
+                              colSpan={5}
                               className="text-center text-sm text-slate-500"
                             >
                               No subjects for {yearName}
                             </Td>
                           </tr>
                         ) : (
-                          yearSubjects.map((subject) => (
+                          yearSubjects.map((subject, subjectIndex) => (
                             <tr
                               key={subject._id}
                               className={
@@ -496,6 +497,9 @@ export const MasterSubjectManager = ({
                                   : undefined
                               }
                             >
+                              <Td className="text-center tabular-nums text-slate-500">
+                                {subjectIndex + 1}
+                              </Td>
                               <Td>
                                 <div className="font-medium">
                                   {subject.name}

@@ -307,6 +307,8 @@ export async function syncLowStockRequests(
     openRequest.minimumStock = min;
     openRequest.requiredQuantity = Math.max(openRequest.requiredQuantity, requiredQty || 1);
     openRequest.priority = getStockPriority(available, min, max, equipment.quantity);
+    openRequest.itemKind = equipment.itemKind ?? "NON_DISPOSABLE";
+    openRequest.equipmentName = equipment.name;
     await openRequest.save();
     return;
   }
@@ -321,6 +323,7 @@ export async function syncLowStockRequests(
     equipmentId: equipment._id,
     equipmentName: equipment.name,
     categoryName: category?.name,
+    itemKind: equipment.itemKind ?? "NON_DISPOSABLE",
     currentStock: available,
     minimumStock: min,
     requiredQuantity: requiredQty || 1,

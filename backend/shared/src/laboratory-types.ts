@@ -151,6 +151,8 @@ export interface LaboratoryStockRequestRecord {
   equipmentId?: string | null;
   equipmentName: string;
   categoryName?: string;
+  /** Disposable / Destroyable vs Non-Disposable / Non-Destroyable */
+  itemKind?: LaboratoryItemKind;
   currentStock: number;
   minimumStock: number;
   requiredQuantity: number;

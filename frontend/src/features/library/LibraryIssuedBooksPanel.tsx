@@ -96,7 +96,7 @@ export const LibraryIssuedBooksPanel = () => {
 
   const overdueCount = activeIssues.filter((i) => i.status === "OVERDUE").length;
 
-  const colCount = canManageIssues ? 9 : 8;
+  const colCount = canManageIssues ? 10 : 9;
 
   const invalidateLibrary = async () => {
     await queryClient.invalidateQueries({ queryKey: ["library-issues"] });
@@ -305,6 +305,7 @@ export const LibraryIssuedBooksPanel = () => {
             <Table className={canManageIssues ? "min-w-[1120px]" : "min-w-[960px]"}>
               <TableHead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                 <tr>
+                  <Th className="w-14 text-center">S.N.</Th>
                   <Th>Book</Th>
                   <Th>Code</Th>
                   <Th>Student / Borrower</Th>
@@ -340,10 +341,13 @@ export const LibraryIssuedBooksPanel = () => {
                     </Td>
                   </tr>
                 ) : (
-                  filteredIssues.map((issue) => {
+                  filteredIssues.map((issue, index) => {
                     const isEditing = editingIssueId === issue._id;
                     return (
                       <tr key={issue._id}>
+                        <Td className="text-center tabular-nums text-slate-500">
+                          {index + 1}
+                        </Td>
                         <Td className="font-medium">
                           {issue.bookTitle ?? "—"}
                         </Td>

@@ -257,50 +257,54 @@ export const StudentListManager = () => {
     <colgroup>
       {canManage && isCollege ? (
         <>
-          <col className="w-[14%]" />
+          <col className="w-[4%]" />
+          <col className="w-[13%]" />
           <col className="w-[8%]" />
           <col className="w-[6%]" />
-          <col className="w-[9%]" />
+          <col className="w-[8%]" />
           <col className="w-[8%]" />
           <col className="w-[7%]" />
-          <col className="w-[9%]" />
           <col className="w-[8%]" />
           <col className="w-[8%]" />
-          <col className="w-[23%]" />
+          <col className="w-[8%]" />
+          <col className="w-[22%]" />
         </>
       ) : canManage ? (
         <>
-          <col className="w-[15%]" />
+          <col className="w-[4%]" />
+          <col className="w-[14%]" />
           <col className="w-[9%]" />
-          <col className="w-[7%]" />
-          <col className="w-[10%]" />
+          <col className="w-[6%]" />
+          <col className="w-[9%]" />
           <col className="w-[9%]" />
           <col className="w-[8%]" />
-          <col className="w-[10%]" />
+          <col className="w-[9%]" />
           <col className="w-[9%]" />
           <col className="w-[23%]" />
         </>
       ) : isCollege ? (
         <>
-          <col className="w-[17%]" />
-          <col className="w-[10%]" />
-          <col className="w-[7%]" />
-          <col className="w-[10%]" />
-          <col className="w-[10%]" />
-          <col className="w-[9%]" />
-          <col className="w-[10%]" />
-          <col className="w-[11%]" />
+          <col className="w-[5%]" />
           <col className="w-[16%]" />
+          <col className="w-[9%]" />
+          <col className="w-[7%]" />
+          <col className="w-[9%]" />
+          <col className="w-[9%]" />
+          <col className="w-[8%]" />
+          <col className="w-[10%]" />
+          <col className="w-[10%]" />
+          <col className="w-[17%]" />
         </>
       ) : (
         <>
-          <col className="w-[19%]" />
-          <col className="w-[11%]" />
-          <col className="w-[8%]" />
-          <col className="w-[11%]" />
-          <col className="w-[11%]" />
+          <col className="w-[5%]" />
+          <col className="w-[18%]" />
           <col className="w-[10%]" />
-          <col className="w-[12%]" />
+          <col className="w-[8%]" />
+          <col className="w-[10%]" />
+          <col className="w-[10%]" />
+          <col className="w-[10%]" />
+          <col className="w-[11%]" />
           <col className="w-[18%]" />
         </>
       )}
@@ -459,6 +463,7 @@ export const StudentListManager = () => {
                   {colGroup}
                   <TableHead>
                     <tr>
+                      <Th className={cn(thClass, "text-center")}>S.N.</Th>
                       <Th className={thClass}>Name</Th>
                       <Th className={thClass}>Mobile</Th>
                       <Th className={thClass}>Roll No.</Th>
@@ -479,7 +484,7 @@ export const StudentListManager = () => {
                 <Table className={tableClassName}>
                   {colGroup}
                   <TableBody>
-                    {filteredStudents.map((student) => {
+                    {filteredStudents.map((student, index) => {
                       const pendingDocs = countPendingRequiredDocuments(
                         student.documents ?? [],
                       );
@@ -514,6 +519,9 @@ export const StudentListManager = () => {
 
                       return (
                         <tr key={student._id} className="align-top">
+                          <Td className="text-center tabular-nums text-slate-500">
+                            {index + 1}
+                          </Td>
                           <Td className="min-w-0">
                             <div className="min-w-0 space-y-1">
                               <StudentNameLink

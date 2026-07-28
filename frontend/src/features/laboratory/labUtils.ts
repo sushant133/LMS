@@ -149,6 +149,8 @@ export type StockRequestFormState = {
   equipmentId: string;
   equipmentName: string;
   categoryName: string;
+  /** Disposable / Destroyable vs Non-Disposable / Non-Destroyable */
+  itemKind: "DISPOSABLE" | "NON_DISPOSABLE";
   currentStock: number;
   minimumStock: number;
   requiredQuantity: number;
@@ -161,6 +163,7 @@ export const defaultRequestForm: StockRequestFormState = {
   equipmentId: "",
   equipmentName: "",
   categoryName: "",
+  itemKind: "NON_DISPOSABLE",
   currentStock: 0,
   minimumStock: 0,
   requiredQuantity: 1,

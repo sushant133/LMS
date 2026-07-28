@@ -161,6 +161,12 @@ const laboratoryStockRequestSchema = new Schema(
     equipmentId: { type: Schema.Types.ObjectId, ref: "LaboratoryEquipment", default: null },
     equipmentName: { type: String, required: true, trim: true },
     categoryName: { type: String, trim: true },
+    itemKind: {
+      type: String,
+      enum: LABORATORY_ITEM_KINDS,
+      default: "NON_DISPOSABLE",
+      index: true
+    },
     currentStock: { type: Number, required: true, min: 0, default: 0 },
     minimumStock: { type: Number, required: true, min: 0, default: 0 },
     requiredQuantity: { type: Number, required: true, min: 1 },

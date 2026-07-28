@@ -958,6 +958,7 @@ export const CollegeStaffManager = ({
               <Table>
                 <TableHead>
                   <tr>
+                    <Th className="w-14 text-center">S.N.</Th>
                     <Th>Photo</Th>
                     <Th>Employee ID</Th>
                     <Th>Name</Th>
@@ -972,8 +973,11 @@ export const CollegeStaffManager = ({
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {staffList.map((staff) => (
+                  {staffList.map((staff, index) => (
                     <tr key={staff._id}>
+                      <Td className="text-center tabular-nums text-slate-500">
+                        {index + 1}
+                      </Td>
                       <Td>
                         {staffPhotoSrc(staff.photoUrl) ? (
                           <img

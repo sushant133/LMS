@@ -10,6 +10,7 @@ import {
   deleteLaboratory,
   deleteLaboratoryCategory,
   deleteLaboratoryStaff,
+  deleteStockRequest,
   getLaboratoryDashboard,
   getLaboratoryReports,
   issueEquipment,
@@ -26,6 +27,7 @@ import {
   updateLaboratory,
   updateLaboratoryCategory,
   updateLaboratoryStaff,
+  updateStockRequest,
   updateStockRequestStatus
 } from "../controllers/laboratoryController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
@@ -64,10 +66,18 @@ router.get("/movements", authorize(...labRoles), listStockMovements);
 
 router.get("/stock-requests", authorize(...labRoles), listStockRequests);
 router.post("/stock-requests", authorize(...labRoles), createStockRequest);
+/** Edit fields (name, kind, qty, …). Status transitions use /status below. */
+router.put("/stock-requests/:id", authorize(...labRoles), updateStockRequest);
 router.put(
   "/stock-requests/:id/status",
   authorize("COLLEGE_ADMIN"),
   updateStockRequestStatus
+);
+/** SUPER_ADMIN inherits via authorize(); COLLEGE_ADMIN is institution admin. */
+router.delete(
+  "/stock-requests/:id",
+  authorize("COLLEGE_ADMIN"),
+  deleteStockRequest
 );
 
 router.get("/reports", authorize(...labRoles), getLaboratoryReports);

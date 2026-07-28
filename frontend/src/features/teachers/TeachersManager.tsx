@@ -263,6 +263,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
               <Table>
                 <TableHead>
                   <tr>
+                    <Th className="w-14 text-center">S.N.</Th>
                     <Th>Name</Th>
                     <Th>Designation</Th>
                     <Th>Code</Th>
@@ -274,7 +275,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {teachers.map((teacher) => {
+                  {teachers.map((teacher, index) => {
                     const migrationStatus =
                       teacher.assignmentMigrationStatus ?? "PENDING";
                     const designation =
@@ -285,6 +286,9 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                       teacher.user?.isActive !== false;
                     return (
                     <tr key={teacher._id}>
+                      <Td className="text-center tabular-nums text-slate-500">
+                        {index + 1}
+                      </Td>
                       <Td>
                         <div>
                           <Link

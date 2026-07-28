@@ -11,6 +11,7 @@ import {
   laboratoryStockAdjustSchema,
   laboratoryStockRequestSchema,
   laboratoryStockRequestStatusSchema,
+  laboratoryStockRequestUpdateSchema,
   moduleStaffSchema,
   isInstitutionAdmin
 } from "@phit-erp/shared";
@@ -1136,12 +1137,17 @@ export const createStockRequest = asyncHandler(async (req: Request, res: Respons
     throw new ApiError(404, "Laboratory not found");
   }
 
+  // Prefer linked equipment kind when present (keeps list consistent with inventory)
+  let itemKind = payload.itemKind ?? "NON_DISPOSABLE";
   if (payload.equipmentId) {
     const equipment = await LaboratoryEquipment.findOne(
       withTenantScope(req, { _id: payload.equipmentId, laboratoryId: payload.laboratoryId })
     );
     if (!equipment) {
       throw new ApiError(404, "Equipment not found in this laboratory");
+    }
+    if (equipment.itemKind) {
+      itemKind = equipment.itemKind;
     }
   }
 
@@ -1151,6 +1157,7 @@ export const createStockRequest = asyncHandler(async (req: Request, res: Respons
     equipmentId: emptyToUndef(payload.equipmentId) || null,
     equipmentName: payload.equipmentName,
     categoryName: emptyToUndef(payload.categoryName),
+    itemKind,
     currentStock: payload.currentStock,
     minimumStock: payload.minimumStock,
     requiredQuantity: payload.requiredQuantity,
@@ -1184,6 +1191,87 @@ export const createStockRequest = asyncHandler(async (req: Request, res: Respons
   );
 
   return sendSuccess(res, "Stock request submitted", request, 201);
+});
+
+/** Edit required-item details (name, kind, qty, priority, lab, etc.) — not workflow status. */
+export const updateStockRequest = asyncHandler(async (req: Request, res: Response) => {
+  const access = await resolveLabAccess(req);
+  const payload = laboratoryStockRequestUpdateSchema.parse(req.body);
+  const request = await LaboratoryStockRequest.findOne(
+    withTenantScope(req, { _id: req.params.id })
+  );
+  if (!request) {
+    throw new ApiError(404, "Stock request not found");
+  }
+
+  assertLabAccess(access, request.laboratoryId.toString());
+
+  // Non-admins may only edit open (not finished) requests in their labs
+  if (!isInstitutionAdmin(access.role)) {
+    if (request.status === "RECEIVED" || request.status === "REJECTED") {
+      throw new ApiError(403, "Only administrators can edit closed stock requests");
+    }
+  }
+
+  const before = request.toObject();
+  const nextLabId = payload.laboratoryId ?? request.laboratoryId.toString();
+  if (payload.laboratoryId) {
+    assertLabAccess(access, payload.laboratoryId);
+    const lab = await Laboratory.findOne(withTenantScope(req, { _id: payload.laboratoryId }));
+    if (!lab) {
+      throw new ApiError(404, "Laboratory not found");
+    }
+    request.laboratoryId = lab._id;
+  }
+
+  if (payload.equipmentId !== undefined) {
+    const equipmentId = emptyToUndef(payload.equipmentId);
+    if (equipmentId) {
+      const equipment = await LaboratoryEquipment.findOne(
+        withTenantScope(req, {
+          _id: equipmentId,
+          laboratoryId: nextLabId
+        })
+      );
+      if (!equipment) {
+        throw new ApiError(404, "Equipment not found in this laboratory");
+      }
+      request.equipmentId = equipment._id;
+      if (payload.itemKind === undefined && equipment.itemKind) {
+        request.itemKind = equipment.itemKind;
+      }
+      if (payload.equipmentName === undefined) {
+        request.equipmentName = equipment.name;
+      }
+    } else {
+      request.equipmentId = undefined;
+    }
+  }
+
+  if (payload.equipmentName !== undefined) request.equipmentName = payload.equipmentName.trim();
+  if (payload.categoryName !== undefined) {
+    request.categoryName = emptyToUndef(payload.categoryName);
+  }
+  if (payload.itemKind !== undefined) request.itemKind = payload.itemKind;
+  if (payload.currentStock !== undefined) request.currentStock = payload.currentStock;
+  if (payload.minimumStock !== undefined) request.minimumStock = payload.minimumStock;
+  if (payload.requiredQuantity !== undefined) request.requiredQuantity = payload.requiredQuantity;
+  if (payload.priority !== undefined) request.priority = payload.priority;
+  if (payload.remarks !== undefined) {
+    request.adminNotes = emptyToUndef(payload.remarks);
+  }
+
+  await request.save();
+
+  await recordAudit(req, {
+    action: "STOCK_REQUEST_EDITED",
+    entity: "LaboratoryStockRequest",
+    entityId: request._id.toString(),
+    before,
+    after: request.toObject()
+  });
+
+  return sendSuccess(res, "Stock request updated", request);
 });
 
 export const updateStockRequestStatus = asyncHandler(async (req: Request, res: Response) => {
@@ -1266,6 +1354,33 @@ export const updateStockRequestStatus = asyncHandler(async (req: Request, res: R
   });
 
   return sendSuccess(res, "Stock request updated", request);
+});
+
+/** Institution admin / super admin: remove a required-items / stock request row. */
+export const deleteStockRequest = asyncHandler(async (req: Request, res: Response) => {
+  const access = await resolveLabAccess(req);
+  if (!isInstitutionAdmin(access.role)) {
+    throw new ApiError(403, "Only administrators can delete stock requests");
+  }
+
+  const request = await LaboratoryStockRequest.findOne(
+    withTenantScope(req, { _id: req.params.id })
+  );
+  if (!request) {
+    throw new ApiError(404, "Stock request not found");
+  }
+
+  const snapshot = request.toObject();
+  await request.deleteOne();
+
+  await recordAudit(req, {
+    action: "STOCK_REQUEST_DELETED",
+    entity: "LaboratoryStockRequest",
+    entityId: String(snapshot._id),
+    before: snapshot
+  });
+
+  return sendSuccess(res, "Stock request deleted", { _id: snapshot._id });
 });
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
@@ -1407,6 +1522,10 @@ export const getLaboratoryReports = asyncHandler(async (req: Request, res: Respo
       rows = requests.map((r) => ({
         laboratory: (r.laboratoryId as { name?: string } | null)?.name,
         equipment: r.equipmentName,
+        category:
+          r.itemKind === "DISPOSABLE"
+            ? "Disposable / Destroyable"
+            : "Non-Disposable / Non-Destroyable",
         required: r.requiredQuantity,
         current: r.currentStock,
         minimum: r.minimumStock,

@@ -1261,7 +1261,7 @@ export const LibraryManager = () => {
                     No books match this year filter or search.
                   </p>
                 ) : (
-                  filteredBooks.map((book) => {
+                  filteredBooks.map((book, bookIndex) => {
                     const expanded = expandedBookId === book._id;
                     const copies = book.copies ?? [];
                     return (
@@ -1276,6 +1276,9 @@ export const LibraryManager = () => {
                             setExpandedBookId(expanded ? null : book._id)
                           }
                         >
+                          <span className="w-8 shrink-0 text-center text-sm tabular-nums text-slate-500">
+                            {bookIndex + 1}
+                          </span>
                           {expanded ? (
                             <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
                           ) : (
@@ -1353,6 +1356,7 @@ export const LibraryManager = () => {
                                 <Table className="min-w-[720px]">
                                   <TableHead>
                                     <tr>
+                                      <Th className="w-14 text-center">S.N.</Th>
                                       <Th>Book code</Th>
                                       <Th>Status</Th>
                                       <Th>Shelf</Th>
@@ -1364,7 +1368,7 @@ export const LibraryManager = () => {
                                     </tr>
                                   </TableHead>
                                   <TableBody>
-                                    {copies.map((copy) => {
+                                    {copies.map((copy, copyIndex) => {
                                       const isEditing =
                                         editingCopyId === copy._id &&
                                         copyEditDraft !== null;
@@ -1373,7 +1377,7 @@ export const LibraryManager = () => {
                                         <tr key={copy._id}>
                                           {isEditing && copyEditDraft ? (
                                             <>
-                                              <Td colSpan={canManageInventory ? 6 : 5}>
+                                              <Td colSpan={canManageInventory ? 7 : 6}>
                                                 <div className="space-y-3 rounded-md border border-brand-200 bg-brand-50/40 p-3">
                                                   <p className="text-sm font-medium text-slate-800">
                                                     Edit copy {copy.bookCode}
@@ -1557,6 +1561,9 @@ export const LibraryManager = () => {
                                             </>
                                           ) : (
                                             <>
+                                              <Td className="text-center tabular-nums text-slate-500">
+                                                {copyIndex + 1}
+                                              </Td>
                                               <Td className="font-mono font-medium">
                                                 {copy.bookCode}
                                               </Td>
@@ -2183,6 +2190,7 @@ export const LibraryManager = () => {
               <Table>
                 <TableHead>
                   <tr>
+                    <Th className="w-14 text-center">S.N.</Th>
                     <Th>Name</Th>
                     <Th>Email</Th>
                     <Th>Phone</Th>
@@ -2190,8 +2198,11 @@ export const LibraryManager = () => {
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {(staffQuery.data ?? []).map((member) => (
+                  {(staffQuery.data ?? []).map((member, index) => (
                     <tr key={member._id}>
+                      <Td className="text-center tabular-nums text-slate-500">
+                        {index + 1}
+                      </Td>
                       <Td>{member.fullName}</Td>
                       <Td>{member.email}</Td>
                       <Td>{member.phone ?? "—"}</Td>

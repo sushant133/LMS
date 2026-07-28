@@ -116,6 +116,7 @@ export const LaboratoryManager = () => {
   const [editingEquipmentId, setEditingEquipmentId] = useState<string | null>(null);
   const [issueForm, setIssueForm] = useState(defaultIssueForm);
   const [requestForm, setRequestForm] = useState<StockRequestFormState>(defaultRequestForm);
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
   const [staffForm, setStaffForm] = useState<ModuleStaffInput>({
     fullName: "",
     email: "",
@@ -341,6 +342,24 @@ export const LaboratoryManager = () => {
     onSuccess: async () => {
       toast.success("Stock request submitted");
       setRequestForm(defaultRequestForm);
+      setEditingRequestId(null);
+      await invalidateLab();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const updateRequest = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: StockRequestFormState;
+    }) => unwrap(api.put(`/laboratory/stock-requests/${id}`, payload)),
+    onSuccess: async () => {
+      toast.success("Required item updated");
+      setRequestForm(defaultRequestForm);
+      setEditingRequestId(null);
       await invalidateLab();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -364,6 +383,16 @@ export const LaboratoryManager = () => {
       ),
     onSuccess: async () => {
       toast.success("Request updated");
+      await invalidateLab();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const deleteRequest = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/laboratory/stock-requests/${id}`)),
+    onSuccess: async () => {
+      toast.success("Required item removed from the list");
       await invalidateLab();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -458,11 +487,13 @@ export const LaboratoryManager = () => {
 
   const fillRequestFromEquipment = (item: LaboratoryEquipmentRecord) => {
     setTab("requests");
+    setEditingRequestId(null);
     setRequestForm({
       laboratoryId: item.laboratoryId,
       equipmentId: item._id,
       equipmentName: item.name,
       categoryName: item.categoryName ?? "",
+      itemKind: item.itemKind ?? "NON_DISPOSABLE",
       currentStock: item.availableQuantity,
       minimumStock: item.minimumStockLevel ?? 0,
       requiredQuantity: Math.max(
@@ -477,6 +508,40 @@ export const LaboratoryManager = () => {
         item.status === "OUT_OF_STOCK" || item.status === "CRITICAL_STOCK" ? "HIGH" : "MEDIUM",
       remarks: "",
     });
+  };
+
+  const beginEditRequest = (req: LaboratoryStockRequestRecord) => {
+    setTab("requests");
+    setEditingRequestId(req._id);
+    setRequestForm({
+      laboratoryId: req.laboratoryId,
+      equipmentId: req.equipmentId ?? "",
+      equipmentName: req.equipmentName ?? "",
+      categoryName: req.categoryName ?? "",
+      itemKind: req.itemKind ?? "NON_DISPOSABLE",
+      currentStock: req.currentStock ?? 0,
+      minimumStock: req.minimumStock ?? 0,
+      requiredQuantity: req.requiredQuantity ?? 1,
+      priority: req.priority ?? "MEDIUM",
+      remarks: req.adminNotes ?? "",
+    });
+    // Scroll form into view on smaller screens
+    requestAnimationFrame(() => {
+      document
+        .getElementById("lab-stock-request-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const cancelEditRequest = () => {
+    setEditingRequestId(null);
+    setRequestForm(defaultRequestForm);
+  };
+
+  const canEditRequest = (req: LaboratoryStockRequestRecord): boolean => {
+    if (isAdmin) return true;
+    if (!canManageLabsMeta) return false;
+    return req.status !== "RECEIVED" && req.status !== "REJECTED";
   };
 
   const beginStockAdjust = (item: LaboratoryEquipmentRecord) => {
@@ -854,6 +919,7 @@ export const LaboratoryManager = () => {
                   <Table className="w-full min-w-[980px]">
                     <TableHead>
                       <tr>
+                        <Th className="w-14 whitespace-nowrap text-center">S.N.</Th>
                         <Th className="whitespace-nowrap">Name</Th>
                         <Th className="whitespace-nowrap">Year</Th>
                         <Th className="whitespace-nowrap">Code</Th>
@@ -867,8 +933,11 @@ export const LaboratoryManager = () => {
                       </tr>
                     </TableHead>
                     <TableBody>
-                      {labOptions.map((lab) => (
+                      {labOptions.map((lab, index) => (
                         <tr key={lab._id}>
+                          <Td className="whitespace-nowrap text-center tabular-nums text-slate-500">
+                            {index + 1}
+                          </Td>
                           <Td className="font-medium whitespace-nowrap">{lab.name}</Td>
                           <Td className="whitespace-nowrap">
                             <Badge className="bg-indigo-100 text-indigo-800">
@@ -1696,19 +1765,21 @@ export const LaboratoryManager = () => {
                             header={
                               <Table className="w-full min-w-[1100px] table-fixed">
                                 <colgroup>
-                                  <col className="w-[20%]" />
-                                  <col className="w-[12%]" />
-                                  <col className="w-[9%]" />
+                                  <col className="w-[5%]" />
+                                  <col className="w-[18%]" />
+                                  <col className="w-[11%]" />
+                                  <col className="w-[8%]" />
                                   <col className="w-[7%]" />
                                   <col className="w-[7%]" />
                                   <col className="w-[6%]" />
                                   <col className="w-[6%]" />
-                                  <col className="w-[9%]" />
+                                  <col className="w-[8%]" />
                                   <col className="w-[8%]" />
                                   <col className="w-[16%]" />
                                 </colgroup>
                                 <TableHead>
                                   <tr>
+                                    <Th className="bg-slate-50 text-center">S.N.</Th>
                                     <Th className="bg-slate-50">Item</Th>
                                     <Th className="bg-slate-50">Lab</Th>
                                     <Th className="bg-slate-50">Code</Th>
@@ -1736,19 +1807,20 @@ export const LaboratoryManager = () => {
                             body={
                               <Table className="w-full min-w-[1100px] table-fixed">
                                 <colgroup>
-                                  <col className="w-[20%]" />
-                                  <col className="w-[12%]" />
-                                  <col className="w-[9%]" />
+                                  <col className="w-[5%]" />
+                                  <col className="w-[18%]" />
+                                  <col className="w-[11%]" />
+                                  <col className="w-[8%]" />
                                   <col className="w-[7%]" />
                                   <col className="w-[7%]" />
                                   <col className="w-[6%]" />
                                   <col className="w-[6%]" />
-                                  <col className="w-[9%]" />
+                                  <col className="w-[8%]" />
                                   <col className="w-[8%]" />
                                   <col className="w-[16%]" />
                                 </colgroup>
                                 <TableBody>
-                                  {equipment.map((item) => {
+                                  {equipment.map((item, index) => {
                                     const isSelected =
                                       stockAction.equipmentId === item._id;
                                     return (
@@ -1759,6 +1831,9 @@ export const LaboratoryManager = () => {
                                           isSelected && "bg-brand-50/70",
                                         )}
                                       >
+                                        <Td className="text-center tabular-nums text-slate-500">
+                                          {index + 1}
+                                        </Td>
                                         <Td>
                                           <div className="flex flex-wrap items-center gap-2">
                                             <span className="font-medium text-slate-900">
@@ -1893,9 +1968,17 @@ export const LaboratoryManager = () => {
       {tab === "requests" && (
         <div className="space-y-6">
           <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-            <Card>
+            <Card id="lab-stock-request-form">
               <CardHeader>
-                <CardTitle>Submit stock request</CardTitle>
+                <CardTitle>
+                  {editingRequestId ? "Edit required item" : "Submit stock request"}
+                </CardTitle>
+                {editingRequestId ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Update fields below, then save. Workflow status (approve / receive) is
+                    managed from the list actions.
+                  </p>
+                ) : null}
               </CardHeader>
               <CardContent className="space-y-3">
                 <FormField label="Laboratory">
@@ -1923,6 +2006,7 @@ export const LaboratoryManager = () => {
                         equipmentId: e.target.value,
                         equipmentName: item?.name ?? c.equipmentName,
                         categoryName: item?.categoryName ?? c.categoryName,
+                        itemKind: item?.itemKind ?? c.itemKind,
                         currentStock: item?.availableQuantity ?? c.currentStock,
                         minimumStock: item?.minimumStockLevel ?? c.minimumStock,
                         laboratoryId: item?.laboratoryId ?? c.laboratoryId,
@@ -1944,6 +2028,27 @@ export const LaboratoryManager = () => {
                       setRequestForm((c) => ({ ...c, equipmentName: e.target.value }))
                     }
                   />
+                </FormField>
+                <FormField label="Category (disposable type)">
+                  <Select
+                    value={requestForm.itemKind}
+                    onChange={(e) =>
+                      setRequestForm((c) => ({
+                        ...c,
+                        itemKind: e.target.value as StockRequestFormState["itemKind"],
+                      }))
+                    }
+                  >
+                    {itemKindOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Disposable / Destroyable or Non-Disposable / Non-Destroyable — shown on the
+                    required items list.
+                  </p>
                 </FormField>
                 <FormField label="Required quantity">
                   <NumberInput
@@ -1978,21 +2083,50 @@ export const LaboratoryManager = () => {
                     onChange={(e) => setRequestForm((c) => ({ ...c, remarks: e.target.value }))}
                   />
                 </FormField>
-                <Button
-                  onClick={() => {
-                    const parsed = laboratoryStockRequestSchema.safeParse(requestForm);
-                    if (!parsed.success) return toast.error("Invalid request details");
-                    createRequest.mutate({
-                      ...requestForm,
-                      ...parsed.data,
-                      equipmentId: parsed.data.equipmentId ?? "",
-                      categoryName: parsed.data.categoryName ?? "",
-                      remarks: parsed.data.remarks ?? "",
-                    });
-                  }}
-                >
-                  Submit request
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={createRequest.isPending || updateRequest.isPending}
+                    onClick={() => {
+                      const parsed = laboratoryStockRequestSchema.safeParse(requestForm);
+                      if (!parsed.success) {
+                        return toast.error(
+                          parsed.error.issues[0]?.message ?? "Invalid request details",
+                        );
+                      }
+                      const payload: StockRequestFormState = {
+                        ...requestForm,
+                        ...parsed.data,
+                        equipmentId: parsed.data.equipmentId ?? "",
+                        categoryName: parsed.data.categoryName ?? "",
+                        itemKind: parsed.data.itemKind ?? requestForm.itemKind,
+                        remarks: parsed.data.remarks ?? "",
+                      };
+                      if (editingRequestId) {
+                        updateRequest.mutate({ id: editingRequestId, payload });
+                      } else {
+                        createRequest.mutate(payload);
+                      }
+                    }}
+                  >
+                    {editingRequestId
+                      ? updateRequest.isPending
+                        ? "Saving…"
+                        : "Save changes"
+                      : createRequest.isPending
+                        ? "Submitting…"
+                        : "Submit request"}
+                  </Button>
+                  {editingRequestId ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={updateRequest.isPending}
+                      onClick={cancelEditRequest}
+                    >
+                      Cancel edit
+                    </Button>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
 
@@ -2078,23 +2212,29 @@ export const LaboratoryManager = () => {
                 ) : (
                   <StickyTableScroll
                     header={
-                      <Table className="w-full min-w-[1100px] table-fixed">
+                      <Table className="w-full min-w-[1280px] table-fixed">
                         <colgroup>
+                          <col className="w-[4%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[14%]" />
                           <col className="w-[12%]" />
-                          <col className="w-[18%]" />
-                          <col className="w-[7%]" />
+                          <col className="w-[5%]" />
+                          <col className="w-[5%]" />
                           <col className="w-[6%]" />
-                          <col className="w-[8%]" />
-                          <col className="w-[8%]" />
-                          <col className="w-[12%]" />
-                          <col className="w-[9%]" />
-                          <col className="w-[9%]" />
-                          {isAdmin ? <col className="w-[11%]" /> : null}
+                          <col className="w-[6%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[7%]" />
+                          {isAdmin || canManageLabsMeta ? (
+                            <col className="w-[14%]" />
+                          ) : null}
                         </colgroup>
                         <TableHead>
                           <tr>
+                            <Th className="bg-slate-50 text-center">S.N.</Th>
                             <Th className="bg-slate-50">Lab</Th>
                             <Th className="bg-slate-50">Equipment</Th>
+                            <Th className="bg-slate-50">Category</Th>
                             <Th className="bg-slate-50">Current</Th>
                             <Th className="bg-slate-50">Min</Th>
                             <Th className="bg-slate-50">Required</Th>
@@ -2102,7 +2242,7 @@ export const LaboratoryManager = () => {
                             <Th className="bg-slate-50">Requested by</Th>
                             <Th className="bg-slate-50">Date</Th>
                             <Th className="bg-slate-50">Status</Th>
-                            {isAdmin ? (
+                            {isAdmin || canManageLabsMeta ? (
                               <Th className="bg-slate-50 text-right">Actions</Th>
                             ) : null}
                           </tr>
@@ -2110,25 +2250,36 @@ export const LaboratoryManager = () => {
                       </Table>
                     }
                     body={
-                      <Table className="w-full min-w-[1100px] table-fixed">
+                      <Table className="w-full min-w-[1280px] table-fixed">
                         <colgroup>
+                          <col className="w-[4%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[14%]" />
                           <col className="w-[12%]" />
-                          <col className="w-[18%]" />
-                          <col className="w-[7%]" />
+                          <col className="w-[5%]" />
+                          <col className="w-[5%]" />
                           <col className="w-[6%]" />
-                          <col className="w-[8%]" />
-                          <col className="w-[8%]" />
-                          <col className="w-[12%]" />
-                          <col className="w-[9%]" />
-                          <col className="w-[9%]" />
-                          {isAdmin ? <col className="w-[11%]" /> : null}
+                          <col className="w-[6%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[7%]" />
+                          {isAdmin || canManageLabsMeta ? (
+                            <col className="w-[14%]" />
+                          ) : null}
                         </colgroup>
                         <TableBody>
-                          {requests.map((req) => (
+                          {requests.map((req, index) => (
                             <tr
                               key={req._id}
-                              className="bg-white hover:bg-slate-50/80"
+                              className={
+                                editingRequestId === req._id
+                                  ? "bg-brand-50/70 hover:bg-brand-50"
+                                  : "bg-white hover:bg-slate-50/80"
+                              }
                             >
+                              <Td className="text-center tabular-nums text-slate-500">
+                                {index + 1}
+                              </Td>
                               <Td>{req.laboratoryName ?? "—"}</Td>
                               <Td>
                                 <div className="font-medium">
@@ -2143,6 +2294,19 @@ export const LaboratoryManager = () => {
                                     : ""}
                                 </div>
                               </Td>
+                              <Td>
+                                <Badge
+                                  className={
+                                    req.itemKind === "DISPOSABLE"
+                                      ? "bg-orange-100 text-orange-900"
+                                      : "bg-sky-100 text-sky-900"
+                                  }
+                                >
+                                  {req.itemKind === "DISPOSABLE"
+                                    ? "Disposable / Destroyable"
+                                    : "Non-Disposable / Non-Destroyable"}
+                                </Badge>
+                              </Td>
                               <Td>{req.currentStock}</Td>
                               <Td>{req.minimumStock}</Td>
                               <Td>{req.requiredQuantity}</Td>
@@ -2156,66 +2320,117 @@ export const LaboratoryManager = () => {
                                   {req.status}
                                 </Badge>
                               </Td>
-                              {isAdmin ? (
-                                <Td className="space-x-1 whitespace-nowrap text-right">
-                                  {req.status === "PENDING" ? (
-                                    <>
+                              {isAdmin || canManageLabsMeta ? (
+                                <Td className="whitespace-nowrap text-right">
+                                  <div className="inline-flex flex-wrap items-center justify-end gap-1">
+                                    {canEditRequest(req) ? (
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={
+                                          updateRequest.isPending ||
+                                          createRequest.isPending
+                                        }
+                                        title="Edit this required item"
+                                        onClick={() => beginEditRequest(req)}
+                                      >
+                                        {editingRequestId === req._id
+                                          ? "Editing…"
+                                          : "Edit"}
+                                      </Button>
+                                    ) : null}
+                                    {isAdmin && req.status === "PENDING" ? (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={() =>
+                                            updateRequestStatus.mutate({
+                                              id: req._id,
+                                              status: "APPROVED",
+                                            })
+                                          }
+                                        >
+                                          Approve
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={() =>
+                                            updateRequestStatus.mutate({
+                                              id: req._id,
+                                              status: "REJECTED",
+                                            })
+                                          }
+                                        >
+                                          Reject
+                                        </Button>
+                                      </>
+                                    ) : null}
+                                    {isAdmin && req.status === "APPROVED" ? (
                                       <Button
                                         size="sm"
                                         variant="secondary"
                                         onClick={() =>
                                           updateRequestStatus.mutate({
                                             id: req._id,
-                                            status: "APPROVED",
+                                            status: "PURCHASED",
                                           })
                                         }
                                       >
-                                        Approve
+                                        Purchased
                                       </Button>
+                                    ) : null}
+                                    {isAdmin &&
+                                    (req.status === "PURCHASED" ||
+                                      req.status === "APPROVED") ? (
                                       <Button
                                         size="sm"
-                                        variant="secondary"
                                         onClick={() =>
                                           updateRequestStatus.mutate({
                                             id: req._id,
-                                            status: "REJECTED",
+                                            status: "RECEIVED",
+                                            receivedQuantity:
+                                              req.requiredQuantity,
                                           })
                                         }
                                       >
-                                        Reject
+                                        Received
                                       </Button>
-                                    </>
-                                  ) : null}
-                                  {req.status === "APPROVED" ? (
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      onClick={() =>
-                                        updateRequestStatus.mutate({
-                                          id: req._id,
-                                          status: "PURCHASED",
-                                        })
-                                      }
-                                    >
-                                      Purchased
-                                    </Button>
-                                  ) : null}
-                                  {req.status === "PURCHASED" ||
-                                  req.status === "APPROVED" ? (
-                                    <Button
-                                      size="sm"
-                                      onClick={() =>
-                                        updateRequestStatus.mutate({
-                                          id: req._id,
-                                          status: "RECEIVED",
-                                          receivedQuantity:
-                                            req.requiredQuantity,
-                                        })
-                                      }
-                                    >
-                                      Received
-                                    </Button>
-                                  ) : null}
+                                    ) : null}
+                                    {isAdmin ? (
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        disabled={deleteRequest.isPending}
+                                        title="Remove this required item from the list"
+                                        onClick={() => {
+                                          const label =
+                                            req.equipmentName || "this request";
+                                          if (
+                                            !window.confirm(
+                                              `Delete required item “${label}”?\n\nThis removes it from the purchase workflow list.${
+                                                req.autoGenerated &&
+                                                (req.status === "PENDING" ||
+                                                  req.status === "APPROVED" ||
+                                                  req.status === "PURCHASED")
+                                                  ? "\n\nNote: Auto low-stock items may reappear if inventory is still below minimum."
+                                                  : ""
+                                              }`,
+                                            )
+                                          ) {
+                                            return;
+                                          }
+                                          if (editingRequestId === req._id) {
+                                            cancelEditRequest();
+                                          }
+                                          deleteRequest.mutate(req._id);
+                                        }}
+                                      >
+                                        Delete
+                                      </Button>
+                                    ) : null}
+                                  </div>
                                 </Td>
                               ) : null}
                             </tr>
@@ -2309,6 +2524,7 @@ export const LaboratoryManager = () => {
                 <Table className="w-full min-w-[960px]">
                   <TableHead>
                     <tr>
+                      <Th className="w-14 whitespace-nowrap text-center">S.N.</Th>
                       <Th className="whitespace-nowrap">Item</Th>
                       <Th className="whitespace-nowrap">Lab</Th>
                       <Th className="whitespace-nowrap">Teacher</Th>
@@ -2321,8 +2537,11 @@ export const LaboratoryManager = () => {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {(issuesQuery.data ?? []).map((issue) => (
+                    {(issuesQuery.data ?? []).map((issue, index) => (
                       <tr key={issue._id}>
+                        <Td className="whitespace-nowrap text-center tabular-nums text-slate-500">
+                          {index + 1}
+                        </Td>
                         <Td className="whitespace-nowrap">
                           {issue.equipmentName ?? "—"}
                         </Td>
@@ -2539,6 +2758,7 @@ export const LaboratoryManager = () => {
                 <Table className="w-full min-w-[640px]">
                   <TableHead>
                     <tr>
+                      <Th className="w-14 whitespace-nowrap text-center">S.N.</Th>
                       <Th className="whitespace-nowrap">Name</Th>
                       <Th className="whitespace-nowrap">Email</Th>
                       <Th className="whitespace-nowrap">Phone</Th>
@@ -2546,8 +2766,11 @@ export const LaboratoryManager = () => {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {(staffQuery.data ?? []).map((member) => (
+                    {(staffQuery.data ?? []).map((member, index) => (
                       <tr key={member._id}>
+                        <Td className="whitespace-nowrap text-center tabular-nums text-slate-500">
+                          {index + 1}
+                        </Td>
                         <Td className="whitespace-nowrap">{member.fullName}</Td>
                         <Td className="whitespace-nowrap">{member.email}</Td>
                         <Td className="whitespace-nowrap">{member.phone ?? "—"}</Td>

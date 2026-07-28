@@ -136,12 +136,20 @@ export const laboratoryStockRequestSchema = z.object({
   equipmentId: objectIdSchema.optional().or(z.literal("")),
   equipmentName: z.string().min(1).max(200),
   categoryName: z.string().trim().max(120).optional().or(z.literal("")),
+  /** Disposable / Destroyable vs Non-Disposable / Non-Destroyable */
+  itemKind: z.enum(LABORATORY_ITEM_KINDS).default("NON_DISPOSABLE"),
   currentStock: z.coerce.number().int().min(0).default(0),
   minimumStock: z.coerce.number().int().min(0).default(0),
   requiredQuantity: z.coerce.number().int().min(1),
   priority: z.enum(LABORATORY_STOCK_PRIORITIES).default("MEDIUM"),
   remarks: z.string().trim().max(2000).optional().or(z.literal(""))
 });
+
+/** Partial update of required-item / purchase workflow fields (not status transitions). */
+export const laboratoryStockRequestUpdateSchema = laboratoryStockRequestSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: "At least one field is required to update" }
+);
 
 export const laboratoryStockRequestStatusSchema = z.object({
   status: z.enum(LABORATORY_STOCK_REQUEST_STATUSES),
@@ -163,5 +171,6 @@ export type LaboratoryStockAdjustInput = z.infer<typeof laboratoryStockAdjustSch
 export type LaboratoryIssueInput = z.infer<typeof laboratoryIssueSchema>;
 export type LaboratoryReturnInput = z.infer<typeof laboratoryReturnSchema>;
 export type LaboratoryStockRequestInput = z.infer<typeof laboratoryStockRequestSchema>;
+export type LaboratoryStockRequestUpdateInput = z.infer<typeof laboratoryStockRequestUpdateSchema>;
 export type LaboratoryStockRequestStatusInput = z.infer<typeof laboratoryStockRequestStatusSchema>;
 export type LaboratoryReportQueryInput = z.infer<typeof laboratoryReportQuerySchema>;
