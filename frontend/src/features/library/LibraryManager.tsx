@@ -232,12 +232,14 @@ export const LibraryManager = () => {
     queryKey: ["students", "library-issue"],
     queryFn: () => unwrap<IssueStudentRow[]>(api.get("/students")),
     enabled: tab === "issue",
+    retry: 1,
   });
 
   const teachersQuery = useQuery({
     queryKey: ["teachers", "library-issue"],
     queryFn: () => unwrap<IssueTeacherRow[]>(api.get("/teachers")),
     enabled: tab === "issue",
+    retry: 1,
   });
 
   const staffQuery = useQuery({
@@ -1771,10 +1773,33 @@ export const LibraryManager = () => {
                       />
                     </FormField>
 
+                    {studentsQuery.isError ? (
+                      <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                        Could not load students for issue filters:{" "}
+                        {parseErrorMessage(studentsQuery.error)}. Ask an admin to
+                        ensure this library account can read the student roster.
+                      </p>
+                    ) : null}
+
+                    {isCollege &&
+                    !studentsQuery.isLoading &&
+                    !studentsQuery.isError &&
+                    issueBatchOptions.length === 0 ? (
+                      <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        No batch/year options found. Students need a batch and
+                        year assigned in Academics before they appear in these
+                        filters.
+                      </p>
+                    ) : null}
+
                     <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200">
                       {studentsQuery.isLoading ? (
                         <p className="p-3 text-sm text-slate-500">
                           Loading students…
+                        </p>
+                      ) : studentsQuery.isError ? (
+                        <p className="p-3 text-sm text-rose-600">
+                          Student list unavailable.
                         </p>
                       ) : filteredIssueStudents.length === 0 ? (
                         <p className="p-3 text-sm text-slate-500">
@@ -2136,8 +2161,12 @@ export const LibraryManager = () => {
               <Button
                 onClick={() => {
                   const parsed = moduleStaffSchema.safeParse(staffForm);
-                  if (!parsed.success)
-                    return toast.error("Invalid staff details");
+                  if (!parsed.success) {
+                    return toast.error(
+                      parsed.error.issues[0]?.message ??
+                        "Invalid staff details — full name (2+ chars) and email are required",
+                    );
+                  }
                   createStaff.mutate(parsed.data);
                 }}
               >

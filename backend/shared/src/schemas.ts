@@ -37,15 +37,11 @@ export const academicYearSchema = z
 export const moneySchema = z.coerce.number().min(0, "Amount cannot be negative");
 
 export const addressSchema = z.object({
-  province: z.string().min(1),
-  district: z.string().min(1),
-  municipality: z.string().min(1),
-  ward: z.string().min(1),
-  streetAddress: z.string().min(1)
-});
-
-/** Institution settings contact address — street / tole is optional */
-export const settingsAddressSchema = addressSchema.extend({
+  province: z.string().trim().min(1, "Province is required"),
+  district: z.string().trim().min(1, "District is required"),
+  municipality: z.string().trim().min(1, "Municipality is required"),
+  ward: z.string().trim().min(1, "Ward is required"),
+  /** Tole / street — optional so forms can save without a detailed street line. */
   streetAddress: z
     .string()
     .trim()
@@ -53,6 +49,9 @@ export const settingsAddressSchema = addressSchema.extend({
     .or(z.literal(""))
     .transform((value) => value ?? "")
 });
+
+/** Institution settings contact address — same shape as person address. */
+export const settingsAddressSchema = addressSchema;
 
 const isValidPortalLoginId = (value: string): boolean => {
   if (z.email().safeParse(value).success) {
@@ -302,22 +301,22 @@ const optionalMoney = z.preprocess((value) => {
 
 export const collegeStaffSchema = z
   .object({
-    fullName: z.string().min(2),
+    fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
     /** Login ID — always required for ERP account creation. */
     email: z.string().email("Valid email is required as login ID"),
-    phone: z.string().min(7),
+    phone: z.string().trim().min(7, "Phone number must be at least 7 digits"),
     password: optionalPortalPasswordSchema,
     /** Always true for new staff; kept for backward-compatible partial updates. */
     enableLogin: z.boolean().default(true),
     staffId: z.string().trim().min(1, "Employee ID is required"),
     photoUrl: z.string().optional().or(z.literal("")),
-    gender: z.string().min(1),
+    gender: z.string().trim().min(1, "Gender is required"),
     dateOfBirthBs: bsDateSchema.optional().or(z.literal("")),
     address: addressSchema,
     emergencyContactName: z.string().trim().max(120).optional().or(z.literal("")),
     emergencyContactPhone: z.string().trim().max(30).optional().or(z.literal("")),
     joinedDateBs: bsDateSchema,
-    designation: z.string().min(1, "Designation is required"),
+    designation: z.string().trim().min(1, "Designation is required"),
     department: z.string().trim().max(120).optional().or(z.literal("")),
     category: z.enum(COLLEGE_STAFF_CATEGORIES),
     customRoleLabel: z.string().trim().max(120).optional().or(z.literal("")),

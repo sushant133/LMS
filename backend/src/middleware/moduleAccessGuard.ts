@@ -144,6 +144,35 @@ export const enforceModuleAccess = async (
 
     const isTeacherRole =
       req.user.role === "TEACHER" || secondaryRoles.includes("TEACHER");
+    const isLibraryStaffRole =
+      req.user.role === "LIBRARY_STAFF" || secondaryRoles.includes("LIBRARY_STAFF");
+    const isLabStaffRole =
+      req.user.role === "LABORATORY_STAFF" ||
+      secondaryRoles.includes("LABORATORY_STAFF");
+
+    /**
+     * Library staff need limited student/teacher rosters for Issue Book filters
+     * (batch/year/class/section). Controllers already return a sanitized list.
+     * Allow GET when they still have library module access.
+     */
+    if (
+      isLibraryStaffRole &&
+      READ_METHODS.has(req.method) &&
+      (moduleKey === "students" || moduleKey === "teachers") &&
+      canAccessModule(accessMap, "library")
+    ) {
+      return next();
+    }
+
+    /** Lab staff need teacher roster for equipment issue workflows. */
+    if (
+      isLabStaffRole &&
+      READ_METHODS.has(req.method) &&
+      moduleKey === "teachers" &&
+      canAccessModule(accessMap, "laboratory")
+    ) {
+      return next();
+    }
 
     // Teachers always keep My Work APIs (students, attendance, exams, homework, …)
     // even if module-access matrix was saved with Hidden for admin departments.

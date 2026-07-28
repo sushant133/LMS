@@ -79,6 +79,21 @@ const emptyToUndef = (value?: string | null) => {
   return trimmed ? trimmed : undefined;
 };
 
+/** Normalize address so optional street is always a string for Mongo. */
+const normalizeAddress = (address: {
+  province: string;
+  district: string;
+  municipality: string;
+  ward: string;
+  streetAddress?: string;
+}) => ({
+  province: address.province.trim(),
+  district: address.district.trim(),
+  municipality: address.municipality.trim(),
+  ward: address.ward.trim(),
+  streetAddress: address.streetAddress?.trim() ?? ""
+});
+
 const roleForCategory = (category: CollegeStaffCategory): UserRole =>
   COLLEGE_STAFF_CATEGORY_ROLES[category] ?? "COLLEGE_STAFF";
 
@@ -216,7 +231,7 @@ const applyStaffProfileFields = (
   }
   if (payload.phone) target.phone = payload.phone;
   if (payload.email !== undefined) target.email = payload.email?.toLowerCase().trim();
-  if (payload.address) target.address = payload.address;
+  if (payload.address) target.address = normalizeAddress(payload.address);
   if (payload.emergencyContactName !== undefined) {
     target.emergencyContactName = emptyToUndef(payload.emergencyContactName);
   }
@@ -356,7 +371,7 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
           dateOfBirthBs: emptyToUndef(payload.dateOfBirthBs),
           phone: payload.phone,
           email,
-          address: payload.address,
+          address: normalizeAddress(payload.address),
           emergencyContactName: emptyToUndef(payload.emergencyContactName),
           emergencyContactPhone: emptyToUndef(payload.emergencyContactPhone),
           joinedDateBs: payload.joinedDateBs,
@@ -383,7 +398,7 @@ export const createCollegeStaff = asyncHandler(async (req: Request, res: Respons
         userId: user!._id,
         staffId: payload.staffId,
         gender: payload.gender,
-        address: payload.address,
+        address: normalizeAddress(payload.address),
         joinedDateBs: payload.joinedDateBs,
         photoUrl: emptyToUndef(payload.photoUrl),
         status: payload.status,

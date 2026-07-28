@@ -528,10 +528,11 @@ export const CollegeStaffManager = ({
             <div className="md:col-span-2 xl:col-span-3">
               <p className="text-sm font-medium text-slate-700">Personal information</p>
             </div>
-            <FormField label="Employee ID">
+            <FormField label="Employee ID *">
               <Input
                 value={form.staffId}
                 onChange={(e) => setForm((c) => ({ ...c, staffId: e.target.value }))}
+                placeholder="Required unique staff code"
               />
             </FormField>
             <FormField label="Full name">
@@ -837,7 +838,30 @@ export const CollegeStaffManager = ({
                         : password.trim() || undefined,
                   });
                   if (!parsed.success) {
-                    toast.error(parsed.error.issues[0]?.message ?? "Invalid staff details");
+                    const fieldLabels: Record<string, string> = {
+                      staffId: "Employee ID",
+                      fullName: "Full name",
+                      email: "Email",
+                      phone: "Phone",
+                      gender: "Gender",
+                      joinedDateBs: "Joining date",
+                      designation: "Designation",
+                      "address.province": "Province",
+                      "address.district": "District",
+                      "address.municipality": "Municipality",
+                      "address.ward": "Ward",
+                      "address.streetAddress": "Street / tole",
+                      customRoleLabel: "Custom role",
+                      password: "Password",
+                    };
+                    const parts = parsed.error.issues.slice(0, 3).map((issue) => {
+                      const path = issue.path.join(".");
+                      const label = fieldLabels[path] ?? path;
+                      return label ? `${label}: ${issue.message}` : issue.message;
+                    });
+                    toast.error(
+                      parts.filter(Boolean).join(" · ") || "Invalid staff details",
+                    );
                     return;
                   }
                   void saveMutation.mutateAsync(parsed.data);

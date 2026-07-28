@@ -328,10 +328,14 @@ export const libraryIssueSchema = z
   });
 
 export const moduleStaffSchema = z.object({
-  fullName: z.string().min(2),
-  email: z.email(),
+  fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
+  email: z.email("Valid email is required"),
   phone: z.string().optional().or(z.literal("")),
-  password: z.string().min(6).optional()
+  /** Empty string from forms → treat as omitted (auto-generate password). */
+  password: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.string().min(6, "Password must be at least 6 characters").optional()
+  )
 });
 
 export const libraryReturnSchema = z.object({
