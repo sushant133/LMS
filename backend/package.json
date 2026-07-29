@@ -14,7 +14,11 @@
     "seed:superadmin": "npm run build:shared && tsx src/scripts/seedSuperAdmin.ts",
     "seed:demo": "npm run build:shared && tsx src/scripts/seedDemoSchool.ts",
     "typecheck": "npm run build:shared && tsc -p tsconfig.json --noEmit",
-    "lint": "npm run build:shared && tsc -p tsconfig.json --noEmit"
+    "lint": "npm run build:shared && tsc -p tsconfig.json --noEmit",
+    "install:frontend": "npm install --prefix ../frontend",
+    "install:all": "npm install && npm run install:frontend",
+    "build:frontend": "npm run build --prefix ../frontend",
+    "build:all": "npm run build && npm run build:frontend"
   },
   "dependencies": {
     "@phit-erp/shared": "file:./shared",
