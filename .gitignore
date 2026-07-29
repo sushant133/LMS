@@ -1,0 +1,18 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+.idea/
+.vscode/
+*.swp
+*~
+
+# Accidental root installs (apps live in backend/ and frontend/)
+/node_modules/
+/package-lock.json
+
+# Env secrets (also ignored per app)
+.env
+.env.*
+!.env.example

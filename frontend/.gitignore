@@ -1,8 +1,8 @@
 node_modules
 dist
+dev-dist
 coverage
 .env
 .env.local
-package-lock.json
 *.tsbuildinfo
 vite.config.d.ts
