@@ -88,10 +88,15 @@ export const LoginPage = () => {
     setSubmitting(true);
     try {
       const result = await login(parsed.data);
-      // Prefer server redirectTo so FE/BE stay aligned
-      const target = result.redirectTo || getRoleRedirectPath(result.user.role);
-      toast.success(t("login"));
-      navigate(target ?? "/dashboard/college_admin", { replace: true });
+
+// Safe access - works even if backend does not send redirectTo
+const target =
+  result?.redirectTo ||
+  getRoleRedirectPath(result?.user?.role) ||
+  "/dashboard/college_admin";
+
+toast.success(t("login"));
+navigate(target, { replace: true });
     } catch (error) {
       toast.error(parseErrorMessage(error));
       setSubmitting(false);

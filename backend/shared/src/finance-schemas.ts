@@ -18,6 +18,28 @@ export const FINANCE_PAYMENT_METHODS = [
 ] as const;
 export const FINANCE_CATEGORY_KINDS = ["EXPENSE", "INCOME", "BOTH"] as const;
 
+/**
+ * Who “owns” a finance archive row:
+ * - INSTITUTION: recorded by Administrator / Superadmin (shared college finance)
+ * - COLLEGE_ADMINISTRATOR: recorded by a College Administrator (their own book)
+ * - STAFF: recorded by college staff with personal finance access (admin-granted)
+ * Institution admins can view all; college administrators / staff only see their own.
+ */
+export const FINANCE_OWNER_SCOPES = [
+  "INSTITUTION",
+  "COLLEGE_ADMINISTRATOR",
+  "STAFF"
+] as const;
+
+export const FINANCE_OWNER_SCOPE_LABELS: Record<
+  (typeof FINANCE_OWNER_SCOPES)[number],
+  string
+> = {
+  INSTITUTION: "Institution (Admin)",
+  COLLEGE_ADMINISTRATOR: "College Administrator",
+  STAFF: "Staff"
+};
+
 export const FINANCE_PAYMENT_METHOD_LABELS: Record<
   (typeof FINANCE_PAYMENT_METHODS)[number],
   string

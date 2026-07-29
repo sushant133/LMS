@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   type ReactNode,
   type UIEvent,
@@ -22,6 +23,10 @@ interface StickyTableScrollProps {
  * Browser sticky on <th> is fragile (border-collapse, overflow ancestors).
  * This keeps the header in a non-scrolling strip and scrolls only the body,
  * with synchronized horizontal scroll between header and body.
+ *
+ * Use matching <colgroup> + table-fixed on both header and body tables so
+ * columns stay aligned. Vertical scrollbar width is mirrored on the header
+ * so header/body table widths match.
  */
 export const StickyTableScroll = ({
   header,
@@ -47,6 +52,15 @@ export const StickyTableScroll = ({
     });
   }, []);
 
+  /** Keep header right padding equal to body vertical scrollbar width. */
+  const syncScrollbarPadding = useCallback(() => {
+    const bodyEl = bodyRef.current;
+    const headerEl = headerRef.current;
+    if (!bodyEl || !headerEl) return;
+    const scrollbarWidth = Math.max(0, bodyEl.offsetWidth - bodyEl.clientWidth);
+    headerEl.style.paddingRight = scrollbarWidth > 0 ? `${scrollbarWidth}px` : "";
+  }, []);
+
   const onHeaderScroll = (event: UIEvent<HTMLDivElement>) => {
     syncScroll("header", event.currentTarget.scrollLeft);
   };
@@ -55,12 +69,21 @@ export const StickyTableScroll = ({
     syncScroll("body", event.currentTarget.scrollLeft);
   };
 
+  useEffect(() => {
+    syncScrollbarPadding();
+    const bodyEl = bodyRef.current;
+    if (!bodyEl || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => syncScrollbarPadding());
+    ro.observe(bodyEl);
+    return () => ro.disconnect();
+  }, [syncScrollbarPadding, header, body]);
+
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-col isolate", className)}>
       {/* Always-visible header strip (does not scroll vertically) */}
       <div
         ref={headerRef}
-        className="shrink-0 overflow-x-auto overflow-y-hidden border-b border-slate-200 bg-slate-50 [scrollbar-gutter:stable] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="shrink-0 overflow-x-auto overflow-y-hidden border-b border-slate-200 bg-slate-50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onScroll={onHeaderScroll}
       >
         {header}
@@ -70,7 +93,7 @@ export const StickyTableScroll = ({
       <div
         ref={bodyRef}
         className={cn(
-          "min-h-0 min-w-0 overflow-auto overscroll-contain [scrollbar-gutter:stable] [scrollbar-width:thin]",
+          "min-h-0 min-w-0 overflow-auto overscroll-contain [scrollbar-width:thin]",
           maxHeightClassName,
         )}
         onScroll={onBodyScroll}

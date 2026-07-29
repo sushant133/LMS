@@ -10,7 +10,10 @@ import {
   getFinanceReport,
   getFinanceTransaction,
   listFinanceCategories,
+  listFinanceStaffAccess,
   listFinanceTransactions,
+  loadPersonalFinanceAccess,
+  setFinanceStaffAccess,
   updateFinanceCategory,
   updateFinanceTransaction
 } from "../controllers/financeController.js";
@@ -19,10 +22,46 @@ import { ApiError } from "../utils/apiError.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 /**
- * Strict Admin / Superadmin only — no COLLEGE_VIEWER read-through, no staff module grants.
- * Future: intentionally open selected roles via product update.
+ * Finance Management access:
+ * - SUPER_ADMIN / COLLEGE_ADMIN: full institution + all personal books
+ * - COLLEGE_VIEWER: own College Administrator book
+ * - Staff with personalFinanceAccess: own STAFF book (create + view only)
  */
-const requireFinanceAdmin = (req: Request, _res: Response, next: NextFunction): void => {
+const requireFinanceAccess = (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void => {
+  if (!req.user) {
+    return next(new ApiError(401, "Authentication required"));
+  }
+  const role = normalizeUserRole(req.user.role);
+  if (role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN" || role === "COLLEGE_VIEWER") {
+    return next();
+  }
+
+  void (async () => {
+    try {
+      const granted = await loadPersonalFinanceAccess(req.user?.userId);
+      if (granted) return next();
+      return next(
+        new ApiError(
+          403,
+          "Finance Management is not enabled for your account. Contact Administrator."
+        )
+      );
+    } catch (error) {
+      return next(error);
+    }
+  })();
+};
+
+/** Category create/update/delete — institution admins only. */
+const requireFinanceCategoryAdmin = (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void => {
   if (!req.user) {
     return next(new ApiError(401, "Authentication required"));
   }
@@ -31,22 +70,50 @@ const requireFinanceAdmin = (req: Request, _res: Response, next: NextFunction): 
     return next();
   }
   return next(
-    new ApiError(403, "Finance Management is available only to Administrator and System Administrator")
+    new ApiError(403, "Only Administrator can manage finance categories")
+  );
+};
+
+/** Staff access panel — Admin / Superadmin only. */
+const requireFinanceInstitutionAdmin = (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void => {
+  if (!req.user) {
+    return next(new ApiError(401, "Authentication required"));
+  }
+  const role = normalizeUserRole(req.user.role);
+  if (role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN") {
+    return next();
+  }
+  return next(
+    new ApiError(403, "Only Administrator can manage staff finance access")
   );
 };
 
 const router = Router();
 
-/** Finance Management: Admin & Superadmin only (independent of Accounting). */
-router.use(protect, tenantGuard, requireFinanceAdmin);
+router.use(protect, tenantGuard, requireFinanceAccess);
 
 router.get("/dashboard", getFinanceDashboard);
 router.get("/report", getFinanceReport);
 
 router.get("/categories", listFinanceCategories);
-router.post("/categories", createFinanceCategory);
-router.put("/categories/:id", updateFinanceCategory);
-router.delete("/categories/:id", deleteFinanceCategory);
+router.post("/categories", requireFinanceCategoryAdmin, createFinanceCategory);
+router.put("/categories/:id", requireFinanceCategoryAdmin, updateFinanceCategory);
+router.delete("/categories/:id", requireFinanceCategoryAdmin, deleteFinanceCategory);
+
+router.get(
+  "/staff-access",
+  requireFinanceInstitutionAdmin,
+  listFinanceStaffAccess
+);
+router.put(
+  "/staff-access/:userId",
+  requireFinanceInstitutionAdmin,
+  setFinanceStaffAccess
+);
 
 router.get("/transactions", listFinanceTransactions);
 router.get("/transactions/:id", getFinanceTransaction);

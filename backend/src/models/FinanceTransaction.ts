@@ -1,6 +1,7 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 import {
   FINANCE_EXPENSE_TYPES,
+  FINANCE_OWNER_SCOPES,
   FINANCE_PAYMENT_METHODS,
   FINANCE_TRANSACTION_TYPES
 } from "@phit-erp/shared";
@@ -53,6 +54,18 @@ const financeTransactionSchema = new Schema(
     referenceNumber: { type: String, trim: true },
     remarks: { type: String, trim: true },
     attachments: { type: [attachmentSchema], default: [] },
+    /**
+     * INSTITUTION = admin/superadmin shared archive.
+     * COLLEGE_ADMINISTRATOR = College Administrator personal finance book.
+     * STAFF = college staff personal book (admin-granted access).
+     * Missing/legacy rows are treated as INSTITUTION.
+     */
+    ownerScope: {
+      type: String,
+      enum: FINANCE_OWNER_SCOPES,
+      default: "INSTITUTION",
+      index: true
+    },
     /** Future optional link to Accounting — never auto-filled today. */
     accountingLinkId: { type: Schema.Types.ObjectId, default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
@@ -64,6 +77,7 @@ const financeTransactionSchema = new Schema(
 financeTransactionSchema.index({ schoolId: 1, transactionType: 1, dateBs: -1 });
 financeTransactionSchema.index({ schoolId: 1, categoryId: 1, dateBs: -1 });
 financeTransactionSchema.index({ schoolId: 1, createdAt: -1 });
+financeTransactionSchema.index({ schoolId: 1, ownerScope: 1, createdBy: 1, dateBs: -1 });
 
 export type FinanceTransactionDocument = InferSchemaType<typeof financeTransactionSchema>;
 export const FinanceTransaction = mongoose.model(

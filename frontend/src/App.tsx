@@ -280,8 +280,27 @@ export default function App() {
               <Route path="/accounting" element={<AccountingPage />} />
             </Route>
 
-            {/* Finance Management: Admin & Superadmin only — independent of Accounting */}
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN"]} />}>
+            {/* Finance Management: Admin + College Admin + staff with personalFinanceAccess grant */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "COLLEGE_STAFF",
+                    "TEACHER",
+                    "LIBRARY_STAFF",
+                    "LABORATORY_STAFF",
+                    "ACCOUNTANT",
+                    "CASHIER",
+                    "AUDITOR",
+                    "PRINCIPAL",
+                  ]}
+                  allowPersonalFinanceAccess
+                />
+              }
+            >
               <Route
                 path="/finance"
                 element={

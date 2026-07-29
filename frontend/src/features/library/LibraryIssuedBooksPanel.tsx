@@ -1,8 +1,14 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { LibraryIssueRecord } from "@phit-erp/shared";
-import { BookMarked, Search } from "lucide-react";
+import {
+  BookMarked,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
+import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Badge } from "components/ui/badge";
@@ -10,6 +16,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import {
   filterIssuedBooks,
@@ -24,13 +31,16 @@ import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
 import { resolveStudentId } from "lib/resolveStudentId";
 import { queryClient } from "lib/queryClient";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
   RETURNED: "bg-brand-100 text-brand-800",
   OVERDUE: "bg-rose-100 text-rose-800",
 };
+
+/** 0 = Issued list, 1 = Manage issue (detail / due date) */
+type IssuedSlide = 0 | 1;
 
 export const LibraryIssuedBooksPanel = () => {
   const isCollege = useIsCollege();
@@ -43,7 +53,8 @@ export const LibraryIssuedBooksPanel = () => {
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ISSUED" | "OVERDUE">(
     "ALL",
   );
-  const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
+  const [issuedSlide, setIssuedSlide] = useState<IssuedSlide>(0);
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [editDueDateBs, setEditDueDateBs] = useState("");
 
   const issuesQuery = useQuery({
@@ -96,7 +107,16 @@ export const LibraryIssuedBooksPanel = () => {
 
   const overdueCount = activeIssues.filter((i) => i.status === "OVERDUE").length;
 
+  const selectedIssue = useMemo(
+    () =>
+      activeIssues.find((i) => i._id === selectedIssueId) ??
+      filteredIssues.find((i) => i._id === selectedIssueId) ??
+      null,
+    [activeIssues, filteredIssues, selectedIssueId],
+  );
+
   const colCount = canManageIssues ? 10 : 9;
+  const tableMinClass = canManageIssues ? "min-w-[1120px]" : "min-w-[960px]";
 
   const invalidateLibrary = async () => {
     await queryClient.invalidateQueries({ queryKey: ["library-issues"] });
@@ -109,8 +129,6 @@ export const LibraryIssuedBooksPanel = () => {
       unwrap(api.put(`/library/issues/${id}`, { dueDateBs })),
     onSuccess: async () => {
       toast.success("Due date updated");
-      setEditingIssueId(null);
-      setEditDueDateBs("");
       await invalidateLibrary();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -120,23 +138,26 @@ export const LibraryIssuedBooksPanel = () => {
     mutationFn: (id: string) => unwrap(api.delete(`/library/issues/${id}`)),
     onSuccess: async () => {
       toast.success("Issue removed — book restored to inventory");
-      if (editingIssueId) {
-        setEditingIssueId(null);
+      if (selectedIssueId) {
+        setSelectedIssueId(null);
         setEditDueDateBs("");
+        setIssuedSlide(0);
       }
       await invalidateLibrary();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  const startEdit = (issue: LibraryIssueRecord) => {
-    setEditingIssueId(issue._id);
+  const openManageIssue = (issue: LibraryIssueRecord) => {
+    setSelectedIssueId(issue._id);
     setEditDueDateBs(issue.dueDateBs);
+    setIssuedSlide(1);
   };
 
-  const cancelEdit = () => {
-    setEditingIssueId(null);
+  const clearSelection = () => {
+    setSelectedIssueId(null);
     setEditDueDateBs("");
+    setIssuedSlide(0);
   };
 
   const placementLabel = (issue: LibraryIssueRecord): string => {
@@ -179,307 +200,554 @@ export const LibraryIssuedBooksPanel = () => {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="space-y-4">
-          <CardTitle className="flex items-center gap-2">
-            <BookMarked className="h-5 w-5 text-brand-600" />
-            All issued books
-          </CardTitle>
-          <p className="text-sm text-slate-500">
-            Search students by name and filter by{" "}
-            {isCollege ? "batch and year" : "class and section"} to see which
-            books they currently hold, and who issued each copy.
-          </p>
-          <div className="flex flex-wrap items-end gap-3">
-            {isCollege ? (
-              <>
-                <div className="min-w-[140px] flex-1 sm:flex-none">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Batch
-                  </label>
-                  <Select
-                    value={batchId}
-                    onChange={(e) => {
-                      setBatchId(e.target.value);
-                      setYearId("");
-                    }}
-                  >
-                    <option value="">All batches</option>
-                    {batchOptions.map((b) => (
-                      <option key={b._id} value={b._id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div className="min-w-[140px] flex-1 sm:flex-none">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Year
-                  </label>
-                  <Select
-                    value={yearId}
-                    onChange={(e) => setYearId(e.target.value)}
-                  >
-                    <option value="">All years</option>
-                    {yearOptions.map((y) => (
-                      <option key={y._id} value={y._id}>
-                        {y.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="min-w-[140px] flex-1 sm:flex-none">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Class
-                  </label>
-                  <Select
-                    value={classId}
-                    onChange={(e) => {
-                      setClassId(e.target.value);
-                      setSectionId("");
-                    }}
-                  >
-                    <option value="">All classes</option>
-                    {classOptions.map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div className="min-w-[140px] flex-1 sm:flex-none">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">
-                    Section
-                  </label>
-                  <Select
-                    value={sectionId}
-                    onChange={(e) => setSectionId(e.target.value)}
-                  >
-                    <option value="">All sections</option>
-                    {sectionOptions.map((s) => (
-                      <option key={s._id} value={s._id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </>
-            )}
-            <div className="min-w-[120px] flex-1 sm:flex-none">
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Status
-              </label>
-              <Select
-                value={statusFilter}
-                onChange={(e) =>
-                  setStatusFilter(e.target.value as "ALL" | "ISSUED" | "OVERDUE")
-                }
-              >
-                <option value="ALL">All active</option>
-                <option value="ISSUED">Issued</option>
-                <option value="OVERDUE">Overdue</option>
-              </Select>
-            </div>
-            <div className="min-w-[200px] flex-1">
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Search student / book
-              </label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  className="pl-9"
-                  placeholder="Student name, book title, or code…"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-            </div>
+      {/* Left–right slider: Issued list ↔ Manage issue */}
+      <div
+        id="library-issued-slider"
+        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-1 rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
+            <button
+              type="button"
+              onClick={() => setIssuedSlide(0)}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-xs font-semibold transition",
+                issuedSlide === 0
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100",
+              )}
+            >
+              Issued list
+            </button>
+            <button
+              type="button"
+              onClick={() => setIssuedSlide(1)}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-xs font-semibold transition",
+                issuedSlide === 1
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100",
+              )}
+            >
+              Manage issue
+            </button>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {/* Scrollable region keeps the slider near the bottom of the visible table area */}
-          <div className="max-h-[min(70vh,640px)] overflow-auto">
-            <Table className={canManageIssues ? "min-w-[1120px]" : "min-w-[960px]"}>
-              <TableHead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
-                <tr>
-                  <Th className="w-14 text-center">S.N.</Th>
-                  <Th>Book</Th>
-                  <Th>Code</Th>
-                  <Th>Student / Borrower</Th>
-                  <Th>{isCollege ? "Batch · Year" : "Class · Section"}</Th>
-                  <Th>Issued</Th>
-                  <Th>Due</Th>
-                  <Th>Status</Th>
-                  <Th>Issued by</Th>
-                  {canManageIssues ? (
-                    <Th className="text-right">Actions</Th>
-                  ) : null}
-                </tr>
-              </TableHead>
-              <TableBody>
-                {issuesQuery.isLoading ? (
-                  <tr>
-                    <Td
-                      colSpan={colCount}
-                      className="py-10 text-center text-slate-500"
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 w-8 p-0"
+              title="Previous panel"
+              aria-label="Previous panel"
+              disabled={issuedSlide === 0}
+              onClick={() => setIssuedSlide(0)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[4.5rem] text-center text-[11px] font-medium tabular-nums text-slate-500">
+              {issuedSlide + 1} / 2
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 w-8 p-0"
+              title="Next panel"
+              aria-label="Next panel"
+              disabled={issuedSlide === 1}
+              onClick={() => setIssuedSlide(1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="relative overflow-hidden">
+          <div
+            className="flex w-[200%] transition-transform duration-300 ease-out"
+            style={{
+              transform: `translateX(-${issuedSlide * 50}%)`,
+            }}
+          >
+            {/* Panel 1: Issued list */}
+            <div className="w-1/2 shrink-0 min-w-0">
+              <Card className="border-0 shadow-none">
+                <CardHeader className="space-y-4 border-b border-slate-100">
+                  <div className="flex flex-row flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <BookMarked className="h-5 w-5 text-brand-600" />
+                        All issued books
+                      </CardTitle>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Search and filter by{" "}
+                        {isCollege ? "batch and year" : "class and section"}.
+                        Select a row or use Manage to open the detail panel.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIssuedSlide(1)}
                     >
-                      Loading issued books…
-                    </Td>
-                  </tr>
-                ) : filteredIssues.length === 0 ? (
-                  <tr>
-                    <Td
-                      colSpan={colCount}
-                      className="py-10 text-center text-slate-500"
-                    >
-                      {activeIssues.length === 0
-                        ? "No books are currently issued."
-                        : "No issued books match your filters."}
-                    </Td>
-                  </tr>
-                ) : (
-                  filteredIssues.map((issue, index) => {
-                    const isEditing = editingIssueId === issue._id;
-                    return (
-                      <tr key={issue._id}>
-                        <Td className="text-center tabular-nums text-slate-500">
-                          {index + 1}
-                        </Td>
-                        <Td className="font-medium">
-                          {issue.bookTitle ?? "—"}
-                        </Td>
-                        <Td className="font-mono text-sm">
-                          {issue.bookCode ?? "—"}
-                        </Td>
-                        <Td>
-                          {issue.borrowerType === "STUDENT" &&
-                          resolveStudentId(issue.studentId) ? (
-                            <StudentNameLink
-                              studentId={resolveStudentId(issue.studentId)!}
-                              name={issue.borrowerName?.trim() || "Student"}
-                            />
-                          ) : (
-                            <span>
-                              {issue.borrowerName?.trim() || "—"}
-                              {issue.borrowerType === "TEACHER" ? (
-                                <span className="ml-1 text-xs text-slate-400">
-                                  (Teacher)
-                                </span>
-                              ) : null}
-                            </span>
-                          )}
-                        </Td>
-                        <Td className="text-sm text-slate-600">
-                          {placementLabel(issue)}
-                        </Td>
-                        <Td>{issue.issuedDateBs}</Td>
-                        <Td>
-                          {isEditing ? (
-                            <div className="min-w-[140px]">
-                              <NepaliDateField
-                                value={editDueDateBs}
-                                onChange={setEditDueDateBs}
-                              />
-                            </div>
-                          ) : (
-                            issue.dueDateBs
-                          )}
-                        </Td>
-                        <Td>
-                          <Badge
-                            className={issueStatusStyles[issue.status] ?? ""}
+                      Manage issue
+                      <ChevronRight className="ml-1 h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-3">
+                    {isCollege ? (
+                      <>
+                        <div className="min-w-[140px] flex-1 sm:flex-none">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Batch
+                          </label>
+                          <Select
+                            value={batchId}
+                            onChange={(e) => {
+                              setBatchId(e.target.value);
+                              setYearId("");
+                            }}
                           >
-                            {issue.status}
-                          </Badge>
-                        </Td>
-                        <Td className="text-sm text-slate-700">
-                          {formatIssuedByLabel(issue)}
-                        </Td>
-                        {canManageIssues ? (
-                          <Td className="text-right">
-                            <div className="flex flex-wrap justify-end gap-1.5">
-                              {isEditing ? (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    disabled={
-                                      updateDueDate.isPending ||
-                                      !editDueDateBs.trim()
-                                    }
-                                    onClick={() => {
-                                      if (!editDueDateBs.trim()) {
-                                        toast.error("Select a due date");
-                                        return;
-                                      }
-                                      updateDueDate.mutate({
-                                        id: issue._id,
-                                        dueDateBs: editDueDateBs.trim(),
-                                      });
-                                    }}
-                                  >
-                                    Save
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    disabled={updateDueDate.isPending}
-                                    onClick={cancelEdit}
-                                  >
-                                    Cancel
-                                  </Button>
-                                </>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  disabled={
-                                    updateDueDate.isPending ||
-                                    deleteIssue.isPending
-                                  }
-                                  onClick={() => startEdit(issue)}
-                                >
-                                  Edit
-                                </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                disabled={
-                                  updateDueDate.isPending ||
-                                  deleteIssue.isPending
-                                }
-                                onClick={() => {
-                                  const label =
-                                    issue.bookCode ||
-                                    issue.bookTitle ||
-                                    "this book";
-                                  if (
-                                    !window.confirm(
-                                      `Delete issue for "${label}"?\n\nThis removes the issue record and returns the copy to inventory as available. This cannot be undone.`,
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  deleteIssue.mutate(issue._id);
-                                }}
+                            <option value="">All batches</option>
+                            {batchOptions.map((b) => (
+                              <option key={b._id} value={b._id}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="min-w-[140px] flex-1 sm:flex-none">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Year
+                          </label>
+                          <Select
+                            value={yearId}
+                            onChange={(e) => setYearId(e.target.value)}
+                          >
+                            <option value="">All years</option>
+                            {yearOptions.map((y) => (
+                              <option key={y._id} value={y._id}>
+                                {y.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="min-w-[140px] flex-1 sm:flex-none">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Class
+                          </label>
+                          <Select
+                            value={classId}
+                            onChange={(e) => {
+                              setClassId(e.target.value);
+                              setSectionId("");
+                            }}
+                          >
+                            <option value="">All classes</option>
+                            {classOptions.map((c) => (
+                              <option key={c._id} value={c._id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="min-w-[140px] flex-1 sm:flex-none">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Section
+                          </label>
+                          <Select
+                            value={sectionId}
+                            onChange={(e) => setSectionId(e.target.value)}
+                          >
+                            <option value="">All sections</option>
+                            {sectionOptions.map((s) => (
+                              <option key={s._id} value={s._id}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                      </>
+                    )}
+                    <div className="min-w-[120px] flex-1 sm:flex-none">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Status
+                      </label>
+                      <Select
+                        value={statusFilter}
+                        onChange={(e) =>
+                          setStatusFilter(
+                            e.target.value as "ALL" | "ISSUED" | "OVERDUE",
+                          )
+                        }
+                      >
+                        <option value="ALL">All active</option>
+                        <option value="ISSUED">Issued</option>
+                        <option value="OVERDUE">Overdue</option>
+                      </Select>
+                    </div>
+                    <div className="min-w-[200px] flex-1">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Search student / book
+                      </label>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                          className="pl-9"
+                          placeholder="Student name, book title, or code…"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <StickyTableScroll
+                    maxHeightClassName="max-h-[min(70vh,560px)]"
+                    header={
+                      <Table className={cn("w-full table-fixed", tableMinClass)}>
+                        <TableHead>
+                          <tr>
+                            <Th className="w-14 bg-slate-50 text-center">S.N.</Th>
+                            <Th className="bg-slate-50">Book</Th>
+                            <Th className="bg-slate-50">Code</Th>
+                            <Th className="bg-slate-50">Student / Borrower</Th>
+                            <Th className="bg-slate-50">
+                              {isCollege ? "Batch · Year" : "Class · Section"}
+                            </Th>
+                            <Th className="bg-slate-50">Issued</Th>
+                            <Th className="bg-slate-50">Due</Th>
+                            <Th className="bg-slate-50">Status</Th>
+                            <Th className="bg-slate-50">Issued by</Th>
+                            {canManageIssues ? (
+                              <Th className="bg-slate-50 text-right">Actions</Th>
+                            ) : null}
+                          </tr>
+                        </TableHead>
+                      </Table>
+                    }
+                    body={
+                      <Table className={cn("w-full table-fixed", tableMinClass)}>
+                        <TableBody>
+                          {issuesQuery.isLoading ? (
+                            <tr>
+                              <Td
+                                colSpan={colCount}
+                                className="py-10 text-center text-slate-500"
                               >
-                                Delete
-                              </Button>
-                            </div>
-                          </Td>
-                        ) : null}
-                      </tr>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
+                                Loading issued books…
+                              </Td>
+                            </tr>
+                          ) : filteredIssues.length === 0 ? (
+                            <tr>
+                              <Td
+                                colSpan={colCount}
+                                className="py-10 text-center text-slate-500"
+                              >
+                                {activeIssues.length === 0
+                                  ? "No books are currently issued."
+                                  : "No issued books match your filters."}
+                              </Td>
+                            </tr>
+                          ) : (
+                            filteredIssues.map((issue, index) => (
+                              <tr
+                                key={issue._id}
+                                className={cn(
+                                  "cursor-pointer transition-colors",
+                                  selectedIssueId === issue._id
+                                    ? "bg-brand-50/70"
+                                    : "hover:bg-slate-50/80",
+                                )}
+                                onClick={() => openManageIssue(issue)}
+                              >
+                                <Td className="text-center tabular-nums text-slate-500">
+                                  {index + 1}
+                                </Td>
+                                <Td className="font-medium">
+                                  {issue.bookTitle ?? "—"}
+                                </Td>
+                                <Td className="font-mono text-sm">
+                                  {issue.bookCode ?? "—"}
+                                </Td>
+                                <Td>
+                                  {issue.borrowerType === "STUDENT" &&
+                                  resolveStudentId(issue.studentId) ? (
+                                    <StudentNameLink
+                                      studentId={
+                                        resolveStudentId(issue.studentId)!
+                                      }
+                                      name={
+                                        issue.borrowerName?.trim() || "Student"
+                                      }
+                                    />
+                                  ) : (
+                                    <span>
+                                      {issue.borrowerName?.trim() || "—"}
+                                      {issue.borrowerType === "TEACHER" ? (
+                                        <span className="ml-1 text-xs text-slate-400">
+                                          (Teacher)
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  )}
+                                </Td>
+                                <Td className="text-sm text-slate-600">
+                                  {placementLabel(issue)}
+                                </Td>
+                                <Td>{issue.issuedDateBs}</Td>
+                                <Td>{issue.dueDateBs}</Td>
+                                <Td>
+                                  <Badge
+                                    className={
+                                      issueStatusStyles[issue.status] ?? ""
+                                    }
+                                  >
+                                    {issue.status}
+                                  </Badge>
+                                </Td>
+                                <Td className="text-sm text-slate-700">
+                                  {formatIssuedByLabel(issue)}
+                                </Td>
+                                {canManageIssues ? (
+                                  <Td
+                                    className="text-right"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <div className="flex flex-wrap justify-end gap-1.5">
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() => openManageIssue(issue)}
+                                      >
+                                        Manage
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        disabled={deleteIssue.isPending}
+                                        onClick={() => {
+                                          const label =
+                                            issue.bookCode ||
+                                            issue.bookTitle ||
+                                            "this book";
+                                          if (
+                                            !window.confirm(
+                                              `Delete issue for "${label}"?\n\nThis removes the issue record and returns the copy to inventory as available. This cannot be undone.`,
+                                            )
+                                          ) {
+                                            return;
+                                          }
+                                          deleteIssue.mutate(issue._id);
+                                        }}
+                                      >
+                                        Delete
+                                      </Button>
+                                    </div>
+                                  </Td>
+                                ) : null}
+                              </tr>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    }
+                  />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Panel 2: Manage issue */}
+            <div className="w-1/2 shrink-0 min-w-0">
+              <Card className="border-0 shadow-none">
+                <CardHeader className="space-y-3 border-b border-slate-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_white_100%)]">
+                  <div className="flex flex-row flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">Manage issue</CardTitle>
+                      <p className="mt-1 text-sm text-slate-500">
+                        View borrower and dates
+                        {canManageIssues
+                          ? "; admins can extend the due date or void the issue."
+                          : "."}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIssuedSlide(0)}
+                    >
+                      <ChevronLeft className="mr-1 h-4 w-4" />
+                      Issued list
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  {!selectedIssue ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                      Select an issued book from the{" "}
+                      <button
+                        type="button"
+                        className="font-medium text-brand-700 underline-offset-2 hover:underline"
+                        onClick={() => setIssuedSlide(0)}
+                      >
+                        Issued list
+                      </button>{" "}
+                      to view details here.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                          Book
+                        </p>
+                        <p className="mt-0.5 text-lg font-semibold text-slate-900">
+                          {selectedIssue.bookTitle ?? "—"}
+                        </p>
+                        <p className="font-mono text-sm text-slate-600">
+                          {selectedIssue.bookCode ?? "—"}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-xl border border-slate-200 px-3 py-2.5">
+                          <p className="text-xs text-slate-500">Borrower</p>
+                          <p className="mt-0.5 font-medium text-slate-900">
+                            {selectedIssue.borrowerType === "STUDENT" &&
+                            resolveStudentId(selectedIssue.studentId) ? (
+                              <StudentNameLink
+                                studentId={
+                                  resolveStudentId(selectedIssue.studentId)!
+                                }
+                                name={
+                                  selectedIssue.borrowerName?.trim() || "Student"
+                                }
+                              />
+                            ) : (
+                              <>
+                                {selectedIssue.borrowerName?.trim() || "—"}
+                                {selectedIssue.borrowerType === "TEACHER"
+                                  ? " (Teacher)"
+                                  : null}
+                              </>
+                            )}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 px-3 py-2.5">
+                          <p className="text-xs text-slate-500">
+                            {isCollege ? "Batch · Year" : "Class · Section"}
+                          </p>
+                          <p className="mt-0.5 font-medium text-slate-900">
+                            {placementLabel(selectedIssue)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 px-3 py-2.5">
+                          <p className="text-xs text-slate-500">Issued date</p>
+                          <p className="mt-0.5 font-medium text-slate-900">
+                            {selectedIssue.issuedDateBs}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 px-3 py-2.5">
+                          <p className="text-xs text-slate-500">Status</p>
+                          <div className="mt-1">
+                            <Badge
+                              className={
+                                issueStatusStyles[selectedIssue.status] ?? ""
+                              }
+                            >
+                              {selectedIssue.status}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 px-3 py-2.5 sm:col-span-2">
+                          <p className="text-xs text-slate-500">Issued by</p>
+                          <p className="mt-0.5 font-medium text-slate-900">
+                            {formatIssuedByLabel(selectedIssue)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {canManageIssues ? (
+                        <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                          <FormField label="Due date (BS)">
+                            <NepaliDateField
+                              value={editDueDateBs}
+                              onChange={setEditDueDateBs}
+                            />
+                          </FormField>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              disabled={
+                                updateDueDate.isPending ||
+                                !editDueDateBs.trim()
+                              }
+                              onClick={() => {
+                                if (!editDueDateBs.trim()) {
+                                  toast.error("Select a due date");
+                                  return;
+                                }
+                                updateDueDate.mutate({
+                                  id: selectedIssue._id,
+                                  dueDateBs: editDueDateBs.trim(),
+                                });
+                              }}
+                            >
+                              {updateDueDate.isPending
+                                ? "Saving…"
+                                : "Save due date"}
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              disabled={
+                                deleteIssue.isPending || updateDueDate.isPending
+                              }
+                              onClick={() => {
+                                const label =
+                                  selectedIssue.bookCode ||
+                                  selectedIssue.bookTitle ||
+                                  "this book";
+                                if (
+                                  !window.confirm(
+                                    `Delete issue for "${label}"?\n\nThis removes the issue record and returns the copy to inventory as available. This cannot be undone.`,
+                                  )
+                                ) {
+                                  return;
+                                }
+                                deleteIssue.mutate(selectedIssue._id);
+                              }}
+                            >
+                              Delete issue
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={clearSelection}
+                            >
+                              Clear selection
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-slate-200 px-3 py-2.5">
+                          <p className="text-xs text-slate-500">Due date</p>
+                          <p className="mt-0.5 font-medium text-slate-900">
+                            {selectedIssue.dueDateBs}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 };

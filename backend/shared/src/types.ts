@@ -235,6 +235,11 @@ export interface UserProfile {
    * (e.g. Principal who also teaches → secondaryRoles includes TEACHER).
    */
   secondaryRoles?: UserRole[];
+  /**
+   * When true, this staff user may open personal Finance Management
+   * (create/view own transactions only). Controlled by Admin / Superadmin.
+   */
+  personalFinanceAccess?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

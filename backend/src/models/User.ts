@@ -40,6 +40,11 @@ export interface UserDocument {
    * When unset/null, school defaults from Settings.parentPortalAccess apply.
    */
   parentPortalAccess?: Record<string, boolean> | null;
+  /**
+   * Personal Finance Management access for staff (admin-granted).
+   * Default false — staff never see Finance until Admin enables it.
+   */
+  personalFinanceAccess?: boolean;
   comparePassword(candidate: string): Promise<boolean>;
 }
 
@@ -77,6 +82,12 @@ const userSchema = new Schema<UserDocument, UserModel>(
     parentPortalAccess: {
       type: Schema.Types.Mixed,
       default: undefined
+    },
+    /** Staff personal finance book — only when Admin grants access */
+    personalFinanceAccess: {
+      type: Boolean,
+      default: false,
+      index: true
     }
   },
   { timestamps: true }

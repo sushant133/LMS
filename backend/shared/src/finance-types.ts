@@ -42,6 +42,11 @@ export interface FinanceCategoryRecord {
   updatedAt?: string;
 }
 
+export type FinanceOwnerScope =
+  | "INSTITUTION"
+  | "COLLEGE_ADMINISTRATOR"
+  | "STAFF";
+
 export interface FinanceTransactionRecord {
   _id: string;
   schoolId: string;
@@ -62,6 +67,12 @@ export interface FinanceTransactionRecord {
   referenceNumber?: string;
   remarks?: string;
   attachments: FinanceAttachment[];
+  /**
+   * INSTITUTION = admin/superadmin archive.
+   * COLLEGE_ADMINISTRATOR = personal book of a College Administrator (COLLEGE_VIEWER).
+   * STAFF = personal book of college staff (only when admin grants access).
+   */
+  ownerScope?: FinanceOwnerScope;
   /**
    * Reserved for a future optional link to Accounting.
    * Never auto-posted to ledger today.
@@ -110,8 +121,10 @@ export interface FinanceReportRow {
   vendorPayee?: string;
   expenseType?: FinanceExpenseType;
   incomeSource?: string;
+  ownerScope?: FinanceOwnerScope;
   attachmentCount: number;
   createdByName?: string;
+  createdBy?: string;
 }
 
 export interface FinanceReportResponse {
@@ -126,4 +139,25 @@ export interface FinanceReportResponse {
     count: number;
   };
   rows: FinanceReportRow[];
+}
+
+/** Admin Staff Access panel — college staff + personal finance grant. */
+export interface FinanceStaffAccessRecord {
+  staffId: string;
+  staffCode: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  designation: string;
+  department?: string;
+  category: string;
+  categoryLabel?: string;
+  status: "ACTIVE" | "INACTIVE";
+  userId?: string;
+  userRole?: string;
+  userActive?: boolean;
+  hasLogin: boolean;
+  /** Admin-granted personal Finance Management access */
+  financeAccessEnabled: boolean;
+  photoUrl?: string;
 }

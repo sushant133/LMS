@@ -2,11 +2,14 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   FINANCE_EXPENSE_TYPES,
+  FINANCE_OWNER_SCOPES,
   FINANCE_PAYMENT_METHODS,
   FINANCE_TRANSACTION_TYPES,
   canManageInstitution,
   financeCategorySchema,
   financeTransactionSchema,
+  isCollegeViewer,
+  type CollegeAdministratorRecord,
   type FinanceAttachment,
   type FinanceCategoryInput,
   type FinanceCategoryRecord,
@@ -14,6 +17,7 @@ import {
   type FinanceExpenseType,
   type FinancePaymentMethod,
   type FinanceReportResponse,
+  type FinanceStaffAccessRecord,
   type FinanceTransactionInput,
   type FinanceTransactionRecord,
   type FinanceTransactionType,
@@ -29,6 +33,7 @@ import {
   Printer,
   Search,
   Trash2,
+  Users,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -63,20 +68,29 @@ import {
   isImageAttachment,
   isPdfAttachment,
   mediaHref,
+  ownerScopeLabel,
   paymentMethodLabel,
   printFinanceReport,
   printTransactionsLedger,
+  summarizeTransactionTotals,
   transactionTypeLabel,
   uploadFinanceAttachments,
 } from "./financeUtils";
 
-type Tab = "dashboard" | "transactions" | "entry" | "categories" | "reports";
+type Tab =
+  | "dashboard"
+  | "transactions"
+  | "entry"
+  | "categories"
+  | "staff-access"
+  | "reports";
 
-const tabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
+const allTabs: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "transactions", label: "Transactions", icon: List },
   { id: "entry", label: "Record entry", icon: Plus },
   { id: "categories", label: "Categories", icon: FolderOpen },
+  { id: "staff-access", label: "Staff access", icon: Users },
   { id: "reports", label: "Reports", icon: FileText },
 ];
 
@@ -101,11 +115,22 @@ const emptyEntry = (
 export const FinanceManager = () => {
   const { user } = useAuth();
   const isAdmin = canManageInstitution(user?.role ?? "");
+  const isCollegeAdminUser = isCollegeViewer(user?.role ?? "");
+  /** Staff with Admin-granted personal finance book (create + view only). */
+  const isStaffFinanceUser =
+    Boolean(user?.personalFinanceAccess) && !isAdmin && !isCollegeAdminUser;
+  /**
+   * Admin, Superadmin, College Administrator, or staff with personalFinanceAccess.
+   */
+  const canAccessFinance = isAdmin || isCollegeAdminUser || isStaffFinanceUser;
+  /** Staff cannot edit/delete — Admin/Superadmin and College Administrators can. */
+  const canEditTransactions = isAdmin || isCollegeAdminUser;
 
   const [tab, setTab] = useState<Tab>("dashboard");
   const [entryForm, setEntryForm] = useState<FinanceTransactionInput>(emptyEntry());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [staffAccessSearch, setStaffAccessSearch] = useState("");
 
   // Filters
   const [search, setSearch] = useState("");
@@ -114,6 +139,8 @@ export const FinanceManager = () => {
   const [paymentFilter, setPaymentFilter] = useState("");
   const [fromDateBs, setFromDateBs] = useState("");
   const [toDateBs, setToDateBs] = useState("");
+  const [ownerScopeFilter, setOwnerScopeFilter] = useState("");
+  const [createdByFilter, setCreatedByFilter] = useState("");
   const [dashYear, setDashYear] = useState("");
   const [dashMonth, setDashMonth] = useState("");
   const [reportType, setReportType] = useState("ALL");
@@ -126,6 +153,14 @@ export const FinanceManager = () => {
   });
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
 
+  const tabs = useMemo(() => {
+    if (isAdmin) return allTabs;
+    // College admin + staff: no categories / staff-access management
+    return allTabs.filter(
+      (item) => item.id !== "categories" && item.id !== "staff-access",
+    );
+  }, [isAdmin]);
+
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["finance"] }),
@@ -133,12 +168,62 @@ export const FinanceManager = () => {
   };
 
   const categoriesQuery = useQuery({
-    queryKey: ["finance", "categories", "all"],
+    queryKey: ["finance", "categories", isAdmin ? "all" : "active"],
     queryFn: () =>
       unwrap<FinanceCategoryRecord[]>(
-        api.get("/finance/categories", { params: { includeInactive: "true" } }),
+        api.get("/finance/categories", {
+          params: isAdmin ? { includeInactive: "true" } : undefined,
+        }),
       ),
+    enabled: canAccessFinance,
+  });
+
+  /** Admins can filter by which College Administrator recorded a personal-book entry. */
+  const collegeAdminsQuery = useQuery({
+    queryKey: ["college-administrators", "finance-filter"],
+    queryFn: () =>
+      unwrap<CollegeAdministratorRecord[]>(api.get("/college-administrators")),
     enabled: isAdmin,
+  });
+
+  /** Admin Staff Access panel + filter for staff books. */
+  const staffAccessQuery = useQuery({
+    queryKey: ["finance", "staff-access", staffAccessSearch],
+    queryFn: () =>
+      unwrap<FinanceStaffAccessRecord[]>(
+        api.get("/finance/staff-access", {
+          params: { search: staffAccessSearch || undefined },
+        }),
+      ),
+    enabled: isAdmin && (tab === "staff-access" || tab === "transactions" || tab === "dashboard" || tab === "reports"),
+  });
+
+  const staffWithAccess = useMemo(
+    () =>
+      (staffAccessQuery.data ?? []).filter(
+        (s) => s.financeAccessEnabled && s.userId,
+      ),
+    [staffAccessQuery.data],
+  );
+
+  const setStaffAccess = useMutation({
+    mutationFn: ({
+      userId,
+      enabled,
+    }: {
+      userId: string;
+      enabled: boolean;
+    }) =>
+      unwrap(api.put(`/finance/staff-access/${userId}`, { enabled })),
+    onSuccess: async (_data, vars) => {
+      toast.success(
+        vars.enabled
+          ? "Finance access granted — staff will see Finance Management after refresh/login"
+          : "Finance access revoked",
+      );
+      await queryClient.invalidateQueries({ queryKey: ["finance", "staff-access"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
   const activeCategories = useMemo(
@@ -160,8 +245,20 @@ export const FinanceManager = () => {
       paymentMethod: paymentFilter || undefined,
       fromDateBs: fromDateBs || undefined,
       toDateBs: toDateBs || undefined,
+      ownerScope: isAdmin ? ownerScopeFilter || undefined : undefined,
+      createdBy: isAdmin ? createdByFilter || undefined : undefined,
     }),
-    [search, typeFilter, categoryFilter, paymentFilter, fromDateBs, toDateBs],
+    [
+      search,
+      typeFilter,
+      categoryFilter,
+      paymentFilter,
+      fromDateBs,
+      toDateBs,
+      ownerScopeFilter,
+      createdByFilter,
+      isAdmin,
+    ],
   );
 
   const transactionsQuery = useQuery({
@@ -170,11 +267,19 @@ export const FinanceManager = () => {
       unwrap<FinanceTransactionRecord[]>(
         api.get("/finance/transactions", { params: filterParams }),
       ),
-    enabled: isAdmin && (tab === "transactions" || tab === "entry"),
+    enabled: canAccessFinance && (tab === "transactions" || tab === "entry"),
   });
 
   const dashboardQuery = useQuery({
-    queryKey: ["finance", "dashboard", dashYear, dashMonth, categoryFilter],
+    queryKey: [
+      "finance",
+      "dashboard",
+      dashYear,
+      dashMonth,
+      categoryFilter,
+      ownerScopeFilter,
+      createdByFilter,
+    ],
     queryFn: () =>
       unwrap<FinanceDashboardResponse>(
         api.get("/finance/dashboard", {
@@ -182,10 +287,12 @@ export const FinanceManager = () => {
             yearBs: dashYear || undefined,
             monthBs: dashMonth || undefined,
             categoryId: categoryFilter || undefined,
+            ownerScope: isAdmin ? ownerScopeFilter || undefined : undefined,
+            createdBy: isAdmin ? createdByFilter || undefined : undefined,
           },
         }),
       ),
-    enabled: isAdmin && tab === "dashboard",
+    enabled: canAccessFinance && tab === "dashboard",
   });
 
   const reportQuery = useQuery({
@@ -201,7 +308,7 @@ export const FinanceManager = () => {
           },
         }),
       ),
-    enabled: isAdmin && tab === "reports",
+    enabled: canAccessFinance && tab === "reports",
   });
 
   const saveTransaction = useMutation({
@@ -266,11 +373,11 @@ export const FinanceManager = () => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  if (!isAdmin) {
+  if (!canAccessFinance) {
     return (
       <EmptyState
         title="Access restricted"
-        description="Finance Management is available only to Administrator and System Administrator."
+        description="Finance Management is available to Administrator and College Administrator. Staff can use it only when an Administrator grants access."
       />
     );
   }
@@ -284,6 +391,10 @@ export const FinanceManager = () => {
   };
 
   const startEdit = (tx: FinanceTransactionRecord) => {
+    if (!canEditTransactions) {
+      toast.error("You cannot edit finance records. Contact Administrator.");
+      return;
+    }
     setEditingId(tx._id);
     setEntryForm({
       transactionType: tx.transactionType,
@@ -329,6 +440,10 @@ export const FinanceManager = () => {
 
   const dash = dashboardQuery.data;
   const transactions = transactionsQuery.data ?? [];
+  const transactionTotals = useMemo(
+    () => summarizeTransactionTotals(transactions),
+    [transactions],
+  );
   const report = reportQuery.data;
 
   return (
@@ -360,7 +475,7 @@ export const FinanceManager = () => {
       {tab === "dashboard" && (
         <div className="space-y-6">
           <Card>
-            <CardContent className="grid gap-3 py-4 md:grid-cols-3">
+            <CardContent className="grid gap-3 py-4 md:grid-cols-3 xl:grid-cols-5">
               <FormField label="Year (BS)">
                 <Input
                   placeholder="e.g. 2082"
@@ -388,6 +503,53 @@ export const FinanceManager = () => {
                   ))}
                 </Select>
               </FormField>
+              {isAdmin ? (
+                <>
+                  <FormField label="Record source">
+                    <Select
+                      value={ownerScopeFilter}
+                      onChange={(e) => setOwnerScopeFilter(e.target.value)}
+                    >
+                      <option value="">All sources</option>
+                      {FINANCE_OWNER_SCOPES.map((scope) => (
+                        <option key={scope} value={scope}>
+                          {ownerScopeLabel(scope)}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Recorded by">
+                    <Select
+                      value={createdByFilter}
+                      onChange={(e) => setCreatedByFilter(e.target.value)}
+                    >
+                      <option value="">Anyone</option>
+                      {ownerScopeFilter === "STAFF" || !ownerScopeFilter ? (
+                        <optgroup label="Staff (with access)">
+                          {staffWithAccess.map((s) => (
+                            <option key={s.userId} value={s.userId}>
+                              {s.fullName}
+                              {s.staffCode ? ` (${s.staffCode})` : ""}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null}
+                      {ownerScopeFilter === "COLLEGE_ADMINISTRATOR" ||
+                      !ownerScopeFilter ? (
+                        <optgroup label="College Administrators">
+                          {(collegeAdminsQuery.data ?? [])
+                            .filter((a) => !a.isDeleted)
+                            .map((a) => (
+                              <option key={a._id} value={a._id}>
+                                {a.fullName}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ) : null}
+                    </Select>
+                  </FormField>
+                </>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -490,39 +652,107 @@ export const FinanceManager = () => {
                   <CardTitle className="text-base">Recent transactions</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <StickyTableScroll
-                    maxHeightClassName="max-h-[min(40vh,360px)]"
-                    header={
-                      <Table className="w-full min-w-[800px]">
-                        <TableHead>
-                          <tr>
-                            <Th className="bg-slate-50">Date</Th>
-                            <Th className="bg-slate-50">Type</Th>
-                            <Th className="bg-slate-50">Title</Th>
-                            <Th className="bg-slate-50">Category</Th>
-                            <Th className="bg-slate-50 text-right">Amount</Th>
-                          </tr>
-                        </TableHead>
-                      </Table>
-                    }
-                    body={
-                      <Table className="w-full min-w-[800px]">
-                        <TableBody>
-                          {(dash?.recentTransactions ?? []).map((tx) => (
-                            <tr key={tx._id}>
-                              <Td>{tx.dateBs}</Td>
-                              <Td>{transactionTypeLabel(tx.transactionType)}</Td>
-                              <Td className="font-medium">{tx.title}</Td>
-                              <Td>{tx.categoryName ?? "—"}</Td>
-                              <Td className="text-right tabular-nums">
-                                {formatFinanceAmount(tx.amountNpr)}
-                              </Td>
+                  {(dash?.recentTransactions ?? []).length === 0 ? (
+                    <div className="p-6">
+                      <EmptyState
+                        title="No recent transactions"
+                        description="New finance entries will appear here."
+                      />
+                    </div>
+                  ) : (
+                    <StickyTableScroll
+                      maxHeightClassName="max-h-[min(40vh,360px)]"
+                      header={
+                        <Table className="w-full min-w-[900px] table-fixed">
+                          <colgroup>
+                            <col className="w-[14%]" />
+                            <col className="w-[12%]" />
+                            <col className="w-[22%]" />
+                            <col className="w-[20%]" />
+                            <col className="w-[16%]" />
+                            <col className="w-[16%]" />
+                          </colgroup>
+                          <TableHead>
+                            <tr>
+                              <Th className="bg-slate-50 whitespace-nowrap">Date</Th>
+                              <Th className="bg-slate-50 whitespace-nowrap">Type</Th>
+                              <Th className="bg-slate-50 whitespace-nowrap">Title</Th>
+                              <Th className="bg-slate-50 whitespace-nowrap">Vendor</Th>
+                              <Th className="bg-slate-50 whitespace-nowrap">Category</Th>
+                              <Th className="bg-slate-50 whitespace-nowrap text-right">
+                                Amount
+                              </Th>
                             </tr>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    }
-                  />
+                          </TableHead>
+                        </Table>
+                      }
+                      body={
+                        <Table className="w-full min-w-[900px] table-fixed">
+                          <colgroup>
+                            <col className="w-[14%]" />
+                            <col className="w-[12%]" />
+                            <col className="w-[22%]" />
+                            <col className="w-[20%]" />
+                            <col className="w-[16%]" />
+                            <col className="w-[16%]" />
+                          </colgroup>
+                          <TableBody>
+                            {(dash?.recentTransactions ?? []).map((tx) => {
+                              const vendorLabel =
+                                tx.transactionType === "INCOME"
+                                  ? tx.vendorPayee?.trim() ||
+                                    tx.incomeSource?.trim() ||
+                                    "—"
+                                  : tx.vendorPayee?.trim() || "—";
+                              return (
+                                <tr key={tx._id} className="align-top">
+                                  <Td className="whitespace-nowrap tabular-nums text-sm">
+                                    {tx.dateBs}
+                                  </Td>
+                                  <Td>
+                                    <Badge
+                                      className={
+                                        tx.transactionType === "INCOME"
+                                          ? "bg-emerald-100 text-emerald-800"
+                                          : "bg-rose-100 text-rose-800"
+                                      }
+                                    >
+                                      {transactionTypeLabel(tx.transactionType)}
+                                    </Badge>
+                                  </Td>
+                                  <Td
+                                    className="truncate font-medium"
+                                    title={tx.title}
+                                  >
+                                    {tx.title}
+                                  </Td>
+                                  <Td
+                                    className="truncate text-sm text-slate-700"
+                                    title={
+                                      vendorLabel !== "—"
+                                        ? vendorLabel
+                                        : undefined
+                                    }
+                                  >
+                                    {vendorLabel}
+                                  </Td>
+                                  <Td
+                                    className="truncate text-sm"
+                                    title={tx.categoryName ?? undefined}
+                                  >
+                                    {tx.categoryName ?? "—"}
+                                  </Td>
+                                  <Td className="whitespace-nowrap text-right tabular-nums text-sm font-medium">
+                                    {formatFinanceAmount(tx.amountNpr)}
+                                  </Td>
+                                </tr>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      }
+                    />
+                  )}
                 </CardContent>
               </Card>
             </>
@@ -591,6 +821,48 @@ export const FinanceManager = () => {
               <FormField label="To date (BS)">
                 <NepaliDateField value={toDateBs} onChange={setToDateBs} />
               </FormField>
+              {isAdmin ? (
+                <>
+                  <FormField label="Record source">
+                    <Select
+                      value={ownerScopeFilter}
+                      onChange={(e) => setOwnerScopeFilter(e.target.value)}
+                    >
+                      <option value="">All sources</option>
+                      {FINANCE_OWNER_SCOPES.map((scope) => (
+                        <option key={scope} value={scope}>
+                          {ownerScopeLabel(scope)}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Recorded by">
+                    <Select
+                      value={createdByFilter}
+                      onChange={(e) => setCreatedByFilter(e.target.value)}
+                    >
+                      <option value="">Anyone</option>
+                      <optgroup label="Staff (with access)">
+                        {staffWithAccess.map((s) => (
+                          <option key={s.userId} value={s.userId}>
+                            {s.fullName}
+                            {s.staffCode ? ` (${s.staffCode})` : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="College Administrators">
+                        {(collegeAdminsQuery.data ?? [])
+                          .filter((a) => !a.isDeleted)
+                          .map((a) => (
+                            <option key={a._id} value={a._id}>
+                              {a.fullName}
+                            </option>
+                          ))}
+                      </optgroup>
+                    </Select>
+                  </FormField>
+                </>
+              ) : null}
               <div className="flex flex-wrap items-end gap-2 md:col-span-2">
                 <Button
                   variant="outline"
@@ -601,6 +873,8 @@ export const FinanceManager = () => {
                     setPaymentFilter("");
                     setFromDateBs("");
                     setToDateBs("");
+                    setOwnerScopeFilter("");
+                    setCreatedByFilter("");
                   }}
                 >
                   Clear filters
@@ -609,8 +883,12 @@ export const FinanceManager = () => {
                   variant="secondary"
                   disabled={transactions.length === 0}
                   onClick={() => {
-                    exportTransactionsExcel(transactions);
-                    toast.success("Exported list to Excel");
+                    try {
+                      exportTransactionsExcel(transactions);
+                      toast.success("Exported list to Excel");
+                    } catch (e) {
+                      toast.error(parseErrorMessage(e));
+                    }
                   }}
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -620,13 +898,17 @@ export const FinanceManager = () => {
                   variant="secondary"
                   disabled={transactions.length === 0}
                   onClick={() => {
-                    exportTransactionsLedgerExcel(transactions, {
-                      title: "Finance Management — Transaction Ledger",
-                      fromDateBs: fromDateBs || undefined,
-                      toDateBs: toDateBs || undefined,
-                      generatedAt: new Date().toLocaleString(),
-                    });
-                    toast.success("Ledger exported to Excel");
+                    try {
+                      exportTransactionsLedgerExcel(transactions, {
+                        title: "Finance Management — Transaction Ledger",
+                        fromDateBs: fromDateBs || undefined,
+                        toDateBs: toDateBs || undefined,
+                        generatedAt: new Date().toLocaleString(),
+                      });
+                      toast.success("Ledger exported to Excel");
+                    } catch (e) {
+                      toast.error(parseErrorMessage(e));
+                    }
                   }}
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -637,6 +919,7 @@ export const FinanceManager = () => {
                   disabled={transactions.length === 0}
                   onClick={() => {
                     void (async () => {
+                      const toastId = toast.loading("Preparing ledger PDF…");
                       try {
                         await exportTransactionsLedgerPdf(transactions, {
                           title: "Finance Management — Transaction Ledger",
@@ -644,9 +927,9 @@ export const FinanceManager = () => {
                           toDateBs: toDateBs || undefined,
                           generatedAt: new Date().toLocaleString(),
                         });
-                        toast.success("Ledger PDF downloaded");
+                        toast.success("Ledger PDF downloaded", { id: toastId });
                       } catch (e) {
-                        toast.error(parseErrorMessage(e));
+                        toast.error(parseErrorMessage(e), { id: toastId });
                       }
                     })();
                   }}
@@ -658,12 +941,16 @@ export const FinanceManager = () => {
                   variant="outline"
                   disabled={transactions.length === 0}
                   onClick={() => {
-                    printTransactionsLedger(transactions, {
-                      title: "Finance Management — Transaction Ledger",
-                      fromDateBs: fromDateBs || undefined,
-                      toDateBs: toDateBs || undefined,
-                      generatedAt: new Date().toLocaleString(),
-                    });
+                    try {
+                      printTransactionsLedger(transactions, {
+                        title: "Finance Management — Transaction Ledger",
+                        fromDateBs: fromDateBs || undefined,
+                        toDateBs: toDateBs || undefined,
+                        generatedAt: new Date().toLocaleString(),
+                      });
+                    } catch (e) {
+                      toast.error(parseErrorMessage(e));
+                    }
                   }}
                 >
                   <Printer className="mr-2 h-4 w-4" />
@@ -697,91 +984,246 @@ export const FinanceManager = () => {
                 </div>
               ) : (
                 <StickyTableScroll
+                  maxHeightClassName="max-h-[min(70vh,640px)]"
                   header={
-                    <Table className="w-full min-w-[1100px]">
+                    <Table
+                      className={cn(
+                        "w-full table-fixed",
+                        isAdmin ? "min-w-[1400px]" : "min-w-[1280px]",
+                      )}
+                    >
+                      <colgroup>
+                        <col className="w-[7%]" />
+                        <col className="w-[7%]" />
+                        {isAdmin ? <col className="w-[9%]" /> : null}
+                        <col className="w-[10%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[9%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[7%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[8%]" />
+                      </colgroup>
                       <TableHead>
                         <tr>
-                          <Th className="bg-slate-50">Date</Th>
-                          <Th className="bg-slate-50">Type</Th>
-                          <Th className="bg-slate-50">Category</Th>
-                          <Th className="bg-slate-50">Title</Th>
-                          <Th className="bg-slate-50 text-right">Amount</Th>
-                          <Th className="bg-slate-50">Payment</Th>
-                          <Th className="bg-slate-50">Reference</Th>
-                          <Th className="bg-slate-50">Attachments</Th>
-                          <Th className="bg-slate-50">Created by</Th>
-                          <Th className="bg-slate-50 text-right">Actions</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Date</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Type</Th>
+                          {isAdmin ? (
+                            <Th className="bg-slate-50 whitespace-nowrap">Source</Th>
+                          ) : null}
+                          <Th className="bg-slate-50 whitespace-nowrap">Category</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Title</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Vendor</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap text-right">
+                            Amount
+                          </Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Payment</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Reference</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">
+                            Attachments
+                          </Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Created by</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap text-right">
+                            Actions
+                          </Th>
                         </tr>
                       </TableHead>
                     </Table>
                   }
                   body={
-                    <Table className="w-full min-w-[1100px]">
+                    <Table
+                      className={cn(
+                        "w-full table-fixed",
+                        isAdmin ? "min-w-[1400px]" : "min-w-[1280px]",
+                      )}
+                    >
+                      <colgroup>
+                        <col className="w-[7%]" />
+                        <col className="w-[7%]" />
+                        {isAdmin ? <col className="w-[9%]" /> : null}
+                        <col className="w-[10%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[9%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[7%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[8%]" />
+                      </colgroup>
                       <TableBody>
-                        {transactions.map((tx) => (
-                          <tr key={tx._id}>
-                            <Td>{tx.dateBs}</Td>
-                            <Td>
-                              <Badge
-                                className={
-                                  tx.transactionType === "INCOME"
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : "bg-rose-100 text-rose-800"
+                        {transactions.map((tx) => {
+                          const vendorLabel =
+                            tx.transactionType === "INCOME"
+                              ? tx.vendorPayee?.trim() ||
+                                tx.incomeSource?.trim() ||
+                                "—"
+                              : tx.vendorPayee?.trim() || "—";
+                          return (
+                            <tr key={tx._id} className="align-top">
+                              <Td className="whitespace-nowrap tabular-nums text-sm">
+                                {tx.dateBs}
+                              </Td>
+                              <Td>
+                                <Badge
+                                  className={
+                                    tx.transactionType === "INCOME"
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : "bg-rose-100 text-rose-800"
+                                  }
+                                >
+                                  {transactionTypeLabel(tx.transactionType)}
+                                </Badge>
+                              </Td>
+                              {isAdmin ? (
+                                <Td className="text-sm">
+                                  <Badge
+                                    className={
+                                      tx.ownerScope === "COLLEGE_ADMINISTRATOR"
+                                        ? "bg-violet-100 text-violet-800"
+                                        : tx.ownerScope === "STAFF"
+                                          ? "bg-sky-100 text-sky-800"
+                                          : "bg-slate-100 text-slate-700"
+                                    }
+                                  >
+                                    {ownerScopeLabel(tx.ownerScope)}
+                                  </Badge>
+                                </Td>
+                              ) : null}
+                              <Td
+                                className="truncate text-sm"
+                                title={tx.categoryName ?? undefined}
+                              >
+                                {tx.categoryName ?? "—"}
+                              </Td>
+                              <Td
+                                className="truncate font-medium"
+                                title={tx.title}
+                              >
+                                {tx.title}
+                              </Td>
+                              <Td
+                                className="truncate text-sm text-slate-700"
+                                title={
+                                  vendorLabel !== "—" ? vendorLabel : undefined
                                 }
                               >
-                                {transactionTypeLabel(tx.transactionType)}
-                              </Badge>
-                            </Td>
-                            <Td>{tx.categoryName ?? "—"}</Td>
-                            <Td className="font-medium">{tx.title}</Td>
-                            <Td className="text-right tabular-nums">
-                              {formatFinanceAmount(tx.amountNpr)}
-                            </Td>
-                            <Td>{paymentMethodLabel(tx.paymentMethod)}</Td>
-                            <Td>{tx.referenceNumber || "—"}</Td>
-                            <Td>
-                              {attachmentStatusLabel(tx.attachments?.length ?? 0)}
-                            </Td>
-                            <Td className="text-sm text-slate-600">
-                              {tx.createdByName ?? "—"}
-                              {tx.updatedAt ? (
-                                <div className="text-xs text-slate-400">
-                                  Upd. {new Date(tx.updatedAt).toLocaleDateString()}
+                                {vendorLabel}
+                              </Td>
+                              <Td className="whitespace-nowrap text-right tabular-nums text-sm font-medium">
+                                {formatFinanceAmount(tx.amountNpr)}
+                              </Td>
+                              <Td className="truncate text-sm">
+                                {paymentMethodLabel(tx.paymentMethod)}
+                              </Td>
+                              <Td
+                                className="truncate text-sm"
+                                title={tx.referenceNumber || undefined}
+                              >
+                                {tx.referenceNumber || "—"}
+                              </Td>
+                              <Td className="text-sm">
+                                {attachmentStatusLabel(
+                                  tx.attachments?.length ?? 0,
+                                )}
+                              </Td>
+                              <Td className="text-sm text-slate-600">
+                                <div
+                                  className="truncate"
+                                  title={tx.createdByName ?? undefined}
+                                >
+                                  {tx.createdByName ?? "—"}
                                 </div>
-                              ) : null}
-                            </Td>
-                            <Td className="space-x-1 text-right whitespace-nowrap">
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => startEdit(tx)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-rose-200 text-rose-700"
-                                onClick={() => {
-                                  if (
-                                    window.confirm(
-                                      `Delete "${tx.title}" (${tx.dateBs})? Attachments will be removed.`,
-                                    )
-                                  ) {
-                                    deleteTransaction.mutate(tx._id);
-                                  }
-                                }}
-                              >
-                                Delete
-                              </Button>
-                            </Td>
-                          </tr>
-                        ))}
+                                {tx.updatedAt ? (
+                                  <div className="truncate text-xs text-slate-400">
+                                    Upd.{" "}
+                                    {new Date(
+                                      tx.updatedAt,
+                                    ).toLocaleDateString()}
+                                  </div>
+                                ) : null}
+                              </Td>
+                              <Td className="whitespace-nowrap text-right">
+                                {canEditTransactions ? (
+                                  <div className="inline-flex flex-wrap justify-end gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      onClick={() => startEdit(tx)}
+                                    >
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="border-rose-200 text-rose-700"
+                                      onClick={() => {
+                                        if (
+                                          window.confirm(
+                                            `Delete "${tx.title}" (${tx.dateBs})? Attachments will be removed.`,
+                                          )
+                                        ) {
+                                          deleteTransaction.mutate(tx._id);
+                                        }
+                                      }}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-slate-400">View only</span>
+                                )}
+                              </Td>
+                            </tr>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   }
                 />
               )}
+              {transactions.length > 0 ? (
+                <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-emerald-100 bg-white px-4 py-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Total income
+                      </p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums text-emerald-700">
+                        {formatFinanceAmount(transactionTotals.totalIncomeNpr)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-rose-100 bg-white px-4 py-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Total expenses
+                      </p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums text-rose-700">
+                        {formatFinanceAmount(transactionTotals.totalExpensesNpr)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-brand-100 bg-white px-4 py-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Total amount (net)
+                      </p>
+                      <p
+                        className={cn(
+                          "mt-1 text-lg font-semibold tabular-nums",
+                          transactionTotals.totalAmountNpr >= 0
+                            ? "text-brand-700"
+                            : "text-rose-700",
+                        )}
+                      >
+                        {formatFinanceAmount(transactionTotals.totalAmountNpr)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        Income − expenses · updates with filters
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
@@ -1051,7 +1493,171 @@ export const FinanceManager = () => {
       )}
 
       {/* ─── Categories ──────────────────────────────────────────── */}
-      {tab === "categories" && (
+      {tab === "staff-access" && isAdmin && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Users className="h-5 w-5 text-brand-600" />
+                Staff Finance Access
+              </CardTitle>
+              <p className="text-sm text-slate-500">
+                Grant Finance Management to individual college staff. When enabled,
+                they can record and view their own personal transactions only.
+                Edit and delete remain Administrator-only.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField label="Search staff">
+                <div className="relative max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Name, staff ID, email, department…"
+                    value={staffAccessSearch}
+                    onChange={(e) => setStaffAccessSearch(e.target.value)}
+                  />
+                </div>
+              </FormField>
+
+              {staffAccessQuery.isLoading ? (
+                <LoadingState />
+              ) : (staffAccessQuery.data ?? []).length === 0 ? (
+                <EmptyState
+                  title="No college staff found"
+                  description="Add staff under Staff Management, then grant finance access here."
+                />
+              ) : (
+                <StickyTableScroll
+                  maxHeightClassName="max-h-[min(70vh,640px)]"
+                  header={
+                    <Table className="w-full min-w-[1100px] table-fixed">
+                      <colgroup>
+                        <col className="w-[10%]" />
+                        <col className="w-[16%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[16%]" />
+                      </colgroup>
+                      <TableHead>
+                        <tr>
+                          <Th className="bg-slate-50">Staff ID</Th>
+                          <Th className="bg-slate-50">Name</Th>
+                          <Th className="bg-slate-50">Designation</Th>
+                          <Th className="bg-slate-50">Department</Th>
+                          <Th className="bg-slate-50">Category</Th>
+                          <Th className="bg-slate-50">Login</Th>
+                          <Th className="bg-slate-50">Status</Th>
+                          <Th className="bg-slate-50 text-right">Finance access</Th>
+                        </tr>
+                      </TableHead>
+                    </Table>
+                  }
+                  body={
+                    <Table className="w-full min-w-[1100px] table-fixed">
+                      <colgroup>
+                        <col className="w-[10%]" />
+                        <col className="w-[16%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[16%]" />
+                      </colgroup>
+                      <TableBody>
+                        {(staffAccessQuery.data ?? []).map((staff) => (
+                          <tr key={staff.staffId} className="align-middle">
+                            <Td className="text-sm tabular-nums">{staff.staffCode}</Td>
+                            <Td>
+                              <div className="font-medium">{staff.fullName}</div>
+                              <div className="truncate text-xs text-slate-500">
+                                {staff.email || staff.phone || "—"}
+                              </div>
+                            </Td>
+                            <Td className="truncate text-sm">{staff.designation}</Td>
+                            <Td className="truncate text-sm">{staff.department || "—"}</Td>
+                            <Td className="truncate text-sm">
+                              {staff.categoryLabel || staff.category}
+                            </Td>
+                            <Td className="text-sm">
+                              {staff.hasLogin ? (
+                                <Badge className="bg-emerald-100 text-emerald-800">
+                                  Linked
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-slate-100 text-slate-600">
+                                  No login
+                                </Badge>
+                              )}
+                            </Td>
+                            <Td className="text-sm">
+                              <Badge
+                                className={
+                                  staff.status === "ACTIVE"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-amber-100 text-amber-800"
+                                }
+                              >
+                                {staff.status}
+                              </Badge>
+                            </Td>
+                            <Td className="text-right">
+                              {staff.hasLogin && staff.userId ? (
+                                <Button
+                                  size="sm"
+                                  variant={
+                                    staff.financeAccessEnabled
+                                      ? "outline"
+                                      : "default"
+                                  }
+                                  className={
+                                    staff.financeAccessEnabled
+                                      ? "border-rose-200 text-rose-700"
+                                      : "bg-brand-600 hover:bg-brand-700"
+                                  }
+                                  disabled={setStaffAccess.isPending}
+                                  onClick={() => {
+                                    if (!staff.userId) return;
+                                    const next = !staff.financeAccessEnabled;
+                                    const ok = window.confirm(
+                                      next
+                                        ? `Grant Finance Management to ${staff.fullName}? They will be able to record personal transactions only.`
+                                        : `Revoke Finance Management from ${staff.fullName}? They will no longer see the menu.`,
+                                    );
+                                    if (!ok) return;
+                                    setStaffAccess.mutate({
+                                      userId: staff.userId,
+                                      enabled: next,
+                                    });
+                                  }}
+                                >
+                                  {staff.financeAccessEnabled
+                                    ? "Revoke access"
+                                    : "Grant access"}
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-slate-400">
+                                  Enable staff login first
+                                </span>
+                              )}
+                            </Td>
+                          </tr>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  }
+                />
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {tab === "categories" && isAdmin && (
         <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
           <Card>
             <CardHeader>
@@ -1305,11 +1911,60 @@ export const FinanceManager = () => {
                   placeholder="1–12"
                 />
               </FormField>
+              {isAdmin ? (
+                <>
+                  <FormField label="Record source">
+                    <Select
+                      value={ownerScopeFilter}
+                      onChange={(e) => setOwnerScopeFilter(e.target.value)}
+                    >
+                      <option value="">All sources</option>
+                      {FINANCE_OWNER_SCOPES.map((scope) => (
+                        <option key={scope} value={scope}>
+                          {ownerScopeLabel(scope)}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Recorded by">
+                    <Select
+                      value={createdByFilter}
+                      onChange={(e) => setCreatedByFilter(e.target.value)}
+                    >
+                      <option value="">Anyone</option>
+                      <optgroup label="Staff (with access)">
+                        {staffWithAccess.map((s) => (
+                          <option key={s.userId} value={s.userId}>
+                            {s.fullName}
+                            {s.staffCode ? ` (${s.staffCode})` : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="College Administrators">
+                        {(collegeAdminsQuery.data ?? [])
+                          .filter((a) => !a.isDeleted)
+                          .map((a) => (
+                            <option key={a._id} value={a._id}>
+                              {a.fullName}
+                            </option>
+                          ))}
+                      </optgroup>
+                    </Select>
+                  </FormField>
+                </>
+              ) : null}
               <div className="flex flex-wrap items-end gap-2 md:col-span-2">
                 <Button
                   variant="outline"
                   disabled={!report?.rows.length}
-                  onClick={() => report && printFinanceReport(report)}
+                  onClick={() => {
+                    if (!report) return;
+                    try {
+                      printFinanceReport(report);
+                    } catch (e) {
+                      toast.error(parseErrorMessage(e));
+                    }
+                  }}
                 >
                   <Printer className="mr-2 h-4 w-4" />
                   Print list
@@ -1319,8 +1974,12 @@ export const FinanceManager = () => {
                   disabled={!report?.rows.length}
                   onClick={() => {
                     if (!report) return;
-                    exportFinanceReportExcel(report);
-                    toast.success("Report list exported");
+                    try {
+                      exportFinanceReportExcel(report);
+                      toast.success("Report list exported");
+                    } catch (e) {
+                      toast.error(parseErrorMessage(e));
+                    }
                   }}
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -1331,11 +1990,15 @@ export const FinanceManager = () => {
                   disabled={!report?.rows.length}
                   onClick={() => {
                     if (!report) return;
-                    exportFinanceReportLedgerExcel(report, {
-                      fromDateBs: fromDateBs || undefined,
-                      toDateBs: toDateBs || undefined,
-                    });
-                    toast.success("Ledger exported to Excel");
+                    try {
+                      exportFinanceReportLedgerExcel(report, {
+                        fromDateBs: fromDateBs || undefined,
+                        toDateBs: toDateBs || undefined,
+                      });
+                      toast.success("Ledger exported to Excel");
+                    } catch (e) {
+                      toast.error(parseErrorMessage(e));
+                    }
                   }}
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -1347,14 +2010,15 @@ export const FinanceManager = () => {
                   onClick={() => {
                     if (!report) return;
                     void (async () => {
+                      const toastId = toast.loading("Preparing ledger PDF…");
                       try {
                         await exportFinanceReportLedgerPdf(report, {
                           fromDateBs: fromDateBs || undefined,
                           toDateBs: toDateBs || undefined,
                         });
-                        toast.success("Ledger PDF downloaded");
+                        toast.success("Ledger PDF downloaded", { id: toastId });
                       } catch (e) {
-                        toast.error(parseErrorMessage(e));
+                        toast.error(parseErrorMessage(e), { id: toastId });
                       }
                     })();
                   }}
@@ -1395,38 +2059,103 @@ export const FinanceManager = () => {
               ) : (
                 <StickyTableScroll
                   header={
-                    <Table className="w-full min-w-[900px]">
+                    <Table className="w-full min-w-[1100px] table-fixed">
+                      <colgroup>
+                        <col className="w-[10%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[16%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[6%]" />
+                      </colgroup>
                       <TableHead>
                         <tr>
-                          <Th className="bg-slate-50">Date</Th>
-                          <Th className="bg-slate-50">Type</Th>
-                          <Th className="bg-slate-50">Category</Th>
-                          <Th className="bg-slate-50">Title</Th>
-                          <Th className="bg-slate-50 text-right">Amount</Th>
-                          <Th className="bg-slate-50">Payment</Th>
-                          <Th className="bg-slate-50">Reference</Th>
-                          <Th className="bg-slate-50">Files</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Date</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Type</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Category</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Title</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Vendor</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap text-right">
+                            Amount
+                          </Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Payment</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Reference</Th>
+                          <Th className="bg-slate-50 whitespace-nowrap">Files</Th>
                         </tr>
                       </TableHead>
                     </Table>
                   }
                   body={
-                    <Table className="w-full min-w-[900px]">
+                    <Table className="w-full min-w-[1100px] table-fixed">
+                      <colgroup>
+                        <col className="w-[10%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[16%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[6%]" />
+                      </colgroup>
                       <TableBody>
-                        {report.rows.map((row, index) => (
-                          <tr key={`${row.dateBs}-${row.title}-${index}`}>
-                            <Td>{row.dateBs}</Td>
-                            <Td>{transactionTypeLabel(row.transactionType)}</Td>
-                            <Td>{row.categoryName}</Td>
-                            <Td className="font-medium">{row.title}</Td>
-                            <Td className="text-right tabular-nums">
-                              {formatFinanceAmount(row.amountNpr)}
-                            </Td>
-                            <Td>{paymentMethodLabel(row.paymentMethod)}</Td>
-                            <Td>{row.referenceNumber || "—"}</Td>
-                            <Td>{row.attachmentCount}</Td>
-                          </tr>
-                        ))}
+                        {report.rows.map((row, index) => {
+                          const vendorLabel =
+                            row.transactionType === "INCOME"
+                              ? row.vendorPayee?.trim() ||
+                                row.incomeSource?.trim() ||
+                                "—"
+                              : row.vendorPayee?.trim() || "—";
+                          return (
+                            <tr
+                              key={`${row.dateBs}-${row.title}-${index}`}
+                              className="align-top"
+                            >
+                              <Td className="whitespace-nowrap tabular-nums text-sm">
+                                {row.dateBs}
+                              </Td>
+                              <Td className="text-sm">
+                                {transactionTypeLabel(row.transactionType)}
+                              </Td>
+                              <Td
+                                className="truncate text-sm"
+                                title={row.categoryName}
+                              >
+                                {row.categoryName}
+                              </Td>
+                              <Td
+                                className="truncate font-medium"
+                                title={row.title}
+                              >
+                                {row.title}
+                              </Td>
+                              <Td
+                                className="truncate text-sm text-slate-700"
+                                title={
+                                  vendorLabel !== "—" ? vendorLabel : undefined
+                                }
+                              >
+                                {vendorLabel}
+                              </Td>
+                              <Td className="whitespace-nowrap text-right tabular-nums text-sm font-medium">
+                                {formatFinanceAmount(row.amountNpr)}
+                              </Td>
+                              <Td className="truncate text-sm">
+                                {paymentMethodLabel(row.paymentMethod)}
+                              </Td>
+                              <Td
+                                className="truncate text-sm"
+                                title={row.referenceNumber || undefined}
+                              >
+                                {row.referenceNumber || "—"}
+                              </Td>
+                              <Td className="text-sm">{row.attachmentCount}</Td>
+                            </tr>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   }

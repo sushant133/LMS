@@ -14,9 +14,17 @@ import { useAuth } from "./AuthProvider";
 
 interface ProtectedRouteProps {
   roles?: UserRole[];
+  /**
+   * When true, staff with admin-granted personalFinanceAccess may open the route
+   * even if their role is not in the allowed list (or is listed but only for grant).
+   */
+  allowPersonalFinanceAccess?: boolean;
 }
 
-export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
+export const ProtectedRoute = ({
+  roles,
+  allowPersonalFinanceAccess = false,
+}: ProtectedRouteProps) => {
   const { user, loading, loggingOut } = useAuth();
   const location = useLocation();
   const online = useOnlineStatus();
@@ -52,14 +60,31 @@ export const ProtectedRoute = ({ roles }: ProtectedRouteProps) => {
   }
 
   const normalizedRole = normalizeUserRole(user.role);
+  const hasPersonalFinance =
+    allowPersonalFinanceAccess && Boolean(user.personalFinanceAccess);
 
   if (
     roles &&
+    !hasPersonalFinance &&
     !hasProtectedRouteAccess(normalizedRole, roles, user.secondaryRoles, {
       pathname: location.pathname,
       moduleAccess: (user.moduleAccess ?? {}) as ModuleAccessMap,
       moduleAccessConfigured: Boolean(user.moduleAccessConfigured),
     })
+  ) {
+    const fallback = getRoleRedirectPath(user.role);
+    if (!fallback || fallback === location.pathname) {
+      return <PageLoadingState />;
+    }
+    return <Navigate to={fallback} replace />;
+  }
+
+  // Staff without grant must not open finance even if role is listed for the route
+  if (
+    allowPersonalFinanceAccess &&
+    location.pathname.startsWith("/finance") &&
+    !["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"].includes(normalizedRole) &&
+    !user.personalFinanceAccess
   ) {
     const fallback = getRoleRedirectPath(user.role);
     if (!fallback || fallback === location.pathname) {

@@ -1,13 +1,19 @@
 import type { Request, Response } from "express";
 import {
+  COLLEGE_STAFF_CATEGORY_LABELS,
   DEFAULT_FINANCE_CATEGORIES,
+  FINANCE_OWNER_SCOPES,
   financeCategorySchema,
   financeTransactionSchema,
+  normalizeUserRole,
   type FinanceCategoryRecord,
   type FinanceDashboardResponse,
+  type FinanceOwnerScope,
   type FinanceReportResponse,
+  type FinanceStaffAccessRecord,
   type FinanceTransactionRecord
 } from "@phit-erp/shared";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import { FinanceCategory } from "../models/FinanceCategory.js";
 import { FinanceTransaction } from "../models/FinanceTransaction.js";
 import { User } from "../models/User.js";
@@ -20,6 +26,155 @@ import { withTenantScope, tenantObjectId } from "../utils/tenant.js";
 const emptyToUndef = (value?: string | null) => {
   const v = value?.trim();
   return v ? v : undefined;
+};
+
+/** Institution Admin / Superadmin — full finance archive including all personal books. */
+export const isFinanceInstitutionAdmin = (req: Request): boolean => {
+  const role = normalizeUserRole(req.user?.role ?? "");
+  return role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN";
+};
+
+export const isFinanceCollegeAdministrator = (req: Request): boolean =>
+  normalizeUserRole(req.user?.role ?? "") === "COLLEGE_VIEWER";
+
+/** Staff personal finance is granted via User.personalFinanceAccess (default false). */
+export const loadPersonalFinanceAccess = async (
+  userId?: string
+): Promise<boolean> => {
+  if (!userId) return false;
+  const user = await User.findById(userId).select("personalFinanceAccess").lean();
+  return Boolean(user?.personalFinanceAccess);
+};
+
+/**
+ * Who owns new rows:
+ * - COLLEGE_VIEWER → COLLEGE_ADMINISTRATOR book
+ * - Staff with personalFinanceAccess → STAFF book
+ * - Admin / Superadmin → INSTITUTION archive
+ */
+const resolveOwnerScopeForUser = async (
+  req: Request
+): Promise<FinanceOwnerScope> => {
+  const role = normalizeUserRole(req.user?.role ?? "");
+  if (role === "COLLEGE_VIEWER") return "COLLEGE_ADMINISTRATOR";
+  if (role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN") return "INSTITUTION";
+  const granted = await loadPersonalFinanceAccess(req.user?.userId);
+  if (granted) return "STAFF";
+  return "INSTITUTION";
+};
+
+const resolveDocOwnerScope = (doc: {
+  ownerScope?: unknown;
+}): FinanceOwnerScope => {
+  const scope = doc.ownerScope;
+  if (scope === "COLLEGE_ADMINISTRATOR") return "COLLEGE_ADMINISTRATOR";
+  if (scope === "STAFF") return "STAFF";
+  return "INSTITUTION";
+};
+
+/**
+ * Personal-book users only see their own rows.
+ * Institution admins see everything; optional query filters: ownerScope, createdBy.
+ */
+const applyFinanceListScope = async (
+  req: Request,
+  filter: Record<string, unknown>
+): Promise<void> => {
+  if (isFinanceInstitutionAdmin(req)) {
+    const ownerScope =
+      typeof req.query.ownerScope === "string" ? req.query.ownerScope : "";
+    const createdBy =
+      typeof req.query.createdBy === "string" ? req.query.createdBy : "";
+
+    if (
+      ownerScope &&
+      (FINANCE_OWNER_SCOPES as readonly string[]).includes(ownerScope)
+    ) {
+      if (ownerScope === "INSTITUTION") {
+        // Legacy rows without ownerScope count as institution archive.
+        const scopeClause = {
+          $or: [
+            { ownerScope: "INSTITUTION" },
+            { ownerScope: { $exists: false } },
+            { ownerScope: null }
+          ]
+        };
+        if (filter.$or) {
+          filter.$and = [
+            ...((filter.$and as unknown[]) ?? []),
+            { $or: filter.$or },
+            scopeClause
+          ];
+          delete filter.$or;
+        } else {
+          Object.assign(filter, scopeClause);
+        }
+      } else {
+        filter.ownerScope = ownerScope;
+      }
+    }
+    if (createdBy) {
+      filter.createdBy = createdBy;
+    }
+    return;
+  }
+
+  if (isFinanceCollegeAdministrator(req)) {
+    filter.ownerScope = "COLLEGE_ADMINISTRATOR";
+    filter.createdBy = req.user?.userId;
+    return;
+  }
+
+  // Staff personal book (access already enforced at route)
+  filter.ownerScope = "STAFF";
+  filter.createdBy = req.user?.userId;
+};
+
+/** Read access: admins all; college admin / staff only own personal book. */
+const assertFinanceTransactionAccess = (
+  req: Request,
+  doc: { ownerScope?: unknown; createdBy?: unknown }
+): void => {
+  if (isFinanceInstitutionAdmin(req)) return;
+
+  const ownerScope = resolveDocOwnerScope(doc);
+  const createdBy = String(doc.createdBy ?? "");
+  const self = String(req.user?.userId ?? "");
+
+  if (isFinanceCollegeAdministrator(req)) {
+    if (ownerScope !== "COLLEGE_ADMINISTRATOR" || createdBy !== self) {
+      throw new ApiError(403, "You can only access your own finance records");
+    }
+    return;
+  }
+
+  // Staff
+  if (ownerScope !== "STAFF" || createdBy !== self) {
+    throw new ApiError(403, "You can only access your own finance records");
+  }
+};
+
+/**
+ * Write (update/delete): institution admins only.
+ * Staff may create new rows but cannot edit/delete.
+ * College Administrators keep edit/delete on their own book.
+ */
+const assertFinanceTransactionWrite = (
+  req: Request,
+  doc: { ownerScope?: unknown; createdBy?: unknown }
+): void => {
+  if (isFinanceInstitutionAdmin(req)) return;
+
+  if (isFinanceCollegeAdministrator(req)) {
+    assertFinanceTransactionAccess(req, doc);
+    return;
+  }
+
+  // Staff: no edit/delete
+  throw new ApiError(
+    403,
+    "Staff cannot edit or delete finance records. Contact Administrator."
+  );
 };
 
 const serializeCategory = (doc: Record<string, unknown>): FinanceCategoryRecord => ({
@@ -61,6 +216,7 @@ const serializeTransaction = (
   attachments: Array.isArray(doc.attachments)
     ? (doc.attachments as FinanceTransactionRecord["attachments"])
     : [],
+  ownerScope: resolveDocOwnerScope(doc),
   accountingLinkId: doc.accountingLinkId ? String(doc.accountingLinkId) : null,
   createdBy: String(doc.createdBy),
   createdByName: names?.createdByName,
@@ -308,8 +464,14 @@ const buildTransactionFilter = (req: Request): Record<string, unknown> => {
   return filter;
 };
 
-export const listFinanceTransactions = asyncHandler(async (req: Request, res: Response) => {
+const buildScopedTransactionFilter = async (req: Request) => {
   const filter = buildTransactionFilter(req);
+  await applyFinanceListScope(req, filter);
+  return filter;
+};
+
+export const listFinanceTransactions = asyncHandler(async (req: Request, res: Response) => {
+  const filter = await buildScopedTransactionFilter(req);
   const rows = await FinanceTransaction.find(filter).sort({ dateBs: -1, createdAt: -1 }).lean();
   return sendSuccess(res, "Finance transactions fetched", await enrichTransactions(rows as never));
 });
@@ -319,6 +481,7 @@ export const getFinanceTransaction = asyncHandler(async (req: Request, res: Resp
     withTenantScope(req, { _id: req.params.id })
   ).lean();
   if (!row) throw new ApiError(404, "Transaction not found");
+  assertFinanceTransactionAccess(req, row as { ownerScope?: unknown; createdBy?: unknown });
   const [enriched] = await enrichTransactions([row as never]);
   return sendSuccess(res, "Finance transaction fetched", enriched);
 });
@@ -326,6 +489,20 @@ export const getFinanceTransaction = asyncHandler(async (req: Request, res: Resp
 export const createFinanceTransaction = asyncHandler(async (req: Request, res: Response) => {
   const payload = financeTransactionSchema.parse(req.body);
   const schoolId = tenantObjectId(req)!;
+
+  // Staff must have explicit grant; college admin / institution admin always allowed here.
+  if (
+    !isFinanceInstitutionAdmin(req) &&
+    !isFinanceCollegeAdministrator(req)
+  ) {
+    const granted = await loadPersonalFinanceAccess(req.user?.userId);
+    if (!granted) {
+      throw new ApiError(
+        403,
+        "Personal Finance Management is not enabled for your account"
+      );
+    }
+  }
 
   const category = await FinanceCategory.findOne(
     withTenantScope(req, { _id: payload.categoryId, isActive: true })
@@ -341,6 +518,8 @@ export const createFinanceTransaction = asyncHandler(async (req: Request, res: R
       `Category "${category.name}" is not valid for ${payload.transactionType.toLowerCase()} transactions`
     );
   }
+
+  const ownerScope = await resolveOwnerScopeForUser(req);
 
   const doc = await FinanceTransaction.create({
     schoolId,
@@ -361,6 +540,7 @@ export const createFinanceTransaction = asyncHandler(async (req: Request, res: R
     referenceNumber: emptyToUndef(payload.referenceNumber),
     remarks: emptyToUndef(payload.remarks),
     attachments: payload.attachments ?? [],
+    ownerScope,
     createdBy: req.user?.userId,
     updatedBy: req.user?.userId
   });
@@ -375,6 +555,9 @@ export const updateFinanceTransaction = asyncHandler(async (req: Request, res: R
     withTenantScope(req, { _id: req.params.id })
   );
   if (!doc) throw new ApiError(404, "Transaction not found");
+  assertFinanceTransactionWrite(req, doc);
+
+  // Personal-book ownership is never re-tagged on update.
 
   if (payload.categoryId) {
     const category = await FinanceCategory.findOne(
@@ -424,14 +607,18 @@ export const updateFinanceTransaction = asyncHandler(async (req: Request, res: R
 });
 
 export const deleteFinanceTransaction = asyncHandler(async (req: Request, res: Response) => {
-  const doc = await FinanceTransaction.findOneAndDelete(
+  const doc = await FinanceTransaction.findOne(
     withTenantScope(req, { _id: req.params.id })
   );
   if (!doc) throw new ApiError(404, "Transaction not found");
+  assertFinanceTransactionWrite(req, doc);
 
   const urls = (doc.attachments ?? [])
     .map((a) => a.url)
     .filter((u): u is string => Boolean(u));
+
+  await doc.deleteOne();
+
   if (urls.length) {
     await deleteStoredMediaUrls(urls);
   }
@@ -442,7 +629,7 @@ export const deleteFinanceTransaction = asyncHandler(async (req: Request, res: R
 // ─── Dashboard & reports ─────────────────────────────────────────────────────
 
 export const getFinanceDashboard = asyncHandler(async (req: Request, res: Response) => {
-  const filter = buildTransactionFilter(req);
+  const filter = await buildScopedTransactionFilter(req);
   const rows = await FinanceTransaction.find(filter).sort({ dateBs: -1 }).lean();
   const enriched = await enrichTransactions(rows as never);
 
@@ -534,7 +721,7 @@ export const getFinanceReport = asyncHandler(async (req: Request, res: Response)
       ? req.query.reportType
       : "ALL";
 
-  const filter = buildTransactionFilter(req);
+  const filter = await buildScopedTransactionFilter(req);
   if (reportType === "COLLEGE_EXPENSES") {
     filter.transactionType = "EXPENSE";
     filter.expenseType = "COLLEGE_EXPENSE";
@@ -600,10 +787,152 @@ export const getFinanceReport = asyncHandler(async (req: Request, res: Response)
       vendorPayee: tx.vendorPayee,
       expenseType: tx.expenseType,
       incomeSource: tx.incomeSource,
+      ownerScope: tx.ownerScope,
       attachmentCount: tx.attachments?.length ?? 0,
-      createdByName: tx.createdByName
+      createdByName: tx.createdByName,
+      createdBy: tx.createdBy
     }))
   };
 
   return sendSuccess(res, "Finance report generated", payload);
 });
+
+// ─── Staff personal finance access (Admin / Superadmin) ──────────────────────
+
+/**
+ * List all college staff with login + personal finance access status.
+ * Admin uses this panel to grant/revoke Finance Management for each staff.
+ */
+export const listFinanceStaffAccess = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!isFinanceInstitutionAdmin(req)) {
+      throw new ApiError(403, "Only Administrator can manage staff finance access");
+    }
+
+    const schoolId = tenantObjectId(req)!;
+    const search =
+      typeof req.query.search === "string" ? req.query.search.trim() : "";
+
+    const filter: Record<string, unknown> = {
+      schoolId,
+      isDeleted: false
+    };
+    if (search) {
+      const term = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      filter.$or = [
+        { fullName: { $regex: term, $options: "i" } },
+        { staffId: { $regex: term, $options: "i" } },
+        { email: { $regex: term, $options: "i" } },
+        { phone: { $regex: term, $options: "i" } },
+        { designation: { $regex: term, $options: "i" } },
+        { department: { $regex: term, $options: "i" } }
+      ];
+    }
+
+    const staffRows = await CollegeStaff.find(filter)
+      .sort({ fullName: 1 })
+      .lean();
+
+    const userIds = staffRows
+      .map((s) => s.user)
+      .filter(Boolean)
+      .map((id) => String(id));
+
+    const users = userIds.length
+      ? await User.find({ _id: { $in: userIds } })
+          .select("fullName email role isActive personalFinanceAccess")
+          .lean()
+      : [];
+    const userMap = new Map(users.map((u) => [u._id.toString(), u]));
+
+    const payload: FinanceStaffAccessRecord[] = staffRows.map((staff) => {
+      const userId = staff.user ? String(staff.user) : undefined;
+      const user = userId ? userMap.get(userId) : undefined;
+      const category = String(staff.category ?? "");
+      const record: FinanceStaffAccessRecord = {
+        staffId: String(staff._id),
+        staffCode: String(staff.staffId ?? ""),
+        fullName: String(staff.fullName ?? ""),
+        email: staff.email || user?.email || undefined,
+        phone: staff.phone ? String(staff.phone) : undefined,
+        designation: String(staff.designation ?? ""),
+        department: staff.department ? String(staff.department) : undefined,
+        category,
+        categoryLabel:
+          COLLEGE_STAFF_CATEGORY_LABELS[
+            category as keyof typeof COLLEGE_STAFF_CATEGORY_LABELS
+          ] ?? category,
+        status: staff.status === "INACTIVE" ? "INACTIVE" : "ACTIVE",
+        userId,
+        userRole: user?.role ? String(user.role) : undefined,
+        userActive: user?.isActive,
+        hasLogin: Boolean(userId && user),
+        financeAccessEnabled: Boolean(user?.personalFinanceAccess),
+        photoUrl: staff.photoUrl ? String(staff.photoUrl) : undefined
+      };
+      return record;
+    });
+
+    return sendSuccess(res, "Staff finance access list fetched", payload);
+  }
+);
+
+/**
+ * Grant or revoke personal Finance Management for a staff user account.
+ * Body: { enabled: boolean }
+ */
+export const setFinanceStaffAccess = asyncHandler(
+  async (req: Request, res: Response) => {
+    if (!isFinanceInstitutionAdmin(req)) {
+      throw new ApiError(403, "Only Administrator can manage staff finance access");
+    }
+
+    const userId = req.params.userId;
+    if (!userId) throw new ApiError(400, "User id is required");
+
+    const enabled = Boolean(
+      (req.body as { enabled?: unknown })?.enabled === true ||
+        (req.body as { enabled?: unknown })?.enabled === "true"
+    );
+
+    const schoolId = tenantObjectId(req)!;
+
+    // Must be a linked college-staff login (not arbitrary admin accounts)
+    const staff = await CollegeStaff.findOne({
+      schoolId,
+      user: userId,
+      isDeleted: false
+    }).lean();
+    if (!staff) {
+      throw new ApiError(
+        404,
+        "No college staff profile is linked to this user account"
+      );
+    }
+
+    const user = await User.findOne({
+      _id: userId,
+      schoolId
+    });
+    if (!user) throw new ApiError(404, "User account not found");
+
+    // Never toggle finance access on institution admin accounts via this path
+    const role = normalizeUserRole(user.role as string);
+    if (role === "SUPER_ADMIN" || role === "COLLEGE_ADMIN") {
+      throw new ApiError(
+        400,
+        "Administrator accounts already have full Finance Management access"
+      );
+    }
+
+    user.personalFinanceAccess = enabled;
+    await user.save();
+
+    return sendSuccess(res, enabled ? "Finance access granted" : "Finance access revoked", {
+      userId: user._id.toString(),
+      staffId: String(staff._id),
+      fullName: staff.fullName,
+      financeAccessEnabled: Boolean(user.personalFinanceAccess)
+    });
+  }
+);

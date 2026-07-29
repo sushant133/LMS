@@ -130,7 +130,10 @@ const getSafeUser = async (userId: string) => {
     moduleAccess,
     moduleAccessConfigured,
     moduleActions: rawActions,
-    secondaryRoles
+    secondaryRoles,
+    personalFinanceAccess: Boolean(
+      (user as { personalFinanceAccess?: boolean }).personalFinanceAccess
+    )
   };
 };
 

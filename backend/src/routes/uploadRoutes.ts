@@ -202,12 +202,24 @@ router.post(
   uploadAccountingHandler
 );
 
-// ─── Finance Management (Admin / Superadmin only — no accountant/viewer) ────
+// ─── Finance Management (Admin + College Admin + staff with grant) ────
+// Staff grant is enforced inside finance API; uploads allowed for any authed
+// role that can reach finance UI. Controllers still scope ownership.
 router.post(
   "/finance",
-  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
-  // Note: COLLEGE_VIEWER gets GET-only pass on authorize when COLLEGE_ADMIN is listed;
-  // POST is still blocked for viewers. Only SUPER_ADMIN / COLLEGE_ADMIN may upload.
+  authorize(
+    "SUPER_ADMIN",
+    "COLLEGE_ADMIN",
+    "COLLEGE_VIEWER",
+    "COLLEGE_STAFF",
+    "TEACHER",
+    "LIBRARY_STAFF",
+    "LABORATORY_STAFF",
+    "ACCOUNTANT",
+    "CASHIER",
+    "AUDITOR",
+    "PRINCIPAL"
+  ),
   uploadFinanceAttachments,
   uploadFinanceHandler
 );

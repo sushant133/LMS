@@ -1,4 +1,4 @@
-import { LogOut, Menu, X } from "lucide-react";
+import { LogOut, Menu, PanelLeftClose } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
@@ -31,6 +31,50 @@ import {
 } from "lib/auth";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
+
+/** Desktop sidebar collapsed preference (persists for all roles / pages). */
+const SIDEBAR_HIDDEN_KEY = "lms.sidebarHidden";
+
+const loadSidebarHidden = (): boolean => {
+  try {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const saveSidebarHidden = (hidden: boolean) => {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_HIDDEN_KEY, hidden ? "1" : "0");
+  } catch {
+    /* private mode / quota */
+  }
+};
+
+/** True when viewport is desktop (left menu is a sticky column, not a drawer). */
+const useIsDesktopLayout = (): boolean => {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    try {
+      return typeof window !== "undefined"
+        ? window.matchMedia("(min-width: 768px)").matches
+        : true;
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const onChange = () => setIsDesktop(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  return isDesktop;
+};
 
 const institutionRoles: UserRole[] = [
   "SUPER_ADMIN",
@@ -285,10 +329,25 @@ const navItems: NavItem[] = [
     section: "administration",
   },
   {
-    /** Institutional finance archive — Admin / Superadmin only (not Accounting). */
+    /**
+     * Finance archive — Admin full view; College Administrator personal book;
+     * Staff only when Admin grants personalFinanceAccess (filtered below).
+     */
     labelKey: "financeManagement",
     path: "/finance",
-    roles: ["SUPER_ADMIN", "COLLEGE_ADMIN"],
+    roles: [
+      "SUPER_ADMIN",
+      "COLLEGE_ADMIN",
+      "COLLEGE_VIEWER",
+      "COLLEGE_STAFF",
+      "TEACHER",
+      "LIBRARY_STAFF",
+      "LABORATORY_STAFF",
+      "ACCOUNTANT",
+      "CASHIER",
+      "AUDITOR",
+      "PRINCIPAL",
+    ],
     section: "administration",
   },
   {
@@ -370,11 +429,51 @@ const renderNavLink = (
 );
 
 export const AppLayout = () => {
-  const [open, setOpen] = useState(false);
+  const isDesktop = useIsDesktopLayout();
+  /** Mobile / tablet drawer open state (not persisted). */
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  /**
+   * Desktop: collapse left column (persisted).
+   * Shared by admin, superadmin, staff, teacher, student — every AppLayout page.
+   */
+  const [sidebarHidden, setSidebarHidden] = useState(() => loadSidebarHidden());
   const location = useLocation();
   const { user, logout, availableSchools } = useAuth();
   const { unreadCount } = useNotificationBadge();
   const { t } = useTranslation();
+
+  const setDesktopSidebarHidden = (hidden: boolean) => {
+    setSidebarHidden(hidden);
+    saveSidebarHidden(hidden);
+    if (hidden) setMobileNavOpen(false);
+  };
+
+  /** Menu is currently on-screen (desktop column or mobile drawer). */
+  const menuIsOpen = isDesktop ? !sidebarHidden : mobileNavOpen;
+
+  /** Hide: desktop collapses column; mobile closes drawer. */
+  const hideMenu = () => {
+    if (isDesktop) {
+      setDesktopSidebarHidden(true);
+      return;
+    }
+    setMobileNavOpen(false);
+  };
+
+  /** Show: only needed when menu is hidden (button lives in the top bar). */
+  const showMenu = () => {
+    if (isDesktop) {
+      setDesktopSidebarHidden(false);
+      return;
+    }
+    setMobileNavOpen(true);
+  };
+
+  // Close mobile drawer on route change only (keep desktop hide preference).
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
   const isTeacherUser =
     Boolean(user) &&
     (normalizeUserRole(user!.role) === "TEACHER" ||
@@ -405,7 +504,7 @@ export const AppLayout = () => {
   const parentPortalAccess = useParentPortalAccess();
 
   useEffect(() => {
-    if (!open) return;
+    if (!mobileNavOpen) return;
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
     if (!isMobile) return;
     const previousOverflow = document.body.style.overflow;
@@ -413,10 +512,10 @@ export const AppLayout = () => {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [open]);
+  }, [mobileNavOpen]);
 
   const handleLogout = async () => {
-    setOpen(false);
+    setMobileNavOpen(false);
     resetAppShell();
     try {
       await logout();
@@ -612,6 +711,12 @@ export const AppLayout = () => {
           }
           return isModuleAllowedForNav(item.path);
         }
+        // Finance: never show for staff unless Admin granted personalFinanceAccess
+        if (item.path === "/finance") {
+          if (isAdmin || institutionAccess) return true;
+          if (effectiveRoles.has("COLLEGE_VIEWER")) return true;
+          return Boolean(user?.personalFinanceAccess);
+        }
         return isModuleAllowedForNav(item.path);
       })
       .map((item) => ({
@@ -709,7 +814,7 @@ export const AppLayout = () => {
     getRoleRedirectPath(normalizedRole) ??
     "/dashboard";
 
-  const closeMobile = () => setOpen(false);
+  const closeMobile = () => setMobileNavOpen(false);
 
   const sectionHeader = (label: string) => (
     <p className="mb-2 mt-1 px-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
@@ -717,28 +822,90 @@ export const AppLayout = () => {
     </p>
   );
 
+  const navTree = (
+    <>
+      {/* General */}
+      {generalItems.length > 0 ? (
+        <div className="space-y-1">
+          {generalItems.map((item) =>
+            renderNavLink(
+              item,
+              t(item.labelKey),
+              closeMobile,
+              navLinkUsesEnd(item.path),
+              unreadCount,
+            ),
+          )}
+        </div>
+      ) : null}
+
+      {/* My Work */}
+      {showMyWorkSection ? (
+        <div className="mt-4 space-y-1 border-t border-white/10 pt-4">
+          {sectionHeader(t("myWork"))}
+          {myWorkItems.map((item) =>
+            renderNavLink(
+              item,
+              t(item.labelKey),
+              closeMobile,
+              navLinkUsesEnd(item.path),
+              unreadCount,
+            ),
+          )}
+        </div>
+      ) : null}
+
+      {/* Administration */}
+      {showAdminSection ? (
+        <div className="mt-4 space-y-1 border-t border-white/10 pt-4">
+          {sectionHeader(t("administration"))}
+          {adminNavItems.map((item) =>
+            renderNavLink(
+              item,
+              t(item.labelKey),
+              closeMobile,
+              navLinkUsesEnd(item.path),
+              unreadCount,
+            ),
+          )}
+          {visibleSystemAdminItems.map((item) =>
+            renderNavLink(
+              { ...item, labelKey: item.labelKey },
+              t(item.labelKey),
+              closeMobile,
+              true,
+              unreadCount,
+            ),
+          )}
+        </div>
+      ) : null}
+    </>
+  );
+
+  const desktopMenuCollapsed = isDesktop && sidebarHidden;
+
   return (
     <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(12,45,107,0.16),_transparent_28%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_100%)]">
-      {open ? (
+      {mobileNavOpen ? (
         <button
           type="button"
           aria-label="Close menu"
-          aria-hidden="true"
           className="fixed inset-0 z-40 bg-slate-950/50 md:hidden"
-          onClick={() => setOpen(false)}
+          onClick={() => setMobileNavOpen(false)}
         />
       ) : null}
 
-      <div key={user._id} className="flex min-h-screen w-full">
+      <div
+        className="app-shell"
+        data-sidebar-collapsed={desktopMenuCollapsed ? "true" : "false"}
+      >
         <aside
-          className={cn(
-            "flex w-[min(var(--app-sidebar-width),88vw)] shrink-0 flex-col overflow-hidden border-r border-white/60 bg-slate-950/95 px-4 py-5 text-white sm:px-5 sm:py-6",
-            "h-[100dvh] md:h-screen md:w-[var(--app-sidebar-width)]",
-            "max-md:fixed max-md:left-0 max-md:top-0 max-md:z-50 max-md:transition-transform max-md:duration-200 max-md:ease-out",
-            "max-md:pt-[max(1.25rem,env(safe-area-inset-top))] max-md:pb-[max(1rem,env(safe-area-inset-bottom))]",
-            open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
-            "md:sticky md:top-0 md:z-30 md:translate-x-0",
-          )}
+          id="app-main-sidebar"
+          className="app-sidebar"
+          data-desktop-hidden={sidebarHidden ? "true" : "false"}
+          data-mobile-open={mobileNavOpen ? "true" : "false"}
+          aria-label="Main navigation"
+          aria-hidden={desktopMenuCollapsed ? true : undefined}
         >
           <div className="flex shrink-0 items-start gap-2">
             <NavLink
@@ -765,76 +932,20 @@ export const AppLayout = () => {
                 )}
               </div>
             </NavLink>
-            <Button
+            {/* Only hide control: right of PHIT COLLEGE / app name */}
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
-              className="h-9 w-9 shrink-0 rounded-xl p-0 text-slate-300 hover:bg-white/10 hover:text-white md:hidden"
-              aria-label="Close menu"
-              onClick={closeMobile}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10 hover:text-white"
+              aria-label="Hide menu"
+              title="Hide menu"
+              onClick={hideMenu}
             >
-              <X className="h-5 w-5" />
-            </Button>
+              <PanelLeftClose className="h-5 w-5" />
+            </button>
           </div>
 
           <div className="app-sidebar-scroll mt-8 min-h-0 flex-1">
-            <nav className="space-y-1 pr-1">
-              {/* General */}
-              {generalItems.length > 0 ? (
-                <div className="space-y-1">
-                  {generalItems.map((item) =>
-                    renderNavLink(
-                      item,
-                      t(item.labelKey),
-                      closeMobile,
-                      navLinkUsesEnd(item.path),
-                      unreadCount,
-                    ),
-                  )}
-                </div>
-              ) : null}
-
-              {/* My Work */}
-              {showMyWorkSection ? (
-                <div className="mt-4 space-y-1 border-t border-white/10 pt-4">
-                  {sectionHeader(t("myWork"))}
-                  {myWorkItems.map((item) =>
-                    renderNavLink(
-                      item,
-                      t(item.labelKey),
-                      closeMobile,
-                      navLinkUsesEnd(item.path),
-                      unreadCount,
-                    ),
-                  )}
-                </div>
-              ) : null}
-
-              {/* Administration */}
-              {showAdminSection ? (
-                <div className="mt-4 space-y-1 border-t border-white/10 pt-4">
-                  {sectionHeader(t("administration"))}
-                  {adminNavItems.map((item) =>
-                    renderNavLink(
-                      item,
-                      t(item.labelKey),
-                      closeMobile,
-                      navLinkUsesEnd(item.path),
-                      unreadCount,
-                    ),
-                  )}
-                  {visibleSystemAdminItems.map((item) =>
-                    renderNavLink(
-                      { ...item, labelKey: item.labelKey },
-                      t(item.labelKey),
-                      closeMobile,
-                      true,
-                      unreadCount,
-                    ),
-                  )}
-                </div>
-              ) : null}
-            </nav>
+            <nav className="space-y-1 pr-1">{navTree}</nav>
 
             <div className="mt-4 pt-4">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -856,67 +967,42 @@ export const AppLayout = () => {
           </div>
         </aside>
 
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 shrink-0 border-b border-white/70 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90">
-            <div className="mx-auto w-full max-w-[1600px] px-3 py-2.5 sm:px-6 sm:py-3 lg:px-8 lg:py-4">
-              {/*
-                Mobile: [Menu] [Logo + name/role] ………… [Logout icon]
-                Desktop: [Welcome + full name] …… [College chip] [Logout]
-              */}
-              <div className="flex items-center gap-2 sm:gap-3">
-                <Button
+        <div className="app-shell-main">
+          <header className="sticky top-0 z-50 shrink-0 border-b border-white/70 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90">
+            <div className="app-shell-header-inner flex items-center gap-2 px-4 py-2.5 sm:gap-3 sm:px-6 sm:py-3 lg:px-8 lg:py-4">
+              {/* Show menu only when the left menu is hidden */}
+              {!menuIsOpen ? (
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-10 w-10 shrink-0 rounded-xl p-0 md:hidden"
-                  aria-label={open ? "Close menu" : "Open menu"}
-                  aria-expanded={open}
-                  onClick={() => setOpen((current) => !current)}
+                  className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+                  aria-label="Show menu"
+                  title="Show menu"
+                  aria-controls="app-main-sidebar"
+                  onClick={showMenu}
                 >
-                  <Menu className="h-5 w-5" />
-                </Button>
+                  <Menu className="h-4 w-4 shrink-0" />
+                  <span>Show menu</span>
+                </button>
+              ) : null}
 
-                {/* Mobile brand strip — single horizontal line, no vertical wrap */}
-                <div className="flex min-w-0 flex-1 items-center gap-2.5 md:hidden">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-brand-100 bg-brand-50">
-                    <CollegeLogo className="h-7 w-7" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className="truncate text-sm font-semibold leading-tight text-slate-900"
-                      title={collegeName}
-                    >
-                      {collegeName}
-                    </p>
-                    <p
-                      className="truncate text-[11px] leading-tight text-slate-500"
-                      title={
-                        getUserRoleSubtitle(user)
-                          ? `${user.fullName} · ${getUserDisplayTitle(user)} · ${getUserRoleSubtitle(user)}`
-                          : `${user.fullName} · ${getUserDisplayTitle(user)}`
-                      }
-                    >
-                      <span className="font-medium text-slate-700">
-                        {user.fullName}
-                      </span>
-                      <span className="text-slate-400"> · </span>
-                      <span>{getUserDisplayTitle(user)}</span>
-                    </p>
-                  </div>
-                </div>
+              {/* Context / brand */}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs uppercase tracking-[0.14em] text-brand-600">
+                  {isDesktop ? t("welcome") : collegeName}
+                </p>
+                <h1 className="truncate text-base font-semibold leading-tight text-slate-900 sm:text-lg">
+                  {user.fullName}
+                  {!isDesktop ? (
+                    <span className="font-normal text-slate-500">
+                      {" "}
+                      · {getUserDisplayTitle(user)}
+                    </span>
+                  ) : null}
+                </h1>
+              </div>
 
-                {/* Desktop welcome */}
-                <div className="hidden min-w-0 flex-1 md:block">
-                  <p className="text-xs uppercase tracking-[0.18em] text-brand-600">
-                    {t("welcome")}
-                  </p>
-                  <h1 className="truncate text-lg font-semibold leading-tight text-slate-900">
-                    {user.fullName}
-                  </h1>
-                </div>
-
-                {/* Desktop college context chip */}
-                <div className="ml-auto hidden min-w-0 max-w-xs items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:max-w-sm md:flex lg:max-w-md">
+              {isDesktop ? (
+                <div className="hidden min-w-0 max-w-[12rem] items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:flex lg:max-w-[16rem]">
                   <CollegeLogo className="h-8 w-8 shrink-0" />
                   <div className="min-w-0">
                     <div
@@ -925,14 +1011,7 @@ export const AppLayout = () => {
                     >
                       {collegeName}
                     </div>
-                    <div
-                      className="truncate text-[10px] font-medium uppercase tracking-wide text-brand-700/80"
-                      title={
-                        getUserRoleSubtitle(user)
-                          ? `${getUserDisplayTitle(user)} · ${getUserRoleSubtitle(user)}`
-                          : getUserDisplayTitle(user)
-                      }
-                    >
+                    <div className="truncate text-[10px] font-medium uppercase tracking-wide text-brand-700/80">
                       {getUserDisplayTitle(user)}
                       {getUserRoleSubtitle(user)
                         ? ` · ${getUserRoleSubtitle(user)}`
@@ -940,27 +1019,27 @@ export const AppLayout = () => {
                     </div>
                   </div>
                 </div>
+              ) : null}
 
-                <Button
-                  type="button"
-                  className="h-10 shrink-0 gap-0 rounded-xl px-0 sm:h-9 sm:gap-2 sm:px-3"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleLogout()}
-                  aria-label={t("logout")}
-                  title={t("logout")}
-                >
-                  <span className="inline-flex h-10 w-10 items-center justify-center sm:h-auto sm:w-auto">
-                    <LogOut className="h-4 w-4" />
-                  </span>
-                  <span className="hidden sm:inline">{t("logout")}</span>
-                </Button>
-              </div>
+              <Button
+                type="button"
+                className="h-10 shrink-0 gap-0 rounded-xl px-0 sm:h-9 sm:gap-2 sm:px-3"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleLogout()}
+                aria-label={t("logout")}
+                title={t("logout")}
+              >
+                <span className="inline-flex h-10 w-10 items-center justify-center sm:h-auto sm:w-auto">
+                  <LogOut className="h-4 w-4" />
+                </span>
+                <span className="hidden sm:inline">{t("logout")}</span>
+              </Button>
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 overflow-x-clip px-4 py-6 sm:px-6 lg:px-8">
-            <div className="mx-auto min-w-0 w-full max-w-[1600px]">
+          <main className="min-w-0 flex-1 overflow-x-auto px-4 py-6 sm:px-6 lg:px-8">
+            <div className="app-shell-main-inner min-w-0">
               <ReadOnlyBanner />
               <Suspense fallback={<LoadingState />}>
                 {(() => {

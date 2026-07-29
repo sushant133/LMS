@@ -22,6 +22,114 @@
   background: #f8fafc;
 }
 
+/**
+ * App left menu (AppLayout)
+ * Mobile: fixed drawer (open/closed via transform classes in JSX).
+ * Desktop: sticky column; data-hidden="true" fully removes it from layout.
+ * Using data attributes + plain CSS avoids Tailwind class-merge conflicts
+ * that broke hide/show on dense admin pages.
+ */
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  width: min(var(--app-sidebar-width), 88vw);
+  height: 100dvh;
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgba(2, 6, 23, 0.95);
+  color: #fff;
+  padding: 1.25rem 1rem;
+}
+
+@media (min-width: 640px) {
+  .app-sidebar {
+    padding: 1.5rem 1.25rem;
+  }
+}
+
+/* Mobile drawer */
+@media (max-width: 767.98px) {
+  .app-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 50;
+    padding-top: max(1.25rem, env(safe-area-inset-top));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    transition: transform 0.2s ease-out;
+  }
+  .app-sidebar[data-mobile-open="false"] {
+    transform: translateX(-100%);
+  }
+  .app-sidebar[data-mobile-open="true"] {
+    transform: translateX(0);
+  }
+}
+
+/* Desktop column */
+@media (min-width: 768px) {
+  .app-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    width: var(--app-sidebar-width);
+    height: 100vh;
+  }
+  .app-sidebar[data-desktop-hidden="true"] {
+    /* Fully leave the flex layout so main content can use 100% width */
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+  }
+}
+
+/**
+ * Main app column (header + page).
+ * When the left menu is collapsed on desktop, content fills the viewport evenly.
+ */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.app-shell-main {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.app-shell-header-inner,
+.app-shell-main-inner {
+  width: 100%;
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Desktop + menu hidden: use full screen width (no narrow centered column) */
+@media (min-width: 768px) {
+  .app-shell[data-sidebar-collapsed="true"] .app-shell-header-inner,
+  .app-shell[data-sidebar-collapsed="true"] .app-shell-main-inner {
+    max-width: none;
+    width: 100%;
+  }
+
+  .app-shell[data-sidebar-collapsed="true"] .app-shell-main {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}
+
 /* Nepali / Devanagari content — ONLY applied via .font-nepali on Nepali subject fields.
    Do not use Preeti/Kantipur as a web font. Store Unicode only.
 

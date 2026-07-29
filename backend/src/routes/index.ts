@@ -83,7 +83,7 @@ router.use("/laboratory", laboratoryRoutes);
 router.use("/transport", transportRoutes);
 router.use("/hr", hrRoutes);
 router.use("/accounting", accountingRoutes);
-/** Institutional finance archive — Admin/Superadmin only; not ERP Accounting. */
+/** Finance archive — Admin + College Administrator (personal book); not ERP Accounting. */
 router.use("/finance", financeRoutes);
 router.use("/student", studentPortalRoutes);
 router.use("/teacher", teacherPortalRoutes);

@@ -49,6 +49,9 @@ import {
   storedEventsOnly,
 } from "./academicCalendarUtils";
 
+/** Stable empty list — never use `?? []` inline (new ref every render → effect loops). */
+const EMPTY_EVENTS: AcademicCalendarEventRecord[] = [];
+
 export const AcademicCalendarHub = () => {
   const { user } = useAuth();
   const canManage = canManageInstitution(user?.role ?? "");
@@ -61,9 +64,6 @@ export const AcademicCalendarHub = () => {
     defaultCalendarFilters(),
   );
   const [selectedDateBs, setSelectedDateBs] = useState("");
-  const [selectedEvents, setSelectedEvents] = useState<
-    AcademicCalendarEventRecord[]
-  >([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] =
@@ -108,7 +108,7 @@ export const AcademicCalendarHub = () => {
           formatMonthKey(month.year, month.month) === appliedFilters.monthBs,
       )
     : allMonths;
-  const events = eventsQuery.data ?? [];
+  const events = eventsQuery.data ?? EMPTY_EVENTS;
   const filteredEvents = useMemo(
     () => filterEventsLocally(events, appliedFilters),
     [events, appliedFilters],
@@ -124,11 +124,14 @@ export const AcademicCalendarHub = () => {
     [filteredEvents],
   );
 
-  /** Day-scoped list when a calendar cell is selected. */
+  /** Day-scoped list when a calendar cell is selected (derived — no setState loop). */
   const dateScopedEvents = useMemo(() => {
-    if (!selectedDateBs) return [];
-    return eventsByDate.get(selectedDateBs) ?? [];
+    if (!selectedDateBs) return EMPTY_EVENTS;
+    return eventsByDate.get(selectedDateBs) ?? EMPTY_EVENTS;
   }, [eventsByDate, selectedDateBs]);
+
+  /** Events shown in the detail dialog for the selected date. */
+  const selectedEvents = dateScopedEvents;
 
   const saveMutation = useMutation({
     mutationFn: async ({
@@ -173,7 +176,6 @@ export const AcademicCalendarHub = () => {
     dayEvents: AcademicCalendarEventRecord[],
   ) => {
     setSelectedDateBs(dateBs);
-    setSelectedEvents(dayEvents);
 
     if (canManage && dayEvents.length === 0) {
       setEditingEvent(null);
@@ -231,7 +233,7 @@ export const AcademicCalendarHub = () => {
     deleteMutation.mutate(event._id);
   };
 
-  // Always land on the institution's current academic year.
+  // Always land on the institution's current academic year (once when empty).
   useEffect(() => {
     if (academicYearBs) return;
 
@@ -256,25 +258,24 @@ export const AcademicCalendarHub = () => {
     }
   }, [schoolAcademicYearBs, academicYearBs]);
 
+  // Keep filter year in sync — only when it actually changes (avoid new object every run).
   useEffect(() => {
-    setAppliedFilters((current) => ({
-      ...current,
-      academicYearBs: resolvedYear,
-    }));
+    setAppliedFilters((current) => {
+      if (current.academicYearBs === resolvedYear) return current;
+      return { ...current, academicYearBs: resolvedYear };
+    });
+    setDraftFilters((current) => {
+      if (current.academicYearBs === resolvedYear) return current;
+      return { ...current, academicYearBs: resolvedYear };
+    });
   }, [resolvedYear]);
 
-  useEffect(() => {
-    if (!selectedDateBs) {
-      setSelectedEvents([]);
-      return;
-    }
-    setSelectedEvents(eventsByDate.get(selectedDateBs) ?? []);
-  }, [eventsByDate, selectedDateBs]);
-
+  // Reset day selection when the academic year changes (not on every eventsByDate rebuild).
   useEffect(() => {
     setSelectedDateBs("");
-    setSelectedEvents([]);
     setDetailOpen(false);
+    setFormOpen(false);
+    setEditingEvent(null);
   }, [resolvedYear]);
 
   return (
@@ -536,9 +537,6 @@ export const AcademicCalendarHub = () => {
                               title="View"
                               onClick={() => {
                                 setSelectedDateBs(start);
-                                setSelectedEvents(
-                                  eventsByDate.get(start) ?? [event],
-                                );
                                 setDetailOpen(true);
                               }}
                             >
@@ -597,7 +595,6 @@ export const AcademicCalendarHub = () => {
                 size="sm"
                 onClick={() => {
                   setSelectedDateBs("");
-                  setSelectedEvents([]);
                   setDetailOpen(false);
                 }}
               >
