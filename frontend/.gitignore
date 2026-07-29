@@ -6,3 +6,13 @@ coverage
 .env.local
 *.tsbuildinfo
 vite.config.d.ts
+
+# Capacitor / Android local build outputs (keep android/ project if you commit it)
+android/.gradle
+android/app/build
+android/build
+android/captures
+android/local.properties
+*.apk
+*.aab
+*.keystore

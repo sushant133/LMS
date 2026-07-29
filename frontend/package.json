@@ -19,9 +19,14 @@
     "install:all": "npm install && npm run install:backend",
     "build:backend": "npm run build --prefix ../backend",
     "build:all": "npm run build && npm run build:backend",
-    "start:backend": "npm run start --prefix ../backend"
+    "start:backend": "npm run start --prefix ../backend",
+    "cap:sync": "npm run build && npx cap sync android",
+    "cap:open": "npx cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
     "@hookform/resolvers": "^4.1.0",
     "@munatech/nepali-datepicker": "1.2.3",
     "@phit-erp/shared": "file:../backend/shared",
