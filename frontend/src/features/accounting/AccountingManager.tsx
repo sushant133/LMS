@@ -106,6 +106,7 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
+import { useCanAccessModule } from "hooks/useModuleAccess";
 
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
@@ -310,19 +311,42 @@ export const AccountingManager = () => {
   const { user } = useAuth();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
-  const normalizedRole = normalizeUserRole(user?.role ?? "");
-  const isAdmin = isInstitutionAdmin(normalizedRole);
-  const isAuditor = normalizedRole === "AUDITOR";
-  const isPrincipal = normalizedRole === "PRINCIPAL";
-  const isCashier = normalizedRole === "CASHIER";
+  const canAccessAccounts = useCanAccessModule("accounts");
+  const secondaryRoles = (user?.secondaryRoles ?? []).map((r) =>
+    normalizeUserRole(r),
+  );
+  const allRoles = [
+    normalizeUserRole(user?.role ?? ""),
+    ...secondaryRoles,
+  ].filter(Boolean);
+  /** Effective finance role: primary, secondary, or module-grant fallback. */
+  const normalizedRole = (() => {
+    const primary = normalizeUserRole(user?.role ?? "");
+    if (ACCOUNTING_ACCESS_ROLES.includes(primary)) return primary;
+    const secondaryFinance = secondaryRoles.find((r) =>
+      ACCOUNTING_ACCESS_ROLES.includes(r),
+    );
+    if (secondaryFinance) return secondaryFinance;
+    // Module-only staff with Accounts WRITE act as accountant for UI caps
+    if (canAccessAccounts) return "ACCOUNTANT" as const;
+    return primary;
+  })();
+  const isAdmin = isInstitutionAdmin(normalizedRole) || allRoles.some(isInstitutionAdmin);
+  const isAuditor = normalizedRole === "AUDITOR" || allRoles.includes("AUDITOR");
+  const isPrincipal =
+    normalizedRole === "PRINCIPAL" || allRoles.includes("PRINCIPAL");
+  const isCashier = normalizedRole === "CASHIER" && !allRoles.includes("ACCOUNTANT");
   const isReadOnlyCollegeAdmin = normalizedRole === "COLLEGE_VIEWER";
   const canWrite = !isAuditor && !isPrincipal && !isReadOnlyCollegeAdmin;
-  const canApprove = ACCOUNTING_APPROVER_ROLES.includes(normalizedRole);
-  const canViewAudit = hasAccountingPermission(normalizedRole, "view_audit");
-  const canReverse = hasAccountingPermission(
-    normalizedRole,
-    "reverse_transaction",
-  );
+  const canApprove =
+    ACCOUNTING_APPROVER_ROLES.some((r) => allRoles.includes(r)) ||
+    allRoles.some(isInstitutionAdmin);
+  const canViewAudit =
+    hasAccountingPermission(normalizedRole, "view_audit") ||
+    allRoles.some((r) => hasAccountingPermission(r, "view_audit"));
+  const canReverse =
+    hasAccountingPermission(normalizedRole, "reverse_transaction") ||
+    allRoles.some((r) => hasAccountingPermission(r, "reverse_transaction"));
   const [tab, setTab] = useState<Tab>("dashboard");
   const [studentSearch, setStudentSearch] = useState("");
   const [accountSearch, setAccountSearch] = useState("");
@@ -407,33 +431,37 @@ export const AccountingManager = () => {
     enabled: tab === "dashboard",
   });
 
+  // Structures / students / academics only needed by legacy forms (disabled).
+  // Live panels load their own data — do not block the whole Accounting page.
   const structuresQuery = useQuery({
     queryKey: ["accounting-structures"],
     queryFn: () =>
       unwrap<FeeStructureRecord[]>(api.get("/accounting/structures")),
+    enabled: false,
   });
 
   const studentsQuery = useQuery({
     queryKey: ["students"],
     queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    enabled: false,
   });
 
   const classesQuery = useQuery({
     queryKey: ["classes"],
     queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes")),
-    enabled: !isCollege,
+    enabled: false,
   });
 
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
-    enabled: isCollege,
+    enabled: false,
   });
 
   const yearsQuery = useQuery({
     queryKey: ["years"],
     queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
-    enabled: isCollege,
+    enabled: false,
   });
 
   const receiptsQuery = useQuery({
@@ -498,6 +526,7 @@ export const AccountingManager = () => {
       unwrap<AccountingSettingsInput & { _id: string }>(
         api.get("/accounting/settings"),
       ),
+    enabled: false,
   });
 
   const accountantsQuery = useQuery({
@@ -527,9 +556,15 @@ export const AccountingManager = () => {
 
   const reportQuery = useQuery({
     queryKey: ["accounting-report", selectedReport, reportMonth, reportDate],
-    queryFn: () =>
-      unwrap<FinancialSummaryReport | { data: unknown[] }>(
-        api.get(`/accounting/reports/${selectedReport}`, {
+    queryFn: () => {
+      const reportMeta = reportTypes.find((item) => item.id === selectedReport);
+      const isLedgerReport =
+        reportMeta && "ledger" in reportMeta && Boolean(reportMeta.ledger);
+      const path = isLedgerReport
+        ? `/accounting/ledger-reports/${selectedReport}`
+        : `/accounting/reports/${selectedReport}`;
+      return unwrap<FinancialSummaryReport | { data: unknown[] }>(
+        api.get(path, {
           params: {
             monthBs: reportUsesMonthFilter(selectedReport)
               ? reportMonth
@@ -540,7 +575,8 @@ export const AccountingManager = () => {
                 : undefined,
           },
         }),
-      ),
+      );
+    },
     enabled: tab === "reports",
   });
 
@@ -881,19 +917,15 @@ export const AccountingManager = () => {
     [structuresQuery.data, collectionForm.feeStructureId],
   );
 
-  if (!user || !ACCOUNTING_ACCESS_ROLES.includes(user.role)) {
+  // Allow primary/secondary finance roles OR Accounts module grant (admin MAC).
+  const hasAccountingAccess =
+    Boolean(user) &&
+    (ACCOUNTING_ACCESS_ROLES.includes(normalizeUserRole(user!.role)) ||
+      secondaryRoles.some((r) => ACCOUNTING_ACCESS_ROLES.includes(r)) ||
+      canAccessAccounts);
+
+  if (!hasAccountingAccess) {
     return null;
-  }
-
-  const isInitialLoading =
-    studentsQuery.isLoading ||
-    structuresQuery.isLoading ||
-    (isCollege
-      ? batchesQuery.isLoading || yearsQuery.isLoading
-      : classesQuery.isLoading);
-
-  if (isInitialLoading) {
-    return <LoadingState />;
   }
 
   const downloadReceipt = (id: string) => {
@@ -3099,6 +3131,11 @@ export const AccountingManager = () => {
             </div>
             {reportQuery.isLoading ? (
               <LoadingState />
+            ) : reportQuery.isError ? (
+              <EmptyState
+                title="Could not load report"
+                description={parseErrorMessage(reportQuery.error)}
+              />
             ) : financialSummary ? (
               <div id="accounting-report-print" className="space-y-6">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">

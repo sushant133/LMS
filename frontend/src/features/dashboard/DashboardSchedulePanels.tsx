@@ -18,6 +18,7 @@ import {
 } from "features/timetable/timetableMatrixUtils";
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
+import { useCanAccessModule } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 
 type YearOption = { _id: string; name: string; batchId?: string; level?: number };
@@ -40,6 +41,11 @@ export const DashboardSchedulePanels = () => {
   const isStudent = user?.role === "STUDENT";
   const isParent = user?.role === "PARENT";
   const canBrowseAll = !isStudent && !isParent;
+  // Honor module matrix so restricted staff (e.g. accountant) never fire 403s.
+  const canAccessTimetable = useCanAccessModule("timetable");
+  const canAccessExams = useCanAccessModule("examinations");
+  const canAccessAcademics = useCanAccessModule("academics");
+  const showSchedule = canAccessTimetable || canAccessExams;
 
   const [batchFilter, setBatchFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("");
@@ -47,7 +53,7 @@ export const DashboardSchedulePanels = () => {
   const batchesQuery = useQuery({
     queryKey: ["batches", "dashboard-schedule"],
     queryFn: () => unwrap<BatchOption[]>(api.get("/academics/batches")),
-    enabled: canBrowseAll && isCollege,
+    enabled: showSchedule && canBrowseAll && isCollege && canAccessAcademics,
     staleTime: 60_000,
   });
 
@@ -59,7 +65,7 @@ export const DashboardSchedulePanels = () => {
           params: batchFilter ? { batchId: batchFilter } : undefined,
         }),
       ),
-    enabled: canBrowseAll && isCollege,
+    enabled: showSchedule && canBrowseAll && isCollege && canAccessAcademics,
     staleTime: 60_000,
   });
 
@@ -79,7 +85,7 @@ export const DashboardSchedulePanels = () => {
       unwrap<TimetableSlotRow[]>(
         api.get("/timetable", { params: timetableParams }),
       ),
-    enabled: Boolean(user),
+    enabled: Boolean(user) && canAccessTimetable,
     staleTime: 60_000,
   });
 
@@ -100,14 +106,14 @@ export const DashboardSchedulePanels = () => {
           params: yearFilter && canBrowseAll ? { yearId: yearFilter } : undefined,
         }),
       ),
-    enabled: Boolean(user),
+    enabled: Boolean(user) && canAccessExams,
     staleTime: 60_000,
   });
 
   const examsQuery = useQuery({
     queryKey: ["exams", "dashboard-routine-labels"],
     queryFn: () => unwrap<ExamRecord[]>(api.get("/exams")),
-    enabled: Boolean(user),
+    enabled: Boolean(user) && canAccessExams,
     staleTime: 60_000,
   });
 
@@ -240,7 +246,13 @@ export const DashboardSchedulePanels = () => {
       .sort((a, b) => a.level - b.level || a.title.localeCompare(b.title));
   }, [isStudent, routines]);
 
-  const loading = timetableQuery.isLoading || routinesQuery.isLoading;
+  const loading =
+    (canAccessTimetable && timetableQuery.isLoading) ||
+    (canAccessExams && routinesQuery.isLoading);
+
+  if (!showSchedule) {
+    return null;
+  }
 
   if (loading) {
     return (
@@ -255,7 +267,7 @@ export const DashboardSchedulePanels = () => {
   return (
     <div className="space-y-6">
       {/* Filters for institution-wide view */}
-      {canBrowseAll && isCollege ? (
+      {canBrowseAll && isCollege && canAccessAcademics ? (
         <Card className="border-slate-200/80 shadow-sm">
           <CardContent className="flex flex-wrap items-end gap-3 py-4">
             <div className="min-w-[10rem]">
@@ -303,122 +315,126 @@ export const DashboardSchedulePanels = () => {
       ) : null}
 
       {/* Class timetable */}
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-          <CardTitle className="flex items-center gap-2">
-            <CalendarDays className="h-5 w-5 text-brand-700" />
-            {isStudent ? "My class timetable" : "Class timetable"}
-          </CardTitle>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/timetable">
-              <BookOpen className="mr-1.5 h-4 w-4" />
-              Open full timetable
-            </Link>
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {timetableTables.every((t) => t.slots.length === 0) ? (
-            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
-              {isStudent
-                ? "Your year timetable has not been published yet."
-                : "No class timetable slots found for this scope."}
-            </p>
-          ) : (
-            timetableTables.map((table) => {
-              if (table.slots.length === 0) return null;
-              const matrix = buildWeeklyMatrix(table.slots, {
-                saturdayIsHoliday: true,
-              });
-              return (
-                <div key={table.key} className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      {table.title}
-                    </h3>
-                    <Badge className="bg-slate-100 text-slate-700">
-                      {table.slots.length} period
-                      {table.slots.length === 1 ? "" : "s"}
-                    </Badge>
+      {canAccessTimetable ? (
+        <Card className="border-slate-200/80 shadow-sm">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-brand-700" />
+              {isStudent ? "My class timetable" : "Class timetable"}
+            </CardTitle>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/timetable">
+                <BookOpen className="mr-1.5 h-4 w-4" />
+                Open full timetable
+              </Link>
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {timetableTables.every((t) => t.slots.length === 0) ? (
+              <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                {isStudent
+                  ? "Your year timetable has not been published yet."
+                  : "No class timetable slots found for this scope."}
+              </p>
+            ) : (
+              timetableTables.map((table) => {
+                if (table.slots.length === 0) return null;
+                const matrix = buildWeeklyMatrix(table.slots, {
+                  saturdayIsHoliday: true,
+                });
+                return (
+                  <div key={table.key} className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        {table.title}
+                      </h3>
+                      <Badge className="bg-slate-100 text-slate-700">
+                        {table.slots.length} period
+                        {table.slots.length === 1 ? "" : "s"}
+                      </Badge>
+                    </div>
+                    <WeeklyTimetableGrid matrix={matrix} compact />
                   </div>
-                  <WeeklyTimetableGrid matrix={matrix} compact />
-                </div>
-              );
-            })
-          )}
-        </CardContent>
-      </Card>
+                );
+              })
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Exam routine */}
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-          <CardTitle className="flex items-center gap-2">
-            <ClipboardList className="h-5 w-5 text-brand-700" />
-            {isStudent ? "My exam routine" : "Exam routine"}
-          </CardTitle>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/exams">Open exams</Link>
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {routineTables.length === 0 ||
-          routineTables.every((t) => t.rows.length === 0) ? (
-            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
-              {isStudent
-                ? "No published exam routine for your batch/year yet."
-                : "No exam routine rows found for this scope."}
-            </p>
-          ) : (
-            routineTables.map((table) => (
-              <div key={table.key} className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  {table.title}
-                </h3>
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <Table>
-                    <TableHead>
-                      <tr>
-                        <Th>Exam</Th>
-                        <Th>Date (BS)</Th>
-                        <Th>Day</Th>
-                        <Th>Subject</Th>
-                        <Th>Time</Th>
-                        <Th>Hall</Th>
-                        <Th>Invigilator</Th>
-                      </tr>
-                    </TableHead>
-                    <TableBody>
-                      {table.rows.map((row) => (
-                        <tr key={row._id}>
-                          <Td className="text-xs font-medium text-slate-700">
-                            {examNameById.get(row.examId) ?? "Exam"}
-                          </Td>
-                          <Td className="whitespace-nowrap text-sm">
-                            {row.examDateBs}
-                          </Td>
-                          <Td className="text-sm">{row.day}</Td>
-                          <Td className="text-sm font-medium">
-                            {row.subjectName ?? "Subject"}
-                            {row.subjectCode ? (
-                              <span className="ml-1 text-xs text-slate-500">
-                                ({row.subjectCode})
-                              </span>
-                            ) : null}
-                          </Td>
-                          <Td className="whitespace-nowrap text-sm">
-                            {row.startTime}–{row.endTime}
-                          </Td>
-                          <Td className="text-sm">{row.examHall || "—"}</Td>
-                          <Td className="text-sm">{row.invigilator || "—"}</Td>
+      {canAccessExams ? (
+        <Card className="border-slate-200/80 shadow-sm">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-brand-700" />
+              {isStudent ? "My exam routine" : "Exam routine"}
+            </CardTitle>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/exams">Open exams</Link>
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {routineTables.length === 0 ||
+            routineTables.every((t) => t.rows.length === 0) ? (
+              <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                {isStudent
+                  ? "No published exam routine for your batch/year yet."
+                  : "No exam routine rows found for this scope."}
+              </p>
+            ) : (
+              routineTables.map((table) => (
+                <div key={table.key} className="space-y-2">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {table.title}
+                  </h3>
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <Table>
+                      <TableHead>
+                        <tr>
+                          <Th>Exam</Th>
+                          <Th>Date (BS)</Th>
+                          <Th>Day</Th>
+                          <Th>Subject</Th>
+                          <Th>Time</Th>
+                          <Th>Hall</Th>
+                          <Th>Invigilator</Th>
                         </tr>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHead>
+                      <TableBody>
+                        {table.rows.map((row) => (
+                          <tr key={row._id}>
+                            <Td className="text-xs font-medium text-slate-700">
+                              {examNameById.get(row.examId) ?? "Exam"}
+                            </Td>
+                            <Td className="whitespace-nowrap text-sm">
+                              {row.examDateBs}
+                            </Td>
+                            <Td className="text-sm">{row.day}</Td>
+                            <Td className="text-sm font-medium">
+                              {row.subjectName ?? "Subject"}
+                              {row.subjectCode ? (
+                                <span className="ml-1 text-xs text-slate-500">
+                                  ({row.subjectCode})
+                                </span>
+                              ) : null}
+                            </Td>
+                            <Td className="whitespace-nowrap text-sm">
+                              {row.startTime}–{row.endTime}
+                            </Td>
+                            <Td className="text-sm">{row.examHall || "—"}</Td>
+                            <Td className="text-sm">{row.invigilator || "—"}</Td>
+                          </tr>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 };

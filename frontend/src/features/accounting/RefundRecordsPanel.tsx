@@ -417,16 +417,13 @@ export const RefundRecordsPanel = () => {
     );
   }
 
-  if (studentsQuery.isError || batchesQuery.isError || yearsQuery.isError) {
-    return (
-      <EmptyState
-        title="Could not load student / batch lists"
-        description={parseErrorMessage(
+  // Student/batch pickers only needed for Process refund — soft-fail so register still works.
+  const pickerListError =
+    studentsQuery.isError || batchesQuery.isError || yearsQuery.isError
+      ? parseErrorMessage(
           studentsQuery.error ?? batchesQuery.error ?? yearsQuery.error,
-        )}
-      />
-    );
-  }
+        )
+      : null;
 
   return (
     <div className="space-y-4">
@@ -463,6 +460,13 @@ export const RefundRecordsPanel = () => {
           </div>
         </CardHeader>
       </Card>
+
+      {pickerListError && tab === "process" ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Student / batch lists could not load ({pickerListError}). The refund
+          register still works; ensure Accounting module access is granted.
+        </div>
+      ) : null}
 
       {tab === "register" ? (
         <>

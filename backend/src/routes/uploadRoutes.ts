@@ -195,9 +195,10 @@ router.post(
 );
 
 // ─── Accounting ─────────────────────────────────────────────────────────────
+// PRINCIPAL may attach for review; module-only Accounts WRITE also passes via authorize module grant.
 router.post(
   "/accounting",
-  authorize(...adminRoles, "ACCOUNTANT", "CASHIER", "AUDITOR"),
+  authorize(...adminRoles, "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"),
   uploadAccountingAttachments,
   uploadAccountingHandler
 );

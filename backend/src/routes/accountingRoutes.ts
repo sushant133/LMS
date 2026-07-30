@@ -127,7 +127,12 @@ router.post(
 );
 router.get(
   "/collections/:id/receipt",
-  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "STUDENT"),
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL", "STUDENT"),
+  // STUDENT path is enforced inside downloadFeeReceipt; staff need print_receipt
+  (req, res, next) => {
+    if (req.user?.role === "STUDENT") return next();
+    return requireAccountingPermission("print_receipt")(req, res, next);
+  },
   downloadFeeReceipt
 );
 router.get("/receipts", readers, requireAccountingPermission("read"), listFeeReceipts);
@@ -146,17 +151,17 @@ router.post("/refunds", managers, requireAccountingPermission("reverse_transacti
 router.get("/expenses", readers, requireAccountingPermission("read"), listExpenses);
 router.post("/expenses", managers, requireAccountingPermission("manage_expenses"), createExpense);
 router.put("/expenses/:id", managers, requireAccountingPermission("manage_expenses"), updateExpense);
-router.delete("/expenses/:id", admins, requireAccountingPermission("reverse_transaction"), deleteExpense);
+router.delete("/expenses/:id", managers, requireAccountingPermission("reverse_transaction"), deleteExpense);
 
 router.get("/purchases", readers, requireAccountingPermission("read"), listPurchases);
 router.post("/purchases", managers, requireAccountingPermission("manage_purchases"), createPurchase);
 router.put("/purchases/:id", managers, requireAccountingPermission("manage_purchases"), updatePurchase);
-router.delete("/purchases/:id", admins, requireAccountingPermission("reverse_transaction"), deletePurchase);
+router.delete("/purchases/:id", managers, requireAccountingPermission("reverse_transaction"), deletePurchase);
 
 router.get("/income", readers, requireAccountingPermission("read"), listIncome);
 router.post("/income", managers, requireAccountingPermission("manage_income"), createIncome);
 router.put("/income/:id", managers, requireAccountingPermission("manage_income"), updateIncome);
-router.delete("/income/:id", admins, requireAccountingPermission("reverse_transaction"), deleteIncome);
+router.delete("/income/:id", managers, requireAccountingPermission("reverse_transaction"), deleteIncome);
 
 // Salaries
 router.get("/salaries", readers, requireAccountingPermission("read"), listSalaries);

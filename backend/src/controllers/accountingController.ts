@@ -168,10 +168,11 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     .filter((item) => item.paidDateBs === today)
     .reduce((sum, item) => sum + item.amountPaidNpr, 0);
   const monthlyCollectionNpr = collections
-    .filter((item) => item.paidDateBs.startsWith(currentMonth))
+    .filter((item) => typeof item.paidDateBs === "string" && item.paidDateBs.startsWith(currentMonth))
     .reduce((sum, item) => sum + item.amountPaidNpr, 0);
 
   const feeByMonth = collections.reduce<Record<string, number>>((acc, item) => {
+    if (typeof item.paidDateBs !== "string" || item.paidDateBs.length < 7) return acc;
     const month = item.paidDateBs.slice(0, 7);
     acc[month] = (acc[month] ?? 0) + item.amountPaidNpr;
     return acc;
@@ -387,12 +388,17 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
   }).lean();
 
   const accounts = students.map((student) => {
-    const studentCollections = collections.filter((item) => item.studentId.toString() === student._id.toString());
+    const sid = student._id.toString();
+    const studentCollections = collections.filter(
+      (item) => item.studentId != null && String(item.studentId) === sid
+    );
     const totalPaid = studentCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
     const totalDiscount = studentCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
     const totalScholarship = studentCollections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
-    const lastPayment = studentCollections.sort((a, b) => b.paidDateBs.localeCompare(a.paidDateBs))[0];
-    const studentAwards = awards.filter((a) => a.studentId.toString() === student._id.toString());
+    const lastPayment = studentCollections
+      .filter((c) => typeof c.paidDateBs === "string")
+      .sort((a, b) => b.paidDateBs.localeCompare(a.paidDateBs))[0];
+    const studentAwards = awards.filter((a) => a.studentId != null && String(a.studentId) === sid);
 
     const primaryId = college ? student.batchId?.toString() : student.classId?.toString();
     const secondaryId = college ? student.yearId?.toString() : student.sectionId?.toString();
@@ -933,7 +939,12 @@ export const reverseFeeCollection = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(403, "This fiscal period is audit-locked. Cannot reverse.");
   }
 
-  const requiresApproval = await needsApprovalForAmount(schoolId, collection.amountPaidNpr, req.user!.role);
+  const requiresApproval = await needsApprovalForAmount(
+    schoolId,
+    collection.amountPaidNpr,
+    req.user!.role,
+    req.user!.userId
+  );
   if (requiresApproval) {
     const existing = await FinancialApproval.findOne({
       schoolId,
@@ -1157,7 +1168,12 @@ export const deleteExpense = asyncHandler(async (req: Request, res: Response) =>
   const expense = await AccountingExpense.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!expense) throw new ApiError(404, "Expense not found");
 
-  const requiresApproval = await needsApprovalForAmount(schoolId, expense.amountNpr, req.user!.role);
+  const requiresApproval = await needsApprovalForAmount(
+    schoolId,
+    expense.amountNpr,
+    req.user!.role,
+    req.user!.userId
+  );
   if (requiresApproval) {
     const approval = await FinancialApproval.create({
       schoolId,
@@ -1190,6 +1206,8 @@ export const createPurchase = asyncHandler(async (req: Request, res: Response) =
   const payload = accountingPurchaseSchema.parse(req.body);
   ensureValidBsDate(payload.purchaseDateBs);
   const schoolId = tenantObjectId(req);
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, payload.purchaseDateBs);
   const totalAmountNpr = payload.quantity * payload.unitPriceNpr;
   const voucherNumber =
     payload.voucherNumber?.trim() ||
@@ -1313,7 +1331,12 @@ export const deletePurchase = asyncHandler(async (req: Request, res: Response) =
   const purchase = await AccountingPurchase.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!purchase) throw new ApiError(404, "Purchase not found");
 
-  const requiresApproval = await needsApprovalForAmount(schoolId, purchase.totalAmountNpr, req.user!.role);
+  const requiresApproval = await needsApprovalForAmount(
+    schoolId,
+    purchase.totalAmountNpr,
+    req.user!.role,
+    req.user!.userId
+  );
   if (requiresApproval) {
     const approval = await FinancialApproval.create({
       schoolId,
@@ -1424,7 +1447,12 @@ export const deleteIncome = asyncHandler(async (req: Request, res: Response) => 
   const record = await AccountingIncome.findOne(withTenantScope(req, { _id: req.params.id, isDeleted: false }));
   if (!record) throw new ApiError(404, "Income record not found");
 
-  const requiresApproval = await needsApprovalForAmount(schoolId, record.amountNpr, req.user!.role);
+  const requiresApproval = await needsApprovalForAmount(
+    schoolId,
+    record.amountNpr,
+    req.user!.role,
+    req.user!.userId
+  );
   if (requiresApproval) {
     const approval = await FinancialApproval.create({
       schoolId,
@@ -1449,51 +1477,85 @@ export const deleteIncome = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const listSalaries = asyncHandler(async (req: Request, res: Response) => {
+  /**
+   * Avoid nested .populate() select quirks (mixed include/exclude projections throw
+   * MongoServerError and surface as HTTP 500). Resolve employee names with plain
+   * ObjectId lookups instead.
+   */
   const salaries = await SalaryPayment.find(withTenantScope(req, { isDeleted: false }))
-    .populate({ path: "teacherId", populate: { path: "user", select: "-password designation" } })
-    .populate("staffId")
     .sort({ monthBs: -1, createdAt: -1 })
     .lean();
 
+  const teacherIds = [
+    ...new Set(
+      salaries
+        .map((s) => (s.teacherId ? String(s.teacherId) : ""))
+        .filter(Boolean)
+    )
+  ];
+  const staffIds = [
+    ...new Set(
+      salaries
+        .map((s) => (s.staffId ? String(s.staffId) : ""))
+        .filter(Boolean)
+    )
+  ];
+
+  const [teachers, staffRows] = await Promise.all([
+    teacherIds.length
+      ? Teacher.find({ _id: { $in: teacherIds } })
+          .select("teacherCode user basicSalaryNpr")
+          .populate({ path: "user", select: "fullName email designation" })
+          .lean()
+      : Promise.resolve([]),
+    staffIds.length
+      ? CollegeStaff.find({ _id: { $in: staffIds } })
+          .select("fullName staffId department designation basicSalaryNpr")
+          .lean()
+      : Promise.resolve([])
+  ]);
+
+  const teacherById = new Map(
+    teachers.map((t) => {
+      const user = t.user as
+        | { _id?: unknown; fullName?: string; email?: string; designation?: string }
+        | null
+        | undefined;
+      return [
+        String(t._id),
+        {
+          _id: String(t._id),
+          teacherCode: t.teacherCode,
+          user: user
+            ? {
+                _id: user._id ? String(user._id) : undefined,
+                fullName: user.fullName,
+                email: user.email,
+                designation: user.designation
+              }
+            : undefined
+        }
+      ] as const;
+    })
+  );
+  const staffById = new Map(
+    staffRows.map((s) => [
+      String(s._id),
+      {
+        _id: String(s._id),
+        fullName: s.fullName ?? "",
+        staffId: s.staffId,
+        department: s.department,
+        designation: s.designation
+      }
+    ])
+  );
+
   const normalized = salaries.map((salary) => {
-    const staffRef = salary.staffId as
-      | {
-          _id?: { toString(): string };
-          fullName?: string;
-          staffId?: string;
-          department?: string;
-          designation?: string;
-        }
-      | string
-      | null
-      | undefined;
-    const teacherRef = salary.teacherId as
-      | {
-          _id?: { toString(): string };
-          user?: { fullName?: string; email?: string; designation?: string };
-          teacherCode?: string;
-        }
-      | string
-      | null
-      | undefined;
-    const collegeStaff =
-      staffRef && typeof staffRef === "object" && "fullName" in staffRef
-        ? {
-            _id: staffRef._id?.toString() ?? "",
-            fullName: staffRef.fullName ?? "",
-            staffId: staffRef.staffId,
-            department: staffRef.department,
-            designation: staffRef.designation
-          }
-        : undefined;
-    const teacher =
-      teacherRef && typeof teacherRef === "object" && teacherRef.user
-        ? {
-            _id: teacherRef._id?.toString() ?? "",
-            user: teacherRef.user,
-            teacherCode: teacherRef.teacherCode
-          }
-        : undefined;
+    const teacherId = salary.teacherId ? String(salary.teacherId) : undefined;
+    const staffId = salary.staffId ? String(salary.staffId) : undefined;
+    const teacher = teacherId ? teacherById.get(teacherId) : undefined;
+    const collegeStaff = staffId ? staffById.get(staffId) : undefined;
 
     const employeeName =
       salary.staffName ||
@@ -1506,26 +1568,19 @@ export const listSalaries = asyncHandler(async (req: Request, res: Response) => 
 
     return {
       ...salary,
-      _id: salary._id.toString(),
-      schoolId: salary.schoolId.toString(),
-      teacherId:
-        typeof teacherRef === "object" && teacherRef?._id
-          ? teacherRef._id.toString()
-          : typeof teacherRef === "string"
-            ? teacherRef
-            : undefined,
-      staffId:
-        typeof staffRef === "object" && staffRef?._id
-          ? staffRef._id.toString()
-          : typeof staffRef === "string"
-            ? staffRef
-            : undefined,
+      _id: String(salary._id),
+      schoolId: salary.schoolId ? String(salary.schoolId) : "",
+      teacherId,
+      staffId,
       teacher,
       collegeStaff,
       employeeName,
       department,
       designation,
-      createdBy: salary.createdBy.toString()
+      createdBy: salary.createdBy ? String(salary.createdBy) : "",
+      paymentMethod: salary.paymentMethod || "BANK_TRANSFER",
+      status: salary.status || "DRAFT",
+      attachments: Array.isArray(salary.attachments) ? salary.attachments : []
     };
   });
 
@@ -1812,10 +1867,11 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       break;
     }
     case "salary-payments": {
-      const filter: Record<string, unknown> = { schoolId };
+      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
       if (monthBs) filter.monthBs = monthBs;
+      // Flat populate (include-only) — avoid nested mixed projections
       data = await SalaryPayment.find(filter)
-        .populate({ path: "teacherId", populate: { path: "user", select: "-password" } })
+        .populate({ path: "teacherId", populate: { path: "user", select: "fullName email designation" } })
         .populate("staffId")
         .sort({ monthBs: -1 })
         .lean();

@@ -1,4 +1,5 @@
 import {
+  applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
   canAccessModule,
   hasModuleAction,
@@ -6,6 +7,7 @@ import {
   resolveModuleAccessMode,
   resolveModuleFromRoutePath,
   TEACHER_BASELINE_MODULE_KEYS,
+  userHasFinanceRole,
   type ErpModuleKey,
   type ModuleAccessMap,
   type ModuleAccessMode,
@@ -23,6 +25,7 @@ import { useAuth } from "features/auth/AuthProvider";
  * (unconfigured = full legacy access via empty map → WRITE).
  * Staff only see / use modules the admin granted (NONE modules are hidden).
  * Teachers always keep teaching baseline modules (Academic Management, etc.).
+ * Finance roles keep Accounts baseline (mirror backend).
  * Do not surface “disabled by administrator” messages — simply hide or disable actions.
  */
 export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
@@ -32,15 +35,23 @@ export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
   const isTeacher =
     user?.role === "TEACHER" ||
     (user?.secondaryRoles ?? []).includes("TEACHER");
+  const secondaryRoles = user?.secondaryRoles ?? [];
+  const isFinance = userHasFinanceRole(user?.role, secondaryRoles);
 
   const map = useMemo(() => {
-    const raw = (user?.moduleAccess ?? {}) as ModuleAccessMap;
-    // Mirror backend applyTeacherRoleBaseline so client nav/actions match API
+    let raw = (user?.moduleAccess ?? {}) as ModuleAccessMap;
+    // Mirror backend baselines so client nav/actions match API
     if (isTeacher && Object.keys(raw).length > 0) {
-      return applyTeacherRoleBaseline(raw) as ModuleAccessMap;
+      raw = applyTeacherRoleBaseline(raw) as ModuleAccessMap;
+    }
+    if (isFinance && Object.keys(raw).length > 0) {
+      raw = applyFinanceRoleBaseline(raw, [
+        user?.role ?? "",
+        ...secondaryRoles,
+      ]) as ModuleAccessMap;
     }
     return raw;
-  }, [user?.moduleAccess, isTeacher]);
+  }, [user?.moduleAccess, user?.role, isTeacher, isFinance, secondaryRoles]);
 
   const actionsMap = (user?.moduleActions ?? {}) as ModuleActionsMap;
   /** Only Super Admin skips the matrix entirely. */

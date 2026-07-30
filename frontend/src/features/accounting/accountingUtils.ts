@@ -179,11 +179,11 @@ export const matchesStudentSearch = (
   }
 
   return (
-    student.user.fullName.toLowerCase().includes(normalized) ||
-    student.user.email.toLowerCase().includes(normalized) ||
-    (student.user.phone ?? "").toLowerCase().includes(normalized) ||
-    student.admissionNumber.toLowerCase().includes(normalized) ||
-    student.guardianPhone.toLowerCase().includes(normalized)
+    (student.user?.fullName ?? "").toLowerCase().includes(normalized) ||
+    (student.user?.email ?? "").toLowerCase().includes(normalized) ||
+    (student.user?.phone ?? "").toLowerCase().includes(normalized) ||
+    (student.admissionNumber ?? "").toLowerCase().includes(normalized) ||
+    (student.guardianPhone ?? "").toLowerCase().includes(normalized)
   );
 };
 

@@ -163,6 +163,24 @@ export const ModuleAccessControlPanel = ({
     });
   };
 
+  /** When enabling Accounting / Cashier / Auditor / Principal secondary role. */
+  const ensureFinanceModulesInDraft = (role: UserRole) => {
+    setDraftAccess((current) => {
+      const next = { ...current };
+      if (next.accounts === "NONE" || !next.accounts) {
+        next.accounts =
+          role === "AUDITOR" || role === "PRINCIPAL" ? "READ_ONLY" : "WRITE";
+      }
+      if (next.dashboard === "NONE" || !next.dashboard) {
+        next.dashboard = "WRITE";
+      }
+      if (next.profile === "NONE" || !next.profile) {
+        next.profile = "WRITE";
+      }
+      return next;
+    });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (payload: {
       moduleAccess: Record<string, ModuleAccessMode>;
@@ -611,6 +629,14 @@ export const ModuleAccessControlPanel = ({
                               );
                               if (option.value === "TEACHER") {
                                 ensureTeacherModulesInDraft();
+                              }
+                              if (
+                                option.value === "ACCOUNTANT" ||
+                                option.value === "CASHIER" ||
+                                option.value === "AUDITOR" ||
+                                option.value === "PRINCIPAL"
+                              ) {
+                                ensureFinanceModulesInDraft(option.value);
                               }
                             } else {
                               setSecondaryRoles((current) =>

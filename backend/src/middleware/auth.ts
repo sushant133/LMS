@@ -113,10 +113,21 @@ export const authorize =
          * READ_ONLY → GET only; WRITE → full methods (moduleAccessGuard still enforces).
          */
         const moduleKey = resolveModuleForRequest(req);
+        const accessMap = await getUserModuleAccessMap(req.user!.userId);
+        const isRead = ["GET", "HEAD", "OPTIONS"].includes(req.method);
+
+        // Accounts staff need student + academic batch/year lists for fee/refund pickers
+        // (same dependency as moduleAccessGuard accounts→students/academics).
+        if (
+          isRead &&
+          (moduleKey === "students" || moduleKey === "academics") &&
+          canAccessModule(accessMap, "accounts")
+        ) {
+          return next();
+        }
+
         if (moduleKey) {
-          const accessMap = await getUserModuleAccessMap(req.user!.userId);
           if (canAccessModule(accessMap, moduleKey)) {
-            const isRead = ["GET", "HEAD", "OPTIONS"].includes(req.method);
             if (isRead || canWriteModule(accessMap, moduleKey)) {
               return next();
             }

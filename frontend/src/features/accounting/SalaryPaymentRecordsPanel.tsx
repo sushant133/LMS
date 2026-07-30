@@ -234,9 +234,10 @@ export const SalaryPaymentRecordsPanel = () => {
     if (method) list = list.filter((r) => r.paymentMethod === method);
     if (status) list = list.filter((r) => r.status === status);
     if (monthBs) {
-      list = list.filter(
-        (r) => r.monthBs === monthBs || r.monthBs.startsWith(monthBs),
-      );
+      list = list.filter((r) => {
+        const m = r.monthBs ?? "";
+        return m === monthBs || m.startsWith(monthBs);
+      });
     }
     if (deptFilter) {
       list = list.filter(
@@ -417,6 +418,15 @@ export const SalaryPaymentRecordsPanel = () => {
   };
 
   if (salariesQuery.isLoading) return <LoadingState />;
+
+  if (salariesQuery.isError) {
+    return (
+      <EmptyState
+        title="Could not load salary records"
+        description={parseErrorMessage(salariesQuery.error)}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -640,11 +650,11 @@ export const SalaryPaymentRecordsPanel = () => {
                         </Td>
                         <Td>{row.paidDateBs || "—"}</Td>
                         <Td className="text-sm">
-                          {row.paymentMethod.replace(/_/g, " ")}
+                          {(row.paymentMethod ?? "—").replace(/_/g, " ")}
                         </Td>
                         <Td>
-                          <Badge className={statusBadge(row.status)}>
-                            {row.status}
+                          <Badge className={statusBadge(row.status ?? "DRAFT")}>
+                            {row.status ?? "DRAFT"}
                           </Badge>
                         </Td>
                         <Td>

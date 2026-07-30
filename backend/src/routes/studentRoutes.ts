@@ -19,11 +19,16 @@ const profileReaders = authorize(
 );
 
 /** List/get: institution staff + scoped parents/students. COLLEGE_VIEWER inherits GET via COLLEGE_ADMIN.
- * LIBRARY_STAFF needs list for issue-book borrower picker. */
+ * LIBRARY_STAFF needs list for issue-book borrower picker.
+ * Finance roles (accountant/cashier/auditor/principal) need student roster for fee/refund pickers. */
 const studentReaders = authorize(
+  "SUPER_ADMIN",
   "COLLEGE_ADMIN",
   "TEACHER",
   "ACCOUNTANT",
+  "CASHIER",
+  "AUDITOR",
+  "PRINCIPAL",
   "PARENT",
   "STUDENT",
   "LIBRARY_STAFF"

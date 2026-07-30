@@ -465,16 +465,13 @@ export const StudentFeeRecordsPanel = () => {
     );
   }
 
-  if (studentsQuery.isError || batchesQuery.isError || yearsQuery.isError) {
-    return (
-      <EmptyState
-        title="Could not load student / batch lists"
-        description={parseErrorMessage(
+  // Picker lists are optional for the ledger/receipts views — soft-fail only.
+  const pickerListError =
+    studentsQuery.isError || batchesQuery.isError || yearsQuery.isError
+      ? parseErrorMessage(
           studentsQuery.error ?? batchesQuery.error ?? yearsQuery.error,
-        )}
-      />
-    );
-  }
+        )
+      : null;
 
   const selectedHistory = historyQuery.data;
   const activeScholarshipForYear = selectedHistory?.scholarshipAwards?.find(
@@ -520,6 +517,14 @@ export const StudentFeeRecordsPanel = () => {
           </div>
         </CardHeader>
       </Card>
+
+      {pickerListError && (tab === "record" || tab === "scholarship") ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Student / batch lists could not load ({pickerListError}). The ledger
+          still works; ask an admin to grant Accounting module access if pickers
+          stay empty.
+        </div>
+      ) : null}
 
       {/* ─── Ledger ─── */}
       {tab === "ledger" ? (

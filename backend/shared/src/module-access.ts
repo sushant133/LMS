@@ -313,7 +313,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     key: "accounts",
     label: "Accounting",
     description: "Accounting, journals, ledgers, approvals",
-    apiPrefixes: ["/accounting"],
+    apiPrefixes: ["/accounting", "/uploads/accounting"],
     routePrefixes: ["/accounting"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "configure"]
   },
@@ -585,6 +585,59 @@ export const applyTeacherRoleBaseline = (
   return next;
 };
 
+/** Primary/secondary roles that own the Accounting console by job function. */
+export const FINANCE_BASELINE_ROLES = [
+  "ACCOUNTANT",
+  "CASHIER",
+  "AUDITOR",
+  "PRINCIPAL"
+] as const;
+
+/**
+ * Finance roles always keep Accounts module access when an admin saves a custom
+ * matrix (same idea as teacher baseline). Admins may still set READ_ONLY.
+ * - ACCOUNTANT / CASHIER → WRITE (operational)
+ * - AUDITOR / PRINCIPAL → READ_ONLY (review / approve elsewhere by role)
+ */
+export const applyFinanceRoleBaseline = (
+  map: ModuleAccessMap | null | undefined,
+  roles: readonly string[]
+): ModuleAccessMap => {
+  if (!map || !hasConfiguredModuleAccess(map)) {
+    return map ?? {};
+  }
+  const normalized = roles.map((r) => String(r).toUpperCase());
+  const isAccountant = normalized.includes("ACCOUNTANT");
+  const isCashier = normalized.includes("CASHIER");
+  const isAuditor = normalized.includes("AUDITOR");
+  const isPrincipal = normalized.includes("PRINCIPAL");
+  if (!isAccountant && !isCashier && !isAuditor && !isPrincipal) {
+    return map;
+  }
+
+  const next: ModuleAccessMap = { ...map };
+  const mode = next.accounts;
+  if (mode === undefined || mode === "NONE") {
+    next.accounts = isAccountant || isCashier ? "WRITE" : "READ_ONLY";
+  }
+  // Dashboard always available for finance staff landing
+  if (next.dashboard === undefined || next.dashboard === "NONE") {
+    next.dashboard = "WRITE";
+  }
+  if (next.profile === undefined || next.profile === "NONE") {
+    next.profile = "WRITE";
+  }
+  return next;
+};
+
+export const userHasFinanceRole = (
+  role: string | undefined,
+  secondaryRoles?: readonly string[] | null
+): boolean => {
+  const all = [role, ...(secondaryRoles ?? [])].filter(Boolean).map((r) => String(r).toUpperCase());
+  return FINANCE_BASELINE_ROLES.some((r) => all.includes(r));
+};
+
 /**
  * Admin UI groups — only modules an admin typically assigns to staff/teachers.
  * Dashboard & profile are always available (self-service) and not listed here.
@@ -637,7 +690,8 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
   {
     id: "finance",
     title: "Finance & HR",
-    description: "Accounting, institutional finance archive, fees, and payroll",
+    description:
+      "Accounting console needs Accounts (Manage). Student fee pickers work automatically with Accounts; Fees/HR are separate modules.",
     keys: ["accounts", "finance-management", "fees", "hr"]
   },
   {

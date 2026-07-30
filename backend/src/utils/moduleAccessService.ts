@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import {
+  applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
   expandModuleAccessMap,
   expandModuleActionsMap,
@@ -11,6 +12,7 @@ import {
   normalizeUserRole,
   resolveModuleAccessMode,
   resolveModuleFromApiPath,
+  userHasFinanceRole,
   type ErpModuleKey,
   type ModuleAccessMap,
   type ModuleAccessMode,
@@ -74,13 +76,15 @@ export const getUserModuleAccessMap = async (userId: string): Promise<ModuleAcce
     return {};
   }
   let map = mapFromUserDoc(user.moduleAccess);
+  const secondary = user.secondaryRoles as UserRole[] | undefined;
   // Teachers keep syllabus/plans/attendance tools even after an admin saves
   // module access (e.g. Principal designation + admin sections).
-  if (
-    userHasTeacherRole(user.role, user.secondaryRoles as UserRole[] | undefined) &&
-    hasConfiguredModuleAccess(map)
-  ) {
+  if (userHasTeacherRole(user.role, secondary) && hasConfiguredModuleAccess(map)) {
     map = applyTeacherRoleBaseline(map);
+  }
+  // Accountants / cashiers / auditors / principals keep Accounts when matrix was saved
+  if (userHasFinanceRole(user.role as string, secondary) && hasConfiguredModuleAccess(map)) {
+    map = applyFinanceRoleBaseline(map, [user.role as string, ...(secondary ?? [])]);
   }
   return map;
 };
@@ -147,6 +151,12 @@ export const getFullPermissionStateForUser = async (
     hasConfiguredModuleAccess(map)
   ) {
     map = applyTeacherRoleBaseline(map);
+  }
+  if (
+    userHasFinanceRole(effectiveRole as string, secondary) &&
+    hasConfiguredModuleAccess(map)
+  ) {
+    map = applyFinanceRoleBaseline(map, [effectiveRole as string, ...secondary]);
   }
   const actions = actionsFromUserDoc(user.moduleActions);
   return {

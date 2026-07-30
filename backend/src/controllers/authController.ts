@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import {
   activeSchoolSchema,
+  applyFinanceRoleBaseline,
   applyTeacherRoleBaseline,
   expandModuleAccessMap,
   getInstitutionPermissions,
@@ -12,6 +13,7 @@ import {
   sanitizeUserDisplayName,
   selfPasswordChangeSchema,
   selfProfileUpdateSchema,
+  userHasFinanceRole,
   type AuthResponse,
   type ModuleAccessMap,
   type SchoolRecord,
@@ -109,6 +111,13 @@ const getSafeUser = async (userId: string) => {
   // Teachers keep teaching modules even when admin saved a custom access map
   if (isTeacherAccount && Object.keys(rawAccess).length > 0) {
     rawAccess = applyTeacherRoleBaseline(rawAccess);
+  }
+  // Finance roles keep Accounts module when a custom matrix was saved
+  if (userHasFinanceRole(user.role as string, secondaryRoles) && Object.keys(rawAccess).length > 0) {
+    rawAccess = applyFinanceRoleBaseline(rawAccess, [
+      user.role as string,
+      ...secondaryRoles
+    ]);
   }
   const moduleAccess = expandModuleAccessMap(rawAccess);
   const moduleAccessConfigured = Object.keys(rawAccess).length > 0;

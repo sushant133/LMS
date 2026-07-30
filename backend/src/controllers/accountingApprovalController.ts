@@ -26,6 +26,13 @@ const rejectionSchema = z.object({
 const canApprove = (role: string): boolean =>
   ACCOUNTING_APPROVER_ROLES.includes(normalizeUserRole(role));
 
+const userCanApprove = async (userId: string, primaryRole: string): Promise<boolean> => {
+  if (canApprove(primaryRole) || isInstitutionAdmin(primaryRole)) return true;
+  const { getUserSecondaryRoles } = await import("../utils/moduleAccessService.js");
+  const secondary = await getUserSecondaryRoles(userId);
+  return secondary.some((role) => canApprove(role) || isInstitutionAdmin(role));
+};
+
 const getEntityAmount = async (
   entityType: string,
   entityId: string,
@@ -118,7 +125,7 @@ export const requestFinancialApproval = asyncHandler(async (req: Request, res: R
 });
 
 export const approveFinancialApproval = asyncHandler(async (req: Request, res: Response) => {
-  if (!canApprove(req.user!.role)) {
+  if (!(await userCanApprove(req.user!.userId, req.user!.role))) {
     throw new ApiError(403, "Only Principal or Finance Administrator can approve");
   }
 
@@ -175,7 +182,7 @@ export const approveFinancialApproval = asyncHandler(async (req: Request, res: R
 });
 
 export const rejectFinancialApproval = asyncHandler(async (req: Request, res: Response) => {
-  if (!canApprove(req.user!.role)) {
+  if (!(await userCanApprove(req.user!.userId, req.user!.role))) {
     throw new ApiError(403, "Only Principal or Finance Administrator can reject");
   }
 
@@ -212,9 +219,11 @@ export const rejectFinancialApproval = asyncHandler(async (req: Request, res: Re
 export const needsApprovalForAmount = async (
   schoolId: ReturnType<typeof tenantObjectId>,
   amountNpr: number,
-  userRole: string
+  userRole: string,
+  userId?: string
 ): Promise<boolean> => {
   if (isInstitutionAdmin(userRole) || canApprove(userRole)) return false;
+  if (userId && (await userCanApprove(userId, userRole))) return false;
   const settings = await AccountingSettings.findOne({ schoolId }).lean();
   const threshold = settings?.approvalThresholdNpr ?? 25000;
   return amountNpr >= threshold;

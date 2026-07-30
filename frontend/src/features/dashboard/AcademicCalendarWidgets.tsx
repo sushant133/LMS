@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
+import { useCanAccessModule } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { getEventTypeLabel } from "features/academic-calendar/academicCalendarUtils";
 
@@ -54,13 +55,20 @@ const formatRangeMeta = (start: string, end: string): string =>
   start === end ? start : `${start} → ${end}`;
 
 export const AcademicCalendarWidgets = () => {
+  const canAccessCalendar = useCanAccessModule("academic-calendar");
+
   const dashboardQuery = useQuery({
     queryKey: ["academic-calendar", "dashboard"],
     queryFn: () =>
       unwrap<AcademicCalendarDashboard>(
         api.get("/academic-calendar/dashboard"),
       ),
+    enabled: canAccessCalendar,
   });
+
+  // Staff without Academic Calendar module (e.g. accountant with only Accounts)
+  // must not hit the API — avoids noisy 403s on the dashboard.
+  if (!canAccessCalendar) return null;
 
   if (dashboardQuery.isPending) {
     return (
