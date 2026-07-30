@@ -1,10 +1,10 @@
 import type { NextFunction, Request, Response } from "express";
 import {
   canAccessModule,
-  canManageInstitution,
   canWriteModule,
   hasModuleAction,
   inferActionFromApiPath,
+  isSystemAdministrator,
   MODULE_ACCESS_DENIED_MESSAGE,
   MODULE_ACCESS_DISABLED_MESSAGE,
   normalizeModuleAccessMode,
@@ -56,7 +56,9 @@ export const enforceModuleAccess = async (
 ): Promise<void> => {
   try {
     if (!req.user) return next();
-    if (canManageInstitution(req.user.role)) return next();
+    // Super Admin always unrestricted. Administrators (COLLEGE_ADMIN) honor their matrix
+    // when Super Admin has configured module access; unconfigured = full legacy access.
+    if (isSystemAdministrator(req.user.role)) return next();
     if (isModuleAccessBypassPath(req.method, req.originalUrl || req.path || "")) return next();
 
     const originalPath = (req.originalUrl || req.path || "").split("?")[0] ?? "";

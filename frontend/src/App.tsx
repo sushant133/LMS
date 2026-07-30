@@ -229,11 +229,49 @@ export default function App() {
               <Route path="/students/:studentId/profile" element={<LazyRoute><StudentProfilePage /></LazyRoute>} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["TEACHER"]} />}>
+            {/* Teachers: My Attendance. Staff with Module Access (teacher/staff attendance) also allowed. */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "TEACHER",
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "COLLEGE_STAFF",
+                    "LIBRARY_STAFF",
+                    "LABORATORY_STAFF",
+                    "ACCOUNTANT",
+                    "PRINCIPAL",
+                    "CASHIER",
+                    "AUDITOR",
+                  ]}
+                />
+              }
+            >
               <Route path="/attendance" element={<AttendancePage />} />
             </Route>
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
+            {/* Attendance Management hub — admins + anyone granted teacher/staff/attendance modules */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "TEACHER",
+                    "COLLEGE_STAFF",
+                    "LIBRARY_STAFF",
+                    "LABORATORY_STAFF",
+                    "ACCOUNTANT",
+                    "PRINCIPAL",
+                    "CASHIER",
+                    "AUDITOR",
+                  ]}
+                />
+              }
+            >
               <Route path="/attendance-view" element={<AttendancePage />} />
             </Route>
 

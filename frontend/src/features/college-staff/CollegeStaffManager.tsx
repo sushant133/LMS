@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   COLLEGE_STAFF_CATEGORIES,
@@ -18,6 +18,7 @@ import { AddressFields } from "components/shared/AddressFields";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
+import { PhoneLink } from "components/shared/PhoneLink";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -1006,7 +1007,9 @@ export const CollegeStaffManager = ({
                       <Td>{staff.department ?? "—"}</Td>
                       <Td>{staff.designation}</Td>
                       <Td className="text-xs">{staff.user?.email ?? staff.email ?? "—"}</Td>
-                      <Td>{staff.phone}</Td>
+                      <Td className="text-sm">
+                        <PhoneLink phone={staff.phone} />
+                      </Td>
                       <Td>
                         <div className="flex flex-col gap-1">
                           <Badge
@@ -1196,53 +1199,80 @@ export const CollegeStaffManager = ({
               )}
             </div>
             <div className="grid gap-2 text-sm md:grid-cols-2">
-              {[
-                ["Employee ID", viewing.staffId],
-                ["Full name", viewing.fullName],
-                ["Email / Login ID", viewing.user?.email ?? viewing.email ?? "—"],
-                ["Phone", viewing.phone],
-                ["Gender", viewing.gender],
-                ["Date of birth", viewing.dateOfBirthBs ?? "—"],
+              {(
                 [
-                  "Staff role",
-                  categoryDisplayLabel(viewing.category, viewing.customRoleLabel),
-                ],
-                ["ERP login role", viewing.user?.role ?? categoryLoginRoleLabel(viewing.category)],
-                ["Department", viewing.department ?? "—"],
-                ["Designation", viewing.designation],
-                ["Joining date", viewing.joinedDateBs],
-                ["Qualification", viewing.qualification ?? "—"],
-                ["Experience", `${viewing.experienceYears ?? 0} years`],
-                ["Employment status", viewing.status],
-                ["Account status", viewing.user?.isActive ? "Active" : "Inactive"],
-                [
-                  "Email delivery",
-                  viewing.credentialsEmailError
-                    ? `${viewing.credentialsEmailStatus ?? "PENDING"} (${viewing.credentialsEmailError})`
-                    : (viewing.credentialsEmailStatus ?? "PENDING"),
-                ],
-                ["Salary", formatCurrencyNpr(viewing.basicSalaryNpr)],
-                [
-                  "Emergency contact",
-                  [viewing.emergencyContactName, viewing.emergencyContactPhone]
-                    .filter(Boolean)
-                    .join(" · ") || "—",
-                ],
-                [
-                  "Address",
+                  ["Employee ID", viewing.staffId],
+                  ["Full name", viewing.fullName],
                   [
-                    viewing.address?.streetAddress,
-                    viewing.address?.municipality,
-                    viewing.address?.district,
-                    viewing.address?.province,
-                  ]
-                    .filter(Boolean)
-                    .join(", ") || "—",
-                ],
-                ["Remarks", viewing.remarks ?? "—"],
-              ].map(([label, value]) => (
-                <div key={label as string}>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+                    "Email / Login ID",
+                    viewing.user?.email ?? viewing.email ?? "—",
+                  ],
+                  ["Phone", <PhoneLink key="phone" phone={viewing.phone} />],
+                  ["Gender", viewing.gender],
+                  ["Date of birth", viewing.dateOfBirthBs ?? "—"],
+                  [
+                    "Staff role",
+                    categoryDisplayLabel(
+                      viewing.category,
+                      viewing.customRoleLabel,
+                    ),
+                  ],
+                  [
+                    "ERP login role",
+                    viewing.user?.role ??
+                      categoryLoginRoleLabel(viewing.category),
+                  ],
+                  ["Department", viewing.department ?? "—"],
+                  ["Designation", viewing.designation],
+                  ["Joining date", viewing.joinedDateBs],
+                  ["Qualification", viewing.qualification ?? "—"],
+                  [
+                    "Experience",
+                    `${viewing.experienceYears ?? 0} years`,
+                  ],
+                  ["Employment status", viewing.status],
+                  [
+                    "Account status",
+                    viewing.user?.isActive ? "Active" : "Inactive",
+                  ],
+                  [
+                    "Email delivery",
+                    viewing.credentialsEmailError
+                      ? `${viewing.credentialsEmailStatus ?? "PENDING"} (${viewing.credentialsEmailError})`
+                      : (viewing.credentialsEmailStatus ?? "PENDING"),
+                  ],
+                  ["Salary", formatCurrencyNpr(viewing.basicSalaryNpr)],
+                  [
+                    "Emergency contact",
+                    viewing.emergencyContactPhone ? (
+                      <span key="emergency">
+                        {viewing.emergencyContactName
+                          ? `${viewing.emergencyContactName} · `
+                          : null}
+                        <PhoneLink phone={viewing.emergencyContactPhone} />
+                      </span>
+                    ) : (
+                      viewing.emergencyContactName || "—"
+                    ),
+                  ],
+                  [
+                    "Address",
+                    [
+                      viewing.address?.streetAddress,
+                      viewing.address?.municipality,
+                      viewing.address?.district,
+                      viewing.address?.province,
+                    ]
+                      .filter(Boolean)
+                      .join(", ") || "—",
+                  ],
+                  ["Remarks", viewing.remarks ?? "—"],
+                ] as Array<[string, ReactNode]>
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    {label}
+                  </p>
                   <p className="font-medium text-slate-900">{value}</p>
                 </div>
               ))}

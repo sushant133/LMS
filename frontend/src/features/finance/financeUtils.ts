@@ -194,18 +194,22 @@ export const isPdfAttachment = (mime?: string, name?: string) => {
   return /\.pdf$/i.test(name ?? "");
 };
 
-/** Sum income, expenses, and net for the current (filtered) transaction list. */
+/** Sum income, expenses, credit, and net for the current (filtered) transaction list. */
 export function summarizeTransactionTotals(rows: FinanceTransactionRecord[]) {
   let totalIncomeNpr = 0;
   let totalExpensesNpr = 0;
+  let totalCreditNpr = 0;
   for (const r of rows) {
-    if (r.transactionType === "INCOME") totalIncomeNpr += Number(r.amountNpr) || 0;
-    else totalExpensesNpr += Number(r.amountNpr) || 0;
+    const amount = Number(r.amountNpr) || 0;
+    if (r.transactionType === "INCOME") totalIncomeNpr += amount;
+    else if (r.transactionType === "CREDIT") totalCreditNpr += amount;
+    else if (r.transactionType === "EXPENSE") totalExpensesNpr += amount;
   }
   return {
     totalIncomeNpr,
     totalExpensesNpr,
-    /** Net = income − expenses */
+    totalCreditNpr,
+    /** Net cash position = income − expenses (credit excluded until settled) */
     totalAmountNpr: totalIncomeNpr - totalExpensesNpr,
     count: rows.length,
   };
@@ -253,6 +257,7 @@ export function exportFinanceReportExcel(report: FinanceReportResponse) {
   const footer = [
     totalRow("TOTAL INCOME", report.totals.incomeNpr),
     totalRow("TOTAL EXPENSES", report.totals.expenseNpr),
+    totalRow("TOTAL CREDIT", report.totals.creditNpr ?? 0),
     totalRow("TOTAL AMOUNT (NET)", report.totals.netNpr),
   ];
 
@@ -321,6 +326,7 @@ export function exportTransactionsExcel(rows: FinanceTransactionRecord[]) {
   const footer = [
     totalRow("TOTAL INCOME", totals.totalIncomeNpr),
     totalRow("TOTAL EXPENSES", totals.totalExpensesNpr),
+    totalRow("TOTAL CREDIT", totals.totalCreditNpr),
     totalRow("TOTAL AMOUNT (NET)", totals.totalAmountNpr),
   ];
 
@@ -380,8 +386,11 @@ export function buildFinanceLedger(
   let totalDebitNpr = 0;
   let totalCreditNpr = 0;
   const lines: FinanceLedgerLine[] = sorted.map((r) => {
+    // Cash ledger: INCOME credits cash; EXPENSE debits cash.
+    // CREDIT (unsettled) is excluded from cash debit/credit columns.
     const isIncome = r.transactionType === "INCOME";
-    const debitNpr = isIncome ? 0 : r.amountNpr;
+    const isExpense = r.transactionType === "EXPENSE";
+    const debitNpr = isExpense ? r.amountNpr : 0;
     const creditNpr = isIncome ? r.amountNpr : 0;
     totalDebitNpr += debitNpr;
     totalCreditNpr += creditNpr;
@@ -390,7 +399,11 @@ export function buildFinanceLedger(
     const party = isIncome
       ? r.incomeSource?.trim() || r.vendorPayee?.trim() || ""
       : r.vendorPayee?.trim() || "";
-    const particulars = party ? `${r.title} — ${party}` : r.title;
+    const particulars = party
+      ? `${r.title} — ${party}`
+      : r.transactionType === "CREDIT"
+        ? `${r.title} (credit)`
+        : r.title;
 
     return {
       dateBs: r.dateBs,
@@ -477,6 +490,7 @@ export function exportTransactionsLedgerExcel(
     totalLine,
     summary("TOTAL INCOME", totals.totalIncomeNpr),
     summary("TOTAL EXPENSES", totals.totalExpensesNpr),
+    summary("TOTAL CREDIT", totals.totalCreditNpr),
     summary("TOTAL AMOUNT (NET)", totals.totalAmountNpr),
   ];
 
@@ -579,6 +593,7 @@ const buildLedgerHtml = (
   <div class="summary">
     <div>Total income<strong>${formatFinanceAmount(totals.totalIncomeNpr)}</strong></div>
     <div>Total expenses<strong>${formatFinanceAmount(totals.totalExpensesNpr)}</strong></div>
+    <div>Total credit<strong>${formatFinanceAmount(totals.totalCreditNpr)}</strong></div>
     <div>Total amount (net)<strong>${formatFinanceAmount(totals.totalAmountNpr)}</strong></div>
   </div>
   <p class="note">Debit = Expense · Credit = Income · Balance = cumulative Credit − Debit. This ledger is independent of the Accounting module.</p>
@@ -851,6 +866,7 @@ export async function exportTransactionsLedgerPdf(
   const boxes = [
     { label: "Total income", value: totals.totalIncomeNpr },
     { label: "Total expenses", value: totals.totalExpensesNpr },
+    { label: "Total credit", value: totals.totalCreditNpr },
     { label: "Total amount (net)", value: totals.totalAmountNpr },
   ];
   boxes.forEach((box, i) => {
@@ -919,6 +935,7 @@ export function printFinanceReport(report: FinanceReportResponse) {
     <div class="totals">
       <div>Total expenses: ${escapeHtml(formatFinanceAmount(report.totals.expenseNpr))}</div>
       <div>Total income: ${escapeHtml(formatFinanceAmount(report.totals.incomeNpr))}</div>
+      <div>Total credit: ${escapeHtml(formatFinanceAmount(report.totals.creditNpr ?? 0))}</div>
       <div>Net: ${escapeHtml(formatFinanceAmount(report.totals.netNpr))}</div>
     </div>
     </body></html>`;

@@ -6,7 +6,7 @@ import {
   type CollegeAdministratorRecord,
 } from "@phit-erp/shared";
 import type { AdminActivityLogEntry } from "@phit-erp/shared";
-import { Eye, KeyRound, Trash2, Upload, UserCog, X } from "lucide-react";
+import { Eye, KeyRound, Shield, Trash2, Upload, UserCog, X } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -17,6 +17,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import { api, resolveApiUrl, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
@@ -69,6 +70,9 @@ export const CollegeAdministratorManager = () => {
   );
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
+  /** Open Module Access for a college administrator without full edit form. */
+  const [accessAdmin, setAccessAdmin] =
+    useState<CollegeAdministratorRecord | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
@@ -227,7 +231,10 @@ export const CollegeAdministratorManager = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="College Administrators" />
+      <PageHeader
+        title="College Administrators"
+        description="Create and manage College Administrator accounts. Use Module Access on a row to choose which ERP sections each administrator can open."
+      />
 
       <Card>
         <CardHeader>
@@ -402,6 +409,7 @@ export const CollegeAdministratorManager = () => {
                   variant="outline"
                   onClick={() => {
                     setEditing(null);
+                    setAccessAdmin(null);
                     setForm(defaultForm);
                   }}
                 >
@@ -422,8 +430,34 @@ export const CollegeAdministratorManager = () => {
               </Button>
             </div>
           </form>
+          {editing?._id ? (
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <ModuleAccessControlPanel
+                userId={editing._id}
+                userName={editing.fullName}
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
+
+      {accessAdmin && !editing ? (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAccessAdmin(null)}
+            >
+              Close module access
+            </Button>
+          </div>
+          <ModuleAccessControlPanel
+            userId={accessAdmin._id}
+            userName={accessAdmin.fullName}
+          />
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
@@ -495,6 +529,7 @@ export const CollegeAdministratorManager = () => {
                           variant="outline"
                           disabled={admin.isDeleted}
                           onClick={() => {
+                            setAccessAdmin(null);
                             setEditing(admin);
                             setForm({
                               fullName: admin.fullName,
@@ -509,6 +544,21 @@ export const CollegeAdministratorManager = () => {
                           }}
                         >
                           Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={admin.isDeleted}
+                          title="Enable or disable ERP modules for this College Administrator"
+                          onClick={() => {
+                            setEditing(null);
+                            setForm(defaultForm);
+                            setAccessAdmin(admin);
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                        >
+                          <Shield className="mr-1 h-3.5 w-3.5" />
+                          Module Access
                         </Button>
                         <Button
                           size="sm"

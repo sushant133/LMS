@@ -509,7 +509,9 @@ export const createFinanceTransaction = asyncHandler(async (req: Request, res: R
   ).lean();
   if (!category) throw new ApiError(400, "Select a valid active category");
 
+  // CREDIT may use any category (purchase or sale on credit); EXPENSE/INCOME must match kind.
   if (
+    payload.transactionType !== "CREDIT" &&
     category.kind !== "BOTH" &&
     category.kind !== payload.transactionType
   ) {
@@ -565,7 +567,11 @@ export const updateFinanceTransaction = asyncHandler(async (req: Request, res: R
     ).lean();
     if (!category) throw new ApiError(400, "Select a valid active category");
     const nextType = payload.transactionType ?? doc.transactionType;
-    if (category.kind !== "BOTH" && category.kind !== nextType) {
+    if (
+      nextType !== "CREDIT" &&
+      category.kind !== "BOTH" &&
+      category.kind !== nextType
+    ) {
       throw new ApiError(
         400,
         `Category "${category.name}" is not valid for ${String(nextType).toLowerCase()} transactions`
@@ -595,8 +601,11 @@ export const updateFinanceTransaction = asyncHandler(async (req: Request, res: R
   if (payload.remarks !== undefined) doc.remarks = emptyToUndef(payload.remarks);
   if (payload.attachments !== undefined) doc.attachments = payload.attachments as never;
 
-  if (doc.transactionType === "INCOME") {
+  if (doc.transactionType === "INCOME" || doc.transactionType === "CREDIT") {
     doc.expenseType = undefined;
+  }
+  if (doc.transactionType === "EXPENSE" || doc.transactionType === "CREDIT") {
+    doc.incomeSource = undefined;
   }
 
   doc.updatedBy = req.user?.userId as never;
@@ -637,15 +646,17 @@ export const getFinanceDashboard = asyncHandler(async (req: Request, res: Respon
   let totalOtherExpensesNpr = 0;
   let totalExternalExpensesNpr = 0;
   let totalIncomeNpr = 0;
+  let totalCreditNpr = 0;
 
   const expenseByMonth = new Map<string, number>();
   const incomeByMonth = new Map<string, number>();
+  const creditByMonth = new Map<string, number>();
   const categoryMap = new Map<
     string,
     {
       categoryId: string;
       categoryName: string;
-      transactionType: "EXPENSE" | "INCOME";
+      transactionType: "EXPENSE" | "INCOME" | "CREDIT";
       amountNpr: number;
       count: number;
     }
@@ -662,9 +673,12 @@ export const getFinanceDashboard = asyncHandler(async (req: Request, res: Respon
         totalOtherExpensesNpr += tx.amountNpr;
       }
       expenseByMonth.set(month, (expenseByMonth.get(month) ?? 0) + tx.amountNpr);
-    } else {
+    } else if (tx.transactionType === "INCOME") {
       totalIncomeNpr += tx.amountNpr;
       incomeByMonth.set(month, (incomeByMonth.get(month) ?? 0) + tx.amountNpr);
+    } else if (tx.transactionType === "CREDIT") {
+      totalCreditNpr += tx.amountNpr;
+      creditByMonth.set(month, (creditByMonth.get(month) ?? 0) + tx.amountNpr);
     }
 
     const key = `${tx.transactionType}:${tx.categoryId}`;
@@ -692,11 +706,16 @@ export const getFinanceDashboard = asyncHandler(async (req: Request, res: Respon
     totalExternalExpensesNpr,
     totalExpensesNpr,
     totalIncomeNpr,
+    totalCreditNpr,
+    // Cash position only — credit is tracked separately (not settled yet)
     netPositionNpr: totalIncomeNpr - totalExpensesNpr,
     monthlyExpenseSummary: [...expenseByMonth.entries()]
       .map(([month, amountNpr]) => ({ month, amountNpr }))
       .sort((a, b) => a.month.localeCompare(b.month)),
     monthlyIncomeSummary: [...incomeByMonth.entries()]
+      .map(([month, amountNpr]) => ({ month, amountNpr }))
+      .sort((a, b) => a.month.localeCompare(b.month)),
+    monthlyCreditSummary: [...creditByMonth.entries()]
       .map(([month, amountNpr]) => ({ month, amountNpr }))
       .sort((a, b) => a.month.localeCompare(b.month)),
     recentTransactions: enriched.slice(0, 12),
@@ -732,6 +751,8 @@ export const getFinanceReport = asyncHandler(async (req: Request, res: Response)
     filter.transactionType = "INCOME";
   } else if (reportType === "EXPENSES") {
     filter.transactionType = "EXPENSE";
+  } else if (reportType === "CREDIT") {
+    filter.transactionType = "CREDIT";
   }
 
   const rows = await FinanceTransaction.find(filter).sort({ dateBs: -1 }).lean();
@@ -739,9 +760,11 @@ export const getFinanceReport = asyncHandler(async (req: Request, res: Response)
 
   let expenseNpr = 0;
   let incomeNpr = 0;
+  let creditNpr = 0;
   for (const tx of enriched) {
     if (tx.transactionType === "EXPENSE") expenseNpr += tx.amountNpr;
-    else incomeNpr += tx.amountNpr;
+    else if (tx.transactionType === "INCOME") incomeNpr += tx.amountNpr;
+    else if (tx.transactionType === "CREDIT") creditNpr += tx.amountNpr;
   }
 
   const titles: Record<string, string> = {
@@ -750,6 +773,7 @@ export const getFinanceReport = asyncHandler(async (req: Request, res: Response)
     OTHER_EXPENSES: "Other / external expenses",
     EXPENSES: "All expenses",
     INCOME: "Income records",
+    CREDIT: "Credit transactions",
     CATEGORY: "Category-wise finance report",
     MONTHLY: "Monthly finance report",
     YEARLY: "Yearly finance report"
@@ -773,6 +797,7 @@ export const getFinanceReport = asyncHandler(async (req: Request, res: Response)
     totals: {
       expenseNpr,
       incomeNpr,
+      creditNpr,
       netNpr: incomeNpr - expenseNpr,
       count: enriched.length
     },

@@ -1,13 +1,15 @@
 import type { Request } from "express";
 import {
   applyTeacherRoleBaseline,
-  canManageInstitution,
   expandModuleAccessMap,
   expandModuleActionsMap,
   hasConfiguredModuleAccess,
+  isSystemAdministrator,
   MODULE_ACCESS_DENIED_MESSAGE,
   MODULE_ACCESS_DISABLED_MESSAGE,
   normalizeModuleAccessMode,
+  normalizeUserRole,
+  resolveModuleAccessMode,
   resolveModuleFromApiPath,
   type ErpModuleKey,
   type ModuleAccessMap,
@@ -27,6 +29,10 @@ const userHasTeacherRole = (
   if (role === "TEACHER") return true;
   return (secondaryRoles ?? []).some((r) => r === "TEACHER");
 };
+
+/** Super Admin always bypasses module access matrix. Administrators can be restricted. */
+const isModuleAccessUnrestricted = (role: string | undefined): boolean =>
+  isSystemAdministrator(role ?? "");
 
 const mapFromUserDoc = (raw: unknown): ModuleAccessMap => {
   if (!raw) return {};
@@ -63,8 +69,9 @@ export const getUserModuleAccessMap = async (userId: string): Promise<ModuleAcce
     .select("moduleAccess role secondaryRoles")
     .lean();
   if (!user) return {};
-  if (canManageInstitution(user.role)) {
-    return expandModuleAccessMap({});
+  // Super Admin: unrestricted (empty map → legacy full WRITE via resolveModuleAccessMode)
+  if (isModuleAccessUnrestricted(user.role as string)) {
+    return {};
   }
   let map = mapFromUserDoc(user.moduleAccess);
   // Teachers keep syllabus/plans/attendance tools even after an admin saves
@@ -81,7 +88,7 @@ export const getUserModuleAccessMap = async (userId: string): Promise<ModuleAcce
 export const getUserModuleActionsMap = async (userId: string): Promise<ModuleActionsMap> => {
   const user = await User.findById(userId).select("moduleActions role").lean();
   if (!user) return {};
-  if (canManageInstitution(user.role)) return {};
+  if (isModuleAccessUnrestricted(user.role as string)) return {};
   return actionsFromUserDoc(user.moduleActions);
 };
 
@@ -95,7 +102,7 @@ export const getExpandedModuleAccessForUser = async (
   userId: string,
   role?: string
 ): Promise<Record<ErpModuleKey, ModuleAccessMode>> => {
-  if (role && canManageInstitution(role)) {
+  if (role && isModuleAccessUnrestricted(role)) {
     return expandModuleAccessMap({});
   }
   const map = await getUserModuleAccessMap(userId);
@@ -123,7 +130,8 @@ export const getFullPermissionStateForUser = async (
     };
   }
 
-  if (canManageInstitution(role ?? user.role)) {
+  const effectiveRole = role ?? user.role;
+  if (isModuleAccessUnrestricted(effectiveRole)) {
     return {
       moduleAccess: expandModuleAccessMap({}),
       moduleActions: expandModuleActionsMap({}, {}),
@@ -135,7 +143,7 @@ export const getFullPermissionStateForUser = async (
   let map = mapFromUserDoc(user.moduleAccess);
   const secondary = (user.secondaryRoles as UserRole[]) ?? [];
   if (
-    userHasTeacherRole(role ?? user.role, secondary) &&
+    userHasTeacherRole(effectiveRole, secondary) &&
     hasConfiguredModuleAccess(map)
   ) {
     map = applyTeacherRoleBaseline(map);
@@ -154,10 +162,10 @@ export const assertModuleWriteAccess = async (
   moduleKey: ErpModuleKey
 ): Promise<void> => {
   if (!req.user) throw new ApiError(401, "Authentication required");
-  if (canManageInstitution(req.user.role)) return;
+  if (isModuleAccessUnrestricted(req.user.role)) return;
 
   const map = await getUserModuleAccessMap(req.user.userId);
-  const mode = map[moduleKey] ?? "WRITE";
+  const mode = resolveModuleAccessMode(map, moduleKey);
   if (mode === "NONE") {
     throw new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE);
   }
@@ -194,9 +202,21 @@ export const updateUserModuleAccess = async (
     }
   }
 
-  // Never lock out institution admins via module access
-  if (canManageInstitution(user.role)) {
-    throw new ApiError(400, "Module access cannot be restricted for institution administrators");
+  const targetRole = normalizeUserRole(user.role as string);
+
+  // System Administrator accounts always keep full access
+  if (isSystemAdministrator(targetRole)) {
+    throw new ApiError(400, "Module access cannot be restricted for System Administrator accounts");
+  }
+
+  // Only Super Admin may assign module access to Administrator (COLLEGE_ADMIN) accounts
+  if (targetRole === "COLLEGE_ADMIN") {
+    if (req.user?.role !== "SUPER_ADMIN") {
+      throw new ApiError(
+        403,
+        "Only Super Admin can assign module access to Administrator accounts"
+      );
+    }
   }
 
   const previousAccess = mapFromUserDoc(user.moduleAccess);

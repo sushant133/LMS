@@ -1,9 +1,8 @@
 import {
   applyTeacherRoleBaseline,
   canAccessModule,
-  canManageInstitution,
-  canWriteModule,
   hasModuleAction,
+  isSystemAdministrator,
   resolveModuleAccessMode,
   resolveModuleFromRoutePath,
   TEACHER_BASELINE_MODULE_KEYS,
@@ -19,7 +18,9 @@ import { useAuth } from "features/auth/AuthProvider";
 
 /**
  * Resolve module access for the signed-in user.
- * Admins always have full write.
+ * Super Admin always has full write.
+ * Administrators (COLLEGE_ADMIN) honor Super Admin’s module matrix when configured
+ * (unconfigured = full legacy access via empty map → WRITE).
  * Staff only see / use modules the admin granted (NONE modules are hidden).
  * Teachers always keep teaching baseline modules (Academic Management, etc.).
  * Do not surface “disabled by administrator” messages — simply hide or disable actions.
@@ -42,13 +43,14 @@ export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
   }, [user?.moduleAccess, isTeacher]);
 
   const actionsMap = (user?.moduleActions ?? {}) as ModuleActionsMap;
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  /** Only Super Admin skips the matrix entirely. */
+  const isUnrestricted = isSystemAdministrator(user?.role ?? "");
 
   const resolvedKey =
     moduleKey ?? resolveModuleFromRoutePath(location.pathname) ?? undefined;
 
   const mode: ModuleAccessMode = useMemo(() => {
-    if (isAdmin) return "WRITE";
+    if (isUnrestricted) return "WRITE";
     if (!resolvedKey) return "WRITE";
     let m = resolveModuleAccessMode(map, resolvedKey);
     // Teaching tools: never treat baseline modules as denied for teachers
@@ -60,15 +62,15 @@ export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
       m = "WRITE";
     }
     return m;
-  }, [isAdmin, isTeacher, map, resolvedKey]);
+  }, [isUnrestricted, isTeacher, map, resolvedKey]);
 
   const canAccess =
-    isAdmin ||
+    isUnrestricted ||
     !resolvedKey ||
     mode !== "NONE" ||
     canAccessModule(map, resolvedKey);
   const canWrite =
-    isAdmin ||
+    isUnrestricted ||
     (resolvedKey
       ? mode === "WRITE" ||
         (isTeacher &&
@@ -81,7 +83,7 @@ export const useModuleAccess = (moduleKey?: ErpModuleKey) => {
   const isDenied = !canAccess;
 
   const canDo = (action: ModulePermissionAction): boolean => {
-    if (isAdmin) return true;
+    if (isUnrestricted) return true;
     if (!resolvedKey) return true;
     return hasModuleAction(map, actionsMap, resolvedKey, action);
   };

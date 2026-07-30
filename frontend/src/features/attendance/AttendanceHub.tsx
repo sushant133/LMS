@@ -67,18 +67,28 @@ export const AttendanceHub = () => {
 
   const perms = permsQuery.data;
   // HR "Teacher Attendance" is admin/staff only — never on a teacher's My Attendance
-  const showTeacherHr =
-    !isTeacher &&
-    (canWriteAdmin || Boolean(perms?.teacher.view));
+  /**
+   * HR Teacher Attendance sheet:
+   * - Institution admins always
+   * - Staff with teacher-attendance Module Access (perms.teacher.view)
+   * Pure teachers without that grant only mark student attendance (My Attendance).
+   */
+  const showTeacherHr = canWriteAdmin || Boolean(perms?.teacher.view);
+  /**
+   * HR Staff Attendance sheet:
+   * - Admins always
+   * - staff-attendance Module Access grant
+   * - COLLEGE_STAFF role (self / office staff portal)
+   */
   const showStaff =
-    canWriteAdmin ||
-    Boolean(perms?.staff.view) ||
-    isStaff;
+    canWriteAdmin || Boolean(perms?.staff.view) || isStaff;
 
-  // Teachers: only student daily + subject-wise
+  // Prefer HR tabs when the user is not a classroom teacher / institution admin
   const defaultTab: AttendanceTab =
-    isStaff && !canWriteAdmin && !hasInstitutionRead && !isTeacher
-      ? "staff"
+    !canWriteAdmin && !hasInstitutionRead && !isTeacher
+      ? isStaff
+        ? "staff"
+        : "teacher"
       : "daily";
 
   const [activeTab, setActiveTab] = useState<AttendanceTab>(defaultTab);
@@ -112,7 +122,8 @@ export const AttendanceHub = () => {
         icon: UserCheck,
       });
     }
-    if (showStaff && !isTeacher) {
+    // Staff HR sheet for admins, staff role, or module grant (including teachers with staff-attendance)
+    if (showStaff) {
       list.push({
         id: "staff",
         label: "Staff Attendance",

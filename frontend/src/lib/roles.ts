@@ -1,9 +1,11 @@
 import {
   INSTITUTION_ACCESS_ROLES,
   INSTITUTION_ADMIN_ROLES,
+  canAccessAttendanceManagement,
   canAccessModule,
   canManageInstitution,
   hasInstitutionAccess,
+  isAttendanceManagementPath,
   isInstitutionAdmin,
   isSystemAdministrator,
   normalizeUserRole,
@@ -73,6 +75,13 @@ export const hasProtectedRouteAccess = (
     options.pathname &&
     options.moduleAccess
   ) {
+    // Teacher Attendance / Staff Attendance grants share the Attendance Management hub
+    if (
+      isAttendanceManagementPath(options.pathname) &&
+      canAccessAttendanceManagement(options.moduleAccess)
+    ) {
+      return true;
+    }
     const moduleKey = resolveModuleFromRoutePath(options.pathname);
     if (moduleKey && canAccessModule(options.moduleAccess, moduleKey)) {
       return true;

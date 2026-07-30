@@ -40,7 +40,7 @@ const getRedirectPath = (role: UserRole | string): string => {
     case "TEACHER":
       return "/dashboard/teacher";
     case "STUDENT":
-      return "/my-subjects";
+      return "/dashboard/student";
     case "LIBRARY_STAFF":
       return "/library";
     case "LABORATORY_STAFF":

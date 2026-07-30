@@ -15,6 +15,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
+import { PhoneLink } from "components/shared/PhoneLink";
 import { api, unwrap } from "lib/api";
 import {
   toastCredentialCreateResult,
@@ -265,6 +266,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                   <tr>
                     <Th className="w-14 text-center">S.N.</Th>
                     <Th>Name</Th>
+                    <Th>Phone</Th>
                     <Th>Designation</Th>
                     <Th>Code</Th>
                     <Th>Status</Th>
@@ -301,6 +303,9 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                             {teacher.user.email}
                           </div>
                         </div>
+                      </Td>
+                      <Td className="text-sm">
+                        <PhoneLink phone={teacher.user?.phone} />
                       </Td>
                       <Td>
                         <Badge className="bg-brand-100 text-brand-900">

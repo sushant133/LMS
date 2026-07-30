@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
+import { PhoneLink } from "components/shared/PhoneLink";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
@@ -175,7 +176,9 @@ export const ModuleStaffPanel = ({
                     <tr key={member._id}>
                       <Td>{member.fullName}</Td>
                       <Td>{member.email}</Td>
-                      <Td>{member.phone ?? "—"}</Td>
+                      <Td className="text-sm">
+                        <PhoneLink phone={member.phone} />
+                      </Td>
                       <Td>{member.isActive ? "Active" : "Inactive"}</Td>
                       <Td className="space-x-2 text-right">
                         {canManage ? (

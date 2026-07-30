@@ -315,7 +315,9 @@ export const ModuleAccessControlPanel = ({
             <p className="mt-1 text-amber-900/90">
               {isPrimaryTeacher
                 ? "This is a teacher account. Teaching tools (syllabus, plans, attendance, homework, etc.) stay available. Turn on View/Manage only for extra admin sections they need. Job title (e.g. Principal) is display-only."
-                : "Right now they only see menus from their job role. Save the options below to control exactly which admin sections they get. If they also teach, enable “Also teaches” under Advanced."}
+                : accessQuery.data?.role === "COLLEGE_ADMIN"
+                  ? "This Administrator currently has full access from their role. Save the options below to limit which ERP sections they can open. Until you save, nothing is restricted."
+                  : "Right now they only see menus from their job role. Save the options below to control exactly which admin sections they get. If they also teach, enable “Also teaches” under Advanced."}
             </p>
           </div>
         ) : (
@@ -324,7 +326,9 @@ export const ModuleAccessControlPanel = ({
             <p className="mt-1 text-emerald-900/90">
               {isPrimaryTeacher || secondaryRoles.includes("TEACHER")
                 ? "Admin sections you enable appear in their menu. Teaching tools stay available for teacher accounts even when job title is Principal."
-                : "Their menu only includes the sections you allow below (plus their personal tools such as dashboard and profile)."}
+                : accessQuery.data?.role === "COLLEGE_ADMIN"
+                  ? "This Administrator’s menu and API access only include the sections you allow below (plus dashboard and profile)."
+                  : "Their menu only includes the sections you allow below (plus their personal tools such as dashboard and profile)."}
             </p>
           </div>
         )}

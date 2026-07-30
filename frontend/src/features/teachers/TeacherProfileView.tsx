@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   HrDocument,
@@ -16,6 +16,7 @@ import { Link, useParams } from "react-router-dom";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
+import { PhoneLink } from "components/shared/PhoneLink";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent } from "components/ui/card";
@@ -50,7 +51,7 @@ const formatAddress = (address: TeacherRecord["address"]): string =>
 const InfoGrid = ({
   items,
 }: {
-  items: Array<{ label: string; value: string | number }>;
+  items: Array<{ label: string; value: ReactNode }>;
 }) => (
   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
     {items.map((item) => (
@@ -187,7 +188,10 @@ export const TeacherProfileView = () => {
                       label: "Login ID",
                       value: teacher.user?.email ?? "—",
                     },
-                    { label: "Phone", value: teacher.user?.phone ?? "—" },
+                    {
+                      label: "Phone",
+                      value: <PhoneLink phone={teacher.user?.phone} />,
+                    },
                     { label: "Qualification", value: teacher.qualification },
                     { label: "Joined date (BS)", value: teacher.joinedDateBs },
                     {

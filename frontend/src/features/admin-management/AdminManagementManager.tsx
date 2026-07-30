@@ -17,6 +17,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import { api, unwrap } from "lib/api";
 import {
   toastAdminCredentialsUpdated,
@@ -58,6 +59,10 @@ export const AdminManagementManager = () => {
   const [editing, setEditing] = useState<AdminAccountRecord | null>(null);
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState<string | null>(null);
+  /** Open Module Access for an Administrator without full edit form. */
+  const [accessAdmin, setAccessAdmin] = useState<AdminAccountRecord | null>(
+    null,
+  );
   const [credentialLoginId, setCredentialLoginId] = useState("");
   const [credentialPassword, setCredentialPassword] = useState("");
 
@@ -226,7 +231,7 @@ export const AdminManagementManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Admin Users"
-        description="As Super Admin, create and manage Administrators, change their login ID and password, and email them the new credentials automatically."
+        description="As Super Admin, create and manage Administrators, assign which ERP modules each can open, change login ID and password, and email them credentials automatically."
       />
 
       <Card>
@@ -330,6 +335,7 @@ export const AdminManagementManager = () => {
                   variant="outline"
                   onClick={() => {
                     setEditing(null);
+                    setAccessAdmin(null);
                     setForm(defaultForm);
                   }}
                 >
@@ -350,8 +356,34 @@ export const AdminManagementManager = () => {
               </Button>
             </div>
           </form>
+          {editing?._id ? (
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <ModuleAccessControlPanel
+                userId={editing._id}
+                userName={editing.fullName}
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
+
+      {accessAdmin && !editing ? (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAccessAdmin(null)}
+            >
+              Close module access
+            </Button>
+          </div>
+          <ModuleAccessControlPanel
+            userId={accessAdmin._id}
+            userName={accessAdmin.fullName}
+          />
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
@@ -410,6 +442,7 @@ export const AdminManagementManager = () => {
                           variant="outline"
                           disabled={admin.isDeleted}
                           onClick={() => {
+                            setAccessAdmin(null);
                             setEditing(admin);
                             setForm({
                               fullName: admin.fullName,
@@ -420,6 +453,21 @@ export const AdminManagementManager = () => {
                           }}
                         >
                           Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={admin.isDeleted}
+                          title="Enable or disable ERP modules for this Administrator"
+                          onClick={() => {
+                            setEditing(null);
+                            setForm(defaultForm);
+                            setAccessAdmin(admin);
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                        >
+                          <Shield className="mr-1 h-3.5 w-3.5" />
+                          Module Access
                         </Button>
                         <Button
                           size="sm"

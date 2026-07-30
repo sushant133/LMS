@@ -106,11 +106,18 @@ const emptyEntry = (
   description: "",
   vendorPayee: "",
   amountNpr: 0,
-  paymentMethod: "CASH",
+  // Credit entries are not cash-settled; default method still satisfies schema.
+  paymentMethod: type === "CREDIT" ? "OTHER" : "CASH",
   referenceNumber: "",
   remarks: "",
   attachments: [],
 });
+
+const transactionTypeBadgeClass = (type: string) => {
+  if (type === "INCOME") return "bg-emerald-100 text-emerald-800";
+  if (type === "CREDIT") return "bg-amber-100 text-amber-900";
+  return "bg-rose-100 text-rose-800";
+};
 
 export const FinanceManager = () => {
   const { user } = useAuth();
@@ -232,6 +239,8 @@ export const FinanceManager = () => {
   );
 
   const entryCategories = useMemo(() => {
+    // Credit can use any category (purchase or receivable on credit).
+    if (entryForm.transactionType === "CREDIT") return activeCategories;
     return activeCategories.filter(
       (c) => c.kind === "BOTH" || c.kind === entryForm.transactionType,
     );
@@ -557,7 +566,7 @@ export const FinanceManager = () => {
             <LoadingState />
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 {[
                   {
                     label: "College expenses",
@@ -575,6 +584,11 @@ export const FinanceManager = () => {
                     label: "Total income",
                     value: dash?.totalIncomeNpr ?? 0,
                     tone: "text-emerald-700",
+                  },
+                  {
+                    label: "Credit (unsettled)",
+                    value: dash?.totalCreditNpr ?? 0,
+                    tone: "text-amber-800",
                   },
                   {
                     label: "Net position",
@@ -711,11 +725,9 @@ export const FinanceManager = () => {
                                   </Td>
                                   <Td>
                                     <Badge
-                                      className={
-                                        tx.transactionType === "INCOME"
-                                          ? "bg-emerald-100 text-emerald-800"
-                                          : "bg-rose-100 text-rose-800"
-                                      }
+                                      className={transactionTypeBadgeClass(
+                                        tx.transactionType,
+                                      )}
                                     >
                                       {transactionTypeLabel(tx.transactionType)}
                                     </Badge>
@@ -1068,11 +1080,9 @@ export const FinanceManager = () => {
                               </Td>
                               <Td>
                                 <Badge
-                                  className={
-                                    tx.transactionType === "INCOME"
-                                      ? "bg-emerald-100 text-emerald-800"
-                                      : "bg-rose-100 text-rose-800"
-                                  }
+                                  className={transactionTypeBadgeClass(
+                                    tx.transactionType,
+                                  )}
                                 >
                                   {transactionTypeLabel(tx.transactionType)}
                                 </Badge>
@@ -1186,7 +1196,7 @@ export const FinanceManager = () => {
               )}
               {transactions.length > 0 ? (
                 <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-xl border border-emerald-100 bg-white px-4 py-3">
                       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                         Total income
@@ -1201,6 +1211,14 @@ export const FinanceManager = () => {
                       </p>
                       <p className="mt-1 text-lg font-semibold tabular-nums text-rose-700">
                         {formatFinanceAmount(transactionTotals.totalExpensesNpr)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-amber-100 bg-white px-4 py-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Total credit
+                      </p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums text-amber-800">
+                        {formatFinanceAmount(transactionTotals.totalCreditNpr)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-brand-100 bg-white px-4 py-3">
@@ -1218,7 +1236,7 @@ export const FinanceManager = () => {
                         {formatFinanceAmount(transactionTotals.totalAmountNpr)}
                       </p>
                       <p className="mt-0.5 text-xs text-slate-400">
-                        Income − expenses · updates with filters
+                        Income − expenses · credit excluded
                       </p>
                     </div>
                   </div>
@@ -1235,7 +1253,9 @@ export const FinanceManager = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-brand-600" />
-              {editingId ? "Edit transaction" : "Record expense or income"}
+              {editingId
+                ? "Edit transaction"
+                : "Record expense, income, or credit"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1252,7 +1272,12 @@ export const FinanceManager = () => {
                         type === "EXPENSE"
                           ? c.expenseType ?? "COLLEGE_EXPENSE"
                           : undefined,
+                      incomeSource: type === "INCOME" ? c.incomeSource : "",
                       categoryId: "",
+                      paymentMethod:
+                        type === "CREDIT" && c.paymentMethod === "CASH"
+                          ? "OTHER"
+                          : c.paymentMethod,
                     }));
                   }}
                 >
@@ -1311,7 +1336,7 @@ export const FinanceManager = () => {
                     ))}
                   </Select>
                 </FormField>
-              ) : (
+              ) : entryForm.transactionType === "INCOME" ? (
                 <FormField label="Income source">
                   <Input
                     value={entryForm.incomeSource ?? ""}
@@ -1324,15 +1349,33 @@ export const FinanceManager = () => {
                     placeholder="e.g. Donor name / program"
                   />
                 </FormField>
+              ) : (
+                <FormField label="Credit party / notes">
+                  <Input
+                    value={entryForm.vendorPayee ?? ""}
+                    onChange={(e) =>
+                      setEntryForm((c) => ({
+                        ...c,
+                        vendorPayee: e.target.value,
+                      }))
+                    }
+                    placeholder="Supplier or party the credit is with"
+                  />
+                </FormField>
               )}
-              <FormField label="Vendor / payee">
-                <Input
-                  value={entryForm.vendorPayee ?? ""}
-                  onChange={(e) =>
-                    setEntryForm((c) => ({ ...c, vendorPayee: e.target.value }))
-                  }
-                />
-              </FormField>
+              {entryForm.transactionType !== "CREDIT" ? (
+                <FormField label="Vendor / payee">
+                  <Input
+                    value={entryForm.vendorPayee ?? ""}
+                    onChange={(e) =>
+                      setEntryForm((c) => ({
+                        ...c,
+                        vendorPayee: e.target.value,
+                      }))
+                    }
+                  />
+                </FormField>
+              ) : null}
               <FormField label="Amount (NPR)">
                 <NumberInput
                   min={0}
@@ -1873,6 +1916,7 @@ export const FinanceManager = () => {
                   <option value="OTHER_EXPENSES">Other / external expenses</option>
                   <option value="EXPENSES">All expenses</option>
                   <option value="INCOME">Income records</option>
+                  <option value="CREDIT">Credit transactions</option>
                   <option value="CATEGORY">Category-wise</option>
                   <option value="MONTHLY">Monthly</option>
                   <option value="YEARLY">Yearly</option>

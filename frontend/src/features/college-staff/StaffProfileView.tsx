@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   CollegeStaffProfileData,
@@ -11,6 +11,7 @@ import { Link, useParams } from "react-router-dom";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
+import { PhoneLink } from "components/shared/PhoneLink";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent } from "components/ui/card";
@@ -45,7 +46,7 @@ const formatAddress = (address: CollegeStaffRecord["address"]): string =>
 const InfoGrid = ({
   items,
 }: {
-  items: Array<{ label: string; value: string | number }>;
+  items: Array<{ label: string; value: ReactNode }>;
 }) => (
   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
     {items.map((item) => (
@@ -189,7 +190,10 @@ export const StaffProfileView = () => {
                       label: "Login ID",
                       value: staff.user?.email ?? staff.email ?? "—",
                     },
-                    { label: "Phone", value: staff.phone },
+                    {
+                      label: "Phone",
+                      value: <PhoneLink phone={staff.phone} />,
+                    },
                     { label: "Gender", value: staff.gender },
                     {
                       label: "Date of birth (BS)",
@@ -220,10 +224,16 @@ export const StaffProfileView = () => {
                     },
                     {
                       label: "Emergency contact",
-                      value:
-                        [staff.emergencyContactName, staff.emergencyContactPhone]
-                          .filter(Boolean)
-                          .join(" · ") || "—",
+                      value: staff.emergencyContactPhone ? (
+                        <span>
+                          {staff.emergencyContactName
+                            ? `${staff.emergencyContactName} · `
+                            : null}
+                          <PhoneLink phone={staff.emergencyContactPhone} />
+                        </span>
+                      ) : (
+                        staff.emergencyContactName || "—"
+                      ),
                     },
                     { label: "Address", value: formatAddress(staff.address) },
                     { label: "Remarks", value: staff.remarks ?? "—" },

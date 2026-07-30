@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { objectIdSchema, optionalObjectIdSchema, bsDateSchema, moneySchema } from "./schemas.js";
 
-export const FINANCE_TRANSACTION_TYPES = ["EXPENSE", "INCOME"] as const;
+/** EXPENSE / INCOME = cash-affecting; CREDIT = recorded on credit (payable / receivable, not settled in cash yet). */
+export const FINANCE_TRANSACTION_TYPES = ["EXPENSE", "INCOME", "CREDIT"] as const;
 export const FINANCE_EXPENSE_TYPES = [
   "COLLEGE_EXPENSE",
   "OTHER_EXPENSE",
@@ -67,7 +68,8 @@ export const FINANCE_TRANSACTION_TYPE_LABELS: Record<
   string
 > = {
   EXPENSE: "Expense",
-  INCOME: "Income"
+  INCOME: "Income",
+  CREDIT: "Credit"
 };
 
 /** Default categories seeded per institution (admin may add more). */
@@ -161,6 +163,7 @@ export const financeTransactionSchema = z
         path: ["expenseType"]
       });
     }
+    // CREDIT entries: no expense type / income source required — party is captured in vendor/payee.
   });
 
 export const financeTransactionUpdateSchema = financeTransactionSchema.partial().extend({

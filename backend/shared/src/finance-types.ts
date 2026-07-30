@@ -1,6 +1,6 @@
 /** Finance Management — independent of ERP Accounting (ledger/journals/fees). */
 
-export type FinanceTransactionType = "EXPENSE" | "INCOME";
+export type FinanceTransactionType = "EXPENSE" | "INCOME" | "CREDIT";
 
 export type FinanceExpenseType =
   | "COLLEGE_EXPENSE"
@@ -92,9 +92,12 @@ export interface FinanceDashboardResponse {
   totalExternalExpensesNpr: number;
   totalExpensesNpr: number;
   totalIncomeNpr: number;
+  /** Purchases / sales recorded on credit (not settled in cash yet). */
+  totalCreditNpr: number;
   netPositionNpr: number;
   monthlyExpenseSummary: Array<{ month: string; amountNpr: number }>;
   monthlyIncomeSummary: Array<{ month: string; amountNpr: number }>;
+  monthlyCreditSummary?: Array<{ month: string; amountNpr: number }>;
   recentTransactions: FinanceTransactionRecord[];
   categoryBreakdown: Array<{
     categoryId: string;
@@ -135,6 +138,7 @@ export interface FinanceReportResponse {
   totals: {
     expenseNpr: number;
     incomeNpr: number;
+    creditNpr?: number;
     netNpr: number;
     count: number;
   };

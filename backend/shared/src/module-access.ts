@@ -173,7 +173,8 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     description:
       "Daily attendance for teaching staff (teachers and dual-role leaders with teaching duties)",
     apiPrefixes: ["/employee-attendance"],
-    routePrefixes: ["/attendance"],
+    // /attendance-view = Attendance Management hub (admin/staff with module grant)
+    routePrefixes: ["/attendance", "/attendance-view"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
@@ -181,7 +182,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Staff Attendance",
     description: "Daily attendance for non-teaching college staff (uses existing staff records)",
     apiPrefixes: ["/employee-attendance"],
-    routePrefixes: ["/attendance"],
+    routePrefixes: ["/attendance", "/attendance-view"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
@@ -670,6 +671,33 @@ export const canWriteModule = (
   map: ModuleAccessMap | null | undefined,
   moduleKey: ErpModuleKey
 ): boolean => resolveModuleAccessMode(map, moduleKey) === "WRITE";
+
+/**
+ * Attendance Management hub modules. Granting any of these should unlock
+ * /attendance-view (and related attendance screens) for staff.
+ */
+export const ATTENDANCE_MANAGEMENT_MODULE_KEYS: readonly ErpModuleKey[] = [
+  "attendance",
+  "daily-attendance",
+  "teacher-attendance",
+  "staff-attendance"
+] as const;
+
+export const isAttendanceManagementPath = (routePath: string): boolean => {
+  const path = (routePath.split("?")[0] ?? routePath) || "/";
+  return (
+    path === "/attendance" ||
+    path === "/attendance-view" ||
+    path.startsWith("/attendance/") ||
+    path.startsWith("/attendance-view/")
+  );
+};
+
+/** True if the user may open Attendance Management for any granted attendance module. */
+export const canAccessAttendanceManagement = (
+  map: ModuleAccessMap | null | undefined
+): boolean =>
+  ATTENDANCE_MANAGEMENT_MODULE_KEYS.some((key) => canAccessModule(map, key));
 
 export const canReadModule = (
   map: ModuleAccessMap | null | undefined,

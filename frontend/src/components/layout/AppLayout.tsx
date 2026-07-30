@@ -6,9 +6,12 @@ import { ReadOnlyBanner } from "components/shared/ReadOnlyBanner";
 import { useTranslation } from "react-i18next";
 import {
   INSTITUTION_NAME,
+  canAccessAttendanceManagement,
   canAccessModule,
   canManageInstitution,
   hasInstitutionAccess,
+  isAttendanceManagementPath,
+  isSystemAdministrator,
   normalizeUserRole,
   resolveModuleFromRoutePath,
   type ModuleAccessMap,
@@ -538,6 +541,8 @@ export const AppLayout = () => {
 
   const institutionAccess = hasInstitutionAccess(normalizedRole);
   const isAdmin = canManageInstitution(normalizedRole);
+  /** Super Admin never filtered by module matrix; Administrators may be. */
+  const isUnrestrictedAdmin = isSystemAdministrator(normalizedRole);
   const moduleAccessMap = (user.moduleAccess ?? {}) as ModuleAccessMap;
   /** Custom map saved by admin — unlocks admin nav for staff/teachers with grants */
   const moduleAccessConfigured = Boolean(user.moduleAccessConfigured);
@@ -584,6 +589,13 @@ export const AppLayout = () => {
   /** Explicit department grant (not legacy unconfigured full access) */
   const hasExplicitModuleGrant = (path: string): boolean => {
     if (!moduleAccessConfigured) return false;
+    // Teacher / Staff Attendance module grants unlock Attendance Management hub
+    if (
+      isAttendanceManagementPath(path) &&
+      canAccessAttendanceManagement(moduleAccessMap)
+    ) {
+      return true;
+    }
     const moduleKey = resolveModuleFromRoutePath(path);
     if (!moduleKey) return false;
     return canAccessModule(moduleAccessMap, moduleKey);
@@ -609,7 +621,7 @@ export const AppLayout = () => {
   };
 
   const isModuleAllowedForNav = (path: string): boolean => {
-    if (isAdmin) return true;
+    if (isUnrestrictedAdmin) return true;
 
     // Parents: school-level portal access matrix (Parent Management)
     if (effectiveRoles.has("PARENT") && normalizedRole === "PARENT") {
@@ -637,6 +649,12 @@ export const AppLayout = () => {
       if (staffMaySeeFieldManagement || hasFieldCoordinatorAccess) return true;
       return canAccessModule(moduleAccessMap, "field-duty");
     }
+    if (isAttendanceManagementPath(path)) {
+      // Teachers always keep My Attendance; HR teacher/staff attendance is via grants
+      if (hasTeachingCapability && path === "/attendance") return true;
+      if (!moduleAccessConfigured) return hasAdminCapability || hasTeachingCapability;
+      return canAccessAttendanceManagement(moduleAccessMap);
+    }
     const moduleKey = resolveModuleFromRoutePath(path);
     if (!moduleKey) return true;
     if (moduleKey === "profile") return true;
@@ -648,7 +666,6 @@ export const AppLayout = () => {
         path === "/homework" ||
         path === "/timetable" ||
         path === "/exams" ||
-        path === "/attendance" ||
         path === "/students" ||
         path === "/my-library" ||
         path === "/laboratory" ||
@@ -685,9 +702,11 @@ export const AppLayout = () => {
         return false;
       })
       .filter((item) => {
-        // Lab: teachers only if assigned (unless lab staff / admin)
+        // Lab: teachers only if assigned (unless lab staff / unrestricted admin)
         if (item.path === "/laboratory") {
-          if (isAdmin || effectiveRoles.has("LABORATORY_STAFF")) return true;
+          if (isUnrestrictedAdmin || effectiveRoles.has("LABORATORY_STAFF")) {
+            return true;
+          }
           if (hasExplicitAdminNavGrant(item.path)) return true;
           if (item.section === "myWork") {
             return hasTeachingCapability && teacherHasLaboratory;
@@ -713,8 +732,10 @@ export const AppLayout = () => {
         }
         // Finance: never show for staff unless Admin granted personalFinanceAccess
         if (item.path === "/finance") {
-          if (isAdmin || institutionAccess) return true;
-          if (effectiveRoles.has("COLLEGE_VIEWER")) return true;
+          if (isUnrestrictedAdmin) return true;
+          if (isAdmin || institutionAccess || effectiveRoles.has("COLLEGE_VIEWER")) {
+            return isModuleAllowedForNav(item.path);
+          }
           return Boolean(user?.personalFinanceAccess);
         }
         return isModuleAllowedForNav(item.path);
@@ -781,6 +802,7 @@ export const AppLayout = () => {
     staffMaySeeFieldManagement,
     moduleAccessConfigured,
     isAdmin,
+    isUnrestrictedAdmin,
     parentPortalAccess.isLoading,
     JSON.stringify(parentPortalAccess.modules),
     JSON.stringify(moduleAccessMap),
@@ -794,8 +816,8 @@ export const AppLayout = () => {
     (i) => i.section === "administration",
   );
 
-  const visibleSystemAdminItems = systemAdminItems.filter((item) =>
-    hasAnyRole(item.roles),
+  const visibleSystemAdminItems = systemAdminItems.filter(
+    (item) => hasAnyRole(item.roles) && isModuleAllowedForNav(item.path),
   );
   const showAdminSection =
     adminNavItems.length > 0 || visibleSystemAdminItems.length > 0;
@@ -1043,7 +1065,8 @@ export const AppLayout = () => {
               <ReadOnlyBanner />
               <Suspense fallback={<LoadingState />}>
                 {(() => {
-                  if (!isAdmin) {
+                  // Super Admin unrestricted; Administrators honor module matrix when configured
+                  if (!isUnrestrictedAdmin) {
                     const path = location.pathname;
                     const alwaysOk =
                       path.startsWith("/dashboard") ||
@@ -1063,19 +1086,32 @@ export const AppLayout = () => {
                         effectiveRoles.has("STUDENT") ||
                         canAccessModule(moduleAccessMap, "field-duty"));
                     if (!alwaysOk && !fieldOk) {
-                      const moduleKey = resolveModuleFromRoutePath(path);
+                      // Teacher/Staff Attendance grants unlock the shared Attendance Management routes
                       if (
-                        moduleKey &&
-                        moduleKey !== "profile" &&
-                        moduleKey !== "dashboard" &&
-                        !canAccessModule(moduleAccessMap, moduleKey)
+                        isAttendanceManagementPath(path) &&
+                        (canAccessAttendanceManagement(moduleAccessMap) ||
+                          (hasTeachingCapability && path === "/attendance"))
                       ) {
-                        return (
-                          <Navigate
-                            to={`/dashboard/${normalizedRole.toLowerCase()}`}
-                            replace
-                          />
-                        );
+                        // allowed
+                      } else {
+                        const moduleKey = resolveModuleFromRoutePath(path);
+                        if (
+                          moduleKey &&
+                          moduleKey !== "profile" &&
+                          moduleKey !== "dashboard" &&
+                          !canAccessModule(moduleAccessMap, moduleKey)
+                        ) {
+                          return (
+                            <Navigate
+                              to={
+                                normalizedRole === "COLLEGE_VIEWER"
+                                  ? "/dashboard/college_admin"
+                                  : `/dashboard/${normalizedRole.toLowerCase()}`
+                              }
+                              replace
+                            />
+                          );
+                        }
                       }
                     }
                   }

@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
+import { PhoneLink } from "components/shared/PhoneLink";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -264,6 +265,7 @@ export const AccountantsStaffPanel = () => {
                   <Th>Name</Th>
                   <Th>Employee ID</Th>
                   <Th>Login</Th>
+                  <Th>Phone</Th>
                   <Th>Status</Th>
                   <Th />
                 </tr>
@@ -274,6 +276,9 @@ export const AccountantsStaffPanel = () => {
                     <Td>{accountant.user.fullName}</Td>
                     <Td>{accountant.employeeId}</Td>
                     <Td>{accountant.user.email}</Td>
+                    <Td className="text-sm">
+                      <PhoneLink phone={accountant.user.phone} />
+                    </Td>
                     <Td>
                       <Badge>{accountant.status}</Badge>
                     </Td>
