@@ -454,6 +454,28 @@ export const StudentFeeRecordsPanel = () => {
     return <LoadingState />;
   }
 
+  if (accountsQuery.isError || receiptsQuery.isError) {
+    return (
+      <EmptyState
+        title="Could not load student fee records"
+        description={parseErrorMessage(
+          accountsQuery.error ?? receiptsQuery.error,
+        )}
+      />
+    );
+  }
+
+  if (studentsQuery.isError || batchesQuery.isError || yearsQuery.isError) {
+    return (
+      <EmptyState
+        title="Could not load student / batch lists"
+        description={parseErrorMessage(
+          studentsQuery.error ?? batchesQuery.error ?? yearsQuery.error,
+        )}
+      />
+    );
+  }
+
   const selectedHistory = historyQuery.data;
   const activeScholarshipForYear = selectedHistory?.scholarshipAwards?.find(
     (a) =>

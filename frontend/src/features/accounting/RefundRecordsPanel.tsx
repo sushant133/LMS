@@ -408,6 +408,26 @@ export const RefundRecordsPanel = () => {
     return <LoadingState />;
   }
 
+  if (refundsQuery.isError) {
+    return (
+      <EmptyState
+        title="Could not load refund records"
+        description={parseErrorMessage(refundsQuery.error)}
+      />
+    );
+  }
+
+  if (studentsQuery.isError || batchesQuery.isError || yearsQuery.isError) {
+    return (
+      <EmptyState
+        title="Could not load student / batch lists"
+        description={parseErrorMessage(
+          studentsQuery.error ?? batchesQuery.error ?? yearsQuery.error,
+        )}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
       <Card>

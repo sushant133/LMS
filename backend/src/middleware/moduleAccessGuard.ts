@@ -176,6 +176,20 @@ export const enforceModuleAccess = async (
       return next();
     }
 
+    /**
+     * Accounting staff need student roster + academic batch/year (and class/section)
+     * lists for Student Fee Records, Refund Records, pickers, and filters — even when
+     * only the Accounting module is granted in the matrix. Controllers already scope
+     * by tenant; this is read-only dependency access.
+     */
+    if (
+      READ_METHODS.has(req.method) &&
+      (moduleKey === "students" || moduleKey === "academics") &&
+      canAccessModule(accessMap, "accounts")
+    ) {
+      return next();
+    }
+
     // Teachers always keep My Work APIs (students, attendance, exams, homework, …)
     // even if module-access matrix was saved with Hidden for admin departments.
     let mode: ModuleAccessMode = normalizeModuleAccessMode(accessMap[moduleKey]);
