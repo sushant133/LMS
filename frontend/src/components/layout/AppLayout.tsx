@@ -1,4 +1,4 @@
-import { LogOut, Menu, PanelLeftClose } from "lucide-react";
+import { LogOut, Menu, PanelLeftClose, X } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { LoadingState } from "components/shared/LoadingState";
@@ -20,6 +20,7 @@ import {
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { Button } from "components/ui/button";
 import { cn } from "lib/utils";
+import { appConfig } from "lib/config";
 import { useAuth } from "features/auth/AuthProvider";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
 import { useFieldCoordinatorAccess } from "hooks/useFieldCoordinatorAccess";
@@ -912,7 +913,7 @@ export const AppLayout = () => {
         <button
           type="button"
           aria-label="Close menu"
-          className="fixed inset-0 z-40 bg-slate-950/50 md:hidden"
+          className="fixed inset-0 z-[55] bg-slate-950/50 md:hidden"
           onClick={() => setMobileNavOpen(false)}
         />
       ) : null}
@@ -929,47 +930,57 @@ export const AppLayout = () => {
           aria-label="Main navigation"
           aria-hidden={desktopMenuCollapsed ? true : undefined}
         >
-          <div className="flex shrink-0 items-start gap-2">
+          {/* Sidebar brand — always PHIT COLLEGE first (mobile-app style) */}
+          <div className="app-sidebar-brand flex shrink-0 items-start gap-2">
             <NavLink
               to={brandHomePath}
               onClick={closeMobile}
-              title="Go to dashboard"
-              className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-2xl outline-none"
+              title={`${appConfig.appName} — Dashboard`}
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-white/40"
             >
-              <div className="shrink-0 rounded-2xl bg-white/10 p-2">
+              <div className="shrink-0 rounded-2xl bg-white/10 p-2 ring-1 ring-white/10">
                 <CollegeLogo variant="light" className="h-9 w-9 sm:h-10 sm:w-10" />
               </div>
               <div className="min-w-0">
-                <h2 className="truncate text-base font-semibold leading-tight sm:text-lg">
+                <h2 className="truncate text-base font-bold tracking-tight text-white sm:text-lg">
                   {t("appName")}
                 </h2>
-                {showCollegeContext ? (
-                  <p className="truncate text-xs text-slate-400">
-                    {INSTITUTION_NAME}
-                  </p>
-                ) : (
-                  <p className="truncate text-xs text-slate-400" title={collegeName}>
-                    {collegeName}
-                  </p>
-                )}
+                <p
+                  className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400"
+                  title={collegeName || INSTITUTION_NAME}
+                >
+                  {showCollegeContext ? INSTITUTION_NAME : collegeName}
+                </p>
               </div>
             </NavLink>
-            {/* Only hide control: right of PHIT COLLEGE / app name */}
             <button
               type="button"
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10 hover:text-white"
-              aria-label="Hide menu"
-              title="Hide menu"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10 hover:text-white md:h-9 md:w-9"
+              aria-label={isDesktop ? "Hide menu" : "Close menu"}
+              title={isDesktop ? "Hide menu" : "Close menu"}
               onClick={hideMenu}
             >
-              <PanelLeftClose className="h-5 w-5" />
+              {isDesktop ? (
+                <PanelLeftClose className="h-5 w-5" />
+              ) : (
+                <X className="h-5 w-5" />
+              )}
             </button>
           </div>
 
-          <div className="app-sidebar-scroll mt-8 min-h-0 flex-1">
+          {/* Mobile drawer: signed-in user strip under brand */}
+          <div className="mt-4 shrink-0 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 md:hidden">
+            <p className="truncate text-sm font-semibold text-white">{user.fullName}</p>
+            <p className="truncate text-xs text-slate-400">
+              {getUserDisplayTitle(user)}
+              {getUserRoleSubtitle(user) ? ` · ${getUserRoleSubtitle(user)}` : ""}
+            </p>
+          </div>
+
+          <div className="app-sidebar-scroll mt-5 min-h-0 flex-1 md:mt-8">
             <nav className="space-y-1 pr-1">{navTree}</nav>
 
-            <div className="mt-4 pt-4">
+            <div className="mt-4 hidden pt-4 md:block">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
                   {getUserDisplayTitle(user)}
@@ -990,10 +1001,32 @@ export const AppLayout = () => {
         </aside>
 
         <div className="app-shell-main">
-          <header className="sticky top-0 z-50 shrink-0 border-b border-white/70 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90">
-            <div className="app-shell-header-inner flex items-center gap-2 px-4 py-2.5 sm:gap-3 sm:px-6 sm:py-3 lg:px-8 lg:py-4">
-              {/* Show menu only when the left menu is hidden */}
-              {!menuIsOpen ? (
+          {/* Sticky app bar — PHIT COLLEGE brand first on mobile */}
+          <header className="app-topbar sticky top-0 z-40 shrink-0 border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90">
+            <div className="app-shell-header-inner flex items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-6 sm:py-3 lg:px-8 lg:py-4">
+              {/* Mobile: always-visible menu toggle (app-style hamburger) */}
+              {!isDesktop ? (
+                <button
+                  type="button"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-sm active:bg-slate-50"
+                  aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
+                  title={mobileNavOpen ? "Close menu" : "Open menu"}
+                  aria-controls="app-main-sidebar"
+                  aria-expanded={mobileNavOpen}
+                  onClick={() =>
+                    mobileNavOpen ? setMobileNavOpen(false) : showMenu()
+                  }
+                >
+                  {mobileNavOpen ? (
+                    <X className="h-5 w-5" />
+                  ) : (
+                    <Menu className="h-5 w-5" />
+                  )}
+                </button>
+              ) : null}
+
+              {/* Desktop: show menu only when the left column is collapsed */}
+              {isDesktop && !menuIsOpen ? (
                 <button
                   type="button"
                   className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
@@ -1007,21 +1040,42 @@ export const AppLayout = () => {
                 </button>
               ) : null}
 
-              {/* Context / brand */}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs uppercase tracking-[0.14em] text-brand-600">
-                  {isDesktop ? t("welcome") : collegeName}
-                </p>
-                <h1 className="truncate text-base font-semibold leading-tight text-slate-900 sm:text-lg">
-                  {user.fullName}
-                  {!isDesktop ? (
-                    <span className="font-normal text-slate-500">
-                      {" "}
-                      · {getUserDisplayTitle(user)}
-                    </span>
-                  ) : null}
-                </h1>
-              </div>
+              {/* Brand block: PHIT COLLEGE primary on mobile (never the long legal name) */}
+              <NavLink
+                to={brandHomePath}
+                onClick={closeMobile}
+                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+                title={`${appConfig.appName} — Dashboard`}
+              >
+                <div className="shrink-0 rounded-xl bg-brand-50 p-1 ring-1 ring-brand-100 md:hidden">
+                  <CollegeLogo className="h-8 w-8" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  {isDesktop ? (
+                    <>
+                      <p className="truncate text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">
+                        {t("welcome")}
+                      </p>
+                      <h1 className="truncate text-base font-semibold leading-tight text-slate-900 sm:text-lg">
+                        {user.fullName}
+                      </h1>
+                    </>
+                  ) : (
+                    <>
+                      <h1 className="truncate text-[15px] font-bold leading-tight tracking-tight text-brand-800 sm:text-base">
+                        {t("appName")}
+                      </h1>
+                      <p className="truncate text-xs font-medium leading-snug text-slate-500">
+                        {user.fullName}
+                        <span className="text-slate-400">
+                          {" "}
+                          · {getUserDisplayTitle(user)}
+                        </span>
+                      </p>
+                    </>
+                  )}
+                </div>
+              </NavLink>
 
               {isDesktop ? (
                 <div className="hidden min-w-0 max-w-[12rem] items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-3 py-1.5 text-sm shadow-sm sm:flex lg:max-w-[16rem]">
@@ -1029,9 +1083,9 @@ export const AppLayout = () => {
                   <div className="min-w-0">
                     <div
                       className="truncate font-semibold leading-tight text-brand-950"
-                      title={collegeName}
+                      title={appConfig.appName}
                     >
-                      {collegeName}
+                      {t("appName")}
                     </div>
                     <div className="truncate text-[10px] font-medium uppercase tracking-wide text-brand-700/80">
                       {getUserDisplayTitle(user)}
@@ -1045,14 +1099,14 @@ export const AppLayout = () => {
 
               <Button
                 type="button"
-                className="h-10 shrink-0 gap-0 rounded-xl px-0 sm:h-9 sm:gap-2 sm:px-3"
+                className="h-11 w-11 shrink-0 gap-0 rounded-2xl px-0 sm:h-9 sm:w-auto sm:gap-2 sm:rounded-xl sm:px-3"
                 variant="outline"
                 size="sm"
                 onClick={() => void handleLogout()}
                 aria-label={t("logout")}
                 title={t("logout")}
               >
-                <span className="inline-flex h-10 w-10 items-center justify-center sm:h-auto sm:w-auto">
+                <span className="inline-flex items-center justify-center">
                   <LogOut className="h-4 w-4" />
                 </span>
                 <span className="hidden sm:inline">{t("logout")}</span>

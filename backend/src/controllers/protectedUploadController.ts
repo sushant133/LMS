@@ -134,6 +134,7 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
   const uploadsDir = getUploadDir();
   const rootResolved = path.resolve(uploadsDir);
   const filePath = path.resolve(rootResolved, schoolId, ...relativeParts);
+  const publicRelative = `/uploads/${schoolId}/${relativeParts.join("/")}`;
 
   // Portable path containment (Windows-safe)
   const relativeToRoot = path.relative(rootResolved, filePath);
@@ -146,11 +147,22 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
   }
 
   if (!(await fs.pathExists(filePath))) {
-    throw new ApiError(404, "File not found");
+    // Common ops issue: Mongo has the URL but the binary was never written,
+    // wiped by a deploy, or UPLOAD_DIR pointed elsewhere when the file was saved.
+    const parentDir = path.dirname(filePath);
+    const parentExists = await fs.pathExists(parentDir);
+    logger.warn(
+      `Upload 404: public=${publicRelative} abs=${filePath} root=${rootResolved} parentDirExists=${parentExists}`
+    );
+    throw new ApiError(
+      404,
+      "File not found on server storage. Re-upload the document, or restore it under UPLOAD_DIR on the VPS."
+    );
   }
 
   const stat = await fs.stat(filePath);
   if (!stat.isFile()) {
+    logger.warn(`Upload 404 (not a file): ${filePath}`);
     throw new ApiError(404, "File not found");
   }
 

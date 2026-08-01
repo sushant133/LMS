@@ -89,7 +89,23 @@ app.get("/", (_req, res) => {
   });
 });
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
+  let uploadDirExists = false;
+  let uploadDirWritable = false;
+  try {
+    const { access, constants } = await import("node:fs/promises");
+    await access(uploadsDir, constants.F_OK);
+    uploadDirExists = true;
+    try {
+      await access(uploadsDir, constants.W_OK);
+      uploadDirWritable = true;
+    } catch {
+      uploadDirWritable = false;
+    }
+  } catch {
+    uploadDirExists = false;
+  }
+
   res.json({
     success: true,
     message: "PHIT LMS backend is running",
@@ -99,8 +115,11 @@ app.get("/api/health", (_req, res) => {
     fileStorage: {
       mode: "local",
       uploadDir: uploadsDir,
+      uploadDirExists,
+      uploadDirWritable,
       publicPrefix: "/uploads",
-      note: "All uploads stored on VPS/local disk. MongoDB holds relative paths + metadata only."
+      serveRoutes: ["/uploads/:schoolId/*", "/api/uploads/:schoolId/*"],
+      note: "MongoDB stores relative paths only. A document 404 means the file is missing under uploadDir on this server."
     }
   });
 });

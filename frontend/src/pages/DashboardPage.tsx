@@ -35,6 +35,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { PageContent } from "components/layout/PageContent";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { api, unwrap } from "lib/api";
+import { appConfig } from "lib/config";
 import {
   getCollegeDisplayName,
   getUserDisplayTitle,
@@ -111,13 +112,13 @@ const DashboardHero = ({
   institutionName?: string;
   unreadCount: number;
 }) => (
-  <section className="overflow-hidden rounded-3xl border border-brand-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_#ffffff_45%,_#eff6ff_100%)] p-6 shadow-sm md:p-8">
+  <section className="overflow-hidden rounded-2xl border border-brand-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_#ffffff_45%,_#eff6ff_100%)] p-4 shadow-sm sm:rounded-3xl sm:p-6 md:p-8">
     {/*
       CSS grid keeps the action buttons pinned to the trailing edge.
       Flex + w-full previously allowed the button group to jump left after client navigation.
     */}
-    <div className="grid min-h-0 gap-5 lg:min-h-[11.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
-      <div className="min-w-0 space-y-3">
+    <div className="grid min-h-0 gap-4 sm:gap-5 lg:min-h-[11.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
+      <div className="min-w-0 space-y-2.5 sm:space-y-3">
         <div className="flex min-h-7 flex-wrap items-center gap-2">
           <Badge className="shrink-0 bg-brand-600 text-white">{roleLabel}</Badge>
           {roleSubtitle ? (
@@ -137,20 +138,30 @@ const DashboardHero = ({
               : "No unread notifications"}
           </Badge>
         </div>
-        <div className="space-y-2">
+        <div className="space-y-1.5 sm:space-y-2">
+          {/* Brand first on mobile; full legal name stays secondary */}
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-700 sm:text-xs">
+            {appConfig.appName}
+          </p>
           <p className="text-sm font-medium text-brand-800">{title}</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl md:text-4xl">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-3xl md:text-4xl">
             Welcome back, {userName}
           </h1>
-          <p className="min-h-5 text-sm font-medium text-slate-600">{institutionName ?? "\u00A0"}</p>
-          <p className="max-w-2xl text-sm leading-6 text-slate-600">{description}</p>
+          {institutionName ? (
+            <p className="truncate text-xs font-medium text-slate-500 sm:text-sm sm:text-slate-600">
+              {institutionName}
+            </p>
+          ) : null}
+          <p className="max-w-2xl text-sm leading-6 text-slate-600 line-clamp-3 sm:line-clamp-none">
+            {description}
+          </p>
         </div>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 justify-self-end lg:pt-1">
+      <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:justify-end lg:w-auto lg:justify-self-end lg:pt-1">
         <Link
           to="/notifications"
           className={cn(
-            "inline-flex h-10 min-w-[9.75rem] items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+            "inline-flex h-10 min-w-0 flex-1 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50 sm:min-w-[9.75rem] sm:flex-none sm:px-4"
           )}
         >
           <Bell className="mr-2 h-4 w-4 shrink-0" />
@@ -159,7 +170,7 @@ const DashboardHero = ({
         <Link
           to="/notices"
           className={cn(
-            "inline-flex h-10 min-w-[9.75rem] items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+            "inline-flex h-10 min-w-0 flex-1 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50 sm:min-w-[9.75rem] sm:flex-none sm:px-4"
           )}
         >
           <Megaphone className="mr-2 h-4 w-4 shrink-0" />

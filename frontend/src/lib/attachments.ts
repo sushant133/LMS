@@ -154,8 +154,18 @@ export const fetchAuthenticatedBlobUrl = async (url: string): Promise<string> =>
     throw new Error("You do not have permission to open this file.");
   }
   if (response.status === 404) {
+    // Prefer the API message when present (e.g. re-upload / restore guidance).
+    let apiMessage = "";
+    try {
+      const clone = response.clone();
+      const body = (await clone.json()) as { message?: string };
+      if (body?.message?.trim()) apiMessage = body.message.trim();
+    } catch {
+      /* not JSON */
+    }
     throw new Error(
-      "File not found on the server (404). The document may have been deleted or never saved correctly. Try re-uploading.",
+      apiMessage ||
+        "File not found on the server (404). The document record exists, but the file is missing from disk — re-upload it.",
     );
   }
   if (!response.ok) {
