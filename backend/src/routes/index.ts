@@ -10,6 +10,7 @@ import dailyAttendanceRoutes from "./dailyAttendanceRoutes.js";
 import fieldDutyRoutes from "./fieldDutyRoutes.js";
 import hospitalRosterRoutes from "./hospitalRosterRoutes.js";
 import employeeAttendanceRoutes from "./employeeAttendanceRoutes.js";
+import attendanceRegisterRoutes from "./attendanceRegisterRoutes.js";
 import biometricRoutes from "./biometricRoutes.js";
 import authRoutes from "./authRoutes.js";
 import dashboardRoutes from "./dashboardRoutes.js";
@@ -62,6 +63,8 @@ router.use("/field-duty", fieldDutyRoutes);
 /** Hospital Roster upgrade — additive routes under the same field-duty module. */
 router.use("/field-duty", hospitalRosterRoutes);
 router.use("/employee-attendance", employeeAttendanceRoutes);
+/** Traditional attendance register (read-only view over existing attendance data). */
+router.use("/attendance-register", attendanceRegisterRoutes);
 /** Device punch ingest foundation (API key; hidden from LMS UI). */
 router.use("/biometric", biometricRoutes);
 router.use("/exams", examRoutes);

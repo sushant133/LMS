@@ -156,15 +156,15 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Attendance",
     description: "Period / subject attendance marking",
     apiPrefixes: ["/attendance"],
-    routePrefixes: ["/attendance", "/attendance-view"],
+    routePrefixes: ["/attendance", "/attendance-view", "/attendance-register"],
     availableActions: ["view", "create", "edit", "approve", "export"]
   },
   {
     key: "daily-attendance",
     label: "Daily Attendance",
     description: "Daily class attendance",
-    apiPrefixes: ["/daily-attendance"],
-    routePrefixes: ["/daily-attendance", "/attendance"],
+    apiPrefixes: ["/daily-attendance", "/attendance-register"],
+    routePrefixes: ["/daily-attendance", "/attendance", "/attendance-register"],
     availableActions: ["view", "create", "edit", "approve", "export"]
   },
   {
@@ -172,17 +172,17 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Teacher Attendance",
     description:
       "Daily attendance for teaching staff (teachers and dual-role leaders with teaching duties)",
-    apiPrefixes: ["/employee-attendance"],
+    apiPrefixes: ["/employee-attendance", "/attendance-register"],
     // /attendance-view = Attendance Management hub (admin/staff with module grant)
-    routePrefixes: ["/attendance", "/attendance-view"],
+    routePrefixes: ["/attendance", "/attendance-view", "/attendance-register"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
     key: "staff-attendance",
     label: "Staff Attendance",
     description: "Daily attendance for non-teaching college staff (uses existing staff records)",
-    apiPrefixes: ["/employee-attendance"],
-    routePrefixes: ["/attendance", "/attendance-view"],
+    apiPrefixes: ["/employee-attendance", "/attendance-register"],
+    routePrefixes: ["/attendance", "/attendance-view", "/attendance-register"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
@@ -742,8 +742,10 @@ export const isAttendanceManagementPath = (routePath: string): boolean => {
   return (
     path === "/attendance" ||
     path === "/attendance-view" ||
+    path === "/attendance-register" ||
     path.startsWith("/attendance/") ||
-    path.startsWith("/attendance-view/")
+    path.startsWith("/attendance-view/") ||
+    path.startsWith("/attendance-register/")
   );
 };
 

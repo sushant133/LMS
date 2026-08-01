@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import {
+  BookOpen,
   CalendarCheck,
   ClipboardList,
   UserCheck,
@@ -12,6 +14,7 @@ import { PageHeader } from "components/shared/PageHeader";
 import { Button } from "components/ui/button";
 import { api, unwrap } from "lib/api";
 import { userIsTeacher } from "lib/teacherRole";
+import { AttendanceRegisterManager } from "features/attendance-register/AttendanceRegisterManager";
 import { AttendanceManager } from "./AttendanceManager";
 import { DailyAttendanceManager } from "./DailyAttendanceManager";
 import { EmployeeAttendancePanel } from "./EmployeeAttendancePanel";
@@ -20,7 +23,8 @@ type AttendanceTab =
   | "daily"
   | "subject"
   | "teacher"
-  | "staff";
+  | "staff"
+  | "register";
 
 type EmpPerms = {
   teacher: {
@@ -46,12 +50,14 @@ type EmpPerms = {
 /**
  * Attendance Management hub:
  * - Student daily + subject (existing)
- * - Teacher attendance (new)
- * - Staff attendance (new)
+ * - Teacher attendance
+ * - Staff attendance
+ * - Traditional Attendance Register (read-only monthly grid)
  * Laboratory / Field attendance remain in their own modules.
  */
 export const AttendanceHub = () => {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const hasInstitutionRead = hasInstitutionAccess(user?.role ?? "");
   const canWriteAdmin = canManageInstitution(user?.role ?? "");
   const isTeacher = userIsTeacher(user);
@@ -83,6 +89,15 @@ export const AttendanceHub = () => {
   const showStaff =
     canWriteAdmin || Boolean(perms?.staff.view) || isStaff;
 
+  /** Traditional register: admins, teachers (scoped), staff with HR access, students (own). */
+  const showRegister =
+    hasInstitutionRead ||
+    canWriteAdmin ||
+    isTeacher ||
+    showTeacherHr ||
+    showStaff ||
+    isStudent;
+
   // Prefer HR tabs when the user is not a classroom teacher / institution admin
   const defaultTab: AttendanceTab =
     !canWriteAdmin && !hasInstitutionRead && !isTeacher
@@ -91,7 +106,32 @@ export const AttendanceHub = () => {
         : "teacher"
       : "daily";
 
-  const [activeTab, setActiveTab] = useState<AttendanceTab>(defaultTab);
+  const tabFromUrl = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<AttendanceTab>(() => {
+    if (tabFromUrl === "register") return "register";
+    if (
+      tabFromUrl === "daily" ||
+      tabFromUrl === "subject" ||
+      tabFromUrl === "teacher" ||
+      tabFromUrl === "staff"
+    ) {
+      return tabFromUrl;
+    }
+    return defaultTab;
+  });
+
+  useEffect(() => {
+    if (tabFromUrl === "register") setActiveTab("register");
+  }, [tabFromUrl]);
+
+  const selectTab = (id: AttendanceTab) => {
+    setActiveTab(id);
+    if (id === "register") {
+      setSearchParams({ tab: "register" }, { replace: true });
+    } else if (searchParams.has("tab")) {
+      setSearchParams({}, { replace: true });
+    }
+  };
 
   const tabs = useMemo(() => {
     const list: Array<{
@@ -131,6 +171,14 @@ export const AttendanceHub = () => {
       });
     }
 
+    if (showRegister) {
+      list.push({
+        id: "register",
+        label: "Attendance Register",
+        icon: BookOpen,
+      });
+    }
+
     return list;
   }, [
     hasInstitutionRead,
@@ -138,6 +186,7 @@ export const AttendanceHub = () => {
     canWriteAdmin,
     showTeacherHr,
     showStaff,
+    showRegister,
   ]);
 
   // Ensure active tab is valid when permissions load
@@ -150,8 +199,8 @@ export const AttendanceHub = () => {
         title={isTeacher && !canWriteAdmin ? "My Attendance" : "Attendance Management"}
         description={
           isTeacher && !canWriteAdmin
-            ? "Mark daily class attendance (1st period locks the day and syncs subject-wise for that period) or take subject-wise attendance for your teaching periods."
-            : "Student classroom attendance, teacher attendance, and staff attendance. Laboratory and field postings stay in their own modules."
+            ? "Mark daily class attendance (1st period locks the day and syncs subject-wise for that period) or take subject-wise attendance for your teaching periods. Use Attendance Register for the traditional monthly view."
+            : "Student classroom attendance, teacher attendance, staff attendance, and traditional monthly Attendance Register. Laboratory and field postings stay in their own modules."
         }
       />
 
@@ -162,7 +211,7 @@ export const AttendanceHub = () => {
             <Button
               key={tab.id}
               variant={safeTab === tab.id ? "default" : "outline"}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => selectTab(tab.id)}
             >
               <Icon className="mr-2 h-4 w-4" />
               {tab.label}
@@ -219,6 +268,10 @@ export const AttendanceHub = () => {
             !Boolean(perms?.staff.create)
           }
         />
+      ) : null}
+
+      {safeTab === "register" ? (
+        <AttendanceRegisterManager embedded />
       ) : null}
     </div>
   );

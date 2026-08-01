@@ -275,6 +275,12 @@ export default function App() {
               <Route path="/attendance-view" element={<AttendancePage />} />
             </Route>
 
+            {/* Legacy URL → Attendance Management (Register tab) */}
+            <Route
+              path="/attendance-register"
+              element={<Navigate to="/attendance-view?tab=register" replace />}
+            />
+
             {/* Field Management: admins + field coordinators (staff) + students (read-only) — not teachers */}
             <Route
               element={

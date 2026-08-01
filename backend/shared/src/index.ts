@@ -25,6 +25,7 @@ export * from "./hospital-roster-types.js";
 export * from "./hospital-roster-schemas.js";
 export * from "./employee-attendance-types.js";
 export * from "./employee-attendance-schemas.js";
+export * from "./attendance-register-types.js";
 export * from "./biometric-types.js";
 export * from "./biometric-schemas.js";
 export * from "./laboratory-constants.js";

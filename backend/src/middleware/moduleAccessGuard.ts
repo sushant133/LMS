@@ -70,6 +70,35 @@ export const enforceModuleAccess = async (
     ) {
       return next();
     }
+    // Traditional Attendance Register (read-only) — allow if any attendance module granted.
+    // Tab-level access is enforced inside attendanceRegisterController.
+    if (
+      READ_METHODS.has(req.method) &&
+      /\/api\/attendance-register(\/|$)/.test(originalPath)
+    ) {
+      const accessMap = await getUserModuleAccessMap(req.user.userId);
+      const allowed =
+        canAccessModule(accessMap, "daily-attendance") ||
+        canAccessModule(accessMap, "attendance") ||
+        canAccessModule(accessMap, "teacher-attendance") ||
+        canAccessModule(accessMap, "staff-attendance");
+      if (allowed) return next();
+      // Teachers / staff still reach controller for self-scoped registers
+      const role = req.user.role;
+      if (
+        role === "TEACHER" ||
+        role === "COLLEGE_STAFF" ||
+        role === "STUDENT" ||
+        role === "SUPER_ADMIN" ||
+        role === "COLLEGE_ADMIN" ||
+        role === "COLLEGE_VIEWER" ||
+        role === "PRINCIPAL"
+      ) {
+        return next();
+      }
+      return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
+    }
+
     // Teacher + Staff attendance share /api/employee-attendance — allow if either
     // category module (or legacy "attendance") is granted. Category-level checks
     // run inside the employee attendance controller.
