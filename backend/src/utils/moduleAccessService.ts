@@ -321,6 +321,10 @@ export const isModuleAccessBypassPath = (method: string, originalUrl: string): b
   if (method === "GET" && /\/api\/users\/modules$/.test(path)) return true;
   // Notifications always available
   if (/\/api\/notifications/.test(path)) return true;
+  // Authenticated file downloads (tenant isolation enforced in serveProtectedUpload)
+  if (method === "GET" && (/\/api\/uploads\//.test(path) || /^\/uploads\//.test(path))) {
+    return true;
+  }
   return false;
 };
 

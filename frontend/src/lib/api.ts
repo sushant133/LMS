@@ -32,10 +32,22 @@ export const resolveMediaUrl = (path?: string | null): string | undefined => {
   // Block dangerous schemes
   if (/^(javascript|data|vbscript|file):/i.test(trimmed)) return undefined;
 
-  // Already absolute CDN / external URL
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // Already absolute CDN / external URL — still rewrite same-site /uploads → /api/uploads
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      if (u.pathname.startsWith("/uploads/") && !u.pathname.startsWith("/api/uploads/")) {
+        if (typeof window !== "undefined" && u.origin === window.location.origin) {
+          return `/api${u.pathname}${u.search}`;
+        }
+      }
+    } catch {
+      /* keep original */
+    }
+    return trimmed;
+  }
 
-  // Accidental /api/uploads → /uploads (legacy clients)
+  // Normalize /api/uploads → /uploads then re-prefix for serving
   if (trimmed.startsWith("/api/uploads/")) {
     trimmed = trimmed.slice(4);
   } else if (trimmed.startsWith("api/uploads/")) {
@@ -43,24 +55,30 @@ export const resolveMediaUrl = (path?: string | null): string | undefined => {
   }
 
   if (!trimmed.startsWith("/")) {
-    trimmed = `/${trimmed}`;
+    trimmed = trimmed.startsWith("uploads/") ? `/${trimmed}` : `/${trimmed}`;
   }
 
-  // Ensure /uploads prefix for bare storage-relative paths
-  if (!trimmed.startsWith("/uploads/") && !trimmed.startsWith("/api/")) {
-    // leave non-upload public assets (e.g. /favicon) as-is
+  // Protected uploads: prefer /api/uploads so production reverse proxy works
+  if (trimmed.startsWith("/uploads/")) {
+    const base = getApiBaseUrl();
+    if (/^https?:\/\//i.test(base)) {
+      const apiBase = base.replace(/\/$/, "");
+      if (apiBase.endsWith("/api")) {
+        return `${apiBase}${trimmed}`;
+      }
+      return `${apiBase}/api${trimmed}`;
+    }
+    return `/api${trimmed}`;
   }
 
   const base = getApiBaseUrl();
 
-  // Cross-origin API host (e.g. http://localhost:5000/api or https://api.example.com/api)
-  // Media is on the same origin as the API but outside the /api prefix.
+  // Cross-origin API host for non-upload paths
   if (/^https?:\/\//i.test(base)) {
     const origin = base.replace(/\/api\/?$/i, "").replace(/\/$/, "");
     return `${origin}${trimmed}`;
   }
 
-  // Same-origin (Vite / Nginx reverse proxy of /uploads)
   return trimmed;
 };
 

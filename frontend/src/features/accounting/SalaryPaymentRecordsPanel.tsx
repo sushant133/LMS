@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type {
-  SalarySheetResponse,
-  SalarySheetRow,
-  SchoolSettingsRecord,
-} from "@phit-erp/shared";
+import type { SalarySheetRow, SchoolSettingsRecord } from "@phit-erp/shared";
 import {
   formatNrsAmountInWords,
   PAYMENT_METHODS,
@@ -39,6 +35,7 @@ import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
+import { fetchSalarySheet, saveSalarySheetClient } from "./salarySheetClient";
 
 type EditableRow = SalarySheetRow & {
   /** local edits */
@@ -193,13 +190,9 @@ export const SalaryPaymentRecordsPanel = () => {
   /** Full employee catalog + attendance for the month (picker source — not the table) */
   const sheetQuery = useQuery({
     queryKey: ["accounting-salary-sheet", monthBs],
-    queryFn: () =>
-      unwrap<SalarySheetResponse>(
-        api.get("/accounting/salary-sheet", {
-          params: { monthBs },
-        }),
-      ),
+    queryFn: () => fetchSalarySheet(monthBs),
     enabled: Boolean(monthBs && /^\d{4}-\d{2}$/.test(monthBs)),
+    retry: 1,
   });
 
   const settingsQuery = useQuery({
@@ -231,8 +224,26 @@ export const SalaryPaymentRecordsPanel = () => {
   }, [sheetQuery.data]);
 
   const saveMutation = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      unwrap(api.post("/accounting/salary-sheet/save", body)),
+    mutationFn: (body: {
+      monthBs: string;
+      status: "DRAFT" | "PROCESSED" | "PAID";
+      paidDateBs?: string;
+      paymentMethod: string;
+      rows: Array<{
+        employeeType: "TEACHER" | "STAFF";
+        teacherId?: string;
+        staffId?: string;
+        employeeName?: string;
+        monthlySalaryNpr: number;
+        presentDays: number;
+        absentDays: number;
+        extraDuty: number;
+        extraAmountNpr?: number;
+        remarks?: string;
+        attendanceManualOverride?: boolean;
+        salaryPaymentId?: string;
+      }>;
+    }) => saveSalarySheetClient(body),
     onSuccess: async () => {
       toast.success("Salary sheet saved — payroll records updated");
       await sheetQuery.refetch();

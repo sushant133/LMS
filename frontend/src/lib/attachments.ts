@@ -1,23 +1,93 @@
 import type { AssignmentAttachment, AssignmentAttachmentKind } from "@phit-erp/shared";
-import { getApiBaseUrl } from "./api";
+// Import from config only — avoid circular import with ./api (axios + attachments consumers)
+import { getApiBaseUrl } from "./config";
 
 export type AttachmentDisplayKind = AssignmentAttachmentKind | "IMAGE" | "PDF" | "VIDEO" | "FILE" | "LINK";
 
-/** Resolve static upload URLs (/uploads/...) for cross-origin production backends. */
+/**
+ * Resolve stored upload paths for fetch/open.
+ *
+ * MongoDB stores: `/uploads/{schoolId}/students/documents/file.pdf`
+ * Serving is authenticated on the API host:
+ *   - preferred (same reverse-proxy as API): `/api/uploads/{schoolId}/...`
+ *   - legacy direct: `/uploads/{schoolId}/...`
+ *
+ * Production Nginx often only proxies `/api` → Node. Using `/api/uploads` avoids 404s
+ * from the static frontend host.
+ */
 export const resolveAttachmentUrl = (url: string): string => {
   if (!url) return "";
-  if (/^https?:\/\//i.test(url)) return url;
+  let path = url.trim();
+  if (!path) return "";
 
-  if (url.startsWith("/")) {
-    const apiBase = getApiBaseUrl();
-    if (apiBase.startsWith("http")) {
-      const origin = apiBase.replace(/\/api\/?$/, "");
-      return `${origin}${url}`;
-    }
-    return url;
+  // Accidental double api prefix
+  if (path.startsWith("/api/api/")) {
+    path = path.replace(/^\/api/, "");
   }
 
-  return `/uploads/${url.replace(/^uploads\//, "")}`;
+  // Already absolute
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      const u = new URL(path);
+      // Normalize absolute URLs that hit the site origin /uploads → /api/uploads
+      if (u.pathname.startsWith("/uploads/") && !u.pathname.startsWith("/api/uploads/")) {
+        const apiBase = getApiBaseUrl();
+        if (apiBase.startsWith("http")) {
+          const apiOrigin = apiBase.replace(/\/api\/?$/, "");
+          return `${apiOrigin}/api${u.pathname}${u.search}`;
+        }
+        if (typeof window !== "undefined" && u.origin === window.location.origin) {
+          return `/api${u.pathname}${u.search}`;
+        }
+      }
+      // Absolute already under /api/uploads on API host
+      return path;
+    } catch {
+      return path;
+    }
+  }
+
+  // Strip leading /api/uploads or /uploads to a canonical /uploads/... path first
+  if (path.startsWith("/api/uploads/")) {
+    path = path.slice(4); // → /uploads/...
+  } else if (path.startsWith("api/uploads/")) {
+    path = `/${path.slice(3)}`;
+  } else if (!path.startsWith("/")) {
+    path = path.startsWith("uploads/") ? `/${path}` : `/uploads/${path}`;
+  }
+
+  // Canonical storage path must start with /uploads/
+  if (!path.startsWith("/uploads/")) {
+    return path;
+  }
+
+  const apiBase = getApiBaseUrl();
+
+  // Absolute API host: https://api.example.com/api → https://api.example.com/api/uploads/...
+  if (apiBase.startsWith("http")) {
+    const base = apiBase.replace(/\/$/, "");
+    // base ends with /api
+    if (base.endsWith("/api")) {
+      return `${base}${path}`; // /api + /uploads/... = /api/uploads/...
+    }
+    // bare API origin without /api suffix
+    return `${base}/api${path}`;
+  }
+
+  // Same-origin relative API base (/api)
+  return `/api${path}`;
+};
+
+/** Alternate URL to try if the preferred path 404s (legacy direct /uploads). */
+export const resolveAttachmentUrlLegacy = (url: string): string => {
+  const preferred = resolveAttachmentUrl(url);
+  if (!preferred) return "";
+  // /api/uploads/... → /uploads/...
+  if (preferred.includes("/api/uploads/")) {
+    return preferred.replace("/api/uploads/", "/uploads/");
+  }
+  // absolute .../api/uploads/ → .../uploads/
+  return preferred.replace(/\/api\/uploads\//, "/uploads/");
 };
 
 const pathFromUrl = (url: string): string => {
@@ -31,7 +101,11 @@ const pathFromUrl = (url: string): string => {
 /** True when the URL points at a stored upload file path. */
 export const isUploadFileUrl = (url: string): boolean => {
   const path = pathFromUrl(url);
-  return path.startsWith("/uploads/");
+  return (
+    path.startsWith("/uploads/") ||
+    path.startsWith("/api/uploads/") ||
+    /\/uploads\//.test(path)
+  );
 };
 
 /**
@@ -39,18 +113,8 @@ export const isUploadFileUrl = (url: string): boolean => {
  * Required after /uploads was auth-gated — plain <a href> / <iframe src> often
  * fail for students (new tab without cookie context or cross-origin).
  */
-export const fetchAuthenticatedBlobUrl = async (url: string): Promise<string> => {
-  const resolved = resolveAttachmentUrl(url);
-  if (!resolved) {
-    throw new Error("Invalid file URL");
-  }
-
-  // External non-upload links: open as-is (caller may use resolved URL).
-  if (!isUploadFileUrl(resolved) && /^https?:\/\//i.test(resolved)) {
-    return resolved;
-  }
-
-  const response = await fetch(resolved, {
+const fetchUploadWithAuth = async (resolved: string): Promise<Response> =>
+  fetch(resolved, {
     method: "GET",
     credentials: "include",
     headers: {
@@ -58,14 +122,52 @@ export const fetchAuthenticatedBlobUrl = async (url: string): Promise<string> =>
     },
   });
 
+export const fetchAuthenticatedBlobUrl = async (url: string): Promise<string> => {
+  const resolved = resolveAttachmentUrl(url);
+  if (!resolved) {
+    throw new Error("Invalid file URL");
+  }
+
+  // External non-upload links (CDN etc.): open as-is
+  const looksLikeUpload =
+    isUploadFileUrl(resolved) ||
+    resolved.includes("/uploads/") ||
+    resolved.includes("/api/uploads/");
+  if (!looksLikeUpload && /^https?:\/\//i.test(resolved)) {
+    return resolved;
+  }
+
+  let response = await fetchUploadWithAuth(resolved);
+
+  // Fallback: try legacy /uploads path if /api/uploads 404s (or reverse)
+  if (response.status === 404) {
+    const legacy = resolveAttachmentUrlLegacy(url);
+    if (legacy && legacy !== resolved) {
+      response = await fetchUploadWithAuth(legacy);
+    }
+  }
+
   if (response.status === 401) {
     throw new Error("Please sign in again to open this file.");
   }
   if (response.status === 403) {
     throw new Error("You do not have permission to open this file.");
   }
+  if (response.status === 404) {
+    throw new Error(
+      "File not found on the server (404). The document may have been deleted or never saved correctly. Try re-uploading.",
+    );
+  }
   if (!response.ok) {
     throw new Error(`Could not open file (${response.status}).`);
+  }
+
+  // Reject HTML error pages (SPA index.html served as 200 for unknown paths)
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("text/html")) {
+    throw new Error(
+      "File route is not reaching the API. Ensure the server proxies /api (and /uploads) to the backend.",
+    );
   }
 
   const blob = await response.blob();
@@ -73,26 +175,46 @@ export const fetchAuthenticatedBlobUrl = async (url: string): Promise<string> =>
   const type =
     blob.type && blob.type !== "application/octet-stream"
       ? blob.type
-      : resolved.toLowerCase().includes(".pdf")
+      : resolved.toLowerCase().includes(".pdf") || url.toLowerCase().includes(".pdf")
         ? "application/pdf"
         : blob.type;
   const typed = type && type !== blob.type ? new Blob([blob], { type }) : blob;
   return URL.createObjectURL(typed);
 };
 
+const isProtectedUploadPath = (url: string): boolean => {
+  if (!url) return false;
+  if (isUploadFileUrl(url)) return true;
+  return (
+    url.includes("/uploads/") ||
+    url.includes("/api/uploads/") ||
+    url.startsWith("/uploads/") ||
+    url.startsWith("/api/uploads/")
+  );
+};
+
 /** Open a protected upload in a new tab using an authenticated blob URL. */
 export const openAuthenticatedAttachment = async (url: string): Promise<void> => {
+  if (!url?.trim()) {
+    throw new Error("No file URL provided");
+  }
   const resolved = resolveAttachmentUrl(url);
-  if (!isUploadFileUrl(resolved) && !resolved.startsWith("/uploads/")) {
-    window.open(resolved, "_blank", "noopener,noreferrer");
+  if (!isProtectedUploadPath(resolved) && !isProtectedUploadPath(url)) {
+    window.open(resolved || url, "_blank", "noopener,noreferrer");
     return;
   }
 
   const blobUrl = await fetchAuthenticatedBlobUrl(url);
   const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
   if (!opened) {
-    // Popup blocked — fall back to same-tab navigation
-    window.location.href = blobUrl;
+    // Popup blocked — force download instead of navigating away from the app
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = "document";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
   // Revoke later so the new tab has time to load
   window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
@@ -103,10 +225,13 @@ export const downloadAuthenticatedAttachment = async (
   url: string,
   filename?: string,
 ): Promise<void> => {
+  if (!url?.trim()) {
+    throw new Error("No file URL provided");
+  }
   const resolved = resolveAttachmentUrl(url);
-  if (!isUploadFileUrl(resolved) && !resolved.startsWith("/uploads/")) {
+  if (!isProtectedUploadPath(resolved) && !isProtectedUploadPath(url)) {
     const a = document.createElement("a");
-    a.href = resolved;
+    a.href = resolved || url;
     a.target = "_blank";
     a.rel = "noopener noreferrer";
     if (filename) a.download = filename;
@@ -118,6 +243,7 @@ export const downloadAuthenticatedAttachment = async (
   const a = document.createElement("a");
   a.href = blobUrl;
   a.download = filename?.trim() || "download";
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -135,8 +261,8 @@ export const isLikelyAppPageUrl = (url: string): boolean => {
     const resolved = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
     const path = resolved.pathname;
 
-    // Real uploaded files are never SPA pages.
-    if (path.startsWith("/uploads/")) {
+    // Real uploaded files are never SPA pages (including /api/uploads reverse-proxy path).
+    if (path.startsWith("/uploads/") || path.startsWith("/api/uploads/")) {
       return false;
     }
 
@@ -162,6 +288,7 @@ export const isLikelyAppPageUrl = (url: string): boolean => {
 };
 
 export const getAttachmentKind = (file: AssignmentAttachment): AttachmentDisplayKind => {
+  if (!file?.url) return "FILE";
   if (file.kind === "LINK") return "LINK";
   if (file.kind === "IMAGE" || file.kind === "PDF" || file.kind === "VIDEO") {
     // Trust declared kind only when the URL still looks like a real file/upload.
@@ -173,8 +300,8 @@ export const getAttachmentKind = (file: AssignmentAttachment): AttachmentDisplay
   }
 
   const mime = file.mimeType?.toLowerCase() ?? "";
-  const name = file.name.toLowerCase();
-  const resolved = resolveAttachmentUrl(file.url);
+  const name = (file.name ?? "").toLowerCase();
+  const resolved = resolveAttachmentUrl(file.url || "");
 
   if (mime.startsWith("text/html") || isLikelyAppPageUrl(resolved)) {
     return "LINK";

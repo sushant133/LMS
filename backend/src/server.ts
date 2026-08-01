@@ -70,7 +70,9 @@ const uploadsDir = getUploadDir();
  * - Relative paths in MongoDB: /uploads/{schoolId}/{module}/filename.ext
  */
 // Express 5 named wildcard (path-to-regexp): /uploads/:schoolId/{*filePath}
+// Also under /api/uploads so Hostinger/Nginx reverse proxies that only forward /api work.
 app.get("/uploads/:schoolId/{*filePath}", protect, serveProtectedUpload);
+app.get("/api/uploads/:schoolId/{*filePath}", protect, serveProtectedUpload);
 app.use("/uploads", (_req, res) => {
   res.status(401).json({
     success: false,
