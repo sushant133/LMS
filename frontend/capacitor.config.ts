@@ -8,6 +8,15 @@ const config: CapacitorConfig = {
     url: 'https://lms.phit.com.np',
     cleartext: true
   },
+  plugins: {
+    SplashScreen: {
+      launchShowDuration: 3000,
+      launchAutoHide: true,
+      backgroundColor: "#ffffff",
+      androidSplashResourceName: "splash",
+      showSpinner: false
+    }
+  },
   android: {
     allowMixedContent: true
   }
