@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   STUDENT_DOCUMENT_CATEGORIES,
   type StudentDocument,
@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   FileText,
+  Loader2,
   Replace,
   Trash2,
   Upload,
@@ -18,6 +19,13 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
+import {
+  downloadAuthenticatedAttachment,
+  fetchAuthenticatedBlobUrl,
+  isUploadFileUrl,
+  openAuthenticatedAttachment,
+  resolveAttachmentUrl,
+} from "lib/attachments";
 import { api, resolveApiUrl, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -449,93 +457,197 @@ interface DocumentRowProps {
   onReplace: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
+/** Thumbnail that loads protected /uploads files with session cookies. */
+const DocumentThumbnail = ({
+  url,
+  name,
+  mimeType,
+}: {
+  url: string;
+  name: string;
+  mimeType?: string;
+}) => {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!url || !isImageDocument(mimeType, url)) {
+      setSrc(null);
+      return;
+    }
+
+    let revoked: string | null = null;
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const resolved = resolveAttachmentUrl(url);
+        if (isUploadFileUrl(resolved) || resolved.startsWith("/uploads/")) {
+          const blobUrl = await fetchAuthenticatedBlobUrl(url);
+          if (cancelled) {
+            URL.revokeObjectURL(blobUrl);
+            return;
+          }
+          revoked = blobUrl;
+          setSrc(blobUrl);
+        } else {
+          setSrc(resolved);
+        }
+      } catch {
+        if (!cancelled) setSrc(null);
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [url, mimeType]);
+
+  if (src) {
+    return (
+      <img src={src} alt={name} className="h-10 w-10 rounded object-cover" />
+    );
+  }
+
+  return (
+    <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-200">
+      <FileText className="h-5 w-5 text-slate-600" />
+    </div>
+  );
+};
+
 const DocumentRow = ({
   doc,
   canManage,
   uploading,
   onDelete,
   onReplace,
-}: DocumentRowProps) => (
-  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
-    {isImageDocument(doc.mimeType, doc.url) ? (
-      <img
-        src={doc.url}
-        alt={doc.name}
-        className="h-10 w-10 rounded object-cover"
+}: DocumentRowProps) => {
+  const [busy, setBusy] = useState<"preview" | "download" | null>(null);
+
+  const handlePreview = async () => {
+    if (!doc.url) return;
+    setBusy("preview");
+    try {
+      await openAuthenticatedAttachment(doc.url);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not open document preview",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!doc.url) return;
+    setBusy("download");
+    try {
+      await downloadAuthenticatedAttachment(
+        doc.url,
+        doc.originalName || doc.name || "document",
+      );
+      toast.success("Download started");
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not download document",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+      <DocumentThumbnail
+        url={doc.url}
+        name={doc.name}
+        mimeType={doc.mimeType}
       />
-    ) : (
-      <div className="flex h-10 w-10 items-center justify-center rounded bg-slate-200">
-        <FileText className="h-5 w-5 text-slate-600" />
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-slate-900">{doc.name}</div>
+        <div className="text-xs text-slate-500">
+          {doc.originalName} · {formatFileSize(doc.size ?? 0)} ·{" "}
+          {doc.uploadedAt
+            ? new Date(doc.uploadedAt).toLocaleDateString()
+            : "—"}
+          {doc.uploadedByName ? ` · ${doc.uploadedByName}` : ""}
+        </div>
+        <Badge className={`mt-1 ${getDocumentStatusBadgeClass(doc.status)}`}>
+          {getDocumentStatusLabel(doc.status)}
+        </Badge>
       </div>
-    )}
-    <div className="min-w-0 flex-1">
-      <div className="font-medium text-slate-900">{doc.name}</div>
-      <div className="text-xs text-slate-500">
-        {doc.originalName} · {formatFileSize(doc.size ?? 0)} ·{" "}
-        {doc.uploadedAt
-          ? new Date(doc.uploadedAt).toLocaleDateString()
-          : "—"}
-        {doc.uploadedByName ? ` · ${doc.uploadedByName}` : ""}
-      </div>
-      <Badge
-        className={`mt-1 ${getDocumentStatusBadgeClass(doc.status)}`}
-      >
-        {getDocumentStatusLabel(doc.status)}
-      </Badge>
-    </div>
-    <div className="flex items-center gap-1">
-      {doc.url ? (
-        <>
-          <Button type="button" variant="outline" size="sm" asChild>
-            <a href={doc.url} target="_blank" rel="noreferrer">
-              <Eye className="mr-1 h-3.5 w-3.5" />
-              Preview
-            </a>
-          </Button>
-          <Button type="button" variant="outline" size="sm" asChild>
-            <a href={doc.url} download={doc.originalName}>
-              <Download className="mr-1 h-3.5 w-3.5" />
-              Download
-            </a>
-          </Button>
-        </>
-      ) : null}
-      {canManage ? (
-        <>
-          <label className="inline-flex cursor-pointer items-center">
+      <div className="flex items-center gap-1">
+        {doc.url ? (
+          <>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={uploading}
-              asChild
+              disabled={busy !== null}
+              onClick={() => void handlePreview()}
             >
-              <span>
-                <Replace className="mr-1 h-3.5 w-3.5" />
-                {uploading ? "..." : "Replace"}
-              </span>
+              {busy === "preview" ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Eye className="mr-1 h-3.5 w-3.5" />
+              )}
+              Preview
             </Button>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-              className="hidden"
-              disabled={uploading}
-              onChange={onReplace}
-            />
-          </label>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            onClick={onDelete}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </>
-      ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => void handleDownload()}
+            >
+              {busy === "download" ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="mr-1 h-3.5 w-3.5" />
+              )}
+              Download
+            </Button>
+          </>
+        ) : null}
+        {canManage ? (
+          <>
+            <label className="inline-flex cursor-pointer items-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={uploading}
+                asChild
+              >
+                <span>
+                  <Replace className="mr-1 h-3.5 w-3.5" />
+                  {uploading ? "..." : "Replace"}
+                </span>
+              </Button>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                className="hidden"
+                disabled={uploading}
+                onChange={onReplace}
+              />
+            </label>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        ) : null}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 interface PendingDocumentRowProps {
   doc: StudentDocument;

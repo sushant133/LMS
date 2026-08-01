@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { HrDocument } from "@phit-erp/shared";
 import {
   Download,
   Eye,
   FileText,
+  Loader2,
   Replace,
   Trash2,
   Upload,
@@ -14,7 +15,14 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
-import { api, resolveApiUrl, resolveMediaUrl, unwrap } from "lib/api";
+import {
+  downloadAuthenticatedAttachment,
+  fetchAuthenticatedBlobUrl,
+  isUploadFileUrl,
+  openAuthenticatedAttachment,
+  resolveAttachmentUrl,
+} from "lib/attachments";
+import { api, resolveApiUrl, unwrap } from "lib/api";
 import { parseErrorMessage } from "lib/utils";
 import {
   formatFileSize,
@@ -384,6 +392,65 @@ export const HrDocumentsSection = ({
   );
 };
 
+const HrDocumentThumbnail = ({
+  url,
+  name,
+  mimeType,
+}: {
+  url?: string;
+  name: string;
+  mimeType?: string;
+}) => {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!url || !isImageDocument(mimeType, url)) {
+      setSrc(null);
+      return;
+    }
+    let revoked: string | null = null;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const resolved = resolveAttachmentUrl(url);
+        if (isUploadFileUrl(resolved) || resolved.startsWith("/uploads/")) {
+          const blobUrl = await fetchAuthenticatedBlobUrl(url);
+          if (cancelled) {
+            URL.revokeObjectURL(blobUrl);
+            return;
+          }
+          revoked = blobUrl;
+          setSrc(blobUrl);
+        } else {
+          setSrc(resolved);
+        }
+      } catch {
+        if (!cancelled) setSrc(null);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
+    };
+  }, [url, mimeType]);
+
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        className="h-10 w-10 shrink-0 rounded object-cover"
+      />
+    );
+  }
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-slate-200">
+      <FileText className="h-5 w-5 text-slate-600" />
+    </div>
+  );
+};
+
 const DocumentRow = ({
   doc,
   canManage,
@@ -397,24 +464,47 @@ const DocumentRow = ({
   onReplace: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onDelete: () => void;
 }) => {
-  // Served at /uploads/* (authenticated), never under /api
-  const url = resolveMediaUrl(doc.url) ?? "";
-  const image = isImageDocument(doc.mimeType, doc.url);
+  const [busy, setBusy] = useState<"preview" | "download" | null>(null);
+  const hasUrl = Boolean(doc.url);
+
+  const handlePreview = async () => {
+    if (!doc.url) return;
+    setBusy("preview");
+    try {
+      await openAuthenticatedAttachment(doc.url);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not open document");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!doc.url) return;
+    setBusy("download");
+    try {
+      await downloadAuthenticatedAttachment(
+        doc.url,
+        doc.originalName || doc.name || "document",
+      );
+      toast.success("Download started");
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not download document",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2">
       <div className="flex min-w-0 items-center gap-3">
-        {image && url ? (
-          <img
-            src={url}
-            alt={doc.name}
-            className="h-10 w-10 shrink-0 rounded object-cover"
-          />
-        ) : (
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-slate-200">
-            <FileText className="h-5 w-5 text-slate-600" />
-          </div>
-        )}
+        <HrDocumentThumbnail
+          url={doc.url}
+          name={doc.name || "Document"}
+          mimeType={doc.mimeType}
+        />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate font-medium text-slate-900">
@@ -432,23 +522,37 @@ const DocumentRow = ({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1">
-        {url ? (
+        {hasUrl ? (
           <>
-            <Button type="button" size="sm" variant="outline" asChild>
-              <a href={url} target="_blank" rel="noreferrer" title="View in new tab">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() => void handlePreview()}
+              title="View in new tab"
+            >
+              {busy === "preview" ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
                 <Eye className="mr-1 h-3.5 w-3.5" />
-                View
-              </a>
+              )}
+              View
             </Button>
-            <Button type="button" size="sm" variant="outline" asChild>
-              <a
-                href={url}
-                download={doc.originalName || doc.name || "document"}
-                title="Download file"
-              >
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() => void handleDownload()}
+              title="Download file"
+            >
+              {busy === "download" ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
                 <Download className="mr-1 h-3.5 w-3.5" />
-                Download
-              </a>
+              )}
+              Download
             </Button>
           </>
         ) : null}
