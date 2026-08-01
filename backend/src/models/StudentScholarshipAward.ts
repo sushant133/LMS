@@ -9,9 +9,12 @@ const studentScholarshipAwardSchema = new Schema(
   {
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, index: true },
     studentId: { type: Schema.Types.ObjectId, ref: "Student", required: true, index: true },
-    /** Year of the final exam they topped (1, 2, or 3). */
-    toppedProgramYear: { type: Number, enum: [1, 2, 3], required: true },
-    /** Program year whose fees are waived (usually topped + 1). */
+    /**
+     * Exam period they topped: 0 = Entrance, 1 = 1st year final, 2 = 2nd year final.
+     * (3rd year final is not offered as a topper source.)
+     */
+    toppedProgramYear: { type: Number, enum: [0, 1, 2], required: true },
+    /** Program year whose fees are waived (Entrance→1, 1st→2, 2nd→3). */
     coversProgramYear: { type: Number, enum: [1, 2, 3], required: true },
     academicYearBs: { type: String, default: "" },
     examName: { type: String, default: "" },

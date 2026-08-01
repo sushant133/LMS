@@ -9,7 +9,18 @@ const accountingSettingsSchema = new Schema(
     autoReceiptNumber: { type: Boolean, default: true },
     defaultPaymentMethod: {
       type: String,
-      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      enum: [
+        "CASH",
+        "BANK_TRANSFER",
+        "CHEQUE",
+        "ESEWA",
+        "KHALTI",
+        "IMEPAY",
+        "FONEPAY",
+        "CONNECT_IPS",
+        "ONLINE",
+        "OTHER"
+      ],
       default: "CASH"
     },
     voucherPrefix: { type: String, default: "JV" },

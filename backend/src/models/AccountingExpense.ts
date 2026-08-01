@@ -9,7 +9,18 @@ const accountingExpenseSchema = new Schema(
     amountNpr: { type: Number, required: true },
     paymentMethod: {
       type: String,
-      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      enum: [
+        "CASH",
+        "BANK_TRANSFER",
+        "CHEQUE",
+        "ESEWA",
+        "KHALTI",
+        "IMEPAY",
+        "FONEPAY",
+        "CONNECT_IPS",
+        "ONLINE",
+        "OTHER"
+      ],
       default: "CASH"
     },
     description: { type: String, required: true },

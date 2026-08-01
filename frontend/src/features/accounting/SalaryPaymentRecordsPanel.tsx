@@ -1,13 +1,25 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SalaryPaymentInput, SalaryPaymentRecord } from "@phit-erp/shared";
-import { PAYMENT_METHODS } from "@phit-erp/shared";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import type {
+  SalarySheetResponse,
+  SalarySheetRow,
+  SchoolSettingsRecord,
+} from "@phit-erp/shared";
 import {
+  formatNrsAmountInWords,
+  PAYMENT_METHODS,
+} from "@phit-erp/shared";
+import { getTodayBs } from "@munatech/nepali-datepicker";
+import {
+  AlertTriangle,
   Banknote,
   FileDown,
-  Paperclip,
+  Pencil,
   Plus,
-  Upload,
+  Printer,
+  Save,
+  Trash2,
+  UserPlus,
   Wallet,
   X,
 } from "lucide-react";
@@ -23,407 +35,794 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
-import { Textarea } from "components/ui/textarea";
-import { api, resolveApiUrl, unwrap } from "lib/api";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { api, unwrap } from "lib/api";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
 
-type PanelTab = "register" | "pay";
-
-type SalaryEmployeeTeacher = {
-  _id: string;
-  teacherCode?: string;
-  basicSalaryNpr?: number;
-  designation?: string;
-  user?: { fullName?: string; designation?: string };
+type EditableRow = SalarySheetRow & {
+  /** local edits */
+  dirty?: boolean;
 };
 
-type SalaryEmployeeStaff = {
-  _id: string;
-  staffId?: string;
-  fullName: string;
-  department?: string;
-  designation?: string;
-  basicSalaryNpr?: number;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+const calcLine = (
+  row: Pick<
+    EditableRow,
+    | "monthlySalaryNpr"
+    | "presentDays"
+    | "absentDays"
+    | "extraDuty"
+    | "workingDaysInMonth"
+    | "extraAmountNpr"
+  >,
+  preferExtraDuty = true,
+): Pick<
+  EditableRow,
+  | "absentDeductionNpr"
+  | "extraAmountNpr"
+  | "salaryAmountNpr"
+  | "tax1PercentNpr"
+  | "netSalaryNpr"
+> => {
+  const days = Math.max(1, row.workingDaysInMonth || 30);
+  const monthly = Math.max(0, Number(row.monthlySalaryNpr) || 0);
+  const absent = Math.max(0, Number(row.absentDays) || 0);
+  const extraDuty = Math.max(0, Number(row.extraDuty) || 0);
+  const perDay = monthly / days;
+  const absentDeductionNpr = round2(perDay * absent);
+  const extraAmountNpr =
+    preferExtraDuty || extraDuty > 0
+      ? round2(perDay * extraDuty)
+      : round2(Math.max(0, Number(row.extraAmountNpr) || 0));
+  const salaryAmountNpr = round2(
+    Math.max(0, monthly - absentDeductionNpr + extraAmountNpr),
+  );
+  const tax1PercentNpr = round2(salaryAmountNpr * 0.01);
+  const netSalaryNpr = round2(Math.max(0, salaryAmountNpr - tax1PercentNpr));
+  return {
+    absentDeductionNpr,
+    extraAmountNpr,
+    salaryAmountNpr,
+    tax1PercentNpr,
+    netSalaryNpr,
+  };
 };
 
-type SalaryEmployeesResponse = {
-  teachers: SalaryEmployeeTeacher[];
-  collegeStaff: SalaryEmployeeStaff[];
-};
-
-type Attachment = {
-  name?: string;
-  url: string;
-  mimeType?: string;
-  size?: number;
-};
-
-const statusBadge = (status: string) => {
-  switch (status) {
-    case "PAID":
-      return "bg-emerald-100 text-emerald-800";
-    case "PROCESSED":
-      return "bg-sky-100 text-sky-800";
-    case "DRAFT":
-      return "bg-amber-100 text-amber-900";
-    default:
-      return "bg-slate-100 text-slate-700";
+const currentBsMonth = (): string => {
+  try {
+    const t = getTodayBs();
+    return `${t.year}-${String(t.month).padStart(2, "0")}`;
+  } catch {
+    return "";
   }
 };
 
-const employeeName = (row: SalaryPaymentRecord): string => {
-  if (row.employeeName) return row.employeeName;
-  if (row.staffName) return row.staffName;
-  if (row.collegeStaff?.fullName) return row.collegeStaff.fullName;
-  const teacher = row.teacher as { user?: { fullName?: string } } | undefined;
-  if (teacher?.user?.fullName) return teacher.user.fullName;
-  return "—";
+const escapeHtml = (s: string) =>
+  s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const formatCollegeAddress = (
+  address?: SchoolSettingsRecord["address"] | null,
+): string => {
+  if (!address) return "";
+  return [
+    address.streetAddress,
+    address.ward ? `Ward ${address.ward}` : "",
+    address.municipality,
+    address.district,
+    address.province,
+  ]
+    .map((p) => (p || "").trim())
+    .filter(Boolean)
+    .join(", ");
 };
 
-const totalDeductions = (row: {
-  advanceSalaryNpr?: number;
-  loanDeductionNpr?: number;
-  taxNpr?: number;
-  otherDeductionsNpr?: number;
-}) =>
-  (row.advanceSalaryNpr ?? 0) +
-  (row.loanDeductionNpr ?? 0) +
-  (row.taxNpr ?? 0) +
-  (row.otherDeductionsNpr ?? 0);
+/** e.g. 2083-04 → Shrawan 2083 (BS month label when known) */
+const BS_MONTH_NAMES = [
+  "Baisakh",
+  "Jestha",
+  "Ashadh",
+  "Shrawan",
+  "Bhadra",
+  "Ashwin",
+  "Kartik",
+  "Mangsir",
+  "Poush",
+  "Magh",
+  "Falgun",
+  "Chaitra",
+] as const;
 
-const totalEarnings = (row: {
-  basicSalaryNpr?: number;
-  allowancesNpr?: number;
-  bonusNpr?: number;
-}) =>
-  (row.basicSalaryNpr ?? 0) + (row.allowancesNpr ?? 0) + (row.bonusNpr ?? 0);
+const formatPayrollMonthLabel = (monthBs: string): string => {
+  const m = monthBs.trim();
+  const match = /^(\d{4})-(\d{2})$/.exec(m);
+  if (!match) return m || "—";
+  const year = match[1]!;
+  const monthNum = Number(match[2]);
+  const name =
+    monthNum >= 1 && monthNum <= 12 ? BS_MONTH_NAMES[monthNum - 1] : match[2];
+  return `${name} ${year}`;
+};
 
-const calcNet = (f: {
-  basicSalaryNpr: number;
-  allowancesNpr: number;
-  bonusNpr: number;
-  advanceSalaryNpr: number;
-  loanDeductionNpr: number;
-  taxNpr: number;
-  otherDeductionsNpr: number;
-}) =>
-  Math.max(
-    0,
-    f.basicSalaryNpr +
-      f.allowancesNpr +
-      f.bonusNpr -
-      f.advanceSalaryNpr -
-      f.loanDeductionNpr -
-      f.taxNpr -
-      f.otherDeductionsNpr,
-  );
-
-const emptyForm = (): SalaryPaymentInput & {
-  basicSalaryNpr: number;
-  allowancesNpr: number;
-  bonusNpr: number;
-  advanceSalaryNpr: number;
-  loanDeductionNpr: number;
-  taxNpr: number;
-  otherDeductionsNpr: number;
-} => ({
-  employeeType: "TEACHER",
-  teacherId: "",
-  staffId: "",
-  staffName: "",
-  monthBs: "",
-  basicSalaryNpr: 0,
-  allowancesNpr: 0,
-  bonusNpr: 0,
-  advanceSalaryNpr: 0,
-  loanDeductionNpr: 0,
-  taxNpr: 0,
-  otherDeductionsNpr: 0,
-  status: "DRAFT",
-  paidDateBs: "",
-  paymentMethod: "BANK_TRANSFER",
-  transactionNumber: "",
-  notes: "",
-  attachments: [],
+const emptyEntryForm = () => ({
+  employeeType: "TEACHER" as "TEACHER" | "STAFF",
+  employeeKey: "",
+  monthlySalaryNpr: "0",
+  presentDays: "0",
+  absentDays: "0",
+  extraDuty: "0",
+  remarks: "",
+  attendanceManualOverride: false,
 });
 
-const num = (v: string | number | undefined): number => {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
+const employeeKeyOf = (r: {
+  employeeType: string;
+  teacherId?: string;
+  staffId?: string;
+}) =>
+  r.employeeType === "TEACHER"
+    ? `TEACHER:${r.teacherId ?? ""}`
+    : `STAFF:${r.staffId ?? ""}`;
 
 export const SalaryPaymentRecordsPanel = () => {
-  const queryClient = useQueryClient();
-  const [tab, setTab] = useState<PanelTab>("register");
-  const [search, setSearch] = useState("");
-  const [employeeTypeFilter, setEmployeeTypeFilter] = useState("");
-  const [method, setMethod] = useState("");
-  const [status, setStatus] = useState("");
-  const [monthBs, setMonthBs] = useState("");
-  const [form, setForm] = useState(emptyForm);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [deptFilter, setDeptFilter] = useState("");
+  const canManualAttendance = useIsTenantAdmin();
+  const [monthBs, setMonthBs] = useState(currentBsMonth);
+  /** Sheet filter (table view only) */
+  const [listSearch, setListSearch] = useState("");
+  const [listDept, setListDept] = useState("");
+  const [listType, setListType] = useState("");
+  /** Employees already on this month's sheet (added one-by-one or previously saved) */
+  const [rows, setRows] = useState<EditableRow[]>([]);
+  const [status, setStatus] = useState<"DRAFT" | "PROCESSED" | "PAID">("DRAFT");
+  const [paidDateBs, setPaidDateBs] = useState("");
+  const [paymentMethod, setPaymentMethod] =
+    useState<(typeof PAYMENT_METHODS)[number]>("BANK_TRANSFER");
+  /** Signatories for print / Excel (avoid window.prompt — it breaks pop-up print) */
+  const [accountantName, setAccountantName] = useState("");
+  const [directorName, setDirectorName] = useState("");
+  const [chairmanName, setChairmanName] = useState("");
+  /** One-by-one entry form */
+  const [entry, setEntry] = useState(emptyEntryForm);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
 
-  const salariesQuery = useQuery({
-    queryKey: ["accounting-salary-records"],
+  /** Full employee catalog + attendance for the month (picker source — not the table) */
+  const sheetQuery = useQuery({
+    queryKey: ["accounting-salary-sheet", monthBs],
     queryFn: () =>
-      unwrap<SalaryPaymentRecord[]>(api.get("/accounting/salaries")),
+      unwrap<SalarySheetResponse>(
+        api.get("/accounting/salary-sheet", {
+          params: { monthBs },
+        }),
+      ),
+    enabled: Boolean(monthBs && /^\d{4}-\d{2}$/.test(monthBs)),
   });
 
-  const employeesQuery = useQuery({
-    queryKey: ["accounting-salary-employees"],
-    queryFn: () =>
-      unwrap<SalaryEmployeesResponse>(api.get("/accounting/salary-employees")),
+  const settingsQuery = useQuery({
+    queryKey: ["settings", "salary-sheet-header"],
+    queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
   });
 
-  const invalidate = async () => {
-    const { invalidateAccountingQueries } = await import(
-      "./invalidateAccountingQueries"
-    );
-    await invalidateAccountingQueries();
-  };
+  const collegeName =
+    settingsQuery.data?.schoolName?.trim() ||
+    (document.querySelector("[data-college-name]") as HTMLElement | null)
+      ?.dataset.collegeName ||
+    "College";
+  const collegeNameNp = settingsQuery.data?.schoolNameNp?.trim() || "";
+  const collegeAddress = formatCollegeAddress(settingsQuery.data?.address);
+  const monthLabel = formatPayrollMonthLabel(monthBs);
+
+  /** Catalog of all employees with attendance-derived figures for the month */
+  const catalog = sheetQuery.data?.rows ?? [];
+
+  useEffect(() => {
+    if (!sheetQuery.data?.rows) return;
+    // Only pre-load employees already saved for this month — not the full staff list
+    const saved = sheetQuery.data.rows
+      .filter((r) => Boolean(r.salaryPaymentId))
+      .map((r, i) => ({ ...r, sn: i + 1 }));
+    setRows(saved);
+    setEditingKey(null);
+    setEntry(emptyEntryForm());
+  }, [sheetQuery.data]);
 
   const saveMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) =>
-      editingId
-        ? unwrap(api.put(`/accounting/salaries/${editingId}`, payload))
-        : unwrap(api.post("/accounting/salaries", payload)),
+    mutationFn: (body: Record<string, unknown>) =>
+      unwrap(api.post("/accounting/salary-sheet/save", body)),
     onSuccess: async () => {
-      toast.success(
-        editingId ? "Salary record updated" : "Salary payment recorded",
-      );
-      setForm(emptyForm());
-      setEditingId(null);
-      setAttachments([]);
-      await invalidate();
-      setTab("register");
+      toast.success("Salary sheet saved — payroll records updated");
+      await sheetQuery.refetch();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  const rows = salariesQuery.data ?? [];
-  const teachers = employeesQuery.data?.teachers ?? [];
-  const staff = employeesQuery.data?.collegeStaff ?? [];
-
   const departments = useMemo(() => {
     const set = new Set<string>();
-    for (const s of staff) {
-      if (s.department?.trim()) set.add(s.department.trim());
+    for (const r of catalog) {
+      if (r.department?.trim()) set.add(r.department.trim());
     }
+    for (const r of rows) {
+      if (r.department?.trim()) set.add(r.department.trim());
+    }
+    set.add("Teaching");
     return [...set].sort();
-  }, [staff]);
+  }, [catalog, rows]);
 
-  const filtered = useMemo(() => {
-    let list = rows;
-    const q = search.trim().toLowerCase();
-    if (q) {
-      list = list.filter((row) => {
-        const name = employeeName(row).toLowerCase();
-        const dept = (row.department ?? "").toLowerCase();
-        const desig = (row.designation ?? "").toLowerCase();
-        return name.includes(q) || dept.includes(q) || desig.includes(q);
-      });
-    }
-    if (employeeTypeFilter) {
-      list = list.filter((r) => r.employeeType === employeeTypeFilter);
-    }
-    if (method) list = list.filter((r) => r.paymentMethod === method);
-    if (status) list = list.filter((r) => r.status === status);
-    if (monthBs) {
-      list = list.filter((r) => {
-        const m = r.monthBs ?? "";
-        return m === monthBs || m.startsWith(monthBs);
-      });
-    }
-    if (deptFilter) {
-      list = list.filter(
-        (r) => (r.department || "").toLowerCase() === deptFilter.toLowerCase(),
-      );
-    }
-    return list;
-  }, [rows, search, employeeTypeFilter, method, status, monthBs, deptFilter]);
+  const workingDaysInMonth =
+    sheetQuery.data?.workingDaysInMonth ??
+    rows[0]?.workingDaysInMonth ??
+    30;
 
-  const summary = useMemo(() => {
-    const paid = filtered.filter((r) => r.status === "PAID");
-    const draft = filtered.filter((r) => r.status === "DRAFT");
-    const totalPaid = paid.reduce((s, r) => s + (r.netSalaryNpr ?? 0), 0);
-    const totalNet = filtered.reduce((s, r) => s + (r.netSalaryNpr ?? 0), 0);
-    return {
-      count: filtered.length,
-      paidCount: paid.length,
-      draftCount: draft.length,
-      totalPaid,
-      totalNet,
-    };
-  }, [filtered]);
-
-  const liveNet = calcNet({
-    basicSalaryNpr: num(form.basicSalaryNpr),
-    allowancesNpr: num(form.allowancesNpr),
-    bonusNpr: num(form.bonusNpr),
-    advanceSalaryNpr: num(form.advanceSalaryNpr),
-    loanDeductionNpr: num(form.loanDeductionNpr),
-    taxNpr: num(form.taxNpr),
-    otherDeductionsNpr: num(form.otherDeductionsNpr),
-  });
-
-  const staffForPicker = useMemo(() => {
-    if (!deptFilter && form.employeeType === "STAFF" && deptFilter) return staff;
-    if (form.employeeType !== "STAFF") return staff;
-    // optional: no dept filter on form, show all staff
-    return staff;
-  }, [staff, form.employeeType, deptFilter]);
-
-  const clearFilters = () => {
-    setSearch("");
-    setEmployeeTypeFilter("");
-    setMethod("");
-    setStatus("");
-    setMonthBs("");
-    setDeptFilter("");
-  };
-
-  const uploadAttachments = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      Array.from(files).forEach((f) => fd.append("files", f));
-      const res = await unwrap<{
-        files: Array<{
-          url: string;
-          originalName?: string;
-          mimeType?: string;
-          size?: number;
-        }>;
-      }>(
-        api.post("/uploads/accounting", fd, {
-          headers: { "Content-Type": "multipart/form-data" },
-        }),
-      );
-      const next = (res.files ?? []).map((f) => ({
-        url: f.url,
-        name: f.originalName ?? "Attachment",
-        mimeType: f.mimeType,
-        size: f.size,
-      }));
-      setAttachments((prev) => [...prev, ...next]);
-      toast.success(`${next.length} file(s) attached`);
-    } catch (e) {
-      toast.error(parseErrorMessage(e));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const startEdit = (row: SalaryPaymentRecord) => {
-    setEditingId(row._id);
-    setForm({
-      employeeType: row.employeeType,
-      teacherId: row.teacherId ?? "",
-      staffId: row.staffId ?? "",
-      staffName: row.staffName ?? "",
-      monthBs: row.monthBs,
-      basicSalaryNpr: row.basicSalaryNpr,
-      allowancesNpr: row.allowancesNpr ?? 0,
-      bonusNpr: row.bonusNpr ?? 0,
-      advanceSalaryNpr: row.advanceSalaryNpr ?? 0,
-      loanDeductionNpr: row.loanDeductionNpr ?? 0,
-      taxNpr: row.taxNpr ?? 0,
-      otherDeductionsNpr: row.otherDeductionsNpr ?? 0,
-      status: row.status,
-      paidDateBs: row.paidDateBs ?? "",
-      paymentMethod: row.paymentMethod,
-      transactionNumber: row.transactionNumber ?? "",
-      notes: row.notes ?? "",
-      attachments: row.attachments ?? [],
+  /** Employees not yet on the sheet (available to add) */
+  const availableCatalog = useMemo(() => {
+    const onSheet = new Set(rows.map((r) => employeeKeyOf(r)));
+    return catalog.filter((c) => {
+      const key = employeeKeyOf(c);
+      if (editingKey && key === editingKey) return true;
+      return !onSheet.has(key);
     });
-    setAttachments(row.attachments ?? []);
-    setTab("pay");
+  }, [catalog, rows, editingKey]);
+
+  const pickerEmployees = useMemo(() => {
+    return availableCatalog.filter((c) => c.employeeType === entry.employeeType);
+  }, [availableCatalog, entry.employeeType]);
+
+  const selectedCatalogRow = useMemo(() => {
+    if (!entry.employeeKey) return null;
+    return (
+      catalog.find((c) => employeeKeyOf(c) === entry.employeeKey) ??
+      rows.find((r) => employeeKeyOf(r) === entry.employeeKey) ??
+      null
+    );
+  }, [catalog, rows, entry.employeeKey]);
+
+  const entryPreview = useMemo(() => {
+    const monthly = Number(entry.monthlySalaryNpr) || 0;
+    const presentDays = Number(entry.presentDays) || 0;
+    const absentDays = Number(entry.absentDays) || 0;
+    const extraDuty = Number(entry.extraDuty) || 0;
+    return calcLine({
+      monthlySalaryNpr: monthly,
+      presentDays,
+      absentDays,
+      extraDuty,
+      workingDaysInMonth,
+      extraAmountNpr: 0,
+    });
+  }, [entry, workingDaysInMonth]);
+
+  const fillEntryFromCatalog = (key: string) => {
+    const src =
+      catalog.find((c) => employeeKeyOf(c) === key) ??
+      rows.find((r) => employeeKeyOf(r) === key);
+    if (!src) {
+      setEntry((f) => ({ ...f, employeeKey: key }));
+      return;
+    }
+    setEntry({
+      employeeType: src.employeeType,
+      employeeKey: key,
+      monthlySalaryNpr: String(src.monthlySalaryNpr ?? 0),
+      presentDays: String(src.presentDays ?? 0),
+      absentDays: String(src.absentDays ?? 0),
+      extraDuty: String(src.extraDuty ?? 0),
+      remarks: src.remarks ?? "",
+      attendanceManualOverride: Boolean(src.attendanceManualOverride),
+    });
   };
 
-  const submit = () => {
-    if (!form.monthBs || !/^\d{4}-\d{2}$/.test(form.monthBs)) {
-      toast.error("Salary month must be YYYY-MM (BS), e.g. 2082-01");
+  const renumber = (list: EditableRow[]): EditableRow[] =>
+    list.map((r, i) => ({ ...r, sn: i + 1 }));
+
+  const addOrUpdateEntry = () => {
+    if (!entry.employeeKey) {
+      toast.error("Select an employee");
       return;
     }
-    if (form.employeeType === "TEACHER" && !form.teacherId) {
-      toast.error("Select a teacher");
+    const src =
+      catalog.find((c) => employeeKeyOf(c) === entry.employeeKey) ??
+      rows.find((r) => employeeKeyOf(r) === entry.employeeKey);
+    if (!src) {
+      toast.error("Employee not found");
       return;
     }
-    if (form.employeeType === "STAFF" && !form.staffId) {
-      toast.error("Select a staff member");
+    const monthly = Number(entry.monthlySalaryNpr) || 0;
+    if (monthly <= 0) {
+      toast.error("Enter monthly salary");
       return;
     }
-    if (form.status === "PAID" && !form.paidDateBs) {
-      toast.error("Paid date (BS) is required when status is Paid");
+    const presentDays = Number(entry.presentDays) || 0;
+    const absentDays = Number(entry.absentDays) || 0;
+    const extraDuty = Number(entry.extraDuty) || 0;
+    const calc = calcLine({
+      monthlySalaryNpr: monthly,
+      presentDays,
+      absentDays,
+      extraDuty,
+      workingDaysInMonth,
+      extraAmountNpr: 0,
+    });
+    const nextRow: EditableRow = {
+      ...src,
+      monthlySalaryNpr: monthly,
+      presentDays,
+      absentDays,
+      extraDuty,
+      ...calc,
+      remarks: entry.remarks,
+      attendanceManualOverride:
+        entry.attendanceManualOverride || Boolean(src.attendanceManualOverride),
+      attendanceIncomplete: entry.attendanceManualOverride
+        ? false
+        : src.attendanceIncomplete,
+      workingDaysInMonth,
+      dirty: true,
+      sn: 0,
+    };
+
+    setRows((prev) => {
+      const key = employeeKeyOf(nextRow);
+      const exists = prev.some((r) => employeeKeyOf(r) === key);
+      if (exists) {
+        return renumber(
+          prev.map((r) => (employeeKeyOf(r) === key ? { ...nextRow } : r)),
+        );
+      }
+      return renumber([...prev, nextRow]);
+    });
+
+    toast.success(
+      editingKey
+        ? `${src.employeeName} updated on salary sheet`
+        : `${src.employeeName} added to salary sheet`,
+    );
+    setEditingKey(null);
+    setEntry(emptyEntryForm());
+  };
+
+  const startEditRow = (row: EditableRow) => {
+    const key = employeeKeyOf(row);
+    setEditingKey(key);
+    setEntry({
+      employeeType: row.employeeType,
+      employeeKey: key,
+      monthlySalaryNpr: String(row.monthlySalaryNpr ?? 0),
+      presentDays: String(row.presentDays ?? 0),
+      absentDays: String(row.absentDays ?? 0),
+      extraDuty: String(row.extraDuty ?? 0),
+      remarks: row.remarks ?? "",
+      attendanceManualOverride: Boolean(row.attendanceManualOverride),
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const removeRow = (row: EditableRow) => {
+    const key = employeeKeyOf(row);
+    if (
+      !window.confirm(
+        `Remove ${row.employeeName} from this month's salary sheet? (Save payroll to persist.)`,
+      )
+    ) {
+      return;
+    }
+    setRows((prev) => renumber(prev.filter((r) => employeeKeyOf(r) !== key)));
+    if (editingKey === key) {
+      setEditingKey(null);
+      setEntry(emptyEntryForm());
+    }
+  };
+
+  const cancelEntry = () => {
+    setEditingKey(null);
+    setEntry(emptyEntryForm());
+  };
+
+  const displayedRows = useMemo(() => {
+    const q = listSearch.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (listType && r.employeeType !== listType) return false;
+      if (listDept && (r.department || "").toLowerCase() !== listDept.toLowerCase()) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        r.employeeName.toLowerCase().includes(q) ||
+        (r.department || "").toLowerCase().includes(q) ||
+        (r.designation || "").toLowerCase().includes(q)
+      );
+    });
+  }, [rows, listSearch, listDept, listType]);
+
+  const totals = useMemo(() => {
+    const totalMonthlySalaryNpr = round2(
+      rows.reduce((s, r) => s + (r.monthlySalaryNpr || 0), 0),
+    );
+    const totalAbsentDeductionNpr = round2(
+      rows.reduce((s, r) => s + (r.absentDeductionNpr || 0), 0),
+    );
+    const totalExtraAmountNpr = round2(
+      rows.reduce((s, r) => s + (r.extraAmountNpr || 0), 0),
+    );
+    const totalSalaryAmountNpr = round2(
+      rows.reduce((s, r) => s + (r.salaryAmountNpr || 0), 0),
+    );
+    const totalTax1PercentNpr = round2(
+      rows.reduce((s, r) => s + (r.tax1PercentNpr || 0), 0),
+    );
+    const totalNetSalaryNpr = round2(
+      rows.reduce((s, r) => s + (r.netSalaryNpr || 0), 0),
+    );
+    return {
+      totalMonthlySalaryNpr,
+      totalAbsentDeductionNpr,
+      totalExtraAmountNpr,
+      totalSalaryAmountNpr,
+      totalTax1PercentNpr,
+      totalNetSalaryNpr,
+      totalNetSalaryInWords: formatNrsAmountInWords(totalNetSalaryNpr),
+    };
+  }, [rows]);
+
+  const getSignatories = (): {
+    accountantName: string;
+    directorName: string;
+    chairmanName: string;
+  } | null => {
+    if (!accountantName.trim() || !directorName.trim() || !chairmanName.trim()) {
+      toast.error(
+        "Enter Accountant, Director, and Chairman names in the signature section before printing or exporting.",
+      );
+      return null;
+    }
+    return {
+      accountantName: accountantName.trim(),
+      directorName: directorName.trim(),
+      chairmanName: chairmanName.trim(),
+    };
+  };
+
+  /** Sheet body only — used with html2pdf (no browser date/title headers). */
+  const buildSheetBodyHtml = (sign: {
+    accountantName: string;
+    directorName: string;
+    chairmanName: string;
+  }) => {
+    const bodyRows = rows
+      .map(
+        (r) => `
+      <tr>
+        <td class="c">${r.sn}</td>
+        <td>${escapeHtml(r.employeeName)}</td>
+        <td class="n">${formatCurrencyNpr(r.monthlySalaryNpr)}</td>
+        <td class="c">${r.presentDays}</td>
+        <td class="c">${r.absentDays}</td>
+        <td class="c">${r.extraDuty}</td>
+        <td class="n">${formatCurrencyNpr(r.absentDeductionNpr)}</td>
+        <td class="n">${formatCurrencyNpr(r.extraAmountNpr)}</td>
+        <td class="n">${formatCurrencyNpr(r.salaryAmountNpr)}</td>
+        <td class="n">${formatCurrencyNpr(r.tax1PercentNpr)}</td>
+        <td class="n"><strong>${formatCurrencyNpr(r.netSalaryNpr)}</strong></td>
+        <td></td>
+        <td>${escapeHtml(r.remarks || "")}</td>
+      </tr>`,
+      )
+      .join("");
+
+    return `
+<div class="salary-sheet-pdf" style="font-family: 'Times New Roman', Georgia, serif; font-size: 11px; color: #111; background: #fff; width: 100%; box-sizing: border-box;">
+  <style>
+    .salary-sheet-pdf .sheet-header { text-align: center; margin-bottom: 14px; border-bottom: 2px solid #111; padding-bottom: 10px; }
+    .salary-sheet-pdf .sheet-header .college-name { font-size: 18px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; margin: 0 0 4px; }
+    .salary-sheet-pdf .sheet-header .college-name-np { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+    .salary-sheet-pdf .sheet-header .college-address { font-size: 11px; margin: 0 0 8px; color: #222; }
+    .salary-sheet-pdf .sheet-header .sheet-title { font-size: 14px; font-weight: 700; margin: 0; text-transform: uppercase; letter-spacing: 0.04em; }
+    .salary-sheet-pdf table { width: 100%; border-collapse: collapse; }
+    .salary-sheet-pdf th, .salary-sheet-pdf td { border: 1px solid #222; padding: 4px 5px; vertical-align: middle; }
+    .salary-sheet-pdf th { background: #f3f4f6; font-size: 10px; text-align: center; }
+    .salary-sheet-pdf td.c { text-align: center; }
+    .salary-sheet-pdf td.n { text-align: right; white-space: nowrap; }
+    .salary-sheet-pdf tfoot td { font-weight: 700; background: #fafafa; }
+    .salary-sheet-pdf .words { margin-top: 10px; font-size: 12px; }
+    .salary-sheet-pdf .sign-row { display: flex; justify-content: space-between; margin-top: 36px; gap: 24px; }
+    .salary-sheet-pdf .sign { flex: 1; text-align: center; }
+    .salary-sheet-pdf .sign .line { border-top: 1px solid #222; margin: 40px 12px 6px; }
+    .salary-sheet-pdf .sign .role { font-weight: 700; font-size: 11px; }
+    .salary-sheet-pdf .sign .name { font-size: 11px; margin-top: 2px; }
+  </style>
+  <div class="sheet-header">
+    <p class="college-name">${escapeHtml(collegeName)}</p>
+    ${
+      collegeNameNp
+        ? `<p class="college-name-np">${escapeHtml(collegeNameNp)}</p>`
+        : ""
+    }
+    ${
+      collegeAddress
+        ? `<p class="college-address">${escapeHtml(collegeAddress)}</p>`
+        : ""
+    }
+    <p class="sheet-title">Salary Sheet of ${escapeHtml(monthLabel)}</p>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>S.N.</th>
+        <th>Employee Name</th>
+        <th>Monthly Salary</th>
+        <th>Present Days</th>
+        <th>Absent Days</th>
+        <th>Extra Duty</th>
+        <th>Absent Deduction</th>
+        <th>Extra Amount</th>
+        <th>Salary Amount</th>
+        <th>1% Tax</th>
+        <th>Net Salary</th>
+        <th>Signature</th>
+        <th>Remarks</th>
+      </tr>
+    </thead>
+    <tbody>${bodyRows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2" class="c">TOTAL</td>
+        <td class="n">${formatCurrencyNpr(totals.totalMonthlySalaryNpr)}</td>
+        <td colspan="3"></td>
+        <td class="n">${formatCurrencyNpr(totals.totalAbsentDeductionNpr)}</td>
+        <td class="n">${formatCurrencyNpr(totals.totalExtraAmountNpr)}</td>
+        <td class="n">${formatCurrencyNpr(totals.totalSalaryAmountNpr)}</td>
+        <td class="n">${formatCurrencyNpr(totals.totalTax1PercentNpr)}</td>
+        <td class="n">${formatCurrencyNpr(totals.totalNetSalaryNpr)}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tfoot>
+  </table>
+  <p class="words"><strong>Total Net Salary:</strong> ${formatCurrencyNpr(totals.totalNetSalaryNpr)}
+    <br/><strong>In words:</strong> ${escapeHtml(totals.totalNetSalaryInWords)}</p>
+  <div class="sign-row">
+    <div class="sign">
+      <div class="line"></div>
+      <div class="role">Accountant</div>
+      <div class="name">${escapeHtml(sign.accountantName)}</div>
+    </div>
+    <div class="sign">
+      <div class="line"></div>
+      <div class="role">Director</div>
+      <div class="name">${escapeHtml(sign.directorName)}</div>
+    </div>
+    <div class="sign">
+      <div class="line"></div>
+      <div class="role">Chairman</div>
+      <div class="name">${escapeHtml(sign.chairmanName)}</div>
+    </div>
+  </div>
+</div>`;
+  };
+
+  const exportPdf = async () => {
+    if (rows.length === 0) {
+      toast.error("No salary rows to export — add at least one employee first");
+      return;
+    }
+    const sign = getSignatories();
+    if (!sign) return;
+
+    const host = document.createElement("div");
+    host.style.position = "fixed";
+    host.style.left = "-12000px";
+    host.style.top = "0";
+    host.style.width = "1100px";
+    host.style.background = "#ffffff";
+    host.style.zIndex = "-1";
+    host.innerHTML = buildSheetBodyHtml(sign);
+    document.body.appendChild(host);
+
+    const target = host.querySelector(".salary-sheet-pdf") as HTMLElement | null;
+    if (!target) {
+      document.body.removeChild(host);
+      toast.error("Could not build salary sheet for PDF");
       return;
     }
 
-    const payload = {
-      employeeType: form.employeeType,
-      teacherId: form.employeeType === "TEACHER" ? form.teacherId || undefined : undefined,
-      staffId: form.employeeType === "STAFF" ? form.staffId || undefined : undefined,
-      staffName:
-        form.employeeType === "STAFF"
-          ? staff.find((s) => s._id === form.staffId)?.fullName || form.staffName
-          : undefined,
-      monthBs: form.monthBs,
-      basicSalaryNpr: num(form.basicSalaryNpr),
-      allowancesNpr: num(form.allowancesNpr),
-      bonusNpr: num(form.bonusNpr),
-      advanceSalaryNpr: num(form.advanceSalaryNpr),
-      loanDeductionNpr: num(form.loanDeductionNpr),
-      taxNpr: num(form.taxNpr),
-      otherDeductionsNpr: num(form.otherDeductionsNpr),
-      status: form.status,
-      paidDateBs: form.paidDateBs || undefined,
-      paymentMethod: form.paymentMethod,
-      transactionNumber: form.transactionNumber || undefined,
-      notes: form.notes || undefined,
-      attachments,
-    };
-    saveMutation.mutate(payload);
+    try {
+      toast.message("Generating PDF…");
+      const { default: html2pdf } = await import("html2pdf.js");
+      const filename = `Salary_Sheet_${monthBs || "payroll"}.pdf`;
+      const blob = (await html2pdf()
+        .set({
+          margin: [10, 10, 10, 10],
+          filename,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: "#ffffff",
+            logging: false,
+            windowWidth: 1100,
+          },
+          jsPDF: {
+            unit: "mm",
+            format: "a4",
+            orientation: "landscape",
+          },
+          pagebreak: { mode: ["css", "legacy"] },
+        } as never)
+        .from(target)
+        .outputPdf("blob")) as Blob;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      toast.success("PDF downloaded (no browser date header)");
+    } catch (e) {
+      toast.error(parseErrorMessage(e) || "PDF generation failed");
+    } finally {
+      if (host.parentNode) host.parentNode.removeChild(host);
+    }
   };
 
   const exportExcel = () => {
-    if (filtered.length === 0) {
-      toast.error("No records to export");
+    if (rows.length === 0) {
+      toast.error("No salary rows to export — add at least one employee first");
       return;
     }
-    downloadRecordsExcel(
-      "Salary_Payment_Records",
-      filtered.map((row) => ({
-        employee: employeeName(row),
-        employeeType: row.employeeType,
-        department: row.department ?? "",
-        designation: row.designation ?? "",
-        salaryMonth: row.monthBs,
-        basicSalaryNpr: row.basicSalaryNpr,
-        allowancesNpr: (row.allowancesNpr ?? 0) + (row.bonusNpr ?? 0),
-        deductionsNpr: totalDeductions(row),
-        netSalaryNpr: row.netSalaryNpr,
-        paymentDate: row.paidDateBs ?? "",
-        paymentMethod: row.paymentMethod,
-        transactionNumber: row.transactionNumber ?? "",
-        status: row.status,
-        remarks: row.notes ?? "",
+    const sign = getSignatories();
+    if (!sign) return;
+    downloadRecordsExcel(`Salary_Sheet_${monthBs}`, [
+      ...rows.map((r) => ({
+        "S.N.": r.sn,
+        "Employee Name": r.employeeName,
+        "Monthly Salary": r.monthlySalaryNpr,
+        "Present Days": r.presentDays,
+        "Absent Days": r.absentDays,
+        "Extra Duty": r.extraDuty,
+        "Absent Deduction": r.absentDeductionNpr,
+        "Extra Amount": r.extraAmountNpr,
+        "Salary Amount": r.salaryAmountNpr,
+        "1% Tax": r.tax1PercentNpr,
+        "Net Salary": r.netSalaryNpr,
+        Signature: "",
+        Remarks: r.remarks || "",
       })),
-    );
-    toast.success("Excel exported");
+      {
+        "S.N.": "",
+        "Employee Name": "TOTAL",
+        "Monthly Salary": totals.totalMonthlySalaryNpr,
+        "Present Days": "",
+        "Absent Days": "",
+        "Extra Duty": "",
+        "Absent Deduction": totals.totalAbsentDeductionNpr,
+        "Extra Amount": totals.totalExtraAmountNpr,
+        "Salary Amount": totals.totalSalaryAmountNpr,
+        "1% Tax": totals.totalTax1PercentNpr,
+        "Net Salary": totals.totalNetSalaryNpr,
+        Signature: "",
+        Remarks: "",
+      },
+      {
+        "S.N.": "",
+        "Employee Name": "Total Net in words",
+        "Monthly Salary": totals.totalNetSalaryInWords,
+        "Present Days": "",
+        "Absent Days": "",
+        "Extra Duty": "",
+        "Absent Deduction": "",
+        "Extra Amount": "",
+        "Salary Amount": "",
+        "1% Tax": "",
+        "Net Salary": "",
+        Signature: "",
+        Remarks: "",
+      },
+      {
+        "S.N.": "",
+        "Employee Name": "Accountant",
+        "Monthly Salary": sign.accountantName,
+        "Present Days": "",
+        "Absent Days": "",
+        "Extra Duty": "",
+        "Absent Deduction": "",
+        "Extra Amount": "",
+        "Salary Amount": "",
+        "1% Tax": "",
+        "Net Salary": "",
+        Signature: "",
+        Remarks: "",
+      },
+      {
+        "S.N.": "",
+        "Employee Name": "Director",
+        "Monthly Salary": sign.directorName,
+        "Present Days": "",
+        "Absent Days": "",
+        "Extra Duty": "",
+        "Absent Deduction": "",
+        "Extra Amount": "",
+        "Salary Amount": "",
+        "1% Tax": "",
+        "Net Salary": "",
+        Signature: "",
+        Remarks: "",
+      },
+      {
+        "S.N.": "",
+        "Employee Name": "Chairman",
+        "Monthly Salary": sign.chairmanName,
+        "Present Days": "",
+        "Absent Days": "",
+        "Extra Duty": "",
+        "Absent Deduction": "",
+        "Extra Amount": "",
+        "Salary Amount": "",
+        "1% Tax": "",
+        "Net Salary": "",
+        Signature: "",
+        Remarks: "",
+      },
+    ]);
+    toast.success("Excel salary sheet exported");
   };
 
-  if (salariesQuery.isLoading) return <LoadingState />;
+  const saveSheet = () => {
+    if (!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) {
+      toast.error("Select payroll month (BS YYYY-MM)");
+      return;
+    }
+    if (rows.length === 0) {
+      toast.error("No employees on the salary sheet");
+      return;
+    }
+    if (status === "PAID" && !paidDateBs) {
+      toast.error("Paid date (BS) is required when marking Paid");
+      return;
+    }
+    saveMutation.mutate({
+      monthBs,
+      status,
+      paidDateBs: paidDateBs || undefined,
+      paymentMethod,
+      rows: rows.map((r) => ({
+        employeeType: r.employeeType,
+        teacherId: r.teacherId,
+        staffId: r.staffId,
+        employeeName: r.employeeName,
+        monthlySalaryNpr: r.monthlySalaryNpr,
+        presentDays: r.presentDays,
+        absentDays: r.absentDays,
+        extraDuty: r.extraDuty,
+        extraAmountNpr: r.extraAmountNpr,
+        remarks: r.remarks,
+        attendanceManualOverride: r.attendanceManualOverride,
+        salaryPaymentId: r.salaryPaymentId,
+      })),
+    });
+  };
 
-  if (salariesQuery.isError) {
+  if (!monthBs) {
     return (
       <EmptyState
-        title="Could not load salary records"
-        description={parseErrorMessage(salariesQuery.error)}
+        title="Select payroll month"
+        description="Enter a BS month (YYYY-MM) to load the salary sheet."
+      />
+    );
+  }
+
+  if (sheetQuery.isLoading) return <LoadingState />;
+
+  if (sheetQuery.isError) {
+    return (
+      <EmptyState
+        title="Could not load salary sheet"
+        description={parseErrorMessage(sheetQuery.error)}
       />
     );
   }
@@ -431,655 +830,625 @@ export const SalaryPaymentRecordsPanel = () => {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <CardTitle className="flex items-center gap-2">
               <Banknote className="h-5 w-5 text-brand-600" />
-              Salary Payment Records
+              Salary Sheet / Payroll
             </CardTitle>
             <p className="mt-1 text-sm text-slate-500">
-              Payroll register for teachers and college staff — draft, process, and
-              mark paid with bank reference and payslip attachments.
+              Add employees <strong>one by one</strong>. Present/absent days load from
+              attendance for the payroll month. The table only shows people you have
+              already added — not the full staff list for mass entry.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
+              type="button"
               size="sm"
-              variant={tab === "register" ? "default" : "outline"}
-              onClick={() => setTab("register")}
+              variant="outline"
+              onClick={exportPdf}
+              disabled={rows.length === 0}
             >
-              <Wallet className="mr-1.5 h-4 w-4" />
-              Register
+              <Printer className="mr-1 h-4 w-4" />
+              Download PDF
             </Button>
             <Button
+              type="button"
               size="sm"
-              variant={tab === "pay" ? "default" : "outline"}
-              onClick={() => {
-                setEditingId(null);
-                setForm(emptyForm());
-                setAttachments([]);
-                setTab("pay");
-              }}
+              variant="outline"
+              onClick={exportExcel}
+              disabled={rows.length === 0}
             >
-              <Plus className="mr-1.5 h-4 w-4" />
-              {editingId ? "Edit payslip" : "Record salary"}
+              <FileDown className="mr-1 h-4 w-4" />
+              Excel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={saveMutation.isPending || rows.length === 0}
+              onClick={saveSheet}
+            >
+              <Save className="mr-1 h-4 w-4" />
+              {saveMutation.isPending ? "Saving…" : "Save payroll"}
             </Button>
           </div>
         </CardHeader>
       </Card>
 
-      {/* Summary */}
-      {tab === "register" ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { label: "Records shown", value: String(summary.count) },
-            {
-              label: "Paid (net)",
-              value: formatCurrencyNpr(summary.totalPaid),
-              className: "text-emerald-700",
-            },
-            {
-              label: "Drafts",
-              value: String(summary.draftCount),
-              className: "text-amber-800",
-            },
-            {
-              label: "Total net (filtered)",
-              value: formatCurrencyNpr(summary.totalNet),
-            },
-          ].map((c) => (
-            <Card key={c.label}>
-              <CardContent className="pt-4">
-                <p className="text-xs text-slate-500">{c.label}</p>
-                <p className={`text-xl font-semibold ${c.className ?? ""}`}>
-                  {c.value}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
+      <Card>
+        <CardContent className="space-y-3 pt-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <FormField label="Payroll month (BS) *">
+              <Input
+                placeholder="YYYY-MM e.g. 2082-01"
+                value={monthBs}
+                onChange={(e) => setMonthBs(e.target.value.trim())}
+              />
+            </FormField>
+            <FormField label="Save status">
+              <Select
+                value={status}
+                onChange={(e) =>
+                  setStatus(e.target.value as "DRAFT" | "PROCESSED" | "PAID")
+                }
+              >
+                <option value="DRAFT">Draft</option>
+                <option value="PROCESSED">Processed</option>
+                <option value="PAID">Paid</option>
+              </Select>
+            </FormField>
+            <FormField label="Payment method">
+              <Select
+                value={paymentMethod}
+                onChange={(e) =>
+                  setPaymentMethod(
+                    e.target.value as (typeof PAYMENT_METHODS)[number],
+                  )
+                }
+              >
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m} value={m}>
+                    {m.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            {status === "PAID" ? (
+              <FormField label="Paid date (BS) *">
+                <NepaliDateField value={paidDateBs} onChange={setPaidDateBs} />
+              </FormField>
+            ) : null}
+          </div>
+          <p className="text-xs text-slate-500">
+            Working days in month (BS): <strong>{workingDaysInMonth}</strong>
+            {sheetQuery.data
+              ? ` · Attendance days on register: ${sheetQuery.data.attendanceCoverageDays}`
+              : ""}
+            {" · "}
+            {rows.length} on sheet · {availableCatalog.length} not yet added
+          </p>
+        </CardContent>
+      </Card>
+
+      {sheetQuery.data?.attendanceWarning ? (
+        <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Attendance notice</p>
+            <p className="text-amber-900/90">{sheetQuery.data.attendanceWarning}</p>
+            {canManualAttendance ? (
+              <p className="mt-1 text-xs">
+                As Super Admin / College Admin you may correct Present/Absent days when
+                adding an employee.
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
-      {tab === "register" ? (
-        <Card>
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base">Salary register</CardTitle>
-            <Button type="button" variant="outline" size="sm" onClick={exportExcel}>
-              <FileDown className="mr-1 h-4 w-4" />
-              Excel
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                <FormField label="Search">
-                  <div className="relative">
-                    <Input
-                      className="h-10 pr-9"
-                      placeholder="Name, department…"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                    {search ? (
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200"
-                        onClick={() => setSearch("")}
-                        aria-label="Clear search"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    ) : null}
-                  </div>
-                </FormField>
-                <FormField label="Employee type">
-                  <Select
-                    value={employeeTypeFilter}
-                    onChange={(e) => setEmployeeTypeFilter(e.target.value)}
-                  >
-                    <option value="">All</option>
-                    <option value="TEACHER">Teacher</option>
-                    <option value="STAFF">Staff</option>
-                  </Select>
-                </FormField>
-                <FormField label="Department">
-                  <Select
-                    value={deptFilter}
-                    onChange={(e) => setDeptFilter(e.target.value)}
-                  >
-                    <option value="">All departments</option>
-                    {departments.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Month (BS)">
-                  <Input
-                    placeholder="YYYY-MM"
-                    value={monthBs}
-                    onChange={(e) => setMonthBs(e.target.value)}
-                  />
-                </FormField>
-                <FormField label="Payment method">
-                  <Select value={method} onChange={(e) => setMethod(e.target.value)}>
-                    <option value="">All</option>
-                    {PAYMENT_METHODS.map((m) => (
-                      <option key={m} value={m}>
-                        {m.replace(/_/g, " ")}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Status">
-                  <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-                    <option value="">All</option>
-                    <option value="DRAFT">Draft</option>
-                    <option value="PROCESSED">Processed</option>
-                    <option value="PAID">Paid</option>
-                  </Select>
-                </FormField>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-slate-500">
-                  Showing {filtered.length} of {rows.length} record
-                  {rows.length === 1 ? "" : "s"}
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={
-                    !search &&
-                    !employeeTypeFilter &&
-                    !method &&
-                    !status &&
-                    !monthBs &&
-                    !deptFilter
-                  }
-                  onClick={clearFilters}
-                >
-                  <X className="mr-1 h-3.5 w-3.5" />
-                  Clear filters
-                </Button>
-              </div>
-            </div>
-
-            {filtered.length === 0 ? (
-              <EmptyState
-                title="No salary records"
-                description="Use Record salary to create a payslip for a teacher or staff member."
+      {/* ─── One-by-one entry ─── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <UserPlus className="h-4 w-4 text-brand-600" />
+            {editingKey ? "Edit employee on sheet" : "Add employee (one by one)"}
+          </CardTitle>
+          <p className="text-sm text-slate-500">
+            Select one employee, review auto-filled attendance, adjust if needed, then
+            add them to the salary sheet below.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <FormField label="Employee type *">
+              <Select
+                value={entry.employeeType}
+                disabled={Boolean(editingKey)}
+                onChange={(e) =>
+                  setEntry((f) => ({
+                    ...f,
+                    employeeType: e.target.value as "TEACHER" | "STAFF",
+                    employeeKey: "",
+                    monthlySalaryNpr: "0",
+                    presentDays: "0",
+                    absentDays: "0",
+                    extraDuty: "0",
+                    remarks: "",
+                    attendanceManualOverride: false,
+                  }))
+                }
+              >
+                <option value="TEACHER">Teacher</option>
+                <option value="STAFF">Staff</option>
+              </Select>
+            </FormField>
+            <FormField label="Employee *">
+              <Select
+                value={entry.employeeKey}
+                disabled={Boolean(editingKey)}
+                onChange={(e) => fillEntryFromCatalog(e.target.value)}
+              >
+                <option value="">
+                  {pickerEmployees.length === 0
+                    ? "No more employees to add"
+                    : "Select employee"}
+                </option>
+                {pickerEmployees.map((c) => (
+                  <option key={employeeKeyOf(c)} value={employeeKeyOf(c)}>
+                    {c.employeeName}
+                    {c.designation ? ` — ${c.designation}` : ""}
+                    {c.department ? ` (${c.department})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label="Monthly salary (NPR) *">
+              <NumberInput
+                min={0}
+                value={entry.monthlySalaryNpr}
+                onChange={(e) =>
+                  setEntry((f) => ({ ...f, monthlySalaryNpr: e.target.value }))
+                }
               />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Employee</Th>
-                      <Th>Type</Th>
-                      <Th>Department</Th>
-                      <Th>Month</Th>
-                      <Th>Earnings</Th>
-                      <Th>Deductions</Th>
-                      <Th>Net</Th>
-                      <Th>Paid date</Th>
-                      <Th>Method</Th>
-                      <Th>Status</Th>
-                      <Th />
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {filtered.map((row) => (
-                      <tr key={row._id}>
-                        <Td>
-                          <div className="font-medium">{employeeName(row)}</div>
-                          {row.designation ? (
-                            <div className="text-xs text-slate-500">
-                              {row.designation}
-                            </div>
-                          ) : null}
-                        </Td>
-                        <Td className="text-sm">{row.employeeType}</Td>
-                        <Td className="text-sm">{row.department || "—"}</Td>
-                        <Td>{row.monthBs}</Td>
-                        <Td>{formatCurrencyNpr(totalEarnings(row))}</Td>
-                        <Td>{formatCurrencyNpr(totalDeductions(row))}</Td>
-                        <Td className="font-semibold text-emerald-800">
-                          {formatCurrencyNpr(row.netSalaryNpr)}
-                        </Td>
-                        <Td>{row.paidDateBs || "—"}</Td>
-                        <Td className="text-sm">
-                          {(row.paymentMethod ?? "—").replace(/_/g, " ")}
-                        </Td>
-                        <Td>
-                          <Badge className={statusBadge(row.status ?? "DRAFT")}>
-                            {row.status ?? "DRAFT"}
+            </FormField>
+            <FormField label="Present days">
+              <NumberInput
+                min={0}
+                step={0.5}
+                value={entry.presentDays}
+                disabled={!canManualAttendance && !entry.attendanceManualOverride}
+                onChange={(e) =>
+                  setEntry((f) => ({
+                    ...f,
+                    presentDays: e.target.value,
+                    attendanceManualOverride: true,
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="Absent days">
+              <NumberInput
+                min={0}
+                step={0.5}
+                value={entry.absentDays}
+                disabled={!canManualAttendance && !entry.attendanceManualOverride}
+                onChange={(e) =>
+                  setEntry((f) => ({
+                    ...f,
+                    absentDays: e.target.value,
+                    attendanceManualOverride: true,
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="Extra duty (days)">
+              <NumberInput
+                min={0}
+                step={0.5}
+                value={entry.extraDuty}
+                onChange={(e) =>
+                  setEntry((f) => ({ ...f, extraDuty: e.target.value }))
+                }
+              />
+            </FormField>
+            <FormField label="Remarks">
+              <Input
+                value={entry.remarks}
+                onChange={(e) =>
+                  setEntry((f) => ({ ...f, remarks: e.target.value }))
+                }
+                placeholder="Optional"
+              />
+            </FormField>
+          </div>
+
+          {selectedCatalogRow ? (
+            <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
+              <div>
+                <p className="text-xs text-slate-500">Absent deduction</p>
+                <p className="font-medium text-rose-700">
+                  {formatCurrencyNpr(entryPreview.absentDeductionNpr)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Extra amount</p>
+                <p className="font-medium text-emerald-700">
+                  {formatCurrencyNpr(entryPreview.extraAmountNpr)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Salary amount</p>
+                <p className="font-medium">
+                  {formatCurrencyNpr(entryPreview.salaryAmountNpr)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">1% tax</p>
+                <p className="font-medium">
+                  {formatCurrencyNpr(entryPreview.tax1PercentNpr)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Net salary</p>
+                <p className="font-semibold text-brand-800">
+                  {formatCurrencyNpr(entryPreview.netSalaryNpr)}
+                </p>
+              </div>
+              {selectedCatalogRow.attendanceIncomplete ? (
+                <div className="sm:col-span-2 lg:col-span-5">
+                  <Badge className="bg-amber-100 text-amber-900">
+                    Attendance incomplete for this employee — verify days before adding
+                  </Badge>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            {editingKey ? (
+              <Button type="button" variant="outline" onClick={cancelEntry}>
+                Cancel edit
+              </Button>
+            ) : null}
+            <Button type="button" onClick={addOrUpdateEntry}>
+              {editingKey ? (
+                <>
+                  <Pencil className="mr-1.5 h-4 w-4" />
+                  Update on sheet
+                </>
+              ) : (
+                <>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Add to salary sheet
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="space-y-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Wallet className="h-4 w-4 text-brand-600" />
+            Salary sheet — {monthBs}
+          </CardTitle>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <FormField label="Filter sheet by name">
+              <Input
+                placeholder="Search added employees…"
+                value={listSearch}
+                onChange={(e) => setListSearch(e.target.value)}
+              />
+            </FormField>
+            <FormField label="Type">
+              <Select value={listType} onChange={(e) => setListType(e.target.value)}>
+                <option value="">All</option>
+                <option value="TEACHER">Teacher</option>
+                <option value="STAFF">Staff</option>
+              </Select>
+            </FormField>
+            <FormField label="Department">
+              <Select value={listDept} onChange={(e) => setListDept(e.target.value)}>
+                <option value="">All</option>
+                {departments.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {/* On-screen header matching PDF */}
+          <div className="mb-4 border-b-2 border-slate-800 pb-3 text-center">
+            <p className="text-lg font-bold uppercase tracking-wide text-slate-900">
+              {collegeName}
+            </p>
+            {collegeNameNp ? (
+              <p className="text-base font-semibold text-slate-800">
+                {collegeNameNp}
+              </p>
+            ) : null}
+            {collegeAddress ? (
+              <p className="mt-1 text-sm text-slate-600">{collegeAddress}</p>
+            ) : null}
+            <p className="mt-2 text-base font-bold uppercase tracking-wide text-slate-900">
+              Salary Sheet of {monthLabel}
+            </p>
+          </div>
+
+          {rows.length === 0 ? (
+            <EmptyState
+              title="No employees on the sheet yet"
+              description="Use “Add employee (one by one)” above. The table only lists people you add — not the full staff roster."
+            />
+          ) : displayedRows.length === 0 ? (
+            <EmptyState
+              title="No matches"
+              description="No added employees match the sheet filters."
+            />
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <Table>
+                <TableHead>
+                  <tr className="bg-slate-50 text-xs">
+                    <Th className="w-12 text-center">S.N.</Th>
+                    <Th>Employee Name</Th>
+                    <Th className="text-right">Monthly Salary</Th>
+                    <Th className="text-center">Present Days</Th>
+                    <Th className="text-center">Absent Days</Th>
+                    <Th className="text-center">Extra Duty</Th>
+                    <Th className="text-right">Absent Deduction</Th>
+                    <Th className="text-right">Extra Amount</Th>
+                    <Th className="text-right">Salary Amount</Th>
+                    <Th className="text-right">1% Tax</Th>
+                    <Th className="text-right">Net Salary</Th>
+                    <Th className="text-center">Signature</Th>
+                    <Th>Remarks</Th>
+                    <Th>Actions</Th>
+                  </tr>
+                </TableHead>
+                <TableBody>
+                  {displayedRows.map((row) => (
+                    <tr
+                      key={`${row.employeeType}-${row.teacherId || row.staffId}`}
+                      className={
+                        row.attendanceIncomplete ? "bg-amber-50/40" : undefined
+                      }
+                    >
+                      <Td className="text-center tabular-nums text-slate-500">
+                        {row.sn}
+                      </Td>
+                      <Td>
+                        <div className="font-medium text-slate-900">
+                          {row.employeeName}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {row.designation || row.employeeType}
+                          {row.department ? ` · ${row.department}` : ""}
+                        </div>
+                        {row.attendanceIncomplete ? (
+                          <Badge className="mt-1 bg-amber-100 text-amber-900">
+                            Attendance incomplete
                           </Badge>
-                        </Td>
-                        <Td>
+                        ) : null}
+                        {row.attendanceManualOverride ? (
+                          <Badge className="mt-1 bg-sky-100 text-sky-900">
+                            Manual attendance
+                          </Badge>
+                        ) : null}
+                      </Td>
+                      <Td className="text-right tabular-nums">
+                        {formatCurrencyNpr(row.monthlySalaryNpr)}
+                      </Td>
+                      <Td className="text-center tabular-nums">{row.presentDays}</Td>
+                      <Td className="text-center tabular-nums">{row.absentDays}</Td>
+                      <Td className="text-center tabular-nums">{row.extraDuty}</Td>
+                      <Td className="text-right tabular-nums text-rose-700">
+                        {formatCurrencyNpr(row.absentDeductionNpr)}
+                      </Td>
+                      <Td className="text-right tabular-nums text-emerald-700">
+                        {formatCurrencyNpr(row.extraAmountNpr)}
+                      </Td>
+                      <Td className="text-right tabular-nums font-medium">
+                        {formatCurrencyNpr(row.salaryAmountNpr)}
+                      </Td>
+                      <Td className="text-right tabular-nums">
+                        {formatCurrencyNpr(row.tax1PercentNpr)}
+                      </Td>
+                      <Td className="text-right tabular-nums font-semibold text-slate-900">
+                        {formatCurrencyNpr(row.netSalaryNpr)}
+                      </Td>
+                      <Td className="min-w-[4rem] border-b border-dashed border-slate-300" />
+                      <Td className="max-w-[10rem] truncate text-sm text-slate-600">
+                        {row.remarks || "—"}
+                      </Td>
+                      <Td>
+                        <div className="flex flex-wrap gap-1">
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={row.status === "PAID"}
-                            onClick={() => startEdit(row)}
+                            onClick={() => startEditRow(row)}
                           >
-                            {row.status === "PAID" ? "Paid" : "Edit"}
+                            <Pencil className="mr-1 h-3.5 w-3.5" />
+                            Edit
                           </Button>
-                        </Td>
-                      </tr>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => removeRow(row)}
+                          >
+                            <Trash2 className="mr-1 h-3.5 w-3.5" />
+                            Remove
+                          </Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-100 font-semibold">
+                    <Td colSpan={2} className="text-center">
+                      TOTAL ({rows.length})
+                    </Td>
+                    <Td className="text-right">
+                      {formatCurrencyNpr(totals.totalMonthlySalaryNpr)}
+                    </Td>
+                    <Td colSpan={3} />
+                    <Td className="text-right text-rose-800">
+                      {formatCurrencyNpr(totals.totalAbsentDeductionNpr)}
+                    </Td>
+                    <Td className="text-right text-emerald-800">
+                      {formatCurrencyNpr(totals.totalExtraAmountNpr)}
+                    </Td>
+                    <Td className="text-right">
+                      {formatCurrencyNpr(totals.totalSalaryAmountNpr)}
+                    </Td>
+                    <Td className="text-right">
+                      {formatCurrencyNpr(totals.totalTax1PercentNpr)}
+                    </Td>
+                    <Td className="text-right text-brand-800">
+                      {formatCurrencyNpr(totals.totalNetSalaryNpr)}
+                    </Td>
+                    <Td colSpan={3} />
+                  </tr>
+                </TableBody>
+              </Table>
+            </div>
+          )}
 
-      {tab === "pay" ? (
-        <div className="grid gap-4 lg:grid-cols-5">
-          <Card className="lg:col-span-3">
-            <CardHeader>
-              <CardTitle className="text-base">
-                {editingId ? "Edit salary payslip" : "Record salary payment"}
-              </CardTitle>
-              <p className="text-sm text-slate-500">
-                Earnings − deductions = net pay. Set status to <strong>Paid</strong>{" "}
-                with a paid date to post cash book and journal entries.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <FormField label="Employee type *">
-                  <Select
-                    value={form.employeeType}
-                    disabled={Boolean(editingId)}
-                    onChange={(e) =>
-                      setForm((c) => ({
-                        ...c,
-                        employeeType: e.target
-                          .value as SalaryPaymentInput["employeeType"],
-                        teacherId: "",
-                        staffId: "",
-                        staffName: "",
-                        basicSalaryNpr: 0,
-                      }))
-                    }
-                  >
-                    <option value="TEACHER">Teacher</option>
-                    <option value="STAFF">College staff</option>
-                  </Select>
-                </FormField>
-                <FormField label="Salary month (BS) *">
-                  <Input
-                    placeholder="YYYY-MM e.g. 2082-01"
-                    value={form.monthBs}
-                    onChange={(e) =>
-                      setForm((c) => ({ ...c, monthBs: e.target.value }))
-                    }
-                  />
-                </FormField>
-
-                {form.employeeType === "TEACHER" ? (
-                  <FormField label="Teacher *">
-                    <Select
-                      value={form.teacherId ?? ""}
-                      disabled={Boolean(editingId)}
-                      onChange={(e) => {
-                        const t = teachers.find((x) => x._id === e.target.value);
-                        setForm((c) => ({
-                          ...c,
-                          teacherId: e.target.value,
-                          basicSalaryNpr: t?.basicSalaryNpr ?? c.basicSalaryNpr,
-                        }));
-                      }}
-                    >
-                      <option value="">Select teacher</option>
-                      {teachers.map((t) => (
-                        <option key={t._id} value={t._id}>
-                          {t.user?.fullName ?? "Teacher"}
-                          {t.teacherCode ? ` (${t.teacherCode})` : ""}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                ) : (
-                  <FormField label="College staff *">
-                    <Select
-                      value={form.staffId ?? ""}
-                      disabled={Boolean(editingId)}
-                      onChange={(e) => {
-                        const s = staffForPicker.find(
-                          (x) => x._id === e.target.value,
-                        );
-                        setForm((c) => ({
-                          ...c,
-                          staffId: e.target.value,
-                          staffName: s?.fullName ?? "",
-                          basicSalaryNpr: s?.basicSalaryNpr ?? c.basicSalaryNpr,
-                        }));
-                      }}
-                    >
-                      <option value="">Select staff</option>
-                      {staffForPicker.map((s) => (
-                        <option key={s._id} value={s._id}>
-                          {s.fullName}
-                          {s.staffId ? ` (${s.staffId})` : ""}
-                          {s.department ? ` · ${s.department}` : ""}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                )}
-
-                <FormField label="Status *">
-                  <Select
-                    value={form.status}
-                    onChange={(e) =>
-                      setForm((c) => ({
-                        ...c,
-                        status: e.target.value as SalaryPaymentInput["status"],
-                      }))
-                    }
-                  >
-                    <option value="DRAFT">Draft</option>
-                    <option value="PROCESSED">Processed</option>
-                    <option value="PAID">Paid</option>
-                  </Select>
-                </FormField>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Earnings
-                </p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <FormField label="Basic salary (NPR) *">
-                    <NumberInput
-                      min={0}
-                      value={form.basicSalaryNpr}
-                      onChange={(e) =>
-                        setForm((c) => ({
-                          ...c,
-                          basicSalaryNpr: e.target.valueAsNumber || 0,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Allowances">
-                    <NumberInput
-                      min={0}
-                      value={form.allowancesNpr}
-                      onChange={(e) =>
-                        setForm((c) => ({
-                          ...c,
-                          allowancesNpr: e.target.valueAsNumber || 0,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Bonus">
-                    <NumberInput
-                      min={0}
-                      value={form.bonusNpr}
-                      onChange={(e) =>
-                        setForm((c) => ({
-                          ...c,
-                          bonusNpr: e.target.valueAsNumber || 0,
-                        }))
-                      }
-                    />
-                  </FormField>
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Deductions
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <FormField label="Advance recovery">
-                    <NumberInput
-                      min={0}
-                      value={form.advanceSalaryNpr}
-                      onChange={(e) =>
-                        setForm((c) => ({
-                          ...c,
-                          advanceSalaryNpr: e.target.valueAsNumber || 0,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Loan deduction">
-                    <NumberInput
-                      min={0}
-                      value={form.loanDeductionNpr}
-                      onChange={(e) =>
-                        setForm((c) => ({
-                          ...c,
-                          loanDeductionNpr: e.target.valueAsNumber || 0,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Tax / TDS">
-                    <NumberInput
-                      min={0}
-                      value={form.taxNpr}
-                      onChange={(e) =>
-                        setForm((c) => ({
-                          ...c,
-                          taxNpr: e.target.valueAsNumber || 0,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Other deductions">
-                    <NumberInput
-                      min={0}
-                      value={form.otherDeductionsNpr}
-                      onChange={(e) =>
-                        setForm((c) => ({
-                          ...c,
-                          otherDeductionsNpr: e.target.valueAsNumber || 0,
-                        }))
-                      }
-                    />
-                  </FormField>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <FormField label="Paid date (BS)">
-                  <NepaliDateField
-                    value={form.paidDateBs ?? ""}
-                    onChange={(v) =>
-                      setForm((c) => ({ ...c, paidDateBs: v }))
-                    }
-                  />
-                </FormField>
-                <FormField label="Payment method">
-                  <Select
-                    value={form.paymentMethod}
-                    onChange={(e) =>
-                      setForm((c) => ({
-                        ...c,
-                        paymentMethod: e.target
-                          .value as SalaryPaymentInput["paymentMethod"],
-                      }))
-                    }
-                  >
-                    {PAYMENT_METHODS.map((m) => (
-                      <option key={m} value={m}>
-                        {m.replace(/_/g, " ")}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Transaction / bank ref">
-                  <Input
-                    value={form.transactionNumber ?? ""}
-                    onChange={(e) =>
-                      setForm((c) => ({
-                        ...c,
-                        transactionNumber: e.target.value,
-                      }))
-                    }
-                    placeholder="Cheque no. / transfer ref"
-                  />
-                </FormField>
-                <FormField label="Notes">
-                  <Textarea
-                    rows={2}
-                    value={form.notes ?? ""}
-                    onChange={(e) =>
-                      setForm((c) => ({ ...c, notes: e.target.value }))
-                    }
-                    placeholder="Payroll notes"
-                  />
-                </FormField>
-              </div>
-
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">
-                      Payslip / bank advice (optional)
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      PDF or image of transfer advice
-                    </p>
-                  </div>
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium">
-                    <Upload className="h-4 w-4" />
-                    {uploading ? "Uploading…" : "Attach"}
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept="image/*,.pdf,application/pdf"
-                      multiple
-                      disabled={uploading}
-                      onChange={(e) => void uploadAttachments(e.target.files)}
-                    />
-                  </label>
-                </div>
-                {attachments.length > 0 ? (
-                  <ul className="mt-3 space-y-1">
-                    {attachments.map((a, i) => (
-                      <li
-                        key={`${a.url}-${i}`}
-                        className="flex items-center justify-between rounded-lg bg-white px-2 py-1.5 text-sm"
-                      >
-                        <a
-                          href={resolveApiUrl(a.url)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-brand-700 hover:underline"
-                        >
-                          <Paperclip className="h-3.5 w-3.5" />
-                          {a.name || "File"}
-                        </a>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() =>
-                            setAttachments((list) =>
-                              list.filter((_, idx) => idx !== i),
-                            )
-                          }
-                        >
-                          Remove
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setForm(emptyForm());
-                    setEditingId(null);
-                    setAttachments([]);
-                  }}
+          {/* Summary */}
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              {
+                label: "Total Monthly Salary",
+                value: formatCurrencyNpr(totals.totalMonthlySalaryNpr),
+              },
+              {
+                label: "Total Absent Deduction",
+                value: formatCurrencyNpr(totals.totalAbsentDeductionNpr),
+              },
+              {
+                label: "Total Extra Amount",
+                value: formatCurrencyNpr(totals.totalExtraAmountNpr),
+              },
+              {
+                label: "Total Salary Amount",
+                value: formatCurrencyNpr(totals.totalSalaryAmountNpr),
+              },
+              {
+                label: "Total 1% Tax",
+                value: formatCurrencyNpr(totals.totalTax1PercentNpr),
+              },
+              {
+                label: "Total Net Salary",
+                value: formatCurrencyNpr(totals.totalNetSalaryNpr),
+                emphasize: true,
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className={`rounded-xl border px-4 py-3 ${
+                  item.emphasize
+                    ? "border-brand-200 bg-brand-50"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                <p className="text-xs text-slate-500">{item.label}</p>
+                <p
+                  className={`text-lg font-semibold ${
+                    item.emphasize ? "text-brand-900" : "text-slate-900"
+                  }`}
                 >
-                  Clear
-                </Button>
-                <Button
-                  type="button"
-                  disabled={saveMutation.isPending}
-                  onClick={submit}
-                >
-                  {saveMutation.isPending
-                    ? "Saving…"
-                    : editingId
-                      ? "Update salary"
-                      : "Save salary record"}
-                </Button>
+                  {item.value}
+                </p>
               </div>
-            </CardContent>
-          </Card>
+            ))}
+          </div>
 
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-base">Payslip preview</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="rounded-xl bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">Net payable</p>
-                <p className="text-2xl font-semibold text-emerald-800">
-                  {formatCurrencyNpr(liveNet)}
-                </p>
-              </div>
-              <dl className="space-y-1.5">
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Basic</dt>
-                  <dd>{formatCurrencyNpr(num(form.basicSalaryNpr))}</dd>
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+            <p>
+              <span className="font-medium text-slate-700">
+                Total Net Salary (figures):
+              </span>{" "}
+              {formatCurrencyNpr(totals.totalNetSalaryNpr)}
+            </p>
+            <p className="mt-1">
+              <span className="font-medium text-slate-700">In words:</span>{" "}
+              {totals.totalNetSalaryInWords}
+            </p>
+          </div>
+
+          {/* Signature names — required before Print/PDF or Excel */}
+          <div className="mt-8 rounded-xl border border-slate-200 bg-white p-4">
+            <p className="mb-3 text-sm font-medium text-slate-800">
+              Signature names (required for PDF and Excel)
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField label="Accountant *">
+                <Input
+                  value={accountantName}
+                  onChange={(e) => setAccountantName(e.target.value)}
+                  placeholder="Full name"
+                />
+              </FormField>
+              <FormField label="Director *">
+                <Input
+                  value={directorName}
+                  onChange={(e) => setDirectorName(e.target.value)}
+                  placeholder="Full name"
+                />
+              </FormField>
+              <FormField label="Chairman *">
+                <Input
+                  value={chairmanName}
+                  onChange={(e) => setChairmanName(e.target.value)}
+                  placeholder="Full name"
+                />
+              </FormField>
+            </div>
+            <div className="mt-6 grid gap-6 sm:grid-cols-3">
+              {(
+                [
+                  ["Accountant", accountantName],
+                  ["Director", directorName],
+                  ["Chairman", chairmanName],
+                ] as const
+              ).map(([role, name]) => (
+                <div key={role} className="text-center">
+                  <div className="mx-8 mb-2 border-t border-slate-400 pt-2" />
+                  <p className="text-sm font-semibold text-slate-800">{role}</p>
+                  <p className="text-xs text-slate-600">
+                    {name.trim() || "—"}
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Allowances</dt>
-                  <dd>{formatCurrencyNpr(num(form.allowancesNpr))}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Bonus</dt>
-                  <dd>{formatCurrencyNpr(num(form.bonusNpr))}</dd>
-                </div>
-                <div className="flex justify-between border-t border-slate-100 pt-1.5 text-rose-700">
-                  <dt>Deductions</dt>
-                  <dd>
-                    {formatCurrencyNpr(
-                      num(form.advanceSalaryNpr) +
-                        num(form.loanDeductionNpr) +
-                        num(form.taxNpr) +
-                        num(form.otherDeductionsNpr),
-                    )}
-                  </dd>
-                </div>
-              </dl>
-              <p className="text-xs text-slate-500">
-                Formula: (Basic + Allowances + Bonus) − (Advance + Loan + Tax +
-                Other)
-              </p>
-              {form.status === "PAID" ? (
-                <p className="rounded-lg bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
-                  Saving as <strong>Paid</strong> will post to cash book and
-                  salary journal when a paid date is set.
-                </p>
-              ) : (
-                <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-950">
-                  Draft / Processed records do not move cash until marked{" "}
-                  <strong>Paid</strong>.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      ) : null}
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={exportPdf}
+                disabled={rows.length === 0}
+              >
+                <Printer className="mr-1 h-4 w-4" />
+                Download PDF
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={exportExcel}
+                disabled={rows.length === 0}
+              >
+                <FileDown className="mr-1 h-4 w-4" />
+                Excel
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

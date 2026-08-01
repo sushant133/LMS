@@ -77,10 +77,23 @@ export const computeBalanceAfterEntry = (
 ): number =>
   entryType === "CREDIT" ? previousBalanceNpr + amountNpr : previousBalanceNpr - amountNpr;
 
+/** Program years that can hold tuition (covers / fee ledger). */
 export const PROGRAM_YEAR_LABELS: Record<number, string> = {
+  0: "Entrance",
   1: "1st Year",
   2: "2nd Year",
   3: "3rd Year"
+};
+
+/** Years a student can top to earn a topper scholarship (Entrance, 1st, 2nd — not 3rd). */
+export const TOPPER_TOPPED_YEAR_OPTIONS = [0, 1, 2] as const;
+
+/** Default covered program year when a student tops the given exam year. */
+export const defaultCoversYearFromTopped = (toppedProgramYear: number): number => {
+  if (toppedProgramYear === 0) return 1; // Entrance → 1st year free
+  if (toppedProgramYear === 1) return 2;
+  if (toppedProgramYear === 2) return 3;
+  return Math.min(3, Math.max(1, toppedProgramYear + 1));
 };
 
 /**
@@ -242,6 +255,67 @@ export const applyScholarshipAwardToYearCollections = async (
 
   await recalculateStudentFeesDue(params.studentId, params.schoolId, session ?? null);
   return { appliedNpr, collectionIds };
+};
+
+/**
+ * Undo topper scholarship amounts written on fee collection rows for a covered year
+ * (used when revoking / deleting / re-editing an award).
+ */
+export const reverseScholarshipAwardFromCollections = async (
+  params: {
+    schoolId: import("mongoose").Types.ObjectId | string;
+    studentId: import("mongoose").Types.ObjectId | string;
+    coversProgramYear: number;
+    feeCollectionId?: import("mongoose").Types.ObjectId | string | null;
+  },
+  session?: import("mongoose").ClientSession | null
+): Promise<{ reversedNpr: number }> => {
+  const { FeeCollection } = await import("../models/FeeCollection.js");
+
+  let reversedNpr = 0;
+  const filter: Record<string, unknown> = {
+    schoolId: params.schoolId,
+    studentId: params.studentId,
+    isDeleted: false
+  };
+  if (params.feeCollectionId) {
+    filter._id = params.feeCollectionId;
+  } else {
+    filter.programYear = params.coversProgramYear;
+    filter.scholarshipType = "TOPPER_YEAR_WAIVER";
+  }
+
+  const query = FeeCollection.find(filter);
+  if (session) query.session(session);
+  const rows = await query;
+
+  for (const row of rows) {
+    const sch = Number(row.scholarshipNpr ?? 0);
+    if (sch <= 0) continue;
+    reversedNpr += sch;
+    row.scholarshipNpr = 0;
+    if (row.scholarshipType === "TOPPER_YEAR_WAIVER") {
+      row.scholarshipType = "NONE";
+    }
+    const totals = calculateFeeTotals({
+      previousDueNpr: 0,
+      currentChargesNpr: Number(row.currentChargesNpr ?? 0),
+      amountPaidNpr: Number(row.amountPaidNpr ?? 0),
+      discountNpr: Number(row.discountNpr ?? 0),
+      scholarshipNpr: 0,
+      lateFeeNpr: Number(row.lateFeeNpr ?? 0)
+    });
+    row.remainingDueNpr = totals.remainingDueNpr;
+    const notes = String(row.notes || "");
+    row.notes = notes
+      .replace(/;?\s*Topper scholarship applied \(year \d+\)/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    await row.save(session ? { session } : undefined);
+  }
+
+  await recalculateStudentFeesDue(params.studentId, params.schoolId, session ?? null);
+  return { reversedNpr };
 };
 
 /**

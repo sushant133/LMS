@@ -8,19 +8,45 @@ const salaryPaymentSchema = new Schema(
     staffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff" },
     staffName: { type: String },
     monthBs: { type: String, required: true },
+    /** Monthly gross salary (sheet: Monthly Salary) */
     basicSalaryNpr: { type: Number, required: true },
     allowancesNpr: { type: Number, default: 0 },
     bonusNpr: { type: Number, default: 0 },
     advanceSalaryNpr: { type: Number, default: 0 },
     loanDeductionNpr: { type: Number, default: 0 },
+    /** 1% tax on Salary Amount (sheet: 1% Tax) */
     taxNpr: { type: Number, default: 0 },
     otherDeductionsNpr: { type: Number, default: 0 },
+    /** Attendance / payroll sheet fields */
+    presentDays: { type: Number, default: 0 },
+    absentDays: { type: Number, default: 0 },
+    /** Extra duty units (days) approved for the month */
+    extraDuty: { type: Number, default: 0 },
+    absentDeductionNpr: { type: Number, default: 0 },
+    extraAmountNpr: { type: Number, default: 0 },
+    /** Monthly Salary − Absent Deduction + Extra Amount */
+    salaryAmountNpr: { type: Number, default: 0 },
+    /** True when attendance register incomplete for this employee/month */
+    attendanceIncomplete: { type: Boolean, default: false },
+    /** Present/absent overridden manually by authorized user */
+    attendanceManualOverride: { type: Boolean, default: false },
     netSalaryNpr: { type: Number, required: true },
     status: { type: String, enum: ["DRAFT", "PROCESSED", "PAID"], default: "DRAFT" },
     paidDateBs: { type: String },
     paymentMethod: {
       type: String,
-      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      enum: [
+        "CASH",
+        "BANK_TRANSFER",
+        "CHEQUE",
+        "ESEWA",
+        "KHALTI",
+        "IMEPAY",
+        "FONEPAY",
+        "CONNECT_IPS",
+        "ONLINE",
+        "OTHER"
+      ],
       default: "BANK_TRANSFER"
     },
     /** Bank / cheque / Fonepay reference */

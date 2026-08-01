@@ -10,7 +10,18 @@ const cashBookEntrySchema = new Schema(
     amountNpr: { type: Number, required: true },
     paymentMethod: {
       type: String,
-      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "ONLINE", "FONEPAY", "OTHER"],
+      enum: [
+        "CASH",
+        "BANK_TRANSFER",
+        "CHEQUE",
+        "ESEWA",
+        "KHALTI",
+        "IMEPAY",
+        "FONEPAY",
+        "CONNECT_IPS",
+        "ONLINE",
+        "OTHER"
+      ],
       default: "CASH"
     },
     referenceType: { type: String },

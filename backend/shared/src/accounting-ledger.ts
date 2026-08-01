@@ -78,7 +78,18 @@ export const feeRefundSchema = z.object({
   dateBs: bsDateSchema,
   reason: z.string().min(1),
   paymentMethod: z
-    .enum(["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"])
+    .enum([
+      "CASH",
+      "BANK_TRANSFER",
+      "CHEQUE",
+      "ESEWA",
+      "KHALTI",
+      "IMEPAY",
+      "FONEPAY",
+      "CONNECT_IPS",
+      "ONLINE",
+      "OTHER"
+    ])
     .default("CASH"),
   bankAccountId: optionalObjectIdSchema,
   transactionNumber: z.string().optional().or(z.literal("")),

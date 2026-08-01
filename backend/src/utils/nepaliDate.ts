@@ -141,6 +141,70 @@ export const bsToAdDate = (dateBs: string): { dateAd: string; dayOfWeek: string 
   };
 };
 
+/** Validate Gregorian (AD) calendar date as YYYY-MM-DD. */
+export const ensureValidAdDate = (dateAd: string): string => {
+  const trimmed = dateAd.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    throw new ApiError(400, `Invalid AD date: ${dateAd}`);
+  }
+  const [year, month, day] = trimmed.split("-").map(Number);
+  if (year === undefined || month === undefined || day === undefined) {
+    throw new ApiError(400, `Invalid AD date: ${dateAd}`);
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new ApiError(400, `Invalid AD date: ${dateAd}`);
+  }
+  const jsDate = new Date(year, month - 1, day, 12, 0, 0);
+  if (
+    jsDate.getFullYear() !== year ||
+    jsDate.getMonth() !== month - 1 ||
+    jsDate.getDate() !== day
+  ) {
+    throw new ApiError(400, `Invalid AD date: ${dateAd}`);
+  }
+  return formatAdDate(jsDate);
+};
+
+/** Convert Gregorian (AD) YYYY-MM-DD to Bikram Sambat (BS) YYYY-MM-DD. */
+export const adToBsDate = (dateAd: string): { dateBs: string; dayOfWeek: string } => {
+  const validated = ensureValidAdDate(dateAd);
+  const [year, month, day] = validated.split("-").map(Number);
+  const jsDate = new Date(year!, (month ?? 1) - 1, day ?? 1, 12, 0, 0);
+  const bs = new NepaliDate(jsDate);
+  return {
+    dateBs: formatBsDate(bs),
+    dayOfWeek: WEEKDAY_NAMES[jsDate.getDay()] ?? "Sunday"
+  };
+};
+
+/**
+ * Resolve a pair of AD/BS dates from either calendar.
+ * Prefer the calendar that was explicitly provided; convert the other.
+ */
+export const resolveAdBsDatePair = (input: {
+  dateBs?: string;
+  dateAd?: string;
+}): { dateBs: string; dateAd: string } => {
+  const dateBs = input.dateBs?.trim() || "";
+  const dateAd = input.dateAd?.trim() || "";
+  if (dateBs && dateAd) {
+    const bs = ensureValidBsDate(dateBs);
+    const ad = ensureValidAdDate(dateAd);
+    // Trust BS as source of truth when both provided (fiscal/Nepal calendar primary)
+    const fromBs = bsToAdDate(bs).dateAd;
+    return { dateBs: bs, dateAd: fromBs || ad };
+  }
+  if (dateBs) {
+    const bs = ensureValidBsDate(dateBs);
+    return { dateBs: bs, dateAd: bsToAdDate(bs).dateAd };
+  }
+  if (dateAd) {
+    const ad = ensureValidAdDate(dateAd);
+    return { dateBs: adToBsDate(ad).dateBs, dateAd: ad };
+  }
+  throw new ApiError(400, "Payment date (BS or AD) is required");
+};
+
 /** JS weekday (0=Sunday … 6=Saturday) for a BS calendar date. */
 export const getDayOfWeekFromBs = (dateBs: string): number => {
   const validated = ensureValidBsDate(dateBs);

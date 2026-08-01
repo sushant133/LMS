@@ -966,6 +966,7 @@ export const CollegeStaffManager = ({
                     <Th>Role</Th>
                     <Th>Department</Th>
                     <Th>Designation</Th>
+                    <Th>Qualification</Th>
                     <Th>Email / Login</Th>
                     <Th>Phone</Th>
                     <Th>Status</Th>
@@ -1006,6 +1007,9 @@ export const CollegeStaffManager = ({
                       </Td>
                       <Td>{staff.department ?? "—"}</Td>
                       <Td>{staff.designation}</Td>
+                      <Td className="text-sm text-slate-700">
+                        {staff.qualification?.trim() || "—"}
+                      </Td>
                       <Td className="text-xs">{staff.user?.email ?? staff.email ?? "—"}</Td>
                       <Td className="text-sm">
                         <PhoneLink phone={staff.phone} />

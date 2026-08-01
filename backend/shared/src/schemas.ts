@@ -29,6 +29,12 @@ export const bsDateSchema = z
   .trim()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in BS format YYYY-MM-DD");
 
+/** Gregorian (AD) calendar date YYYY-MM-DD. */
+export const adDateSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in AD format YYYY-MM-DD");
+
 export const academicYearSchema = z
   .string()
   .trim()

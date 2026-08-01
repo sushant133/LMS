@@ -17,6 +17,7 @@ import {
   deleteExpense,
   deleteIncome,
   deletePurchase,
+  deleteStudentScholarshipAward,
   downloadFeeReceipt,
   generateAccountingReport,
   getAccountingDashboard,
@@ -32,12 +33,15 @@ import {
   listPurchases,
   listSalaries,
   listSalaryEmployees,
+  getSalarySheet,
+  saveSalarySheet,
   listStudentAccounts,
   listStudentScholarshipAwards,
   listAccountingStructures,
   resetAccountantPassword,
   reverseFeeCollection,
   revokeStudentScholarshipAward,
+  updateStudentScholarshipAward,
   updateAccountant,
   updateAccountingFeeCollection,
   updateAccountingSettings,
@@ -111,19 +115,48 @@ router.get(
 );
 
 // Fee collection & receipts
+// Edit / delete (reverse) of posted fee payments: Super Admin + College Admin only
 router.get("/collections", readers, requireAccountingPermission("read"), listFeeReceipts);
 router.post("/collections", cashiers, requireAccountingPermission("collect_fees"), collectAccountingFee);
-router.put("/collections/:id", managers, requireAccountingPermission("manage_expenses"), updateAccountingFeeCollection);
-router.post("/collections/:id/reverse", managers, requireAccountingPermission("reverse_transaction"), reverseFeeCollection);
+router.put(
+  "/collections/:id",
+  admins,
+  requireAccountingPermission("reverse_transaction"),
+  updateAccountingFeeCollection
+);
+router.post(
+  "/collections/:id/reverse",
+  admins,
+  requireAccountingPermission("reverse_transaction"),
+  reverseFeeCollection
+);
+router.delete(
+  "/collections/:id",
+  admins,
+  requireAccountingPermission("reverse_transaction"),
+  reverseFeeCollection
+);
 
-// HA topper scholarships (top year N → free year N+1)
+// HA topper scholarships (Entrance/1st/2nd top → free next year)
 router.get("/scholarships", readers, requireAccountingPermission("read"), listStudentScholarshipAwards);
 router.post("/scholarships", cashiers, requireAccountingPermission("collect_fees"), createStudentScholarshipAward);
+router.put(
+  "/scholarships/:id",
+  managers,
+  requireAccountingPermission("collect_fees"),
+  updateStudentScholarshipAward
+);
 router.post(
   "/scholarships/:id/revoke",
   managers,
   requireAccountingPermission("reverse_transaction"),
   revokeStudentScholarshipAward
+);
+router.delete(
+  "/scholarships/:id",
+  managers,
+  requireAccountingPermission("reverse_transaction"),
+  deleteStudentScholarshipAward
 );
 router.get(
   "/collections/:id/receipt",
@@ -163,9 +196,16 @@ router.post("/income", managers, requireAccountingPermission("manage_income"), c
 router.put("/income/:id", managers, requireAccountingPermission("manage_income"), updateIncome);
 router.delete("/income/:id", managers, requireAccountingPermission("reverse_transaction"), deleteIncome);
 
-// Salaries
+// Salaries / monthly salary sheet (payroll)
 router.get("/salaries", readers, requireAccountingPermission("read"), listSalaries);
 router.get("/salary-employees", readers, requireAccountingPermission("read"), listSalaryEmployees);
+router.get("/salary-sheet", readers, requireAccountingPermission("read"), getSalarySheet);
+router.post(
+  "/salary-sheet/save",
+  managers,
+  requireAccountingPermission("manage_salaries"),
+  saveSalarySheet
+);
 router.post("/salaries", managers, requireAccountingPermission("manage_salaries"), createSalary);
 router.put("/salaries/:id", managers, requireAccountingPermission("manage_salaries"), updateSalary);
 

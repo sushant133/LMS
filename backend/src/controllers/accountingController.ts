@@ -11,6 +11,7 @@ import {
   enhancedFeeCollectionSchema,
   extendedFeeStructureSchema,
   salaryPaymentSchema,
+  salarySheetSaveSchema,
   studentScholarshipAwardSchema,
   buildFinancialSummaryRows,
   buildFinancialSummaryCsv,
@@ -48,10 +49,12 @@ import {
   calculateNetSalary,
   calculateSuggestedLateFee,
   computeBalanceAfterEntry,
+  defaultCoversYearFromTopped,
   ensureActiveScholarshipAwardsApplied,
   generateReceiptNumber,
   PROGRAM_YEAR_LABELS,
-  recalculateStudentFeesDue
+  recalculateStudentFeesDue,
+  reverseScholarshipAwardFromCollections
 } from "../utils/accountingCalculations.js";
 import { getLatestCashBalance, recordCashEntry, reverseCashEntry } from "../utils/accountingCashBook.js";
 import { getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
@@ -75,10 +78,23 @@ import {
   notifyAccountCredentials,
   resolvePortalPassword
 } from "../utils/credentialEmail.js";
-import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
+import {
+  bsToAdDate,
+  ensureValidBsDate,
+  getTodayBs,
+  resolveAdBsDatePair
+} from "../utils/nepaliDate.js";
 import { withFinancialTransaction } from "../utils/financialTransaction.js";
 import { voidFeeCollection, voidWithJournalReversal } from "../utils/accountingVoid.js";
-import { hasAccountingPermission } from "@phit-erp/shared";
+import {
+  formatNrsAmountInWords,
+  hasAccountingPermission,
+  isInstitutionAdmin
+} from "@phit-erp/shared";
+import {
+  buildSalarySheet,
+  calculateSalarySheetLine
+} from "../utils/salarySheetService.js";
 import { needsApprovalForAmount } from "./accountingApprovalController.js";
 import { FinancialApproval } from "../models/FinancialApproval.js";
 import { z } from "zod";
@@ -86,6 +102,11 @@ import { z } from "zod";
 const reverseReasonSchema = z.object({
   reason: z.string().min(3, "Reason must be at least 3 characters")
 });
+
+const emptyToUndef = (value?: string | null): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+};
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { sendSuccess } from "../utils/response.js";
@@ -413,6 +434,16 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
       totalScholarshipNpr: totalScholarship,
       remainingDueNpr: student.feesDueNpr ?? 0,
       lastPaymentDateBs: lastPayment?.paidDateBs,
+      lastPaymentDateAd: (() => {
+        if (!lastPayment?.paidDateBs) return undefined;
+        const stored = (lastPayment as { paidDateAd?: string }).paidDateAd;
+        if (stored) return stored;
+        try {
+          return bsToAdDate(lastPayment.paidDateBs).dateAd;
+        } catch {
+          return undefined;
+        }
+      })(),
       yearWise: buildProgramYearFeeSummary(studentCollections, studentAwards)
     };
   });
@@ -580,18 +611,30 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
 
 export const listFeeReceipts = asyncHandler(async (req: Request, res: Response) => {
   const collections = await FeeCollection.find(withTenantScope(req, { isDeleted: false }))
-    .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
+    .populate({
+      path: "studentId",
+      populate: [
+        { path: "user", select: "fullName email phone" },
+        { path: "batchId", select: "name" },
+        { path: "yearId", select: "name" },
+        { path: "classId", select: "name" },
+        { path: "sectionId", select: "name" }
+      ]
+    })
     .sort({ paidDateBs: -1 });
   return sendSuccess(res, "Fee receipts fetched", collections);
 });
 
 export const collectAccountingFee = asyncHandler(async (req: Request, res: Response) => {
   const payload = enhancedFeeCollectionSchema.parse(req.body);
-  ensureValidBsDate(payload.paidDateBs);
+  const { dateBs: paidDateBs, dateAd: paidDateAd } = resolveAdBsDatePair({
+    dateBs: payload.paidDateBs,
+    dateAd: payload.paidDateAd
+  });
 
   const schoolId = tenantObjectId(req);
   const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
-  await assertFiscalPeriodOpen(schoolId, payload.paidDateBs);
+  await assertFiscalPeriodOpen(schoolId, paidDateBs);
 
   const settings = await getOrCreateSettings(schoolId);
   const studentExists = await Student.findOne({ _id: payload.studentId, schoolId }).select("_id").lean();
@@ -612,7 +655,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
         ? [{ feeType: structure.feeType, title: structure.title, amountNpr: currentChargesNpr }]
         : [];
 
-  const fiscalYearBs = getFiscalYearFromBsDate(payload.paidDateBs, settings.currentFiscalYearBs);
+  const fiscalYearBs = getFiscalYearFromBsDate(paidDateBs, settings.currentFiscalYearBs);
   const paymentMethod = payload.paymentMethod ?? settings.defaultPaymentMethod;
 
   const collection = await withFinancialTransaction(async (session) => {
@@ -650,7 +693,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       schoolId.toString(),
       receiptNumber,
       payload.amountPaidNpr,
-      payload.paidDateBs
+      paidDateBs
     );
 
     const [created] = await FeeCollection.create(
@@ -660,7 +703,8 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           studentId: payload.studentId,
           feeStructureId: payload.feeStructureId,
           receiptNumber,
-          paidDateBs: payload.paidDateBs,
+          paidDateBs,
+          paidDateAd,
           fiscalYearBs,
           academicYearBs: payload.academicYearBs ?? structure?.academicYearBs,
           semesterBs: payload.semesterBs ?? structure?.semesterBs,
@@ -677,6 +721,8 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           paymentMethod,
           bankAccountId: payload.bankAccountId,
           transactionNumber: payload.transactionNumber,
+          receivedByName: payload.receivedByName?.trim() || "",
+          paidByName: payload.paidByName?.trim() || "",
           verificationCode,
           feeBreakdown,
           attachments: payload.attachments ?? [],
@@ -715,7 +761,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     await recordCashEntry(
       req,
       {
-        dateBs: payload.paidDateBs,
+        dateBs: paidDateBs,
         entryType: "CREDIT",
         category: "Fee Collection",
         description: `Fee receipt ${receiptNumber}`,
@@ -733,7 +779,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
       collectionId: created._id,
       studentId: payload.studentId,
-      dateBs: payload.paidDateBs,
+      dateBs: paidDateBs,
       amountPaidNpr: payload.amountPaidNpr,
       discountNpr: payload.discountNpr,
       scholarshipNpr: payload.scholarshipNpr,
@@ -758,7 +804,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
   return sendSuccess(res, "Fee collected successfully", collection, 201);
 });
 
-/** Record topper scholarship: topped year N finals → waive year N+1 fees. */
+/** Record topper scholarship: topped Entrance/1st/2nd → waive next program year fees. */
 export const createStudentScholarshipAward = asyncHandler(async (req: Request, res: Response) => {
   const payload = studentScholarshipAwardSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
@@ -766,12 +812,7 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
   if (!student) throw new ApiError(404, "Student not found");
 
   const coversProgramYear =
-    payload.coversProgramYear ??
-    (payload.toppedProgramYear < 3 ? payload.toppedProgramYear + 1 : payload.toppedProgramYear);
-
-  if (coversProgramYear === payload.toppedProgramYear && !payload.coversProgramYear) {
-    // default is next year; if already year 3, still allow covering year 3 only if explicit
-  }
+    payload.coversProgramYear ?? defaultCoversYearFromTopped(payload.toppedProgramYear);
 
   const existing = await StudentScholarshipAward.findOne({
     schoolId,
@@ -787,19 +828,26 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
     );
   }
 
+  const toppedLabel = YEAR_LABELS[payload.toppedProgramYear] ?? `Year ${payload.toppedProgramYear}`;
+  const coversLabel = YEAR_LABELS[coversProgramYear] ?? `Year ${coversProgramYear}`;
+  const examPhrase =
+    payload.toppedProgramYear === 0
+      ? "Entrance examination"
+      : `${toppedLabel} final examination`;
+
   const created = await StudentScholarshipAward.create({
     schoolId,
     studentId: payload.studentId,
     toppedProgramYear: payload.toppedProgramYear,
     coversProgramYear,
     academicYearBs: payload.academicYearBs ?? "",
-    examName: payload.examName ?? "",
+    examName: payload.examName ?? (payload.toppedProgramYear === 0 ? "Entrance" : ""),
     rank: payload.rank,
     waiverType: payload.waiverType,
     amountNpr: payload.amountNpr ?? 0,
     reason:
       payload.reason?.trim() ||
-      `Topped ${YEAR_LABELS[payload.toppedProgramYear]} final examination — scholarship for ${YEAR_LABELS[coversProgramYear]}`,
+      `Topped ${examPhrase} — scholarship for ${coversLabel}`,
     notes: payload.notes ?? "",
     status: "ACTIVE",
     createdBy: req.user!.userId
@@ -823,7 +871,6 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
         .collectionIds[0] as unknown as typeof created.feeCollectionId;
     }
     if (payload.waiverType === "FULL" || !payload.waiverType) {
-      // Store waived amount for reporting when full waiver used ledger charges
       if (!created.amountNpr) {
         created.amountNpr = applied.appliedNpr;
       }
@@ -840,7 +887,7 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
 
   return sendSuccess(
     res,
-    `Scholarship recorded: ${YEAR_LABELS[coversProgramYear]} fee waiver (topped ${YEAR_LABELS[payload.toppedProgramYear]})${
+    `Scholarship recorded: ${coversLabel} fee waiver (topped ${toppedLabel})${
       applied.appliedNpr > 0
         ? ` — NPR ${applied.appliedNpr.toLocaleString("en-NP")} applied; year dues set to zero`
         : ""
@@ -856,11 +903,131 @@ export const listStudentScholarshipAwards = asyncHandler(async (req: Request, re
   if (typeof req.query.studentId === "string" && req.query.studentId) {
     filter.studentId = req.query.studentId;
   }
+  if (typeof req.query.status === "string" && req.query.status) {
+    filter.status = req.query.status;
+  }
   const rows = await StudentScholarshipAward.find(filter)
-    .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
+    .populate({
+      path: "studentId",
+      select: "admissionNumber registrationNumber batchId yearId user",
+      populate: [
+        { path: "user", select: "fullName email phone" },
+        { path: "batchId", select: "name" },
+        { path: "yearId", select: "name" }
+      ]
+    })
     .sort({ createdAt: -1 })
     .lean();
   return sendSuccess(res, "Scholarship awards fetched", rows);
+});
+
+export const updateStudentScholarshipAward = asyncHandler(async (req: Request, res: Response) => {
+  const payload = studentScholarshipAwardSchema.partial().parse(req.body);
+  const schoolId = tenantObjectId(req);
+  const award = await StudentScholarshipAward.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
+  if (!award) throw new ApiError(404, "Scholarship award not found");
+  if (award.status === "REVOKED") {
+    throw new ApiError(400, "Cannot edit a revoked scholarship");
+  }
+
+  const before = award.toObject();
+  const prevCovers = award.coversProgramYear;
+  const prevStudentId = award.studentId.toString();
+
+  if (payload.studentId) {
+    const student = await Student.findOne({ _id: payload.studentId, schoolId }).select("_id").lean();
+    if (!student) throw new ApiError(404, "Student not found");
+    award.studentId = student._id as typeof award.studentId;
+  }
+
+  if (payload.toppedProgramYear !== undefined) {
+    award.toppedProgramYear = payload.toppedProgramYear;
+  }
+  if (payload.coversProgramYear !== undefined) {
+    award.coversProgramYear = payload.coversProgramYear;
+  } else if (payload.toppedProgramYear !== undefined) {
+    award.coversProgramYear = defaultCoversYearFromTopped(payload.toppedProgramYear);
+  }
+  if (payload.academicYearBs !== undefined) award.academicYearBs = payload.academicYearBs ?? "";
+  if (payload.examName !== undefined) award.examName = payload.examName ?? "";
+  if (payload.rank !== undefined) award.rank = payload.rank;
+  if (payload.waiverType !== undefined) award.waiverType = payload.waiverType;
+  if (payload.amountNpr !== undefined) award.amountNpr = payload.amountNpr;
+  if (payload.notes !== undefined) award.notes = payload.notes ?? "";
+  if (payload.reason !== undefined && payload.reason.trim()) {
+    award.reason = payload.reason.trim();
+  } else {
+    const toppedLabel = YEAR_LABELS[award.toppedProgramYear] ?? String(award.toppedProgramYear);
+    const coversLabel = YEAR_LABELS[award.coversProgramYear] ?? String(award.coversProgramYear);
+    const examPhrase =
+      award.toppedProgramYear === 0
+        ? "Entrance examination"
+        : `${toppedLabel} final examination`;
+    award.reason = `Topped ${examPhrase} — scholarship for ${coversLabel}`;
+  }
+
+  // Undo previous ledger application, then re-apply with new settings
+  await reverseScholarshipAwardFromCollections({
+    schoolId,
+    studentId: prevStudentId,
+    coversProgramYear: prevCovers,
+    feeCollectionId: award.feeCollectionId
+  });
+
+  const dup = await StudentScholarshipAward.findOne({
+    schoolId,
+    studentId: award.studentId,
+    coversProgramYear: award.coversProgramYear,
+    isDeleted: false,
+    status: { $in: ["ACTIVE", "APPLIED"] },
+    _id: { $ne: award._id }
+  }).lean();
+  if (dup) {
+    throw new ApiError(
+      400,
+      `Another active scholarship already covers ${YEAR_LABELS[award.coversProgramYear]} for this student`
+    );
+  }
+
+  award.status = "ACTIVE";
+  award.feeCollectionId = undefined;
+
+  const applied = await applyScholarshipAwardToYearCollections({
+    schoolId,
+    studentId: award.studentId,
+    coversProgramYear: award.coversProgramYear,
+    waiverType: award.waiverType ?? "FULL",
+    amountNpr: award.amountNpr ?? 0,
+    awardId: award._id.toString(),
+    scholarshipType: "TOPPER_YEAR_WAIVER"
+  });
+
+  if (applied.appliedNpr > 0) {
+    award.status = "APPLIED";
+    if (applied.collectionIds[0]) {
+      award.feeCollectionId = applied
+        .collectionIds[0] as unknown as typeof award.feeCollectionId;
+    }
+    if ((award.waiverType === "FULL" || !award.waiverType) && !award.amountNpr) {
+      award.amountNpr = applied.appliedNpr;
+    }
+  }
+
+  await award.save();
+
+  await recordAudit(req, {
+    action: "accounting.scholarship.update",
+    entity: "StudentScholarshipAward",
+    entityId: award._id.toString(),
+    before,
+    after: award
+  });
+
+  return sendSuccess(res, "Scholarship updated — student fee ledger refreshed", award);
 });
 
 export const revokeStudentScholarshipAward = asyncHandler(async (req: Request, res: Response) => {
@@ -871,67 +1038,341 @@ export const revokeStudentScholarshipAward = asyncHandler(async (req: Request, r
     isDeleted: false
   });
   if (!award) throw new ApiError(404, "Scholarship award not found");
-  if (award.status === "APPLIED") {
-    throw new ApiError(
-      400,
-      "This scholarship was already applied on a fee receipt. Reverse that receipt before revoking."
-    );
+  if (award.status === "REVOKED") {
+    throw new ApiError(400, "Scholarship is already revoked");
   }
+
+  const before = award.toObject();
+
+  // Undo scholarship amounts on fee rows so student dues return to payable
+  await reverseScholarshipAwardFromCollections({
+    schoolId,
+    studentId: award.studentId,
+    coversProgramYear: award.coversProgramYear,
+    feeCollectionId: award.feeCollectionId
+  });
+
   award.status = "REVOKED";
+  award.feeCollectionId = undefined;
   await award.save();
+
   await recordAudit(req, {
     action: "accounting.scholarship.revoke",
     entity: "StudentScholarshipAward",
     entityId: award._id.toString(),
+    before,
     after: { status: "REVOKED" }
   });
-  return sendSuccess(res, "Scholarship award revoked", award);
+  return sendSuccess(
+    res,
+    "Scholarship revoked — student fee dues restored where applicable",
+    award
+  );
 });
 
-export const updateAccountingFeeCollection = asyncHandler(async (req: Request, res: Response) => {
-  const payload = enhancedFeeCollectionSchema.partial().parse(req.body);
+export const deleteStudentScholarshipAward = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
-  const existing = await FeeCollection.findOne({ _id: req.params.id, schoolId, isDeleted: false });
-  if (!existing) throw new ApiError(404, "Fee collection not found");
+  const award = await StudentScholarshipAward.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
+  if (!award) throw new ApiError(404, "Scholarship award not found");
 
-  // Posted collections cannot change money fields without reverse + re-collect
-  const moneyFieldsChanged =
-    (payload.amountPaidNpr !== undefined && payload.amountPaidNpr !== existing.amountPaidNpr) ||
-    (payload.currentChargesNpr !== undefined && payload.currentChargesNpr !== existing.currentChargesNpr) ||
-    (payload.discountNpr !== undefined && payload.discountNpr !== existing.discountNpr) ||
-    (payload.scholarshipNpr !== undefined && payload.scholarshipNpr !== existing.scholarshipNpr) ||
-    (payload.lateFeeNpr !== undefined && payload.lateFeeNpr !== existing.lateFeeNpr) ||
-    (payload.paidDateBs !== undefined && payload.paidDateBs !== existing.paidDateBs);
+  const before = award.toObject();
 
-  if (moneyFieldsChanged) {
+  if (award.status !== "REVOKED") {
+    await reverseScholarshipAwardFromCollections({
+      schoolId,
+      studentId: award.studentId,
+      coversProgramYear: award.coversProgramYear,
+      feeCollectionId: award.feeCollectionId
+    });
+  }
+
+  award.status = "REVOKED";
+  award.isDeleted = true;
+  award.feeCollectionId = undefined;
+  await award.save();
+
+  await recordAudit(req, {
+    action: "accounting.scholarship.delete",
+    entity: "StudentScholarshipAward",
+    entityId: award._id.toString(),
+    before,
+    after: { isDeleted: true, status: "REVOKED" }
+  });
+
+  return sendSuccess(
+    res,
+    "Scholarship deleted — student fee ledger corrected",
+    award
+  );
+});
+
+/**
+ * Super Admin / College Admin: edit a posted fee payment.
+ * Non-financial fields update in place. Money / date / method changes reverse
+ * the original journal + cash book lines, re-post with new values, and
+ * recalculate the student outstanding balance (profile + ledger).
+ */
+export const updateAccountingFeeCollection = asyncHandler(async (req: Request, res: Response) => {
+  if (!isInstitutionAdmin(req.user!.role)) {
     throw new ApiError(
-      400,
-      "Cannot change payment amounts or date on a posted fee collection. Reverse it and collect again."
+      403,
+      "Only Super Admin or College Admin can edit fee payment transactions"
     );
   }
 
+  const payload = enhancedFeeCollectionSchema.partial().parse(req.body);
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+  const existing = await FeeCollection.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
+  if (!existing) throw new ApiError(404, "Fee collection not found");
+
+  const settings = await getOrCreateSettings(schoolId);
+  if (settings.auditLockDateBs && existing.paidDateBs <= settings.auditLockDateBs) {
+    throw new ApiError(403, "This fiscal period is audit-locked. Cannot edit.");
+  }
+
   const before = existing.toObject();
-  if (payload.notes !== undefined) existing.notes = payload.notes;
-  if (payload.transactionNumber !== undefined) existing.transactionNumber = payload.transactionNumber;
-  await existing.save();
+
+  // Resolve payment date pair if either calendar was sent
+  let nextPaidDateBs = existing.paidDateBs;
+  let nextPaidDateAd =
+    (existing as { paidDateAd?: string }).paidDateAd ||
+    (() => {
+      try {
+        return bsToAdDate(existing.paidDateBs).dateAd;
+      } catch {
+        return "";
+      }
+    })();
+
+  if (payload.paidDateBs !== undefined || payload.paidDateAd !== undefined) {
+    const pair = resolveAdBsDatePair({
+      dateBs: payload.paidDateBs ?? existing.paidDateBs,
+      dateAd: payload.paidDateAd ?? nextPaidDateAd
+    });
+    nextPaidDateBs = pair.dateBs;
+    nextPaidDateAd = pair.dateAd;
+    await assertFiscalPeriodOpenIfNeeded(schoolId, nextPaidDateBs);
+  }
+
+  const nextAmountPaid =
+    payload.amountPaidNpr !== undefined ? payload.amountPaidNpr : existing.amountPaidNpr;
+  const nextCharges =
+    payload.currentChargesNpr !== undefined
+      ? payload.currentChargesNpr
+      : existing.currentChargesNpr;
+  const nextDiscount =
+    payload.discountNpr !== undefined ? payload.discountNpr : existing.discountNpr ?? 0;
+  const nextScholarship =
+    payload.scholarshipNpr !== undefined
+      ? payload.scholarshipNpr
+      : existing.scholarshipNpr ?? 0;
+  const nextLateFee =
+    payload.lateFeeNpr !== undefined ? payload.lateFeeNpr : existing.lateFeeNpr ?? 0;
+  const nextPaymentMethod =
+    payload.paymentMethod !== undefined ? payload.paymentMethod : existing.paymentMethod;
+  const nextBankAccountId =
+    payload.bankAccountId !== undefined ? payload.bankAccountId : existing.bankAccountId?.toString();
+  const nextFeeBreakdown =
+    payload.feeBreakdown !== undefined && payload.feeBreakdown.length > 0
+      ? payload.feeBreakdown
+      : existing.feeBreakdown ?? [];
+  const nextProgramYear =
+    payload.programYear !== undefined ? payload.programYear : existing.programYear;
+  const nextScholarshipType =
+    payload.scholarshipType !== undefined
+      ? payload.scholarshipType
+      : existing.scholarshipType ?? "NONE";
+
+  const accountingFieldsChanged =
+    nextAmountPaid !== existing.amountPaidNpr ||
+    nextCharges !== existing.currentChargesNpr ||
+    nextDiscount !== (existing.discountNpr ?? 0) ||
+    nextScholarship !== (existing.scholarshipNpr ?? 0) ||
+    nextLateFee !== (existing.lateFeeNpr ?? 0) ||
+    nextPaidDateBs !== existing.paidDateBs ||
+    nextPaymentMethod !== existing.paymentMethod ||
+    (payload.feeBreakdown !== undefined && payload.feeBreakdown.length > 0);
+
+  const updated = await withFinancialTransaction(async (session) => {
+    if (accountingFieldsChanged) {
+      // Reverse original GL + cash impact (student balance fixed after re-post)
+      await reverseJournalEntry(schoolId, userId, "FeeCollection", existing._id);
+      await reverseCashEntry(
+        req,
+        "FeeCollection",
+        existing._id.toString(),
+        existing.paidDateBs,
+        session
+      );
+    }
+
+    // Recompute previous due from other active collections before this one
+    const priorQuery = FeeCollection.find({
+      schoolId,
+      studentId: existing.studentId,
+      isDeleted: false,
+      _id: { $ne: existing._id },
+      createdAt: { $lte: existing.createdAt }
+    }).sort({ createdAt: 1 });
+    if (session) priorQuery.session(session);
+    const priorCollections = await priorQuery.lean();
+
+    let previousDueNpr = 0;
+    for (const row of priorCollections) {
+      const t = calculateFeeTotals({
+        previousDueNpr,
+        currentChargesNpr: row.currentChargesNpr ?? 0,
+        amountPaidNpr: row.amountPaidNpr,
+        discountNpr: row.discountNpr ?? 0,
+        scholarshipNpr: row.scholarshipNpr ?? 0,
+        lateFeeNpr: row.lateFeeNpr ?? 0
+      });
+      previousDueNpr = t.remainingDueNpr;
+    }
+
+    const totals = calculateFeeTotals({
+      previousDueNpr,
+      currentChargesNpr: nextCharges,
+      amountPaidNpr: nextAmountPaid,
+      discountNpr: nextDiscount,
+      scholarshipNpr: nextScholarship,
+      lateFeeNpr: nextLateFee
+    });
+
+    existing.paidDateBs = nextPaidDateBs;
+    (existing as { paidDateAd?: string }).paidDateAd = nextPaidDateAd;
+    existing.fiscalYearBs = getFiscalYearFromBsDate(
+      nextPaidDateBs,
+      settings.currentFiscalYearBs
+    );
+    existing.amountPaidNpr = nextAmountPaid;
+    existing.currentChargesNpr = nextCharges;
+    existing.discountNpr = nextDiscount;
+    existing.scholarshipNpr = nextScholarship;
+    existing.lateFeeNpr = nextLateFee;
+    existing.previousDueNpr = previousDueNpr;
+    existing.remainingDueNpr = totals.remainingDueNpr;
+    existing.advancePaymentNpr = totals.advancePaymentNpr;
+    existing.paymentMethod = nextPaymentMethod;
+    if (payload.bankAccountId !== undefined) {
+      existing.bankAccountId = payload.bankAccountId
+        ? (payload.bankAccountId as unknown as typeof existing.bankAccountId)
+        : undefined;
+    }
+    if (payload.transactionNumber !== undefined) {
+      existing.transactionNumber = emptyToUndef(payload.transactionNumber) ?? "";
+    }
+    if (payload.receivedByName !== undefined) {
+      (existing as { receivedByName?: string }).receivedByName =
+        payload.receivedByName?.trim() || "";
+    }
+    if (payload.paidByName !== undefined) {
+      (existing as { paidByName?: string }).paidByName = payload.paidByName?.trim() || "";
+    }
+    if (payload.notes !== undefined) existing.notes = payload.notes;
+    if (payload.attachments !== undefined) {
+      existing.attachments = payload.attachments as typeof existing.attachments;
+    }
+    if (nextProgramYear !== undefined) existing.programYear = nextProgramYear;
+    if (nextScholarshipType) existing.scholarshipType = nextScholarshipType;
+    if (nextFeeBreakdown.length > 0) {
+      existing.feeBreakdown = nextFeeBreakdown as typeof existing.feeBreakdown;
+    }
+    if (payload.academicYearBs !== undefined) {
+      existing.academicYearBs = emptyToUndef(payload.academicYearBs);
+    }
+    if (payload.semesterBs !== undefined) {
+      existing.semesterBs = emptyToUndef(payload.semesterBs);
+    }
+
+    await existing.save(session ? { session } : undefined);
+
+    if (accountingFieldsChanged) {
+      await recordCashEntry(
+        req,
+        {
+          dateBs: nextPaidDateBs,
+          entryType: "CREDIT",
+          category: "Fee Collection",
+          description: `Fee receipt ${existing.receiptNumber} (edited)`,
+          amountNpr: nextAmountPaid,
+          paymentMethod: nextPaymentMethod,
+          referenceType: "FeeCollection",
+          referenceId: existing._id.toString(),
+          bankAccountId: nextBankAccountId
+        },
+        session
+      );
+
+      await postFeeCollectionJournal({
+        schoolId,
+        userId,
+        collectionId: existing._id,
+        studentId: existing.studentId,
+        dateBs: nextPaidDateBs,
+        amountPaidNpr: nextAmountPaid,
+        discountNpr: nextDiscount,
+        scholarshipNpr: nextScholarship,
+        lateFeeNpr: nextLateFee,
+        paymentMethod: nextPaymentMethod,
+        bankAccountId: nextBankAccountId,
+        receiptNumber: existing.receiptNumber,
+        feeBreakdown: (existing.feeBreakdown ?? []).map((item) => ({
+          feeType: item.feeType,
+          title: item.title,
+          amountNpr: item.amountNpr
+        })),
+        session
+      });
+    }
+
+    await recalculateStudentFeesDue(existing.studentId, schoolId, session);
+    return existing;
+  });
 
   await recordAudit(req, {
     action: "accounting.fee.update",
     entity: "FeeCollection",
     entityId: existing._id.toString(),
     before,
-    after: existing
+    after: updated
   });
 
-  return sendSuccess(res, "Fee collection updated", existing);
+  return sendSuccess(
+    res,
+    accountingFieldsChanged
+      ? "Fee payment updated — accounts and student balance corrected"
+      : "Fee collection updated",
+    updated
+  );
 });
 
 export const reverseFeeCollection = asyncHandler(async (req: Request, res: Response) => {
-  const payload = reverseReasonSchema.parse(req.body);
+  if (!isInstitutionAdmin(req.user!.role)) {
+    throw new ApiError(
+      403,
+      "Only Super Admin or College Admin can delete (reverse) fee payment transactions"
+    );
+  }
+
+  const payload = reverseReasonSchema.parse(req.body ?? { reason: "Deleted by administrator" });
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
 
-  const collection = await FeeCollection.findOne({ _id: req.params.id, schoolId, isDeleted: false });
+  const collection = await FeeCollection.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
   if (!collection) throw new ApiError(404, "Fee collection not found");
 
   const settings = await getOrCreateSettings(schoolId);
@@ -939,6 +1380,7 @@ export const reverseFeeCollection = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(403, "This fiscal period is audit-locked. Cannot reverse.");
   }
 
+  // Institution admins never need dual approval (needsApprovalForAmount already skips them)
   const requiresApproval = await needsApprovalForAmount(
     schoolId,
     collection.amountPaidNpr,
@@ -990,8 +1432,20 @@ export const reverseFeeCollection = asyncHandler(async (req: Request, res: Respo
     after: { isDeleted: true, voidReason: payload.reason }
   });
 
-  return sendSuccess(res, "Fee collection reversed successfully");
+  return sendSuccess(
+    res,
+    "Fee payment deleted — journal, cash book, and student balance updated"
+  );
 });
+
+/** Ensure fiscal period is open for a BS date (lazy import to avoid circular deps). */
+const assertFiscalPeriodOpenIfNeeded = async (
+  schoolId: import("mongoose").Types.ObjectId,
+  dateBs: string
+): Promise<void> => {
+  const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+  await assertFiscalPeriodOpen(schoolId, dateBs);
+};
 
 export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
@@ -1587,10 +2041,242 @@ export const listSalaries = asyncHandler(async (req: Request, res: Response) => 
   return sendSuccess(res, "Salary payments fetched", normalized);
 });
 
+const resolvePayrollAmounts = (payload: {
+  basicSalaryNpr: number;
+  presentDays?: number;
+  absentDays?: number;
+  extraDuty?: number;
+  extraAmountNpr?: number;
+  absentDeductionNpr?: number;
+  salaryAmountNpr?: number;
+  taxNpr?: number;
+  allowancesNpr?: number;
+  bonusNpr?: number;
+  advanceSalaryNpr?: number;
+  loanDeductionNpr?: number;
+  otherDeductionsNpr?: number;
+  workingDaysInMonth?: number;
+}) => {
+  const useSheet =
+    payload.presentDays !== undefined ||
+    payload.absentDays !== undefined ||
+    payload.extraDuty !== undefined ||
+    payload.extraAmountNpr !== undefined ||
+    payload.salaryAmountNpr !== undefined;
+
+  if (useSheet) {
+    const calc = calculateSalarySheetLine({
+      monthlySalaryNpr: payload.basicSalaryNpr,
+      presentDays: payload.presentDays ?? 0,
+      absentDays: payload.absentDays ?? 0,
+      extraDuty: payload.extraDuty ?? 0,
+      workingDaysInMonth: payload.workingDaysInMonth ?? 30,
+      extraAmountOverrideNpr:
+        payload.extraAmountNpr !== undefined &&
+        (payload.extraDuty === undefined || payload.extraDuty === 0)
+          ? payload.extraAmountNpr
+          : undefined
+    });
+    return {
+      absentDeductionNpr: calc.absentDeductionNpr,
+      extraAmountNpr: calc.extraAmountNpr,
+      salaryAmountNpr: calc.salaryAmountNpr,
+      taxNpr: calc.tax1PercentNpr,
+      netSalaryNpr: calc.netSalaryNpr
+    };
+  }
+
+  return {
+    absentDeductionNpr: payload.absentDeductionNpr ?? 0,
+    extraAmountNpr: payload.extraAmountNpr ?? 0,
+    salaryAmountNpr: payload.salaryAmountNpr ?? 0,
+    taxNpr: payload.taxNpr ?? 0,
+    netSalaryNpr: calculateNetSalary(
+      payload as Parameters<typeof calculateNetSalary>[0]
+    )
+  };
+};
+
+export const getSalarySheet = asyncHandler(async (req: Request, res: Response) => {
+  const monthBs = String(req.query.monthBs || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(monthBs)) {
+    throw new ApiError(400, "monthBs is required (YYYY-MM BS)");
+  }
+  const schoolId = tenantObjectId(req);
+  const sheet = await buildSalarySheet({
+    schoolId,
+    monthBs,
+    department: typeof req.query.department === "string" ? req.query.department : "",
+    employeeType:
+      req.query.employeeType === "TEACHER" || req.query.employeeType === "STAFF"
+        ? req.query.employeeType
+        : "",
+    employeeId: typeof req.query.employeeId === "string" ? req.query.employeeId : "",
+    search: typeof req.query.q === "string" ? req.query.q : ""
+  });
+  return sendSuccess(res, "Salary sheet generated", sheet);
+});
+
+export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) => {
+  const payload = salarySheetSaveSchema.parse(req.body);
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId;
+
+  // Derive working days from BS calendar for consistent per-day rates
+  const [y, m] = payload.monthBs.split("-").map(Number);
+  const { getDaysInBsMonth } = await import("../utils/nepaliDate.js");
+  const workingDaysInMonth =
+    y && m ? getDaysInBsMonth(y, m) : 30;
+
+  if (payload.status === "PAID" && payload.paidDateBs) {
+    const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+    await assertFiscalPeriodOpen(schoolId, payload.paidDateBs);
+  }
+
+  const savedIds: string[] = [];
+
+  for (const row of payload.rows) {
+    const calc = calculateSalarySheetLine({
+      monthlySalaryNpr: row.monthlySalaryNpr,
+      presentDays: row.presentDays,
+      absentDays: row.absentDays,
+      extraDuty: row.extraDuty,
+      workingDaysInMonth,
+      extraAmountOverrideNpr:
+        row.extraAmountNpr !== undefined && row.extraDuty === 0
+          ? row.extraAmountNpr
+          : undefined
+    });
+
+    const docFields = {
+      employeeType: row.employeeType,
+      teacherId: row.employeeType === "TEACHER" ? row.teacherId : undefined,
+      staffId: row.employeeType === "STAFF" ? row.staffId : undefined,
+      staffName: row.employeeName ?? "",
+      monthBs: payload.monthBs,
+      basicSalaryNpr: row.monthlySalaryNpr,
+      allowancesNpr: 0,
+      bonusNpr: 0,
+      advanceSalaryNpr: 0,
+      loanDeductionNpr: 0,
+      otherDeductionsNpr: 0,
+      presentDays: row.presentDays,
+      absentDays: row.absentDays,
+      extraDuty: row.extraDuty,
+      absentDeductionNpr: calc.absentDeductionNpr,
+      extraAmountNpr: calc.extraAmountNpr,
+      salaryAmountNpr: calc.salaryAmountNpr,
+      taxNpr: calc.tax1PercentNpr,
+      netSalaryNpr: calc.netSalaryNpr,
+      attendanceManualOverride: Boolean(row.attendanceManualOverride),
+      attendanceIncomplete: false,
+      notes: row.remarks ?? "",
+      status: payload.status,
+      paidDateBs: payload.paidDateBs || undefined,
+      paymentMethod: payload.paymentMethod
+    };
+
+    let existing = null as InstanceType<typeof SalaryPayment> | null;
+    if (row.salaryPaymentId) {
+      existing = await SalaryPayment.findOne({
+        _id: row.salaryPaymentId,
+        schoolId,
+        isDeleted: false
+      });
+    }
+    if (!existing) {
+      const filter: Record<string, unknown> = {
+        schoolId,
+        monthBs: payload.monthBs,
+        isDeleted: false
+      };
+      if (row.employeeType === "TEACHER" && row.teacherId) filter.teacherId = row.teacherId;
+      if (row.employeeType === "STAFF" && row.staffId) filter.staffId = row.staffId;
+      existing = await SalaryPayment.findOne(filter);
+    }
+
+    if (existing) {
+      if (existing.status === "PAID" && payload.status !== "PAID") {
+        continue;
+      }
+      const wasPaid = existing.status === "PAID";
+      Object.assign(existing, docFields);
+      await existing.save();
+      savedIds.push(String(existing._id));
+
+      if (!wasPaid && payload.status === "PAID" && payload.paidDateBs) {
+        await recordCashEntry(req, {
+          dateBs: payload.paidDateBs,
+          entryType: "DEBIT",
+          category: "Salary",
+          description: `Salary payment ${payload.monthBs} — ${row.employeeName || ""}`,
+          amountNpr: calc.netSalaryNpr,
+          paymentMethod: payload.paymentMethod,
+          referenceType: "SalaryPayment",
+          referenceId: existing._id.toString()
+        });
+        await postSalaryJournal({
+          schoolId,
+          userId: userId as unknown as import("mongoose").Types.ObjectId,
+          salaryId: existing._id,
+          dateBs: payload.paidDateBs,
+          amountNpr: calc.netSalaryNpr,
+          paymentMethod: payload.paymentMethod,
+          monthBs: payload.monthBs
+        });
+      }
+    } else {
+      const created = await SalaryPayment.create({
+        ...docFields,
+        schoolId,
+        createdBy: userId
+      });
+      savedIds.push(String(created._id));
+
+      if (payload.status === "PAID" && payload.paidDateBs) {
+        await recordCashEntry(req, {
+          dateBs: payload.paidDateBs,
+          entryType: "DEBIT",
+          category: "Salary",
+          description: `Salary payment ${payload.monthBs} — ${row.employeeName || ""}`,
+          amountNpr: calc.netSalaryNpr,
+          paymentMethod: payload.paymentMethod,
+          referenceType: "SalaryPayment",
+          referenceId: created._id.toString()
+        });
+        await postSalaryJournal({
+          schoolId,
+          userId: userId as unknown as import("mongoose").Types.ObjectId,
+          salaryId: created._id,
+          dateBs: payload.paidDateBs,
+          amountNpr: calc.netSalaryNpr,
+          paymentMethod: payload.paymentMethod,
+          monthBs: payload.monthBs
+        });
+      }
+    }
+  }
+
+  await recordAudit(req, {
+    action: "accounting.salary.sheet.save",
+    entity: "SalaryPayment",
+    entityId: payload.monthBs,
+    after: { monthBs: payload.monthBs, count: savedIds.length, status: payload.status }
+  });
+
+  const sheet = await buildSalarySheet({ schoolId, monthBs: payload.monthBs });
+  return sendSuccess(res, `Salary sheet saved (${savedIds.length} employee(s))`, {
+    ...sheet,
+    savedIds,
+    totalNetInWords: formatNrsAmountInWords(sheet.totals.totalNetSalaryNpr)
+  });
+});
+
 export const createSalary = asyncHandler(async (req: Request, res: Response) => {
   const payload = salaryPaymentSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
-  const netSalaryNpr = calculateNetSalary(payload);
+  const amounts = resolvePayrollAmounts(payload);
+  const netSalaryNpr = amounts.netSalaryNpr;
 
   // Prevent duplicate month payslip for same employee
   const dupFilter: Record<string, unknown> = {
@@ -1628,8 +2314,16 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
     bonusNpr: payload.bonusNpr,
     advanceSalaryNpr: payload.advanceSalaryNpr,
     loanDeductionNpr: payload.loanDeductionNpr,
-    taxNpr: payload.taxNpr,
+    taxNpr: amounts.taxNpr,
     otherDeductionsNpr: payload.otherDeductionsNpr,
+    presentDays: payload.presentDays ?? 0,
+    absentDays: payload.absentDays ?? 0,
+    extraDuty: payload.extraDuty ?? 0,
+    absentDeductionNpr: amounts.absentDeductionNpr,
+    extraAmountNpr: amounts.extraAmountNpr,
+    salaryAmountNpr: amounts.salaryAmountNpr,
+    attendanceIncomplete: payload.attendanceIncomplete ?? false,
+    attendanceManualOverride: payload.attendanceManualOverride ?? false,
     netSalaryNpr,
     status: payload.status,
     paidDateBs: payload.paidDateBs || undefined,
@@ -1684,12 +2378,19 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
   }
 
   const merged = { ...existing.toObject(), ...payload };
-  const netSalaryNpr = calculateNetSalary(merged as Parameters<typeof calculateNetSalary>[0]);
+  const amounts = resolvePayrollAmounts(
+    merged as Parameters<typeof resolvePayrollAmounts>[0]
+  );
+  const netSalaryNpr = amounts.netSalaryNpr;
   const before = existing.toObject();
   const salary = await SalaryPayment.findOneAndUpdate(
     withTenantScope(req, { _id: req.params.id }),
     {
       ...payload,
+      taxNpr: amounts.taxNpr,
+      absentDeductionNpr: amounts.absentDeductionNpr,
+      extraAmountNpr: amounts.extraAmountNpr,
+      salaryAmountNpr: amounts.salaryAmountNpr,
       netSalaryNpr,
       ...(payload.transactionNumber !== undefined
         ? { transactionNumber: payload.transactionNumber }

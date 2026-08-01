@@ -311,16 +311,42 @@ export const FEE_TYPES = [
   "ANNUAL"
 ] as const;
 
-export const PAYMENT_METHODS = ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"] as const;
+export const PAYMENT_METHODS = [
+  "CASH",
+  "BANK_TRANSFER",
+  "CHEQUE",
+  "ESEWA",
+  "KHALTI",
+  "IMEPAY",
+  "FONEPAY",
+  "CONNECT_IPS",
+  "ONLINE",
+  "OTHER"
+] as const;
 
 export const PAYMENT_METHOD_LABELS: Record<(typeof PAYMENT_METHODS)[number], string> = {
   CASH: "Cash",
   BANK_TRANSFER: "Bank Deposit",
   CHEQUE: "Cheque",
+  ESEWA: "eSewa",
+  KHALTI: "Khalti",
+  IMEPAY: "IME Pay",
   FONEPAY: "Fonepay",
+  CONNECT_IPS: "Connect IPS",
   ONLINE: "Online",
   OTHER: "Other"
 };
+
+/**
+ * Payment methods where staff often receive cash/voucher in person —
+ * show "Received by" and "Paid by / Depositor" fields.
+ */
+export const PAYMENT_METHODS_WITH_HANDOVER = [
+  "CASH",
+  "BANK_TRANSFER",
+  "CHEQUE",
+  "OTHER"
+] as const;
 
 export const FEE_STRUCTURE_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
 

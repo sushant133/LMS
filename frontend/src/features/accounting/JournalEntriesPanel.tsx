@@ -27,6 +27,7 @@ import { Textarea } from "components/ui/textarea";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { formatDualDateCell } from "./accountingUtils";
 
 const formatTodayBs = (): string => {
   const d = getTodayBs();
@@ -964,7 +965,19 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                   return (
                     <tr key={v._id}>
                       <Td className="font-mono text-sm">{v.voucherNo}</Td>
-                      <Td>{v.dateBs}</Td>
+                      <Td className="whitespace-nowrap text-sm">
+                        {(() => {
+                          const dual = formatDualDateCell({ dateBs: v.dateBs });
+                          return (
+                            <>
+                              <div className="font-medium text-slate-800">{dual.primary}</div>
+                              {dual.secondary ? (
+                                <div className="text-xs text-slate-500">{dual.secondary}</div>
+                              ) : null}
+                            </>
+                          );
+                        })()}
+                      </Td>
                       <Td className="max-w-[160px] truncate text-sm">
                         {v.instituteName || v.govOfficeName || v.officeName || "—"}
                       </Td>
@@ -1044,7 +1057,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
               <TableHead>
                 <tr>
                   <Th>भौचर</Th>
-                  <Th>मिति</Th>
+                  <Th>मिति (BS / AD)</Th>
                   <Th>प्रकार</Th>
                   <Th>विवरण</Th>
                   <Th>डेबिट</Th>
@@ -1055,10 +1068,16 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
               <TableBody>
                 {(entriesQuery.data ?? []).map((entry) => {
                   const linked = voucherByJournalId.get(entry._id);
+                  const dual = formatDualDateCell({ dateBs: entry.dateBs });
                   return (
                     <tr key={entry._id}>
                       <Td className="font-mono text-sm">{entry.voucherNumber}</Td>
-                      <Td>{entry.dateBs}</Td>
+                      <Td className="whitespace-nowrap text-sm">
+                        <div className="font-medium text-slate-800">{dual.primary}</div>
+                        {dual.secondary ? (
+                          <div className="text-xs text-slate-500">{dual.secondary}</div>
+                        ) : null}
+                      </Td>
                       <Td>{entry.voucherType}</Td>
                       <Td className="max-w-xs truncate" title={entry.narration}>
                         {entry.narration}

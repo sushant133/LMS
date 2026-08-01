@@ -22,7 +22,7 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { formatCurrencyNpr } from "lib/utils";
-import { downloadRecordsExcel } from "./accountingUtils";
+import { downloadRecordsExcel, formatDualDateCell } from "./accountingUtils";
 import { printSimpleDocument } from "./voucherPrint";
 
 type LedgerLine = {
@@ -478,7 +478,7 @@ export const LedgerPanel = () => {
                 <Table>
                   <TableHead>
                     <tr>
-                      <Th>Date</Th>
+                      <Th>Date (BS / AD)</Th>
                       <Th>Voucher</Th>
                       <Th>Particulars</Th>
                       <Th>Source</Th>
@@ -488,9 +488,16 @@ export const LedgerPanel = () => {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {[...lines].reverse().map((row) => (
+                    {[...lines].reverse().map((row) => {
+                      const dual = formatDualDateCell({ dateBs: row.dateBs });
+                      return (
                       <tr key={row.key}>
-                        <Td className="whitespace-nowrap text-sm">{row.dateBs}</Td>
+                        <Td className="whitespace-nowrap text-sm">
+                          <div className="font-medium text-slate-800">{dual.primary}</div>
+                          {dual.secondary ? (
+                            <div className="text-xs text-slate-500">{dual.secondary}</div>
+                          ) : null}
+                        </Td>
                         <Td className="font-mono text-sm">{row.voucherNumber}</Td>
                         <Td
                           className="max-w-[260px] truncate text-sm"
@@ -522,7 +529,8 @@ export const LedgerPanel = () => {
                           {formatCurrencyNpr(row.runningBalanceNpr)}
                         </Td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

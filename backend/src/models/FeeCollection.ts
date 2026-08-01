@@ -32,6 +32,8 @@ const feeCollectionSchema = new Schema(
     feeStructureId: { type: Schema.Types.ObjectId, ref: "FeeStructure" },
     receiptNumber: { type: String, required: true, trim: true },
     paidDateBs: { type: String, required: true },
+    /** Gregorian (AD) equivalent of paidDateBs — stored for dual-calendar display. */
+    paidDateAd: { type: String },
     fiscalYearBs: { type: String },
     academicYearBs: { type: String },
     semesterBs: { type: String },
@@ -58,11 +60,26 @@ const feeCollectionSchema = new Schema(
     remainingDueNpr: { type: Number, default: 0 },
     paymentMethod: {
       type: String,
-      enum: ["CASH", "BANK_TRANSFER", "CHEQUE", "FONEPAY", "ONLINE", "OTHER"],
+      enum: [
+        "CASH",
+        "BANK_TRANSFER",
+        "CHEQUE",
+        "ESEWA",
+        "KHALTI",
+        "IMEPAY",
+        "FONEPAY",
+        "CONNECT_IPS",
+        "ONLINE",
+        "OTHER"
+      ],
       default: "CASH"
     },
     bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount" },
     transactionNumber: { type: String },
+    /** Staff / person who received cash, voucher, or deposit slip */
+    receivedByName: { type: String, trim: true, default: "" },
+    /** Person who paid or deposited cash / voucher (payer / depositor) */
+    paidByName: { type: String, trim: true, default: "" },
     verificationCode: { type: String },
     feeBreakdown: { type: [feeBreakdownSchema], default: [] },
     attachments: { type: [feeAttachmentSchema], default: [] },

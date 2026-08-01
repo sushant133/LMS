@@ -8,7 +8,15 @@ import {
   PAYMENT_STATUSES,
   PURCHASE_CATEGORIES
 } from "./constants.js";
-import { addressSchema, academicYearSchema, bsDateSchema, moneySchema, objectIdSchema, optionalObjectIdSchema } from "./schemas.js";
+import {
+  addressSchema,
+  academicYearSchema,
+  adDateSchema,
+  bsDateSchema,
+  moneySchema,
+  objectIdSchema,
+  optionalObjectIdSchema
+} from "./schemas.js";
 
 export const feeBreakdownItemSchema = z.object({
   feeType: z.enum(FEE_TYPES),
@@ -27,41 +35,62 @@ export const feeAttachmentSchema = z.object({
     .default("OTHER")
 });
 
-export const enhancedFeeCollectionSchema = z.object({
-  studentId: objectIdSchema,
-  feeStructureId: optionalObjectIdSchema,
-  receiptNumber: z.string().optional(),
-  paidDateBs: bsDateSchema,
-  academicYearBs: z.string().optional(),
-  semesterBs: z.string().optional(),
-  /** HA / multi-year: 1 = 1st year, 2 = 2nd year, 3 = 3rd year */
-  programYear: z.coerce.number().int().min(1).max(3).optional(),
-  currentChargesNpr: moneySchema.default(0),
-  amountPaidNpr: moneySchema,
-  discountNpr: moneySchema.default(0),
-  scholarshipNpr: moneySchema.default(0),
-  scholarshipType: z
-    .enum(["NONE", "TOPPER_YEAR_WAIVER", "MERIT", "OTHER"])
-    .optional()
-    .default("NONE"),
-  lateFeeNpr: moneySchema.default(0),
-  advancePaymentNpr: moneySchema.default(0),
-  paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
-  bankAccountId: optionalObjectIdSchema,
-  transactionNumber: z.string().optional().or(z.literal("")),
-  feeBreakdown: z.array(feeBreakdownItemSchema).default([]),
-  attachments: z.array(feeAttachmentSchema).optional().default([]),
-  isInstallment: z.boolean().default(false),
-  installmentNumber: z.coerce.number().int().min(1).optional(),
-  totalInstallments: z.coerce.number().int().min(1).optional(),
-  notes: z.string().optional(),
-  /** When recording a topper scholarship with this payment */
-  scholarshipAwardId: optionalObjectIdSchema
-});
+export const enhancedFeeCollectionSchema = z
+  .object({
+    studentId: objectIdSchema,
+    feeStructureId: optionalObjectIdSchema,
+    receiptNumber: z.string().optional(),
+    /** BS payment date — required unless paidDateAd is provided (server converts). */
+    paidDateBs: bsDateSchema.optional().or(z.literal("")),
+    /** AD payment date — optional; if only AD is given, server converts to BS. */
+    paidDateAd: adDateSchema.optional().or(z.literal("")),
+    academicYearBs: z.string().optional(),
+    semesterBs: z.string().optional(),
+    /** HA / multi-year: 1 = 1st year, 2 = 2nd year, 3 = 3rd year */
+    programYear: z.coerce.number().int().min(1).max(3).optional(),
+    currentChargesNpr: moneySchema.default(0),
+    amountPaidNpr: moneySchema,
+    discountNpr: moneySchema.default(0),
+    scholarshipNpr: moneySchema.default(0),
+    scholarshipType: z
+      .enum(["NONE", "TOPPER_YEAR_WAIVER", "MERIT", "OTHER"])
+      .optional()
+      .default("NONE"),
+    lateFeeNpr: moneySchema.default(0),
+    advancePaymentNpr: moneySchema.default(0),
+    paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+    bankAccountId: optionalObjectIdSchema,
+    transactionNumber: z.string().optional().or(z.literal("")),
+    /** Staff / person who received cash, voucher, or deposit slip */
+    receivedByName: z.string().trim().max(200).optional().or(z.literal("")),
+    /** Person who paid or deposited cash / voucher */
+    paidByName: z.string().trim().max(200).optional().or(z.literal("")),
+    feeBreakdown: z.array(feeBreakdownItemSchema).default([]),
+    attachments: z.array(feeAttachmentSchema).optional().default([]),
+    isInstallment: z.boolean().default(false),
+    installmentNumber: z.coerce.number().int().min(1).optional(),
+    totalInstallments: z.coerce.number().int().min(1).optional(),
+    notes: z.string().optional(),
+    /** When recording a topper scholarship with this payment */
+    scholarshipAwardId: optionalObjectIdSchema
+  })
+  .superRefine((value, ctx) => {
+    const hasBs = Boolean(value.paidDateBs && value.paidDateBs.trim());
+    const hasAd = Boolean(value.paidDateAd && value.paidDateAd.trim());
+    if (!hasBs && !hasAd) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Payment date is required (BS or AD)",
+        path: ["paidDateBs"]
+      });
+    }
+  });
 
 export const studentScholarshipAwardSchema = z.object({
   studentId: objectIdSchema,
-  toppedProgramYear: z.coerce.number().int().min(1).max(3),
+  /** 0 = Entrance, 1 = 1st year final, 2 = 2nd year final (not 3rd). */
+  toppedProgramYear: z.coerce.number().int().min(0).max(2),
+  /** Program year whose fees are waived (1–3). */
   coversProgramYear: z.coerce.number().int().min(1).max(3).optional(),
   academicYearBs: z.string().optional().or(z.literal("")),
   examName: z.string().optional().or(z.literal("")),
@@ -139,6 +168,14 @@ export const salaryPaymentSchema = z
     loanDeductionNpr: moneySchema.default(0),
     taxNpr: moneySchema.default(0),
     otherDeductionsNpr: moneySchema.default(0),
+    presentDays: z.coerce.number().min(0).optional().default(0),
+    absentDays: z.coerce.number().min(0).optional().default(0),
+    extraDuty: z.coerce.number().min(0).optional().default(0),
+    absentDeductionNpr: moneySchema.optional().default(0),
+    extraAmountNpr: moneySchema.optional().default(0),
+    salaryAmountNpr: moneySchema.optional().default(0),
+    attendanceIncomplete: z.boolean().optional().default(false),
+    attendanceManualOverride: z.boolean().optional().default(false),
     status: z.enum(["DRAFT", "PROCESSED", "PAID"]).default("DRAFT"),
     paidDateBs: bsDateSchema.optional().or(z.literal("")),
     paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),
@@ -244,6 +281,31 @@ export type AccountingExpenseInput = z.infer<typeof accountingExpenseSchema>;
 export type AccountingPurchaseInput = z.infer<typeof accountingPurchaseSchema>;
 export type AccountingIncomeInput = z.infer<typeof accountingIncomeSchema>;
 export type SalaryPaymentInput = z.infer<typeof salaryPaymentSchema>;
+
+export const salarySheetSaveSchema = z.object({
+  monthBs: z.string().regex(/^\d{4}-\d{2}$/, "Use YYYY-MM (BS month)"),
+  status: z.enum(["DRAFT", "PROCESSED", "PAID"]).default("DRAFT"),
+  paidDateBs: bsDateSchema.optional().or(z.literal("")),
+  paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),
+  rows: z
+    .array(
+      z.object({
+        employeeType: z.enum(["TEACHER", "STAFF"]),
+        teacherId: optionalObjectIdSchema,
+        staffId: optionalObjectIdSchema,
+        employeeName: z.string().optional().or(z.literal("")),
+        monthlySalaryNpr: moneySchema,
+        presentDays: z.coerce.number().min(0).default(0),
+        absentDays: z.coerce.number().min(0).default(0),
+        extraDuty: z.coerce.number().min(0).default(0),
+        extraAmountNpr: moneySchema.optional(),
+        remarks: z.string().optional().or(z.literal("")),
+        attendanceManualOverride: z.boolean().optional().default(false),
+        salaryPaymentId: optionalObjectIdSchema
+      })
+    )
+    .min(1)
+});
 export type BankAccountInput = z.infer<typeof bankAccountSchema>;
 export type CashBookEntryInput = z.infer<typeof cashBookEntrySchema>;
 export type AccountingSettingsInput = z.infer<typeof accountingSettingsSchema>;

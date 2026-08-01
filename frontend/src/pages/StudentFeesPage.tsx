@@ -7,7 +7,9 @@ import { Badge } from "components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "@phit-erp/shared";
 import { formatCurrencyNpr } from "lib/utils";
+import { formatDualDateCell } from "features/accounting/accountingUtils";
 
 const yearStatusClass = (status: ProgramYearFeeSummary["status"]) => {
   switch (status) {
@@ -188,7 +190,7 @@ export const StudentFeesPage = () => {
               <TableHead>
                 <tr>
                   <Th>Receipt</Th>
-                  <Th>Date</Th>
+                  <Th>Date (BS / AD)</Th>
                   <Th>Year</Th>
                   <Th>Amount paid</Th>
                   <Th>Scholarship</Th>
@@ -197,10 +199,20 @@ export const StudentFeesPage = () => {
                 </tr>
               </TableHead>
               <TableBody>
-                {history.collections.map((collection) => (
+                {history.collections.map((collection) => {
+                  const dual = formatDualDateCell({
+                    dateBs: collection.paidDateBs,
+                    dateAd: collection.paidDateAd,
+                  });
+                  return (
                   <tr key={collection._id}>
                     <Td className="font-medium">{collection.receiptNumber}</Td>
-                    <Td>{collection.paidDateBs}</Td>
+                    <Td className="whitespace-nowrap text-sm">
+                      <div className="font-medium text-slate-800">{dual.primary}</div>
+                      {dual.secondary ? (
+                        <div className="text-xs text-slate-500">{dual.secondary}</div>
+                      ) : null}
+                    </Td>
                     <Td>
                       {collection.programYear
                         ? `${collection.programYear}${
@@ -228,10 +240,27 @@ export const StudentFeesPage = () => {
                       </Badge>
                     </Td>
                     <Td>
-                      {(collection.paymentMethod ?? "CASH").replace(/_/g, " ")}
+                      {PAYMENT_METHOD_LABELS[
+                        (collection.paymentMethod ?? "CASH") as PaymentMethod
+                      ] ??
+                        (collection.paymentMethod ?? "CASH").replace(/_/g, " ")}
+                      {collection.receivedByName || collection.paidByName ? (
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {collection.receivedByName
+                            ? `Recv: ${collection.receivedByName}`
+                            : ""}
+                          {collection.receivedByName && collection.paidByName
+                            ? " · "
+                            : ""}
+                          {collection.paidByName
+                            ? `Paid by: ${collection.paidByName}`
+                            : ""}
+                        </div>
+                      ) : null}
                     </Td>
                   </tr>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           )}

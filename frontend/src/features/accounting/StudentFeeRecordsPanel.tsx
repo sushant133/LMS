@@ -8,17 +8,24 @@ import type {
   StudentAccountSummary,
   StudentFinancialHistory,
   StudentRecord,
+  StudentScholarshipAwardRecord,
   YearRecord,
 } from "@phit-erp/shared";
-import { PAYMENT_METHODS } from "@phit-erp/shared";
+import {
+  PAYMENT_METHOD_LABELS,
+  PAYMENT_METHODS,
+  PAYMENT_METHODS_WITH_HANDOVER,
+} from "@phit-erp/shared";
 import {
   Award,
   FileDown,
   FileText,
   Paperclip,
+  Pencil,
   Plus,
   Printer,
   Receipt,
+  Trash2,
   Upload,
   Wallet,
   X,
@@ -36,9 +43,15 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
+import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, resolveApiUrl, unwrap } from "lib/api";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
-import { downloadRecordsExcel } from "./accountingUtils";
+import {
+  adDateToBsString,
+  bsDateToAdString,
+  downloadRecordsExcel,
+  formatDualDateCell,
+} from "./accountingUtils";
 
 type PanelTab = "ledger" | "record" | "scholarship" | "receipts";
 
@@ -64,6 +77,55 @@ const PROGRAM_YEARS = [
   { value: 2, label: "2nd Year" },
   { value: 3, label: "3rd Year" },
 ] as const;
+
+/** Topped exam options for topper scholarship (no 3rd year final). */
+const TOPPED_EXAM_OPTIONS = [
+  { value: 0, label: "Entrance" },
+  { value: 1, label: "1st Year" },
+  { value: 2, label: "2nd Year" },
+] as const;
+
+const defaultCoversFromTopped = (topped: number): number => {
+  if (topped === 0) return 1;
+  if (topped === 1) return 2;
+  if (topped === 2) return 3;
+  return Math.min(3, topped + 1);
+};
+
+const toppedExamLabel = (value: number): string =>
+  TOPPED_EXAM_OPTIONS.find((o) => o.value === value)?.label ??
+  PROGRAM_YEARS.find((y) => y.value === value)?.label ??
+  `Year ${value}`;
+
+const coversYearLabel = (value: number): string =>
+  PROGRAM_YEARS.find((y) => y.value === value)?.label ?? `Year ${value}`;
+
+const emptyScholarshipForm = () => ({
+  studentId: "",
+  toppedProgramYear: "0",
+  coversProgramYear: "1",
+  examName: "Entrance",
+  rank: "1",
+  amountNpr: "0",
+  notes: "",
+});
+
+const scholarshipStudentMeta = (award: StudentScholarshipAwardRecord) => {
+  const s = award.studentId;
+  if (!s || typeof s === "string") {
+    return { name: "—", admission: "—", batch: "—", year: "—" };
+  }
+  const batch =
+    typeof s.batchId === "object" && s.batchId ? s.batchId.name : undefined;
+  const year =
+    typeof s.yearId === "object" && s.yearId ? s.yearId.name : undefined;
+  return {
+    name: s.user?.fullName ?? "—",
+    admission: s.admissionNumber ?? "—",
+    batch: batch || "—",
+    year: year || "—",
+  };
+};
 
 const yearStatusBadge = (status: ProgramYearFeeSummary["status"]) => {
   switch (status) {
@@ -104,6 +166,7 @@ const emptyPaymentForm = () => ({
   programYear: "1",
   feeStructureId: "",
   paidDateBs: "",
+  paidDateAd: "",
   currentChargesNpr: "",
   amountPaidNpr: "",
   discountNpr: "0",
@@ -111,37 +174,85 @@ const emptyPaymentForm = () => ({
   lateFeeNpr: "0",
   paymentMethod: "CASH" as (typeof PAYMENT_METHODS)[number],
   transactionNumber: "",
+  receivedByName: "",
+  paidByName: "",
   notes: "",
   scholarshipType: "NONE" as "NONE" | "TOPPER_YEAR_WAIVER" | "MERIT" | "OTHER",
   scholarshipAwardId: "",
 });
 
+const paymentMethodNeedsHandover = (
+  method: (typeof PAYMENT_METHODS)[number],
+): boolean =>
+  (PAYMENT_METHODS_WITH_HANDOVER as readonly string[]).includes(method);
+
+const paymentMethodLabel = (method: string): string =>
+  PAYMENT_METHOD_LABELS[method as (typeof PAYMENT_METHODS)[number]] ??
+  method.replace(/_/g, " ");
+
+/** Dual-calendar payment date cell for fee tables. */
+const DualDateCell = ({
+  dateBs,
+  dateAd,
+}: {
+  dateBs?: string | null;
+  dateAd?: string | null;
+}) => {
+  const { primary, secondary } = formatDualDateCell({ dateBs, dateAd });
+  return (
+    <div className="whitespace-nowrap text-sm">
+      <div className="font-medium text-slate-800">{primary}</div>
+      {secondary ? (
+        <div className="text-xs text-slate-500">{secondary}</div>
+      ) : null}
+    </div>
+  );
+};
+
+const resolveCollectionStudentId = (
+  row: EnhancedFeeCollectionRecord,
+): string => {
+  const s = row.studentId as unknown;
+  if (!s) return "";
+  if (typeof s === "string") return s;
+  if (typeof s === "object" && s && "_id" in s) {
+    return String((s as { _id: unknown })._id);
+  }
+  return String(s);
+};
+
 export const StudentFeeRecordsPanel = () => {
   const queryClient = useQueryClient();
+  const canAdminEdit = useIsTenantAdmin();
   const [tab, setTab] = useState<PanelTab>("ledger");
   const [search, setSearch] = useState("");
   /** Ledger filters */
   const [ledgerBatchId, setLedgerBatchId] = useState("");
   const [ledgerYearId, setLedgerYearId] = useState("");
   /** Record / scholarship student picker filters */
+  const [pickerSearch, setPickerSearch] = useState("");
   const [pickerBatchId, setPickerBatchId] = useState("");
   const [pickerYearId, setPickerYearId] = useState("");
+  /** All receipts filters */
+  const [receiptSearch, setReceiptSearch] = useState("");
+  const [receiptBatchId, setReceiptBatchId] = useState("");
+  const [receiptYearId, setReceiptYearId] = useState("");
   const [method, setMethod] = useState("");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [receiptFromBs, setReceiptFromBs] = useState("");
+  const [receiptFromAd, setReceiptFromAd] = useState("");
+  const [receiptToBs, setReceiptToBs] = useState("");
+  const [receiptToAd, setReceiptToAd] = useState("");
+  const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
   const [attachments, setAttachments] = useState<FeeAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [scholarshipForm, setScholarshipForm] = useState({
-    studentId: "",
-    toppedProgramYear: "1",
-    coversProgramYear: "2",
-    examName: "Final Examination",
-    rank: "1",
-    amountNpr: "0",
-    notes: "",
-  });
+  /** Super Admin / College Admin: edit existing fee receipt */
+  const [editingReceipt, setEditingReceipt] =
+    useState<EnhancedFeeCollectionRecord | null>(null);
+  const [scholarshipForm, setScholarshipForm] = useState(emptyScholarshipForm);
+  const [editingScholarship, setEditingScholarship] =
+    useState<StudentScholarshipAwardRecord | null>(null);
 
   const accountsQuery = useQuery({
     queryKey: ["accounting-student-accounts"],
@@ -153,6 +264,12 @@ export const StudentFeeRecordsPanel = () => {
     queryKey: ["accounting-fee-records"],
     queryFn: () =>
       unwrap<EnhancedFeeCollectionRecord[]>(api.get("/accounting/receipts")),
+  });
+
+  const scholarshipsQuery = useQuery({
+    queryKey: ["accounting-scholarships"],
+    queryFn: () =>
+      unwrap<StudentScholarshipAwardRecord[]>(api.get("/accounting/scholarships")),
   });
 
   const structuresQuery = useQuery({
@@ -205,31 +322,192 @@ export const StudentFeeRecordsPanel = () => {
       toast.success("Fee payment recorded — student account updated");
       setPaymentForm(emptyPaymentForm());
       setAttachments([]);
+      setEditingReceipt(null);
       await invalidate();
       setTab("ledger");
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  const scholarshipMutation = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      unwrap(api.post("/accounting/scholarships", body)),
+  const updateCollectionMutation = useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: Record<string, unknown>;
+    }) => unwrap(api.put(`/accounting/collections/${id}`, body)),
     onSuccess: async () => {
-      toast.success("Topper scholarship recorded for next year");
-      setScholarshipForm({
-        studentId: "",
-        toppedProgramYear: "1",
-        coversProgramYear: "2",
-        examName: "Final Examination",
-        rank: "1",
-        amountNpr: "0",
-        notes: "",
-      });
+      toast.success(
+        "Payment updated — journal, cash book, and student balance corrected",
+      );
+      setPaymentForm(emptyPaymentForm());
+      setAttachments([]);
+      setEditingReceipt(null);
       await invalidate();
-      setTab("ledger");
+      setTab("receipts");
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
+
+  const deleteCollectionMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      unwrap(api.post(`/accounting/collections/${id}/reverse`, { reason })),
+    onSuccess: async () => {
+      toast.success(
+        "Payment deleted — accounts and student profile balance updated",
+      );
+      if (editingReceipt) {
+        setEditingReceipt(null);
+        setPaymentForm(emptyPaymentForm());
+        setAttachments([]);
+      }
+      await invalidate();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const startEditReceipt = (row: EnhancedFeeCollectionRecord) => {
+    const studentId = resolveCollectionStudentId(row);
+    const paidDateBs = row.paidDateBs ?? "";
+    const paidDateAd =
+      row.paidDateAd?.trim() ||
+      (paidDateBs ? bsDateToAdString(paidDateBs) : "");
+    setEditingReceipt(row);
+    setSelectedStudentId(studentId);
+    setPaymentForm({
+      studentId,
+      programYear: String(row.programYear ?? 1),
+      feeStructureId: row.feeStructureId
+        ? String(row.feeStructureId)
+        : "",
+      paidDateBs,
+      paidDateAd,
+      currentChargesNpr: String(row.currentChargesNpr ?? 0),
+      amountPaidNpr: String(row.amountPaidNpr ?? 0),
+      discountNpr: String(row.discountNpr ?? 0),
+      scholarshipNpr: String(row.scholarshipNpr ?? 0),
+      lateFeeNpr: String(row.lateFeeNpr ?? 0),
+      paymentMethod:
+        (row.paymentMethod as (typeof PAYMENT_METHODS)[number]) || "CASH",
+      transactionNumber: row.transactionNumber ?? "",
+      receivedByName: row.receivedByName ?? "",
+      paidByName: row.paidByName ?? "",
+      notes: row.notes ?? "",
+      scholarshipType:
+        (row.scholarshipType as
+          | "NONE"
+          | "TOPPER_YEAR_WAIVER"
+          | "MERIT"
+          | "OTHER") || "NONE",
+      scholarshipAwardId: "",
+    });
+    setAttachments(
+      (row.attachments ?? []).map((a) => ({
+        name: a.name,
+        url: a.url,
+        mimeType: a.mimeType,
+        size: a.size,
+        kind: a.kind,
+      })),
+    );
+    setTab("record");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelEditReceipt = () => {
+    setEditingReceipt(null);
+    setPaymentForm(emptyPaymentForm());
+    setAttachments([]);
+    setSelectedStudentId("");
+  };
+
+  const confirmDeleteReceipt = (row: EnhancedFeeCollectionRecord) => {
+    const st = resolveStudent(row);
+    const reason = window.prompt(
+      `Delete fee receipt ${row.receiptNumber} for ${st.name}?\n\nThis reverses journal, cash book, and updates the student balance.\n\nEnter reason for audit:`,
+      "Entered by mistake",
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      toast.error("Reason must be at least 3 characters");
+      return;
+    }
+    deleteCollectionMutation.mutate({ id: row._id, reason: reason.trim() });
+  };
+
+  const scholarshipMutation = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      editingScholarship
+        ? unwrap(api.put(`/accounting/scholarships/${editingScholarship._id}`, body))
+        : unwrap(api.post("/accounting/scholarships", body)),
+    onSuccess: async () => {
+      toast.success(
+        editingScholarship
+          ? "Scholarship updated — student fee ledger refreshed"
+          : "Topper scholarship recorded",
+      );
+      setScholarshipForm(emptyScholarshipForm());
+      setEditingScholarship(null);
+      await invalidate();
+      await queryClient.invalidateQueries({ queryKey: ["accounting-scholarships"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const revokeScholarshipMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/accounting/scholarships/${id}/revoke`)),
+    onSuccess: async () => {
+      toast.success("Scholarship revoked — student dues restored");
+      await invalidate();
+      await queryClient.invalidateQueries({ queryKey: ["accounting-scholarships"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const deleteScholarshipMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/accounting/scholarships/${id}`)),
+    onSuccess: async () => {
+      toast.success("Scholarship deleted");
+      if (editingScholarship) {
+        setEditingScholarship(null);
+        setScholarshipForm(emptyScholarshipForm());
+      }
+      await invalidate();
+      await queryClient.invalidateQueries({ queryKey: ["accounting-scholarships"] });
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const startEditScholarship = (award: StudentScholarshipAwardRecord) => {
+    const studentId =
+      typeof award.studentId === "string"
+        ? award.studentId
+        : award.studentId?._id ?? "";
+    const topped = Number(award.toppedProgramYear);
+    setEditingScholarship(award);
+    setScholarshipForm({
+      studentId,
+      toppedProgramYear: String(topped),
+      coversProgramYear: String(
+        award.coversProgramYear ?? defaultCoversFromTopped(topped),
+      ),
+      examName:
+        award.examName ||
+        (topped === 0 ? "Entrance" : "Final Examination"),
+      rank: String(award.rank ?? 1),
+      amountNpr: String(award.amountNpr ?? 0),
+      notes: award.notes ?? "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelEditScholarship = () => {
+    setEditingScholarship(null);
+    setScholarshipForm(emptyScholarshipForm());
+  };
 
   const students = studentsQuery.data ?? [];
   const accounts = accountsQuery.data ?? [];
@@ -245,6 +523,11 @@ export const StudentFeeRecordsPanel = () => {
     if (!pickerBatchId) return years;
     return years.filter((y) => y.batchId === pickerBatchId);
   }, [years, pickerBatchId]);
+
+  const yearsForReceiptBatch = useMemo(() => {
+    if (!receiptBatchId) return years;
+    return years.filter((y) => y.batchId === receiptBatchId);
+  }, [years, receiptBatchId]);
 
   const asId = (value: unknown): string => {
     if (value == null) return "";
@@ -285,31 +568,73 @@ export const StudentFeeRecordsPanel = () => {
     });
   }, [accounts, search, ledgerBatchId, ledgerYearId]);
 
-  /** Students available in payment / scholarship pickers after batch+year filter */
+  /** Students available in payment / scholarship pickers after search + batch+year filter */
   const pickerStudents = useMemo(() => {
-    return students.filter((s) =>
-      studentMatchesGroup(s, pickerBatchId, pickerYearId),
-    );
-  }, [students, pickerBatchId, pickerYearId]);
+    const q = pickerSearch.trim().toLowerCase();
+    return students.filter((s) => {
+      if (!studentMatchesGroup(s, pickerBatchId, pickerYearId)) return false;
+      if (!q) return true;
+      const name = s.user?.fullName?.toLowerCase() ?? "";
+      const adm = s.admissionNumber?.toLowerCase() ?? "";
+      const reg = s.registrationNumber?.toLowerCase() ?? "";
+      const phone = s.user?.phone?.toLowerCase() ?? "";
+      const email = s.user?.email?.toLowerCase() ?? "";
+      return (
+        name.includes(q) ||
+        adm.includes(q) ||
+        reg.includes(q) ||
+        phone.includes(q) ||
+        email.includes(q)
+      );
+    });
+  }, [students, pickerBatchId, pickerYearId, pickerSearch]);
 
   const filteredReceipts = useMemo(() => {
     let rows = receiptsQuery.data ?? [];
-    const q = search.trim().toLowerCase();
+    if (receiptBatchId || receiptYearId) {
+      rows = rows.filter((row) => {
+        const s = row.studentId as unknown as
+          | { batchId?: unknown; yearId?: unknown }
+          | string
+          | null;
+        if (!s || typeof s === "string") {
+          return !receiptBatchId && !receiptYearId;
+        }
+        return studentMatchesGroup(s, receiptBatchId, receiptYearId);
+      });
+    }
+    const q = receiptSearch.trim().toLowerCase();
     if (q) {
       rows = rows.filter((row) => {
         const st = resolveStudent(row);
         return (
           st.name.toLowerCase().includes(q) ||
           st.admission.toLowerCase().includes(q) ||
-          row.receiptNumber.toLowerCase().includes(q)
+          st.batch.toLowerCase().includes(q) ||
+          st.year.toLowerCase().includes(q) ||
+          row.receiptNumber.toLowerCase().includes(q) ||
+          (row.transactionNumber ?? "").toLowerCase().includes(q)
         );
       });
     }
     if (method) rows = rows.filter((r) => r.paymentMethod === method);
-    if (fromDate) rows = rows.filter((r) => r.paidDateBs >= fromDate);
-    if (toDate) rows = rows.filter((r) => r.paidDateBs <= toDate);
+    // Date filters use BS (source of truth); AD inputs sync into BS fields
+    if (receiptFromBs) {
+      rows = rows.filter((r) => r.paidDateBs >= receiptFromBs);
+    }
+    if (receiptToBs) {
+      rows = rows.filter((r) => r.paidDateBs <= receiptToBs);
+    }
     return rows;
-  }, [receiptsQuery.data, search, method, fromDate, toDate]);
+  }, [
+    receiptsQuery.data,
+    receiptSearch,
+    receiptBatchId,
+    receiptYearId,
+    method,
+    receiptFromBs,
+    receiptToBs,
+  ]);
 
   const clearLedgerFilters = () => {
     setSearch("");
@@ -318,9 +643,30 @@ export const StudentFeeRecordsPanel = () => {
   };
 
   const clearPickerFilters = () => {
+    setPickerSearch("");
     setPickerBatchId("");
     setPickerYearId("");
   };
+
+  const clearReceiptFilters = () => {
+    setReceiptSearch("");
+    setReceiptBatchId("");
+    setReceiptYearId("");
+    setMethod("");
+    setReceiptFromBs("");
+    setReceiptFromAd("");
+    setReceiptToBs("");
+    setReceiptToAd("");
+  };
+
+  const hasReceiptFilters = Boolean(
+    receiptSearch ||
+      receiptBatchId ||
+      receiptYearId ||
+      method ||
+      receiptFromBs ||
+      receiptToBs,
+  );
 
   const uploadAttachments = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -351,25 +697,38 @@ export const StudentFeeRecordsPanel = () => {
     }
   };
 
-  const submitPayment = () => {
+  const buildPaymentPayload = () => {
     if (!paymentForm.studentId) {
       toast.error("Select a student");
-      return;
+      return null;
     }
-    if (!paymentForm.paidDateBs) {
-      toast.error("Select payment date (BS)");
-      return;
+    let paidDateBs = paymentForm.paidDateBs.trim();
+    let paidDateAd = paymentForm.paidDateAd.trim();
+    if (!paidDateBs && paidDateAd) {
+      paidDateBs = adDateToBsString(paidDateAd);
+    }
+    if (!paidDateAd && paidDateBs) {
+      paidDateAd = bsDateToAdString(paidDateBs);
+    }
+    if (!paidDateBs && !paidDateAd) {
+      toast.error("Enter payment date (BS or AD)");
+      return null;
+    }
+    if (!paidDateBs) {
+      toast.error("Could not convert AD date to BS — check the AD date");
+      return null;
     }
     const amountPaid = Number(paymentForm.amountPaidNpr);
     const charges = Number(paymentForm.currentChargesNpr);
     if (!Number.isFinite(amountPaid) || amountPaid < 0) {
       toast.error("Enter a valid amount paid (0 allowed for full scholarship)");
-      return;
+      return null;
     }
-    collectMutation.mutate({
+    return {
       studentId: paymentForm.studentId,
       feeStructureId: paymentForm.feeStructureId || undefined,
-      paidDateBs: paymentForm.paidDateBs,
+      paidDateBs,
+      paidDateAd: paidDateAd || undefined,
       programYear: Number(paymentForm.programYear),
       currentChargesNpr: Number.isFinite(charges) ? charges : 0,
       amountPaidNpr: amountPaid,
@@ -378,6 +737,8 @@ export const StudentFeeRecordsPanel = () => {
       lateFeeNpr: Number(paymentForm.lateFeeNpr) || 0,
       paymentMethod: paymentForm.paymentMethod,
       transactionNumber: paymentForm.transactionNumber || undefined,
+      receivedByName: paymentForm.receivedByName.trim() || undefined,
+      paidByName: paymentForm.paidByName.trim() || undefined,
       notes: paymentForm.notes || undefined,
       scholarshipType: paymentForm.scholarshipType,
       scholarshipAwardId: paymentForm.scholarshipAwardId || undefined,
@@ -392,7 +753,17 @@ export const StudentFeeRecordsPanel = () => {
               },
             ]
           : [],
-    });
+    };
+  };
+
+  const submitPayment = () => {
+    const body = buildPaymentPayload();
+    if (!body) return;
+    if (editingReceipt) {
+      updateCollectionMutation.mutate({ id: editingReceipt._id, body });
+      return;
+    }
+    collectMutation.mutate(body);
   };
 
   const submitScholarship = () => {
@@ -414,12 +785,88 @@ export const StudentFeeRecordsPanel = () => {
     });
   };
 
-  const downloadReceipt = (id: string) => {
-    window.open(
-      `${api.defaults.baseURL}/accounting/collections/${id}/receipt`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+  const scholarshipAwards = scholarshipsQuery.data ?? [];
+  const activeScholarshipAwards = useMemo(
+    () =>
+      scholarshipAwards.filter(
+        (a) => a.status === "ACTIVE" || a.status === "APPLIED",
+      ),
+    [scholarshipAwards],
+  );
+
+  const downloadReceiptPdf = async (
+    id: string,
+    receiptNumber?: string,
+  ): Promise<void> => {
+    setPrintingReceiptId(id);
+    try {
+      const response = await api.get(`/accounting/collections/${id}/receipt`, {
+        responseType: "blob",
+        headers: { Accept: "application/pdf" },
+      });
+      const raw = response.data as Blob;
+      // API errors often return JSON with responseType blob
+      if (raw.type && raw.type.includes("json")) {
+        const text = await raw.text();
+        let message = "Could not open receipt PDF";
+        try {
+          const parsed = JSON.parse(text) as { message?: string; error?: string };
+          message = parsed.message || parsed.error || message;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(message);
+      }
+      const blob =
+        raw.type === "application/pdf"
+          ? raw
+          : new Blob([raw], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const filename = `${(receiptNumber || id).replace(/[^\w.-]+/g, "_")}-receipt.pdf`;
+
+      // Prefer direct download (most reliable); also try open for print
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      const opened = window.open(url, "_blank");
+      if (opened) {
+        toast.success("Receipt PDF opened — use browser Print if needed");
+      } else {
+        toast.success("Receipt PDF downloaded");
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      toast.error(parseErrorMessage(e) || "Could not open receipt PDF");
+    } finally {
+      setPrintingReceiptId(null);
+    }
+  };
+
+  const printAllFilteredReceipts = async () => {
+    if (filteredReceipts.length === 0) {
+      toast.error("No receipts to print");
+      return;
+    }
+    if (filteredReceipts.length > 15) {
+      if (
+        !window.confirm(
+          `Print ${filteredReceipts.length} receipt PDFs? This will open multiple tabs (or download if pop-ups are blocked).`,
+        )
+      ) {
+        return;
+      }
+    }
+    toast.message(`Preparing ${filteredReceipts.length} receipt PDF(s)…`);
+    for (const row of filteredReceipts) {
+      // Sequential to avoid browser pop-up / connection storms
+      // eslint-disable-next-line no-await-in-loop
+      await downloadReceiptPdf(row._id, row.receiptNumber);
+    }
   };
 
   const exportExcel = () => {
@@ -442,7 +889,11 @@ export const StudentFeeRecordsPanel = () => {
           scholarshipNpr: row.scholarshipNpr,
           remainingDueNpr: row.remainingDueNpr,
           paidDateBs: row.paidDateBs,
-          paymentMethod: row.paymentMethod,
+          paidDateAd:
+            row.paidDateAd || bsDateToAdString(row.paidDateBs) || "",
+          paymentMethod: paymentMethodLabel(row.paymentMethod),
+          receivedByName: row.receivedByName ?? "",
+          paidByName: row.paidByName ?? "",
           attachments: row.attachments?.length ?? 0,
         };
       }),
@@ -633,6 +1084,7 @@ export const StudentFeeRecordsPanel = () => {
                       <Th>3rd Year</Th>
                       <Th>Total paid</Th>
                       <Th>Remaining</Th>
+                      <Th>Last payment</Th>
                       <Th />
                     </tr>
                   </TableHead>
@@ -694,6 +1146,16 @@ export const StudentFeeRecordsPanel = () => {
                             {formatCurrencyNpr(acc.remainingDueNpr)}
                           </Td>
                           <Td>
+                            {acc.lastPaymentDateBs || acc.lastPaymentDateAd ? (
+                              <DualDateCell
+                                dateBs={acc.lastPaymentDateBs}
+                                dateAd={acc.lastPaymentDateAd}
+                              />
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </Td>
+                          <Td>
                             <Button
                               size="sm"
                               variant="outline"
@@ -731,18 +1193,68 @@ export const StudentFeeRecordsPanel = () => {
         <div className="grid gap-4 lg:grid-cols-5">
           <Card className="lg:col-span-3">
             <CardHeader>
-              <CardTitle className="text-base">Record student fee payment</CardTitle>
+              <CardTitle className="text-base">
+                {editingReceipt
+                  ? `Edit fee payment — ${editingReceipt.receiptNumber}`
+                  : "Record student fee payment"}
+              </CardTitle>
               <p className="text-sm text-slate-500">
-                Posts to cash book / journal and updates the student&apos;s outstanding
-                balance. Attach bank voucher, Fonepay screenshot, or invoice PDF.
+                {editingReceipt
+                  ? "Super Admin / College Admin only. Saving reverses the old journal and cash book entries, re-posts corrected amounts, and updates the student balance."
+                  : "Posts to cash book / journal and updates the student's outstanding balance. Attach bank voucher, Fonepay screenshot, or invoice PDF."}
               </p>
+              {editingReceipt ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                  <Pencil className="h-4 w-4 shrink-0" />
+                  <span className="flex-1">
+                    Editing receipt{" "}
+                    <strong className="font-mono">{editingReceipt.receiptNumber}</strong>
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={cancelEditReceipt}
+                  >
+                    Cancel edit
+                  </Button>
+                </div>
+              ) : null}
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Find student by batch &amp; year
+                  Find student by search, batch &amp; year
                 </p>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <FormField label="Search">
+                    <div className="relative">
+                      <Input
+                        className="h-10 pr-9"
+                        placeholder="Name, admission no., phone…"
+                        value={pickerSearch}
+                        onChange={(e) => {
+                          setPickerSearch(e.target.value);
+                          setPaymentForm((f) => ({ ...f, studentId: "" }));
+                          setSelectedStudentId("");
+                        }}
+                      />
+                      {pickerSearch ? (
+                        <button
+                          type="button"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                          onClick={() => {
+                            setPickerSearch("");
+                            setPaymentForm((f) => ({ ...f, studentId: "" }));
+                            setSelectedStudentId("");
+                          }}
+                          aria-label="Clear search"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  </FormField>
                   <FormField label="Batch">
                     <Select
                       value={pickerBatchId}
@@ -785,7 +1297,7 @@ export const StudentFeeRecordsPanel = () => {
                       type="button"
                       variant="outline"
                       className="w-full"
-                      disabled={!pickerBatchId && !pickerYearId}
+                      disabled={!pickerSearch && !pickerBatchId && !pickerYearId}
                       onClick={() => {
                         clearPickerFilters();
                         setPaymentForm((f) => ({ ...f, studentId: "" }));
@@ -800,7 +1312,9 @@ export const StudentFeeRecordsPanel = () => {
                 <p className="mt-2 text-xs text-slate-500">
                   {pickerStudents.length} student
                   {pickerStudents.length === 1 ? "" : "s"} in list
-                  {pickerBatchId || pickerYearId ? " (filtered)" : ""}
+                  {pickerSearch || pickerBatchId || pickerYearId
+                    ? " (filtered)"
+                    : ""}
                 </p>
               </div>
 
@@ -808,6 +1322,7 @@ export const StudentFeeRecordsPanel = () => {
                 <FormField label="Student *">
                   <Select
                     value={paymentForm.studentId}
+                    disabled={Boolean(editingReceipt)}
                     onChange={(e) => {
                       const id = e.target.value;
                       setPaymentForm((f) => ({ ...f, studentId: id }));
@@ -819,15 +1334,28 @@ export const StudentFeeRecordsPanel = () => {
                     }}
                   >
                     <option value="">
-                      {pickerStudents.length === 0
-                        ? "No students in this batch/year"
+                      {pickerStudents.length === 0 && !editingReceipt
+                        ? "No students match search / batch / year"
                         : "Select student"}
                     </option>
-                    {pickerStudents.map((s) => (
-                      <option key={s._id} value={s._id}>
-                        {s.user?.fullName ?? "Student"} ({s.admissionNumber})
-                      </option>
-                    ))}
+                    {(() => {
+                      const list = [...pickerStudents];
+                      if (
+                        editingReceipt &&
+                        paymentForm.studentId &&
+                        !list.some((s) => s._id === paymentForm.studentId)
+                      ) {
+                        const extra = students.find(
+                          (s) => s._id === paymentForm.studentId,
+                        );
+                        if (extra) list.unshift(extra);
+                      }
+                      return list.map((s) => (
+                        <option key={s._id} value={s._id}>
+                          {s.user?.fullName ?? "Student"} ({s.admissionNumber})
+                        </option>
+                      ));
+                    })()}
                   </Select>
                 </FormField>
                 <FormField label="Program year (HA) *">
@@ -847,12 +1375,30 @@ export const StudentFeeRecordsPanel = () => {
                     ))}
                   </Select>
                 </FormField>
-                <FormField label="Payment date (BS) *">
+                <FormField label="Payment date (BS)">
                   <NepaliDateField
                     value={paymentForm.paidDateBs}
                     onChange={(v) =>
-                      setPaymentForm((f) => ({ ...f, paidDateBs: v }))
+                      setPaymentForm((f) => ({
+                        ...f,
+                        paidDateBs: v,
+                        paidDateAd: v ? bsDateToAdString(v) : "",
+                      }))
                     }
+                  />
+                </FormField>
+                <FormField label="Payment date (AD)">
+                  <Input
+                    type="date"
+                    value={paymentForm.paidDateAd}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setPaymentForm((f) => ({
+                        ...f,
+                        paidDateAd: v,
+                        paidDateBs: v ? adDateToBsString(v) : "",
+                      }));
+                    }}
                   />
                 </FormField>
                 <FormField label="Fee structure (optional)">
@@ -951,7 +1497,7 @@ export const StudentFeeRecordsPanel = () => {
                   >
                     {PAYMENT_METHODS.map((m) => (
                       <option key={m} value={m}>
-                        {m.replace(/_/g, " ")}
+                        {paymentMethodLabel(m)}
                       </option>
                     ))}
                   </Select>
@@ -965,9 +1511,37 @@ export const StudentFeeRecordsPanel = () => {
                         transactionNumber: e.target.value,
                       }))
                     }
-                    placeholder="Bank ref / cheque no."
+                    placeholder="Bank ref / cheque no. / eSewa ref"
                   />
                 </FormField>
+                {paymentMethodNeedsHandover(paymentForm.paymentMethod) ? (
+                  <>
+                    <FormField label="Received by">
+                      <Input
+                        value={paymentForm.receivedByName}
+                        onChange={(e) =>
+                          setPaymentForm((f) => ({
+                            ...f,
+                            receivedByName: e.target.value,
+                          }))
+                        }
+                        placeholder="Staff who received cash / voucher"
+                      />
+                    </FormField>
+                    <FormField label="Paid by / Depositor">
+                      <Input
+                        value={paymentForm.paidByName}
+                        onChange={(e) =>
+                          setPaymentForm((f) => ({
+                            ...f,
+                            paidByName: e.target.value,
+                          }))
+                        }
+                        placeholder="Person who paid or deposited"
+                      />
+                    </FormField>
+                  </>
+                ) : null}
                 <FormField label="Scholarship type">
                   <Select
                     value={paymentForm.scholarshipType}
@@ -1086,19 +1660,30 @@ export const StudentFeeRecordsPanel = () => {
                   type="button"
                   variant="outline"
                   onClick={() => {
+                    if (editingReceipt) {
+                      cancelEditReceipt();
+                      return;
+                    }
                     setPaymentForm(emptyPaymentForm());
                     setAttachments([]);
                   }}
                 >
-                  Clear
+                  {editingReceipt ? "Cancel" : "Clear"}
                 </Button>
                 <Button
                   type="button"
-                  disabled={collectMutation.isPending}
+                  disabled={
+                    collectMutation.isPending ||
+                    updateCollectionMutation.isPending
+                  }
                   onClick={submitPayment}
                 >
                   <Receipt className="mr-1.5 h-4 w-4" />
-                  {collectMutation.isPending ? "Saving…" : "Save fee record"}
+                  {collectMutation.isPending || updateCollectionMutation.isPending
+                    ? "Saving…"
+                    : editingReceipt
+                      ? "Save corrections"
+                      : "Save fee record"}
                 </Button>
               </div>
             </CardContent>
@@ -1171,32 +1756,473 @@ export const StudentFeeRecordsPanel = () => {
 
       {/* ─── Scholarship ─── */}
       {tab === "scholarship" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Award className="h-5 w-5 text-violet-600" />
-              Topper scholarship (HA rule)
-            </CardTitle>
-            <p className="text-sm text-slate-500">
-              If a student ranks top in the <strong>1st year final</strong>, they receive a
-              scholarship for <strong>2nd year</strong> fees. If they do not top the 2nd
-              year final, <strong>3rd year</strong> is payable again. Same pattern for
-              other years.
-            </p>
-          </CardHeader>
-          <CardContent className="grid max-w-3xl gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-                Find student by batch &amp; year
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Award className="h-5 w-5 text-violet-600" />
+                {editingScholarship
+                  ? "Edit topper scholarship"
+                  : "Topper scholarship (HA rule)"}
+              </CardTitle>
+              <p className="text-sm text-slate-500">
+                Top <strong>Entrance</strong> → free <strong>1st year</strong>. Top{" "}
+                <strong>1st year final</strong> → free <strong>2nd year</strong>. Top{" "}
+                <strong>2nd year final</strong> → free <strong>3rd year</strong>.
               </p>
-              <div className="grid gap-3 sm:grid-cols-3">
+              {editingScholarship ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-950">
+                  <Pencil className="h-4 w-4 shrink-0" />
+                  <span className="flex-1">
+                    Editing scholarship for{" "}
+                    <strong>
+                      {scholarshipStudentMeta(editingScholarship).name}
+                    </strong>
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={cancelEditScholarship}
+                  >
+                    Cancel edit
+                  </Button>
+                </div>
+              ) : null}
+            </CardHeader>
+            <CardContent className="grid max-w-3xl gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Find student by search, batch &amp; year
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <FormField label="Search">
+                    <div className="relative">
+                      <Input
+                        className="h-10 pr-9"
+                        placeholder="Name, admission no., phone…"
+                        value={pickerSearch}
+                        onChange={(e) => {
+                          setPickerSearch(e.target.value);
+                          if (!editingScholarship) {
+                            setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                          }
+                        }}
+                      />
+                      {pickerSearch ? (
+                        <button
+                          type="button"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                          onClick={() => {
+                            setPickerSearch("");
+                            if (!editingScholarship) {
+                              setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                            }
+                          }}
+                          aria-label="Clear search"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  </FormField>
+                  <FormField label="Batch">
+                    <Select
+                      value={pickerBatchId}
+                      onChange={(e) => {
+                        setPickerBatchId(e.target.value);
+                        setPickerYearId("");
+                        if (!editingScholarship) {
+                          setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                        }
+                      }}
+                    >
+                      <option value="">All batches</option>
+                      {batches.map((b) => (
+                        <option key={b._id} value={b._id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Year">
+                    <Select
+                      value={pickerYearId}
+                      onChange={(e) => {
+                        setPickerYearId(e.target.value);
+                        if (!editingScholarship) {
+                          setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                        }
+                      }}
+                    >
+                      <option value="">
+                        {pickerBatchId ? "All years in batch" : "All years"}
+                      </option>
+                      {yearsForPickerBatch.map((y) => (
+                        <option key={y._id} value={y._id}>
+                          {y.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      disabled={!pickerSearch && !pickerBatchId && !pickerYearId}
+                      onClick={() => {
+                        clearPickerFilters();
+                        if (!editingScholarship) {
+                          setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                        }
+                      }}
+                    >
+                      <X className="mr-1.5 h-4 w-4" />
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <FormField label="Student *">
+                <Select
+                  value={scholarshipForm.studentId}
+                  disabled={Boolean(editingScholarship)}
+                  onChange={(e) =>
+                    setScholarshipForm((f) => ({ ...f, studentId: e.target.value }))
+                  }
+                >
+                  <option value="">
+                    {pickerStudents.length === 0 && !editingScholarship
+                      ? "No students match search / batch / year"
+                      : "Select student"}
+                  </option>
+                  {(() => {
+                    const list = [...pickerStudents];
+                    if (
+                      editingScholarship &&
+                      scholarshipForm.studentId &&
+                      !list.some((s) => s._id === scholarshipForm.studentId)
+                    ) {
+                      const extra = students.find(
+                        (s) => s._id === scholarshipForm.studentId,
+                      );
+                      if (extra) list.unshift(extra);
+                    }
+                    return list.map((s) => (
+                      <option key={s._id} value={s._id}>
+                        {s.user?.fullName} ({s.admissionNumber})
+                      </option>
+                    ));
+                  })()}
+                </Select>
+              </FormField>
+              <FormField label="Topped which year final? *">
+                <Select
+                  value={scholarshipForm.toppedProgramYear}
+                  onChange={(e) => {
+                    const topped = Number(e.target.value);
+                    setScholarshipForm((f) => ({
+                      ...f,
+                      toppedProgramYear: String(topped),
+                      coversProgramYear: String(defaultCoversFromTopped(topped)),
+                      examName:
+                        topped === 0
+                          ? "Entrance"
+                          : f.examName === "Entrance"
+                            ? "Final Examination"
+                            : f.examName,
+                    }));
+                  }}
+                >
+                  {TOPPED_EXAM_OPTIONS.map((y) => (
+                    <option key={y.value} value={String(y.value)}>
+                      {y.value === 0 ? y.label : `${y.label} finals`}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Scholarship covers year *">
+                <Select
+                  value={scholarshipForm.coversProgramYear}
+                  onChange={(e) =>
+                    setScholarshipForm((f) => ({
+                      ...f,
+                      coversProgramYear: e.target.value,
+                    }))
+                  }
+                >
+                  {PROGRAM_YEARS.map((y) => (
+                    <option key={y.value} value={String(y.value)}>
+                      {y.label} fees waived
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Exam name">
+                <Input
+                  value={scholarshipForm.examName}
+                  onChange={(e) =>
+                    setScholarshipForm((f) => ({ ...f, examName: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Rank">
+                <NumberInput
+                  min={1}
+                  value={scholarshipForm.rank}
+                  onChange={(e) =>
+                    setScholarshipForm((f) => ({ ...f, rank: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Waiver amount (0 = full year fee when applied)">
+                <NumberInput
+                  min={0}
+                  value={scholarshipForm.amountNpr}
+                  onChange={(e) =>
+                    setScholarshipForm((f) => ({
+                      ...f,
+                      amountNpr: e.target.value,
+                    }))
+                  }
+                />
+              </FormField>
+              <div className="sm:col-span-2">
+                <FormField label="Notes">
+                  <Textarea
+                    value={scholarshipForm.notes}
+                    onChange={(e) =>
+                      setScholarshipForm((f) => ({ ...f, notes: e.target.value }))
+                    }
+                    rows={2}
+                  />
+                </FormField>
+              </div>
+              <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
+                {editingScholarship ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={cancelEditScholarship}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  disabled={scholarshipMutation.isPending}
+                  onClick={submitScholarship}
+                >
+                  <Award className="mr-1.5 h-4 w-4" />
+                  {scholarshipMutation.isPending
+                    ? "Saving…"
+                    : editingScholarship
+                      ? "Save scholarship changes"
+                      : "Record topper scholarship"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Students with topper scholarship
+              </CardTitle>
+              <p className="text-sm text-slate-500">
+                Active and applied awards only. Edit, revoke, or delete to correct the
+                student fee ledger and profile balance.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {scholarshipsQuery.isLoading ? (
+                <LoadingState />
+              ) : activeScholarshipAwards.length === 0 ? (
+                <EmptyState
+                  title="No topper scholarships yet"
+                  description="Record a scholarship above. Students who receive one will appear here."
+                />
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHead>
+                      <tr>
+                        <Th>Student</Th>
+                        <Th>Batch / Year</Th>
+                        <Th>Topped</Th>
+                        <Th>Covers</Th>
+                        <Th>Rank</Th>
+                        <Th>Amount</Th>
+                        <Th>Status</Th>
+                        <Th>Actions</Th>
+                      </tr>
+                    </TableHead>
+                    <TableBody>
+                      {activeScholarshipAwards.map((award) => {
+                        const meta = scholarshipStudentMeta(award);
+                        return (
+                          <tr key={award._id}>
+                            <Td>
+                              <div className="font-medium">{meta.name}</div>
+                              <div className="text-xs text-slate-500">
+                                Adm: {meta.admission}
+                              </div>
+                            </Td>
+                            <Td className="text-sm">
+                              {meta.batch}
+                              {meta.year !== "—" ? ` / ${meta.year}` : ""}
+                            </Td>
+                            <Td className="text-sm">
+                              {toppedExamLabel(Number(award.toppedProgramYear))}
+                              {award.examName ? (
+                                <div className="text-xs text-slate-500">
+                                  {award.examName}
+                                </div>
+                              ) : null}
+                            </Td>
+                            <Td className="text-sm">
+                              {coversYearLabel(Number(award.coversProgramYear))}
+                            </Td>
+                            <Td className="text-sm">{award.rank ?? "—"}</Td>
+                            <Td className="text-sm">
+                              {(award.amountNpr ?? 0) > 0
+                                ? formatCurrencyNpr(award.amountNpr)
+                                : "Full year"}
+                            </Td>
+                            <Td>
+                              <Badge
+                                className={
+                                  award.status === "APPLIED"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-violet-100 text-violet-800"
+                                }
+                              >
+                                {award.status}
+                              </Badge>
+                            </Td>
+                            <Td>
+                              <div className="flex flex-wrap gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startEditScholarship(award)}
+                                >
+                                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={
+                                    revokeScholarshipMutation.isPending ||
+                                    award.status === "REVOKED"
+                                  }
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        `Revoke scholarship for ${meta.name}?\n\nThis restores fee dues for ${coversYearLabel(Number(award.coversProgramYear))} where the award was applied.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    revokeScholarshipMutation.mutate(award._id);
+                                  }}
+                                >
+                                  Revoke
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={deleteScholarshipMutation.isPending}
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        `Delete scholarship for ${meta.name}?\n\nThis removes the award and corrects the student fee ledger.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    deleteScholarshipMutation.mutate(award._id);
+                                  }}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Delete
+                                </Button>
+                              </div>
+                            </Td>
+                          </tr>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {/* ─── Receipts ─── */}
+      {tab === "receipts" ? (
+        <Card>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-base">All fee receipts</CardTitle>
+              <p className="mt-1 text-xs text-slate-500">
+                Filter by batch, year, student search, and date range (BS or AD). Print
+                PDF for any receipt.
+                {canAdminEdit
+                  ? " Super Admin / College Admin can edit or delete mistaken payments."
+                  : ""}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={filteredReceipts.length === 0 || Boolean(printingReceiptId)}
+                onClick={() => void printAllFilteredReceipts()}
+              >
+                <Printer className="mr-1 h-4 w-4" />
+                Print all PDFs
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={exportExcel}>
+                <FileDown className="mr-1 h-4 w-4" />
+                Excel
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <FormField label="Search student / receipt">
+                  <div className="relative">
+                    <Input
+                      className="h-10 pr-9"
+                      placeholder="Name, admission no., receipt…"
+                      value={receiptSearch}
+                      onChange={(e) => setReceiptSearch(e.target.value)}
+                    />
+                    {receiptSearch ? (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                        onClick={() => setReceiptSearch("")}
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                </FormField>
                 <FormField label="Batch">
                   <Select
-                    value={pickerBatchId}
+                    value={receiptBatchId}
                     onChange={(e) => {
-                      setPickerBatchId(e.target.value);
-                      setPickerYearId("");
-                      setScholarshipForm((f) => ({ ...f, studentId: "" }));
+                      setReceiptBatchId(e.target.value);
+                      setReceiptYearId("");
                     }}
                   >
                     <option value="">All batches</option>
@@ -1209,201 +2235,103 @@ export const StudentFeeRecordsPanel = () => {
                 </FormField>
                 <FormField label="Year">
                   <Select
-                    value={pickerYearId}
-                    onChange={(e) => {
-                      setPickerYearId(e.target.value);
-                      setScholarshipForm((f) => ({ ...f, studentId: "" }));
-                    }}
+                    value={receiptYearId}
+                    onChange={(e) => setReceiptYearId(e.target.value)}
+                    disabled={
+                      Boolean(receiptBatchId) && yearsForReceiptBatch.length === 0
+                    }
                   >
                     <option value="">
-                      {pickerBatchId ? "All years in batch" : "All years"}
+                      {receiptBatchId ? "All years in batch" : "All years"}
                     </option>
-                    {yearsForPickerBatch.map((y) => (
+                    {yearsForReceiptBatch.map((y) => (
                       <option key={y._id} value={y._id}>
                         {y.name}
                       </option>
                     ))}
                   </Select>
                 </FormField>
-                <div className="flex items-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    disabled={!pickerBatchId && !pickerYearId}
-                    onClick={() => {
-                      clearPickerFilters();
-                      setScholarshipForm((f) => ({ ...f, studentId: "" }));
-                    }}
+                <FormField label="Payment method">
+                  <Select
+                    value={method}
+                    onChange={(e) => setMethod(e.target.value)}
                   >
-                    <X className="mr-1.5 h-4 w-4" />
-                    Clear
-                  </Button>
-                </div>
+                    <option value="">All methods</option>
+                    {PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>
+                        {paymentMethodLabel(m)}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="From date (BS)">
+                  <NepaliDateField
+                    value={receiptFromBs}
+                    onChange={(v) => {
+                      setReceiptFromBs(v);
+                      setReceiptFromAd(v ? bsDateToAdString(v) : "");
+                    }}
+                  />
+                </FormField>
+                <FormField label="From date (AD)">
+                  <Input
+                    type="date"
+                    value={receiptFromAd}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setReceiptFromAd(v);
+                      setReceiptFromBs(v ? adDateToBsString(v) : "");
+                    }}
+                  />
+                </FormField>
+                <FormField label="To date (BS)">
+                  <NepaliDateField
+                    value={receiptToBs}
+                    onChange={(v) => {
+                      setReceiptToBs(v);
+                      setReceiptToAd(v ? bsDateToAdString(v) : "");
+                    }}
+                  />
+                </FormField>
+                <FormField label="To date (AD)">
+                  <Input
+                    type="date"
+                    value={receiptToAd}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setReceiptToAd(v);
+                      setReceiptToBs(v ? adDateToBsString(v) : "");
+                    }}
+                  />
+                </FormField>
               </div>
-            </div>
-            <FormField label="Student *">
-              <Select
-                value={scholarshipForm.studentId}
-                onChange={(e) =>
-                  setScholarshipForm((f) => ({ ...f, studentId: e.target.value }))
-                }
-              >
-                <option value="">
-                  {pickerStudents.length === 0
-                    ? "No students in this batch/year"
-                    : "Select student"}
-                </option>
-                {pickerStudents.map((s) => (
-                  <option key={s._id} value={s._id}>
-                    {s.user?.fullName} ({s.admissionNumber})
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-            <FormField label="Topped which year final? *">
-              <Select
-                value={scholarshipForm.toppedProgramYear}
-                onChange={(e) => {
-                  const topped = e.target.value;
-                  const next =
-                    topped === "1" ? "2" : topped === "2" ? "3" : topped;
-                  setScholarshipForm((f) => ({
-                    ...f,
-                    toppedProgramYear: topped,
-                    coversProgramYear: next,
-                  }));
-                }}
-              >
-                {PROGRAM_YEARS.map((y) => (
-                  <option key={y.value} value={String(y.value)}>
-                    {y.label} finals
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-            <FormField label="Scholarship covers year *">
-              <Select
-                value={scholarshipForm.coversProgramYear}
-                onChange={(e) =>
-                  setScholarshipForm((f) => ({
-                    ...f,
-                    coversProgramYear: e.target.value,
-                  }))
-                }
-              >
-                {PROGRAM_YEARS.map((y) => (
-                  <option key={y.value} value={String(y.value)}>
-                    {y.label} fees waived
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-            <FormField label="Exam name">
-              <Input
-                value={scholarshipForm.examName}
-                onChange={(e) =>
-                  setScholarshipForm((f) => ({ ...f, examName: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Rank">
-              <NumberInput
-                min={1}
-                value={scholarshipForm.rank}
-                onChange={(e) =>
-                  setScholarshipForm((f) => ({ ...f, rank: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Waiver amount (0 = full year fee when applied)">
-              <NumberInput
-                min={0}
-                value={scholarshipForm.amountNpr}
-                onChange={(e) =>
-                  setScholarshipForm((f) => ({
-                    ...f,
-                    amountNpr: e.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <div className="sm:col-span-2">
-              <FormField label="Notes">
-                <Textarea
-                  value={scholarshipForm.notes}
-                  onChange={(e) =>
-                    setScholarshipForm((f) => ({ ...f, notes: e.target.value }))
-                  }
-                  rows={2}
-                />
-              </FormField>
-            </div>
-            <div className="sm:col-span-2 flex justify-end">
-              <Button
-                type="button"
-                disabled={scholarshipMutation.isPending}
-                onClick={submitScholarship}
-              >
-                <Award className="mr-1.5 h-4 w-4" />
-                {scholarshipMutation.isPending
-                  ? "Saving…"
-                  : "Record topper scholarship"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* ─── Receipts ─── */}
-      {tab === "receipts" ? (
-        <Card>
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base">All fee receipts</CardTitle>
-            <Button type="button" variant="outline" size="sm" onClick={exportExcel}>
-              <FileDown className="mr-1 h-4 w-4" />
-              Excel
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-4">
-              <FormField label="Search">
-                <Input
-                  placeholder="Student, receipt…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </FormField>
-              <FormField label="Payment method">
-                <Select value={method} onChange={(e) => setMethod(e.target.value)}>
-                  <option value="">All</option>
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m} value={m}>
-                      {m.replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-              <FormField label="From date (BS)">
-                <Input
-                  placeholder="YYYY-MM-DD"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                />
-              </FormField>
-              <FormField label="To date (BS)">
-                <Input
-                  placeholder="YYYY-MM-DD"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                />
-              </FormField>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-slate-500">
+                  Showing {filteredReceipts.length} receipt
+                  {filteredReceipts.length === 1 ? "" : "s"}
+                  {hasReceiptFilters ? " (filtered)" : ""}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasReceiptFilters}
+                  onClick={clearReceiptFilters}
+                >
+                  <X className="mr-1.5 h-4 w-4" />
+                  Clear filters
+                </Button>
+              </div>
             </div>
 
             {filteredReceipts.length === 0 ? (
               <EmptyState
                 title="No fee records"
-                description="Record a payment to build the student fee history."
+                description={
+                  hasReceiptFilters
+                    ? "No receipts match these filters — try clearing batch, year, search, or dates."
+                    : "Record a payment to build the student fee history."
+                }
               />
             ) : (
               <div className="overflow-x-auto">
@@ -1412,14 +2340,18 @@ export const StudentFeeRecordsPanel = () => {
                     <tr>
                       <Th>Receipt</Th>
                       <Th>Student</Th>
-                      <Th>Year</Th>
+                      <Th>Batch / Year</Th>
+                      <Th>Program year</Th>
                       <Th>Category</Th>
                       <Th>Paid</Th>
                       <Th>Scholarship</Th>
                       <Th>Remaining</Th>
-                      <Th>Date</Th>
+                      <Th>Method</Th>
+                      <Th>Received by</Th>
+                      <Th>Paid by</Th>
+                      <Th>Date (BS / AD)</Th>
                       <Th>Proof</Th>
-                      <Th />
+                      <Th>Actions</Th>
                     </tr>
                   </TableHead>
                   <TableBody>
@@ -1435,6 +2367,10 @@ export const StudentFeeRecordsPanel = () => {
                             </div>
                           </Td>
                           <Td className="text-sm">
+                            {st.batch}
+                            {st.year !== "—" ? ` / ${st.year}` : ""}
+                          </Td>
+                          <Td className="text-sm">
                             {row.programYear
                               ? PROGRAM_YEARS.find((y) => y.value === row.programYear)
                                   ?.label ?? `Y${row.programYear}`
@@ -1446,7 +2382,21 @@ export const StudentFeeRecordsPanel = () => {
                           <Td>{formatCurrencyNpr(row.amountPaidNpr)}</Td>
                           <Td>{formatCurrencyNpr(row.scholarshipNpr ?? 0)}</Td>
                           <Td>{formatCurrencyNpr(row.remainingDueNpr ?? 0)}</Td>
-                          <Td>{row.paidDateBs}</Td>
+                          <Td className="text-sm">
+                            {paymentMethodLabel(row.paymentMethod)}
+                          </Td>
+                          <Td className="text-sm">
+                            {row.receivedByName?.trim() || "—"}
+                          </Td>
+                          <Td className="text-sm">
+                            {row.paidByName?.trim() || "—"}
+                          </Td>
+                          <Td>
+                            <DualDateCell
+                              dateBs={row.paidDateBs}
+                              dateAd={row.paidDateAd}
+                            />
+                          </Td>
                           <Td>
                             {(row.attachments?.length ?? 0) > 0 ? (
                               <span className="inline-flex items-center gap-1 text-xs text-slate-600">
@@ -1458,14 +2408,45 @@ export const StudentFeeRecordsPanel = () => {
                             )}
                           </Td>
                           <Td>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => downloadReceipt(row._id)}
-                            >
-                              <Printer className="mr-1 h-3.5 w-3.5" />
-                              Receipt
-                            </Button>
+                            <div className="flex flex-wrap justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={printingReceiptId === row._id}
+                                onClick={() =>
+                                  void downloadReceiptPdf(
+                                    row._id,
+                                    row.receiptNumber,
+                                  )
+                                }
+                              >
+                                <Printer className="mr-1 h-3.5 w-3.5" />
+                                {printingReceiptId === row._id
+                                  ? "Opening…"
+                                  : "Print PDF"}
+                              </Button>
+                              {canAdminEdit ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => startEditReceipt(row)}
+                                  >
+                                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    disabled={deleteCollectionMutation.isPending}
+                                    onClick={() => confirmDeleteReceipt(row)}
+                                  >
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                    Delete
+                                  </Button>
+                                </>
+                              ) : null}
+                            </div>
                           </Td>
                         </tr>
                       );

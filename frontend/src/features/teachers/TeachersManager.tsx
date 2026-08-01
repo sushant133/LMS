@@ -268,6 +268,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     <Th>Name</Th>
                     <Th>Phone</Th>
                     <Th>Designation</Th>
+                    <Th>Qualification</Th>
                     <Th>Code</Th>
                     <Th>Status</Th>
                     <Th>Teaching load</Th>
@@ -311,6 +312,9 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                         <Badge className="bg-brand-100 text-brand-900">
                           {designation}
                         </Badge>
+                      </Td>
+                      <Td className="text-sm text-slate-700">
+                        {teacher.qualification?.trim() || "—"}
                       </Td>
                       <Td>{teacher.teacherCode}</Td>
                       <Td>

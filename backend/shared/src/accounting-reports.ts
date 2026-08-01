@@ -10,6 +10,7 @@ export const REPORT_COLUMNS: Record<AccountingReportType, ReportColumn[]> = {
   "daily-fee-collection": [
     { key: "receiptNumber", label: "Receipt No." },
     { key: "paidDateBs", label: "Paid Date (BS)" },
+    { key: "paidDateAd", label: "Paid Date (AD)" },
     { key: "studentId.user.fullName", label: "Student" },
     { key: "studentId.admissionNumber", label: "Admission No." },
     { key: "currentChargesNpr", label: "Current Charges", format: "currency" },
@@ -19,12 +20,15 @@ export const REPORT_COLUMNS: Record<AccountingReportType, ReportColumn[]> = {
     { key: "amountPaidNpr", label: "Amount Paid", format: "currency" },
     { key: "remainingDueNpr", label: "Remaining Due", format: "currency" },
     { key: "paymentMethod", label: "Payment Method" },
+    { key: "receivedByName", label: "Received By" },
+    { key: "paidByName", label: "Paid By / Depositor" },
     { key: "accountantName", label: "Collected By" },
     { key: "notes", label: "Notes" }
   ],
   "monthly-fee-collection": [
     { key: "receiptNumber", label: "Receipt No." },
     { key: "paidDateBs", label: "Paid Date (BS)" },
+    { key: "paidDateAd", label: "Paid Date (AD)" },
     { key: "studentId.user.fullName", label: "Student" },
     { key: "studentId.admissionNumber", label: "Admission No." },
     { key: "currentChargesNpr", label: "Current Charges", format: "currency" },
@@ -34,6 +38,8 @@ export const REPORT_COLUMNS: Record<AccountingReportType, ReportColumn[]> = {
     { key: "amountPaidNpr", label: "Amount Paid", format: "currency" },
     { key: "remainingDueNpr", label: "Remaining Due", format: "currency" },
     { key: "paymentMethod", label: "Payment Method" },
+    { key: "receivedByName", label: "Received By" },
+    { key: "paidByName", label: "Paid By / Depositor" },
     { key: "accountantName", label: "Collected By" }
   ],
   "pending-fees": [

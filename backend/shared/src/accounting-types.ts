@@ -1,6 +1,16 @@
 import type { AddressSelection, CollegeStaffRecord, FeeType, StudentRecord, TeacherRecord, UserProfile } from "./types.js";
 
-export type PaymentMethod = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "ONLINE" | "OTHER";
+export type PaymentMethod =
+  | "CASH"
+  | "BANK_TRANSFER"
+  | "CHEQUE"
+  | "ESEWA"
+  | "KHALTI"
+  | "IMEPAY"
+  | "FONEPAY"
+  | "CONNECT_IPS"
+  | "ONLINE"
+  | "OTHER";
 
 export type PaymentStatus = "PENDING" | "PARTIAL" | "PAID";
 
@@ -69,6 +79,8 @@ export interface EnhancedFeeCollectionRecord {
   feeStructureId?: string;
   receiptNumber: string;
   paidDateBs: string;
+  /** Gregorian (AD) equivalent of paidDateBs */
+  paidDateAd?: string;
   fiscalYearBs?: string;
   academicYearBs?: string;
   semesterBs?: string;
@@ -86,6 +98,10 @@ export interface EnhancedFeeCollectionRecord {
   paymentMethod: PaymentMethod;
   bankAccountId?: string;
   transactionNumber?: string;
+  /** Staff / person who received cash, voucher, or deposit slip */
+  receivedByName?: string;
+  /** Person who paid or deposited cash / voucher (payer / depositor) */
+  paidByName?: string;
   verificationCode?: string;
   feeBreakdown: FeeBreakdownItem[];
   attachments?: FeePaymentAttachment[];
@@ -118,7 +134,16 @@ export interface ProgramYearFeeSummary {
 export interface StudentScholarshipAwardRecord {
   _id: string;
   schoolId: string;
-  studentId: string;
+  /** May be populated with student user fields from list endpoint */
+  studentId: string | {
+    _id: string;
+    admissionNumber?: string;
+    registrationNumber?: string;
+    user?: { fullName?: string; email?: string; phone?: string };
+    batchId?: string | { name?: string };
+    yearId?: string | { name?: string };
+  };
+  /** 0 = Entrance, 1 = 1st year, 2 = 2nd year */
   toppedProgramYear: number;
   coversProgramYear: number;
   academicYearBs?: string;
@@ -143,6 +168,7 @@ export interface StudentAccountSummary {
   totalScholarshipNpr: number;
   remainingDueNpr: number;
   lastPaymentDateBs?: string;
+  lastPaymentDateAd?: string;
   yearWise?: ProgramYearFeeSummary[];
 }
 
@@ -215,6 +241,14 @@ export interface SalaryPaymentRecord {
   loanDeductionNpr: number;
   taxNpr: number;
   otherDeductionsNpr: number;
+  presentDays?: number;
+  absentDays?: number;
+  extraDuty?: number;
+  absentDeductionNpr?: number;
+  extraAmountNpr?: number;
+  salaryAmountNpr?: number;
+  attendanceIncomplete?: boolean;
+  attendanceManualOverride?: boolean;
   netSalaryNpr: number;
   status: SalaryPaymentStatus;
   paidDateBs?: string;
@@ -234,6 +268,53 @@ export interface SalaryPaymentRecord {
   designation?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/** One line on the monthly salary sheet (payroll). */
+export interface SalarySheetRow {
+  sn: number;
+  employeeType: "TEACHER" | "STAFF";
+  teacherId?: string;
+  staffId?: string;
+  employeeName: string;
+  department: string;
+  designation: string;
+  monthlySalaryNpr: number;
+  presentDays: number;
+  absentDays: number;
+  extraDuty: number;
+  absentDeductionNpr: number;
+  extraAmountNpr: number;
+  salaryAmountNpr: number;
+  tax1PercentNpr: number;
+  netSalaryNpr: number;
+  remarks: string;
+  attendanceIncomplete: boolean;
+  attendanceManualOverride: boolean;
+  attendanceDaysRecorded: number;
+  workingDaysInMonth: number;
+  salaryPaymentId?: string;
+  status?: SalaryPaymentStatus;
+}
+
+export interface SalarySheetTotals {
+  totalMonthlySalaryNpr: number;
+  totalAbsentDeductionNpr: number;
+  totalExtraAmountNpr: number;
+  totalSalaryAmountNpr: number;
+  totalTax1PercentNpr: number;
+  totalNetSalaryNpr: number;
+  totalNetSalaryInWords: string;
+}
+
+export interface SalarySheetResponse {
+  monthBs: string;
+  workingDaysInMonth: number;
+  attendanceCoverageDays: number;
+  attendanceIncomplete: boolean;
+  attendanceWarning?: string;
+  rows: SalarySheetRow[];
+  totals: SalarySheetTotals;
 }
 
 export interface BankAccountRecord {

@@ -8,9 +8,72 @@ import {
   type StudentAccountSummary,
   type StudentRecord,
 } from "@phit-erp/shared";
+import { adToBs, bsToAd } from "@munatech/nepali-datepicker";
 import { saveAs } from "file-saver";
 import { formatCurrencyNpr } from "lib/utils";
 import * as XLSX from "xlsx";
+
+const AD_BS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Convert BS YYYY-MM-DD → AD YYYY-MM-DD. Returns "" if invalid. */
+export const bsDateToAdString = (dateBs: string): string => {
+  const trimmed = dateBs?.trim() ?? "";
+  if (!AD_BS_DATE_RE.test(trimmed)) return "";
+  try {
+    const [year, month, day] = trimmed.split("-").map(Number);
+    if (!year || !month || !day) return "";
+    const ad = bsToAd(year, month, day);
+    return `${ad.year}-${String(ad.month).padStart(2, "0")}-${String(ad.day).padStart(2, "0")}`;
+  } catch {
+    return "";
+  }
+};
+
+/** Convert AD YYYY-MM-DD → BS YYYY-MM-DD. Returns "" if invalid. */
+export const adDateToBsString = (dateAd: string): string => {
+  const trimmed = dateAd?.trim() ?? "";
+  if (!AD_BS_DATE_RE.test(trimmed)) return "";
+  try {
+    const [year, month, day] = trimmed.split("-").map(Number);
+    if (!year || !month || !day) return "";
+    const bs = adToBs(year, month, day);
+    return `${bs.year}-${String(bs.month).padStart(2, "0")}-${String(bs.day).padStart(2, "0")}`;
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * Resolve display pair for a payment/transaction date.
+ * Prefer stored values; convert the missing calendar from the other.
+ */
+export const resolveDualPaymentDates = (input: {
+  dateBs?: string | null;
+  dateAd?: string | null;
+}): { dateBs: string; dateAd: string } => {
+  const dateBs = input.dateBs?.trim() || "";
+  let dateAd = input.dateAd?.trim() || "";
+  if (dateBs && !dateAd) {
+    dateAd = bsDateToAdString(dateBs);
+  } else if (dateAd && !dateBs) {
+    return { dateBs: adDateToBsString(dateAd), dateAd };
+  }
+  return { dateBs, dateAd };
+};
+
+/** Compact dual-date cell: BS + AD lines for tables. */
+export const formatDualDateCell = (input: {
+  dateBs?: string | null;
+  dateAd?: string | null;
+}): { primary: string; secondary: string } => {
+  const { dateBs, dateAd } = resolveDualPaymentDates(input);
+  if (!dateBs && !dateAd) return { primary: "—", secondary: "" };
+  if (dateBs && dateAd) {
+    return { primary: `BS ${dateBs}`, secondary: `AD ${dateAd}` };
+  }
+  if (dateBs) return { primary: `BS ${dateBs}`, secondary: "" };
+  return { primary: `AD ${dateAd}`, secondary: "" };
+};
 
 export { FINANCIAL_SUMMARY_SECTIONS, REPORT_COLUMNS };
 export type { ReportColumn };

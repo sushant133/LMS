@@ -45,7 +45,11 @@ const getPaymentAccountCode = (paymentMethod: string): string => {
   if (
     paymentMethod === "BANK_TRANSFER" ||
     paymentMethod === "CHEQUE" ||
+    paymentMethod === "ESEWA" ||
+    paymentMethod === "KHALTI" ||
+    paymentMethod === "IMEPAY" ||
     paymentMethod === "FONEPAY" ||
+    paymentMethod === "CONNECT_IPS" ||
     paymentMethod === "ONLINE"
   ) {
     return SYSTEM_ACCOUNT_CODES.BANK;

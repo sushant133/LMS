@@ -147,7 +147,7 @@ const tabs: Array<{
 }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "fee-records", label: "Student Fee Records", icon: Receipt },
-  { id: "salary-records", label: "Salary Payment Records", icon: Banknote },
+  { id: "salary-records", label: "Salary Sheet / Payroll", icon: Banknote },
   { id: "refund-records", label: "Refund Records", icon: RotateCcw },
   { id: "purchases", label: "Purchases", icon: ShoppingCart },
   { id: "expenses", label: "Expenses", icon: TrendingDown },
