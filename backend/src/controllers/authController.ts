@@ -542,8 +542,9 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const getMe = asyncHandler(async (req: Request, res: Response) => {
+  // Logged out / no cookie: 200 with null so browsers do not log a failed 401 on every visit.
   if (!req.user?.userId) {
-    throw new ApiError(401, "Authentication required");
+    return sendSuccess(res, "Not authenticated", null);
   }
 
   const activeSchoolId =

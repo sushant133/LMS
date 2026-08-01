@@ -8,7 +8,7 @@ import {
   switchActiveSchool,
   updateProfile
 } from "../controllers/authController.js";
-import { protect } from "../middleware/auth.js";
+import { optionalAuth, protect } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
 const router = Router();
@@ -40,7 +40,8 @@ const registerLimit = rateLimit({
 router.post("/register", registerLimit, register);
 router.post("/login", loginLimit, login);
 router.post("/logout", logout);
-router.get("/me", protect, getMe);
+/** Optional auth: 200 + null when logged out (avoids console 401 on first visit). */
+router.get("/me", optionalAuth, getMe);
 router.put("/profile", protect, updateProfile);
 router.post("/change-password", protect, authStrictLimit, changePassword);
 router.post("/active-school", protect, switchActiveSchool);

@@ -27,44 +27,65 @@ interface JwtPayload {
 }
 
 /**
+ * Attach req.user from the session cookie when present and valid.
+ * Returns false when there is no usable session (missing/invalid/inactive).
+ */
+const loadUserFromCookie = async (req: Request): Promise<boolean> => {
+  const token = req.cookies?.[env.COOKIE_NAME] as string | undefined;
+  if (!token) return false;
+
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
+
+    const dbUser = await User.findById(decoded.userId)
+      .select("isActive role email schoolId")
+      .lean();
+
+    if (!dbUser || !dbUser.isActive) {
+      return false;
+    }
+
+    // Prefer live DB role/school over JWT claims so admin changes apply immediately
+    req.user = {
+      userId: decoded.userId,
+      role: normalizeUserRole(dbUser.role as string),
+      email: dbUser.email || decoded.email,
+      schoolId: dbUser.schoolId ? dbUser.schoolId.toString() : null
+    };
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Cookie JWT auth.
  * Verifies token, then reloads isActive/role/schoolId from DB so deactivation
  * and role demotion take effect immediately (not only after token expiry).
  */
 export const protect = (req: Request, _res: Response, next: NextFunction): void => {
-  const token = req.cookies?.[env.COOKIE_NAME] as string | undefined;
-
-  if (!token) {
-    return next(new ApiError(401, "Authentication required"));
-  }
-
   void (async () => {
-    try {
-      const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
-
-      const dbUser = await User.findById(decoded.userId)
-        .select("isActive role email schoolId")
-        .lean();
-
-      if (!dbUser || !dbUser.isActive) {
-        return next(new ApiError(401, "Invalid or expired session"));
-      }
-
-      // Prefer live DB role/school over JWT claims so admin changes apply immediately
-      req.user = {
-        userId: decoded.userId,
-        role: normalizeUserRole(dbUser.role as string),
-        email: dbUser.email || decoded.email,
-        schoolId: dbUser.schoolId ? dbUser.schoolId.toString() : null
-      };
-
-      return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
-        if (err) return next(err);
-        void enforceModuleAccess(req, _res, next);
-      });
-    } catch {
-      return next(new ApiError(401, "Invalid or expired session"));
+    const ok = await loadUserFromCookie(req);
+    if (!ok) {
+      return next(new ApiError(401, "Authentication required"));
     }
+
+    return enforceInstitutionReadOnly(req, _res, (err?: unknown) => {
+      if (err) return next(err);
+      void enforceModuleAccess(req, _res, next);
+    });
+  })();
+};
+
+/**
+ * Optional session for bootstrap routes like GET /auth/me.
+ * Never 401s — attaches req.user only when a valid cookie exists.
+ * Stops red console noise for logged-out visitors while keeping protect() strict elsewhere.
+ */
+export const optionalAuth = (req: Request, _res: Response, next: NextFunction): void => {
+  void (async () => {
+    await loadUserFromCookie(req);
+    next();
   })();
 };
 

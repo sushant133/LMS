@@ -40,8 +40,11 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
     queryKey: ["auth", "me"],
     queryFn: async () => {
       try {
-        return await unwrap<MeResponse>(api.get("/auth/me"));
+        // Backend returns 200 + data:null when logged out (no console 401).
+        const me = await unwrap<MeResponse | null>(api.get("/auth/me"));
+        return me ?? null;
       } catch {
+        // Network / server errors, or legacy servers that still 401 when logged out
         return null;
       }
     },
