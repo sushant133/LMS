@@ -61,6 +61,8 @@ export const StudentListManager = () => {
   const [yearFilter, setYearFilter] = useState("");
   const [classFilter, setClassFilter] = useState("");
   const [sectionFilter, setSectionFilter] = useState("");
+  /** "" | "Male" | "Female" | "Other" */
+  const [genderFilter, setGenderFilter] = useState("");
 
   const studentsQuery = useQuery({
     queryKey: ["students"],
@@ -148,11 +150,13 @@ export const StudentListManager = () => {
       batchFilter ||
       yearFilter ||
       classFilter ||
-      sectionFilter,
+      sectionFilter ||
+      genderFilter,
   );
 
   const filteredStudents = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const genderWanted = genderFilter.trim().toLowerCase();
 
     return students.filter((student) => {
       // Skip orphaned student records (user account missing)
@@ -164,6 +168,11 @@ export const StudentListManager = () => {
       } else {
         if (classFilter && student.classId !== classFilter) return false;
         if (sectionFilter && student.sectionId !== sectionFilter) return false;
+      }
+
+      if (genderWanted) {
+        const studentGender = (student.gender ?? "").trim().toLowerCase();
+        if (studentGender !== genderWanted) return false;
       }
 
       if (!query) return true;
@@ -187,6 +196,7 @@ export const StudentListManager = () => {
   }, [
     batchFilter,
     classFilter,
+    genderFilter,
     isCollege,
     searchQuery,
     sectionFilter,
@@ -200,6 +210,7 @@ export const StudentListManager = () => {
     setYearFilter("");
     setClassFilter("");
     setSectionFilter("");
+    setGenderFilter("");
   };
 
   const clearFiltersButton = (alignLabel: string) => (
@@ -355,13 +366,25 @@ export const StudentListManager = () => {
         </Button>
       </CardHeader>
       <CardContent className="min-w-0 space-y-4">
-        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           <FormField label="Search">
             <Input
               placeholder="Name, mobile number, or login ID"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
             />
+          </FormField>
+
+          <FormField label="Gender">
+            <Select
+              value={genderFilter}
+              onChange={(event) => setGenderFilter(event.target.value)}
+            >
+              <option value="">All genders</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </Select>
           </FormField>
 
           {isCollege ? (

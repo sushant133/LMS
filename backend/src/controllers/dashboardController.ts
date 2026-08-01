@@ -257,37 +257,118 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   const adminLike = institutionAccess;
 
   let collegeYearStats: Array<{ label: string; value: number }> = [];
-  if (adminLike && college) {
-    const [years, activeStudents, passedOutCount, alumniCount] = await Promise.all([
-      Year.find({ schoolId }).select("_id name level").lean(),
-      Student.find({
-        schoolId,
-        $or: [{ academicStatus: "ACTIVE" }, { academicStatus: { $exists: false } }, { academicStatus: null }]
-      })
-        .select("yearId")
-        .lean(),
-      Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
-      Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
-    ]);
+  /** Male/Female pie for currently enrolled (ACTIVE) students in running years. */
+  let genderChart: Array<{ name: string; value: number }> = [];
+  let genderChartScope = "";
+  /** Ethnicity pie — same active / current-running-year scope as gender. */
+  let ethnicityChart: Array<{ name: string; value: number }> = [];
+  let ethnicityChartScope = "";
 
-    const yearNameById = new Map(years.map((year) => [year._id.toString(), year.name]));
-    const countsByYearName = new Map<string, number>();
-    for (const year of years) {
-      countsByYearName.set(year.name, 0);
-    }
-    for (const student of activeStudents) {
-      const yearName = student.yearId ? yearNameById.get(student.yearId.toString()) : undefined;
-      if (!yearName) continue;
-      countsByYearName.set(yearName, (countsByYearName.get(yearName) ?? 0) + 1);
+  const tallyGenderAndEthnicity = (
+    students: Array<{ gender?: string | null; ethnicityCategory?: string | null }>
+  ): {
+    gender: Array<{ name: string; value: number }>;
+    ethnicity: Array<{ name: string; value: number }>;
+  } => {
+    let male = 0;
+    let female = 0;
+    let genderOther = 0;
+    const ethnicityCounts = new Map<string, number>();
+
+    for (const student of students) {
+      const g = (student.gender ?? "").trim().toLowerCase();
+      if (g === "male") male += 1;
+      else if (g === "female") female += 1;
+      else genderOther += 1;
+
+      const ethnicity = (student.ethnicityCategory ?? "").trim() || "Unset";
+      ethnicityCounts.set(ethnicity, (ethnicityCounts.get(ethnicity) ?? 0) + 1);
     }
 
-    collegeYearStats = [
-      ...[...countsByYearName.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([label, value]) => ({ label, value })),
-      { label: "Passed Out", value: passedOutCount },
-      { label: "Alumni", value: alumniCount }
-    ];
+    const ethnicity = [...ethnicityCounts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, value]) => ({ name, value }));
+
+    return {
+      gender: [
+        { name: "Male", value: male },
+        { name: "Female", value: female },
+        ...(genderOther > 0 ? [{ name: "Other / Unset", value: genderOther }] : [])
+      ],
+      ethnicity
+    };
+  };
+
+  if (adminLike) {
+    const activeStatusFilter = {
+      schoolId,
+      $or: [
+        { academicStatus: "ACTIVE" as const },
+        { academicStatus: { $exists: false } },
+        { academicStatus: null }
+      ]
+    };
+
+    if (college) {
+      const [years, activeStudents, passedOutCount, alumniCount] = await Promise.all([
+        Year.find({ schoolId }).select("_id name level isActive").lean(),
+        Student.find(activeStatusFilter).select("yearId gender ethnicityCategory").lean(),
+        Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
+        Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
+      ]);
+
+      const yearNameById = new Map(years.map((year) => [year._id.toString(), year.name]));
+      const activeYearIds = new Set(
+        years.filter((year) => year.isActive !== false).map((year) => year._id.toString())
+      );
+      const countsByYearName = new Map<string, number>();
+      for (const year of years) {
+        countsByYearName.set(year.name, 0);
+      }
+
+      const hasActiveYearFilter = activeYearIds.size > 0;
+      const scopedForCharts: Array<{
+        gender?: string | null;
+        ethnicityCategory?: string | null;
+      }> = [];
+
+      for (const student of activeStudents) {
+        const yearId = student.yearId ? student.yearId.toString() : "";
+        const yearName = yearId ? yearNameById.get(yearId) : undefined;
+        if (yearName) {
+          countsByYearName.set(yearName, (countsByYearName.get(yearName) ?? 0) + 1);
+        }
+        // Charts: students in currently active (running) academic years.
+        // If no year is marked active, fall back to all ACTIVE students.
+        if (hasActiveYearFilter) {
+          if (!yearId || !activeYearIds.has(yearId)) continue;
+        }
+        scopedForCharts.push(student);
+      }
+
+      collegeYearStats = [
+        ...[...countsByYearName.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([label, value]) => ({ label, value })),
+        { label: "Passed Out", value: passedOutCount },
+        { label: "Alumni", value: alumniCount }
+      ];
+
+      const tallied = tallyGenderAndEthnicity(scopedForCharts);
+      genderChart = tallied.gender;
+      ethnicityChart = tallied.ethnicity;
+      genderChartScope = "Active students in current running years";
+      ethnicityChartScope = "Active students in current running years";
+    } else {
+      const activeStudents = await Student.find(activeStatusFilter)
+        .select("gender ethnicityCategory")
+        .lean();
+      const tallied = tallyGenderAndEthnicity(activeStudents);
+      genderChart = tallied.gender;
+      ethnicityChart = tallied.ethnicity;
+      genderChartScope = "Active (currently enrolled) students";
+      ethnicityChartScope = "Active (currently enrolled) students";
+    }
   }
 
   const stats = adminLike
@@ -446,6 +527,10 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
               { name: "Sections", value: teacherScope.sectionIds.length }
             ]
         : [],
+    genderChart: adminLike ? genderChart : [],
+    genderChartScope: adminLike ? genderChartScope : undefined,
+    ethnicityChart: adminLike ? ethnicityChart : [],
+    ethnicityChartScope: adminLike ? ethnicityChartScope : undefined,
     notices,
     banners,
     notifications: notifications.map((notification) => ({

@@ -1138,6 +1138,19 @@ export interface DashboardResponse {
   attendanceChart: Array<{ label: string; present: number; absent: number }>;
   feeChart: Array<{ label: string; amount: number }>;
   counts: Array<{ name: string; value: number }>;
+  /**
+   * Gender breakdown for currently enrolled (ACTIVE) students.
+   * College: limited to years marked isActive (current running year structure).
+   */
+  genderChart?: Array<{ name: string; value: number }>;
+  /** Label for gender chart scope, e.g. "Active students (current years)". */
+  genderChartScope?: string;
+  /**
+   * Ethnicity breakdown for currently enrolled (ACTIVE) students.
+   * Same scope as genderChart (current running years when college).
+   */
+  ethnicityChart?: Array<{ name: string; value: number }>;
+  ethnicityChartScope?: string;
   notices: NoticeRecord[];
   banners: BannerRecord[];
   notifications: DashboardNotificationItem[];

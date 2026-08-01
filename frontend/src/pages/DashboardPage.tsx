@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -50,6 +51,205 @@ import { applyNotificationReadLocally, invalidateNotificationQueries } from "lib
 import { cn, formatCurrencyNpr } from "lib/utils";
 
 const INSTITUTION_MIX_COLORS = ["#0c2d6b", "#3b82f6", "#f59e0b"];
+/** Male / Female / Other pie colors */
+const GENDER_CHART_COLORS: Record<string, string> = {
+  Male: "#2563eb",
+  Female: "#db2777",
+  "Other / Unset": "#94a3b8",
+  Other: "#94a3b8",
+};
+
+/** Ethnicity category palette (stable by index for unknown labels) */
+const ETHNICITY_CHART_COLORS = [
+  "#0c2d6b",
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#ea580c",
+  "#059669",
+  "#ca8a04",
+  "#64748b",
+  "#0891b2",
+];
+
+const ethnicityColor = (name: string, index: number): string => {
+  const fixed: Record<string, string> = {
+    "Brahmin / Chhetri": "#0c2d6b",
+    Dalit: "#7c3aed",
+    "Janajati / Indigenous": "#059669",
+    Madhesi: "#ea580c",
+    Muslim: "#0891b2",
+    Other: "#ca8a04",
+    "Prefer not to say": "#94a3b8",
+    Unset: "#cbd5e1",
+  };
+  return fixed[name] ?? ETHNICITY_CHART_COLORS[index % ETHNICITY_CHART_COLORS.length]!;
+};
+
+type BreakdownSlice = { name: string; value: number };
+
+/** Clean donut + legend with full category names (Male, Female, Madhesi, …). */
+const BreakdownDonutCard = ({
+  title,
+  scope,
+  icon,
+  data,
+  colorFor,
+  emptyMessage,
+}: {
+  title: string;
+  scope?: string;
+  icon: ReactNode;
+  data: BreakdownSlice[];
+  colorFor: (name: string, index: number) => string;
+  emptyMessage: string;
+}) => {
+  const slices = data.filter((s) => s.value > 0);
+  const total = data.reduce((sum, s) => sum + s.value, 0);
+  const hasData = slices.length > 0 && total > 0;
+
+  /** Full word labels on slices large enough to read (e.g. "Male", "Madhesi"). */
+  const renderSliceLabel = (props: {
+    cx?: number;
+    cy?: number;
+    midAngle?: number;
+    outerRadius?: number;
+    percent?: number;
+    name?: string;
+    value?: number;
+  }) => {
+    const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, percent = 0, name = "", value = 0 } =
+      props;
+    // Hide only tiny slivers so short labels stay readable
+    if (percent < 0.04 || !name) return null;
+    const RADIAN = Math.PI / 180;
+    const radius = outerRadius + 18;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="#334155"
+        textAnchor={x > cx ? "start" : "end"}
+        dominantBaseline="central"
+        className="text-[11px] font-semibold"
+      >
+        {`${name} (${value})`}
+      </text>
+    );
+  };
+
+  return (
+    <Card className="border-slate-200/80 shadow-sm">
+      <CardHeader className="space-y-1 pb-2">
+        <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+          {icon}
+          {title}
+        </CardTitle>
+        {scope ? (
+          <p className="text-xs font-normal text-slate-500 sm:text-sm">{scope}</p>
+        ) : null}
+      </CardHeader>
+      <CardContent>
+        {!hasData ? (
+          <div className="flex h-[220px] items-center justify-center text-sm text-slate-500">
+            {emptyMessage}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {/* Extra height so full-word labels outside the ring are not clipped */}
+            <div className="relative mx-auto h-[240px] w-full max-w-[320px] sm:h-[260px] sm:max-w-[360px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart margin={{ top: 20, right: 28, bottom: 20, left: 28 }}>
+                  <Pie
+                    data={slices}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius="62%"
+                    innerRadius="40%"
+                    paddingAngle={slices.length > 1 ? 3 : 0}
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                    isAnimationActive={false}
+                    label={renderSliceLabel}
+                    labelLine={{
+                      stroke: "#94a3b8",
+                      strokeWidth: 1,
+                    }}
+                  >
+                    {slices.map((entry, index) => (
+                      <Cell
+                        key={entry.name}
+                        fill={colorFor(entry.name, index)}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: 12,
+                      border: "1px solid #e2e8f0",
+                      fontSize: 13,
+                    }}
+                    formatter={(value: number | string, name: string) => {
+                      const n = typeof value === "number" ? value : Number(value);
+                      const pct =
+                        total > 0 ? ((n / total) * 100).toFixed(0) : "0";
+                      // Keep full category name in tooltip (Male, Female, Madhesi, …)
+                      return [`${n} student${n === 1 ? "" : "s"} (${pct}%)`, name];
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                  Total
+                </span>
+                <span className="text-2xl font-bold tabular-nums text-slate-900">
+                  {total}
+                </span>
+              </div>
+            </div>
+
+            {/* Full-word legend — never truncated */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {slices.map((entry, index) => {
+                const pct =
+                  total > 0 ? Math.round((entry.value / total) * 100) : 0;
+                return (
+                  <div
+                    key={entry.name}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white"
+                        style={{ backgroundColor: colorFor(entry.name, index) }}
+                      />
+                      <span className="text-sm font-semibold text-slate-800 whitespace-normal">
+                        {entry.name}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-baseline gap-1.5">
+                      <span className="text-sm font-bold tabular-nums text-slate-900">
+                        {entry.value}
+                      </span>
+                      <span className="text-xs tabular-nums text-slate-400">
+                        {pct}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
 
 const statIconMap: Record<string, typeof Users> = {
   Students: Users,
@@ -879,6 +1079,30 @@ export const DashboardPage = () => {
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
+            ) : null}
+
+            {isCollegeAdmin && (data.genderChart?.length ?? 0) > 0 ? (
+              <BreakdownDonutCard
+                title="Students by Gender"
+                scope={data.genderChartScope}
+                icon={<Users className="h-5 w-5 text-brand-700" />}
+                data={data.genderChart ?? []}
+                colorFor={(name) =>
+                  GENDER_CHART_COLORS[name] ?? INSTITUTION_MIX_COLORS[0]!
+                }
+                emptyMessage="No active students with gender recorded yet."
+              />
+            ) : null}
+
+            {isCollegeAdmin && (data.ethnicityChart?.length ?? 0) > 0 ? (
+              <BreakdownDonutCard
+                title="Students by Ethnicity"
+                scope={data.ethnicityChartScope}
+                icon={<Sparkles className="h-5 w-5 text-brand-700" />}
+                data={data.ethnicityChart ?? []}
+                colorFor={ethnicityColor}
+                emptyMessage="No active students with ethnicity recorded yet."
+              />
             ) : null}
           </div>
         </div>
