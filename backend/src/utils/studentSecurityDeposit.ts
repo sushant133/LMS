@@ -69,18 +69,22 @@ export async function syncStudentSecurityDepositHeldFromLedger(
   let refundedNpr = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
   let corrected = false;
 
-  // Held must match accounting collections (source of truth for "deposit paid")
+  /**
+   * Held = sum of deposit lines on fee receipts only.
+   * Never inflate the admission plan when removing phantom held:
+   * - Legacy: plan was stored only in securityDepositNpr, expected=0 → move to expected
+   * - Bug: plan 15k + phantom 15k + paid 15k → held 30k, ledger 15k → held becomes 15k, plan stays 15k
+   */
   if (Math.abs(heldNpr - ledgerDepositPaidNpr) > 0.001) {
-    // Excess held without ledger = admission plan wrongly stored as collected
-    if (heldNpr > ledgerDepositPaidNpr) {
-      const phantom = heldNpr - ledgerDepositPaidNpr;
-      expectedNpr = Math.max(expectedNpr, ledgerDepositPaidNpr + phantom);
+    if (heldNpr > ledgerDepositPaidNpr && expectedNpr <= 0) {
+      // No plan on file — treat old held as planned amount (not collected)
+      expectedNpr = heldNpr;
     }
     heldNpr = ledgerDepositPaidNpr;
     corrected = true;
   }
 
-  // Planned amount missing but student has deposit history
+  // Planned amount still missing but real collections exist
   if (expectedNpr <= 0 && heldNpr > 0) {
     expectedNpr = heldNpr;
     corrected = true;

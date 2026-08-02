@@ -221,6 +221,17 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
   await assertStudentProfileAccess(req, studentId);
 
   const schoolId = tenantObjectId(req);
+
+  // Align deposit held with accounting receipts before building the profile
+  try {
+    const { syncStudentSecurityDepositHeldFromLedger } = await import(
+      "../utils/studentSecurityDeposit.js"
+    );
+    await syncStudentSecurityDepositHeldFromLedger(studentId, schoolId);
+  } catch {
+    // non-fatal
+  }
+
   let student = await Student.findOne({ _id: studentId, schoolId }).populate("user", "-password");
   if (!student) throw new ApiError(404, "Student not found");
 

@@ -371,7 +371,7 @@ export const StudentProfileView = () => {
                               : formatCurrencyNpr(student.year3FeeNpr ?? 0),
                           },
                           {
-                            label: "Total tuition due",
+                            label: "Outstanding tuition (balance)",
                             value: student.hasScholarship
                               ? "Scholarship"
                               : formatCurrencyNpr(student.feesDueNpr ?? 0),
@@ -396,13 +396,16 @@ export const StudentProfileView = () => {
                             label: "Deposit still due",
                             value: student.securityDepositWaived
                               ? "—"
-                              : formatCurrencyNpr(
-                                  Math.max(
-                                    0,
-                                    (student.securityDepositExpectedNpr ?? 0) -
-                                      (student.securityDepositNpr ?? 0),
-                                  ),
-                                ),
+                              : (() => {
+                                  const plan =
+                                    student.securityDepositExpectedNpr ?? 0;
+                                  const held = student.securityDepositNpr ?? 0;
+                                  const due = Math.max(0, plan - held);
+                                  if (held > plan + 0.001 && plan > 0) {
+                                    return `${formatCurrencyNpr(0)} (over by ${formatCurrencyNpr(held - plan)})`;
+                                  }
+                                  return formatCurrencyNpr(due);
+                                })(),
                           },
                           {
                             label: "Deposit refunded",
