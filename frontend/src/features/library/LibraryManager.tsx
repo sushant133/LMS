@@ -721,7 +721,7 @@ export const LibraryManager = () => {
 
       {tab === "dashboard" && (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {[
               {
                 label: "Total Physical Books",
@@ -735,7 +735,7 @@ export const LibraryManager = () => {
                 label: "Issued",
                 value: dashboardQuery.data?.issuedBooks ?? 0,
                 valueClass: "text-slate-900",
-                hint: "View all books currently out →",
+                hint: "View issued →",
                 onClick: () => {
                   setIssuedStatusFilter("ALL");
                   setTab("issued");
@@ -745,7 +745,7 @@ export const LibraryManager = () => {
                 label: "Overdue",
                 value: dashboardQuery.data?.overdueBooks ?? 0,
                 valueClass: "text-rose-600",
-                hint: "View overdue books only →",
+                hint: "View overdue →",
                 onClick: () => {
                   setIssuedStatusFilter("OVERDUE");
                   setTab("issued");
@@ -755,25 +755,27 @@ export const LibraryManager = () => {
                 label: "Returned",
                 value: dashboardQuery.data?.returnedBooks ?? 0,
                 valueClass: "text-emerald-700",
-                hint: "View returns history →",
+                hint: "View returns →",
                 onClick: () => setTab("returns"),
               },
             ].map((stat) => (
               <Card
                 key={stat.label}
                 className={cn(
-                  "bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]",
+                  "min-w-0 overflow-hidden bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]",
                   "onClick" in stat &&
                     stat.onClick &&
                     "cursor-pointer transition hover:ring-2 hover:ring-brand-200",
                 )}
                 onClick={"onClick" in stat ? stat.onClick : undefined}
               >
-                <CardContent className="py-6">
-                  <p className="text-sm text-slate-500">{stat.label}</p>
+                <CardContent className="flex min-h-[7.5rem] flex-col justify-between gap-2 py-5">
+                  <p className="truncate text-sm font-medium text-slate-500">
+                    {stat.label}
+                  </p>
                   <p
                     className={cn(
-                      "text-3xl font-semibold",
+                      "text-3xl font-semibold tabular-nums leading-none",
                       "valueClass" in stat && stat.valueClass
                         ? stat.valueClass
                         : "text-slate-900",
@@ -782,23 +784,28 @@ export const LibraryManager = () => {
                     {stat.value}
                   </p>
                   {"onClick" in stat && stat.onClick && "hint" in stat ? (
-                    <p className="mt-1 text-xs text-brand-600">{stat.hint}</p>
-                  ) : null}
+                    <p className="truncate text-xs font-medium text-brand-600">
+                      {stat.hint}
+                    </p>
+                  ) : (
+                    <span className="h-4" aria-hidden />
+                  )}
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
+          <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+            <Card className="min-w-0 overflow-hidden">
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2">
-                  <History className="h-5 w-5 text-brand-600" />
-                  Recently issued
+                <CardTitle className="flex min-w-0 items-center gap-2">
+                  <History className="h-5 w-5 shrink-0 text-brand-600" />
+                  <span className="truncate">Recently issued</span>
                 </CardTitle>
                 <Button
                   size="sm"
                   variant="secondary"
+                  className="shrink-0"
                   onClick={() => {
                     setIssuedStatusFilter("ALL");
                     setTab("issued");
@@ -808,136 +815,174 @@ export const LibraryManager = () => {
                   View issued
                 </Button>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Book</Th>
-                      <Th>Code</Th>
-                      <Th>Borrower</Th>
-                      <Th>Due</Th>
-                      <Th>Status</Th>
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {(dashboardQuery.data?.recentlyIssued ?? []).length === 0 ? (
+              <CardContent className="min-w-0">
+                <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                  <Table className="w-full min-w-[520px]">
+                    <TableHead>
                       <tr>
-                        <Td
-                          colSpan={5}
-                          className="py-8 text-center text-slate-500"
-                        >
-                          No books issued yet.
-                        </Td>
+                        <Th className="min-w-[8rem]">Book</Th>
+                        <Th className="whitespace-nowrap">Code</Th>
+                        <Th className="min-w-[7rem]">Borrower</Th>
+                        <Th className="whitespace-nowrap">Due</Th>
+                        <Th className="whitespace-nowrap">Status</Th>
                       </tr>
-                    ) : (
-                      (dashboardQuery.data?.recentlyIssued ?? []).map((issue) => (
-                        <tr key={issue._id}>
-                          <Td>{issue.bookTitle ?? "—"}</Td>
-                          <Td className="font-mono text-sm">
-                            {issue.bookCode ?? "—"}
-                          </Td>
-                          <Td>
-                            {issue.borrowerType === "STUDENT" &&
-                            resolveStudentId(issue.studentId) ? (
-                              <StudentNameLink
-                                studentId={resolveStudentId(issue.studentId)!}
-                                name={issue.borrowerName?.trim() || "Student"}
-                              />
-                            ) : (
-                              issue.borrowerName?.trim() || "—"
-                            )}
-                          </Td>
-                          <Td>{issue.dueDateBs}</Td>
-                          <Td>
-                            <Badge
-                              className={issueStatusStyles[issue.status] ?? ""}
-                            >
-                              {issue.status}
-                            </Badge>
+                    </TableHead>
+                    <TableBody>
+                      {(dashboardQuery.data?.recentlyIssued ?? []).length ===
+                      0 ? (
+                        <tr>
+                          <Td
+                            colSpan={5}
+                            className="py-8 text-center text-slate-500"
+                          >
+                            No books issued yet.
                           </Td>
                         </tr>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                      ) : (
+                        (dashboardQuery.data?.recentlyIssued ?? []).map(
+                          (issue) => (
+                            <tr key={issue._id}>
+                              <Td className="max-w-[10rem]">
+                                <span
+                                  className="line-clamp-2"
+                                  title={issue.bookTitle ?? undefined}
+                                >
+                                  {issue.bookTitle ?? "—"}
+                                </span>
+                              </Td>
+                              <Td className="whitespace-nowrap font-mono text-sm">
+                                {issue.bookCode ?? "—"}
+                              </Td>
+                              <Td className="max-w-[8rem]">
+                                <span className="line-clamp-2">
+                                  {issue.borrowerType === "STUDENT" &&
+                                  resolveStudentId(issue.studentId) ? (
+                                    <StudentNameLink
+                                      studentId={
+                                        resolveStudentId(issue.studentId)!
+                                      }
+                                      name={
+                                        issue.borrowerName?.trim() || "Student"
+                                      }
+                                    />
+                                  ) : (
+                                    issue.borrowerName?.trim() || "—"
+                                  )}
+                                </span>
+                              </Td>
+                              <Td className="whitespace-nowrap text-sm">
+                                {issue.dueDateBs}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                <Badge
+                                  className={
+                                    issueStatusStyles[issue.status] ?? ""
+                                  }
+                                >
+                                  {issue.status}
+                                </Badge>
+                              </Td>
+                            </tr>
+                          ),
+                        )
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="min-w-0 overflow-hidden">
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2">
-                  <RotateCcw className="h-5 w-5 text-emerald-600" />
-                  Recently returned
+                <CardTitle className="flex min-w-0 items-center gap-2">
+                  <RotateCcw className="h-5 w-5 shrink-0 text-emerald-600" />
+                  <span className="truncate">Recently returned</span>
                 </CardTitle>
                 <Button
                   size="sm"
                   variant="secondary"
+                  className="shrink-0"
                   onClick={() => setTab("returns")}
                 >
                   <RotateCcw className="mr-2 h-4 w-4" />
                   View returns
                 </Button>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Book</Th>
-                      <Th>Code</Th>
-                      <Th>Borrower</Th>
-                      <Th>Returned</Th>
-                      <Th>Status</Th>
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {(dashboardQuery.data?.recentlyReturned ?? []).length ===
-                    0 ? (
+              <CardContent className="min-w-0">
+                <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                  <Table className="w-full min-w-[520px]">
+                    <TableHead>
                       <tr>
-                        <Td
-                          colSpan={5}
-                          className="py-8 text-center text-slate-500"
-                        >
-                          No returned books yet.
-                        </Td>
+                        <Th className="min-w-[8rem]">Book</Th>
+                        <Th className="whitespace-nowrap">Code</Th>
+                        <Th className="min-w-[7rem]">Borrower</Th>
+                        <Th className="whitespace-nowrap">Returned</Th>
+                        <Th className="whitespace-nowrap">Status</Th>
                       </tr>
-                    ) : (
-                      (dashboardQuery.data?.recentlyReturned ?? []).map(
-                        (issue) => (
-                          <tr key={issue._id}>
-                            <Td>{issue.bookTitle ?? "—"}</Td>
-                            <Td className="font-mono text-sm">
-                              {issue.bookCode ?? "—"}
-                            </Td>
-                            <Td>
-                              {issue.borrowerType === "STUDENT" &&
-                              resolveStudentId(issue.studentId) ? (
-                                <StudentNameLink
-                                  studentId={
-                                    resolveStudentId(issue.studentId)!
+                    </TableHead>
+                    <TableBody>
+                      {(dashboardQuery.data?.recentlyReturned ?? []).length ===
+                      0 ? (
+                        <tr>
+                          <Td
+                            colSpan={5}
+                            className="py-8 text-center text-slate-500"
+                          >
+                            No returned books yet.
+                          </Td>
+                        </tr>
+                      ) : (
+                        (dashboardQuery.data?.recentlyReturned ?? []).map(
+                          (issue) => (
+                            <tr key={issue._id}>
+                              <Td className="max-w-[10rem]">
+                                <span
+                                  className="line-clamp-2"
+                                  title={issue.bookTitle ?? undefined}
+                                >
+                                  {issue.bookTitle ?? "—"}
+                                </span>
+                              </Td>
+                              <Td className="whitespace-nowrap font-mono text-sm">
+                                {issue.bookCode ?? "—"}
+                              </Td>
+                              <Td className="max-w-[8rem]">
+                                <span className="line-clamp-2">
+                                  {issue.borrowerType === "STUDENT" &&
+                                  resolveStudentId(issue.studentId) ? (
+                                    <StudentNameLink
+                                      studentId={
+                                        resolveStudentId(issue.studentId)!
+                                      }
+                                      name={
+                                        issue.borrowerName?.trim() || "Student"
+                                      }
+                                    />
+                                  ) : (
+                                    issue.borrowerName?.trim() || "—"
+                                  )}
+                                </span>
+                              </Td>
+                              <Td className="whitespace-nowrap text-sm">
+                                {issue.returnedDateBs ?? "—"}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                <Badge
+                                  className={
+                                    issueStatusStyles[issue.status] ??
+                                    "bg-brand-100 text-brand-800"
                                   }
-                                  name={issue.borrowerName?.trim() || "Student"}
-                                />
-                              ) : (
-                                issue.borrowerName?.trim() || "—"
-                              )}
-                            </Td>
-                            <Td>{issue.returnedDateBs ?? "—"}</Td>
-                            <Td>
-                              <Badge
-                                className={
-                                  issueStatusStyles[issue.status] ??
-                                  "bg-brand-100 text-brand-800"
-                                }
-                              >
-                                RETURNED
-                              </Badge>
-                            </Td>
-                          </tr>
-                        ),
-                      )
-                    )}
-                  </TableBody>
-                </Table>
+                                >
+                                  RETURNED
+                                </Badge>
+                              </Td>
+                            </tr>
+                          ),
+                        )
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </div>
