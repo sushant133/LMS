@@ -23,6 +23,8 @@ export const SYSTEM_ACCOUNT_CODES = {
   STUDENT_RECEIVABLE: "1201",
   ACCOUNTS_PAYABLE: "2001",
   REFUND_PAYABLE: "2101",
+  /** Student admission security / caution deposits held (refundable liability) */
+  SECURITY_DEPOSIT_LIABILITY: "2102",
   OPENING_BALANCE: "3001",
   CAPITAL: "3002",
   /** Leaf “general fee income” — must not share code with parent group 4000 */
@@ -73,7 +75,9 @@ export const FEE_TYPE_ACCOUNT_MAP: Record<FeeType, string> = {
   FINE: SYSTEM_ACCOUNT_CODES.FINE_INCOME,
   SCHOLARSHIP: SYSTEM_ACCOUNT_CODES.SCHOLARSHIP_EXPENSE,
   MISC: SYSTEM_ACCOUNT_CODES.OTHER_INCOME,
-  REFUND: SYSTEM_ACCOUNT_CODES.OTHER_INCOME
+  REFUND: SYSTEM_ACCOUNT_CODES.OTHER_INCOME,
+  /** Deposit is a liability, not income */
+  SECURITY_DEPOSIT: SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY
 };
 
 export const DEFAULT_CHART_OF_ACCOUNTS: Array<{
@@ -91,7 +95,15 @@ export const DEFAULT_CHART_OF_ACCOUNTS: Array<{
   { code: "2000", name: "Liabilities", nameNp: "दायित्व", accountType: "LIABILITY", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.ACCOUNTS_PAYABLE, name: "Accounts Payable", nameNp: "देय खाता", accountType: "LIABILITY", parentCode: "2000", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.REFUND_PAYABLE, name: "Refund Payable", nameNp: "फिर्ता देय", accountType: "LIABILITY", parentCode: "2000", isSystem: true },
-  { code: "3000", name: "Equity", nameNp: "पूँजी", accountType: "EQUITY", isSystem: true },
+  {
+    code: SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY,
+    name: "Student Security Deposit",
+    nameNp: "विद्यार्थी धरौटी",
+    accountType: "LIABILITY",
+    parentCode: "2000",
+    isSystem: true
+  },
+  { code: "3000", name: "Equity", nameNp: "पूँजी", isSystem: true, accountType: "EQUITY" },
   { code: SYSTEM_ACCOUNT_CODES.CAPITAL, name: "Capital", nameNp: "पूँजी", accountType: "EQUITY", parentCode: "3000", isSystem: true },
   { code: SYSTEM_ACCOUNT_CODES.OPENING_BALANCE, name: "Opening Balance Equity", nameNp: "सुरुवाती शेष", accountType: "EQUITY", parentCode: "3000", isSystem: true },
   { code: "4000", name: "Income", nameNp: "आम्दानी", accountType: "INCOME", isSystem: true },

@@ -38,6 +38,8 @@ import {
   filterSubjectsByYear,
   filtersToParams,
   NEPALI_MONTHS,
+  joinSubUnitTitles,
+  normalizeSubUnitTitles,
   parseSubUnitsFromTopics,
   resolveSubjectSelectValue,
   statusBadgeClass,
@@ -60,6 +62,7 @@ import {
   type HierarchyScopeOption,
   type HierarchySubjectNode,
 } from "./academicHierarchyUtils";
+import { SubUnitMultiSelect } from "./SubUnitMultiSelect";
 
 const formatTodayBs = (): string => {
   const today = getTodayBs();
@@ -145,10 +148,12 @@ export const LogBookPanel = ({
     lessonPlanId: undefined,
     sessionPlanUnitId: "",
     subUnitTitle: "",
+    subUnitTitles: [],
     syllabusId: "",
     syllabusChapterId: "",
     syllabusUnitId: "",
     syllabusSubUnitId: "",
+    syllabusSubUnitIds: [],
     topicCovered: "",
     unit: "",
     objectives: "",
@@ -322,30 +327,51 @@ export const LogBookPanel = ({
   const lessonItemOptions = useMemo(() => {
     const plans = lessonPlansQuery.data ?? [];
     const options = plans.flatMap((plan) =>
-      plan.items.map((item) => ({
-        id: item._id,
-        planId: plan._id,
-        month: plan.month || plan.startDateBs || "",
-        label: `${plan.startDateBs || plan.month || "Plan"}${plan.endDateBs ? `→${plan.endDateBs}` : ""} · ${item.unit ? `Ch ${item.unit.unitNo}` : item.subjectLabel || "Chapter"}${item.subUnitTitle ? ` · ${item.subUnitTitle}` : ""} · ${item.plannedTopic}`,
-        topic: item.plannedTopic,
-        subUnitTitle: item.subUnitTitle || "",
-        unit: item.unit
-          ? `Chapter ${item.unit.unitNo}: ${item.unit.chapterName}`
-          : item.subjectLabel || "",
-        objectives: item.learningObjectives || "",
-        teachingMethod: item.teachingMethod || "",
-        teachingAids: item.teachingAids || "",
-        subjectId: plan.subjectId,
-        sessionPlanUnitId: item.sessionPlanUnitId || "",
-        syllabusId: item.syllabusId || item.unit?.syllabusId || "",
-        syllabusChapterId:
-          item.syllabusChapterId || item.unit?.syllabusChapterId || "",
-        syllabusUnitId: item.syllabusUnitId || "",
-        syllabusSubUnitId: item.syllabusSubUnitId || "",
-        completionStatus: item.completionStatus,
-        completedPercent: item.completedPercent,
-        remainingPercent: item.remainingPercent,
-      })),
+      plan.items.map((item) => {
+        const plannedSubs = normalizeSubUnitTitles(
+          item.subUnitTitles,
+          item.subUnitTitle,
+        );
+        const plannedIds = (item.syllabusSubUnitIds ?? [])
+          .map((id) => String(id))
+          .filter(Boolean);
+        if (
+          plannedIds.length === 0 &&
+          item.syllabusSubUnitId
+        ) {
+          plannedIds.push(String(item.syllabusSubUnitId));
+        }
+        const subLabel =
+          plannedSubs.length > 0
+            ? plannedSubs.join(", ")
+            : item.subUnitTitle || "";
+        return {
+          id: item._id,
+          planId: plan._id,
+          month: plan.month || plan.startDateBs || "",
+          label: `${plan.startDateBs || plan.month || "Plan"}${plan.endDateBs ? `→${plan.endDateBs}` : ""} · ${item.unit ? `Ch ${item.unit.unitNo}` : item.subjectLabel || "Chapter"}${subLabel ? ` · ${subLabel}` : ""} · ${item.plannedTopic}`,
+          topic: item.plannedTopic,
+          subUnitTitle: joinSubUnitTitles(plannedSubs) || item.subUnitTitle || "",
+          subUnitTitles: plannedSubs,
+          syllabusSubUnitIds: plannedIds,
+          unit: item.unit
+            ? `Chapter ${item.unit.unitNo}: ${item.unit.chapterName}`
+            : item.subjectLabel || "",
+          objectives: item.learningObjectives || "",
+          teachingMethod: item.teachingMethod || "",
+          teachingAids: item.teachingAids || "",
+          subjectId: plan.subjectId,
+          sessionPlanUnitId: item.sessionPlanUnitId || "",
+          syllabusId: item.syllabusId || item.unit?.syllabusId || "",
+          syllabusChapterId:
+            item.syllabusChapterId || item.unit?.syllabusChapterId || "",
+          syllabusUnitId: item.syllabusUnitId || "",
+          syllabusSubUnitId: plannedIds[0] || item.syllabusSubUnitId || "",
+          completionStatus: item.completionStatus,
+          completedPercent: item.completedPercent,
+          remainingPercent: item.remainingPercent,
+        };
+      }),
     );
     // Incomplete topics first so teachers pick the next class faster
     return options.sort((a, b) => {
@@ -461,7 +487,18 @@ export const LogBookPanel = ({
     }
     const option = options.find((row) => row.id === itemId);
     if (!option) return;
-    // Full cascade: Lesson Plan → Log Book (+ hierarchical syllabus links)
+    // Full cascade: Lesson Plan → Log Book (+ hierarchical syllabus links).
+    // Pre-select all planned sub-units; teacher can uncheck what was not taught.
+    const titles =
+      option.subUnitTitles?.length > 0
+        ? option.subUnitTitles
+        : normalizeSubUnitTitles(undefined, option.subUnitTitle);
+    const ids =
+      option.syllabusSubUnitIds?.length > 0
+        ? option.syllabusSubUnitIds
+        : option.syllabusSubUnitId
+          ? [option.syllabusSubUnitId]
+          : [];
     setForm((current) => ({
       ...current,
       lessonPlanItemId: itemId,
@@ -469,23 +506,28 @@ export const LogBookPanel = ({
       subjectId: option.subjectId || current.subjectId,
       sessionPlanUnitId:
         option.sessionPlanUnitId || current.sessionPlanUnitId || "",
-      subUnitTitle: option.subUnitTitle || "",
+      subUnitTitles: titles,
+      subUnitTitle: joinSubUnitTitles(titles),
       syllabusId: option.syllabusId || current.syllabusId || "",
       syllabusChapterId:
         option.syllabusChapterId || current.syllabusChapterId || "",
       syllabusUnitId: option.syllabusUnitId || current.syllabusUnitId || "",
-      syllabusSubUnitId:
-        option.syllabusSubUnitId || current.syllabusSubUnitId || "",
+      syllabusSubUnitIds: ids,
+      syllabusSubUnitId: ids[0] || option.syllabusSubUnitId || "",
       unit: option.unit || current.unit,
-      topicCovered: option.topic || option.subUnitTitle || current.topicCovered,
+      topicCovered:
+        option.topic ||
+        joinSubUnitTitles(titles) ||
+        option.subUnitTitle ||
+        current.topicCovered,
       objectives: option.objectives || current.objectives,
       teachingMethod: option.teachingMethod || current.teachingMethod,
       teachingAids: option.teachingAids || current.teachingAids,
     }));
     if (!quiet) {
       toast.success(
-        option.syllabusSubUnitId
-          ? "Filled from Lesson Plan · linked to syllabus sub-unit"
+        titles.length > 0
+          ? `Filled from Lesson Plan · ${titles.length} sub-unit(s) — uncheck any not taught`
           : "Filled from Lesson Plan",
       );
     }
@@ -520,16 +562,67 @@ export const LogBookPanel = ({
       ...current,
       sessionPlanUnitId: unitId,
       subUnitTitle: "",
+      subUnitTitles: [],
       syllabusId: unit?.syllabusId || "",
       syllabusChapterId: unit?.syllabusChapterId || "",
       syllabusUnitId: "",
       syllabusSubUnitId: "",
+      syllabusSubUnitIds: [],
       unit: unit ? `Chapter ${unit.unitNo}: ${unit.chapterName}` : "",
       topicCovered: unit?.topicsCovered || unit?.chapterName || "",
       objectives: unit?.learningOutcomes || current.objectives,
       // Manual unit pick clears lesson-plan link (user can re-link)
       lessonPlanItemId: "",
       lessonPlanId: undefined,
+    }));
+  };
+
+  const selectedLessonOption = useMemo(
+    () => lessonItemOptions.find((row) => row.id === form.lessonPlanItemId),
+    [lessonItemOptions, form.lessonPlanItemId],
+  );
+
+  /** Sub-units teacher can tick as taught — from lesson plan or session unit topics. */
+  const taughtSubUnitOptions = useMemo(() => {
+    if (selectedLessonOption) {
+      const planned = selectedLessonOption.subUnitTitles ?? [];
+      if (planned.length > 0) return planned;
+      return parseSubUnitsFromTopics(
+        selectedSessionUnit?.topicsCovered || selectedLessonOption.topic,
+      );
+    }
+    return logSubUnits;
+  }, [selectedLessonOption, selectedSessionUnit, logSubUnits]);
+
+  const applyTaughtSubUnits = (titles: string[]) => {
+    const unique = normalizeSubUnitTitles(titles);
+    // Map selected titles back to syllabus ids from the lesson plan when possible
+    let ids: string[] = [];
+    if (selectedLessonOption) {
+      const planned = selectedLessonOption.subUnitTitles ?? [];
+      const plannedIds = selectedLessonOption.syllabusSubUnitIds ?? [];
+      ids = unique
+        .map((title) => {
+          const idx = planned.findIndex(
+            (p) => p.toLowerCase() === title.toLowerCase(),
+          );
+          return idx >= 0 ? plannedIds[idx] : undefined;
+        })
+        .filter((id): id is string => Boolean(id));
+    }
+    setForm((current) => ({
+      ...current,
+      subUnitTitles: unique,
+      subUnitTitle: joinSubUnitTitles(unique),
+      syllabusSubUnitIds: ids,
+      syllabusSubUnitId: ids[0] || "",
+      topicCovered:
+        unique.length > 0
+          ? joinSubUnitTitles(unique)
+          : selectedLessonOption?.topic ||
+            selectedSessionUnit?.topicsCovered ||
+            selectedSessionUnit?.chapterName ||
+            current.topicCovered,
     }));
   };
 
@@ -805,6 +898,9 @@ export const LogBookPanel = ({
                         lessonPlanId: undefined,
                         sessionPlanUnitId: "",
                         subUnitTitle: "",
+                        subUnitTitles: [],
+                        syllabusSubUnitIds: [],
+                        syllabusSubUnitId: "",
                         topicCovered: "",
                         unit: "",
                         objectives: "",
@@ -834,6 +930,9 @@ export const LogBookPanel = ({
                         lessonPlanId: undefined,
                         sessionPlanUnitId: "",
                         subUnitTitle: "",
+                        subUnitTitles: [],
+                        syllabusSubUnitIds: [],
+                        syllabusSubUnitId: "",
                         topicCovered: "",
                         unit: "",
                         objectives: "",
@@ -863,6 +962,9 @@ export const LogBookPanel = ({
                         lessonPlanId: undefined,
                         sessionPlanUnitId: "",
                         subUnitTitle: "",
+                        subUnitTitles: [],
+                        syllabusSubUnitIds: [],
+                        syllabusSubUnitId: "",
                         topicCovered: "",
                         unit: "",
                         objectives: "",
@@ -889,6 +991,9 @@ export const LogBookPanel = ({
                       lessonPlanId: undefined,
                       sessionPlanUnitId: "",
                       subUnitTitle: "",
+                      subUnitTitles: [],
+                      syllabusSubUnitIds: [],
+                      syllabusSubUnitId: "",
                       topicCovered: "",
                       unit: "",
                       objectives: "",
@@ -1012,15 +1117,26 @@ export const LogBookPanel = ({
               </FormField>
 
               {form.lessonPlanItemId ? (
-                <div className="grid gap-3 sm:grid-cols-2 rounded-xl border border-emerald-100 bg-white p-3">
+                <div className="space-y-3 rounded-xl border border-emerald-100 bg-white p-3">
                   <FormField label="Unit">
                     <Input value={form.unit} readOnly className="bg-slate-50" />
                   </FormField>
-                  <FormField label="Sub-unit / topic">
-                    <Input
-                      value={form.subUnitTitle || form.topicCovered}
-                      readOnly
-                      className="bg-slate-50"
+                  <FormField label="Sub-units taught today *">
+                    <SubUnitMultiSelect
+                      options={taughtSubUnitOptions}
+                      value={normalizeSubUnitTitles(
+                        form.subUnitTitles,
+                        form.subUnitTitle,
+                      )}
+                      onChange={applyTaughtSubUnits}
+                      allowCustom
+                      nepali={formNepaliText}
+                      placeholder={
+                        formNepaliText
+                          ? "थप उप-एकाइ थप्नुहोस्…"
+                          : "Add another sub-unit taught…"
+                      }
+                      hint="Select every sub-unit you taught in this class (from the Lesson Plan). Uncheck any you did not cover."
                     />
                   </FormField>
                 </div>
@@ -1051,45 +1167,23 @@ export const LogBookPanel = ({
                     ))}
                   </Select>
                 </FormField>
-                <FormField label="Sub-unit / topic">
-                  {logSubUnits.length > 0 ? (
-                    <Select
-                      value={form.subUnitTitle || ""}
-                      onChange={(event) => {
-                        const sub = event.target.value;
-                        setForm((current) => ({
-                          ...current,
-                          subUnitTitle: sub,
-                          topicCovered:
-                            sub ||
-                            selectedSessionUnit?.topicsCovered ||
-                            selectedSessionUnit?.chapterName ||
-                            current.topicCovered,
-                        }));
-                      }}
-                    >
-                      <option value="">Whole unit / chapter</option>
-                      {logSubUnits.map((sub) => (
-                        <option key={sub} value={sub}>
-                          {sub}
-                        </option>
-                      ))}
-                    </Select>
-                  ) : (
-                    <Input
-                      value={form.topicCovered}
-                      nepali={formNepaliText}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          topicCovered: event.target.value,
-                        }))
-                      }
-                      placeholder={
-                        formNepaliText ? "पढाइएको विषय" : "Topic taught"
-                      }
-                    />
-                  )}
+                <FormField label="Sub-units taught (one or more)">
+                  <SubUnitMultiSelect
+                    options={logSubUnits}
+                    value={normalizeSubUnitTitles(
+                      form.subUnitTitles,
+                      form.subUnitTitle,
+                    )}
+                    onChange={applyTaughtSubUnits}
+                    allowCustom
+                    nepali={formNepaliText}
+                    placeholder={
+                      formNepaliText
+                        ? "नयाँ उप-एकाइ थप्नुहोस्…"
+                        : "Add custom sub-unit taught…"
+                    }
+                    hint="Select multiple sub-units taught, or add a custom one."
+                  />
                 </FormField>
               </div>
             ) : null}
@@ -1209,15 +1303,25 @@ export const LogBookPanel = ({
                     );
                     return;
                   }
+                  const taught = normalizeSubUnitTitles(
+                    form.subUnitTitles,
+                    form.subUnitTitle,
+                  );
                   createMutation.mutate({
                     ...form,
                     teacherId: teacherId || form.teacherId,
                     lessonPlanItemId: form.lessonPlanItemId || "",
                     sessionPlanUnitId: form.sessionPlanUnitId || "",
-                    subUnitTitle: form.subUnitTitle || "",
+                    subUnitTitles: taught,
+                    subUnitTitle: joinSubUnitTitles(taught),
+                    syllabusSubUnitIds: form.syllabusSubUnitIds ?? [],
+                    syllabusSubUnitId:
+                      form.syllabusSubUnitIds?.[0] ||
+                      form.syllabusSubUnitId ||
+                      "",
                     topicCovered:
                       form.topicCovered ||
-                      form.subUnitTitle ||
+                      joinSubUnitTitles(taught) ||
                       form.unit ||
                       "Topic taught",
                   });

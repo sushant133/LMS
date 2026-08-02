@@ -89,6 +89,8 @@ export interface EnhancedFeeCollectionRecord {
   previousDueNpr: number;
   currentChargesNpr: number;
   amountPaidNpr: number;
+  /** Security / caution deposit collected on this receipt (NPR). */
+  securityDepositPaidNpr?: number;
   discountNpr: number;
   scholarshipNpr: number;
   scholarshipType?: "NONE" | "TOPPER_YEAR_WAIVER" | "MERIT" | "OTHER";
@@ -428,6 +430,13 @@ export interface StudentFinancialHistory {
   totalFineNpr: number;
   advanceBalanceNpr: number;
   totalRefundsNpr: number;
+  /** Planned security deposit (admission plan). */
+  securityDepositExpectedNpr?: number;
+  /** Deposit collected and held. */
+  securityDepositHeldNpr?: number;
+  /** Deposit already refunded. */
+  securityDepositRefundedNpr?: number;
+  securityDepositWaived?: boolean;
   collections: EnhancedFeeCollectionRecord[];
   refunds: Array<{ _id?: string; refundNumber?: string; dateBs: string; amountNpr: number; reason: string }>;
   dueInstallments: Array<{ installmentNumber: number; totalInstallments: number; amountNpr: number; dueDateBs?: string }>;

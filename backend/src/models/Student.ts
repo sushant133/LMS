@@ -85,7 +85,13 @@ const studentSchema = new Schema(
     year2FeeNpr: { type: Number, default: 0, min: 0 },
     year3FeeNpr: { type: Number, default: 0, min: 0 },
     /**
-     * Security / caution deposit collected at admission (NPR).
+     * Planned security / caution deposit set at admission (NPR).
+     * Collection is recorded via fee payment (securityDepositPaidNpr).
+     */
+    securityDepositExpectedNpr: { type: Number, default: 0 },
+    /**
+     * Security / caution deposit collected and held (NPR).
+     * Increased only when recording deposit with a fee payment.
      * Refunded on pass-out (or withdrawal) via FeeRefund type DEPOSIT_REFUND.
      */
     securityDepositNpr: { type: Number, default: 0 },
@@ -93,7 +99,7 @@ const studentSchema = new Schema(
     securityDepositRefundedNpr: { type: Number, default: 0 },
     /**
      * When true, college did not take a security deposit for this student
-     * (waived / cancelled / not applicable). Amount is forced to 0.
+     * (waived / cancelled / not applicable). Expected amount forced to 0.
      */
     securityDepositWaived: { type: Boolean, default: false },
     /** Full scholarship — UI shows "Scholarship" instead of a fee amount. */

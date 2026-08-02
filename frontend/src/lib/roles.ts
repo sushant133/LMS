@@ -20,7 +20,8 @@ export {
   canManageInstitution,
   hasInstitutionAccess,
   isInstitutionAdmin,
-  isSystemAdministrator
+  isSystemAdministrator,
+  normalizeUserRole
 };
 
 export const hasProtectedRouteAccess = (

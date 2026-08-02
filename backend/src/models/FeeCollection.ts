@@ -44,7 +44,13 @@ const feeCollectionSchema = new Schema(
     programYear: { type: Number, enum: [1, 2, 3], index: true },
     previousDueNpr: { type: Number, default: 0 },
     currentChargesNpr: { type: Number, default: 0 },
+    /** Tuition / fee amount paid (excludes security deposit). */
     amountPaidNpr: { type: Number, required: true },
+    /**
+     * Security / caution deposit collected with this payment (NPR).
+     * Does not affect tuition balance; updates student.securityDepositNpr held.
+     */
+    securityDepositPaidNpr: { type: Number, default: 0 },
     discountNpr: { type: Number, default: 0 },
     scholarshipNpr: { type: Number, default: 0 },
     /**

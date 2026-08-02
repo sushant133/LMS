@@ -410,17 +410,67 @@ export const academicSessionPlanSchema = scopeSchema.extend({
   units: z.array(academicSessionPlanUnitSchema).min(1)
 });
 
+/** Normalize multi / legacy sub-unit title + id fields on lesson / log book payloads. */
+export const normalizeSubUnitSelection = <
+  T extends {
+    subUnitTitle?: string;
+    subUnitTitles?: string[];
+    syllabusSubUnitId?: string;
+    syllabusSubUnitIds?: string[];
+  }
+>(
+  row: T
+): T & {
+  subUnitTitle: string;
+  subUnitTitles: string[];
+  syllabusSubUnitId: string;
+  syllabusSubUnitIds: string[];
+} => {
+  const fromArray = (row.subUnitTitles ?? []).map((t) => t.trim()).filter(Boolean);
+  const fromLegacy = (row.subUnitTitle || "")
+    .split(/[;\n|]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const titles = fromArray.length > 0 ? fromArray : fromLegacy;
+  const uniqueTitles = titles.filter(
+    (t, i, arr) => arr.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i
+  );
+  const ids = (row.syllabusSubUnitIds ?? []).map((id) => id.trim()).filter(Boolean);
+  const legacyId = (row.syllabusSubUnitId || "").trim();
+  const uniqueIds =
+    ids.length > 0
+      ? ids.filter((id, i, arr) => arr.indexOf(id) === i)
+      : legacyId
+        ? [legacyId]
+        : [];
+  return {
+    ...row,
+    subUnitTitles: uniqueTitles,
+    subUnitTitle: uniqueTitles.join("; "),
+    syllabusSubUnitIds: uniqueIds,
+    syllabusSubUnitId: uniqueIds[0] || ""
+  };
+};
+
 export const academicLessonPlanItemSchema = z.object({
   serialNo: z.coerce.number().int().min(1),
   /** Required: every lesson plan topic must map to a Session Plan unit. */
   sessionPlanUnitId: z.string().min(1, "Select a unit from the Session Plan"),
-  /** Optional sub-topic from the unit's topics list. */
+  /**
+   * Optional single sub-topic (legacy). Prefer `subUnitTitles` for multi-select.
+   * When only this is sent, server/UI also treat it as a one-item list.
+   */
   subUnitTitle: z.string().default(""),
+  /** One or more sub-units planned for this lesson (from syllabus or custom). */
+  subUnitTitles: z.array(z.string()).optional().default([]),
   /** Optional hierarchical syllabus links (Chapter → Unit → Sub Unit → Child…). */
   syllabusId: z.string().optional().default(""),
   syllabusChapterId: z.string().optional().default(""),
   syllabusUnitId: z.string().optional().default(""),
+  /** Primary/legacy single syllabus sub-unit id. Prefer `syllabusSubUnitIds`. */
   syllabusSubUnitId: z.string().optional().default(""),
+  /** Syllabus sub-unit ids matched to selected titles (same order when known). */
+  syllabusSubUnitIds: z.array(z.string()).optional().default([]),
   subjectLabel: z.string().default(""),
   plannedTopic: z.string().min(1),
   description: z.string().default(""),
@@ -482,12 +532,16 @@ export const academicLogBookEntrySchema = scopeSchema.extend({
   /** Preferred: link to a Lesson Plan topic when available. */
   lessonPlanItemId: z.string().optional().default(""),
   sessionPlanUnitId: z.string().min(1, "Select a unit from the Session Plan"),
+  /** Legacy single title; prefer `subUnitTitles`. */
   subUnitTitle: z.string().default(""),
+  /** Sub-units actually taught this class (multi-select from Lesson Plan / Session Plan). */
+  subUnitTitles: z.array(z.string()).optional().default([]),
   /** Optional hierarchical syllabus links for coverage tracking. */
   syllabusId: z.string().optional().default(""),
   syllabusChapterId: z.string().optional().default(""),
   syllabusUnitId: z.string().optional().default(""),
   syllabusSubUnitId: z.string().optional().default(""),
+  syllabusSubUnitIds: z.array(z.string()).optional().default([]),
   academicYearBs: z.string().min(1),
   session: z.string().min(1),
   faculty: z.string().optional(),

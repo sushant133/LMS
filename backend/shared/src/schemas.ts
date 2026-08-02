@@ -217,11 +217,20 @@ export const studentSchema = z.object({
   year1FeeNpr: moneySchema.default(0),
   year2FeeNpr: moneySchema.default(0),
   year3FeeNpr: moneySchema.default(0),
-  /** Security / caution deposit at admission (NPR). */
-  securityDepositNpr: moneySchema.default(0),
+  /**
+   * Planned security / caution deposit at admission (NPR).
+   * Does not mark the deposit as collected — collection is via Student Fee Records.
+   * Alias: securityDepositNpr is accepted for backward compatibility (mapped to expected).
+   */
+  securityDepositExpectedNpr: moneySchema.default(0).optional(),
+  /**
+   * @deprecated Prefer securityDepositExpectedNpr. Still accepted as planned amount
+   * (not held). Held/collected deposit is only set when recording a fee payment.
+   */
+  securityDepositNpr: moneySchema.default(0).optional(),
   /**
    * When true, college did not collect a security deposit (waived/cancelled).
-   * Server forces securityDepositNpr to 0.
+   * Server forces expected deposit to 0; cannot waive if a deposit is still held.
    */
   securityDepositWaived: z.boolean().optional().default(false),
   /** When true, student is on scholarship — no fee amount; UI shows "Scholarship". */

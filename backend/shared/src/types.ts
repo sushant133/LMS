@@ -70,7 +70,8 @@ export type FeeType =
   | "MISC"
   | "REFUND"
   | "OTHER"
-  | "ANNUAL";
+  | "ANNUAL"
+  | "SECURITY_DEPOSIT";
 
 export type AttendanceStatus = "PRESENT" | "ABSENT" | "LEAVE" | "LATE" | "MEDICAL_LEAVE";
 
@@ -311,7 +312,15 @@ export interface StudentRecord {
   year1FeeNpr?: number;
   year2FeeNpr?: number;
   year3FeeNpr?: number;
-  /** Security / caution deposit held from admission (NPR). */
+  /**
+   * Planned security / caution deposit amount set at admission (NPR).
+   * Actual collection is recorded via Student Fee Records payment.
+   */
+  securityDepositExpectedNpr?: number;
+  /**
+   * Security / caution deposit collected and currently held (NPR).
+   * Increased only when recording deposit with a fee payment; refunded via DEPOSIT_REFUND.
+   */
   securityDepositNpr?: number;
   /** Amount of deposit already refunded (NPR). */
   securityDepositRefundedNpr?: number;

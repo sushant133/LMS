@@ -24,7 +24,7 @@ const studentScholarshipAwardSchema = new Schema(
     amountNpr: { type: Number, default: 0 },
     reason: {
       type: String,
-      default: "Topper of previous year final examination — one year scholarship"
+      default: "Merit based on previous year final examination — one year scholarship"
     },
     status: { type: String, enum: ["ACTIVE", "APPLIED", "REVOKED"], default: "ACTIVE", index: true },
     /** Linked fee collection that applied this scholarship (when fee was recorded). */

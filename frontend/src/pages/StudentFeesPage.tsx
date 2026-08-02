@@ -162,7 +162,7 @@ export const StudentFeesPage = () => {
               >
                 <p className="font-medium text-violet-950">
                   {a.reason ||
-                    `Topped year ${a.toppedProgramYear} → year ${a.coversProgramYear} scholarship`}
+                    `Merit in year ${a.toppedProgramYear} → year ${a.coversProgramYear} scholarship`}
                 </p>
                 <p className="text-xs text-violet-800">
                   Status: {a.status}

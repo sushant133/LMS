@@ -1399,22 +1399,12 @@ export const AccountingManager = () => {
                       const account = (studentAccountsQuery.data ?? []).find(
                         (item) => item.student._id === studentId,
                       );
-                      const suggestedLateFine =
-                        account &&
-                        account.remainingDueNpr > 0 &&
-                        settingsForm.lateFinePercent > 0
-                          ? Math.round(
-                              (account.remainingDueNpr *
-                                settingsForm.lateFinePercent) /
-                                100,
-                            )
-                          : 0;
                       setCollectionForm((c) => ({
                         ...c,
                         studentId,
                         currentChargesNpr:
                           structure?.amountNpr ?? c.currentChargesNpr,
-                        lateFeeNpr: suggestedLateFine,
+                        lateFeeNpr: 0,
                       }));
                     }}
                   >
@@ -1534,17 +1524,6 @@ export const AccountingManager = () => {
                       setCollectionForm((c) => ({
                         ...c,
                         scholarshipNpr: e.target.valueAsNumber,
-                      }))
-                    }
-                  />
-                </FormField>
-                <FormField label="Late Fine">
-                  <NumberInput
-                    value={collectionForm.lateFeeNpr}
-                    onChange={(e) =>
-                      setCollectionForm((c) => ({
-                        ...c,
-                        lateFeeNpr: e.target.valueAsNumber,
                       }))
                     }
                   />

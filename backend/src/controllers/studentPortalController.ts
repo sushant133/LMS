@@ -15,6 +15,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import {
   buildProgramYearFeeSummary,
+  filterOutOpeningTuitionCharges,
   ensureActiveScholarshipAwardsApplied,
   PROGRAM_YEAR_LABELS
 } from "../utils/accountingCalculations.js";
@@ -405,9 +406,15 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
     0
   );
   const activeAwards = awardList.filter((a) => a.status !== "REVOKED");
+  const plannedFees = {
+    1: Math.max(0, Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0),
+    2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
+    3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
+  };
   const yearWise = buildProgramYearFeeSummary(
     feeCollections as unknown as Array<Record<string, unknown>>,
-    activeAwards
+    activeAwards,
+    plannedFees
   );
   const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
   const scholarshipStatus =
@@ -415,7 +422,7 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
       ? activeAwards
           .map(
             (a) =>
-              `Topped ${PROGRAM_YEAR_LABELS[Number(a.toppedProgramYear)] ?? a.toppedProgramYear} → ${PROGRAM_YEAR_LABELS[Number(a.coversProgramYear)] ?? a.coversProgramYear} scholarship`
+              `Merit in ${PROGRAM_YEAR_LABELS[Number(a.toppedProgramYear)] ?? a.toppedProgramYear} → ${PROGRAM_YEAR_LABELS[Number(a.coversProgramYear)] ?? a.coversProgramYear} scholarship`
           )
           .join("; ")
       : totalScholarship > 0
@@ -432,12 +439,14 @@ export const getMyFinancialHistory = asyncHandler(async (req: Request, res: Resp
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
     totalScholarshipNpr: totalScholarship,
-    totalPayableNpr: totalPaid + yearWiseRemaining + totalDiscount + totalScholarship,
+    totalPayableNpr: yearWise.reduce((s, y) => s + Number(y.chargedNpr || 0), 0),
     totalFineNpr: feeCollections.reduce((s, c) => s + (c.lateFeeNpr ?? 0), 0),
     advanceBalanceNpr: feeCollections.reduce((s, c) => s + (c.advancePaymentNpr ?? 0), 0),
     totalRefundsNpr: 0,
     scholarshipStatus,
-    collections: feeCollections,
+    collections: filterOutOpeningTuitionCharges(
+      feeCollections as unknown as Array<Record<string, unknown>>
+    ),
     refunds: [],
     dueInstallments: [],
     yearWise,

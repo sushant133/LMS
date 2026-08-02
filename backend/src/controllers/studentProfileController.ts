@@ -15,7 +15,9 @@ import { LibraryIssue } from "../models/LibraryBook.js";
 import {
   buildProgramYearFeeSummary,
   ensureActiveScholarshipAwardsApplied,
-  PROGRAM_YEAR_LABELS
+  filterOutOpeningTuitionCharges,
+  PROGRAM_YEAR_LABELS,
+  recalculateStudentFeesDue
 } from "../utils/accountingCalculations.js";
 import { Result } from "../models/Result.js";
 import { SchoolClass } from "../models/SchoolClass.js";
@@ -361,6 +363,23 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
     )) as typeof student;
   }
 
+  // Repair inflated dues when viewing profile (late fees, plan-based year dues)
+  if (permissions.canViewFinancial) {
+    try {
+      const repairedDue = await recalculateStudentFeesDue(student._id, schoolId);
+      (student as { feesDueNpr?: number }).feesDueNpr = repairedDue;
+      feeCollections = (await FeeCollection.find({
+        schoolId,
+        studentId: student._id,
+        isDeleted: false
+      })
+        .sort({ paidDateBs: -1 })
+        .lean()) as unknown as Array<Record<string, unknown>>;
+    } catch {
+      // Non-blocking — still return ledger view
+    }
+  }
+
   const totalPaid = feeCollections.reduce(
     (sum, item) => sum + Number(item.amountPaidNpr ?? 0),
     0
@@ -373,8 +392,14 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
     (sum, item) => sum + Number(item.scholarshipNpr ?? 0),
     0
   );
+
+  const plannedFees = {
+    1: Math.max(0, Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0),
+    2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
+    3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
+  };
   const yearWise = permissions.canViewFinancial
-    ? buildProgramYearFeeSummary(feeCollections, activeAwards)
+    ? buildProgramYearFeeSummary(feeCollections, activeAwards, plannedFees)
     : [];
   const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
   const scholarshipStatus =
@@ -383,7 +408,7 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
           .map((a) => {
             const top = Number(a.toppedProgramYear);
             const cover = Number(a.coversProgramYear);
-            return `Topped ${PROGRAM_YEAR_LABELS[top] ?? top} → ${PROGRAM_YEAR_LABELS[cover] ?? cover} scholarship`;
+            return `Merit in ${PROGRAM_YEAR_LABELS[top] ?? top} → ${PROGRAM_YEAR_LABELS[cover] ?? cover} scholarship`;
           })
           .join("; ")
       : totalScholarship > 0
@@ -480,7 +505,8 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
           scholarshipStatus,
           yearWise,
           scholarshipAwards: activeAwards,
-          collections: feeCollections
+          // Year-wise plan at admission is not a payment — omit OPEN- plan rows
+          collections: filterOutOpeningTuitionCharges(feeCollections)
         }
       : null,
     library: permissions.canViewLibrary

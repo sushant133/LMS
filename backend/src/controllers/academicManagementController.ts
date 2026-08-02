@@ -12,6 +12,7 @@ import {
   academicSyllabusUpdateSchema,
   academicSyllabusSubUnitProgressSchema,
   academicSyllabusReorderSchema,
+  normalizeSubUnitSelection,
   type AcademicManagementFilters,
   type AcademicSyllabusChapterInput
 } from "@phit-erp/shared";
@@ -1446,7 +1447,11 @@ export const listLessonPlans = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const createLessonPlan = asyncHandler(async (req: Request, res: Response) => {
-  const payload = academicLessonPlanSchema.parse(req.body);
+  const parsed = academicLessonPlanSchema.parse(req.body);
+  const payload = {
+    ...parsed,
+    items: parsed.items.map((item) => normalizeSubUnitSelection(item))
+  };
 
   if (req.user?.role === "TEACHER") {
     const scope = await requireTeacherScope(req);
@@ -1542,6 +1547,23 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
             (unitAny as { syllabusUnitId?: { toString(): string } })?.syllabusUnitId?.toString?.() ||
             undefined,
           syllabusSubUnitId: item.syllabusSubUnitId?.trim() || undefined,
+          subUnitTitles: Array.isArray(item.subUnitTitles)
+            ? item.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+            : item.subUnitTitle
+              ? String(item.subUnitTitle)
+                  .split(/[;\n|]+/)
+                  .map((t) => t.trim())
+                  .filter(Boolean)
+              : [],
+          subUnitTitle:
+            (Array.isArray(item.subUnitTitles) && item.subUnitTitles.length > 0
+              ? item.subUnitTitles.map((t) => String(t).trim()).filter(Boolean).join("; ")
+              : item.subUnitTitle?.trim()) || "",
+          syllabusSubUnitIds: Array.isArray(item.syllabusSubUnitIds)
+            ? item.syllabusSubUnitIds.map((id) => String(id).trim()).filter(Boolean)
+            : item.syllabusSubUnitId?.trim()
+              ? [item.syllabusSubUnitId.trim()]
+              : [],
           schoolId: tenantObjectId(req),
           lessonPlanId: createdPlan._id
         };
@@ -1560,7 +1582,13 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
 });
 
 export const updateLessonPlan = asyncHandler(async (req: Request, res: Response) => {
-  const payload = academicLessonPlanSchema.partial().parse(req.body);
+  const parsed = academicLessonPlanSchema.partial().parse(req.body);
+  const payload = {
+    ...parsed,
+    ...(parsed.items
+      ? { items: parsed.items.map((item) => normalizeSubUnitSelection(item)) }
+      : {})
+  };
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Lesson plan not found");
 
@@ -1786,7 +1814,7 @@ export const listLogBookEntries = asyncHandler(async (req: Request, res: Respons
 });
 
 export const createLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
-  const parsed = academicLogBookEntrySchema.parse(req.body);
+  const parsed = normalizeSubUnitSelection(academicLogBookEntrySchema.parse(req.body));
   const dateBs = ensureValidBsDate(parsed.dateBs);
   const payload = { ...parsed, dateBs };
 
@@ -1835,7 +1863,9 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
       syllabusChapterId?: { toString(): string };
       syllabusUnitId?: { toString(): string };
       syllabusSubUnitId?: { toString(): string };
+      syllabusSubUnitIds?: Array<string | { toString(): string }>;
       subUnitTitle?: string;
+      subUnitTitles?: string[];
     };
     if (!payload.syllabusId && itemAny.syllabusId) payload.syllabusId = itemAny.syllabusId.toString();
     if (!payload.syllabusChapterId && itemAny.syllabusChapterId) {
@@ -1844,10 +1874,46 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     if (!payload.syllabusUnitId && itemAny.syllabusUnitId) {
       payload.syllabusUnitId = itemAny.syllabusUnitId.toString();
     }
-    if (!payload.syllabusSubUnitId && itemAny.syllabusSubUnitId) {
+    // Prefer teacher-selected multi sub-units; fall back to full lesson-plan list
+    const payloadTitles = Array.isArray(payload.subUnitTitles)
+      ? payload.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+      : [];
+    const itemTitles = Array.isArray(itemAny.subUnitTitles)
+      ? itemAny.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+      : itemAny.subUnitTitle
+        ? String(itemAny.subUnitTitle)
+            .split(/[;\n|]+/)
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [];
+    if (payloadTitles.length === 0 && itemTitles.length > 0) {
+      payload.subUnitTitles = itemTitles;
+      payload.subUnitTitle = itemTitles.join("; ");
+    } else if (payloadTitles.length > 0) {
+      payload.subUnitTitles = payloadTitles;
+      payload.subUnitTitle = payloadTitles.join("; ");
+    } else if (!payload.subUnitTitle && itemAny.subUnitTitle) {
+      payload.subUnitTitle = itemAny.subUnitTitle;
+    }
+
+    const payloadIds = Array.isArray(payload.syllabusSubUnitIds)
+      ? payload.syllabusSubUnitIds.map((id) => String(id).trim()).filter(Boolean)
+      : [];
+    const itemIds = Array.isArray(itemAny.syllabusSubUnitIds)
+      ? itemAny.syllabusSubUnitIds.map((id) => String(id).toString().trim()).filter(Boolean)
+      : itemAny.syllabusSubUnitId
+        ? [itemAny.syllabusSubUnitId.toString()]
+        : [];
+    if (payloadIds.length === 0 && itemIds.length > 0 && payloadTitles.length === 0) {
+      // Inherit all planned syllabus links only when teacher did not narrow titles
+      payload.syllabusSubUnitIds = itemIds;
+      payload.syllabusSubUnitId = itemIds[0] || "";
+    } else if (payloadIds.length > 0) {
+      payload.syllabusSubUnitIds = payloadIds;
+      payload.syllabusSubUnitId = payloadIds[0] || "";
+    } else if (!payload.syllabusSubUnitId && itemAny.syllabusSubUnitId) {
       payload.syllabusSubUnitId = itemAny.syllabusSubUnitId.toString();
     }
-    if (!payload.subUnitTitle && itemAny.subUnitTitle) payload.subUnitTitle = itemAny.subUnitTitle;
     await assertNoDuplicateLogBookForItemDate(req, lessonPlanItemId, dateBs);
   }
 
@@ -1861,10 +1927,21 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     payload.syllabusChapterId = unitAny.syllabusChapterId.toString();
   }
 
-  if (payload.subUnitTitle) {
+  const taughtTitles = Array.isArray(payload.subUnitTitles)
+    ? payload.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+    : payload.subUnitTitle
+      ? String(payload.subUnitTitle)
+          .split(/[;\n|]+/)
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
+  payload.subUnitTitles = taughtTitles;
+  payload.subUnitTitle = taughtTitles.join("; ");
+
+  if (taughtTitles.length > 0) {
     payload.topicCovered =
       payload.topicCovered ||
-      `${unitDoc.chapterName} — ${payload.subUnitTitle}`;
+      `${unitDoc.chapterName} — ${taughtTitles.join("; ")}`;
   } else {
     payload.topicCovered =
       payload.topicCovered || unitDoc.topicsCovered || unitDoc.chapterName;
@@ -1890,12 +1967,21 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
 
   const count = await AcademicLogBookEntry.countDocuments({ logBookId, isDeleted: false });
 
+  const taughtSubUnitIds = Array.isArray(payload.syllabusSubUnitIds)
+    ? payload.syllabusSubUnitIds.map((id) => String(id).trim()).filter(Boolean)
+    : payload.syllabusSubUnitId?.trim()
+      ? [payload.syllabusSubUnitId.trim()]
+      : [];
+
   const entry = await AcademicLogBookEntry.create({
     ...payload,
+    subUnitTitles: taughtTitles,
+    subUnitTitle: taughtTitles.join("; "),
     syllabusId: payload.syllabusId?.trim() || undefined,
     syllabusChapterId: payload.syllabusChapterId?.trim() || undefined,
     syllabusUnitId: payload.syllabusUnitId?.trim() || undefined,
-    syllabusSubUnitId: payload.syllabusSubUnitId?.trim() || undefined,
+    syllabusSubUnitId: taughtSubUnitIds[0] || payload.syllabusSubUnitId?.trim() || undefined,
+    syllabusSubUnitIds: taughtSubUnitIds,
     schoolId: tenantObjectId(req),
     logBookId,
     serialNo: count + 1,
@@ -1911,19 +1997,19 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     await syncLessonPlanItemProgress(entry.lessonPlanItemId.toString());
   }
 
-  // Mark linked syllabus sub-unit as completed when a class log is recorded
-  if (payload.syllabusSubUnitId) {
+  // Mark all linked syllabus sub-units completed when a class log is recorded
+  if (taughtSubUnitIds.length > 0) {
     try {
       const { AcademicSyllabusSubUnit } = await import("../models/AcademicSyllabusSubUnit.js");
-      await AcademicSyllabusSubUnit.updateOne(
+      await AcademicSyllabusSubUnit.updateMany(
         {
-          _id: payload.syllabusSubUnitId,
+          _id: { $in: taughtSubUnitIds },
           schoolId: tenantObjectId(req)
         },
         {
           $set: {
             status: "COMPLETED",
-            todaysCoverage: payload.topicCovered || ""
+            todaysCoverage: payload.topicCovered || taughtTitles.join("; ") || ""
           }
         }
       );
@@ -1939,8 +2025,21 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
 
 export const updateLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
   const parsed = academicLogBookEntrySchema.partial().parse(req.body);
+  const normalized =
+    parsed.subUnitTitle !== undefined ||
+    parsed.subUnitTitles !== undefined ||
+    parsed.syllabusSubUnitId !== undefined ||
+    parsed.syllabusSubUnitIds !== undefined
+      ? normalizeSubUnitSelection(parsed as {
+          subUnitTitle?: string;
+          subUnitTitles?: string[];
+          syllabusSubUnitId?: string;
+          syllabusSubUnitIds?: string[];
+        })
+      : parsed;
   const payload = {
     ...parsed,
+    ...normalized,
     ...(parsed.dateBs ? { dateBs: ensureValidBsDate(parsed.dateBs) } : {})
   };
   const existing = await AcademicLogBookEntry.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });

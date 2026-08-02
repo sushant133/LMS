@@ -49,7 +49,14 @@ export const enhancedFeeCollectionSchema = z
     /** HA / multi-year: 1 = 1st year, 2 = 2nd year, 3 = 3rd year */
     programYear: z.coerce.number().int().min(1).max(3).optional(),
     currentChargesNpr: moneySchema.default(0),
+    /** Tuition / fee amount paid (excludes security deposit). */
     amountPaidNpr: moneySchema,
+    /**
+     * Admission security / caution deposit collected with this payment (NPR).
+     * Does not reduce tuition dues; increases student.securityDepositNpr held.
+     * Cash received = amountPaidNpr + securityDepositPaidNpr.
+     */
+    securityDepositPaidNpr: moneySchema.default(0).optional(),
     discountNpr: moneySchema.default(0),
     scholarshipNpr: moneySchema.default(0),
     scholarshipType: z
@@ -83,6 +90,20 @@ export const enhancedFeeCollectionSchema = z
         message: "Payment date is required (BS or AD)",
         path: ["paidDateBs"]
       });
+    }
+    const feePaid = Number(value.amountPaidNpr) || 0;
+    const depositPaid = Number(value.securityDepositPaidNpr) || 0;
+    if (feePaid <= 0 && depositPaid <= 0) {
+      // Allow pure scholarship (amount 0) when scholarshipNpr > 0 or charges with sch
+      const hasScholarship = (Number(value.scholarshipNpr) || 0) > 0;
+      if (!hasScholarship) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Enter amount paid and/or security deposit amount (or apply scholarship)",
+          path: ["amountPaidNpr"]
+        });
+      }
     }
   });
 

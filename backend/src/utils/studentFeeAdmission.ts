@@ -17,9 +17,9 @@ export const sumYearFeesNpr = (plan: YearFeePlan): number =>
   Math.max(0, Number(plan.year3FeeNpr) || 0);
 
 /**
- * Seed opening tuition charges per program year so Accounts / parent year-wise
- * ledger can track paid vs remaining. Safe to call on create; on update only
- * adds years that do not already have a collection row.
+ * Seed / sync opening tuition charges per program year from the admission fee plan.
+ * These are NOT payments — they book the year fee structure for ledger math only.
+ * On update, refreshes OPEN- row amounts when the plan changes; never deletes paid years.
  */
 export const seedStudentYearFeeCharges = async (params: {
   schoolId: Types.ObjectId | string;
@@ -30,7 +30,7 @@ export const seedStudentYearFeeCharges = async (params: {
   paidDateBs?: string;
   createdBy: Types.ObjectId | string;
   session?: ClientSession | null;
-  /** When true, skip years that already have any fee row. */
+  /** When true, do not create years that already have any fee row; still sync OPEN amounts. */
   onlyMissingYears?: boolean;
 }): Promise<void> => {
   if (params.hasScholarship) return;
@@ -41,29 +41,68 @@ export const seedStudentYearFeeCharges = async (params: {
     { programYear: 3, amount: Math.max(0, Number(params.plan.year3FeeNpr) || 0) }
   ].filter((y) => y.amount > 0) as Array<{ programYear: 1 | 2 | 3; amount: number }>;
 
-  if (years.length === 0) return;
+  if (years.length === 0) {
+    await recalculateStudentFeesDue(params.studentId, params.schoolId, params.session ?? null);
+    return;
+  }
 
   const sessionOpt = getSessionOption(params.session ?? null);
   const paidDateBs = (params.paidDateBs || "").trim() || getTodayBs();
   const adm = (params.admissionNumber || "STU").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24);
 
-  let existingYears = new Set<number>();
-  if (params.onlyMissingYears) {
-    const existingQuery = FeeCollection.find({
-      schoolId: params.schoolId,
-      studentId: params.studentId,
-      isDeleted: false,
-      programYear: { $in: [1, 2, 3] }
-    }).select("programYear");
-    if (params.session) existingQuery.session(params.session);
-    const existing = await existingQuery.lean();
-    existingYears = new Set(
-      existing.map((r) => Number(r.programYear)).filter((n) => n === 1 || n === 2 || n === 3)
-    );
-  }
+  const existingQuery = FeeCollection.find({
+    schoolId: params.schoolId,
+    studentId: params.studentId,
+    isDeleted: false,
+    programYear: { $in: [1, 2, 3] }
+  }).select("programYear receiptNumber notes accountantName amountPaidNpr currentChargesNpr paymentMethod");
+  if (params.session) existingQuery.session(params.session);
+  const existing = await existingQuery;
+
+  const yearsWithAnyRow = new Set(
+    existing.map((r) => Number(r.programYear)).filter((n) => n === 1 || n === 2 || n === 3)
+  );
 
   for (const row of years) {
-    if (existingYears.has(row.programYear)) continue;
+    const openDoc = existing.find((r) => {
+      const py = Number(r.programYear);
+      if (py !== row.programYear) return false;
+      const receipt = String(r.receiptNumber ?? "");
+      const notes = String(r.notes ?? "");
+      return (
+        receipt.startsWith("OPEN-") ||
+        /opening tuition charge/i.test(notes) ||
+        (Number(r.amountPaidNpr ?? 0) === 0 &&
+          String(r.paymentMethod ?? "") === "OTHER" &&
+          String(r.accountantName ?? "") === "System")
+      );
+    });
+
+    if (openDoc) {
+      // Keep OPEN plan amount aligned with student year fee structure
+      if (Number(openDoc.currentChargesNpr) !== row.amount) {
+        openDoc.currentChargesNpr = row.amount;
+        openDoc.remainingDueNpr = Math.max(
+          0,
+          row.amount - Number(openDoc.amountPaidNpr ?? 0) - Number(openDoc.scholarshipNpr ?? 0)
+        );
+        openDoc.lateFeeNpr = 0;
+        openDoc.feeBreakdown = [
+          {
+            feeType: "TUITION",
+            title: `${PROGRAM_YEAR_LABELS[row.programYear] ?? `Year ${row.programYear}`} tuition (admission plan)`,
+            amountNpr: row.amount
+          }
+        ] as typeof openDoc.feeBreakdown;
+        await openDoc.save(sessionOpt);
+      }
+      continue;
+    }
+
+    if (params.onlyMissingYears && yearsWithAnyRow.has(row.programYear)) {
+      continue;
+    }
+
     const label = PROGRAM_YEAR_LABELS[row.programYear] ?? `Year ${row.programYear}`;
     const receiptNumber = `OPEN-${adm}-Y${row.programYear}-${Date.now().toString(36)}`;
     await FeeCollection.create(

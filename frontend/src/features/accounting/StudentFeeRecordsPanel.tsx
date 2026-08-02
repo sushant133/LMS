@@ -43,8 +43,9 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useAuth } from "features/auth/AuthProvider";
 import { api, resolveApiUrl, unwrap } from "lib/api";
+import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import {
   adDateToBsString,
@@ -78,7 +79,7 @@ const PROGRAM_YEARS = [
   { value: 3, label: "3rd Year" },
 ] as const;
 
-/** Topped exam options for topper scholarship (no 3rd year final). */
+/** Exam options for merit scholarship (no 3rd year final as basis). */
 const TOPPED_EXAM_OPTIONS = [
   { value: 0, label: "Entrance" },
   { value: 1, label: "1st Year" },
@@ -169,9 +170,10 @@ const emptyPaymentForm = () => ({
   paidDateAd: "",
   currentChargesNpr: "",
   amountPaidNpr: "",
+  /** Security / caution deposit collected with this payment (0 = none) */
+  securityDepositPaidNpr: "0",
   discountNpr: "0",
   scholarshipNpr: "0",
-  lateFeeNpr: "0",
   paymentMethod: "CASH" as (typeof PAYMENT_METHODS)[number],
   transactionNumber: "",
   receivedByName: "",
@@ -221,9 +223,20 @@ const resolveCollectionStudentId = (
   return String(s);
 };
 
+/** Super Admin / College Admin (primary or secondary role) may edit/delete payments. */
+const useCanEditFeePayments = (): boolean => {
+  const { user } = useAuth();
+  if (!user) return false;
+  if (canManageInstitution(user.role)) return true;
+  return (user.secondaryRoles ?? []).some((role) =>
+    canManageInstitution(normalizeUserRole(role)),
+  );
+};
+
 export const StudentFeeRecordsPanel = () => {
   const queryClient = useQueryClient();
-  const canAdminEdit = useIsTenantAdmin();
+  /** Super Admin / College Admin only — edit amount paid / delete mistaken receipts */
+  const canAdminEdit = useCanEditFeePayments();
   const [tab, setTab] = useState<PanelTab>("ledger");
   const [search, setSearch] = useState("");
   /** Ledger filters */
@@ -319,7 +332,9 @@ export const StudentFeeRecordsPanel = () => {
     mutationFn: (body: Record<string, unknown>) =>
       unwrap(api.post("/accounting/collections", body)),
     onSuccess: async () => {
-      toast.success("Fee payment recorded — student account updated");
+      toast.success(
+        "Payment recorded — fee balance and security deposit (if any) updated",
+      );
       setPaymentForm(emptyPaymentForm());
       setAttachments([]);
       setEditingReceipt(null);
@@ -375,6 +390,7 @@ export const StudentFeeRecordsPanel = () => {
       (paidDateBs ? bsDateToAdString(paidDateBs) : "");
     setEditingReceipt(row);
     setSelectedStudentId(studentId);
+    const depositPaid = Number(row.securityDepositPaidNpr ?? 0) || 0;
     setPaymentForm({
       studentId,
       programYear: String(row.programYear ?? 1),
@@ -385,9 +401,9 @@ export const StudentFeeRecordsPanel = () => {
       paidDateAd,
       currentChargesNpr: String(row.currentChargesNpr ?? 0),
       amountPaidNpr: String(row.amountPaidNpr ?? 0),
+      securityDepositPaidNpr: String(depositPaid),
       discountNpr: String(row.discountNpr ?? 0),
       scholarshipNpr: String(row.scholarshipNpr ?? 0),
-      lateFeeNpr: String(row.lateFeeNpr ?? 0),
       paymentMethod:
         (row.paymentMethod as (typeof PAYMENT_METHODS)[number]) || "CASH",
       transactionNumber: row.transactionNumber ?? "",
@@ -445,7 +461,7 @@ export const StudentFeeRecordsPanel = () => {
       toast.success(
         editingScholarship
           ? "Scholarship updated — student fee ledger refreshed"
-          : "Topper scholarship recorded",
+          : "Merit scholarship recorded",
       );
       setScholarshipForm(emptyScholarshipForm());
       setEditingScholarship(null);
@@ -720,9 +736,37 @@ export const StudentFeeRecordsPanel = () => {
     }
     const amountPaid = Number(paymentForm.amountPaidNpr);
     const charges = Number(paymentForm.currentChargesNpr);
+    const depositPaid = Math.max(0, Number(paymentForm.securityDepositPaidNpr) || 0);
     if (!Number.isFinite(amountPaid) || amountPaid < 0) {
       toast.error("Enter a valid amount paid (0 allowed for full scholarship)");
       return null;
+    }
+    if (!Number.isFinite(depositPaid) || depositPaid < 0) {
+      toast.error("Enter a valid security deposit amount (0 if none)");
+      return null;
+    }
+    if (amountPaid <= 0 && depositPaid <= 0 && !(Number(paymentForm.scholarshipNpr) > 0)) {
+      toast.error("Enter fee amount paid and/or security deposit (or apply scholarship)");
+      return null;
+    }
+    const feeBreakdown: Array<{
+      feeType: string;
+      title: string;
+      amountNpr: number;
+    }> = [];
+    if (charges > 0) {
+      feeBreakdown.push({
+        feeType: "TUITION",
+        title: `${PROGRAM_YEARS.find((y) => String(y.value) === paymentForm.programYear)?.label ?? "Year"} tuition / program fee`,
+        amountNpr: charges,
+      });
+    }
+    if (depositPaid > 0) {
+      feeBreakdown.push({
+        feeType: "SECURITY_DEPOSIT",
+        title: "Security / caution deposit",
+        amountNpr: depositPaid,
+      });
     }
     return {
       studentId: paymentForm.studentId,
@@ -732,9 +776,10 @@ export const StudentFeeRecordsPanel = () => {
       programYear: Number(paymentForm.programYear),
       currentChargesNpr: Number.isFinite(charges) ? charges : 0,
       amountPaidNpr: amountPaid,
+      securityDepositPaidNpr: depositPaid,
       discountNpr: Number(paymentForm.discountNpr) || 0,
       scholarshipNpr: Number(paymentForm.scholarshipNpr) || 0,
-      lateFeeNpr: Number(paymentForm.lateFeeNpr) || 0,
+      lateFeeNpr: 0,
       paymentMethod: paymentForm.paymentMethod,
       transactionNumber: paymentForm.transactionNumber || undefined,
       receivedByName: paymentForm.receivedByName.trim() || undefined,
@@ -743,16 +788,7 @@ export const StudentFeeRecordsPanel = () => {
       scholarshipType: paymentForm.scholarshipType,
       scholarshipAwardId: paymentForm.scholarshipAwardId || undefined,
       attachments,
-      feeBreakdown:
-        charges > 0
-          ? [
-              {
-                feeType: "TUITION",
-                title: `${PROGRAM_YEARS.find((y) => String(y.value) === paymentForm.programYear)?.label ?? "Year"} tuition / program fee`,
-                amountNpr: charges,
-              },
-            ]
-          : [],
+      feeBreakdown,
     };
   };
 
@@ -886,6 +922,7 @@ export const StudentFeeRecordsPanel = () => {
           feeCategory: feeCategory(row),
           chargedNpr: row.currentChargesNpr,
           amountPaidNpr: row.amountPaidNpr,
+          securityDepositPaidNpr: row.securityDepositPaidNpr ?? 0,
           scholarshipNpr: row.scholarshipNpr,
           remainingDueNpr: row.remainingDueNpr,
           paidDateBs: row.paidDateBs,
@@ -941,9 +978,10 @@ export const StudentFeeRecordsPanel = () => {
               Student Fee Records
             </CardTitle>
             <p className="mt-1 text-sm text-slate-500">
-              HA program fee ledger — record payments, attach bank slips / screenshots,
-              apply topper scholarships (top Year N → free Year N+1), and track paid vs
-              remaining by year.
+              HA program fee ledger — record tuition payments and security deposits,
+              attach bank slips / screenshots, apply merit scholarships (merit Year N →
+              free Year N+1), and track paid vs remaining by year. Deposit refunds are
+              only allowed after a deposit is recorded here.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -951,7 +989,7 @@ export const StudentFeeRecordsPanel = () => {
               [
                 ["ledger", "Student ledger", Wallet],
                 ["record", "Record payment", Plus],
-                ["scholarship", "Topper scholarship", Award],
+                ["scholarship", "Merit Scholarship", Award],
                 ["receipts", "All receipts", Receipt],
               ] as const
             ).map(([id, label, Icon]) => (
@@ -1200,15 +1238,25 @@ export const StudentFeeRecordsPanel = () => {
               </CardTitle>
               <p className="text-sm text-slate-500">
                 {editingReceipt
-                  ? "Super Admin / College Admin only. Saving reverses the old journal and cash book entries, re-posts corrected amounts, and updates the student balance."
+                  ? "Change amount paid, deposit, charges, or other fields. Saving reverses the old journal and cash book entries, re-posts corrected amounts, and updates the student balance."
                   : "Posts to cash book / journal and updates the student's outstanding balance. Attach bank voucher, Fonepay screenshot, or invoice PDF."}
               </p>
               {editingReceipt ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
                   <Pencil className="h-4 w-4 shrink-0" />
                   <span className="flex-1">
-                    Editing receipt{" "}
-                    <strong className="font-mono">{editingReceipt.receiptNumber}</strong>
+                    Editing payment{" "}
+                    <strong className="font-mono">
+                      {editingReceipt.receiptNumber}
+                    </strong>
+                    {" · "}
+                    Amount paid:{" "}
+                    <strong>
+                      {formatCurrencyNpr(editingReceipt.amountPaidNpr ?? 0)}
+                    </strong>
+                    {(editingReceipt.securityDepositPaidNpr ?? 0) > 0
+                      ? ` · Deposit: ${formatCurrencyNpr(editingReceipt.securityDepositPaidNpr ?? 0)}`
+                      : ""}
                   </span>
                   <Button
                     type="button"
@@ -1218,7 +1266,30 @@ export const StudentFeeRecordsPanel = () => {
                   >
                     Cancel edit
                   </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    disabled={deleteCollectionMutation.isPending}
+                    onClick={() => confirmDeleteReceipt(editingReceipt)}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    Delete payment
+                  </Button>
                 </div>
+              ) : null}
+              {!editingReceipt && canAdminEdit ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  To correct a past payment, open{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-brand-700 underline-offset-2 hover:underline"
+                    onClick={() => setTab("receipts")}
+                  >
+                    All receipts
+                  </button>{" "}
+                  and use <strong>Edit</strong> or <strong>Delete</strong>.
+                </p>
               ) : null}
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1361,12 +1432,29 @@ export const StudentFeeRecordsPanel = () => {
                 <FormField label="Program year (HA) *">
                   <Select
                     value={paymentForm.programYear}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const year = e.target.value;
+                      const yearRow = selectedHistory?.yearWise?.find(
+                        (y) => String(y.programYear) === year,
+                      );
+                      // Due is remaining against the fee plan — do not re-enter full year fee
+                      const remaining = yearRow
+                        ? Math.max(0, Number(yearRow.remainingNpr) || 0)
+                        : null;
                       setPaymentForm((f) => ({
                         ...f,
-                        programYear: e.target.value,
-                      }))
-                    }
+                        programYear: year,
+                        // Charge field 0 when plan already exists (avoids double-booking)
+                        currentChargesNpr:
+                          remaining != null
+                            ? "0"
+                            : f.currentChargesNpr,
+                        amountPaidNpr:
+                          remaining != null && remaining > 0
+                            ? String(remaining)
+                            : f.amountPaidNpr,
+                      }));
+                    }}
                   >
                     {PROGRAM_YEARS.map((y) => (
                       <option key={y.value} value={String(y.value)}>
@@ -1424,7 +1512,7 @@ export const StudentFeeRecordsPanel = () => {
                     ))}
                   </Select>
                 </FormField>
-                <FormField label="Fee charged (NPR) *">
+                <FormField label="Extra charge this receipt (NPR)">
                   <NumberInput
                     min={0}
                     value={paymentForm.currentChargesNpr}
@@ -1434,9 +1522,14 @@ export const StudentFeeRecordsPanel = () => {
                         currentChargesNpr: e.target.value,
                       }))
                     }
+                    placeholder="0"
                   />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Leave 0 when paying the year fee plan already set at admission.
+                    Only enter amount for new/extra charges.
+                  </p>
                 </FormField>
-                <FormField label="Amount paid (NPR) *">
+                <FormField label="Amount paid — fee (NPR) *">
                   <NumberInput
                     min={0}
                     value={paymentForm.amountPaidNpr}
@@ -1447,6 +1540,60 @@ export const StudentFeeRecordsPanel = () => {
                       }))
                     }
                   />
+                  {selectedHistory?.yearWise ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      {(() => {
+                        const y = selectedHistory.yearWise?.find(
+                          (r) =>
+                            String(r.programYear) === paymentForm.programYear,
+                        );
+                        if (!y) return "Select student to see year balance";
+                        return `This year: plan ${formatCurrencyNpr(y.chargedNpr)} · paid ${formatCurrencyNpr(y.paidNpr)} · due ${formatCurrencyNpr(y.remainingNpr)}`;
+                      })()}
+                    </p>
+                  ) : null}
+                </FormField>
+                <FormField label="Security deposit (NPR)">
+                  <NumberInput
+                    min={0}
+                    disabled={Boolean(selectedHistory?.securityDepositWaived)}
+                    value={
+                      selectedHistory?.securityDepositWaived
+                        ? "0"
+                        : paymentForm.securityDepositPaidNpr
+                    }
+                    onChange={(e) =>
+                      setPaymentForm((f) => ({
+                        ...f,
+                        securityDepositPaidNpr: e.target.value,
+                      }))
+                    }
+                    placeholder="0"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    {selectedHistory?.securityDepositWaived
+                      ? "Not taken for this student"
+                      : selectedStudentId
+                        ? (() => {
+                            const expected =
+                              Number(
+                                selectedHistory?.securityDepositExpectedNpr,
+                              ) || 0;
+                            const held =
+                              Number(
+                                selectedHistory?.securityDepositHeldNpr,
+                              ) || 0;
+                            const refunded =
+                              Number(
+                                selectedHistory?.securityDepositRefundedNpr,
+                              ) || 0;
+                            if (expected <= 0 && held <= 0) {
+                              return "Optional — leave 0 if none on this receipt";
+                            }
+                            return `Expected ${formatCurrencyNpr(expected)} · Held ${formatCurrencyNpr(held)}${refunded > 0 ? ` · Refunded ${formatCurrencyNpr(refunded)}` : ""}`;
+                          })()
+                        : "Optional — leave 0 if not collecting deposit"}
+                  </p>
                 </FormField>
                 <FormField label="Discount (NPR)">
                   <NumberInput
@@ -1468,18 +1615,6 @@ export const StudentFeeRecordsPanel = () => {
                       setPaymentForm((f) => ({
                         ...f,
                         scholarshipNpr: e.target.value,
-                      }))
-                    }
-                  />
-                </FormField>
-                <FormField label="Late fee / fine (NPR)">
-                  <NumberInput
-                    min={0}
-                    value={paymentForm.lateFeeNpr}
-                    onChange={(e) =>
-                      setPaymentForm((f) => ({
-                        ...f,
-                        lateFeeNpr: e.target.value,
                       }))
                     }
                   />
@@ -1553,8 +1688,8 @@ export const StudentFeeRecordsPanel = () => {
                     }
                   >
                     <option value="NONE">None</option>
-                    <option value="TOPPER_YEAR_WAIVER">Topper year waiver</option>
-                    <option value="MERIT">Merit</option>
+                    <option value="TOPPER_YEAR_WAIVER">Merit year waiver</option>
+                    <option value="MERIT">Merit (other)</option>
                     <option value="OTHER">Other</option>
                   </Select>
                 </FormField>
@@ -1562,7 +1697,7 @@ export const StudentFeeRecordsPanel = () => {
 
               {activeScholarshipForYear ? (
                 <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-950">
-                  Active topper scholarship for this year:{" "}
+                  Active merit scholarship for this year:{" "}
                   <strong>{activeScholarshipForYear.reason}</strong>
                   <Button
                     type="button"
@@ -1585,6 +1720,32 @@ export const StudentFeeRecordsPanel = () => {
                     Apply as full scholarship
                   </Button>
                 </div>
+              ) : null}
+
+              {(Number(paymentForm.amountPaidNpr) || 0) +
+                (Number(paymentForm.securityDepositPaidNpr) || 0) >
+              0 ? (
+                <p className="text-sm text-slate-600">
+                  Total cash this receipt:{" "}
+                  <span className="font-semibold text-slate-900">
+                    {formatCurrencyNpr(
+                      (Number(paymentForm.amountPaidNpr) || 0) +
+                        (Number(paymentForm.securityDepositPaidNpr) || 0),
+                    )}
+                  </span>
+                  {(Number(paymentForm.securityDepositPaidNpr) || 0) > 0 ? (
+                    <span className="text-slate-500">
+                      {" "}
+                      (fee{" "}
+                      {formatCurrencyNpr(Number(paymentForm.amountPaidNpr) || 0)}{" "}
+                      + deposit{" "}
+                      {formatCurrencyNpr(
+                        Number(paymentForm.securityDepositPaidNpr) || 0,
+                      )}
+                      )
+                    </span>
+                  ) : null}
+                </p>
               ) : null}
 
               <FormField label="Remarks">
@@ -1682,7 +1843,7 @@ export const StudentFeeRecordsPanel = () => {
                   {collectMutation.isPending || updateCollectionMutation.isPending
                     ? "Saving…"
                     : editingReceipt
-                      ? "Save corrections"
+                      ? "Update payment"
                       : "Save fee record"}
                 </Button>
               </div>
@@ -1715,6 +1876,53 @@ export const StudentFeeRecordsPanel = () => {
                         {formatCurrencyNpr(selectedHistory.totalPaidNpr)}
                       </p>
                     </div>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-amber-800">
+                      Security deposit
+                    </p>
+                    {selectedHistory.securityDepositWaived ? (
+                      <p className="mt-1 text-amber-900">Not taken / cancelled</p>
+                    ) : (
+                      <div className="mt-1 grid grid-cols-2 gap-1 text-xs text-slate-700">
+                        <span>
+                          Expected:{" "}
+                          {formatCurrencyNpr(
+                            selectedHistory.securityDepositExpectedNpr ?? 0,
+                          )}
+                        </span>
+                        <span>
+                          Held:{" "}
+                          {formatCurrencyNpr(
+                            selectedHistory.securityDepositHeldNpr ?? 0,
+                          )}
+                        </span>
+                        <span>
+                          Refunded:{" "}
+                          {formatCurrencyNpr(
+                            selectedHistory.securityDepositRefundedNpr ?? 0,
+                          )}
+                        </span>
+                        <span className="font-medium text-violet-800">
+                          Remaining:{" "}
+                          {formatCurrencyNpr(
+                            Math.max(
+                              0,
+                              (selectedHistory.securityDepositHeldNpr ?? 0) -
+                                (selectedHistory.securityDepositRefundedNpr ??
+                                  0),
+                            ),
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {(selectedHistory.securityDepositHeldNpr ?? 0) <= 0 &&
+                    !selectedHistory.securityDepositWaived ? (
+                      <p className="mt-1 text-xs text-amber-900">
+                        No deposit held yet — enter Security deposit (NPR) when
+                        recording a payment.
+                      </p>
+                    ) : null}
                   </div>
                   <p className="text-xs text-slate-600">
                     Scholarship: {selectedHistory.scholarshipStatus ?? "None"}
@@ -1762,13 +1970,14 @@ export const StudentFeeRecordsPanel = () => {
               <CardTitle className="flex items-center gap-2 text-base">
                 <Award className="h-5 w-5 text-violet-600" />
                 {editingScholarship
-                  ? "Edit topper scholarship"
-                  : "Topper scholarship (HA rule)"}
+                  ? "Edit merit scholarship"
+                  : "Merit Scholarship (HA rule)"}
               </CardTitle>
               <p className="text-sm text-slate-500">
-                Top <strong>Entrance</strong> → free <strong>1st year</strong>. Top{" "}
-                <strong>1st year final</strong> → free <strong>2nd year</strong>. Top{" "}
-                <strong>2nd year final</strong> → free <strong>3rd year</strong>.
+                Merit in <strong>Entrance</strong> → free <strong>1st year</strong>.
+                Merit in <strong>1st year final</strong> → free{" "}
+                <strong>2nd year</strong>. Merit in <strong>2nd year final</strong> →
+                free <strong>3rd year</strong>.
               </p>
               {editingScholarship ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-950">
@@ -1917,7 +2126,7 @@ export const StudentFeeRecordsPanel = () => {
                   })()}
                 </Select>
               </FormField>
-              <FormField label="Topped which year final? *">
+              <FormField label="Merit based on which year final? *">
                 <Select
                   value={scholarshipForm.toppedProgramYear}
                   onChange={(e) => {
@@ -1937,7 +2146,9 @@ export const StudentFeeRecordsPanel = () => {
                 >
                   {TOPPED_EXAM_OPTIONS.map((y) => (
                     <option key={y.value} value={String(y.value)}>
-                      {y.value === 0 ? y.label : `${y.label} finals`}
+                      {y.value === 0
+                        ? "Entrance examination"
+                        : `${y.label} final examination`}
                     </option>
                   ))}
                 </Select>
@@ -2019,7 +2230,7 @@ export const StudentFeeRecordsPanel = () => {
                     ? "Saving…"
                     : editingScholarship
                       ? "Save scholarship changes"
-                      : "Record topper scholarship"}
+                      : "Record merit scholarship"}
                 </Button>
               </div>
             </CardContent>
@@ -2028,7 +2239,7 @@ export const StudentFeeRecordsPanel = () => {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                Students with topper scholarship
+                Students with merit scholarship
               </CardTitle>
               <p className="text-sm text-slate-500">
                 Active and applied awards only. Edit, revoke, or delete to correct the
@@ -2040,7 +2251,7 @@ export const StudentFeeRecordsPanel = () => {
                 <LoadingState />
               ) : activeScholarshipAwards.length === 0 ? (
                 <EmptyState
-                  title="No topper scholarships yet"
+                  title="No merit scholarships yet"
                   description="Record a scholarship above. Students who receive one will appear here."
                 />
               ) : (
@@ -2050,7 +2261,7 @@ export const StudentFeeRecordsPanel = () => {
                       <tr>
                         <Th>Student</Th>
                         <Th>Batch / Year</Th>
-                        <Th>Topped</Th>
+                        <Th>Merit based on</Th>
                         <Th>Covers</Th>
                         <Th>Rank</Th>
                         <Th>Amount</Th>
@@ -2170,12 +2381,18 @@ export const StudentFeeRecordsPanel = () => {
             <div>
               <CardTitle className="text-base">All fee receipts</CardTitle>
               <p className="mt-1 text-xs text-slate-500">
-                Filter by batch, year, student search, and date range (BS or AD). Print
-                PDF for any receipt.
+                Filter by batch, year, student search, and date range (BS or AD).
+                Print PDF for any receipt.
                 {canAdminEdit
-                  ? " Super Admin / College Admin can edit or delete mistaken payments."
+                  ? " As Super Admin / Administrator you can Edit amount paid or Delete a payment — balances and accounts update automatically."
                   : ""}
               </p>
+              {canAdminEdit ? (
+                <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-950">
+                  <Pencil className="h-3.5 w-3.5" />
+                  Admin actions enabled: Edit payment · Delete payment
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -2343,7 +2560,8 @@ export const StudentFeeRecordsPanel = () => {
                       <Th>Batch / Year</Th>
                       <Th>Program year</Th>
                       <Th>Category</Th>
-                      <Th>Paid</Th>
+                      <Th>Fee paid</Th>
+                      <Th>Deposit</Th>
                       <Th>Scholarship</Th>
                       <Th>Remaining</Th>
                       <Th>Method</Th>
@@ -2380,6 +2598,11 @@ export const StudentFeeRecordsPanel = () => {
                             {feeCategory(row)}
                           </Td>
                           <Td>{formatCurrencyNpr(row.amountPaidNpr)}</Td>
+                          <Td>
+                            {(row.securityDepositPaidNpr ?? 0) > 0
+                              ? formatCurrencyNpr(row.securityDepositPaidNpr ?? 0)
+                              : "—"}
+                          </Td>
                           <Td>{formatCurrencyNpr(row.scholarshipNpr ?? 0)}</Td>
                           <Td>{formatCurrencyNpr(row.remainingDueNpr ?? 0)}</Td>
                           <Td className="text-sm">
@@ -2407,8 +2630,31 @@ export const StudentFeeRecordsPanel = () => {
                               "—"
                             )}
                           </Td>
-                          <Td>
-                            <div className="flex flex-wrap justify-end gap-1">
+                          <Td className="sticky right-0 bg-white/95 backdrop-blur-sm">
+                            <div className="flex min-w-[11rem] flex-wrap justify-end gap-1">
+                              {canAdminEdit ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="default"
+                                    title="Edit amount paid, deposit, charges, date…"
+                                    onClick={() => startEditReceipt(row)}
+                                  >
+                                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    title="Delete this payment and reverse accounts"
+                                    disabled={deleteCollectionMutation.isPending}
+                                    onClick={() => confirmDeleteReceipt(row)}
+                                  >
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                    Delete
+                                  </Button>
+                                </>
+                              ) : null}
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -2423,29 +2669,8 @@ export const StudentFeeRecordsPanel = () => {
                                 <Printer className="mr-1 h-3.5 w-3.5" />
                                 {printingReceiptId === row._id
                                   ? "Opening…"
-                                  : "Print PDF"}
+                                  : "PDF"}
                               </Button>
-                              {canAdminEdit ? (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => startEditReceipt(row)}
-                                  >
-                                    <Pencil className="mr-1 h-3.5 w-3.5" />
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    disabled={deleteCollectionMutation.isPending}
-                                    onClick={() => confirmDeleteReceipt(row)}
-                                  >
-                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                    Delete
-                                  </Button>
-                                </>
-                              ) : null}
                             </div>
                           </Td>
                         </tr>

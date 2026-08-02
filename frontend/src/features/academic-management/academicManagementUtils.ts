@@ -277,6 +277,40 @@ export const parseSubUnitsFromTopics = (topicsCovered?: string): string[] => {
     .filter((value, index, arr) => arr.indexOf(value) === index);
 };
 
+/** Normalize multi / legacy sub-unit title fields into a unique list. */
+export const normalizeSubUnitTitles = (
+  titles?: string[] | null,
+  legacyJoined?: string | null,
+): string[] => {
+  const fromArray = (titles ?? []).map((t) => t.trim()).filter(Boolean);
+  const fromLegacy = (legacyJoined ?? "")
+    .split(/[;\n|]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const list = fromArray.length > 0 ? fromArray : fromLegacy;
+  return list.filter(
+    (t, i, arr) =>
+      arr.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i,
+  );
+};
+
+export const joinSubUnitTitles = (titles: string[]): string =>
+  titles.map((t) => t.trim()).filter(Boolean).join("; ");
+
+/** Toggle a title in a multi-select list (case-insensitive). */
+export const toggleSubUnitTitle = (
+  current: string[],
+  title: string,
+  selected: boolean,
+): string[] => {
+  const trimmed = title.trim();
+  if (!trimmed) return current;
+  const without = current.filter(
+    (t) => t.toLowerCase() !== trimmed.toLowerCase(),
+  );
+  return selected ? [...without, trimmed] : without;
+};
+
 /** Map syllabus/session unit fields into a session-plan unit draft row. */
 export const mapSourceUnitToSessionUnit = (
   unit: {

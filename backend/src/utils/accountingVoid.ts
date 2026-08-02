@@ -42,6 +42,18 @@ export const voidFeeCollection = async (
   if (session) studentQuery.session(session);
   const student = await studentQuery;
   if (student) {
+    // Reverse security deposit held when this receipt collected a deposit
+    const depositPaid = Math.max(
+      0,
+      Number((collection as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0
+    );
+    if (depositPaid > 0) {
+      const held = Math.max(0, Number(student.securityDepositNpr) || 0);
+      const refunded = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
+      const nextHeld = Math.max(refunded, held - depositPaid);
+      student.securityDepositNpr = nextHeld;
+      await student.save(session ? { session } : undefined);
+    }
     await recalculateStudentFeesDue(student._id, schoolId, session);
   }
 };

@@ -33,6 +33,7 @@ import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getDefaultFiscalYearDates, getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
+import { filterOutOpeningTuitionCharges } from "../utils/accountingCalculations.js";
 import {
   ensureDefaultChartOfAccounts,
   postFeeRefundJournal,
@@ -616,6 +617,7 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
   const amountNpr = payload.amountNpr;
 
   // ── Admission security deposit refund (pass-out / withdrawal) ───────────
+  // Deposit must already have been collected via Student Fee Records payment.
   if (refundType === "DEPOSIT_REFUND") {
     if (student.securityDepositWaived) {
       throw new ApiError(
@@ -623,23 +625,15 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
         "Security deposit was not taken / cancelled for this student. No deposit refund is due."
       );
     }
-    // Register deposit if never stored but accountant provides original amount
-    if (
-      (!(student.securityDepositNpr > 0) || student.securityDepositNpr === 0) &&
-      payload.originalDepositNpr &&
-      payload.originalDepositNpr > 0
-    ) {
-      student.securityDepositNpr = payload.originalDepositNpr;
-    }
 
-    const held = student.securityDepositNpr ?? 0;
-    const alreadyRefunded = student.securityDepositRefundedNpr ?? 0;
+    const held = Math.max(0, Number(student.securityDepositNpr) || 0);
+    const alreadyRefunded = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
     const remaining = Math.max(0, held - alreadyRefunded);
 
-    if (held <= 0) {
+    if (held <= 0 || remaining <= 0) {
       throw new ApiError(
         400,
-        "No security deposit on record for this student. Enter the original admission deposit amount, then refund."
+        "No security deposit has been recorded for this student. Record the deposit under Student Fee Records → Record payment first, then process the refund."
       );
     }
     if (amountNpr > remaining + 0.001) {
@@ -692,7 +686,8 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
     amountNpr,
     paymentMethod: payload.paymentMethod,
     bankAccountId: payload.bankAccountId,
-    refundNumber
+    refundNumber,
+    isDepositRefund: refundType === "DEPOSIT_REFUND"
   });
 
   await recordCashEntry(req, {
@@ -870,7 +865,12 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
           totalFineNpr: totalFine,
           advanceBalanceNpr: advanceBalance,
           totalRefundsNpr: totalRefunds,
-          collections: reportType === "student-ledger" ? studentCollections : undefined
+          collections:
+            reportType === "student-ledger"
+              ? filterOutOpeningTuitionCharges(
+                  studentCollections as unknown as Array<Record<string, unknown>>
+                )
+              : undefined
         };
       });
 

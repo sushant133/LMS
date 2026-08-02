@@ -308,7 +308,9 @@ export const FEE_TYPES = [
   "MISC",
   "REFUND",
   "OTHER",
-  "ANNUAL"
+  "ANNUAL",
+  /** Admission caution / security deposit (liability — not fee income). */
+  "SECURITY_DEPOSIT"
 ] as const;
 
 export const PAYMENT_METHODS = [

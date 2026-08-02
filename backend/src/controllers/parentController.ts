@@ -545,32 +545,20 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
 
       const totalPaidNpr = collections.reduce((s, c) => s + (c.amountPaidNpr ?? 0), 0);
       const totalScholarshipNpr = collections.reduce((s, c) => s + (c.scholarshipNpr ?? 0), 0);
-      const yearWise = buildProgramYearFeeSummary(
-        collections as unknown as Array<Record<string, unknown>>,
-        awards as unknown as Array<Record<string, unknown>>
-      );
-
-      // When ledger has no rows yet, surface planned admission fees as charged amounts
       const planned = {
         1: Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0,
         2: Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0,
         3: Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0
       };
-      const yearWiseWithPlan = yearWise.map((y) => {
-        // Scholarship-covered years stay at zero remaining (do not re-open planned dues).
-        if (y.status === "SCHOLARSHIP" || (y.scholarshipNote && y.remainingNpr <= 0)) {
-          return y;
-        }
-        if (y.status !== "NO_RECORD") return y;
-        const plannedAmt = planned[y.programYear as 1 | 2 | 3] ?? 0;
-        if (plannedAmt <= 0) return y;
-        return {
-          ...y,
-          chargedNpr: plannedAmt,
-          remainingNpr: plannedAmt,
-          status: "DUE" as const
-        };
-      });
+      const yearWiseWithPlan = buildProgramYearFeeSummary(
+        collections as unknown as Array<Record<string, unknown>>,
+        awards as unknown as Array<Record<string, unknown>>,
+        planned
+      );
+      const feesDueFromPlan = yearWiseWithPlan.reduce(
+        (s, y) => s + Number(y.remainingNpr || 0),
+        0
+      );
 
       return {
         studentId: student._id.toString(),
@@ -580,11 +568,17 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
         rollNumber: student.rollNumber,
         admissionNumber: student.admissionNumber,
         registrationNumber: (student as { registrationNumber?: string }).registrationNumber || "",
-        feesDueNpr: student.feesDueNpr,
+        feesDueNpr: feesDueFromPlan,
         year1FeeNpr: planned[1],
         year2FeeNpr: planned[2],
         year3FeeNpr: planned[3],
+        securityDepositExpectedNpr:
+          Number((student as { securityDepositExpectedNpr?: number }).securityDepositExpectedNpr) ||
+          0,
         securityDepositNpr: Number((student as { securityDepositNpr?: number }).securityDepositNpr) || 0,
+        securityDepositRefundedNpr:
+          Number((student as { securityDepositRefundedNpr?: number }).securityDepositRefundedNpr) ||
+          0,
         totalPaidNpr,
         totalScholarshipNpr,
         yearWise: yearWiseWithPlan,
@@ -656,6 +650,8 @@ export const getParentPortal = asyncHandler(async (req: Request, res: Response) 
           next.year2FeeNpr = 0;
           next.year3FeeNpr = 0;
           next.securityDepositNpr = 0;
+          next.securityDepositExpectedNpr = 0;
+          next.securityDepositRefundedNpr = 0;
           next.yearWise = [];
         }
         if (!canAttendance) {

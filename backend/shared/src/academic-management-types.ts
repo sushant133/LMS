@@ -343,13 +343,18 @@ export interface AcademicLessonPlanItemRecord {
   lessonPlanId: string;
   serialNo: number;
   sessionPlanUnitId?: string;
-  /** Sub-topic selected from the session plan unit's topics list. */
+  /** Joined legacy display of planned sub-units. Prefer `subUnitTitles`. */
   subUnitTitle?: string;
+  /** One or more sub-units planned for this lesson. */
+  subUnitTitles?: string[];
   /** Hierarchical syllabus links (Subject → Chapter → Unit → Sub Unit → Child…). */
   syllabusId?: string;
   syllabusChapterId?: string;
   syllabusUnitId?: string;
+  /** Primary/legacy single sub-unit id. Prefer `syllabusSubUnitIds`. */
   syllabusSubUnitId?: string;
+  /** Syllabus sub-unit ids for multi-selected sub-units. */
+  syllabusSubUnitIds?: string[];
   subjectLabel: string;
   plannedTopic: string;
   description: string;
@@ -447,11 +452,15 @@ export interface AcademicLogBookEntryRecord extends AcademicManagementScope {
   lessonPlanId?: string;
   lessonPlanItemId?: string;
   sessionPlanUnitId?: string;
+  /** Joined legacy display. Prefer `subUnitTitles`. */
   subUnitTitle?: string;
+  /** Sub-units taught in this class (multi-select). */
+  subUnitTitles?: string[];
   syllabusId?: string;
   syllabusChapterId?: string;
   syllabusUnitId?: string;
   syllabusSubUnitId?: string;
+  syllabusSubUnitIds?: string[];
   academicYearBs: string;
   session: string;
   faculty?: string;

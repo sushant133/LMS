@@ -47,10 +47,11 @@ import {
   buildProgramYearFeeSummary,
   calculateFeeTotals,
   calculateNetSalary,
-  calculateSuggestedLateFee,
+  capProgramYearChargesNpr,
   computeBalanceAfterEntry,
   defaultCoversYearFromTopped,
   ensureActiveScholarshipAwardsApplied,
+  filterOutOpeningTuitionCharges,
   generateReceiptNumber,
   PROGRAM_YEAR_LABELS,
   recalculateStudentFeesDue,
@@ -89,7 +90,8 @@ import { voidFeeCollection, voidWithJournalReversal } from "../utils/accountingV
 import {
   formatNrsAmountInWords,
   hasAccountingPermission,
-  isInstitutionAdmin
+  isInstitutionAdmin,
+  normalizeUserRole
 } from "@phit-erp/shared";
 import {
   buildSalarySheet,
@@ -97,6 +99,7 @@ import {
 } from "../utils/salarySheetService.js";
 import { needsApprovalForAmount } from "./accountingApprovalController.js";
 import { FinancialApproval } from "../models/FinancialApproval.js";
+import { getUserSecondaryRoles } from "../utils/moduleAccessService.js";
 import { z } from "zod";
 
 const reverseReasonSchema = z.object({
@@ -106,6 +109,20 @@ const reverseReasonSchema = z.object({
 const emptyToUndef = (value?: string | null): string | undefined => {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+};
+
+/** Super Admin / College Admin (primary or secondary role) may edit/delete fee payments. */
+const assertCanEditOrDeleteFeePayment = async (req: {
+  user?: { userId: string; role: string };
+}): Promise<void> => {
+  const role = normalizeUserRole(req.user?.role ?? "");
+  if (isInstitutionAdmin(role)) return;
+  const secondary = await getUserSecondaryRoles(req.user!.userId);
+  if (secondary.some((r) => isInstitutionAdmin(normalizeUserRole(r)))) return;
+  throw new ApiError(
+    403,
+    "Only Super Admin or College Admin can edit or delete fee payment transactions"
+  );
 };
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
@@ -174,25 +191,37 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     CashBookEntry.find({ schoolId }).sort({ dateBs: -1, createdAt: -1 }).limit(10).lean()
   ]);
 
+  // Real payments only — exclude admission OPEN- plan rows from income / activity
+  const paymentCollections = filterOutOpeningTuitionCharges(
+    collections as unknown as Array<Record<string, unknown>>
+  ) as typeof collections;
+  const recentPayments = filterOutOpeningTuitionCharges(
+    recentCollections as unknown as Array<Record<string, unknown>>
+  ) as typeof recentCollections;
+
   const totalRegisterExpensesNpr = expenses.reduce((sum, item) => sum + item.amountNpr, 0);
   const totalSalaryPaidNpr = paidSalaries.reduce((sum, item) => sum + (item.netSalaryNpr || 0), 0);
   const totalPurchasesPaidNpr = paidPurchases.reduce((sum, item) => sum + (item.totalAmountNpr || 0), 0);
   const totalRefundsNpr = refunds.reduce((sum, item) => sum + (item.amountNpr || 0), 0);
   const totalOtherIncomeNpr = incomes.reduce((sum, item) => sum + item.amountNpr, 0);
-  const totalFeeIncomeNpr = collections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
-  const totalIncomeNpr = totalFeeIncomeNpr + totalOtherIncomeNpr;
+  // Tuition fee income for cards (exclude OPEN plan rows and security deposit liability)
+  const totalTuitionCollectedNpr = paymentCollections.reduce(
+    (sum, item) => sum + (item.amountPaidNpr || 0),
+    0
+  );
+  const totalIncomeNpr = totalTuitionCollectedNpr + totalOtherIncomeNpr;
   // Cash-basis outflow for dashboard card
   const totalExpensesNpr =
     totalRegisterExpensesNpr + totalSalaryPaidNpr + totalPurchasesPaidNpr + totalRefundsNpr;
 
-  const todayCollectionNpr = collections
+  const todayCollectionNpr = paymentCollections
     .filter((item) => item.paidDateBs === today)
     .reduce((sum, item) => sum + item.amountPaidNpr, 0);
-  const monthlyCollectionNpr = collections
+  const monthlyCollectionNpr = paymentCollections
     .filter((item) => typeof item.paidDateBs === "string" && item.paidDateBs.startsWith(currentMonth))
     .reduce((sum, item) => sum + item.amountPaidNpr, 0);
 
-  const feeByMonth = collections.reduce<Record<string, number>>((acc, item) => {
+  const feeByMonth = paymentCollections.reduce<Record<string, number>>((acc, item) => {
     if (typeof item.paidDateBs !== "string" || item.paidDateBs.length < 7) return acc;
     const month = item.paidDateBs.slice(0, 7);
     acc[month] = (acc[month] ?? 0) + item.amountPaidNpr;
@@ -204,9 +233,25 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     return acc;
   }, {});
 
-  const revenueByFeeType = collections.reduce<Record<string, number>>((acc, item) => {
-    for (const breakdown of item.feeBreakdown ?? []) {
-      acc[breakdown.feeType] = (acc[breakdown.feeType] ?? 0) + breakdown.amountNpr;
+  // Revenue by type from cash actually received (not OPEN plan charge amounts)
+  const revenueByFeeType = paymentCollections.reduce<Record<string, number>>((acc, item) => {
+    const paid = Number(item.amountPaidNpr) || 0;
+    const deposit = Number((item as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0;
+    if (deposit > 0) {
+      acc.SECURITY_DEPOSIT = (acc.SECURITY_DEPOSIT ?? 0) + deposit;
+    }
+    if (paid <= 0) return acc;
+    const tuitionLines = (item.feeBreakdown ?? []).filter(
+      (b) => String(b.feeType) !== "SECURITY_DEPOSIT"
+    );
+    const lineTotal = tuitionLines.reduce((s, b) => s + Number(b.amountNpr || 0), 0);
+    if (lineTotal > 0) {
+      for (const breakdown of tuitionLines) {
+        const share = paid * (Number(breakdown.amountNpr || 0) / lineTotal);
+        acc[breakdown.feeType] = (acc[breakdown.feeType] ?? 0) + share;
+      }
+    } else {
+      acc.TUITION = (acc.TUITION ?? 0) + paid;
     }
     return acc;
   }, {});
@@ -257,7 +302,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       .slice(-6)
       .map(([label, amount]) => ({ label, amount })),
     revenueSources: Object.entries(revenueByFeeType).map(([label, amount]) => ({ label, amount })),
-    recentCollections,
+    recentCollections: recentPayments,
     recentExpenses,
     recentTransactions: cashEntries.map((entry) => ({
       dateBs: entry.dateBs,
@@ -271,7 +316,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     totalIncomeNpr,
     totalExpensesNpr,
     cashBalanceNpr,
-    recentFees: recentCollections.map((c) => ({
+    recentFees: recentPayments.map((c) => ({
       id: c._id.toString(),
       dateBs: c.paidDateBs,
       voucherNo: c.receiptNumber,
@@ -413,26 +458,47 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
     const studentCollections = collections.filter(
       (item) => item.studentId != null && String(item.studentId) === sid
     );
-    const totalPaid = studentCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
-    const totalDiscount = studentCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
-    const totalScholarship = studentCollections.reduce((sum, item) => sum + (item.scholarshipNpr ?? 0), 0);
-    const lastPayment = studentCollections
-      .filter((c) => typeof c.paidDateBs === "string")
+    const paymentCollections = filterOutOpeningTuitionCharges(
+      studentCollections as unknown as Array<Record<string, unknown>>
+    ) as typeof studentCollections;
+    const totalPaid = paymentCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
+    const totalDiscount = paymentCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
+    const totalScholarship = paymentCollections.reduce(
+      (sum, item) => sum + (item.scholarshipNpr ?? 0),
+      0
+    );
+    const lastPayment = paymentCollections
+      .filter((c) => typeof c.paidDateBs === "string" && Number(c.amountPaidNpr) > 0)
       .sort((a, b) => b.paidDateBs.localeCompare(a.paidDateBs))[0];
     const studentAwards = awards.filter((a) => a.studentId != null && String(a.studentId) === sid);
 
     const primaryId = college ? student.batchId?.toString() : student.classId?.toString();
     const secondaryId = college ? student.yearId?.toString() : student.sectionId?.toString();
 
+    const plannedFees = {
+      1: Math.max(0, Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0),
+      2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
+      3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
+    };
+    const yearWise = buildProgramYearFeeSummary(
+      studentCollections,
+      studentAwards,
+      plannedFees
+    );
+    const yearWiseRemaining = yearWise.reduce(
+      (s, y) => s + Number(y.remainingNpr || 0),
+      0
+    );
+
     return {
       student,
       className: primaryId ? (primaryMap.get(primaryId) ?? "") : "",
       sectionName: secondaryId ? (secondaryMap.get(secondaryId) ?? "") : "",
-      previousDueNpr: student.feesDueNpr ?? 0,
+      previousDueNpr: yearWiseRemaining,
       totalPaidNpr: totalPaid,
       totalDiscountNpr: totalDiscount,
       totalScholarshipNpr: totalScholarship,
-      remainingDueNpr: student.feesDueNpr ?? 0,
+      remainingDueNpr: yearWiseRemaining,
       lastPaymentDateBs: lastPayment?.paidDateBs,
       lastPaymentDateAd: (() => {
         if (!lastPayment?.paidDateBs) return undefined;
@@ -444,7 +510,7 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
           return undefined;
         }
       })(),
-      yearWise: buildProgramYearFeeSummary(studentCollections, studentAwards)
+      yearWise
     };
   });
 
@@ -516,6 +582,24 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     ];
   }
 
+  const totalRefunds = refunds.reduce((sum, item) => sum + item.amountNpr, 0);
+
+  const activeAwards = awardRows.filter((a) => a.status !== "REVOKED");
+  // Repair inflated dues when opening the fee ledger
+  try {
+    const repairedDue = await recalculateStudentFeesDue(student._id, schoolId);
+    (student as { feesDueNpr?: number }).feesDueNpr = repairedDue;
+    feeCollections = await FeeCollection.find({
+      schoolId,
+      studentId: student._id,
+      isDeleted: false
+    })
+      .sort({ paidDateBs: -1 })
+      .lean();
+  } catch {
+    // Non-blocking
+  }
+
   const totalPaid = feeCollections.reduce((sum, item) => sum + item.amountPaidNpr, 0);
   const totalDiscount = feeCollections.reduce((sum, item) => sum + (item.discountNpr ?? 0), 0);
   const totalScholarship = feeCollections.reduce(
@@ -527,7 +611,6 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     (sum, item) => sum + (item.advancePaymentNpr ?? 0),
     0
   );
-  const totalRefunds = refunds.reduce((sum, item) => sum + item.amountNpr, 0);
 
   const dueInstallments = feeCollections
     .filter((c) => c.isInstallment && c.installmentNumber && c.totalInstallments)
@@ -538,10 +621,15 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
       dueDateBs: c.paidDateBs
     }));
 
-  const activeAwards = awardRows.filter((a) => a.status !== "REVOKED");
+  const plannedFees = {
+    1: Math.max(0, Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0),
+    2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
+    3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
+  };
   const yearWise = buildProgramYearFeeSummary(
     feeCollections as unknown as Array<Record<string, unknown>>,
-    activeAwards
+    activeAwards,
+    plannedFees
   );
   const yearWiseRemaining = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
 
@@ -550,12 +638,19 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
       ? activeAwards
           .map(
             (a) =>
-              `Topped ${YEAR_LABELS[Number(a.toppedProgramYear)] ?? a.toppedProgramYear} → ${YEAR_LABELS[Number(a.coversProgramYear)] ?? a.coversProgramYear} scholarship`
+              `Merit in ${YEAR_LABELS[Number(a.toppedProgramYear)] ?? a.toppedProgramYear} → ${YEAR_LABELS[Number(a.coversProgramYear)] ?? a.coversProgramYear} scholarship`
           )
           .join("; ")
       : totalScholarship > 0
         ? "Scholarship Applied"
         : "None";
+
+  const stuDeposit = student as {
+    securityDepositExpectedNpr?: number;
+    securityDepositNpr?: number;
+    securityDepositRefundedNpr?: number;
+    securityDepositWaived?: boolean;
+  };
 
   return sendSuccess(res, "Student financial history fetched", {
     student,
@@ -565,8 +660,8 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     yearName: college ? (secondaryDoc?.name ?? "") : undefined,
     guardianName: student.guardianName,
     scholarshipStatus,
-    totalPayableNpr:
-      totalPaid + yearWiseRemaining + totalDiscount + totalScholarship,
+    // Payable = year plan total (charged); outstanding = remaining after payments
+    totalPayableNpr: yearWise.reduce((s, y) => s + Number(y.chargedNpr || 0), 0),
     outstandingDueNpr: yearWiseRemaining,
     totalPaidNpr: totalPaid,
     totalDiscountNpr: totalDiscount,
@@ -574,7 +669,14 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
     totalFineNpr: totalFine,
     advanceBalanceNpr: advanceBalance,
     totalRefundsNpr: totalRefunds,
-    collections: feeCollections,
+    securityDepositExpectedNpr: Number(stuDeposit.securityDepositExpectedNpr) || 0,
+    securityDepositHeldNpr: Number(stuDeposit.securityDepositNpr) || 0,
+    securityDepositRefundedNpr: Number(stuDeposit.securityDepositRefundedNpr) || 0,
+    securityDepositWaived: Boolean(stuDeposit.securityDepositWaived),
+    // Only real payments — admission year-fee plan rows are not payment history
+    collections: filterOutOpeningTuitionCharges(
+      feeCollections as unknown as Array<Record<string, unknown>>
+    ),
     refunds: refunds.map((r) => ({
       _id: r._id.toString(),
       refundNumber: r.refundNumber,
@@ -621,8 +723,13 @@ export const listFeeReceipts = asyncHandler(async (req: Request, res: Response) 
         { path: "sectionId", select: "name" }
       ]
     })
-    .sort({ paidDateBs: -1 });
-  return sendSuccess(res, "Fee receipts fetched", collections);
+    .sort({ paidDateBs: -1 })
+    .lean();
+  // Hide system OPEN- year-plan rows (fee structure at admission, not payments)
+  const paymentsOnly = filterOutOpeningTuitionCharges(
+    collections as unknown as Array<Record<string, unknown>>
+  );
+  return sendSuccess(res, "Fee receipts fetched", paymentsOnly);
 });
 
 export const collectAccountingFee = asyncHandler(async (req: Request, res: Response) => {
@@ -647,16 +754,35 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
   }
 
   const currentChargesNpr = payload.currentChargesNpr || structure?.amountNpr || 0;
+  const securityDepositPaidNpr = Math.max(0, Number(payload.securityDepositPaidNpr) || 0);
   const accountantName = await getActorName(req);
-  const feeBreakdown =
+  let feeBreakdown =
     payload.feeBreakdown.length > 0
-      ? payload.feeBreakdown
+      ? [...payload.feeBreakdown]
       : structure
         ? [{ feeType: structure.feeType, title: structure.title, amountNpr: currentChargesNpr }]
         : [];
 
+  // Append security deposit line when collecting deposit with this receipt
+  if (securityDepositPaidNpr > 0) {
+    const hasDepositLine = feeBreakdown.some(
+      (b) => String(b.feeType) === "SECURITY_DEPOSIT"
+    );
+    if (!hasDepositLine) {
+      feeBreakdown = [
+        ...feeBreakdown,
+        {
+          feeType: "SECURITY_DEPOSIT" as const,
+          title: "Security / caution deposit",
+          amountNpr: securityDepositPaidNpr
+        }
+      ];
+    }
+  }
+
   const fiscalYearBs = getFiscalYearFromBsDate(paidDateBs, settings.currentFiscalYearBs);
   const paymentMethod = payload.paymentMethod ?? settings.defaultPaymentMethod;
+  const cashReceivedNpr = (payload.amountPaidNpr || 0) + securityDepositPaidNpr;
 
   const collection = await withFinancialTransaction(async (session) => {
     // Reload student inside the transaction to reduce lost-update races on feesDueNpr
@@ -665,14 +791,59 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     const student = await studentQuery;
     if (!student) throw new ApiError(404, "Student not found");
 
+    if (securityDepositPaidNpr > 0) {
+      if (student.securityDepositWaived) {
+        throw new ApiError(
+          400,
+          "Security deposit was marked not taken / cancelled for this student. Clear that flag before recording a deposit."
+        );
+      }
+      student.securityDepositNpr =
+        (Number(student.securityDepositNpr) || 0) + securityDepositPaidNpr;
+      // If expected was never set, adopt first collected amount as expected plan
+      if (!(Number(student.securityDepositExpectedNpr) > 0)) {
+        student.securityDepositExpectedNpr = student.securityDepositNpr;
+      }
+      await student.save(session ? { session } : undefined);
+    }
+
     const previousDueNpr = student.feesDueNpr ?? 0;
-    const lateFeeNpr =
-      payload.lateFeeNpr > 0
-        ? payload.lateFeeNpr
-        : calculateSuggestedLateFee(previousDueNpr, settings.lateFinePercent);
+    // Late fee / fine is disabled for student fee collections.
+    const lateFeeNpr = 0;
+
+    // Avoid double-charging: admission OPEN rows already booked year plan fees.
+    // Payment "Fee charged" should only add unbilled amount for that program year.
+    let effectiveChargesNpr = currentChargesNpr;
+    const programYear = payload.programYear;
+    if (programYear === 1 || programYear === 2 || programYear === 3) {
+      const priorYearQuery = FeeCollection.find({
+        schoolId,
+        studentId: payload.studentId,
+        programYear,
+        isDeleted: false
+      }).select("currentChargesNpr");
+      if (session) priorYearQuery.session(session);
+      const priorYearRows = await priorYearQuery.lean();
+      const priorCharged = priorYearRows.reduce(
+        (s, r) => s + Number(r.currentChargesNpr ?? 0),
+        0
+      );
+      const plannedMap: Record<number, number> = {
+        1: Math.max(0, Number(student.year1FeeNpr) || 0),
+        2: Math.max(0, Number(student.year2FeeNpr) || 0),
+        3: Math.max(0, Number(student.year3FeeNpr) || 0)
+      };
+      effectiveChargesNpr = capProgramYearChargesNpr({
+        programYear,
+        requestedChargesNpr: currentChargesNpr,
+        priorChargedNpr: priorCharged,
+        plannedYearFeeNpr: plannedMap[programYear] ?? 0
+      });
+    }
+
     const totals = calculateFeeTotals({
       previousDueNpr,
-      currentChargesNpr,
+      currentChargesNpr: effectiveChargesNpr,
       amountPaidNpr: payload.amountPaidNpr,
       discountNpr: payload.discountNpr,
       scholarshipNpr: payload.scholarshipNpr,
@@ -692,9 +863,26 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     const verificationCode = generateReceiptVerificationCode(
       schoolId.toString(),
       receiptNumber,
-      payload.amountPaidNpr,
+      cashReceivedNpr,
       paidDateBs
     );
+
+    // Align breakdown with effective (non-duplicated) charges
+    let storedBreakdown = feeBreakdown;
+    if (effectiveChargesNpr <= 0) {
+      storedBreakdown = feeBreakdown.filter(
+        (b) => String(b.feeType) === "SECURITY_DEPOSIT"
+      );
+    } else if (
+      effectiveChargesNpr !== currentChargesNpr &&
+      storedBreakdown.length > 0
+    ) {
+      storedBreakdown = storedBreakdown.map((b) =>
+        String(b.feeType) === "SECURITY_DEPOSIT"
+          ? b
+          : { ...b, amountNpr: effectiveChargesNpr }
+      );
+    }
 
     const [created] = await FeeCollection.create(
       [
@@ -710,8 +898,9 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           semesterBs: payload.semesterBs ?? structure?.semesterBs,
           programYear: payload.programYear,
           previousDueNpr,
-          currentChargesNpr,
+          currentChargesNpr: effectiveChargesNpr,
           amountPaidNpr: payload.amountPaidNpr,
+          securityDepositPaidNpr,
           discountNpr: payload.discountNpr,
           scholarshipNpr: payload.scholarshipNpr,
           scholarshipType: payload.scholarshipType ?? "NONE",
@@ -724,7 +913,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           receivedByName: payload.receivedByName?.trim() || "",
           paidByName: payload.paidByName?.trim() || "",
           verificationCode,
-          feeBreakdown,
+          feeBreakdown: storedBreakdown,
           attachments: payload.attachments ?? [],
           isInstallment: payload.isInstallment,
           installmentNumber: payload.installmentNumber,
@@ -758,21 +947,32 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     // Replay all collections for authoritative outstanding balance (handles concurrent cashiers better)
     await recalculateStudentFeesDue(payload.studentId, schoolId, session);
 
-    await recordCashEntry(
-      req,
-      {
-        dateBs: paidDateBs,
-        entryType: "CREDIT",
-        category: "Fee Collection",
-        description: `Fee receipt ${receiptNumber}`,
-        amountNpr: payload.amountPaidNpr,
-        paymentMethod,
-        referenceType: "FeeCollection",
-        referenceId: created._id.toString(),
-        bankAccountId: payload.bankAccountId
-      },
-      session
-    );
+    if (cashReceivedNpr > 0) {
+      const cashCategory =
+        securityDepositPaidNpr > 0 && payload.amountPaidNpr <= 0
+          ? "Security Deposit Collection"
+          : securityDepositPaidNpr > 0
+            ? "Fee Collection + Security Deposit"
+            : "Fee Collection";
+      await recordCashEntry(
+        req,
+        {
+          dateBs: paidDateBs,
+          entryType: "CREDIT",
+          category: cashCategory,
+          description:
+            securityDepositPaidNpr > 0
+              ? `Receipt ${receiptNumber} (fee ${payload.amountPaidNpr} + deposit ${securityDepositPaidNpr})`
+              : `Fee receipt ${receiptNumber}`,
+          amountNpr: cashReceivedNpr,
+          paymentMethod,
+          referenceType: "FeeCollection",
+          referenceId: created._id.toString(),
+          bankAccountId: payload.bankAccountId
+        },
+        session
+      );
+    }
 
     await postFeeCollectionJournal({
       schoolId,
@@ -781,6 +981,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       studentId: payload.studentId,
       dateBs: paidDateBs,
       amountPaidNpr: payload.amountPaidNpr,
+      securityDepositPaidNpr,
       discountNpr: payload.discountNpr,
       scholarshipNpr: payload.scholarshipNpr,
       lateFeeNpr,
@@ -801,10 +1002,17 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     after: collection
   });
 
-  return sendSuccess(res, "Fee collected successfully", collection, 201);
+  return sendSuccess(
+    res,
+    securityDepositPaidNpr > 0
+      ? "Fee and security deposit recorded successfully"
+      : "Fee collected successfully",
+    collection,
+    201
+  );
 });
 
-/** Record topper scholarship: topped Entrance/1st/2nd → waive next program year fees. */
+/** Record merit scholarship: merit in Entrance/1st/2nd final → waive next program year fees. */
 export const createStudentScholarshipAward = asyncHandler(async (req: Request, res: Response) => {
   const payload = studentScholarshipAwardSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
@@ -847,7 +1055,7 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
     amountNpr: payload.amountNpr ?? 0,
     reason:
       payload.reason?.trim() ||
-      `Topped ${examPhrase} — scholarship for ${coversLabel}`,
+      `Merit in ${examPhrase} — scholarship for ${coversLabel}`,
     notes: payload.notes ?? "",
     status: "ACTIVE",
     createdBy: req.user!.userId
@@ -887,7 +1095,7 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
 
   return sendSuccess(
     res,
-    `Scholarship recorded: ${coversLabel} fee waiver (topped ${toppedLabel})${
+    `Merit scholarship recorded: ${coversLabel} fee waiver (based on ${toppedLabel})${
       applied.appliedNpr > 0
         ? ` — NPR ${applied.appliedNpr.toLocaleString("en-NP")} applied; year dues set to zero`
         : ""
@@ -967,7 +1175,7 @@ export const updateStudentScholarshipAward = asyncHandler(async (req: Request, r
       award.toppedProgramYear === 0
         ? "Entrance examination"
         : `${toppedLabel} final examination`;
-    award.reason = `Topped ${examPhrase} — scholarship for ${coversLabel}`;
+    award.reason = `Merit in ${examPhrase} — scholarship for ${coversLabel}`;
   }
 
   // Undo previous ledger application, then re-apply with new settings
@@ -1117,12 +1325,7 @@ export const deleteStudentScholarshipAward = asyncHandler(async (req: Request, r
  * recalculate the student outstanding balance (profile + ledger).
  */
 export const updateAccountingFeeCollection = asyncHandler(async (req: Request, res: Response) => {
-  if (!isInstitutionAdmin(req.user!.role)) {
-    throw new ApiError(
-      403,
-      "Only Super Admin or College Admin can edit fee payment transactions"
-    );
-  }
+  await assertCanEditOrDeleteFeePayment(req);
 
   const payload = enhancedFeeCollectionSchema.partial().parse(req.body);
   const schoolId = tenantObjectId(req);
@@ -1165,7 +1368,15 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
 
   const nextAmountPaid =
     payload.amountPaidNpr !== undefined ? payload.amountPaidNpr : existing.amountPaidNpr;
-  const nextCharges =
+  const prevDepositPaid = Math.max(
+    0,
+    Number((existing as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0
+  );
+  const nextDepositPaid =
+    payload.securityDepositPaidNpr !== undefined
+      ? Math.max(0, Number(payload.securityDepositPaidNpr) || 0)
+      : prevDepositPaid;
+  let nextCharges =
     payload.currentChargesNpr !== undefined
       ? payload.currentChargesNpr
       : existing.currentChargesNpr;
@@ -1175,16 +1386,44 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
     payload.scholarshipNpr !== undefined
       ? payload.scholarshipNpr
       : existing.scholarshipNpr ?? 0;
-  const nextLateFee =
-    payload.lateFeeNpr !== undefined ? payload.lateFeeNpr : existing.lateFeeNpr ?? 0;
+  // Late fee / fine disabled for student fee collections
+  const nextLateFee = 0;
   const nextPaymentMethod =
     payload.paymentMethod !== undefined ? payload.paymentMethod : existing.paymentMethod;
   const nextBankAccountId =
     payload.bankAccountId !== undefined ? payload.bankAccountId : existing.bankAccountId?.toString();
-  const nextFeeBreakdown =
+  type BreakdownLine = { feeType: string; title: string; amountNpr: number };
+  const existingBreakdown: BreakdownLine[] = (existing.feeBreakdown ?? []).map((b) => ({
+    feeType: String(b.feeType),
+    title: String(b.title),
+    amountNpr: Number(b.amountNpr) || 0
+  }));
+  let nextFeeBreakdown: BreakdownLine[] =
     payload.feeBreakdown !== undefined && payload.feeBreakdown.length > 0
-      ? payload.feeBreakdown
-      : existing.feeBreakdown ?? [];
+      ? payload.feeBreakdown.map((b) => ({
+          feeType: String(b.feeType),
+          title: String(b.title),
+          amountNpr: Number(b.amountNpr) || 0
+        }))
+      : existingBreakdown;
+  // Keep fee breakdown deposit line in sync with securityDepositPaidNpr
+  if (nextDepositPaid > 0) {
+    const withoutDeposit = nextFeeBreakdown.filter(
+      (b) => String(b.feeType) !== "SECURITY_DEPOSIT"
+    );
+    nextFeeBreakdown = [
+      ...withoutDeposit,
+      {
+        feeType: "SECURITY_DEPOSIT",
+        title: "Security / caution deposit",
+        amountNpr: nextDepositPaid
+      }
+    ];
+  } else {
+    nextFeeBreakdown = nextFeeBreakdown.filter(
+      (b) => String(b.feeType) !== "SECURITY_DEPOSIT"
+    );
+  }
   const nextProgramYear =
     payload.programYear !== undefined ? payload.programYear : existing.programYear;
   const nextScholarshipType =
@@ -1194,13 +1433,15 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
 
   const accountingFieldsChanged =
     nextAmountPaid !== existing.amountPaidNpr ||
+    nextDepositPaid !== prevDepositPaid ||
     nextCharges !== existing.currentChargesNpr ||
     nextDiscount !== (existing.discountNpr ?? 0) ||
     nextScholarship !== (existing.scholarshipNpr ?? 0) ||
     nextLateFee !== (existing.lateFeeNpr ?? 0) ||
     nextPaidDateBs !== existing.paidDateBs ||
     nextPaymentMethod !== existing.paymentMethod ||
-    (payload.feeBreakdown !== undefined && payload.feeBreakdown.length > 0);
+    (payload.feeBreakdown !== undefined && payload.feeBreakdown.length > 0) ||
+    payload.securityDepositPaidNpr !== undefined;
 
   const updated = await withFinancialTransaction(async (session) => {
     if (accountingFieldsChanged) {
@@ -1215,29 +1456,47 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
       );
     }
 
-    // Recompute previous due from other active collections before this one
-    const priorQuery = FeeCollection.find({
-      schoolId,
-      studentId: existing.studentId,
-      isDeleted: false,
-      _id: { $ne: existing._id },
-      createdAt: { $lte: existing.createdAt }
-    }).sort({ createdAt: 1 });
-    if (session) priorQuery.session(session);
-    const priorCollections = await priorQuery.lean();
-
-    let previousDueNpr = 0;
-    for (const row of priorCollections) {
-      const t = calculateFeeTotals({
-        previousDueNpr,
-        currentChargesNpr: row.currentChargesNpr ?? 0,
-        amountPaidNpr: row.amountPaidNpr,
-        discountNpr: row.discountNpr ?? 0,
-        scholarshipNpr: row.scholarshipNpr ?? 0,
-        lateFeeNpr: row.lateFeeNpr ?? 0
+    // Cap charges against year plan / other rows so edit cannot re-double OPEN plan
+    const programYearForCap =
+      payload.programYear !== undefined ? payload.programYear : existing.programYear;
+    if (programYearForCap === 1 || programYearForCap === 2 || programYearForCap === 3) {
+      const studentPlanQuery = Student.findOne({
+        _id: existing.studentId,
+        schoolId
+      }).select("year1FeeNpr year2FeeNpr year3FeeNpr");
+      if (session) studentPlanQuery.session(session);
+      const studentForPlan = await studentPlanQuery.lean();
+      const priorYearQuery = FeeCollection.find({
+        schoolId,
+        studentId: existing.studentId,
+        programYear: programYearForCap,
+        isDeleted: false,
+        _id: { $ne: existing._id }
+      }).select("currentChargesNpr");
+      if (session) priorYearQuery.session(session);
+      const priorYearRows = await priorYearQuery.lean();
+      const priorCharged = priorYearRows.reduce(
+        (s, r) => s + Number(r.currentChargesNpr ?? 0),
+        0
+      );
+      const plannedMap: Record<number, number> = {
+        1: Math.max(0, Number(studentForPlan?.year1FeeNpr) || 0),
+        2: Math.max(0, Number(studentForPlan?.year2FeeNpr) || 0),
+        3: Math.max(0, Number(studentForPlan?.year3FeeNpr) || 0)
+      };
+      nextCharges = capProgramYearChargesNpr({
+        programYear: programYearForCap,
+        requestedChargesNpr: nextCharges,
+        priorChargedNpr: priorCharged,
+        plannedYearFeeNpr: plannedMap[programYearForCap] ?? 0
       });
-      previousDueNpr = t.remainingDueNpr;
     }
+
+    // Snapshot previous due for the receipt only (authoritative balance via recalculate after)
+    const studentBalQuery = Student.findById(existing.studentId).select("feesDueNpr");
+    if (session) studentBalQuery.session(session);
+    const studentBal = await studentBalQuery.lean();
+    const previousDueNpr = Math.max(0, Number(studentBal?.feesDueNpr ?? 0));
 
     const totals = calculateFeeTotals({
       previousDueNpr,
@@ -1255,6 +1514,8 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
       settings.currentFiscalYearBs
     );
     existing.amountPaidNpr = nextAmountPaid;
+    (existing as { securityDepositPaidNpr?: number }).securityDepositPaidNpr =
+      nextDepositPaid;
     existing.currentChargesNpr = nextCharges;
     existing.discountNpr = nextDiscount;
     existing.scholarshipNpr = nextScholarship;
@@ -1284,9 +1545,7 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
     }
     if (nextProgramYear !== undefined) existing.programYear = nextProgramYear;
     if (nextScholarshipType) existing.scholarshipType = nextScholarshipType;
-    if (nextFeeBreakdown.length > 0) {
-      existing.feeBreakdown = nextFeeBreakdown as typeof existing.feeBreakdown;
-    }
+    existing.feeBreakdown = nextFeeBreakdown as typeof existing.feeBreakdown;
     if (payload.academicYearBs !== undefined) {
       existing.academicYearBs = emptyToUndef(payload.academicYearBs);
     }
@@ -1296,22 +1555,52 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
 
     await existing.save(session ? { session } : undefined);
 
+    // Adjust student held deposit when deposit amount on this receipt changes
+    if (nextDepositPaid !== prevDepositPaid) {
+      const studentQuery = Student.findOne({ _id: existing.studentId, schoolId });
+      if (session) studentQuery.session(session);
+      const student = await studentQuery;
+      if (student) {
+        if (nextDepositPaid > 0 && student.securityDepositWaived) {
+          throw new ApiError(
+            400,
+            "Security deposit was marked not taken for this student. Cannot set deposit on this receipt."
+          );
+        }
+        const delta = nextDepositPaid - prevDepositPaid;
+        const held = Math.max(0, Number(student.securityDepositNpr) || 0);
+        const refunded = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
+        const nextHeld = Math.max(refunded, held + delta);
+        student.securityDepositNpr = nextHeld;
+        if (nextHeld > 0 && !(Number(student.securityDepositExpectedNpr) > 0)) {
+          student.securityDepositExpectedNpr = nextHeld;
+        }
+        await student.save(session ? { session } : undefined);
+      }
+    }
+
     if (accountingFieldsChanged) {
-      await recordCashEntry(
-        req,
-        {
-          dateBs: nextPaidDateBs,
-          entryType: "CREDIT",
-          category: "Fee Collection",
-          description: `Fee receipt ${existing.receiptNumber} (edited)`,
-          amountNpr: nextAmountPaid,
-          paymentMethod: nextPaymentMethod,
-          referenceType: "FeeCollection",
-          referenceId: existing._id.toString(),
-          bankAccountId: nextBankAccountId
-        },
-        session
-      );
+      const cashReceived = nextAmountPaid + nextDepositPaid;
+      if (cashReceived > 0) {
+        await recordCashEntry(
+          req,
+          {
+            dateBs: nextPaidDateBs,
+            entryType: "CREDIT",
+            category:
+              nextDepositPaid > 0
+                ? "Fee Collection + Security Deposit"
+                : "Fee Collection",
+            description: `Fee receipt ${existing.receiptNumber} (edited)`,
+            amountNpr: cashReceived,
+            paymentMethod: nextPaymentMethod,
+            referenceType: "FeeCollection",
+            referenceId: existing._id.toString(),
+            bankAccountId: nextBankAccountId
+          },
+          session
+        );
+      }
 
       await postFeeCollectionJournal({
         schoolId,
@@ -1320,6 +1609,7 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
         studentId: existing.studentId,
         dateBs: nextPaidDateBs,
         amountPaidNpr: nextAmountPaid,
+        securityDepositPaidNpr: nextDepositPaid,
         discountNpr: nextDiscount,
         scholarshipNpr: nextScholarship,
         lateFeeNpr: nextLateFee,
@@ -1357,12 +1647,7 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
 });
 
 export const reverseFeeCollection = asyncHandler(async (req: Request, res: Response) => {
-  if (!isInstitutionAdmin(req.user!.role)) {
-    throw new ApiError(
-      403,
-      "Only Super Admin or College Admin can delete (reverse) fee payment transactions"
-    );
-  }
+  await assertCanEditOrDeleteFeePayment(req);
 
   const payload = reverseReasonSchema.parse(req.body ?? { reason: "Deleted by administrator" });
   const schoolId = tenantObjectId(req);
@@ -1479,9 +1764,18 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
     college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean()
   ]);
 
-  const feeTitle = collection.feeBreakdown?.map((item) => item.title).join(", ") || "College Fee";
+  const depositPaid = Math.max(
+    0,
+    Number((collection as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0
+  );
+  const feeTitle =
+    collection.feeBreakdown?.map((item) => item.title).join(", ") ||
+    (depositPaid > 0 && collection.amountPaidNpr <= 0
+      ? "Security Deposit"
+      : "College Fee");
   const isReprint = (collection.printCount ?? 0) > 0;
   const printAction = isReprint ? "accounting.receipt.reprint" : "accounting.receipt.print";
+  const cashTotal = collection.amountPaidNpr + depositPaid;
 
   collection.printCount = (collection.printCount ?? 0) + 1;
   collection.lastPrintedAt = new Date();
@@ -1511,10 +1805,10 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
       className: classDoc?.name ?? "",
       sectionName: sectionDoc?.name ?? "",
       feeTitle,
-      amountPaidNpr: collection.amountPaidNpr,
+      amountPaidNpr: cashTotal,
       discountNpr: collection.discountNpr ?? 0,
       lateFeeNpr: collection.lateFeeNpr ?? 0,
-      totalPaid: collection.amountPaidNpr,
+      totalPaid: cashTotal,
       scholarshipNpr: collection.scholarshipNpr ?? 0,
       remainingDueNpr: collection.remainingDueNpr ?? 0,
       paymentMethod: collection.paymentMethod ?? "CASH",

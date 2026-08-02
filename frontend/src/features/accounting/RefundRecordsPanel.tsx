@@ -46,8 +46,10 @@ type StudentPop = {
   user?: { fullName?: string };
   admissionNumber?: string;
   academicStatus?: string;
+  securityDepositExpectedNpr?: number;
   securityDepositNpr?: number;
   securityDepositRefundedNpr?: number;
+  securityDepositWaived?: boolean;
   batchId?: string;
   yearId?: string;
 };
@@ -183,9 +185,16 @@ export const RefundRecordsPanel = () => {
     [students, form.studentId],
   );
 
+  const depositExpected =
+    selectedStudent?.securityDepositExpectedNpr ??
+    selectedStudent?.securityDepositNpr ??
+    0;
   const depositHeld = selectedStudent?.securityDepositNpr ?? 0;
   const depositRefunded = selectedStudent?.securityDepositRefundedNpr ?? 0;
   const depositRemaining = Math.max(0, depositHeld - depositRefunded);
+  const depositWaived = Boolean(selectedStudent?.securityDepositWaived);
+  const canRefundDeposit =
+    !depositWaived && depositHeld > 0 && depositRemaining > 0;
 
   const pickerStudents = useMemo(() => {
     return students.filter((s) => {
@@ -316,15 +325,12 @@ export const RefundRecordsPanel = () => {
   const selectStudent = (id: string) => {
     const s = students.find((x) => x._id === id);
     setForm((c) => {
-      const next = { ...c, studentId: id };
+      const next = { ...c, studentId: id, originalDepositNpr: 0 };
       if (c.refundType === "DEPOSIT_REFUND" && s) {
         const held = s.securityDepositNpr ?? 0;
         const refunded = s.securityDepositRefundedNpr ?? 0;
         const rem = Math.max(0, held - refunded);
-        if (rem > 0) next.amountNpr = rem;
-        if (held === 0 && (s.securityDepositNpr ?? 0) === 0) {
-          // leave amount for accountant to set after original deposit
-        }
+        next.amountNpr = rem > 0 ? rem : 0;
       }
       return next;
     });
@@ -349,15 +355,25 @@ export const RefundRecordsPanel = () => {
       toast.error("Enter a reason for the refund");
       return;
     }
-    if (
-      form.refundType === "DEPOSIT_REFUND" &&
-      depositHeld <= 0 &&
-      (!form.originalDepositNpr || form.originalDepositNpr <= 0)
-    ) {
-      toast.error(
-        "Enter the original admission deposit amount (not yet on student record)",
-      );
-      return;
+    if (form.refundType === "DEPOSIT_REFUND") {
+      if (depositWaived) {
+        toast.error(
+          "Security deposit was not taken for this student — no deposit refund is due",
+        );
+        return;
+      }
+      if (!canRefundDeposit) {
+        toast.error(
+          "No security deposit has been recorded yet. Record the deposit under Student Fee Records → Record payment first.",
+        );
+        return;
+      }
+      if (form.amountNpr > depositRemaining + 0.001) {
+        toast.error(
+          `Refund cannot exceed remaining deposit (${depositRemaining} NPR)`,
+        );
+        return;
+      }
     }
 
     createMutation.mutate({
@@ -370,10 +386,6 @@ export const RefundRecordsPanel = () => {
       transactionNumber: form.transactionNumber || undefined,
       notes: form.notes || undefined,
       approvedBy: form.approvedBy || undefined,
-      originalDepositNpr:
-        form.refundType === "DEPOSIT_REFUND" && form.originalDepositNpr > 0
-          ? form.originalDepositNpr
-          : undefined,
       attachments,
     });
   };
@@ -825,21 +837,14 @@ export const RefundRecordsPanel = () => {
                     placeholder="Cheque / transfer ref"
                   />
                 </FormField>
-                {form.refundType === "DEPOSIT_REFUND" && depositHeld <= 0 ? (
-                  <FormField label="Original admission deposit (NPR) *">
-                    <NumberInput
-                      min={0}
-                      value={form.originalDepositNpr}
-                      onChange={(e) => {
-                        const v = e.target.valueAsNumber || 0;
-                        setForm((c) => ({
-                          ...c,
-                          originalDepositNpr: v,
-                          amountNpr: c.amountNpr > 0 ? c.amountNpr : v,
-                        }));
-                      }}
-                    />
-                  </FormField>
+                {form.refundType === "DEPOSIT_REFUND" &&
+                form.studentId &&
+                !canRefundDeposit ? (
+                  <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                    {depositWaived
+                      ? "Security deposit was marked not taken for this student."
+                      : "No deposit has been recorded for this student yet. Go to Student Fee Records → Record payment and include the security deposit, then return here to refund."}
+                  </div>
                 ) : null}
               </div>
 
@@ -953,7 +958,12 @@ export const RefundRecordsPanel = () => {
                 </Button>
                 <Button
                   type="button"
-                  disabled={createMutation.isPending}
+                  disabled={
+                    createMutation.isPending ||
+                    (form.refundType === "DEPOSIT_REFUND" &&
+                      Boolean(form.studentId) &&
+                      !canRefundDeposit)
+                  }
                   onClick={submit}
                 >
                   {createMutation.isPending
@@ -990,37 +1000,47 @@ export const RefundRecordsPanel = () => {
                       )}
                     </p>
                   </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <p className="text-xs text-slate-500">Deposit held</p>
-                      <p className="text-lg font-semibold">
-                        {formatCurrencyNpr(depositHeld)}
-                      </p>
+                  {depositWaived ? (
+                    <div className="rounded-xl bg-slate-100 p-3 text-sm text-slate-700">
+                      Security deposit not taken / cancelled for this student.
                     </div>
-                    <div className="rounded-xl bg-amber-50 p-3">
-                      <p className="text-xs text-amber-800">Already refunded</p>
-                      <p className="text-lg font-semibold text-amber-900">
-                        {formatCurrencyNpr(depositRefunded)}
-                      </p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2">
+                      <div className="rounded-xl bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">Expected (plan)</p>
+                        <p className="text-lg font-semibold">
+                          {formatCurrencyNpr(depositExpected)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-emerald-50 p-3">
+                        <p className="text-xs text-emerald-800">
+                          Deposit held (recorded)
+                        </p>
+                        <p className="text-lg font-semibold text-emerald-900">
+                          {formatCurrencyNpr(depositHeld)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-amber-50 p-3">
+                        <p className="text-xs text-amber-800">Already refunded</p>
+                        <p className="text-lg font-semibold text-amber-900">
+                          {formatCurrencyNpr(depositRefunded)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-violet-50 p-3">
+                        <p className="text-xs text-violet-800">
+                          Remaining deposit
+                        </p>
+                        <p className="text-lg font-semibold text-violet-900">
+                          {formatCurrencyNpr(depositRemaining)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="rounded-xl bg-violet-50 p-3">
-                      <p className="text-xs text-violet-800">
-                        Remaining deposit
-                      </p>
-                      <p className="text-lg font-semibold text-violet-900">
-                        {formatCurrencyNpr(
-                          depositHeld > 0
-                            ? depositRemaining
-                            : form.originalDepositNpr || 0,
-                        )}
-                      </p>
-                    </div>
-                  </div>
+                  )}
                   {form.refundType === "DEPOSIT_REFUND" ? (
                     <p className="rounded-lg bg-violet-50 px-2 py-1.5 text-xs text-violet-950">
-                      Typical HA process: collect security deposit at admission;
-                      after final pass-out (or approved withdrawal), refund the
-                      remaining deposit here.
+                      Record security deposit under Student Fee Records when
+                      collected; after pass-out (or approved withdrawal), refund
+                      the remaining held deposit here.
                     </p>
                   ) : (
                     <p className="rounded-lg bg-sky-50 px-2 py-1.5 text-xs text-sky-950">

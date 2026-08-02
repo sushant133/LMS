@@ -227,9 +227,15 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
   const year1FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year1FeeNpr) || 0);
   const year2FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year2FeeNpr) || 0);
   const year3FeeNpr = hasScholarship ? 0 : Math.max(0, Number(payload.year3FeeNpr) || 0);
-  const securityDepositNpr = securityDepositWaived
+  // Planned deposit only — held/collected amount is set when recording fee payment
+  const securityDepositExpectedNpr = securityDepositWaived
     ? 0
-    : Math.max(0, Number(payload.securityDepositNpr) || 0);
+    : Math.max(
+        0,
+        Number(payload.securityDepositExpectedNpr) ||
+          Number(payload.securityDepositNpr) ||
+          0
+      );
   const yearFeeTotal = year1FeeNpr + year2FeeNpr + year3FeeNpr;
   // Prefer year plan sum when any year fee is set; else legacy total fee field
   const feesDueNpr = hasScholarship
@@ -317,7 +323,10 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
           year1FeeNpr,
           year2FeeNpr,
           year3FeeNpr,
-          securityDepositNpr,
+          securityDepositExpectedNpr,
+          /** Held deposit starts at 0 until recorded in Student Fee Records. */
+          securityDepositNpr: 0,
+          securityDepositRefundedNpr: 0,
           securityDepositWaived,
           hasScholarship,
           remarks: payload.remarks,
@@ -362,7 +371,8 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
         year1FeeNpr,
         year2FeeNpr,
         year3FeeNpr,
-        securityDepositNpr
+        securityDepositExpectedNpr,
+        securityDepositNpr: 0
       }
     });
 
@@ -425,9 +435,24 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     ? 0
     : Math.max(0, Number(payload.year3FeeNpr) || 0);
   const securityDepositWaived = Boolean(payload.securityDepositWaived);
-  const securityDepositNpr = securityDepositWaived
+  const heldDeposit = Math.max(0, Number(student.securityDepositNpr) || 0);
+  const refundedDeposit = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
+  const remainingHeld = Math.max(0, heldDeposit - refundedDeposit);
+  if (securityDepositWaived && remainingHeld > 0.001) {
+    throw new ApiError(
+      400,
+      `Cannot mark security deposit as not taken while ${remainingHeld} NPR is still held. Record a deposit refund first, or keep the deposit on file.`
+    );
+  }
+  // Form amount is planned/expected only — never overwrite held collected deposit
+  const securityDepositExpectedNpr = securityDepositWaived
     ? 0
-    : Math.max(0, Number(payload.securityDepositNpr) || 0);
+    : Math.max(
+        0,
+        Number(payload.securityDepositExpectedNpr) ||
+          Number(payload.securityDepositNpr) ||
+          0
+      );
   const yearFeeTotal = year1FeeNpr + year2FeeNpr + year3FeeNpr;
   // Keep existing outstanding if no year plan provided; otherwise use plan sum as baseline
   // (recalc after seeding will align with ledger when collections exist)
@@ -539,7 +564,8 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     year1FeeNpr,
     year2FeeNpr,
     year3FeeNpr,
-    securityDepositNpr,
+    securityDepositExpectedNpr,
+    // Do not overwrite securityDepositNpr (held) or securityDepositRefundedNpr here
     securityDepositWaived,
     hasScholarship,
     remarks: payload.remarks,

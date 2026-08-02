@@ -96,8 +96,8 @@ export const feeRefundSchema = z.object({
   notes: z.string().optional().or(z.literal("")),
   approvedBy: z.string().optional().or(z.literal("")),
   /**
-   * When recording a deposit refund, set or confirm the original admission deposit
-   * if it was never stored on the student record.
+   * @deprecated Deposit must be recorded via Student Fee Records first.
+   * Kept optional for API compatibility; server ignores setting held from refund.
    */
   originalDepositNpr: moneySchema.optional(),
   attachments: z

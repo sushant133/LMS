@@ -96,23 +96,81 @@ export const defaultCoversYearFromTopped = (toppedProgramYear: number): number =
   return Math.min(3, Math.max(1, toppedProgramYear + 1));
 };
 
+/** True when row is the system admission-plan opening charge (not a real payment). */
+export const isOpeningTuitionCharge = (row: Record<string, unknown>): boolean => {
+  const receipt = String(row.receiptNumber ?? "");
+  const notes = String(row.notes ?? "");
+  return (
+    receipt.startsWith("OPEN-") ||
+    /opening tuition charge/i.test(notes) ||
+    (Number(row.amountPaidNpr ?? 0) === 0 &&
+      Number(row.currentChargesNpr ?? 0) > 0 &&
+      String(row.paymentMethod ?? "") === "OTHER" &&
+      String(row.accountantName ?? "") === "System")
+  );
+};
+
+/**
+ * Payment history / receipts list: fee plan rows set at student create are not payments.
+ * Year-wise dues still use those rows internally via year1/2/3FeeNpr + OPEN charges.
+ */
+export const filterOutOpeningTuitionCharges = <T extends Record<string, unknown>>(
+  rows: T[]
+): T[] => rows.filter((row) => !isOpeningTuitionCharge(row));
+
+export type PlannedYearFees = {
+  1?: number;
+  2?: number;
+  3?: number;
+};
+
 /**
  * HA / multi-year fee ledger: paid, scholarship, remaining per program year.
  *
- * Topper rule: award covering year N (e.g. topped 1st → covers 2nd) must zero
- * remaining for that year when waiver is FULL — even if only an opening tuition
- * charge exists and no scholarship amount was written on the fee receipt yet.
+ * Charge basis (avoids double-counting opening plan + payment "fee charged"):
+ * 1. Prefer fixed year fee plan on the student (year1/2/3FeeNpr) when set
+ * 2. Else opening tuition charge for that year
+ * 3. Else sum of ledger charges (legacy)
+ *
+ * Merit/topper rule: award covering year N zeros remaining when FULL waiver.
  */
 export const buildProgramYearFeeSummary = (
   collections: Array<Record<string, unknown>>,
-  awards: Array<Record<string, unknown>> = []
+  awards: Array<Record<string, unknown>> = [],
+  plannedFees: PlannedYearFees = {}
 ) => {
   return ([1, 2, 3] as const).map((programYear) => {
     const yearRows = collections.filter((c) => Number(c.programYear) === programYear);
-    const chargedNpr = yearRows.reduce(
-      (s, c) => s + Number(c.currentChargesNpr ?? 0) + Number(c.lateFeeNpr ?? 0),
+    const openingRows = yearRows.filter((c) => isOpeningTuitionCharge(c));
+    const paymentRows = yearRows.filter((c) => !isOpeningTuitionCharge(c));
+
+    const openingChargeNpr = openingRows.reduce(
+      (s, c) => s + Number(c.currentChargesNpr ?? 0),
       0
     );
+    const paymentChargeNpr = paymentRows.reduce(
+      (s, c) => s + Number(c.currentChargesNpr ?? 0),
+      0
+    );
+    // Late fee / fine is not used for student tuition dues
+    const lateFeeNpr = 0;
+
+    const plannedNpr = Math.max(0, Number(plannedFees[programYear]) || 0);
+
+    // Fixed year plan is authoritative when set — prevents double-count of
+    // opening charge + same amount re-entered as "Fee charged" on payment.
+    let baseChargeNpr = 0;
+    if (plannedNpr > 0) {
+      baseChargeNpr = plannedNpr;
+    } else if (openingChargeNpr > 0) {
+      // Opening booked the year; only count payment charges ABOVE that opening amount
+      baseChargeNpr =
+        openingChargeNpr + Math.max(0, paymentChargeNpr - openingChargeNpr);
+    } else {
+      baseChargeNpr = paymentChargeNpr;
+    }
+
+    const chargedNpr = baseChargeNpr + lateFeeNpr;
     const paidNpr = yearRows.reduce((s, c) => s + Number(c.amountPaidNpr ?? 0), 0);
     let scholarshipNpr = yearRows.reduce((s, c) => s + Number(c.scholarshipNpr ?? 0), 0);
     const discountNpr = yearRows.reduce((s, c) => s + Number(c.discountNpr ?? 0), 0);
@@ -141,16 +199,17 @@ export const buildProgramYearFeeSummary = (
     const remainingNpr = Math.max(0, chargedNpr - paidNpr - scholarshipNpr - discountNpr);
 
     let status: "PAID" | "PARTIAL" | "DUE" | "SCHOLARSHIP" | "NO_RECORD" = "NO_RECORD";
-    if (yearRows.length === 0 && award) {
+    const hasLedger = yearRows.length > 0 || plannedNpr > 0;
+    if (!hasLedger && award) {
       status = "SCHOLARSHIP";
-    } else if (yearRows.length === 0) {
+    } else if (!hasLedger) {
       status = "NO_RECORD";
     } else if (award && remainingNpr <= 0) {
       // Scholarship covers this year (full waiver or collections fully offset)
       status = paidNpr > 0 && scholarshipNpr <= 0 ? "PAID" : "SCHOLARSHIP";
     } else if (scholarshipNpr > 0 && paidNpr === 0 && remainingNpr === 0) {
       status = "SCHOLARSHIP";
-    } else if (remainingNpr <= 0 && (paidNpr > 0 || scholarshipNpr > 0)) {
+    } else if (remainingNpr <= 0 && (paidNpr > 0 || scholarshipNpr > 0 || plannedNpr > 0)) {
       status = "PAID";
     } else if (paidNpr > 0 || scholarshipNpr > 0 || award) {
       status = "PARTIAL";
@@ -170,7 +229,7 @@ export const buildProgramYearFeeSummary = (
       scholarshipNote: award
         ? String(
             award.reason ||
-              `Topper scholarship covering ${PROGRAM_YEAR_LABELS[programYear]} (topped year ${award.toppedProgramYear})`
+              `Merit scholarship covering ${PROGRAM_YEAR_LABELS[programYear]} (based on year ${award.toppedProgramYear})`
           )
         : undefined
     };
@@ -242,9 +301,12 @@ export const applyScholarshipAwardToYearCollections = async (
       lateFeeNpr: Number(row.lateFeeNpr ?? 0)
     });
     row.remainingDueNpr = totals.remainingDueNpr;
-    const noteBit = `Topper scholarship applied (year ${params.coversProgramYear})`;
+    const noteBit = `Merit scholarship applied (year ${params.coversProgramYear})`;
     const prevNotes = String(row.notes || "").trim();
-    if (!prevNotes.includes("Topper scholarship applied")) {
+    if (
+      !prevNotes.includes("Merit scholarship applied") &&
+      !prevNotes.includes("Topper scholarship applied")
+    ) {
       row.notes = prevNotes ? `${prevNotes}; ${noteBit}` : noteBit;
     }
     await row.save(session ? { session } : undefined);
@@ -258,7 +320,7 @@ export const applyScholarshipAwardToYearCollections = async (
 };
 
 /**
- * Undo topper scholarship amounts written on fee collection rows for a covered year
+ * Undo merit scholarship amounts written on fee collection rows for a covered year
  * (used when revoking / deleting / re-editing an award).
  */
 export const reverseScholarshipAwardFromCollections = async (
@@ -308,7 +370,7 @@ export const reverseScholarshipAwardFromCollections = async (
     row.remainingDueNpr = totals.remainingDueNpr;
     const notes = String(row.notes || "");
     row.notes = notes
-      .replace(/;?\s*Topper scholarship applied \(year \d+\)/gi, "")
+      .replace(/;?\s*(Merit|Topper) scholarship applied \(year \d+\)/gi, "")
       .replace(/\s{2,}/g, " ")
       .trim();
     await row.save(session ? { session } : undefined);
@@ -375,7 +437,61 @@ export const ensureActiveScholarshipAwardsApplied = async (params: {
   return next;
 };
 
-/** Replays active fee collections chronologically to derive the correct outstanding balance. */
+/**
+ * Zero late fee / fine on all fee collections (late fines are not used for student fees).
+ */
+const stripAllLateFees = async (
+  collections: Array<{
+    _id: unknown;
+    lateFeeNpr?: number;
+  }>,
+  session?: import("mongoose").ClientSession | null
+): Promise<void> => {
+  const { FeeCollection } = await import("../models/FeeCollection.js");
+  const dirty = collections.filter((row) => Number(row.lateFeeNpr ?? 0) > 0);
+  if (dirty.length === 0) return;
+  const ids = dirty.map((row) => row._id);
+  const update = FeeCollection.updateMany(
+    { _id: { $in: ids } },
+    { $set: { lateFeeNpr: 0 } }
+  );
+  if (session) update.session(session);
+  await update;
+  for (const row of dirty) {
+    row.lateFeeNpr = 0;
+  }
+};
+
+/**
+ * Cap new "fee charged" so year plan / existing OPEN charges are not double-booked.
+ */
+export const capProgramYearChargesNpr = (params: {
+  programYear?: number | null;
+  requestedChargesNpr: number;
+  priorChargedNpr: number;
+  plannedYearFeeNpr: number;
+}): number => {
+  const requested = Math.max(0, Number(params.requestedChargesNpr) || 0);
+  const prior = Math.max(0, Number(params.priorChargedNpr) || 0);
+  const planned = Math.max(0, Number(params.plannedYearFeeNpr) || 0);
+  const year = Number(params.programYear);
+  if (year !== 1 && year !== 2 && year !== 3) {
+    return requested;
+  }
+  if (planned > 0) {
+    return Math.min(requested, Math.max(0, planned - prior));
+  }
+  if (prior > 0) {
+    // Year already has ledger charges (e.g. OPEN) — do not restate them on a payment
+    return 0;
+  }
+  return requested;
+};
+
+/**
+ * Derive outstanding tuition due from year-wise plan + payments (HA).
+ * Falls back to chronological replay for non–program-year / legacy rows.
+ */
 export const recalculateStudentFeesDue = async (
   studentId: import("mongoose").Types.ObjectId | string,
   schoolId: import("mongoose").Types.ObjectId | string,
@@ -383,26 +499,70 @@ export const recalculateStudentFeesDue = async (
 ): Promise<number> => {
   const { FeeCollection } = await import("../models/FeeCollection.js");
   const { Student } = await import("../models/Student.js");
+  const { StudentScholarshipAward } = await import("../models/StudentScholarshipAward.js");
 
-  const query = FeeCollection.find({ studentId, schoolId, isDeleted: false }).sort({ createdAt: 1 });
+  const studentQuery = Student.findOne({ _id: studentId, schoolId });
+  if (session) studentQuery.session(session);
+  const student = await studentQuery.lean();
+  if (!student) return 0;
+
+  const query = FeeCollection.find({ studentId, schoolId, isDeleted: false }).sort({
+    createdAt: 1
+  });
   if (session) query.session(session);
   const collections = await query.lean();
 
-  // Replay chronologically using running balance only (ignore frozen previousDue snapshots)
-  let runningDue = 0;
-  for (const collection of collections) {
-    const totals = calculateFeeTotals({
-      previousDueNpr: runningDue,
-      currentChargesNpr: collection.currentChargesNpr ?? 0,
-      amountPaidNpr: collection.amountPaidNpr,
-      discountNpr: collection.discountNpr ?? 0,
-      scholarshipNpr: collection.scholarshipNpr ?? 0,
-      lateFeeNpr: collection.lateFeeNpr ?? 0
-    });
-    runningDue = totals.remainingDueNpr;
+  // Clear any stored late fees so tuition dues are plan − paid only
+  await stripAllLateFees(collections, session ?? null);
+
+  const awardsQuery = StudentScholarshipAward.find({
+    schoolId,
+    studentId,
+    isDeleted: false,
+    status: { $in: ["ACTIVE", "APPLIED"] }
+  });
+  if (session) awardsQuery.session(session);
+  const awards = await awardsQuery.lean();
+
+  const planned: PlannedYearFees = {
+    1: Math.max(0, Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0),
+    2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
+    3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
+  };
+
+  const yearWise = buildProgramYearFeeSummary(
+    collections as unknown as Array<Record<string, unknown>>,
+    awards as unknown as Array<Record<string, unknown>>,
+    planned
+  );
+  let runningDue = yearWise.reduce((s, y) => s + Number(y.remainingNpr || 0), 0);
+
+  // Legacy / unscoped fee rows (no program year 1–3) — still replay chronologically
+  const otherRows = collections.filter((c) => {
+    const y = Number(c.programYear);
+    return y !== 1 && y !== 2 && y !== 3;
+  });
+  if (otherRows.length > 0) {
+    let otherDue = 0;
+    for (const collection of otherRows) {
+      const totals = calculateFeeTotals({
+        previousDueNpr: otherDue,
+        currentChargesNpr: collection.currentChargesNpr ?? 0,
+        amountPaidNpr: collection.amountPaidNpr,
+        discountNpr: collection.discountNpr ?? 0,
+        scholarshipNpr: collection.scholarshipNpr ?? 0,
+        lateFeeNpr: 0
+      });
+      otherDue = totals.remainingDueNpr;
+    }
+    runningDue += otherDue;
   }
 
-  const updateQuery = Student.findByIdAndUpdate(studentId, { feesDueNpr: runningDue }, { new: true });
+  const updateQuery = Student.findByIdAndUpdate(
+    studentId,
+    { feesDueNpr: runningDue },
+    { new: true }
+  );
   if (session) updateQuery.session(session);
   await updateQuery;
   return runningDue;

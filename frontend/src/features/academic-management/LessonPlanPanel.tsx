@@ -37,11 +37,14 @@ import {
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
+  joinSubUnitTitles,
   matchSyllabusSubUnit,
+  normalizeSubUnitTitles,
   parseSubUnitsFromTopics,
   resolveSubjectSelectValue,
   statusBadgeClass,
 } from "./academicManagementUtils";
+import { SubUnitMultiSelect } from "./SubUnitMultiSelect";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
 import { AcademicCommentsPanel } from "./AcademicCommentsPanel";
 import { AcademicProgressBar } from "./AcademicProgressBar";
@@ -85,45 +88,87 @@ const normText = (value?: string | null) =>
 const emptyItem = (
   serialNo: number,
   unit?: AcademicSessionPlanUnitRecord,
-  subUnitTitle = "",
+  subUnitTitles: string[] = [],
   syllabusMatch?: {
     syllabusId?: string;
     syllabusChapterId?: string;
     syllabusUnitId?: string;
     syllabusSubUnitId?: string;
+    syllabusSubUnitIds?: string[];
     learningOutcomes?: string;
     description?: string;
   } | null,
-): AcademicLessonPlanInput["items"][number] => ({
-  serialNo,
-  sessionPlanUnitId: unit?._id ?? "",
-  subUnitTitle,
-  syllabusId: syllabusMatch?.syllabusId || unit?.syllabusId || "",
-  syllabusChapterId:
-    syllabusMatch?.syllabusChapterId || unit?.syllabusChapterId || "",
-  syllabusUnitId: syllabusMatch?.syllabusUnitId || "",
-  syllabusSubUnitId: syllabusMatch?.syllabusSubUnitId || "",
-  subjectLabel: unit ? `Chapter ${unit.unitNo}` : "",
-  plannedTopic: subUnitTitle
-    ? subUnitTitle
-    : unit
-      ? unit.topicsCovered || unit.chapterName
-      : "",
-  description: syllabusMatch?.description || "",
-  learningObjectives:
-    syllabusMatch?.learningOutcomes || unit?.learningOutcomes || "",
-  teachingMethod: "",
-  teachingAids: "",
-  assessmentMethod: "",
-  deadline: "",
-  itemStartDateBs: unit?.startDateBs || "",
-  itemEndDateBs: unit?.endDateBs || "",
-  estimatedClasses: Math.max(
-    1,
-    Math.round(unit?.estimatedTeachingHours || 1),
-  ),
-  remarks: "",
-});
+): AcademicLessonPlanInput["items"][number] => {
+  const titles = normalizeSubUnitTitles(subUnitTitles);
+  const joined = joinSubUnitTitles(titles);
+  const ids =
+    syllabusMatch?.syllabusSubUnitIds?.filter(Boolean) ||
+    (syllabusMatch?.syllabusSubUnitId
+      ? [syllabusMatch.syllabusSubUnitId]
+      : []);
+  return {
+    serialNo,
+    sessionPlanUnitId: unit?._id ?? "",
+    subUnitTitle: joined,
+    subUnitTitles: titles,
+    syllabusId: syllabusMatch?.syllabusId || unit?.syllabusId || "",
+    syllabusChapterId:
+      syllabusMatch?.syllabusChapterId || unit?.syllabusChapterId || "",
+    syllabusUnitId: syllabusMatch?.syllabusUnitId || "",
+    syllabusSubUnitId: ids[0] || syllabusMatch?.syllabusSubUnitId || "",
+    syllabusSubUnitIds: ids,
+    subjectLabel: unit ? `Chapter ${unit.unitNo}` : "",
+    plannedTopic: joined
+      ? joined
+      : unit
+        ? unit.topicsCovered || unit.chapterName
+        : "",
+    description: syllabusMatch?.description || "",
+    learningObjectives:
+      syllabusMatch?.learningOutcomes || unit?.learningOutcomes || "",
+    teachingMethod: "",
+    teachingAids: "",
+    assessmentMethod: "",
+    deadline: "",
+    itemStartDateBs: unit?.startDateBs || "",
+    itemEndDateBs: unit?.endDateBs || "",
+    estimatedClasses: Math.max(
+      1,
+      Math.round(unit?.estimatedTeachingHours || 1),
+    ),
+    remarks: "",
+  };
+};
+
+/** Resolve syllabus matches for multiple selected sub-unit titles. */
+const matchMultipleSubUnits = (
+  matchedSyllabus: Parameters<typeof matchSyllabusSubUnit>[0],
+  chapterId: string | undefined,
+  titles: string[],
+) => {
+  const ids: string[] = [];
+  let firstMatch: ReturnType<typeof matchSyllabusSubUnit> = null;
+  const outcomes: string[] = [];
+  const descriptions: string[] = [];
+  for (const title of titles) {
+    const match = matchSyllabusSubUnit(matchedSyllabus, {
+      syllabusChapterId: chapterId,
+      heading: title,
+    });
+    if (match && !firstMatch) firstMatch = match;
+    if (match?.syllabusSubUnitId) ids.push(match.syllabusSubUnitId);
+    if (match?.learningOutcomes) outcomes.push(match.learningOutcomes);
+    if (match?.description) descriptions.push(match.description);
+  }
+  return {
+    firstMatch,
+    syllabusSubUnitIds: ids.filter(
+      (id, i, arr) => arr.indexOf(id) === i,
+    ),
+    learningOutcomes: outcomes.join("\n"),
+    description: descriptions.join("\n"),
+  };
+};
 
 export const LessonPlanPanel = ({
   filters,
@@ -570,37 +615,51 @@ export const LessonPlanPanel = ({
             (item) => item.sessionPlanUnitId === unitId,
           );
           const subUnits = parseSubUnitsFromTopics(unit.topicsCovered);
-          const defaultSub =
-            prev?.subUnitTitle ||
-            (subUnits.length === 1 ? subUnits[0]! : "");
-          const match = matchSyllabusSubUnit(matchedSyllabus, {
-            syllabusChapterId: unit.syllabusChapterId,
-            heading: defaultSub,
-          });
+          const prevTitles = normalizeSubUnitTitles(
+            prev?.subUnitTitles,
+            prev?.subUnitTitle,
+          );
+          const defaultTitles =
+            prevTitles.length > 0
+              ? prevTitles
+              : subUnits.length === 1
+                ? [subUnits[0]!]
+                : [];
+          const multi = matchMultipleSubUnits(
+            matchedSyllabus,
+            unit.syllabusChapterId,
+            defaultTitles,
+          );
+          const match = multi.firstMatch;
           const syllabusMatch = match
             ? {
                 syllabusId: matchedSyllabus?._id,
                 syllabusChapterId:
                   match.syllabusChapterId || unit.syllabusChapterId,
                 syllabusUnitId: match.syllabusUnitId,
-                syllabusSubUnitId: match.syllabusSubUnitId,
-                learningOutcomes: match.learningOutcomes,
-                description: match.description,
+                syllabusSubUnitId: multi.syllabusSubUnitIds[0] || match.syllabusSubUnitId,
+                syllabusSubUnitIds: multi.syllabusSubUnitIds,
+                learningOutcomes:
+                  multi.learningOutcomes || match.learningOutcomes,
+                description: multi.description || match.description,
               }
             : {
                 syllabusId: unit.syllabusId || matchedSyllabus?._id || "",
                 syllabusChapterId: unit.syllabusChapterId || "",
+                syllabusSubUnitIds: multi.syllabusSubUnitIds,
               };
+          const joined = joinSubUnitTitles(defaultTitles);
           return {
-            ...emptyItem(index + 1, unit, defaultSub, syllabusMatch),
+            ...emptyItem(index + 1, unit, defaultTitles, syllabusMatch),
             ...prev,
             serialNo: index + 1,
             sessionPlanUnitId: unit._id,
             subjectLabel: `Chapter ${unit.unitNo}`,
-            subUnitTitle: defaultSub,
+            subUnitTitles: defaultTitles,
+            subUnitTitle: joined,
             plannedTopic:
               prev?.plannedTopic ||
-              defaultSub ||
+              joined ||
               unit.topicsCovered ||
               unit.chapterName,
             syllabusId:
@@ -616,7 +675,14 @@ export const LessonPlanPanel = ({
             syllabusUnitId:
               prev?.syllabusUnitId || match?.syllabusUnitId || "",
             syllabusSubUnitId:
-              prev?.syllabusSubUnitId || match?.syllabusSubUnitId || "",
+              prev?.syllabusSubUnitId ||
+              multi.syllabusSubUnitIds[0] ||
+              match?.syllabusSubUnitId ||
+              "",
+            syllabusSubUnitIds:
+              prev?.syllabusSubUnitIds?.length
+                ? prev.syllabusSubUnitIds
+                : multi.syllabusSubUnitIds,
             itemStartDateBs:
               prev?.itemStartDateBs ||
               unit.startDateBs ||
@@ -626,6 +692,7 @@ export const LessonPlanPanel = ({
               prev?.itemEndDateBs || unit.endDateBs || current.endDateBs || "",
             learningObjectives:
               prev?.learningObjectives ||
+              multi.learningOutcomes ||
               match?.learningOutcomes ||
               unit.learningOutcomes ||
               "",
@@ -1422,81 +1489,72 @@ export const LessonPlanPanel = ({
                               className="bg-slate-50"
                             />
                           </FormField>
-                          <FormField label="Sub Unit / Child (from Syllabus)">
-                            {subUnits.length > 0 ? (
-                              <Select
-                                value={item.subUnitTitle || ""}
-                                onChange={(event) => {
-                                  const sub = event.target.value;
-                                  const match = matchSyllabusSubUnit(
-                                    matchedSyllabus,
-                                    {
-                                      syllabusChapterId:
-                                        unit?.syllabusChapterId ||
-                                        item.syllabusChapterId,
-                                      heading: sub,
-                                    },
-                                  );
-                                  setForm((current) => ({
-                                    ...current,
-                                    items: current.items.map((row, i) =>
-                                      i === index
-                                        ? {
-                                            ...row,
-                                            subUnitTitle: sub,
-                                            plannedTopic:
-                                              sub ||
-                                              unit?.chapterName ||
-                                              row.plannedTopic,
-                                            syllabusId:
-                                              matchedSyllabus?._id ||
-                                              unit?.syllabusId ||
-                                              row.syllabusId ||
-                                              "",
-                                            syllabusChapterId:
-                                              match?.syllabusChapterId ||
-                                              unit?.syllabusChapterId ||
-                                              row.syllabusChapterId ||
-                                              "",
-                                            syllabusUnitId:
-                                              match?.syllabusUnitId || "",
-                                            syllabusSubUnitId:
-                                              match?.syllabusSubUnitId || "",
-                                            learningObjectives:
-                                              match?.learningOutcomes ||
-                                              row.learningObjectives,
-                                            description:
-                                              match?.description ||
-                                              row.description,
-                                          }
-                                        : row,
-                                    ),
-                                  }));
-                                }}
-                              >
-                                <option value="">All topics / chapter</option>
-                                {subUnits.map((sub) => (
-                                  <option key={sub} value={sub}>
-                                    {sub}
-                                  </option>
-                                ))}
-                              </Select>
-                            ) : (
-                              <Input
-                                value={item.plannedTopic}
-                                nepali={formNepaliText}
-                                onChange={(event) =>
-                                  updateItemField(
-                                    index,
-                                    "plannedTopic",
-                                    event.target.value,
-                                  )
-                                }
-                                placeholder={
-                                  formNepaliText ? "विषय / उप-एकाइ" : "Topic / sub-unit"
-                                }
-                              />
-                            )}
+                          <FormField label="Sub-units (select one or more)">
+                            <SubUnitMultiSelect
+                              options={subUnits}
+                              value={normalizeSubUnitTitles(
+                                item.subUnitTitles,
+                                item.subUnitTitle,
+                              )}
+                              nepali={formNepaliText}
+                              allowCustom
+                              placeholder={
+                                formNepaliText
+                                  ? "नयाँ उप-एकाइ थप्नुहोस्…"
+                                  : "Add custom sub-unit…"
+                              }
+                              hint="Select multiple sub-units planned for this lesson, or add a custom one."
+                              onChange={(titles) => {
+                                const multi = matchMultipleSubUnits(
+                                  matchedSyllabus,
+                                  unit?.syllabusChapterId ||
+                                    item.syllabusChapterId,
+                                  titles,
+                                );
+                                const match = multi.firstMatch;
+                                const joined = joinSubUnitTitles(titles);
+                                setForm((current) => ({
+                                  ...current,
+                                  items: current.items.map((row, i) =>
+                                    i === index
+                                      ? {
+                                          ...row,
+                                          subUnitTitles: titles,
+                                          subUnitTitle: joined,
+                                          plannedTopic:
+                                            joined ||
+                                            unit?.chapterName ||
+                                            row.plannedTopic,
+                                          syllabusId:
+                                            matchedSyllabus?._id ||
+                                            unit?.syllabusId ||
+                                            row.syllabusId ||
+                                            "",
+                                          syllabusChapterId:
+                                            match?.syllabusChapterId ||
+                                            unit?.syllabusChapterId ||
+                                            row.syllabusChapterId ||
+                                            "",
+                                          syllabusUnitId:
+                                            match?.syllabusUnitId ||
+                                            row.syllabusUnitId ||
+                                            "",
+                                          syllabusSubUnitId:
+                                            multi.syllabusSubUnitIds[0] || "",
+                                          syllabusSubUnitIds:
+                                            multi.syllabusSubUnitIds,
+                                          learningObjectives:
+                                            multi.learningOutcomes ||
+                                            row.learningObjectives,
+                                          description:
+                                            multi.description ||
+                                            row.description,
+                                        }
+                                      : row,
+                                  ),
+                                }));
+                              }}
+                            />
                           </FormField>
                           <FormField label="Planned topic">
                             <Input

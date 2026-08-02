@@ -281,10 +281,11 @@ export const reverseJournalEntryById = async (
 
 /**
  * Cash-basis fee collection journal:
- * Dr Cash/Bank = amountPaidNpr
+ * Dr Cash/Bank = amountPaidNpr + securityDepositPaidNpr
  * Dr Discount / Scholarship expenses
  * Cr Fee income (scaled) + Fine income
- * So cash book amount and GL cash debit always match amountPaidNpr.
+ * Cr Security deposit liability (if deposit collected)
+ * So cash book amount and GL cash debit always match total cash received.
  */
 export const postFeeCollectionJournal = async (params: {
   schoolId: Types.ObjectId;
@@ -293,6 +294,8 @@ export const postFeeCollectionJournal = async (params: {
   studentId: Types.ObjectId | string;
   dateBs: string;
   amountPaidNpr: number;
+  /** Security deposit collected with this receipt (liability credit). */
+  securityDepositPaidNpr?: number;
   discountNpr: number;
   scholarshipNpr: number;
   lateFeeNpr: number;
@@ -309,22 +312,27 @@ export const postFeeCollectionJournal = async (params: {
   const scholarshipNpr = Math.max(0, params.scholarshipNpr);
   const lateFeeNpr = Math.max(0, params.lateFeeNpr);
   const amountPaidNpr = Math.max(0, params.amountPaidNpr);
+  const securityDepositPaidNpr = Math.max(0, params.securityDepositPaidNpr ?? 0);
+  const cashDebit = amountPaidNpr + securityDepositPaidNpr;
 
-  // Fee income credit so entry balances: Cash + discount + scholarship = fee income + late fee
+  // Fee income credit so entry balances for the fee portion only:
+  // Cash(fee) + discount + scholarship = fee income + late fee
   const feeIncomeCredit = Math.max(0, amountPaidNpr + discountNpr + scholarshipNpr - lateFeeNpr);
 
-  const breakdown = params.feeBreakdown.length > 0
+  // Exclude SECURITY_DEPOSIT lines from fee income allocation (handled as liability)
+  const incomeBreakdown = (params.feeBreakdown.length > 0
     ? params.feeBreakdown
-    : [{ feeType: "OTHER", title: "Fee Collection", amountNpr: feeIncomeCredit }];
+    : [{ feeType: "OTHER", title: "Fee Collection", amountNpr: feeIncomeCredit }]
+  ).filter((item) => String(item.feeType) !== "SECURITY_DEPOSIT");
 
-  const breakdownTotal = breakdown.reduce((sum, item) => sum + item.amountNpr, 0);
+  const breakdownTotal = incomeBreakdown.reduce((sum, item) => sum + item.amountNpr, 0);
   const incomeLines: JournalLineInput[] = [];
 
   if (feeIncomeCredit > 0) {
     if (breakdownTotal > 0) {
       let allocated = 0;
-      breakdown.forEach((item, index) => {
-        const isLast = index === breakdown.length - 1;
+      incomeBreakdown.forEach((item, index) => {
+        const isLast = index === incomeBreakdown.length - 1;
         const share = isLast
           ? Number((feeIncomeCredit - allocated).toFixed(2))
           : Number(((item.amountNpr / breakdownTotal) * feeIncomeCredit).toFixed(2));
@@ -360,6 +368,16 @@ export const postFeeCollectionJournal = async (params: {
     });
   }
 
+  if (securityDepositPaidNpr > 0) {
+    incomeLines.push({
+      accountCode: SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY,
+      accountName: "",
+      debitNpr: 0,
+      creditNpr: securityDepositPaidNpr,
+      description: "Security / caution deposit held"
+    });
+  }
+
   if (discountNpr > 0) {
     incomeLines.push({
       accountCode: SYSTEM_ACCOUNT_CODES.GENERAL_EXPENSE,
@@ -385,14 +403,23 @@ export const postFeeCollectionJournal = async (params: {
     line.accountName = await getAccountName(params.schoolId, line.accountCode);
   }
 
+  // Skip empty journal (e.g. pure scholarship with 0 cash and 0 deposit)
+  if (cashDebit <= 0 && incomeLines.every((l) => l.debitNpr <= 0 && l.creditNpr <= 0)) {
+    return;
+  }
+
   const lines: JournalLineInput[] = [
-    {
-      accountCode: paymentAccount,
-      accountName: paymentName,
-      debitNpr: amountPaidNpr,
-      creditNpr: 0,
-      description: `Receipt ${params.receiptNumber}`
-    },
+    ...(cashDebit > 0
+      ? [
+          {
+            accountCode: paymentAccount,
+            accountName: paymentName,
+            debitNpr: cashDebit,
+            creditNpr: 0,
+            description: `Receipt ${params.receiptNumber}`
+          }
+        ]
+      : []),
     ...incomeLines
   ];
 
@@ -406,11 +433,14 @@ export const postFeeCollectionJournal = async (params: {
     else lastIncome.debitNpr = Number((lastIncome.debitNpr - drift).toFixed(2));
   }
 
+  const hasDeposit = securityDepositPaidNpr > 0;
   await postJournalEntry({
     schoolId: params.schoolId,
     userId: params.userId,
     dateBs: params.dateBs,
-    narration: `Fee collection — Receipt ${params.receiptNumber}`,
+    narration: hasDeposit
+      ? `Fee + security deposit — Receipt ${params.receiptNumber}`
+      : `Fee collection — Receipt ${params.receiptNumber}`,
     lines,
     voucherType: "RECEIPT",
     referenceType: "FeeCollection",
@@ -431,10 +461,49 @@ export const postFeeRefundJournal = async (params: {
   paymentMethod: string;
   bankAccountId?: Types.ObjectId | string;
   refundNumber: string;
+  /** When true, reverse liability (security deposit) instead of refund expense. */
+  isDepositRefund?: boolean;
 }): Promise<void> => {
-  // Spec: Debit Refund Expense · Credit Cash/Bank
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
   const paymentName = await getAccountName(params.schoolId, paymentAccount);
+
+  if (params.isDepositRefund) {
+    // Dr Security deposit liability · Cr Cash/Bank
+    const liabilityName = await getAccountName(
+      params.schoolId,
+      SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY
+    );
+    await postJournalEntry({
+      schoolId: params.schoolId,
+      userId: params.userId,
+      dateBs: params.dateBs,
+      narration: `Security deposit refund — ${params.refundNumber}`,
+      lines: [
+        {
+          accountCode: SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY,
+          accountName: liabilityName,
+          debitNpr: params.amountNpr,
+          creditNpr: 0,
+          description: "Security deposit returned"
+        },
+        {
+          accountCode: paymentAccount,
+          accountName: paymentName,
+          debitNpr: 0,
+          creditNpr: params.amountNpr,
+          description: `Deposit refund ${params.refundNumber}`
+        }
+      ],
+      voucherType: "PAYMENT",
+      referenceType: "FeeRefund",
+      referenceId: params.refundId,
+      studentId: params.studentId,
+      bankAccountId: params.bankAccountId
+    });
+    return;
+  }
+
+  // Spec: Debit Refund Expense · Credit Cash/Bank
   const refundExpenseName = await getAccountName(
     params.schoolId,
     SYSTEM_ACCOUNT_CODES.REFUND_EXPENSE

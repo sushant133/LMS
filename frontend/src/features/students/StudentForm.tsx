@@ -159,6 +159,10 @@ export const StudentForm = ({
       year1FeeNpr: year1,
       year2FeeNpr: year2,
       year3FeeNpr: year3,
+      // Planned/expected deposit (server maps to securityDepositExpectedNpr)
+      securityDepositExpectedNpr: securityDepositWaived
+        ? 0
+        : Number(form.securityDepositNpr) || 0,
       securityDepositNpr: securityDepositWaived
         ? 0
         : Number(form.securityDepositNpr) || 0,
@@ -555,7 +559,7 @@ export const StudentForm = ({
             </FormField>
           </>
         )}
-        <FormField label="Security deposit (NPR)">
+        <FormField label="Security deposit expected (NPR)">
           <NumberInput
             min={0}
             disabled={Boolean(form.securityDepositWaived)}
@@ -571,10 +575,17 @@ export const StudentForm = ({
                 securityDepositWaived: false,
               }))
             }
-            placeholder="Caution / security deposit"
+            placeholder="Planned caution / security deposit"
           />
         </FormField>
         <div className="md:col-span-2 xl:col-span-2">
+          <p className="mb-2 rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
+            This is the <strong>planned</strong> deposit amount only. Actual
+            collection is recorded under{" "}
+            <strong>Accounts → Student Fee Records → Record payment</strong>{" "}
+            (include security deposit). Deposit refunds are allowed only after
+            collection is recorded.
+          </p>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 text-sm">
             <input
               type="checkbox"
@@ -596,7 +607,8 @@ export const StudentForm = ({
               </span>
               <span className="mt-0.5 block text-xs text-slate-500">
                 Use when the college does not collect a security deposit for
-                this student. Amount is set to zero and shown as not taken.
+                this student. Planned amount is set to zero. Cannot waive if a
+                deposit is still held.
               </span>
             </span>
           </label>
