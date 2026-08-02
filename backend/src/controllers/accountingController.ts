@@ -160,6 +160,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     recentSalaries,
     recentPurchases,
     recentRefunds,
+    recentDepositCollections,
     cashEntries
   ] = await Promise.all([
     FeeCollection.find({ schoolId, isDeleted: false }).lean(),
@@ -184,6 +185,15 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       .lean(),
     AccountingPurchase.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(8).lean(),
     FeeRefund.find({ schoolId, isDeleted: false })
+      .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .lean(),
+    FeeCollection.find({
+      schoolId,
+      isDeleted: false,
+      securityDepositPaidNpr: { $gt: 0 }
+    })
       .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
       .sort({ createdAt: -1 })
       .limit(8)
@@ -380,6 +390,20 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       status: r.refundType || "REFUND",
       linkTab: "refund-records"
     })),
+    recentDeposits: recentDepositCollections.map((c) => {
+      const depositPaid =
+        Number((c as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0;
+      const feePaid = Number(c.amountPaidNpr) || 0;
+      return {
+        id: c._id.toString(),
+        dateBs: c.paidDateBs,
+        voucherNo: c.receiptNumber,
+        party: studentParty(c),
+        amountNpr: depositPaid,
+        status: feePaid > 0 ? "FEE+DEPOSIT" : "DEPOSIT",
+        linkTab: "deposit-records"
+      };
+    }),
     // legacy compatibility
     pendingFeesTotal: 0,
     bankBalanceNpr: 0,

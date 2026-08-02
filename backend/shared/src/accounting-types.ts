@@ -408,6 +408,8 @@ export interface AccountingDashboardResponse {
   recentPurchases: AccountingDashboardActivityItem[];
   recentExpenseItems: AccountingDashboardActivityItem[];
   recentRefunds: AccountingDashboardActivityItem[];
+  /** Receipts that collected security deposit (amount = deposit portion only) */
+  recentDeposits: AccountingDashboardActivityItem[];
   /** @deprecated kept for older clients */
   pendingFeesTotal?: number;
   bankBalanceNpr?: number;

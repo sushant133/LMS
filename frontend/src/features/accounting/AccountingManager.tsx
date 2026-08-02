@@ -1072,6 +1072,11 @@ export const AccountingManager = () => {
                     amountClass: "text-brand-700",
                   },
                   {
+                    title: "Recent Security Deposits",
+                    items: dashboardQuery.data?.recentDeposits ?? [],
+                    amountClass: "text-violet-700",
+                  },
+                  {
                     title: "Recent Salary Payments",
                     items: dashboardQuery.data?.recentSalaries ?? [],
                     amountClass: "text-emerald-800",

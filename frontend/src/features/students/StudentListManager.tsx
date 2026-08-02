@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -9,6 +9,7 @@ import {
   type StudentRecord,
   type YearRecord,
 } from "@phit-erp/shared";
+import { Printer } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
@@ -17,6 +18,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Input } from "components/ui/input";
 import { Label } from "components/ui/label";
@@ -30,6 +32,7 @@ import {
 } from "hooks/useNormalizedRole";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { useAuth } from "features/auth/AuthProvider";
+import { getCollegeDisplayName } from "lib/auth";
 import { userIsTeacher } from "lib/teacherRole";
 import {
   filterSectionsByClass,
@@ -39,15 +42,39 @@ import {
 import { api, unwrap } from "lib/api";
 import { toastResendCredentials } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
+import { printElementById } from "lib/printUtils";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { Badge } from "components/ui/badge";
 import { downloadStudentsExcel } from "./studentExportUtils";
 import { countPendingRequiredDocuments } from "./studentDocumentUtils";
 
+const STUDENTS_PRINT_AREA_ID = "students-list-print-area";
+
+const printTh: CSSProperties = {
+  border: "1px solid #94a3b8",
+  background: "#f1f5f9",
+  padding: "5px 4px",
+  fontSize: 10,
+  fontWeight: 700,
+  textAlign: "left",
+  color: "#0f172a",
+  whiteSpace: "nowrap",
+};
+
+const printTd: CSSProperties = {
+  border: "1px solid #cbd5e1",
+  padding: "4px 4px",
+  fontSize: 10,
+  color: "#0f172a",
+  verticalAlign: "top",
+};
+
 export const StudentListManager = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, availableSchools } = useAuth();
+  const institutionName = getCollegeDisplayName(availableSchools, user);
+  const [printing, setPrinting] = useState(false);
   const role = useNormalizedRole();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
@@ -294,6 +321,59 @@ export const StudentListManager = () => {
     setStatusFilter("");
   };
 
+  /** Subtitle for print header: batch / year (or class / section) when filtered.
+   * Must stay above any early return (Rules of Hooks). */
+  const printScopeLines = useMemo(() => {
+    const lines: string[] = [];
+    if (isCollege) {
+      if (batchFilter) {
+        lines.push(
+          `${labels.primary}: ${primaryMap.get(batchFilter) ?? "Selected"}`,
+        );
+      }
+      if (yearFilter) {
+        lines.push(
+          `${labels.secondary}: ${secondaryMap.get(yearFilter) ?? "Selected"}`,
+        );
+      } else if (yearNameFilter) {
+        lines.push(`${labels.secondary}: ${yearNameFilter}`);
+      }
+    } else {
+      if (classFilter) {
+        lines.push(
+          `${labels.primary}: ${primaryMap.get(classFilter) ?? "Selected"}`,
+        );
+      }
+      if (sectionFilter) {
+        lines.push(
+          `${labels.secondary}: ${secondaryMap.get(sectionFilter) ?? "Selected"}`,
+        );
+      }
+    }
+    if (genderFilter) lines.push(`Gender: ${genderFilter}`);
+    if (statusFilter) {
+      lines.push(`Status: ${statusFilter.replace(/_/g, " ")}`);
+    }
+    if (searchQuery.trim()) {
+      lines.push(`Search: “${searchQuery.trim()}”`);
+    }
+    return lines;
+  }, [
+    batchFilter,
+    classFilter,
+    genderFilter,
+    isCollege,
+    labels.primary,
+    labels.secondary,
+    primaryMap,
+    searchQuery,
+    secondaryMap,
+    sectionFilter,
+    statusFilter,
+    yearFilter,
+    yearNameFilter,
+  ]);
+
   const clearFiltersButton = (alignLabel: string) => (
     <div className="space-y-2">
       <Label className="invisible select-none" aria-hidden="true">
@@ -317,6 +397,30 @@ export const StudentListManager = () => {
 
   const handleEdit = (student: StudentRecord) => {
     navigate("/students/create", { state: { student } });
+  };
+
+  const handlePrintList = async () => {
+    if (filteredStudents.length === 0) {
+      toast.error("No students to print");
+      return;
+    }
+    setPrinting(true);
+    try {
+      const el = document.getElementById(STUDENTS_PRINT_AREA_ID);
+      if (!el?.textContent?.trim()) {
+        throw new Error("Print content is empty — try again");
+      }
+      await printElementById(STUDENTS_PRINT_AREA_ID, "students-list-print");
+      toast.success(
+        `Print dialog opened — ${filteredStudents.length} student${
+          filteredStudents.length === 1 ? "" : "s"
+        }`,
+      );
+    } catch (e) {
+      toast.error(parseErrorMessage(e));
+    } finally {
+      setPrinting(false);
+    }
   };
 
   const isLoading = isTeacher
@@ -427,24 +531,35 @@ export const StudentListManager = () => {
               : null}
           </p>
         </div>
-        <Button
-          variant="outline"
-          className="w-full shrink-0 sm:w-auto"
-          disabled={filteredStudents.length === 0}
-          onClick={() => {
-            downloadStudentsExcel(filteredStudents, {
-              isCollege,
-              primaryLabel: labels.primary,
-              secondaryLabel: labels.secondary,
-              primaryMap,
-              secondaryMap,
-              includeFees: canManage,
-            });
-            toast.success("Student data exported to Excel");
-          }}
-        >
-          Export Excel
-        </Button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            disabled={filteredStudents.length === 0 || printing}
+            onClick={() => void handlePrintList()}
+          >
+            <Printer className="mr-2 h-4 w-4" />
+            {printing ? "Preparing…" : "Print list"}
+          </Button>
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            disabled={filteredStudents.length === 0}
+            onClick={() => {
+              downloadStudentsExcel(filteredStudents, {
+                isCollege,
+                primaryLabel: labels.primary,
+                secondaryLabel: labels.secondary,
+                primaryMap,
+                secondaryMap,
+                includeFees: canManage,
+              });
+              toast.success("Student data exported to Excel");
+            }}
+          >
+            Export Excel
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="min-w-0 space-y-4">
         {statusFilter || yearNameFilter ? (
@@ -808,6 +923,195 @@ export const StudentListManager = () => {
           </div>
         )}
       </CardContent>
+
+      {/* Hidden print layout — college header + filtered student table */}
+      <div
+        id={STUDENTS_PRINT_AREA_ID}
+        className="hidden print:block"
+        aria-hidden="true"
+        style={{
+          background: "#ffffff",
+          color: "#0f172a",
+          padding: 16,
+          fontFamily:
+            '"IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif',
+        }}
+      >
+        <header
+          style={{
+            marginBottom: 12,
+            paddingBottom: 10,
+            borderBottom: "1px solid #94a3b8",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <CollegeLogo className="h-12 w-12 shrink-0" />
+            <div style={{ minWidth: 0 }}>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: "#0f172a",
+                }}
+              >
+                {institutionName || "Institution"}
+              </p>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#1e293b",
+                }}
+              >
+                Students list
+              </p>
+              {printScopeLines.length > 0 ? (
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    fontSize: 11,
+                    color: "#334155",
+                    fontWeight: 600,
+                  }}
+                >
+                  {printScopeLines.join("  ·  ")}
+                </p>
+              ) : (
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    fontSize: 11,
+                    color: "#64748b",
+                  }}
+                >
+                  All {labels.primaryPlural.toLowerCase()} /{" "}
+                  {labels.secondaryPlural.toLowerCase()}
+                </p>
+              )}
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 10,
+                  color: "#64748b",
+                }}
+              >
+                {filteredStudents.length} student
+                {filteredStudents.length === 1 ? "" : "s"}
+              </p>
+            </div>
+          </div>
+        </header>
+
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            tableLayout: "auto",
+          }}
+        >
+          <thead>
+            <tr>
+              <th style={{ ...printTh, textAlign: "center", width: 36 }}>
+                S.N.
+              </th>
+              <th style={printTh}>Name</th>
+              <th style={printTh}>Mobile</th>
+              <th style={printTh}>Roll No.</th>
+              <th style={printTh}>Admission No.</th>
+              <th style={printTh}>{labels.primary}</th>
+              <th style={printTh}>{labels.secondary}</th>
+              {isCollege ? <th style={printTh}>Status</th> : null}
+              <th style={printTh}>Guardian</th>
+              {canManage ? (
+                <th style={{ ...printTh, textAlign: "right" }}>Total Fee</th>
+              ) : null}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredStudents.map((student, index) => {
+              const displayName =
+                student.user?.fullName ?? "Unknown student";
+              const displayPhone = student.user?.phone || "—";
+              const primaryLabel =
+                primaryMap.get(
+                  (isCollege ? student.batchId : student.classId) ?? "",
+                ) ?? "—";
+              const secondaryLabel =
+                secondaryMap.get(
+                  (isCollege ? student.yearId : student.sectionId) ?? "",
+                ) ?? "—";
+              const academicStatus = student.academicStatus ?? "ACTIVE";
+              const statusLabel =
+                STUDENT_ACADEMIC_STATUS_LABELS[
+                  academicStatus as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
+                ] ?? academicStatus.replace(/_/g, " ");
+
+              return (
+                <tr
+                  key={student._id}
+                  style={{
+                    background: index % 2 === 1 ? "#f8fafc" : "#ffffff",
+                  }}
+                >
+                  <td style={{ ...printTd, textAlign: "center" }}>
+                    {index + 1}
+                  </td>
+                  <td style={printTd}>
+                    <div style={{ fontWeight: 600 }}>{displayName}</div>
+                    {student.user?.email ? (
+                      <div style={{ fontSize: 9, color: "#64748b" }}>
+                        {student.user.email}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td style={printTd}>{displayPhone}</td>
+                  <td style={printTd}>{student.rollNumber || "—"}</td>
+                  <td style={printTd}>
+                    {student.admissionNumber || "—"}
+                    {student.registrationNumber ? (
+                      <div style={{ fontSize: 9, color: "#64748b" }}>
+                        Reg: {student.registrationNumber}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td style={printTd}>{primaryLabel}</td>
+                  <td style={printTd}>{secondaryLabel}</td>
+                  {isCollege ? (
+                    <td style={printTd}>{statusLabel}</td>
+                  ) : null}
+                  <td style={printTd}>{student.guardianName || "—"}</td>
+                  {canManage ? (
+                    <td style={{ ...printTd, textAlign: "right" }}>
+                      {student.hasScholarship
+                        ? "Scholarship"
+                        : formatCurrencyNpr(student.feesDueNpr)}
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <footer
+          style={{
+            marginTop: 12,
+            paddingTop: 8,
+            borderTop: "1px solid #cbd5e1",
+            fontSize: 9,
+            color: "#64748b",
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            Students list · Confidential institutional record
+            {printScopeLines.length > 0
+              ? ` · ${printScopeLines.join(" · ")}`
+              : ""}
+          </p>
+        </footer>
+      </div>
     </Card>
   );
 };
