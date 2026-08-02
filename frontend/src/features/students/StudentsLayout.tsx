@@ -1,4 +1,4 @@
-import { NavLink, Navigate, Outlet } from "react-router-dom";
+import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import { UserPlus, Users } from "lucide-react";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
@@ -18,6 +18,7 @@ export const StudentsLayout = () => {
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const canManage = useIsTenantAdmin();
+  const location = useLocation();
 
   return (
     <div className="space-y-6">
@@ -36,7 +37,10 @@ export const StudentsLayout = () => {
             <UserPlus className="h-4 w-4 shrink-0" />
             Create Student
           </NavLink>
-          <NavLink to="/students/list" className={tabClass}>
+          <NavLink
+            to={{ pathname: "/students/list", search: location.search }}
+            className={tabClass}
+          >
             <Users className="h-4 w-4 shrink-0" />
             Students List
           </NavLink>
@@ -50,6 +54,13 @@ export const StudentsLayout = () => {
   );
 };
 
-export const StudentsIndexRedirect = () => (
-  <Navigate to="/students/list" replace />
-);
+/** Keep dashboard query (?yearName=, ?status=) when redirecting /students → /students/list */
+export const StudentsIndexRedirect = () => {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: "list", search: location.search }}
+      replace
+    />
+  );
+};

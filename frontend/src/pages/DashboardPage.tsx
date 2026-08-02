@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -33,6 +33,8 @@ import { useAuth } from "features/auth/AuthProvider";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
+import { Select } from "components/ui/select";
+import { FormField } from "components/shared/FormField";
 import { PageContent } from "components/layout/PageContent";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { api, unwrap } from "lib/api";
@@ -43,6 +45,7 @@ import {
   getUserRoleSubtitle,
   roleLabelMap,
 } from "lib/auth";
+import { useIsCollege } from "hooks/useInstitutionType";
 import { AcademicCalendarWidgets } from "features/dashboard/AcademicCalendarWidgets";
 import { DashboardSchedulePanels } from "features/dashboard/DashboardSchedulePanels";
 import { DashboardBannerPopup } from "features/notices/DashboardBannerPopup";
@@ -88,6 +91,208 @@ const ethnicityColor = (name: string, index: number): string => {
 
 type BreakdownSlice = { name: string; value: number };
 
+type DemoRow = NonNullable<DashboardResponse["studentDemographics"]>[number];
+
+const tallyGenderSlices = (rows: DemoRow[]): BreakdownSlice[] => {
+  let male = 0;
+  let female = 0;
+  let other = 0;
+  for (const s of rows) {
+    const g = (s.gender ?? "").trim().toLowerCase();
+    if (g === "male") male += 1;
+    else if (g === "female") female += 1;
+    else other += 1;
+  }
+  return [
+    { name: "Male", value: male },
+    { name: "Female", value: female },
+    ...(other > 0 ? [{ name: "Other / Unset", value: other }] : []),
+  ];
+};
+
+const tallyEthnicitySlices = (rows: DemoRow[]): BreakdownSlice[] => {
+  const counts = new Map<string, number>();
+  for (const s of rows) {
+    const ethnicity = (s.ethnicityCategory ?? "").trim() || "Unset";
+    counts.set(ethnicity, (counts.get(ethnicity) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, value]) => ({ name, value }));
+};
+
+/** Gender + ethnicity donuts with batch / year (or class / section) filters. */
+const StudentDemographicsCharts = ({
+  data,
+}: {
+  data: DashboardResponse;
+}) => {
+  const isCollege = useIsCollege();
+  const [batchId, setBatchId] = useState("");
+  const [yearId, setYearId] = useState("");
+
+  const batches = data.chartBatches ?? [];
+  const years = data.chartYears ?? [];
+  const rows = data.studentDemographics ?? [];
+
+  const yearOptions = useMemo(() => {
+    if (!batchId) return years;
+    return years.filter((y) => !y.batchId || y.batchId === batchId);
+  }, [batchId, years]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      if (batchId && r.batchId !== batchId) return false;
+      if (yearId && r.yearId !== yearId) return false;
+      return true;
+    });
+  }, [batchId, rows, yearId]);
+
+  const genderData = useMemo(
+    () => tallyGenderSlices(filteredRows),
+    [filteredRows],
+  );
+  const ethnicityData = useMemo(
+    () => tallyEthnicitySlices(filteredRows),
+    [filteredRows],
+  );
+
+  const batchLabel = isCollege ? "Batch" : "Class";
+  const yearLabel = isCollege ? "Year" : "Section";
+  const batchName = batches.find((b) => b._id === batchId)?.name;
+  const yearName = years.find((y) => y._id === yearId)?.name;
+  const scopeParts = [
+    "Active students",
+    batchName ? `${batchLabel}: ${batchName}` : null,
+    yearName ? `${yearLabel}: ${yearName}` : null,
+    !batchId && !yearId ? "all batches & years" : null,
+  ].filter(Boolean);
+  const scope = scopeParts.join(" · ");
+
+  const hasAnyDemo =
+    rows.length > 0 ||
+    (data.genderChart?.length ?? 0) > 0 ||
+    (data.ethnicityChart?.length ?? 0) > 0;
+
+  if (!hasAnyDemo) return null;
+
+  /**
+   * No filter → use server default charts (active / current running years).
+   * With batch/year filter → recompute from full active-student demographics.
+   */
+  const hasChartFilter = Boolean(batchId || yearId);
+  const genderSlices =
+    hasChartFilter && rows.length > 0
+      ? genderData
+      : (data.genderChart ?? genderData);
+  const ethnicitySlices =
+    hasChartFilter && rows.length > 0
+      ? ethnicityData
+      : (data.ethnicityChart ?? ethnicityData);
+
+  const chartScope = hasChartFilter
+    ? scope
+    : data.genderChartScope || data.ethnicityChartScope || scope;
+
+  const legendBase = "/students/list";
+
+  // Hide filter bar only when we have no batch/year options (non-admin / empty school)
+  const showFilters = batches.length > 0 || years.length > 0;
+
+  return (
+    <div className="space-y-4">
+      {showFilters ? (
+        <Card className="border-slate-200/80 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">
+              Student demographics filters
+            </CardTitle>
+            <p className="text-sm text-slate-500">
+              Filter gender and ethnicity charts by {batchLabel.toLowerCase()}{" "}
+              and {yearLabel.toLowerCase()}.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <FormField label={batchLabel}>
+              <Select
+                value={batchId}
+                onChange={(e) => {
+                  setBatchId(e.target.value);
+                  setYearId("");
+                }}
+              >
+                <option value="">All {batchLabel.toLowerCase()}s</option>
+                {batches.map((b) => (
+                  <option key={b._id} value={b._id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label={yearLabel}>
+              <Select
+                value={yearId}
+                onChange={(e) => setYearId(e.target.value)}
+              >
+                <option value="">All {yearLabel.toLowerCase()}s</option>
+                {yearOptions.map((y) => (
+                  <option key={y._id} value={y._id}>
+                    {y.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <div className="flex items-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full sm:w-auto"
+                disabled={!batchId && !yearId}
+                onClick={() => {
+                  setBatchId("");
+                  setYearId("");
+                }}
+              >
+                Clear filters
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <BreakdownDonutCard
+          title="Students by Gender"
+          scope={chartScope}
+          icon={<Users className="h-5 w-5 text-brand-700" />}
+          data={genderSlices}
+          colorFor={(name) =>
+            GENDER_CHART_COLORS[name] ?? INSTITUTION_MIX_COLORS[0]!
+          }
+          emptyMessage={
+            hasChartFilter
+              ? "No active students match this batch/year filter."
+              : "No active students with gender recorded yet."
+          }
+          legendLinkBase={legendBase}
+        />
+        <BreakdownDonutCard
+          title="Students by Ethnicity"
+          scope={chartScope}
+          icon={<Sparkles className="h-5 w-5 text-brand-700" />}
+          data={ethnicitySlices}
+          colorFor={ethnicityColor}
+          emptyMessage={
+            hasChartFilter
+              ? "No active students match this batch/year filter."
+              : "No active students with ethnicity recorded yet."
+          }
+        />
+      </div>
+    </div>
+  );
+};
+
 /** Clean donut + legend with full category names (Male, Female, Madhesi, …). */
 const BreakdownDonutCard = ({
   title,
@@ -96,6 +301,8 @@ const BreakdownDonutCard = ({
   data,
   colorFor,
   emptyMessage,
+  /** When set, legend rows link to this path with ?gender=Name (for gender chart). */
+  legendLinkBase,
 }: {
   title: string;
   scope?: string;
@@ -103,6 +310,7 @@ const BreakdownDonutCard = ({
   data: BreakdownSlice[];
   colorFor: (name: string, index: number) => string;
   emptyMessage: string;
+  legendLinkBase?: string;
 }) => {
   const slices = data.filter((s) => s.value > 0);
   const total = data.reduce((sum, s) => sum + s.value, 0);
@@ -213,20 +421,28 @@ const BreakdownDonutCard = ({
               </div>
             </div>
 
-            {/* Full-word legend — never truncated */}
+            {/* Full-word legend — clickable when legendLinkBase is set */}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {slices.map((entry, index) => {
                 const pct =
                   total > 0 ? Math.round((entry.value / total) * 100) : 0;
-                return (
-                  <div
-                    key={entry.name}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5"
-                  >
+                const genderParam =
+                  entry.name === "Other / Unset" || entry.name === "Other"
+                    ? "Other"
+                    : entry.name;
+                const href = legendLinkBase
+                  ? `${legendLinkBase}?gender=${encodeURIComponent(genderParam)}`
+                  : undefined;
+                const rowClass =
+                  "flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 transition";
+                const inner = (
+                  <>
                     <div className="flex items-center gap-2">
                       <span
                         className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white"
-                        style={{ backgroundColor: colorFor(entry.name, index) }}
+                        style={{
+                          backgroundColor: colorFor(entry.name, index),
+                        }}
                       />
                       <span className="text-sm font-semibold text-slate-800 whitespace-normal">
                         {entry.name}
@@ -240,6 +456,22 @@ const BreakdownDonutCard = ({
                         {pct}%
                       </span>
                     </div>
+                  </>
+                );
+                return href ? (
+                  <Link
+                    key={entry.name}
+                    to={href}
+                    className={cn(
+                      rowClass,
+                      "hover:border-brand-200 hover:bg-brand-50/50",
+                    )}
+                  >
+                    {inner}
+                  </Link>
+                ) : (
+                  <div key={entry.name} className={rowClass}>
+                    {inner}
                   </div>
                 );
               })}
@@ -266,7 +498,64 @@ const statIconMap: Record<string, typeof Users> = {
   "Assigned Subjects": ClipboardList,
   "Linked Children": Users,
   "Children with Fees Due": Wallet,
-  "Fee Entries": Receipt
+  "Fee Entries": Receipt,
+  "Passed Out": Users,
+  Alumni: Users,
+};
+
+/**
+ * Map dashboard metric labels → routes (with optional query filters).
+ * Dynamic year names (e.g. "1st Year") open the student list filtered by year name.
+ */
+const resolveDashboardStatHref = (label: string): string | undefined => {
+  // Always use /students/list so query filters are not dropped by index redirect
+  const fixed: Record<string, string> = {
+    Students: "/students/list",
+    Teachers: "/teachers",
+    Batches: "/academics",
+    Classes: "/academics",
+    Years: "/academics",
+    Notices: "/notices",
+    "Visible Notices": "/notices",
+    "Unread Alerts": "/notifications",
+    "Enrolled Subjects": "/my-subjects",
+    "Attendance Days": "/attendance",
+    "Assigned Batches": "/students/list",
+    "Assigned Classes": "/students/list",
+    "Assigned Subjects": "/academics/subject-assignments",
+    "Linked Children": "/parent-portal",
+    "Children with Fees Due": "/parent-portal",
+    "Fee Entries": "/accounting?tab=fee-records",
+    "Passed Out": "/students/list?status=PASSED_OUT",
+    Alumni: "/students/list?status=ALUMNI",
+  };
+  if (fixed[label]) return fixed[label];
+
+  // College year-level counts from admin dashboard (e.g. "1st Year", "2nd Year")
+  // Match ACTIVE students in that year — same scope as dashboard counts
+  if (/year/i.test(label) && !/^assigned/i.test(label)) {
+    return `/students/list?yearName=${encodeURIComponent(label)}&status=ACTIVE`;
+  }
+
+  return undefined;
+};
+
+const dashboardStatHint = (label: string, href?: string): string | null => {
+  if (!href) return null;
+  if (label === "Unread Alerts") return "Open notifications →";
+  if (label === "Students" || label.startsWith("1st") || label.startsWith("2nd") || label.startsWith("3rd") || /year/i.test(label)) {
+    return "View students →";
+  }
+  if (label === "Passed Out" || label === "Alumni") return "View list →";
+  if (label === "Teachers") return "View teachers →";
+  if (label === "Batches" || label === "Classes" || label === "Years") {
+    return "Open academics →";
+  }
+  if (label.includes("Notice")) return "Open notices →";
+  if (label.includes("Subject")) return "Open →";
+  if (label.includes("Attendance")) return "Open attendance →";
+  if (label.includes("Children") || label.includes("Parent")) return "Open portal →";
+  return "Open →";
 };
 
 const highlightToneClass: Record<NonNullable<DashboardHighlight["tone"]>, string> = {
@@ -407,30 +696,54 @@ const StatGrid = ({ stats }: { stats: DashboardMetric[] }) => (
   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     {stats.map((stat) => {
       const Icon = statIconMap[stat.label] ?? Sparkles;
+      const href = resolveDashboardStatHref(stat.label);
+      const hint = dashboardStatHint(stat.label, href);
       const content = (
-        <Card className="overflow-hidden border-slate-200/80 shadow-sm transition hover:shadow-md">
-          <CardContent className="flex items-start justify-between gap-4 py-5">
-            <div>
-              <p className="text-sm font-medium text-slate-500">{stat.label}</p>
-              <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{stat.value}</p>
-              {stat.change ? <p className="mt-1 text-xs text-brand-700">{stat.change}</p> : null}
+        <Card
+          className={cn(
+            "h-full min-w-0 overflow-hidden border-slate-200/80 shadow-sm transition",
+            href
+              ? "cursor-pointer hover:shadow-md hover:ring-2 hover:ring-brand-200"
+              : "hover:shadow-md",
+          )}
+        >
+          <CardContent className="flex min-h-[6.5rem] items-start justify-between gap-4 py-5">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-slate-500">
+                {stat.label}
+              </p>
+              <p className="mt-2 break-words text-3xl font-semibold tracking-tight text-slate-900 tabular-nums">
+                {stat.value}
+              </p>
+              {stat.change ? (
+                <p className="mt-1 text-xs text-brand-700">{stat.change}</p>
+              ) : null}
+              {hint ? (
+                <p className="mt-2 truncate text-xs font-medium text-brand-600">
+                  {hint}
+                </p>
+              ) : null}
             </div>
-            <div className="rounded-2xl bg-brand-50 p-3 text-brand-700">
+            <div className="shrink-0 rounded-2xl bg-brand-50 p-3 text-brand-700">
               <Icon className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
       );
 
-      if (stat.label === "Unread Alerts") {
+      if (href) {
         return (
-          <Link key={stat.label} to="/notifications" className="block">
+          <Link key={stat.label} to={href} className="block min-w-0">
             {content}
           </Link>
         );
       }
 
-      return <div key={stat.label}>{content}</div>;
+      return (
+        <div key={stat.label} className="min-w-0">
+          {content}
+        </div>
+      );
     })}
   </div>
 );
@@ -918,17 +1231,29 @@ export const DashboardPage = () => {
         {(data.children ?? []).length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2">
             {(data.children ?? []).map((child) => (
-              <Card key={child.studentId} className="border-slate-200/80 shadow-sm">
-                <CardContent className="py-5">
-                  <p className="text-sm text-slate-500">Linked child</p>
-                  <p className="mt-1 text-xl font-semibold text-slate-900">
-                    <StudentNameLink studentId={child.studentId} name={child.fullName} />
-                  </p>
-                  <p className="mt-3 text-sm text-slate-600">
-                    Fees due: <span className="font-semibold text-slate-900">{formatCurrencyNpr(child.feesDueNpr)}</span>
-                  </p>
-                </CardContent>
-              </Card>
+              <Link
+                key={child.studentId}
+                to="/parent-portal"
+                className="block"
+              >
+                <Card className="h-full border-slate-200/80 shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-brand-200">
+                  <CardContent className="py-5">
+                    <p className="text-sm text-slate-500">Linked child</p>
+                    <p className="mt-1 text-xl font-semibold text-slate-900">
+                      {child.fullName}
+                    </p>
+                    <p className="mt-3 text-sm text-slate-600">
+                      Fees due:{" "}
+                      <span className="font-semibold text-slate-900">
+                        {formatCurrencyNpr(child.feesDueNpr)}
+                      </span>
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-brand-600">
+                      Open parent portal →
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         ) : null}
@@ -1081,30 +1406,9 @@ export const DashboardPage = () => {
               </Card>
             ) : null}
 
-            {isCollegeAdmin && (data.genderChart?.length ?? 0) > 0 ? (
-              <BreakdownDonutCard
-                title="Students by Gender"
-                scope={data.genderChartScope}
-                icon={<Users className="h-5 w-5 text-brand-700" />}
-                data={data.genderChart ?? []}
-                colorFor={(name) =>
-                  GENDER_CHART_COLORS[name] ?? INSTITUTION_MIX_COLORS[0]!
-                }
-                emptyMessage="No active students with gender recorded yet."
-              />
-            ) : null}
-
-            {isCollegeAdmin && (data.ethnicityChart?.length ?? 0) > 0 ? (
-              <BreakdownDonutCard
-                title="Students by Ethnicity"
-                scope={data.ethnicityChartScope}
-                icon={<Sparkles className="h-5 w-5 text-brand-700" />}
-                data={data.ethnicityChart ?? []}
-                colorFor={ethnicityColor}
-                emptyMessage="No active students with ethnicity recorded yet."
-              />
-            ) : null}
           </div>
+
+          {isCollegeAdmin ? <StudentDemographicsCharts data={data} /> : null}
         </div>
 
         <div className="space-y-6">

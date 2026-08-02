@@ -142,6 +142,8 @@ export const FinanceManager = () => {
   // Filters
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  /** COLLEGE_EXPENSE | OTHER_EXPENSE | EXTERNAL_EXPENSE | OTHER_EXTERNAL */
+  const [expenseTypeFilter, setExpenseTypeFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("");
   const [fromDateBs, setFromDateBs] = useState("");
@@ -250,6 +252,7 @@ export const FinanceManager = () => {
     () => ({
       search: search || undefined,
       transactionType: typeFilter || undefined,
+      expenseType: expenseTypeFilter || undefined,
       categoryId: categoryFilter || undefined,
       paymentMethod: paymentFilter || undefined,
       fromDateBs: fromDateBs || undefined,
@@ -260,6 +263,7 @@ export const FinanceManager = () => {
     [
       search,
       typeFilter,
+      expenseTypeFilter,
       categoryFilter,
       paymentFilter,
       fromDateBs,
@@ -269,6 +273,47 @@ export const FinanceManager = () => {
       isAdmin,
     ],
   );
+
+  /** Apply dashboard year/month to transaction date range filters. */
+  const applyDashPeriodToTxFilters = () => {
+    const y = dashYear.trim().slice(0, 4);
+    const m = dashMonth.trim().padStart(2, "0");
+    if (y && /^\d{4}$/.test(y)) {
+      if (m && m !== "00" && Number(m) >= 1 && Number(m) <= 12) {
+        setFromDateBs(`${y}-${m}-01`);
+        setToDateBs(`${y}-${m}-32`);
+      } else {
+        setFromDateBs(`${y}-01-01`);
+        setToDateBs(`${y}-12-32`);
+      }
+    }
+  };
+
+  /** Open Transactions with filters (from dashboard cards / lists). */
+  const openTransactions = (opts?: {
+    transactionType?: string;
+    expenseType?: string;
+    monthBs?: string;
+    clearDates?: boolean;
+  }) => {
+    setSearch("");
+    setPaymentFilter("");
+    setTypeFilter(opts?.transactionType ?? "");
+    setExpenseTypeFilter(opts?.expenseType ?? "");
+    if (opts?.monthBs && opts.monthBs.length >= 7) {
+      const [y, mo] = opts.monthBs.split("-");
+      if (y && mo) {
+        setFromDateBs(`${y}-${mo}-01`);
+        setToDateBs(`${y}-${mo}-32`);
+      }
+    } else if (opts?.clearDates) {
+      setFromDateBs("");
+      setToDateBs("");
+    } else {
+      applyDashPeriodToTxFilters();
+    }
+    setTab("transactions");
+  };
 
   const transactionsQuery = useQuery({
     queryKey: ["finance", "transactions", filterParams],
@@ -566,39 +611,66 @@ export const FinanceManager = () => {
             <LoadingState />
           ) : (
             <>
+              {/* Same card shape as before — only click + light hover for navigation */}
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                {[
-                  {
-                    label: "College expenses",
-                    value: dash?.totalCollegeExpensesNpr ?? 0,
-                    tone: "text-rose-700",
-                  },
-                  {
-                    label: "Other / external expenses",
-                    value:
-                      (dash?.totalOtherExpensesNpr ?? 0) +
-                      (dash?.totalExternalExpensesNpr ?? 0),
-                    tone: "text-orange-700",
-                  },
-                  {
-                    label: "Total income",
-                    value: dash?.totalIncomeNpr ?? 0,
-                    tone: "text-emerald-700",
-                  },
-                  {
-                    label: "Credit (unsettled)",
-                    value: dash?.totalCreditNpr ?? 0,
-                    tone: "text-amber-800",
-                  },
-                  {
-                    label: "Net position",
-                    value: dash?.netPositionNpr ?? 0,
-                    tone: "text-brand-700",
-                  },
-                ].map((stat) => (
+                {(
+                  [
+                    {
+                      label: "College expenses",
+                      value: dash?.totalCollegeExpensesNpr ?? 0,
+                      tone: "text-rose-700",
+                      onClick: () =>
+                        openTransactions({
+                          transactionType: "EXPENSE",
+                          expenseType: "COLLEGE_EXPENSE",
+                        }),
+                    },
+                    {
+                      label: "Other / external expenses",
+                      value:
+                        (dash?.totalOtherExpensesNpr ?? 0) +
+                        (dash?.totalExternalExpensesNpr ?? 0),
+                      tone: "text-orange-700",
+                      onClick: () =>
+                        openTransactions({
+                          transactionType: "EXPENSE",
+                          expenseType: "OTHER_EXTERNAL",
+                        }),
+                    },
+                    {
+                      label: "Total income",
+                      value: dash?.totalIncomeNpr ?? 0,
+                      tone: "text-emerald-700",
+                      onClick: () =>
+                        openTransactions({ transactionType: "INCOME" }),
+                    },
+                    {
+                      label: "Credit (unsettled)",
+                      value: dash?.totalCreditNpr ?? 0,
+                      tone: "text-amber-800",
+                      onClick: () =>
+                        openTransactions({ transactionType: "CREDIT" }),
+                    },
+                    {
+                      label: "Net position",
+                      value: dash?.netPositionNpr ?? 0,
+                      tone: "text-brand-700",
+                      onClick: () => openTransactions({}),
+                    },
+                  ] as const
+                ).map((stat) => (
                   <Card
                     key={stat.label}
-                    className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]"
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)] transition hover:shadow-md"
+                    onClick={stat.onClick}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        stat.onClick();
+                      }
+                    }}
                   >
                     <CardContent className="py-5">
                       <p className="text-sm text-slate-500">{stat.label}</p>
@@ -611,9 +683,20 @@ export const FinanceManager = () => {
               </div>
 
               <div className="grid gap-6 xl:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Monthly expense summary</CardTitle>
+                <Card className="min-w-0 overflow-hidden">
+                  <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                    <CardTitle className="text-base">
+                      Monthly expense summary
+                    </CardTitle>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        openTransactions({ transactionType: "EXPENSE" })
+                      }
+                    >
+                      View expenses
+                    </Button>
                   </CardHeader>
                   <CardContent>
                     {(dash?.monthlyExpenseSummary ?? []).length === 0 ? (
@@ -621,23 +704,42 @@ export const FinanceManager = () => {
                     ) : (
                       <ul className="divide-y divide-slate-100 text-sm">
                         {dash?.monthlyExpenseSummary.map((row) => (
-                          <li
-                            key={row.month}
-                            className="flex justify-between py-2"
-                          >
-                            <span>{row.month}</span>
-                            <span className="font-medium text-rose-700">
-                              {formatFinanceAmount(row.amountNpr)}
-                            </span>
+                          <li key={row.month}>
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between py-2 text-left transition hover:bg-slate-50"
+                              onClick={() =>
+                                openTransactions({
+                                  transactionType: "EXPENSE",
+                                  monthBs: row.month,
+                                })
+                              }
+                            >
+                              <span>{row.month}</span>
+                              <span className="font-medium text-rose-700">
+                                {formatFinanceAmount(row.amountNpr)}
+                              </span>
+                            </button>
                           </li>
                         ))}
                       </ul>
                     )}
                   </CardContent>
                 </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Monthly income summary</CardTitle>
+                <Card className="min-w-0 overflow-hidden">
+                  <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                    <CardTitle className="text-base">
+                      Monthly income summary
+                    </CardTitle>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        openTransactions({ transactionType: "INCOME" })
+                      }
+                    >
+                      View income
+                    </Button>
                   </CardHeader>
                   <CardContent>
                     {(dash?.monthlyIncomeSummary ?? []).length === 0 ? (
@@ -645,14 +747,22 @@ export const FinanceManager = () => {
                     ) : (
                       <ul className="divide-y divide-slate-100 text-sm">
                         {dash?.monthlyIncomeSummary.map((row) => (
-                          <li
-                            key={row.month}
-                            className="flex justify-between py-2"
-                          >
-                            <span>{row.month}</span>
-                            <span className="font-medium text-emerald-700">
-                              {formatFinanceAmount(row.amountNpr)}
-                            </span>
+                          <li key={row.month}>
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between py-2 text-left transition hover:bg-slate-50"
+                              onClick={() =>
+                                openTransactions({
+                                  transactionType: "INCOME",
+                                  monthBs: row.month,
+                                })
+                              }
+                            >
+                              <span>{row.month}</span>
+                              <span className="font-medium text-emerald-700">
+                                {formatFinanceAmount(row.amountNpr)}
+                              </span>
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -661,9 +771,16 @@ export const FinanceManager = () => {
                 </Card>
               </div>
 
-              <Card>
-                <CardHeader>
+              <Card className="min-w-0 overflow-hidden">
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
                   <CardTitle className="text-base">Recent transactions</CardTitle>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openTransactions({})}
+                  >
+                    View all
+                  </Button>
                 </CardHeader>
                 <CardContent className="p-0">
                   {(dash?.recentTransactions ?? []).length === 0 ? (
@@ -719,7 +836,19 @@ export const FinanceManager = () => {
                                     "—"
                                   : tx.vendorPayee?.trim() || "—";
                               return (
-                                <tr key={tx._id} className="align-top">
+                                <tr
+                                  key={tx._id}
+                                  className="cursor-pointer align-top hover:bg-slate-50"
+                                  onClick={() =>
+                                    openTransactions({
+                                      transactionType: tx.transactionType,
+                                      expenseType:
+                                        tx.transactionType === "EXPENSE"
+                                          ? tx.expenseType
+                                          : undefined,
+                                    })
+                                  }
+                                >
                                   <Td className="whitespace-nowrap tabular-nums text-sm">
                                     {tx.dateBs}
                                   </Td>
@@ -791,7 +920,10 @@ export const FinanceManager = () => {
               <FormField label="Type">
                 <Select
                   value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value)}
+                  onChange={(e) => {
+                    setTypeFilter(e.target.value);
+                    if (e.target.value !== "EXPENSE") setExpenseTypeFilter("");
+                  }}
                 >
                   <option value="">All types</option>
                   {FINANCE_TRANSACTION_TYPES.map((t) => (
@@ -799,6 +931,21 @@ export const FinanceManager = () => {
                       {transactionTypeLabel(t)}
                     </option>
                   ))}
+                </Select>
+              </FormField>
+              <FormField label="Expense kind">
+                <Select
+                  value={expenseTypeFilter}
+                  onChange={(e) => {
+                    setExpenseTypeFilter(e.target.value);
+                    if (e.target.value) setTypeFilter("EXPENSE");
+                  }}
+                >
+                  <option value="">All expense kinds</option>
+                  <option value="COLLEGE_EXPENSE">College expense</option>
+                  <option value="OTHER_EXPENSE">Other expense</option>
+                  <option value="EXTERNAL_EXPENSE">External expense</option>
+                  <option value="OTHER_EXTERNAL">Other + external</option>
                 </Select>
               </FormField>
               <FormField label="Category">
@@ -881,6 +1028,7 @@ export const FinanceManager = () => {
                   onClick={() => {
                     setSearch("");
                     setTypeFilter("");
+                    setExpenseTypeFilter("");
                     setCategoryFilter("");
                     setPaymentFilter("");
                     setFromDateBs("");

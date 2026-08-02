@@ -130,7 +130,11 @@ export const LaboratoryManager = () => {
   const [itemKindFilter, setItemKindFilter] = useState("");
   const [yearFilter, setYearFilter] = useState<"ALL" | LaboratoryYearLevel>("ALL");
   const [stockStatusFilter, setStockStatusFilter] = useState("");
+  /** Inventory condition filter (e.g. DAMAGED from dashboard) */
+  const [conditionFilter, setConditionFilter] = useState("");
   const [requestStatusFilter, setRequestStatusFilter] = useState("");
+  /** "" | ACTIVE (issued+overdue) | ISSUED | OVERDUE | RETURNED */
+  const [issueStatusFilter, setIssueStatusFilter] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [selectedLabForCategories, setSelectedLabForCategories] = useState("");
   const [stockAction, setStockAction] = useState({
@@ -175,6 +179,7 @@ export const LaboratoryManager = () => {
       itemKindFilter,
       yearFilter,
       stockStatusFilter,
+      conditionFilter,
     ],
     queryFn: () =>
       unwrap<LaboratoryEquipmentRecord[]>(
@@ -185,10 +190,34 @@ export const LaboratoryManager = () => {
             itemKind: itemKindFilter || undefined,
             yearLevel: yearFilter !== "ALL" ? yearFilter : undefined,
             stockStatus: stockStatusFilter || undefined,
+            condition: conditionFilter || undefined,
           },
         }),
       ),
   });
+
+  /** Open Inventory with optional stock/condition filter (from dashboard cards). */
+  const openInventory = (opts?: {
+    stockStatus?: string;
+    condition?: string;
+  }) => {
+    // Clear other filters so the card only shows that slice of inventory
+    setLabFilter("");
+    setSearch("");
+    setItemKindFilter("");
+    setYearFilter("ALL");
+    setStockStatusFilter(opts?.stockStatus ?? "");
+    setConditionFilter(opts?.condition ?? "");
+    setEditingEquipmentId(null);
+    setInventorySlide(1);
+    setTab("inventory");
+    // Scroll to inventory results after paint
+    window.setTimeout(() => {
+      document
+        .getElementById("lab-inventory-results")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
 
   const issuesQuery = useQuery({
     queryKey: ["laboratory-issues"],
@@ -440,8 +469,67 @@ export const LaboratoryManager = () => {
   const visibleTabs = tabs.filter((item) => !item.adminOnly || isAdmin);
   const categories = categoriesQuery.data ?? [];
   const labOptions = useMemo(() => labsQuery.data ?? [], [labsQuery.data]);
-  const equipment = equipmentQuery.data ?? [];
-  const requests = requestsQuery.data ?? [];
+
+  /**
+   * Inventory list — always enforce stock/condition filters client-side too,
+   * so dashboard card clicks never show the wrong slice even if the API lags.
+   */
+  const equipment = useMemo(() => {
+    let list = equipmentQuery.data ?? [];
+    if (stockStatusFilter === "LOW_STOCK") {
+      // Dashboard "Low Stock Items" = low + critical (not out of stock)
+      list = list.filter(
+        (item) =>
+          item.status === "LOW_STOCK" || item.status === "CRITICAL_STOCK",
+      );
+    } else if (stockStatusFilter === "OUT_OF_STOCK") {
+      list = list.filter((item) => item.status === "OUT_OF_STOCK");
+    } else if (stockStatusFilter === "AVAILABLE") {
+      list = list.filter((item) => item.status === "AVAILABLE");
+    } else if (stockStatusFilter === "CRITICAL_STOCK") {
+      list = list.filter((item) => item.status === "CRITICAL_STOCK");
+    }
+    if (conditionFilter) {
+      list = list.filter((item) => item.condition === conditionFilter);
+    }
+    return list;
+  }, [conditionFilter, equipmentQuery.data, stockStatusFilter]);
+
+  const inventoryFilterLabel = useMemo(() => {
+    if (conditionFilter === "DAMAGED") return "Damaged items only";
+    if (stockStatusFilter === "OUT_OF_STOCK") return "Out of stock only";
+    if (stockStatusFilter === "LOW_STOCK")
+      return "Low stock & critical stock only";
+    if (stockStatusFilter === "CRITICAL_STOCK") return "Critical stock only";
+    if (stockStatusFilter === "AVAILABLE") return "Available stock only";
+    if (conditionFilter)
+      return `Condition: ${conditionFilter.replace(/_/g, " ")}`;
+    return "";
+  }, [conditionFilter, stockStatusFilter]);
+
+  const requests = useMemo(() => {
+    const list = requestsQuery.data ?? [];
+    // Client-side OPEN filter if API is older
+    if (requestStatusFilter === "OPEN") {
+      return list.filter((r) =>
+        ["PENDING", "APPROVED", "PURCHASED"].includes(r.status),
+      );
+    }
+    return list;
+  }, [requestStatusFilter, requestsQuery.data]);
+
+  const issues = useMemo(() => {
+    const list = issuesQuery.data ?? [];
+    if (issueStatusFilter === "ACTIVE") {
+      return list.filter(
+        (i) => i.status === "ISSUED" || i.status === "OVERDUE",
+      );
+    }
+    if (issueStatusFilter) {
+      return list.filter((i) => i.status === issueStatusFilter);
+    }
+    return list;
+  }, [issueStatusFilter, issuesQuery.data]);
 
   const beginEditLab = (lab: LaboratoryRecord) => {
     setEditingLabId(lab._id);
@@ -601,24 +689,88 @@ export const LaboratoryManager = () => {
 
       {tab === "dashboard" && (
         <div className="space-y-6">
+          {/* Original card shape — click only (no taller layout / hint lines) */}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {[
-              { label: "Total Laboratories", value: dashboardQuery.data?.totalLaboratories ?? 0 },
-              { label: "Total Equipment", value: dashboardQuery.data?.totalEquipment ?? 0 },
-              { label: "Available Units", value: dashboardQuery.data?.availableEquipment ?? 0 },
-              { label: "Low Stock Items", value: dashboardQuery.data?.lowStockItemsCount ?? 0 },
-              { label: "Out of Stock", value: dashboardQuery.data?.outOfStockItemsCount ?? 0 },
-              { label: "Damaged Items", value: dashboardQuery.data?.damagedItemsCount ?? 0 },
-              { label: "Pending Requests", value: dashboardQuery.data?.pendingRequestsCount ?? 0 },
-              { label: "Issued Units", value: dashboardQuery.data?.issuedEquipment ?? 0 },
-            ].map((stat) => (
+            {(
+              [
+                {
+                  label: "Total Laboratories",
+                  value: dashboardQuery.data?.totalLaboratories ?? 0,
+                  onClick: () => setTab("labs"),
+                },
+                {
+                  label: "Total Equipment",
+                  value: dashboardQuery.data?.totalEquipment ?? 0,
+                  onClick: () => openInventory(),
+                },
+                {
+                  label: "Available Units",
+                  value: dashboardQuery.data?.availableEquipment ?? 0,
+                  onClick: () => openInventory({ stockStatus: "AVAILABLE" }),
+                },
+                {
+                  label: "Low Stock Items",
+                  value: dashboardQuery.data?.lowStockItemsCount ?? 0,
+                  onClick: () => openInventory({ stockStatus: "LOW_STOCK" }),
+                },
+                {
+                  label: "Out of Stock",
+                  value: dashboardQuery.data?.outOfStockItemsCount ?? 0,
+                  onClick: () => openInventory({ stockStatus: "OUT_OF_STOCK" }),
+                },
+                {
+                  label: "Damaged Items",
+                  value: dashboardQuery.data?.damagedItemsCount ?? 0,
+                  onClick: () => openInventory({ condition: "DAMAGED" }),
+                },
+                {
+                  label: "Pending Requests",
+                  value: dashboardQuery.data?.pendingRequestsCount ?? 0,
+                  onClick: () => {
+                    setLabFilter("");
+                    // OPEN = PENDING + APPROVED + PURCHASED (matches dashboard count)
+                    setRequestStatusFilter("OPEN");
+                    setTab("requests");
+                    window.setTimeout(() => {
+                      document
+                        .getElementById("lab-requests-list")
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }, 80);
+                  },
+                },
+                {
+                  label: "Issued Units",
+                  value: dashboardQuery.data?.issuedEquipment ?? 0,
+                  onClick: () => {
+                    setIssueStatusFilter("ACTIVE");
+                    setTab("issues");
+                    window.setTimeout(() => {
+                      document
+                        .getElementById("lab-issues-list")
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }, 80);
+                  },
+                },
+              ] as const
+            ).map((stat) => (
               <Card
                 key={stat.label}
-                className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]"
+                role="button"
+                tabIndex={0}
+                className="cursor-pointer bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)] transition hover:shadow-md"
+                onClick={stat.onClick}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    stat.onClick();
+                  }
+                }}
               >
                 <CardContent className="py-6">
                   <p className="text-sm text-slate-500">{stat.label}</p>
-                  <p className="text-3xl font-semibold text-slate-900">{stat.value}</p>
+                  <p className="text-3xl font-semibold text-slate-900">
+                    {stat.value}
+                  </p>
                 </CardContent>
               </Card>
             ))}
@@ -634,85 +786,139 @@ export const LaboratoryManager = () => {
           ) : null}
 
           <div className="grid min-w-0 gap-6 xl:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Low / critical stock</CardTitle>
+            <Card className="min-w-0 overflow-hidden">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                <CardTitle>Low / critical / out of stock</CardTitle>
+                <div className="flex flex-wrap gap-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openInventory({ stockStatus: "LOW_STOCK" })}
+                  >
+                    Low stock
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      openInventory({ stockStatus: "OUT_OF_STOCK" })
+                    }
+                  >
+                    Out of stock
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="min-w-0">
-                <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
-                  <Table className="w-full min-w-[560px]">
-                    <TableHead>
-                      <tr>
-                        <Th className="whitespace-nowrap">Item</Th>
-                        <Th className="whitespace-nowrap">Lab</Th>
-                        <Th className="whitespace-nowrap">Available</Th>
-                        <Th className="whitespace-nowrap">Min</Th>
-                        <Th className="whitespace-nowrap">Status</Th>
-                      </tr>
-                    </TableHead>
-                    <TableBody>
-                      {(dashboardQuery.data?.lowStockItems ?? []).map((item) => (
-                        <tr key={item._id}>
-                          <Td className="whitespace-nowrap font-medium">
-                            {item.name}
-                          </Td>
-                          <Td className="whitespace-nowrap">
-                            {item.laboratoryName ?? "—"}
-                          </Td>
-                          <Td className="whitespace-nowrap">
-                            {item.availableQuantity}
-                          </Td>
-                          <Td className="whitespace-nowrap">
-                            {item.minimumStockLevel ?? 0}
-                          </Td>
-                          <Td className="whitespace-nowrap">
-                            <StockStatusBadge status={item.status} />
-                          </Td>
+                {(dashboardQuery.data?.lowStockItems ?? []).length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-500">
+                    No low or out-of-stock items.
+                  </p>
+                ) : (
+                  <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                    <Table className="w-full min-w-[560px]">
+                      <TableHead>
+                        <tr>
+                          <Th className="whitespace-nowrap">Item</Th>
+                          <Th className="whitespace-nowrap">Lab</Th>
+                          <Th className="whitespace-nowrap">Available</Th>
+                          <Th className="whitespace-nowrap">Min</Th>
+                          <Th className="whitespace-nowrap">Status</Th>
                         </tr>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHead>
+                      <TableBody>
+                        {(dashboardQuery.data?.lowStockItems ?? []).map(
+                          (item) => (
+                            <tr
+                              key={item._id}
+                              className="cursor-pointer hover:bg-slate-50"
+                              onClick={() =>
+                                openInventory({
+                                  stockStatus:
+                                    item.status === "OUT_OF_STOCK"
+                                      ? "OUT_OF_STOCK"
+                                      : "LOW_STOCK",
+                                })
+                              }
+                            >
+                              <Td className="whitespace-nowrap font-medium">
+                                {item.name}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                {item.laboratoryName ?? "—"}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                {item.availableQuantity}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                {item.minimumStockLevel ?? 0}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                <StockStatusBadge status={item.status} />
+                              </Td>
+                            </tr>
+                          ),
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
+            <Card className="min-w-0 overflow-hidden">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
                 <CardTitle>Recently updated inventory</CardTitle>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => openInventory()}
+                >
+                  View inventory
+                </Button>
               </CardHeader>
               <CardContent className="min-w-0">
-                <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
-                  <Table className="w-full min-w-[480px]">
-                    <TableHead>
-                      <tr>
-                        <Th className="whitespace-nowrap">Item</Th>
-                        <Th className="whitespace-nowrap">Lab</Th>
-                        <Th className="whitespace-nowrap">Available</Th>
-                        <Th className="whitespace-nowrap">Status</Th>
-                      </tr>
-                    </TableHead>
-                    <TableBody>
-                      {(dashboardQuery.data?.recentlyUpdated ?? []).map(
-                        (item) => (
-                          <tr key={item._id}>
-                            <Td className="whitespace-nowrap font-medium">
-                              {item.name}
-                            </Td>
-                            <Td className="whitespace-nowrap">
-                              {item.laboratoryName ?? "—"}
-                            </Td>
-                            <Td className="whitespace-nowrap">
-                              {item.availableQuantity}
-                            </Td>
-                            <Td className="whitespace-nowrap">
-                              <StockStatusBadge status={item.status} />
-                            </Td>
-                          </tr>
-                        ),
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                {(dashboardQuery.data?.recentlyUpdated ?? []).length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-500">
+                    No equipment yet.
+                  </p>
+                ) : (
+                  <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+                    <Table className="w-full min-w-[480px]">
+                      <TableHead>
+                        <tr>
+                          <Th className="whitespace-nowrap">Item</Th>
+                          <Th className="whitespace-nowrap">Lab</Th>
+                          <Th className="whitespace-nowrap">Available</Th>
+                          <Th className="whitespace-nowrap">Status</Th>
+                        </tr>
+                      </TableHead>
+                      <TableBody>
+                        {(dashboardQuery.data?.recentlyUpdated ?? []).map(
+                          (item) => (
+                            <tr
+                              key={item._id}
+                              className="cursor-pointer hover:bg-slate-50"
+                              onClick={() => openInventory()}
+                            >
+                              <Td className="whitespace-nowrap font-medium">
+                                {item.name}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                {item.laboratoryName ?? "—"}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                {item.availableQuantity}
+                              </Td>
+                              <Td className="whitespace-nowrap">
+                                <StockStatusBadge status={item.status} />
+                              </Td>
+                            </tr>
+                          ),
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -1055,10 +1261,38 @@ export const LaboratoryManager = () => {
       )}
 
       {tab === "inventory" && (
-        <div className="space-y-6">
+        <div className="space-y-6" id="lab-inventory-results">
+          {inventoryFilterLabel ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50/90 px-4 py-3 text-sm text-brand-950">
+              <p>
+                <span className="font-semibold">Showing:</span>{" "}
+                {inventoryFilterLabel}
+                <span className="text-brand-800">
+                  {" "}
+                  · {equipment.length} item
+                  {equipment.length === 1 ? "" : "s"}
+                </span>
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setLabFilter("");
+                  setSearch("");
+                  setItemKindFilter("");
+                  setYearFilter("ALL");
+                  setStockStatusFilter("");
+                  setConditionFilter("");
+                }}
+              >
+                Show all equipment
+              </Button>
+            </div>
+          ) : null}
+
           {/* Filters */}
           <Card className="border-slate-200 bg-[linear-gradient(135deg,_white_0%,_#f8fafc_100%)]">
-            <CardContent className="grid gap-3 py-4 md:grid-cols-2 xl:grid-cols-5">
+            <CardContent className="grid gap-3 py-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
               <FormField label="Laboratory">
                 <Select value={labFilter} onChange={(e) => setLabFilter(e.target.value)}>
                   <option value="">All laboratories</option>
@@ -1105,16 +1339,64 @@ export const LaboratoryManager = () => {
               <FormField label="Stock status">
                 <Select
                   value={stockStatusFilter}
-                  onChange={(e) => setStockStatusFilter(e.target.value)}
+                  onChange={(e) => {
+                    setStockStatusFilter(e.target.value);
+                    if (e.target.value) setConditionFilter("");
+                  }}
                 >
                   <option value="">All statuses</option>
-                  <option value="AVAILABLE">Available</option>
-                  <option value="LOW_STOCK">Low Stock</option>
-                  <option value="CRITICAL_STOCK">Critical Stock</option>
-                  <option value="OUT_OF_STOCK">Out of Stock</option>
+                  <option value="AVAILABLE">Available only</option>
+                  <option value="LOW_STOCK">Low / Critical stock only</option>
+                  <option value="CRITICAL_STOCK">Critical stock only</option>
+                  <option value="OUT_OF_STOCK">Out of stock only</option>
+                </Select>
+              </FormField>
+              <FormField label="Condition">
+                <Select
+                  value={conditionFilter}
+                  onChange={(e) => {
+                    setConditionFilter(e.target.value);
+                    if (e.target.value) setStockStatusFilter("");
+                  }}
+                >
+                  <option value="">All conditions</option>
+                  {conditionOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </Select>
               </FormField>
             </CardContent>
+            {(stockStatusFilter ||
+              conditionFilter ||
+              labFilter ||
+              search ||
+              itemKindFilter ||
+              yearFilter !== "ALL") && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-6 py-2">
+                <p className="text-xs text-slate-500">
+                  Filters active
+                  {inventoryFilterLabel ? ` · ${inventoryFilterLabel}` : ""}
+                  {labFilter ? " · laboratory selected" : ""}
+                  {search ? ` · search “${search}”` : ""}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setLabFilter("");
+                    setSearch("");
+                    setItemKindFilter("");
+                    setYearFilter("ALL");
+                    setStockStatusFilter("");
+                    setConditionFilter("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            )}
           </Card>
 
           <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
@@ -2149,7 +2431,11 @@ export const LaboratoryManager = () => {
                           }`
                         : " · all laboratories"}
                       {requestStatusFilter
-                        ? ` · status: ${requestStatusFilter}`
+                        ? ` · status: ${
+                            requestStatusFilter === "OPEN"
+                              ? "open (pending/approved/purchased)"
+                              : requestStatusFilter
+                          }`
                         : ""}
                     </p>
                   </div>
@@ -2181,7 +2467,8 @@ export const LaboratoryManager = () => {
                       onChange={(e) => setRequestStatusFilter(e.target.value)}
                     >
                       <option value="">All statuses</option>
-                      <option value="PENDING">Pending</option>
+                      <option value="OPEN">Open (pending / approved / purchased)</option>
+                      <option value="PENDING">Pending only</option>
                       <option value="APPROVED">Approved</option>
                       <option value="PURCHASED">Purchased</option>
                       <option value="RECEIVED">Received</option>
@@ -2204,7 +2491,7 @@ export const LaboratoryManager = () => {
                   ) : null}
                 </div>
               </CardHeader>
-              <CardContent className="p-0">
+              <CardContent className="p-0" id="lab-requests-list">
                 {requests.length === 0 ? (
                   <div className="px-6 py-12 text-center text-sm text-slate-500">
                     No stock requests match this filter.
@@ -2518,9 +2805,43 @@ export const LaboratoryManager = () => {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Equipment issues</CardTitle>
+          <Card id="lab-issues-list">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+              <div>
+                <CardTitle>Equipment issues</CardTitle>
+                {issueStatusFilter ? (
+                  <p className="mt-1 text-xs text-brand-800">
+                    Showing:{" "}
+                    {issueStatusFilter === "ACTIVE"
+                      ? "Currently issued / overdue only"
+                      : issueStatusFilter}
+                    {" · "}
+                    {issues.length} row{issues.length === 1 ? "" : "s"}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  className="w-auto min-w-[160px]"
+                  value={issueStatusFilter}
+                  onChange={(e) => setIssueStatusFilter(e.target.value)}
+                >
+                  <option value="">All issues</option>
+                  <option value="ACTIVE">Issued + overdue</option>
+                  <option value="ISSUED">Issued only</option>
+                  <option value="OVERDUE">Overdue only</option>
+                  <option value="RETURNED">Returned only</option>
+                </Select>
+                {issueStatusFilter ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIssueStatusFilter("")}
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
             </CardHeader>
             <CardContent className="min-w-0">
               <div className="max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
@@ -2540,7 +2861,17 @@ export const LaboratoryManager = () => {
                     </tr>
                   </TableHead>
                   <TableBody>
-                    {(issuesQuery.data ?? []).map((issue, index) => (
+                    {issues.length === 0 ? (
+                      <tr>
+                        <Td
+                          colSpan={10}
+                          className="py-10 text-center text-sm text-slate-500"
+                        >
+                          No issues match this filter.
+                        </Td>
+                      </tr>
+                    ) : null}
+                    {issues.map((issue, index) => (
                       <tr key={issue._id}>
                         <Td className="whitespace-nowrap text-center tabular-nums text-slate-500">
                           {index + 1}

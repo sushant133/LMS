@@ -263,6 +263,15 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   /** Ethnicity pie — same active / current-running-year scope as gender. */
   let ethnicityChart: Array<{ name: string; value: number }> = [];
   let ethnicityChartScope = "";
+  /** Rows for client-side batch/year filter on demographics charts. */
+  let studentDemographics: Array<{
+    batchId?: string;
+    yearId?: string;
+    gender?: string;
+    ethnicityCategory?: string;
+  }> = [];
+  let chartBatches: Array<{ _id: string; name: string }> = [];
+  let chartYears: Array<{ _id: string; name: string; batchId?: string }> = [];
 
   const tallyGenderAndEthnicity = (
     students: Array<{ gender?: string | null; ethnicityCategory?: string | null }>
@@ -310,12 +319,16 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     };
 
     if (college) {
-      const [years, activeStudents, passedOutCount, alumniCount] = await Promise.all([
-        Year.find({ schoolId }).select("_id name level isActive").lean(),
-        Student.find(activeStatusFilter).select("yearId gender ethnicityCategory").lean(),
-        Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
-        Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
-      ]);
+      const [years, batches, activeStudents, passedOutCount, alumniCount] =
+        await Promise.all([
+          Year.find({ schoolId }).select("_id name level isActive batchId").lean(),
+          Batch.find({ schoolId }).select("_id name").sort({ name: 1 }).lean(),
+          Student.find(activeStatusFilter)
+            .select("batchId yearId gender ethnicityCategory")
+            .lean(),
+          Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
+          Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
+        ]);
 
       const yearNameById = new Map(years.map((year) => [year._id.toString(), year.name]));
       const activeYearIds = new Set(
@@ -332,13 +345,22 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         ethnicityCategory?: string | null;
       }> = [];
 
+      studentDemographics = [];
       for (const student of activeStudents) {
         const yearId = student.yearId ? student.yearId.toString() : "";
+        const batchId = student.batchId ? student.batchId.toString() : "";
         const yearName = yearId ? yearNameById.get(yearId) : undefined;
         if (yearName) {
           countsByYearName.set(yearName, (countsByYearName.get(yearName) ?? 0) + 1);
         }
-        // Charts: students in currently active (running) academic years.
+        // Full demographics for client batch/year filters (all active students)
+        studentDemographics.push({
+          batchId: batchId || undefined,
+          yearId: yearId || undefined,
+          gender: student.gender ?? undefined,
+          ethnicityCategory: student.ethnicityCategory ?? undefined
+        });
+        // Default charts: students in currently active (running) academic years.
         // If no year is marked active, fall back to all ACTIVE students.
         if (hasActiveYearFilter) {
           if (!yearId || !activeYearIds.has(yearId)) continue;
@@ -359,15 +381,43 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       ethnicityChart = tallied.ethnicity;
       genderChartScope = "Active students in current running years";
       ethnicityChartScope = "Active students in current running years";
+      chartBatches = batches.map((b) => ({
+        _id: b._id.toString(),
+        name: b.name
+      }));
+      chartYears = years.map((y) => ({
+        _id: y._id.toString(),
+        name: y.name,
+        batchId: y.batchId ? y.batchId.toString() : undefined
+      }));
     } else {
-      const activeStudents = await Student.find(activeStatusFilter)
-        .select("gender ethnicityCategory")
-        .lean();
+      const [classes, sections, activeStudents] = await Promise.all([
+        SchoolClass.find({ schoolId }).select("_id name").sort({ name: 1 }).lean(),
+        Section.find({ schoolId }).select("_id name classId").lean(),
+        Student.find(activeStatusFilter)
+          .select("classId sectionId gender ethnicityCategory")
+          .lean()
+      ]);
       const tallied = tallyGenderAndEthnicity(activeStudents);
       genderChart = tallied.gender;
       ethnicityChart = tallied.ethnicity;
       genderChartScope = "Active (currently enrolled) students";
       ethnicityChartScope = "Active (currently enrolled) students";
+      studentDemographics = activeStudents.map((s) => ({
+        batchId: s.classId ? s.classId.toString() : undefined,
+        yearId: s.sectionId ? s.sectionId.toString() : undefined,
+        gender: s.gender ?? undefined,
+        ethnicityCategory: s.ethnicityCategory ?? undefined
+      }));
+      chartBatches = classes.map((c) => ({
+        _id: c._id.toString(),
+        name: c.name
+      }));
+      chartYears = sections.map((s) => ({
+        _id: s._id.toString(),
+        name: s.name,
+        batchId: s.classId ? s.classId.toString() : undefined
+      }));
     }
   }
 
@@ -531,6 +581,9 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
     genderChartScope: adminLike ? genderChartScope : undefined,
     ethnicityChart: adminLike ? ethnicityChart : [],
     ethnicityChartScope: adminLike ? ethnicityChartScope : undefined,
+    studentDemographics: adminLike ? studentDemographics : undefined,
+    chartBatches: adminLike ? chartBatches : undefined,
+    chartYears: adminLike ? chartYears : undefined,
     notices,
     banners,
     notifications: notifications.map((notification) => ({

@@ -1160,6 +1160,20 @@ export interface DashboardResponse {
    */
   ethnicityChart?: Array<{ name: string; value: number }>;
   ethnicityChartScope?: string;
+  /**
+   * Active-student rows for client-side batch/year filtering of gender & ethnicity charts.
+   * College: batchId + yearId; school: classId + sectionId (mapped to same fields).
+   */
+  studentDemographics?: Array<{
+    batchId?: string;
+    yearId?: string;
+    gender?: string;
+    ethnicityCategory?: string;
+  }>;
+  /** Batches (college) or classes (school) for demographics filters. */
+  chartBatches?: Array<{ _id: string; name: string }>;
+  /** Years (college) or sections (school) for demographics filters. */
+  chartYears?: Array<{ _id: string; name: string; batchId?: string }>;
   notices: NoticeRecord[];
   banners: BannerRecord[];
   notifications: DashboardNotificationItem[];

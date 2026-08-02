@@ -12,6 +12,11 @@ const PrivacyPolicyPage = lazy(() =>
 );
 const DashboardPage = lazy(() => import("pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const StudentsLayout = lazy(() => import("pages/StudentsPage"));
+const StudentsIndexRedirect = lazy(() =>
+  import("pages/StudentsPage").then((module) => ({
+    default: module.StudentsIndexRedirect,
+  })),
+);
 const CreateStudentPage = lazy(() =>
   import("pages/CreateStudentPage").then((module) => ({ default: module.CreateStudentPage })),
 );
@@ -201,7 +206,14 @@ export default function App() {
                   </LazyRoute>
                 }
               >
-                <Route index element={<Navigate to="list" replace />} />
+                <Route
+                  index
+                  element={
+                    <LazyRoute>
+                      <StudentsIndexRedirect />
+                    </LazyRoute>
+                  }
+                />
                 <Route
                   path="list"
                   element={

@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   STUDENT_ACADEMIC_STATUS_LABELS,
   type BatchRecord,
@@ -46,6 +46,7 @@ import { countPendingRequiredDocuments } from "./studentDocumentUtils";
 
 export const StudentListManager = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const role = useNormalizedRole();
   const isCollege = useIsCollege();
@@ -63,6 +64,24 @@ export const StudentListManager = () => {
   const [sectionFilter, setSectionFilter] = useState("");
   /** "" | "Male" | "Female" | "Other" */
   const [genderFilter, setGenderFilter] = useState("");
+  /** Dashboard deep-link: year display name (e.g. 1st Year) */
+  const [yearNameFilter, setYearNameFilter] = useState("");
+  /** Dashboard deep-link: ACTIVE | PASSED_OUT | ALUMNI | … */
+  const [statusFilter, setStatusFilter] = useState("");
+
+  // Apply filters from main dashboard stat cards (?status= / ?yearName= / ?gender=)
+  useEffect(() => {
+    const status = searchParams.get("status")?.trim() ?? "";
+    const yearName = searchParams.get("yearName")?.trim() ?? "";
+    const gender = searchParams.get("gender")?.trim() ?? "";
+    const q = searchParams.get("q")?.trim() ?? "";
+    // Reset then apply so re-clicking another year on dashboard updates correctly
+    setStatusFilter(status);
+    setYearNameFilter(yearName);
+    if (gender) setGenderFilter(gender);
+    else if (searchParams.has("gender")) setGenderFilter("");
+    if (q) setSearchQuery(q);
+  }, [searchParams]);
 
   const studentsQuery = useQuery({
     queryKey: ["students"],
@@ -121,6 +140,27 @@ export const StudentListManager = () => {
     ? (teacherScopeQuery.data?.students ?? [])
     : (studentsQuery.data ?? []);
 
+  /**
+   * When dashboard opens with yearName (e.g. "1st Year"), resolve matching year
+   * record IDs so filters stay consistent across batches.
+   */
+  const yearIdsMatchingName = useMemo(() => {
+    const wanted = yearNameFilter.trim().toLowerCase();
+    if (!wanted || !isCollege) return [] as string[];
+    // Exact name match first (dashboard counts by Year.name)
+    const exact = years.filter(
+      (y) => (y.name ?? "").trim().toLowerCase() === wanted,
+    );
+    if (exact.length > 0) return exact.map((y) => y._id);
+    // Soft match: year name contains filter or vice versa (e.g. "1st Year" vs "HA 1st Year")
+    return years
+      .filter((y) => {
+        const n = (y.name ?? "").trim().toLowerCase();
+        return n.includes(wanted) || wanted.includes(n);
+      })
+      .map((y) => y._id);
+  }, [isCollege, yearNameFilter, years]);
+
   const primaryMap = useMemo(
     () =>
       new Map(
@@ -151,12 +191,16 @@ export const StudentListManager = () => {
       yearFilter ||
       classFilter ||
       sectionFilter ||
-      genderFilter,
+      genderFilter ||
+      yearNameFilter ||
+      statusFilter,
   );
 
   const filteredStudents = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const genderWanted = genderFilter.trim().toLowerCase();
+    const yearNameWanted = yearNameFilter.trim().toLowerCase();
+    const statusWanted = statusFilter.trim().toUpperCase();
 
     return students.filter((student) => {
       // Skip orphaned student records (user account missing)
@@ -164,15 +208,46 @@ export const StudentListManager = () => {
 
       if (isCollege) {
         if (batchFilter && student.batchId !== batchFilter) return false;
+        // Prefer explicit year dropdown; else match all year IDs with dashboard yearName
         if (yearFilter && student.yearId !== yearFilter) return false;
+        else if (!yearFilter && yearIdsMatchingName.length > 0) {
+          if (
+            !student.yearId ||
+            !yearIdsMatchingName.includes(student.yearId)
+          ) {
+            return false;
+          }
+        } else if (!yearFilter && yearNameWanted) {
+          // Fallback: name match if year list not loaded yet / no exact ID match
+          const fromMap = student.yearId
+            ? (secondaryMap.get(student.yearId) ?? "").toLowerCase()
+            : "";
+          const fromField = (
+            (student as { yearName?: string }).yearName ?? ""
+          ).toLowerCase();
+          if (fromMap !== yearNameWanted && fromField !== yearNameWanted) {
+            return false;
+          }
+        }
       } else {
         if (classFilter && student.classId !== classFilter) return false;
         if (sectionFilter && student.sectionId !== sectionFilter) return false;
       }
 
+      if (statusWanted) {
+        const status = (student.academicStatus ?? "ACTIVE").toUpperCase();
+        if (status !== statusWanted) return false;
+      }
+
       if (genderWanted) {
         const studentGender = (student.gender ?? "").trim().toLowerCase();
-        if (studentGender !== genderWanted) return false;
+        if (genderWanted === "other") {
+          if (studentGender === "male" || studentGender === "female") {
+            return false;
+          }
+        } else if (studentGender !== genderWanted) {
+          return false;
+        }
       }
 
       if (!query) return true;
@@ -199,9 +274,13 @@ export const StudentListManager = () => {
     genderFilter,
     isCollege,
     searchQuery,
+    secondaryMap,
     sectionFilter,
+    statusFilter,
     students,
     yearFilter,
+    yearIdsMatchingName,
+    yearNameFilter,
   ]);
 
   const clearFilters = () => {
@@ -211,6 +290,8 @@ export const StudentListManager = () => {
     setClassFilter("");
     setSectionFilter("");
     setGenderFilter("");
+    setYearNameFilter("");
+    setStatusFilter("");
   };
 
   const clearFiltersButton = (alignLabel: string) => (
@@ -366,6 +447,20 @@ export const StudentListManager = () => {
         </Button>
       </CardHeader>
       <CardContent className="min-w-0 space-y-4">
+        {statusFilter || yearNameFilter ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50/80 px-4 py-2 text-sm text-brand-900">
+            <p>
+              Filtered from dashboard
+              {statusFilter
+                ? ` · status: ${statusFilter.replace(/_/g, " ")}`
+                : ""}
+              {yearNameFilter ? ` · year: ${yearNameFilter}` : ""}
+            </p>
+            <Button size="sm" variant="outline" onClick={clearFilters}>
+              Clear
+            </Button>
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           <FormField label="Search">
             <Input

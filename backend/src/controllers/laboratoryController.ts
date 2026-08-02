@@ -187,7 +187,10 @@ export const getLaboratoryDashboard = asyncHandler(async (req: Request, res: Res
     LaboratoryStockRequest.countDocuments(
       withTenantScope(
         req,
-        labScopeFilter(access, { status: { $in: ["PENDING", "APPROVED", "PURCHASED"] } })
+        // Dashboard "Pending Requests" card = awaiting action (not yet received/rejected)
+        labScopeFilter(access, {
+          status: { $in: ["PENDING", "APPROVED", "PURCHASED"] },
+        })
       )
     )
   ]);
@@ -607,7 +610,14 @@ export const listEquipment = asyncHandler(async (req: Request, res: Response) =>
   let enriched = equipment.map((item) => formatEquipment(item as Record<string, unknown>));
 
   if (typeof stockStatus === "string" && stockStatus) {
-    enriched = enriched.filter((item) => item.status === stockStatus);
+    // LOW_STOCK dashboard/filter includes critical (matches report + low-stock count)
+    if (stockStatus === "LOW_STOCK") {
+      enriched = enriched.filter(
+        (item) => item.status === "LOW_STOCK" || item.status === "CRITICAL_STOCK"
+      );
+    } else {
+      enriched = enriched.filter((item) => item.status === stockStatus);
+    }
   }
 
   return sendSuccess(res, "Laboratory equipment fetched", enriched);
@@ -1089,7 +1099,12 @@ export const listStockRequests = asyncHandler(async (req: Request, res: Response
   const { status, laboratoryId } = req.query;
 
   if (typeof status === "string" && status) {
-    filter.status = status;
+    // Dashboard "Pending Requests" = still open in the workflow
+    if (status === "OPEN") {
+      filter.status = { $in: ["PENDING", "APPROVED", "PURCHASED"] };
+    } else {
+      filter.status = status;
+    }
   }
   if (typeof laboratoryId === "string" && laboratoryId) {
     assertLabAccess(access, laboratoryId);

@@ -417,7 +417,12 @@ const buildTransactionFilter = (req: Request): Record<string, unknown> => {
     filter.paymentMethod = paymentMethod;
   }
   if (typeof expenseType === "string" && expenseType) {
-    filter.expenseType = expenseType;
+    // Dashboard "Other / external" combines two expense kinds
+    if (expenseType === "OTHER_EXTERNAL") {
+      filter.expenseType = { $in: ["OTHER_EXPENSE", "EXTERNAL_EXPENSE"] };
+    } else {
+      filter.expenseType = expenseType;
+    }
   }
 
   const dateFilter: Record<string, string> = {};
