@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -42,144 +42,30 @@ const formatCost = (cost?: number) => {
   return cost.toLocaleString("en-NP");
 };
 
-type PrintItemBlockProps = {
-  item: LaboratoryEquipmentRecord;
-  index: number;
-  showPageBreak?: boolean;
+const kindShort = (kind?: string) => {
+  if (kind === "DISPOSABLE") return "Disposable";
+  if (kind === "NON_DISPOSABLE") return "Non-disp.";
+  return itemKindLabel(kind);
 };
 
-const PrintItemBlock = ({
-  item,
-  index,
-  showPageBreak = false,
-}: PrintItemBlockProps) => (
-  <section
-    style={{
-      marginBottom: 20,
-      border: "1px solid #cbd5e1",
-      padding: 12,
-      pageBreakAfter: showPageBreak ? "always" : "auto",
-      breakAfter: showPageBreak ? "page" : "auto",
-      color: "#0f172a",
-      background: "#ffffff",
-    }}
-  >
-    <p
-      style={{
-        margin: 0,
-        fontSize: 11,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        color: "#64748b",
-      }}
-    >
-      Item {index + 1}
-    </p>
-    <h2
-      style={{
-        margin: "2px 0 6px",
-        fontSize: 16,
-        fontWeight: 700,
-        color: "#0f172a",
-      }}
-    >
-      {item.name}
-    </h2>
-    <table
-      style={{
-        width: "100%",
-        borderCollapse: "collapse",
-        fontSize: 12,
-        color: "#334155",
-      }}
-    >
-      <tbody>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0", width: "50%" }}>
-            <strong>Item code:</strong> {item.itemCode || "—"}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Laboratory:</strong> {item.laboratoryName || "—"}
-          </td>
-        </tr>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0" }}>
-            <strong>Category:</strong> {item.categoryName || "—"}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Year level:</strong> {item.yearLevel ?? "All Years"}
-          </td>
-        </tr>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0" }}>
-            <strong>Kind:</strong> {itemKindLabel(item.itemKind)}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Unit:</strong> {item.unit || "pcs"}
-          </td>
-        </tr>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0" }}>
-            <strong>Brand:</strong> {item.brand?.trim() || "—"}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Model:</strong> {item.equipmentModel?.trim() || "—"}
-          </td>
-        </tr>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0" }}>
-            <strong>Quantity:</strong> total {item.quantity} · available{" "}
-            {item.availableQuantity} · issued {item.issuedQuantity}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Stock levels:</strong> min {item.minimumStockLevel ?? 0} ·
-            max {item.maximumStockLevel ?? 0} · required{" "}
-            {item.requiredQuantity ?? 0}
-          </td>
-        </tr>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0" }}>
-            <strong>Stock status:</strong> {item.status}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Condition / equipment:</strong> {item.condition} /{" "}
-            {item.equipmentStatus}
-          </td>
-        </tr>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0" }}>
-            <strong>Storage:</strong> {item.storageLocation?.trim() || "—"}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Purchase date:</strong> {item.purchaseDateBs?.trim() || "—"}
-          </td>
-        </tr>
-        <tr>
-          <td style={{ padding: "3px 8px 3px 0" }}>
-            <strong>Supplier:</strong> {item.supplier?.trim() || "—"}
-          </td>
-          <td style={{ padding: "3px 0" }}>
-            <strong>Cost (NPR):</strong> {formatCost(item.purchaseCost)}
-          </td>
-        </tr>
-        {item.description?.trim() ? (
-          <tr>
-            <td style={{ padding: "3px 0" }} colSpan={2}>
-              <strong>Description:</strong> {item.description.trim()}
-            </td>
-          </tr>
-        ) : null}
-        {item.remarks?.trim() ? (
-          <tr>
-            <td style={{ padding: "3px 0" }} colSpan={2}>
-              <strong>Remarks:</strong> {item.remarks.trim()}
-            </td>
-          </tr>
-        ) : null}
-      </tbody>
-    </table>
-  </section>
-);
+const thStyle: CSSProperties = {
+  border: "1px solid #94a3b8",
+  background: "#f1f5f9",
+  padding: "4px 3px",
+  fontSize: 9,
+  fontWeight: 700,
+  textAlign: "left",
+  whiteSpace: "nowrap",
+  color: "#0f172a",
+};
+
+const tdStyle: CSSProperties = {
+  border: "1px solid #cbd5e1",
+  padding: "3px 3px",
+  fontSize: 9,
+  color: "#0f172a",
+  verticalAlign: "top",
+};
 
 export const LaboratoryPrintInventoryPanel = () => {
   const { user, availableSchools } = useAuth();
@@ -543,7 +429,7 @@ export const LaboratoryPrintInventoryPanel = () => {
         </CardContent>
       </Card>
 
-      {/* Hidden print layout for browser print */}
+      {/* Hidden print layout — compact inventory table (landscape-friendly) */}
       <div
         id={PRINT_AREA_ID}
         className="hidden print:block"
@@ -551,89 +437,173 @@ export const LaboratoryPrintInventoryPanel = () => {
         style={{
           background: "#ffffff",
           color: "#0f172a",
-          padding: 24,
+          padding: 12,
           fontFamily:
             '"IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif',
         }}
       >
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <header
-            style={{
-              marginBottom: 20,
-              paddingBottom: 12,
-              borderBottom: "1px solid #94a3b8",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <CollegeLogo className="h-14 w-14 shrink-0" />
-              <div style={{ minWidth: 0 }}>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 18,
-                    fontWeight: 700,
-                    color: "#0f172a",
-                  }}
-                >
-                  {institutionName || "Institution"}
-                </p>
-                <p
-                  style={{
-                    margin: "2px 0 0",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    color: "#1e293b",
-                  }}
-                >
-                  {printTitle}
-                </p>
-                <p
-                  style={{
-                    margin: "4px 0 0",
-                    fontSize: 12,
-                    color: "#475569",
-                  }}
-                >
-                  Laboratory inventory report · {printItems.length} item
-                  {printItems.length === 1 ? "" : "s"} · total quantity{" "}
-                  {printItems.reduce((n, i) => n + (i.quantity || 0), 0)}
-                </p>
-              </div>
+        <header
+          style={{
+            marginBottom: 10,
+            paddingBottom: 8,
+            borderBottom: "1px solid #94a3b8",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <CollegeLogo className="h-12 w-12 shrink-0" />
+            <div style={{ minWidth: 0 }}>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "#0f172a",
+                }}
+              >
+                {institutionName || "Institution"}
+              </p>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#1e293b",
+                }}
+              >
+                {printTitle}
+              </p>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 10,
+                  color: "#475569",
+                }}
+              >
+                Equipment inventory table · {printItems.length} item
+                {printItems.length === 1 ? "" : "s"} · total qty{" "}
+                {printItems.reduce((n, i) => n + (i.quantity || 0), 0)}
+              </p>
             </div>
-          </header>
+          </div>
+        </header>
 
-          {printItems.length === 0 ? (
-            <p style={{ margin: 0, fontSize: 13, color: "#475569" }}>
-              No equipment selected to print.
-            </p>
-          ) : (
-            printItems.map((item, index) => (
-              <PrintItemBlock
-                key={item._id}
-                item={item}
-                index={index}
-                showPageBreak={
-                  printItems.length > 1 && index < printItems.length - 1
-                }
-              />
-            ))
-          )}
-
-          <footer
+        {printItems.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 12, color: "#475569" }}>
+            No equipment selected to print.
+          </p>
+        ) : (
+          <table
             style={{
-              marginTop: 24,
-              paddingTop: 12,
-              borderTop: "1px solid #cbd5e1",
-              fontSize: 11,
-              color: "#64748b",
+              width: "100%",
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
             }}
           >
-            <p style={{ margin: 0 }}>
-              Laboratory equipment inventory · Full item details with stock
-              quantities · Confidential institutional record
-            </p>
-          </footer>
-        </div>
+            <thead>
+              <tr>
+                {(
+                  [
+                    "S.N.",
+                    "Code",
+                    "Equipment",
+                    "Laboratory",
+                    "Category",
+                    "Year",
+                    "Kind",
+                    "Brand",
+                    "Model",
+                    "Unit",
+                    "Qty",
+                    "Avl",
+                    "Iss",
+                    "Stock",
+                    "Cond.",
+                    "Eq.status",
+                    "Storage",
+                    "Supplier",
+                    "Cost",
+                    "Purch.",
+                  ] as const
+                ).map((h) => (
+                  <th key={h} style={thStyle}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...printItems]
+                .sort((a, b) => {
+                  const lab = (a.laboratoryName || "").localeCompare(
+                    b.laboratoryName || "",
+                  );
+                  if (lab !== 0) return lab;
+                  return (a.name || "").localeCompare(b.name || "");
+                })
+                .map((item, index) => (
+                  <tr
+                    key={item._id}
+                    style={{
+                      background: index % 2 === 1 ? "#f8fafc" : "#ffffff",
+                    }}
+                  >
+                    <td style={{ ...tdStyle, textAlign: "center" }}>
+                      {index + 1}
+                    </td>
+                    <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                      {item.itemCode || "—"}
+                    </td>
+                    <td style={tdStyle}>{item.name || "—"}</td>
+                    <td style={tdStyle}>{item.laboratoryName || "—"}</td>
+                    <td style={tdStyle}>{item.categoryName || "—"}</td>
+                    <td style={tdStyle}>{item.yearLevel ?? "All"}</td>
+                    <td style={tdStyle}>{kindShort(item.itemKind)}</td>
+                    <td style={tdStyle}>{item.brand?.trim() || "—"}</td>
+                    <td style={tdStyle}>
+                      {item.equipmentModel?.trim() || "—"}
+                    </td>
+                    <td style={tdStyle}>{item.unit || "pcs"}</td>
+                    <td style={{ ...tdStyle, textAlign: "right" }}>
+                      {item.quantity ?? 0}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "right" }}>
+                      {item.availableQuantity ?? 0}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "right" }}>
+                      {item.issuedQuantity ?? 0}
+                    </td>
+                    <td style={tdStyle}>{item.status || "—"}</td>
+                    <td style={tdStyle}>{item.condition || "—"}</td>
+                    <td style={tdStyle}>{item.equipmentStatus || "—"}</td>
+                    <td style={tdStyle}>
+                      {item.storageLocation?.trim() || "—"}
+                    </td>
+                    <td style={tdStyle}>{item.supplier?.trim() || "—"}</td>
+                    <td style={{ ...tdStyle, textAlign: "right" }}>
+                      {formatCost(item.purchaseCost)}
+                    </td>
+                    <td style={tdStyle}>
+                      {item.purchaseDateBs?.trim() || "—"}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        )}
+
+        <footer
+          style={{
+            marginTop: 10,
+            paddingTop: 6,
+            borderTop: "1px solid #cbd5e1",
+            fontSize: 9,
+            color: "#64748b",
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            Laboratory equipment inventory · One row = one item · Confidential
+          </p>
+        </footer>
       </div>
     </div>
   );
