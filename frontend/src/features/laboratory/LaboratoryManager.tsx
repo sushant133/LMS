@@ -35,6 +35,7 @@ import {
   Package,
   PackagePlus,
   Pencil,
+  Printer,
   ShoppingCart,
   Trash2,
   Users,
@@ -46,6 +47,7 @@ import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { useModuleAccess } from "hooks/useModuleAccess";
+import { LaboratoryPrintInventoryPanel } from "features/laboratory/LaboratoryPrintInventoryPanel";
 import { StockStatusBadge } from "features/library/StockStatusBadge";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -91,6 +93,7 @@ const tabs: Array<{
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "labs", label: "Laboratories", icon: FlaskConical },
   { id: "inventory", label: "Inventory", icon: Package },
+  { id: "print-inventory", label: "Print inventory", icon: Printer },
   { id: "requests", label: "Required Items", icon: ClipboardList },
   { id: "issues", label: "Issue & Return", icon: Beaker },
   { id: "reports", label: "Reports", icon: FileBarChart2 },
@@ -2794,6 +2797,8 @@ export const LaboratoryManager = () => {
           </Card>
         </div>
       )}
+
+      {tab === "print-inventory" && <LaboratoryPrintInventoryPanel />}
     </div>
   );
 };

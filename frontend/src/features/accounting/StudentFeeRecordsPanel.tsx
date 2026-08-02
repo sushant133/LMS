@@ -1,4 +1,11 @@
-import { useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   BatchRecord,
@@ -18,6 +25,8 @@ import {
 } from "@phit-erp/shared";
 import {
   Award,
+  ChevronLeft,
+  ChevronRight,
   FileDown,
   FileText,
   Paperclip,
@@ -230,6 +239,149 @@ const useCanEditFeePayments = (): boolean => {
   if (canManageInstitution(user.role)) return true;
   return (user.secondaryRoles ?? []).some((role) =>
     canManageInstitution(normalizeUserRole(role)),
+  );
+};
+
+/**
+ * Desktop-contained horizontal scroll for All receipts.
+ * Fits inside main content only (no page-wide overflow). Student + Actions
+ * stay pinned so each row’s student details stay readable while scrolling.
+ */
+const ReceiptsTableScroll = ({
+  children,
+}: {
+  children: ReactNode;
+}) => {
+  const topRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const syncing = useRef(false);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [contentWidth, setContentWidth] = useState(0);
+  const [needsHScroll, setNeedsHScroll] = useState(false);
+
+  const updateScrollState = useCallback(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    const overflow = scrollWidth > clientWidth + 2;
+    setNeedsHScroll(overflow);
+    setCanScrollLeft(overflow && scrollLeft > 2);
+    setCanScrollRight(overflow && scrollLeft + clientWidth < scrollWidth - 2);
+    setContentWidth(scrollWidth);
+  }, []);
+
+  const syncFrom = useCallback(
+    (source: "top" | "body" | "bottom", left: number) => {
+      if (syncing.current) return;
+      syncing.current = true;
+      if (source !== "top" && topRef.current) topRef.current.scrollLeft = left;
+      if (source !== "body" && bodyRef.current) bodyRef.current.scrollLeft = left;
+      if (source !== "bottom" && bottomRef.current) {
+        bottomRef.current.scrollLeft = left;
+      }
+      requestAnimationFrame(() => {
+        syncing.current = false;
+        updateScrollState();
+      });
+    },
+    [updateScrollState],
+  );
+
+  const scrollByDir = (dir: -1 | 1) => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const step = Math.max(180, Math.floor(el.clientWidth * 0.5));
+    el.scrollBy({ left: dir * step, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    updateScrollState();
+    const el = bodyRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => updateScrollState());
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    window.addEventListener("resize", updateScrollState);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateScrollState);
+    };
+  }, [updateScrollState, children]);
+
+  const spacerStyle = {
+    width: contentWidth > 0 ? `${contentWidth}px` : "100%",
+  };
+
+  return (
+    /* min-w-0 + max-w-full: stay inside desktop main panel only */
+    <div className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-200 bg-white">
+      {/* Left/right controls — desktop only */}
+      <div className="hidden items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/90 px-3 py-2 md:flex">
+        <p className="text-xs text-slate-500">
+          {needsHScroll
+            ? "Use ← → or the sliders to see more columns. Student name stays fixed on the left."
+            : "All columns fit on this screen."}
+        </p>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 p-0"
+            disabled={!canScrollLeft}
+            onClick={() => scrollByDir(-1)}
+            title="Scroll left"
+            aria-label="Scroll table left"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 p-0"
+            disabled={!canScrollRight}
+            onClick={() => scrollByDir(1)}
+            title="Scroll right"
+            aria-label="Scroll table right"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Top horizontal slider — desktop only */}
+      <div
+        ref={topRef}
+        className="hidden overflow-x-auto overflow-y-hidden border-b border-slate-100 [scrollbar-width:thin] md:block"
+        onScroll={(e) => syncFrom("top", e.currentTarget.scrollLeft)}
+      >
+        <div className="h-3" style={spacerStyle} />
+      </div>
+
+      {/* Scrollport locked to parent width on desktop */}
+      <div
+        ref={bodyRef}
+        className="max-h-[min(70vh,720px)] w-full min-w-0 max-w-full overflow-auto overscroll-contain [scrollbar-width:thin]"
+        onScroll={(e) => {
+          syncFrom("body", e.currentTarget.scrollLeft);
+          updateScrollState();
+        }}
+      >
+        <div className="w-max min-w-full">{children}</div>
+      </div>
+
+      {/* Bottom horizontal slider — desktop only */}
+      <div
+        ref={bottomRef}
+        className="hidden overflow-x-auto overflow-y-hidden border-t border-slate-100 [scrollbar-width:thin] md:block"
+        onScroll={(e) => syncFrom("bottom", e.currentTarget.scrollLeft)}
+      >
+        <div className="h-3" style={spacerStyle} />
+      </div>
+    </div>
   );
 };
 
@@ -969,7 +1121,7 @@ export const StudentFeeRecordsPanel = () => {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 max-w-full space-y-4">
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -978,7 +1130,8 @@ export const StudentFeeRecordsPanel = () => {
               Student Fee Records
             </CardTitle>
             <p className="mt-1 text-sm text-slate-500">
-              HA program fee ledger — record tuition payments and security deposits,
+              HA program fee ledger — record tuition payments and security deposits
+              (deposit “to be deposited” on student create is plan only; paid only after entry here),
               attach bank slips / screenshots, apply merit scholarships (merit Year N →
               free Year N+1), and track paid vs remaining by year. Deposit refunds are
               only allowed after a deposit is recorded here.
@@ -1553,7 +1706,7 @@ export const StudentFeeRecordsPanel = () => {
                     </p>
                   ) : null}
                 </FormField>
-                <FormField label="Security deposit (NPR)">
+                <FormField label="Security deposit paid on this receipt (NPR)">
                   <NumberInput
                     min={0}
                     disabled={Boolean(selectedHistory?.securityDepositWaived)}
@@ -1587,12 +1740,13 @@ export const StudentFeeRecordsPanel = () => {
                               Number(
                                 selectedHistory?.securityDepositRefundedNpr,
                               ) || 0;
+                            const stillDue = Math.max(0, expected - held);
                             if (expected <= 0 && held <= 0) {
-                              return "Optional — leave 0 if none on this receipt";
+                              return "Optional — leave 0 if not collecting deposit on this receipt";
                             }
-                            return `Expected ${formatCurrencyNpr(expected)} · Held ${formatCurrencyNpr(held)}${refunded > 0 ? ` · Refunded ${formatCurrencyNpr(refunded)}` : ""}`;
+                            return `Plan ${formatCurrencyNpr(expected)} · Paid/held ${formatCurrencyNpr(held)} · Still due ${formatCurrencyNpr(stillDue)}${refunded > 0 ? ` · Refunded ${formatCurrencyNpr(refunded)}` : ""}`;
                           })()
-                        : "Optional — leave 0 if not collecting deposit"}
+                        : "Only enter amount actually received now — plan amount is not auto-paid"}
                   </p>
                 </FormField>
                 <FormField label="Discount (NPR)">
@@ -1886,15 +2040,25 @@ export const StudentFeeRecordsPanel = () => {
                     ) : (
                       <div className="mt-1 grid grid-cols-2 gap-1 text-xs text-slate-700">
                         <span>
-                          Expected:{" "}
+                          To deposit (plan):{" "}
                           {formatCurrencyNpr(
                             selectedHistory.securityDepositExpectedNpr ?? 0,
                           )}
                         </span>
                         <span>
-                          Held:{" "}
+                          Paid / held:{" "}
                           {formatCurrencyNpr(
                             selectedHistory.securityDepositHeldNpr ?? 0,
+                          )}
+                        </span>
+                        <span>
+                          Still due:{" "}
+                          {formatCurrencyNpr(
+                            Math.max(
+                              0,
+                              (selectedHistory.securityDepositExpectedNpr ?? 0) -
+                                (selectedHistory.securityDepositHeldNpr ?? 0),
+                            ),
                           )}
                         </span>
                         <span>
@@ -1903,8 +2067,8 @@ export const StudentFeeRecordsPanel = () => {
                             selectedHistory.securityDepositRefundedNpr ?? 0,
                           )}
                         </span>
-                        <span className="font-medium text-violet-800">
-                          Remaining:{" "}
+                        <span className="font-medium text-violet-800 col-span-2">
+                          Remaining held (refundable):{" "}
                           {formatCurrencyNpr(
                             Math.max(
                               0,
@@ -1919,8 +2083,8 @@ export const StudentFeeRecordsPanel = () => {
                     {(selectedHistory.securityDepositHeldNpr ?? 0) <= 0 &&
                     !selectedHistory.securityDepositWaived ? (
                       <p className="mt-1 text-xs text-amber-900">
-                        No deposit held yet — enter Security deposit (NPR) when
-                        recording a payment.
+                        Plan only — not paid yet. Enter Security deposit (NPR)
+                        when recording a payment to mark it collected.
                       </p>
                     ) : null}
                   </div>
@@ -2376,9 +2540,9 @@ export const StudentFeeRecordsPanel = () => {
 
       {/* ─── Receipts ─── */}
       {tab === "receipts" ? (
-        <Card>
+        <Card className="min-w-0 max-w-full overflow-hidden">
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+            <div className="min-w-0">
               <CardTitle className="text-base">All fee receipts</CardTitle>
               <p className="mt-1 text-xs text-slate-500">
                 Filter by batch, year, student search, and date range (BS or AD).
@@ -2411,7 +2575,7 @@ export const StudentFeeRecordsPanel = () => {
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="min-w-0 space-y-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 <FormField label="Search student / receipt">
@@ -2551,76 +2715,92 @@ export const StudentFeeRecordsPanel = () => {
                 }
               />
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
+              <ReceiptsTableScroll>
+                <Table className="w-max min-w-full border-separate border-spacing-0">
                   <TableHead>
                     <tr>
-                      <Th>Receipt</Th>
-                      <Th>Student</Th>
-                      <Th>Batch / Year</Th>
-                      <Th>Program year</Th>
-                      <Th>Category</Th>
-                      <Th>Fee paid</Th>
-                      <Th>Deposit</Th>
-                      <Th>Scholarship</Th>
-                      <Th>Remaining</Th>
-                      <Th>Method</Th>
-                      <Th>Received by</Th>
-                      <Th>Paid by</Th>
-                      <Th>Date (BS / AD)</Th>
-                      <Th>Proof</Th>
-                      <Th>Actions</Th>
+                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:left-0 md:z-20 md:min-w-[8rem] md:max-w-[8rem] md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.15)]">
+                        Receipt
+                      </Th>
+                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:left-32 md:z-20 md:min-w-[12rem] md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.15)]">
+                        Student
+                      </Th>
+                      <Th className="whitespace-nowrap">Batch / Year</Th>
+                      <Th className="whitespace-nowrap">Program year</Th>
+                      <Th className="whitespace-nowrap">Category</Th>
+                      <Th className="whitespace-nowrap">Fee paid</Th>
+                      <Th className="whitespace-nowrap">Deposit</Th>
+                      <Th className="whitespace-nowrap">Scholarship</Th>
+                      <Th className="whitespace-nowrap">Remaining</Th>
+                      <Th className="whitespace-nowrap">Method</Th>
+                      <Th className="whitespace-nowrap">Received by</Th>
+                      <Th className="whitespace-nowrap">Paid by</Th>
+                      <Th className="whitespace-nowrap">Date (BS / AD)</Th>
+                      <Th className="whitespace-nowrap">Proof</Th>
+                      <Th className="whitespace-nowrap bg-slate-50 md:sticky md:right-0 md:z-20 md:shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.12)]">
+                        Actions
+                      </Th>
                     </tr>
                   </TableHead>
                   <TableBody>
                     {filteredReceipts.map((row) => {
                       const st = resolveStudent(row);
                       return (
-                        <tr key={row._id}>
-                          <Td className="font-mono text-sm">{row.receiptNumber}</Td>
-                          <Td>
-                            <div className="font-medium">{st.name}</div>
+                        <tr key={row._id} className="group">
+                          <Td className="whitespace-nowrap bg-white font-mono text-sm group-hover:bg-slate-50 md:sticky md:left-0 md:z-10 md:min-w-[8rem] md:max-w-[8rem] md:truncate md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                            {row.receiptNumber}
+                          </Td>
+                          <Td className="min-w-[12rem] bg-white group-hover:bg-slate-50 md:sticky md:left-32 md:z-10 md:shadow-[2px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                            <div className="font-medium text-slate-900">
+                              {st.name}
+                            </div>
                             <div className="text-xs text-slate-500">
                               {st.admission}
                             </div>
                           </Td>
-                          <Td className="text-sm">
+                          <Td className="whitespace-nowrap text-sm">
                             {st.batch}
                             {st.year !== "—" ? ` / ${st.year}` : ""}
                           </Td>
-                          <Td className="text-sm">
+                          <Td className="whitespace-nowrap text-sm">
                             {row.programYear
                               ? PROGRAM_YEARS.find((y) => y.value === row.programYear)
                                   ?.label ?? `Y${row.programYear}`
                               : "—"}
                           </Td>
-                          <Td className="max-w-[120px] truncate text-sm">
+                          <Td className="max-w-[10rem] truncate text-sm">
                             {feeCategory(row)}
                           </Td>
-                          <Td>{formatCurrencyNpr(row.amountPaidNpr)}</Td>
-                          <Td>
+                          <Td className="whitespace-nowrap">
+                            {formatCurrencyNpr(row.amountPaidNpr)}
+                          </Td>
+                          <Td className="whitespace-nowrap">
                             {(row.securityDepositPaidNpr ?? 0) > 0
                               ? formatCurrencyNpr(row.securityDepositPaidNpr ?? 0)
                               : "—"}
                           </Td>
-                          <Td>{formatCurrencyNpr(row.scholarshipNpr ?? 0)}</Td>
-                          <Td>{formatCurrencyNpr(row.remainingDueNpr ?? 0)}</Td>
-                          <Td className="text-sm">
+                          <Td className="whitespace-nowrap">
+                            {formatCurrencyNpr(row.scholarshipNpr ?? 0)}
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            {formatCurrencyNpr(row.remainingDueNpr ?? 0)}
+                          </Td>
+                          <Td className="whitespace-nowrap text-sm">
                             {paymentMethodLabel(row.paymentMethod)}
                           </Td>
-                          <Td className="text-sm">
+                          <Td className="whitespace-nowrap text-sm">
                             {row.receivedByName?.trim() || "—"}
                           </Td>
-                          <Td className="text-sm">
+                          <Td className="whitespace-nowrap text-sm">
                             {row.paidByName?.trim() || "—"}
                           </Td>
-                          <Td>
+                          <Td className="whitespace-nowrap">
                             <DualDateCell
                               dateBs={row.paidDateBs}
                               dateAd={row.paidDateAd}
                             />
                           </Td>
-                          <Td>
+                          <Td className="whitespace-nowrap">
                             {(row.attachments?.length ?? 0) > 0 ? (
                               <span className="inline-flex items-center gap-1 text-xs text-slate-600">
                                 <FileText className="h-3.5 w-3.5" />
@@ -2630,7 +2810,7 @@ export const StudentFeeRecordsPanel = () => {
                               "—"
                             )}
                           </Td>
-                          <Td className="sticky right-0 bg-white/95 backdrop-blur-sm">
+                          <Td className="whitespace-nowrap bg-white group-hover:bg-slate-50 md:sticky md:right-0 md:z-10 md:shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.12)]">
                             <div className="flex min-w-[11rem] flex-wrap justify-end gap-1">
                               {canAdminEdit ? (
                                 <>
@@ -2678,7 +2858,7 @@ export const StudentFeeRecordsPanel = () => {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+              </ReceiptsTableScroll>
             )}
           </CardContent>
         </Card>

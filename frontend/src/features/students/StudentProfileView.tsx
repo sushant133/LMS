@@ -377,21 +377,31 @@ export const StudentProfileView = () => {
                               : formatCurrencyNpr(student.feesDueNpr ?? 0),
                           },
                           {
-                            label: "Security deposit (expected)",
+                            label: "Deposit to be deposited (plan)",
                             value: student.securityDepositWaived
                               ? "Not taken / cancelled"
                               : formatCurrencyNpr(
-                                  student.securityDepositExpectedNpr ??
-                                    student.securityDepositNpr ??
-                                    0,
+                                  student.securityDepositExpectedNpr ?? 0,
                                 ),
                           },
                           {
-                            label: "Security deposit held",
+                            label: "Deposit paid / held (accounts)",
                             value: student.securityDepositWaived
                               ? "—"
                               : formatCurrencyNpr(
                                   student.securityDepositNpr ?? 0,
+                                ),
+                          },
+                          {
+                            label: "Deposit still due",
+                            value: student.securityDepositWaived
+                              ? "—"
+                              : formatCurrencyNpr(
+                                  Math.max(
+                                    0,
+                                    (student.securityDepositExpectedNpr ?? 0) -
+                                      (student.securityDepositNpr ?? 0),
+                                  ),
                                 ),
                           },
                           {

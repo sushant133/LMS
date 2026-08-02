@@ -8,8 +8,30 @@ const PRINT_CLEANUP_MS = 60_000;
 const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.querySelectorAll(".no-print").forEach((node) => node.remove());
-  clone.style.display = "block";
-  clone.style.visibility = "visible";
+  // Drop utility classes that force non-layout (Tailwind `hidden` etc.)
+  clone.classList.remove("hidden");
+  clone.className = clone.className
+    .split(/\s+/)
+    .filter((c) => c && c !== "hidden" && !c.startsWith("print:"))
+    .join(" ");
+  // Force a printable layout even when the source node is hidden/off-screen
+  // (e.g. `hidden`, `fixed left-[-10000px]`, zero size).
+  clone.style.setProperty("display", "block", "important");
+  clone.style.setProperty("visibility", "visible", "important");
+  clone.style.position = "static";
+  clone.style.left = "auto";
+  clone.style.top = "auto";
+  clone.style.right = "auto";
+  clone.style.bottom = "auto";
+  clone.style.transform = "none";
+  clone.style.opacity = "1";
+  clone.style.width = "100%";
+  clone.style.maxWidth = "100%";
+  clone.style.height = "auto";
+  clone.style.maxHeight = "none";
+  clone.style.overflow = "visible";
+  clone.style.pointerEvents = "auto";
+  clone.removeAttribute("aria-hidden");
   return clone;
 };
 
@@ -71,7 +93,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title></title>
+    <title>&#8203;</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -134,18 +156,31 @@ const printViaIframe = (element: HTMLElement, pageFormat: PageFormat): Promise<v
       return;
     }
 
+    // Browser print headers show date + document title (e.g. "8/2/26, 2:07 PM PHIT COLLEGE").
+    // Blank both the parent and iframe titles while printing so that header stays empty.
+    const previousTitle = document.title;
+    document.title = "\u200B";
+
     let settled = false;
-    const removeIframe = () => {
+    const cleanup = () => {
       window.clearTimeout(fallbackTimer);
+      document.title = previousTitle;
       if (iframe.parentNode) {
         document.body.removeChild(iframe);
       }
     };
 
-    const fallbackTimer = window.setTimeout(removeIframe, PRINT_CLEANUP_MS);
+    const fallbackTimer = window.setTimeout(cleanup, PRINT_CLEANUP_MS);
 
     const startPrint = () => {
-      win.addEventListener("afterprint", removeIframe, { once: true });
+      try {
+        doc.title = "\u200B";
+        win.document.title = "\u200B";
+      } catch {
+        // ignore cross-document title assignment failures
+      }
+
+      win.addEventListener("afterprint", cleanup, { once: true });
 
       window.setTimeout(() => {
         try {
@@ -157,7 +192,7 @@ const printViaIframe = (element: HTMLElement, pageFormat: PageFormat): Promise<v
           }
         } catch (error) {
           settled = true;
-          removeIframe();
+          cleanup();
           reject(error);
         }
       }, 250);

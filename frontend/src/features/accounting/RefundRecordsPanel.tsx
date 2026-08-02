@@ -185,10 +185,8 @@ export const RefundRecordsPanel = () => {
     [students, form.studentId],
   );
 
-  const depositExpected =
-    selectedStudent?.securityDepositExpectedNpr ??
-    selectedStudent?.securityDepositNpr ??
-    0;
+  // Expected = admission plan only. Held = collected via Student Fee Records only.
+  const depositExpected = selectedStudent?.securityDepositExpectedNpr ?? 0;
   const depositHeld = selectedStudent?.securityDepositNpr ?? 0;
   const depositRefunded = selectedStudent?.securityDepositRefundedNpr ?? 0;
   const depositRemaining = Math.max(0, depositHeld - depositRefunded);

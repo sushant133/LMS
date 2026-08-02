@@ -42,7 +42,16 @@ const issueStatusStyles: Record<string, string> = {
 /** 0 = Issued list, 1 = Manage issue (detail / due date) */
 type IssuedSlide = 0 | 1;
 
-export const LibraryIssuedBooksPanel = () => {
+type StatusFilter = "ALL" | "ISSUED" | "OVERDUE";
+
+interface LibraryIssuedBooksPanelProps {
+  /** From dashboard: ALL (issued card) or OVERDUE (overdue card only). */
+  initialStatusFilter?: StatusFilter;
+}
+
+export const LibraryIssuedBooksPanel = ({
+  initialStatusFilter = "ALL",
+}: LibraryIssuedBooksPanelProps) => {
   const isCollege = useIsCollege();
   const canManageIssues = useIsTenantAdmin();
   const [searchQuery, setSearchQuery] = useState("");
@@ -50,8 +59,8 @@ export const LibraryIssuedBooksPanel = () => {
   const [yearId, setYearId] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "ISSUED" | "OVERDUE">(
-    "ALL",
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    initialStatusFilter,
   );
   const [issuedSlide, setIssuedSlide] = useState<IssuedSlide>(0);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
@@ -176,18 +185,32 @@ export const LibraryIssuedBooksPanel = () => {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
+        <Card
+          className={cn(
+            "cursor-pointer bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)] transition hover:ring-2 hover:ring-brand-200",
+            statusFilter === "ALL" && "ring-2 ring-brand-300",
+          )}
+          onClick={() => setStatusFilter("ALL")}
+        >
           <CardContent className="py-5">
-            <p className="text-sm text-slate-500">Currently issued</p>
+            <p className="text-sm text-slate-500">Currently issued (all out)</p>
             <p className="text-3xl font-semibold text-slate-900">
               {activeIssues.length}
             </p>
+            <p className="mt-1 text-xs text-brand-600">Show all out books</p>
           </CardContent>
         </Card>
-        <Card className="bg-[linear-gradient(135deg,_white_0%,_#fef2f2_100%)]">
+        <Card
+          className={cn(
+            "cursor-pointer bg-[linear-gradient(135deg,_white_0%,_#fef2f2_100%)] transition hover:ring-2 hover:ring-rose-200",
+            statusFilter === "OVERDUE" && "ring-2 ring-rose-400",
+          )}
+          onClick={() => setStatusFilter("OVERDUE")}
+        >
           <CardContent className="py-5">
-            <p className="text-sm text-slate-500">Overdue</p>
+            <p className="text-sm text-slate-500">Overdue only</p>
             <p className="text-3xl font-semibold text-rose-600">{overdueCount}</p>
+            <p className="mt-1 text-xs text-rose-600">Show overdue books only</p>
           </CardContent>
         </Card>
         <Card className="bg-[linear-gradient(135deg,_white_0%,_#ecfdf5_100%)]">
@@ -278,12 +301,16 @@ export const LibraryIssuedBooksPanel = () => {
                     <div>
                       <CardTitle className="flex items-center gap-2 text-base">
                         <BookMarked className="h-5 w-5 text-brand-600" />
-                        All issued books
+                        {statusFilter === "OVERDUE"
+                          ? "Overdue books only"
+                          : statusFilter === "ISSUED"
+                            ? "Issued (not overdue)"
+                            : "All issued books"}
                       </CardTitle>
                       <p className="mt-1 text-sm text-slate-500">
-                        Search and filter by{" "}
-                        {isCollege ? "batch and year" : "class and section"}.
-                        Select a row or use Manage to open the detail panel.
+                        {statusFilter === "OVERDUE"
+                          ? "Books past their due date only. Change status filter to see all issued books."
+                          : `Search and filter by ${isCollege ? "batch and year" : "class and section"}. Select a row or use Manage to open the detail panel.`}
                       </p>
                     </div>
                     <Button

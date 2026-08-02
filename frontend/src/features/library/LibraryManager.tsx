@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   Lock,
   Package,
+  Printer,
   RotateCcw,
   Users,
 } from "lucide-react";
@@ -39,6 +40,7 @@ import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { LibraryIssuedBooksPanel } from "features/library/LibraryIssuedBooksPanel";
+import { LibraryPrintBooksPanel } from "features/library/LibraryPrintBooksPanel";
 import { LibraryReturnsPanel } from "features/library/LibraryReturnsPanel";
 import { formatIssuedByLabel } from "features/library/libraryUtils";
 import { StockStatusBadge } from "features/library/StockStatusBadge";
@@ -76,7 +78,14 @@ type IssueTeacherRow = {
   user?: { fullName?: string } | null;
 };
 
-type Tab = "dashboard" | "inventory" | "issue" | "issued" | "returns" | "staff";
+type Tab =
+  | "dashboard"
+  | "inventory"
+  | "print-books"
+  | "issue"
+  | "issued"
+  | "returns"
+  | "staff";
 
 type CopyDraft = {
   bookCode: string;
@@ -167,6 +176,7 @@ const tabs: Array<{
 }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "inventory", label: "Inventory", icon: Package },
+  { id: "print-books", label: "Print books", icon: Printer },
   { id: "issue", label: "Issue Books", icon: BookOpen },
   { id: "issued", label: "Issued Books", icon: BookMarked },
   { id: "returns", label: "Returns", icon: RotateCcw },
@@ -178,6 +188,10 @@ export const LibraryManager = () => {
   const isCollege = useIsCollege();
   const isAdmin = canManageInstitution(user?.role ?? "");
   const [tab, setTab] = useState<Tab>("dashboard");
+  /** When opening Issued Books from dashboard cards */
+  const [issuedStatusFilter, setIssuedStatusFilter] = useState<
+    "ALL" | "ISSUED" | "OVERDUE"
+  >("ALL");
   const [bookForm, setBookForm] = useState<LibraryBookInput>(defaultBook);
   const [copyDrafts, setCopyDrafts] = useState<CopyDraft[]>([emptyCopy()]);
   const [addCopyDrafts, setAddCopyDrafts] = useState<CopyDraft[]>([]);
@@ -688,7 +702,12 @@ export const LibraryManager = () => {
               key={item.id}
               variant={tab === item.id ? "default" : "secondary"}
               size="sm"
-              onClick={() => setTab(item.id)}
+              onClick={() => {
+                if (item.id === "issued") {
+                  setIssuedStatusFilter("ALL");
+                }
+                setTab(item.id);
+              }}
               className={cn(
                 tab === item.id && "bg-brand-600 hover:bg-brand-700",
               )}
@@ -702,7 +721,7 @@ export const LibraryManager = () => {
 
       {tab === "dashboard" && (
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             {[
               {
                 label: "Total Physical Books",
@@ -715,12 +734,29 @@ export const LibraryManager = () => {
               {
                 label: "Issued",
                 value: dashboardQuery.data?.issuedBooks ?? 0,
-                onClick: () => setTab("issued"),
+                valueClass: "text-slate-900",
+                hint: "View all books currently out →",
+                onClick: () => {
+                  setIssuedStatusFilter("ALL");
+                  setTab("issued");
+                },
               },
               {
                 label: "Overdue",
                 value: dashboardQuery.data?.overdueBooks ?? 0,
-                onClick: () => setTab("issued"),
+                valueClass: "text-rose-600",
+                hint: "View overdue books only →",
+                onClick: () => {
+                  setIssuedStatusFilter("OVERDUE");
+                  setTab("issued");
+                },
+              },
+              {
+                label: "Returned",
+                value: dashboardQuery.data?.returnedBooks ?? 0,
+                valueClass: "text-emerald-700",
+                hint: "View returns history →",
+                onClick: () => setTab("returns"),
               },
             ].map((stat) => (
               <Card
@@ -735,92 +771,176 @@ export const LibraryManager = () => {
               >
                 <CardContent className="py-6">
                   <p className="text-sm text-slate-500">{stat.label}</p>
-                  <p className="text-3xl font-semibold text-slate-900">
+                  <p
+                    className={cn(
+                      "text-3xl font-semibold",
+                      "valueClass" in stat && stat.valueClass
+                        ? stat.valueClass
+                        : "text-slate-900",
+                    )}
+                  >
                     {stat.value}
                   </p>
-                  {"onClick" in stat && stat.onClick ? (
-                    <p className="mt-1 text-xs text-brand-600">
-                      View all issued books →
-                    </p>
+                  {"onClick" in stat && stat.onClick && "hint" in stat ? (
+                    <p className="mt-1 text-xs text-brand-600">{stat.hint}</p>
                   ) : null}
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          <Card>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-              <CardTitle className="flex items-center gap-2">
-                <History className="h-5 w-5 text-brand-600" />
-                Recently issued
-              </CardTitle>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setTab("issued")}
-              >
-                <BookMarked className="mr-2 h-4 w-4" />
-                View all issued books
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>Book</Th>
-                    <Th>Code</Th>
-                    <Th>Borrower</Th>
-                    <Th>Due</Th>
-                    <Th>Issued by</Th>
-                    <Th>Status</Th>
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {(dashboardQuery.data?.recentlyIssued ?? []).length === 0 ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+                <CardTitle className="flex items-center gap-2">
+                  <History className="h-5 w-5 text-brand-600" />
+                  Recently issued
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setIssuedStatusFilter("ALL");
+                    setTab("issued");
+                  }}
+                >
+                  <BookMarked className="mr-2 h-4 w-4" />
+                  View issued
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHead>
                     <tr>
-                      <Td
-                        colSpan={6}
-                        className="py-8 text-center text-slate-500"
-                      >
-                        No books issued yet.
-                      </Td>
+                      <Th>Book</Th>
+                      <Th>Code</Th>
+                      <Th>Borrower</Th>
+                      <Th>Due</Th>
+                      <Th>Status</Th>
                     </tr>
-                  ) : (
-                    (dashboardQuery.data?.recentlyIssued ?? []).map((issue) => (
-                      <tr key={issue._id}>
-                        <Td>{issue.bookTitle ?? "—"}</Td>
-                        <Td className="font-mono text-sm">
-                          {issue.bookCode ?? "—"}
-                        </Td>
-                        <Td>
-                          {issue.borrowerType === "STUDENT" &&
-                          resolveStudentId(issue.studentId) ? (
-                            <StudentNameLink
-                              studentId={resolveStudentId(issue.studentId)!}
-                              name={issue.borrowerName?.trim() || "Student"}
-                            />
-                          ) : (
-                            issue.borrowerName?.trim() || "—"
-                          )}
-                        </Td>
-                        <Td>{issue.dueDateBs}</Td>
-                        <Td className="text-sm">
-                          {formatIssuedByLabel(issue)}
-                        </Td>
-                        <Td>
-                          <Badge
-                            className={issueStatusStyles[issue.status] ?? ""}
-                          >
-                            {issue.status}
-                          </Badge>
+                  </TableHead>
+                  <TableBody>
+                    {(dashboardQuery.data?.recentlyIssued ?? []).length === 0 ? (
+                      <tr>
+                        <Td
+                          colSpan={5}
+                          className="py-8 text-center text-slate-500"
+                        >
+                          No books issued yet.
                         </Td>
                       </tr>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                    ) : (
+                      (dashboardQuery.data?.recentlyIssued ?? []).map((issue) => (
+                        <tr key={issue._id}>
+                          <Td>{issue.bookTitle ?? "—"}</Td>
+                          <Td className="font-mono text-sm">
+                            {issue.bookCode ?? "—"}
+                          </Td>
+                          <Td>
+                            {issue.borrowerType === "STUDENT" &&
+                            resolveStudentId(issue.studentId) ? (
+                              <StudentNameLink
+                                studentId={resolveStudentId(issue.studentId)!}
+                                name={issue.borrowerName?.trim() || "Student"}
+                              />
+                            ) : (
+                              issue.borrowerName?.trim() || "—"
+                            )}
+                          </Td>
+                          <Td>{issue.dueDateBs}</Td>
+                          <Td>
+                            <Badge
+                              className={issueStatusStyles[issue.status] ?? ""}
+                            >
+                              {issue.status}
+                            </Badge>
+                          </Td>
+                        </tr>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+                <CardTitle className="flex items-center gap-2">
+                  <RotateCcw className="h-5 w-5 text-emerald-600" />
+                  Recently returned
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setTab("returns")}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  View returns
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHead>
+                    <tr>
+                      <Th>Book</Th>
+                      <Th>Code</Th>
+                      <Th>Borrower</Th>
+                      <Th>Returned</Th>
+                      <Th>Status</Th>
+                    </tr>
+                  </TableHead>
+                  <TableBody>
+                    {(dashboardQuery.data?.recentlyReturned ?? []).length ===
+                    0 ? (
+                      <tr>
+                        <Td
+                          colSpan={5}
+                          className="py-8 text-center text-slate-500"
+                        >
+                          No returned books yet.
+                        </Td>
+                      </tr>
+                    ) : (
+                      (dashboardQuery.data?.recentlyReturned ?? []).map(
+                        (issue) => (
+                          <tr key={issue._id}>
+                            <Td>{issue.bookTitle ?? "—"}</Td>
+                            <Td className="font-mono text-sm">
+                              {issue.bookCode ?? "—"}
+                            </Td>
+                            <Td>
+                              {issue.borrowerType === "STUDENT" &&
+                              resolveStudentId(issue.studentId) ? (
+                                <StudentNameLink
+                                  studentId={
+                                    resolveStudentId(issue.studentId)!
+                                  }
+                                  name={issue.borrowerName?.trim() || "Student"}
+                                />
+                              ) : (
+                                issue.borrowerName?.trim() || "—"
+                              )}
+                            </Td>
+                            <Td>{issue.returnedDateBs ?? "—"}</Td>
+                            <Td>
+                              <Badge
+                                className={
+                                  issueStatusStyles[issue.status] ??
+                                  "bg-brand-100 text-brand-800"
+                                }
+                              >
+                                RETURNED
+                              </Badge>
+                            </Td>
+                          </tr>
+                        ),
+                      )
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
 
@@ -2130,7 +2250,12 @@ export const LibraryManager = () => {
         </div>
       )}
 
-      {tab === "issued" && <LibraryIssuedBooksPanel />}
+      {tab === "issued" && (
+        <LibraryIssuedBooksPanel
+          key={issuedStatusFilter}
+          initialStatusFilter={issuedStatusFilter}
+        />
+      )}
 
       {tab === "returns" && <LibraryReturnsPanel />}
 
@@ -2225,6 +2350,8 @@ export const LibraryManager = () => {
           </Card>
         </div>
       )}
+
+      {tab === "print-books" && <LibraryPrintBooksPanel />}
     </div>
   );
 };

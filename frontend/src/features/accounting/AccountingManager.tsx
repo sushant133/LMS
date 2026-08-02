@@ -61,6 +61,7 @@ import {
   Printer,
   RotateCcw,
   Receipt,
+  Shield,
   ShoppingCart,
   TrendingDown,
   TrendingUp,
@@ -94,6 +95,7 @@ import { ChartOfAccountsPanel } from "./ChartOfAccountsPanel";
 import { JournalEntriesPanel } from "./JournalEntriesPanel";
 import { LedgerPanel } from "./LedgerPanel";
 import { StudentFeeRecordsPanel } from "./StudentFeeRecordsPanel";
+import { SecurityDepositRecordsPanel } from "./SecurityDepositRecordsPanel";
 import { SalaryPaymentRecordsPanel } from "./SalaryPaymentRecordsPanel";
 import { RefundRecordsPanel } from "./RefundRecordsPanel";
 import { printRegisterVoucher, printSimpleDocument } from "./voucherPrint";
@@ -115,6 +117,7 @@ import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 type Tab =
   | "dashboard"
   | "fee-records"
+  | "deposit-records"
   | "salary-records"
   | "refund-records"
   | "purchases"
@@ -128,6 +131,7 @@ type Tab =
 const accountingTabs: Tab[] = [
   "dashboard",
   "fee-records",
+  "deposit-records",
   "salary-records",
   "refund-records",
   "purchases",
@@ -147,6 +151,7 @@ const tabs: Array<{
 }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "fee-records", label: "Student Fee Records", icon: Receipt },
+  { id: "deposit-records", label: "Security Deposits", icon: Shield },
   { id: "salary-records", label: "Salary Sheet / Payroll", icon: Banknote },
   { id: "refund-records", label: "Refund Records", icon: RotateCcw },
   { id: "purchases", label: "Purchases", icon: ShoppingCart },
@@ -1036,20 +1041,21 @@ export const AccountingManager = () => {
                     !/outstanding|pending\s*fee|fee\s*due/i.test(stat.label),
                 )
                 .map((stat) => (
-                <Card key={stat.label}>
+                <Card key={stat.label} className="overflow-hidden">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-slate-500">
+                    <CardTitle className="truncate text-sm font-medium text-slate-500">
                       {stat.label}
                     </CardTitle>
                   </CardHeader>
                   <CardContent
                     className={cn(
-                      "text-2xl font-semibold",
+                      "min-w-0 overflow-hidden break-words text-lg font-semibold tabular-nums leading-snug sm:text-xl xl:text-2xl",
                       stat.label.includes("Expense") && "text-rose-700",
                       stat.label.includes("Income") && "text-emerald-700",
                       stat.label.includes("Cash") && "text-brand-700",
                       stat.label.includes("Collection") && "text-brand-800",
                     )}
+                    title={formatCurrencyNpr(stat.value)}
                   >
                     {formatCurrencyNpr(stat.value)}
                   </CardContent>
@@ -1099,16 +1105,16 @@ export const AccountingManager = () => {
                         <button
                           key={item.id}
                           type="button"
-                          className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white p-3 text-left text-sm transition hover:border-brand-200 hover:bg-brand-50/40"
+                          className="flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-xl border border-slate-100 bg-white p-3 text-left text-sm transition hover:border-brand-200 hover:bg-brand-50/40"
                           onClick={() => {
                             if (item.linkTab) setTab(item.linkTab as Tab);
                           }}
                         >
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1 overflow-hidden">
                             <div className="truncate font-medium text-slate-900">
                               {item.party}
                             </div>
-                            <div className="text-xs text-slate-500">
+                            <div className="truncate text-xs text-slate-500">
                               {item.dateBs} · {item.voucherNo}
                               {item.status ? (
                                 <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
@@ -1119,11 +1125,25 @@ export const AccountingManager = () => {
                           </div>
                           <div
                             className={cn(
-                              "shrink-0 font-semibold",
+                              "max-w-[45%] shrink-0 text-right text-sm font-semibold tabular-nums leading-tight",
                               section.amountClass,
+                              String(item.status).includes("DEPOSIT") &&
+                                "text-violet-700",
                             )}
+                            title={formatCurrencyNpr(item.amountNpr)}
                           >
-                            {formatCurrencyNpr(item.amountNpr)}
+                            <span className="block break-all">
+                              {formatCurrencyNpr(item.amountNpr)}
+                            </span>
+                            {String(item.status) === "DEPOSIT" ? (
+                              <div className="text-[10px] font-normal text-violet-600">
+                                deposit
+                              </div>
+                            ) : String(item.status) === "FEE+DEPOSIT" ? (
+                              <div className="text-[10px] font-normal text-slate-500">
+                                fee + deposit
+                              </div>
+                            ) : null}
                           </div>
                         </button>
                       ))
@@ -1137,6 +1157,7 @@ export const AccountingManager = () => {
       ) : null}
 
       {tab === "fee-records" ? <StudentFeeRecordsPanel /> : null}
+      {tab === "deposit-records" ? <SecurityDepositRecordsPanel /> : null}
       {tab === "salary-records" ? <SalaryPaymentRecordsPanel /> : null}
       {tab === "refund-records" ? <RefundRecordsPanel /> : null}
       {tab === "ledger" ? <LedgerPanel /> : null}

@@ -1,5 +1,7 @@
+import { jsPDF } from "jspdf";
 import type {
   LaboratoryEquipmentInput,
+  LaboratoryEquipmentRecord,
   LaboratoryInput,
   LaboratoryReportType,
   LaboratoryStockRequestStatus,
@@ -23,6 +25,7 @@ export type LabTab =
   | "dashboard"
   | "labs"
   | "inventory"
+  | "print-inventory"
   | "requests"
   | "issues"
   | "reports"
@@ -219,4 +222,318 @@ export async function exportElementToPdf(elementId: string, filename: string) {
     })
     .from(element)
     .save();
+}
+
+export type LaboratoryInventoryPdfMeta = {
+  institutionName?: string;
+  title?: string;
+  filename?: string;
+};
+
+const itemKindLabel = (kind?: string) => {
+  if (kind === "DISPOSABLE") return "Disposable / Destroyable";
+  if (kind === "NON_DISPOSABLE") return "Non-Disposable / Non-Destroyable";
+  return kind?.replace(/_/g, " ") || "—";
+};
+
+const formatCost = (cost?: number) => {
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost <= 0) return "—";
+  return cost.toLocaleString("en-NP");
+};
+
+/**
+ * Full laboratory inventory PDF (jsPDF text layout).
+ * Includes every equipment item with all stock and purchase details.
+ * Avoids html2canvas truncation on long multi-page reports.
+ */
+export async function exportLaboratoryInventoryPdf(
+  items: LaboratoryEquipmentRecord[],
+  meta?: LaboratoryInventoryPdfMeta,
+): Promise<void> {
+  if (!items.length) {
+    throw new Error("No equipment to export");
+  }
+
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 10;
+  const marginTop = 12;
+  const marginBottom = 12;
+  const usableWidth = pageWidth - marginX * 2;
+
+  // SN | Item code | Name | Lab | Kind | Qty | Avail | Issued | Status | Condition | Cost
+  const colWeights = [8, 22, 42, 28, 22, 14, 14, 14, 20, 18, 18];
+  const weightSum = colWeights.reduce((a, b) => a + b, 0);
+  const colW = colWeights.map((w) => (w / weightSum) * usableWidth);
+  const headers = [
+    "S.N.",
+    "Item code",
+    "Equipment name",
+    "Laboratory",
+    "Kind",
+    "Total",
+    "Avail",
+    "Issued",
+    "Stock",
+    "Condition",
+    "Cost",
+  ];
+  const colX: number[] = [];
+  {
+    let x = marginX;
+    for (const w of colW) {
+      colX.push(x);
+      x += w;
+    }
+  }
+
+  const rowH = 6.5;
+  let y = marginTop;
+  let pageNo = 1;
+
+  const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+
+  const fitText = (text: string, maxWidth: number) => {
+    const t = (text || "—").replace(/\s+/g, " ").trim() || "—";
+    if (doc.getTextWidth(t) <= maxWidth) return t;
+    let out = t;
+    while (out.length > 1 && doc.getTextWidth(`${out}…`) > maxWidth) {
+      out = out.slice(0, -1);
+    }
+    return `${out}…`;
+  };
+
+  const drawFooter = () => {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      "Laboratory inventory · Full equipment details with stock quantities",
+      marginX,
+      pageHeight - 6,
+    );
+    doc.text(`Page ${pageNo}`, pageWidth - marginX, pageHeight - 6, {
+      align: "right",
+    });
+  };
+
+  const drawReportHeader = () => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(15, 23, 42);
+    doc.text(meta?.institutionName?.trim() || "Institution", marginX, y);
+    y += 6;
+
+    doc.setFontSize(12);
+    doc.text(meta?.title?.trim() || "Laboratory Equipment Inventory", marginX, y);
+    y += 5;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text(
+      `${items.length} item${items.length === 1 ? "" : "s"} · total quantity ${totalQty} · Full equipment details`,
+      marginX,
+      y,
+    );
+    y += 6;
+
+    doc.setDrawColor(148, 163, 184);
+    doc.line(marginX, y, pageWidth - marginX, y);
+    y += 5;
+  };
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed <= pageHeight - marginBottom) return;
+    drawFooter();
+    doc.addPage();
+    pageNo += 1;
+    y = marginTop;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(15, 23, 42);
+    doc.text(
+      `${meta?.title?.trim() || "Laboratory Equipment Inventory"} (continued)`,
+      marginX,
+      y,
+    );
+    y += 6;
+  };
+
+  const paintTableHeader = () => {
+    doc.setFillColor(241, 245, 249);
+    doc.rect(marginX, y, usableWidth, rowH, "F");
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(marginX, y, usableWidth, rowH, "S");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    headers.forEach((h, i) => {
+      const maxW = colW[i]! - 1.5;
+      const rightAlign = (i >= 5 && i <= 7) || i === headers.length - 1;
+      if (rightAlign) {
+        doc.text(fitText(h, maxW), colX[i]! + colW[i]! - 1, y + 4.4, {
+          align: "right",
+        });
+      } else if (i === 0) {
+        doc.text(fitText(h, maxW), colX[i]! + colW[i]! / 2, y + 4.4, {
+          align: "center",
+        });
+      } else {
+        doc.text(fitText(h, maxW), colX[i]! + 0.8, y + 4.4);
+      }
+    });
+    y += rowH;
+  };
+
+  const drawTableHeader = () => {
+    ensureSpace(rowH + 2);
+    paintTableHeader();
+  };
+
+  const drawRow = (cells: string[], index: number) => {
+    const pageBefore = pageNo;
+    ensureSpace(rowH);
+    if (pageNo !== pageBefore) {
+      paintTableHeader();
+      ensureSpace(rowH);
+    }
+
+    if (index % 2 === 1) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(marginX, y, usableWidth, rowH, "F");
+    }
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(marginX, y, usableWidth, rowH, "S");
+    let xLine = marginX;
+    for (let i = 0; i < colW.length - 1; i++) {
+      xLine += colW[i]!;
+      doc.line(xLine, y, xLine, y + rowH);
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(15, 23, 42);
+    cells.forEach((value, i) => {
+      const maxW = colW[i]! - 1.8;
+      const text = fitText(value, maxW);
+      const rightAlign = (i >= 5 && i <= 7) || i === cells.length - 1;
+      if (rightAlign) {
+        doc.text(text, colX[i]! + colW[i]! - 1, y + 4.4, { align: "right" });
+      } else if (i === 0) {
+        doc.text(text, colX[i]! + colW[i]! / 2, y + 4.4, { align: "center" });
+      } else if (i === 1) {
+        doc.setFont("helvetica", "bold");
+        doc.text(text, colX[i]! + 0.8, y + 4.4);
+        doc.setFont("helvetica", "normal");
+      } else {
+        doc.text(text, colX[i]! + 0.8, y + 4.4);
+      }
+    });
+    y += rowH;
+  };
+
+  // Group by laboratory for readable sections
+  const byLab = new Map<string, LaboratoryEquipmentRecord[]>();
+  for (const item of items) {
+    const key = item.laboratoryId || "unknown";
+    const list = byLab.get(key) ?? [];
+    list.push(item);
+    byLab.set(key, list);
+  }
+
+  drawReportHeader();
+
+  let globalIndex = 0;
+  for (const [, labItems] of byLab) {
+    const labName =
+      labItems[0]?.laboratoryName?.trim() || "Unassigned laboratory";
+    ensureSpace(14);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Laboratory: ${fitText(labName, usableWidth - 10)}`, marginX, y);
+    y += 5;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text(
+      `${labItems.length} item${labItems.length === 1 ? "" : "s"} · qty ${labItems.reduce((s, i) => s + (i.quantity || 0), 0)}`,
+      marginX,
+      y,
+    );
+    y += 4;
+
+    drawTableHeader();
+
+    for (const item of labItems) {
+      globalIndex += 1;
+      drawRow(
+        [
+          String(globalIndex),
+          item.itemCode?.trim() || "—",
+          item.name?.trim() || "—",
+          item.laboratoryName?.trim() || labName,
+          itemKindLabel(item.itemKind),
+          String(item.quantity ?? 0),
+          String(item.availableQuantity ?? 0),
+          String(item.issuedQuantity ?? 0),
+          item.status || "—",
+          item.condition || "—",
+          formatCost(item.purchaseCost),
+        ],
+        globalIndex - 1,
+      );
+
+      // Detail lines under each item so full info is not lost in the grid
+      const detailLines = [
+        `Category: ${item.categoryName?.trim() || "—"} · Year: ${item.yearLevel ?? "All Years"} · Unit: ${item.unit || "pcs"} · Brand: ${item.brand?.trim() || "—"} · Model: ${item.equipmentModel?.trim() || "—"}`,
+        `Storage: ${item.storageLocation?.trim() || "—"} · Equipment status: ${item.equipmentStatus || "—"} · Min stock: ${item.minimumStockLevel ?? 0} · Max/capacity: ${item.maximumStockLevel ?? 0} · Required: ${item.requiredQuantity ?? 0}`,
+        `Purchase date: ${item.purchaseDateBs?.trim() || "—"} · Supplier: ${item.supplier?.trim() || "—"} · Cost (NPR): ${formatCost(item.purchaseCost)}`,
+        item.description?.trim()
+          ? `Description: ${item.description.trim()}`
+          : "",
+        item.remarks?.trim() ? `Remarks: ${item.remarks.trim()}` : "",
+      ].filter(Boolean);
+
+      for (const line of detailLines) {
+        ensureSpace(4.5);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(71, 85, 105);
+        const wrapped = doc.splitTextToSize(`    ${line}`, usableWidth - 4);
+        for (const wline of wrapped) {
+          ensureSpace(4);
+          doc.text(wline, marginX, y);
+          y += 3.8;
+        }
+      }
+      y += 2.5;
+    }
+
+    y += 4;
+  }
+
+  // When printing a single item, still ensure detail block is clear (already above)
+  drawFooter();
+
+  const filename =
+    meta?.filename?.trim() ||
+    (items.length === 1
+      ? `lab-equipment-${(items[0].name || "item")
+          .replace(/[^\w\s\-().]+/g, "")
+          .trim()
+          .replace(/\s+/g, "-")
+          .slice(0, 60)}.pdf`
+      : "laboratory-inventory-all.pdf");
+
+  doc.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
 }

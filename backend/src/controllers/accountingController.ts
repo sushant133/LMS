@@ -204,6 +204,14 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
   const totalPurchasesPaidNpr = paidPurchases.reduce((sum, item) => sum + (item.totalAmountNpr || 0), 0);
   const totalRefundsNpr = refunds.reduce((sum, item) => sum + (item.amountNpr || 0), 0);
   const totalOtherIncomeNpr = incomes.reduce((sum, item) => sum + item.amountNpr, 0);
+  /** Cash received on a fee receipt = tuition paid + security deposit collected */
+  const cashReceivedOnCollection = (item: {
+    amountPaidNpr?: number;
+    securityDepositPaidNpr?: number;
+  }) =>
+    (Number(item.amountPaidNpr) || 0) +
+    (Number((item as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0);
+
   // Tuition fee income for cards (exclude OPEN plan rows and security deposit liability)
   const totalTuitionCollectedNpr = paymentCollections.reduce(
     (sum, item) => sum + (item.amountPaidNpr || 0),
@@ -214,17 +222,18 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
   const totalExpensesNpr =
     totalRegisterExpensesNpr + totalSalaryPaidNpr + totalPurchasesPaidNpr + totalRefundsNpr;
 
+  // Student collections (cash in) include fee + deposit
   const todayCollectionNpr = paymentCollections
     .filter((item) => item.paidDateBs === today)
-    .reduce((sum, item) => sum + item.amountPaidNpr, 0);
+    .reduce((sum, item) => sum + cashReceivedOnCollection(item), 0);
   const monthlyCollectionNpr = paymentCollections
     .filter((item) => typeof item.paidDateBs === "string" && item.paidDateBs.startsWith(currentMonth))
-    .reduce((sum, item) => sum + item.amountPaidNpr, 0);
+    .reduce((sum, item) => sum + cashReceivedOnCollection(item), 0);
 
   const feeByMonth = paymentCollections.reduce<Record<string, number>>((acc, item) => {
     if (typeof item.paidDateBs !== "string" || item.paidDateBs.length < 7) return acc;
     const month = item.paidDateBs.slice(0, 7);
-    acc[month] = (acc[month] ?? 0) + item.amountPaidNpr;
+    acc[month] = (acc[month] ?? 0) + cashReceivedOnCollection(item);
     return acc;
   }, {});
 
@@ -316,15 +325,25 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     totalIncomeNpr,
     totalExpensesNpr,
     cashBalanceNpr,
-    recentFees: recentPayments.map((c) => ({
-      id: c._id.toString(),
-      dateBs: c.paidDateBs,
-      voucherNo: c.receiptNumber,
-      party: studentParty(c),
-      amountNpr: c.amountPaidNpr,
-      status: "PAID",
-      linkTab: "fee-records"
-    })),
+    recentFees: recentPayments.map((c) => {
+      const feePaid = Number(c.amountPaidNpr) || 0;
+      const depositPaid =
+        Number((c as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0;
+      const cashTotal = feePaid + depositPaid;
+      // Avoid NPR 0.00 on deposit-only receipts; label status clearly
+      let status = "PAID";
+      if (depositPaid > 0 && feePaid <= 0) status = "DEPOSIT";
+      else if (depositPaid > 0 && feePaid > 0) status = "FEE+DEPOSIT";
+      return {
+        id: c._id.toString(),
+        dateBs: c.paidDateBs,
+        voucherNo: c.receiptNumber,
+        party: studentParty(c),
+        amountNpr: cashTotal,
+        status,
+        linkTab: depositPaid > 0 && feePaid <= 0 ? "deposit-records" : "fee-records"
+      };
+    }),
     recentSalaries: recentSalaries.map((s) => ({
       id: s._id.toString(),
       dateBs: s.paidDateBs || s.monthBs,
@@ -521,6 +540,13 @@ const YEAR_LABELS = PROGRAM_YEAR_LABELS;
 
 export const getStudentFinancialHistory = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
+
+  // Held deposit only from fee receipts — never treat admission planned amount as paid
+  const { syncStudentSecurityDepositHeldFromLedger } = await import(
+    "../utils/studentSecurityDeposit.js"
+  );
+  await syncStudentSecurityDepositHeldFromLedger(req.params.studentId as string, schoolId);
+
   const student = await Student.findOne({ _id: req.params.studentId, schoolId }).populate("user", "-password").lean();
   if (!student) throw new ApiError(404, "Student not found");
 

@@ -186,6 +186,21 @@ export const getStudentById = asyncHandler(async (req: Request, res: Response) =
     return sendSuccess(res, "Student fetched", sanitizeStudentForLimitedStaffList(student as never));
   }
 
+  // Held deposit only from accounting receipts — fix admission amount wrongly stored as paid
+  try {
+    const { syncStudentSecurityDepositHeldFromLedger } = await import(
+      "../utils/studentSecurityDeposit.js"
+    );
+    await syncStudentSecurityDepositHeldFromLedger(student._id, tenantObjectId(req));
+    // Reload after possible correction so response has fresh held/expected
+    const refreshed = await Student.findById(student._id).populate("user", "-password");
+    if (refreshed) {
+      return sendSuccess(res, "Student fetched", refreshed);
+    }
+  } catch {
+    // non-fatal — still return student
+  }
+
   return sendSuccess(res, "Student fetched", student);
 });
 
@@ -435,6 +450,27 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     ? 0
     : Math.max(0, Number(payload.year3FeeNpr) || 0);
   const securityDepositWaived = Boolean(payload.securityDepositWaived);
+
+  // Align held with accounting receipts first (admission plan must not appear as collected)
+  try {
+    const { syncStudentSecurityDepositHeldFromLedger } = await import(
+      "../utils/studentSecurityDeposit.js"
+    );
+    await syncStudentSecurityDepositHeldFromLedger(student._id, schoolId);
+    const latest = await Student.findById(student._id).select(
+      "securityDepositNpr securityDepositRefundedNpr securityDepositExpectedNpr"
+    );
+    if (latest) {
+      student.securityDepositNpr = latest.securityDepositNpr;
+      student.securityDepositRefundedNpr = latest.securityDepositRefundedNpr;
+      if (!(Number(student.securityDepositExpectedNpr) > 0) && Number(latest.securityDepositExpectedNpr) > 0) {
+        student.securityDepositExpectedNpr = latest.securityDepositExpectedNpr;
+      }
+    }
+  } catch {
+    // continue with existing held
+  }
+
   const heldDeposit = Math.max(0, Number(student.securityDepositNpr) || 0);
   const refundedDeposit = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
   const remainingHeld = Math.max(0, heldDeposit - refundedDeposit);
@@ -444,7 +480,8 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
       `Cannot mark security deposit as not taken while ${remainingHeld} NPR is still held. Record a deposit refund first, or keep the deposit on file.`
     );
   }
-  // Form amount is planned/expected only — never overwrite held collected deposit
+  // Form amount is planned/expected only — never overwrite held collected deposit.
+  // Prefer securityDepositExpectedNpr; legacy clients may still send securityDepositNpr as plan.
   const securityDepositExpectedNpr = securityDepositWaived
     ? 0
     : Math.max(

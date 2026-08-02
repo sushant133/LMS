@@ -314,7 +314,11 @@ export interface LibraryDashboardResponse {
   availableBooks: number;
   issuedBooks: number;
   overdueBooks: number;
+  /** Total returned issue records (history). */
+  returnedBooks: number;
   recentlyIssued: LibraryIssueRecord[];
+  /** Latest returned books for dashboard. */
+  recentlyReturned: LibraryIssueRecord[];
   inventoryAccessEnabled: boolean;
 }
 

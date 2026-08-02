@@ -101,7 +101,7 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
         onWheel={handleWheel}
         onKeyDown={handleKeyDown}
         className={cn(
-          "number-input-no-spin flex h-10 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
+          "number-input-no-spin flex h-10 w-full min-w-0 max-w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition placeholder:text-slate-400 focus:border-brand-500",
           className,
         )}
       />

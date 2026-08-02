@@ -214,22 +214,41 @@ export const getLibraryDashboard = asyncHandler(async (req: Request, res: Respon
 
   const schoolId = req.tenantSchoolId!;
 
-  const [books, activeIssues, recentlyIssued, totalCopies, availableCopies, issuedCopies] =
-    await Promise.all([
-      LibraryBook.find(scope).lean(),
-      LibraryIssue.find({ ...scope, status: { $in: ["ISSUED", "OVERDUE"] } }).lean(),
-      LibraryIssue.find(scope)
-        .populate([...issueBorrowerPopulate])
-        .sort({ createdAt: -1 })
-        .limit(8)
-        .lean(),
-      LibraryBookCopy.countDocuments({ schoolId }),
-      LibraryBookCopy.countDocuments({ schoolId, status: "AVAILABLE" }),
-      LibraryBookCopy.countDocuments({ schoolId, status: "ISSUED" })
-    ]);
+  const [
+    books,
+    activeIssues,
+    returnedCount,
+    recentlyIssued,
+    recentlyReturned,
+    totalCopies,
+    availableCopies
+  ] = await Promise.all([
+    LibraryBook.find(scope).lean(),
+    // After syncSchoolLibraryOverdueStatuses, statuses are current
+    LibraryIssue.find({ ...scope, status: { $in: ["ISSUED", "OVERDUE"] } }).lean(),
+    LibraryIssue.countDocuments({ ...scope, status: "RETURNED" }),
+    LibraryIssue.find({ ...scope, status: { $in: ["ISSUED", "OVERDUE"] } })
+      .populate([...issueBorrowerPopulate])
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .lean(),
+    LibraryIssue.find({ ...scope, status: "RETURNED" })
+      .populate([...issueBorrowerPopulate])
+      .sort({ returnedDateBs: -1, createdAt: -1 })
+      .limit(8)
+      .lean(),
+    LibraryBookCopy.countDocuments({ schoolId }),
+    LibraryBookCopy.countDocuments({ schoolId, status: "AVAILABLE" })
+  ]);
 
   const useCopyInventory = totalCopies > 0;
   const enrichedBooks = books.map((book) => formatBookWithCopies(book as never, []));
+
+  // Counts from issue records (authoritative for overdue vs currently out)
+  const overdueBooks = activeIssues.filter((issue) => issue.status === "OVERDUE").length;
+  const issuedOnTime = activeIssues.filter((issue) => issue.status === "ISSUED").length;
+  // "Issued" on dashboard = all books currently out (on-time + overdue)
+  const issuedBooks = issuedOnTime + overdueBooks;
 
   const inventoryAccessEnabled = await getLibraryInventoryAccessEnabled(req.tenantSchoolId!);
 
@@ -240,11 +259,13 @@ export const getLibraryDashboard = asyncHandler(async (req: Request, res: Respon
     availableBooks: useCopyInventory
       ? availableCopies
       : enrichedBooks.reduce((sum, book) => sum + book.availableCopies, 0),
-    issuedBooks: useCopyInventory
-      ? issuedCopies
-      : enrichedBooks.reduce((sum, book) => sum + book.issuedCopies, 0),
-    overdueBooks: activeIssues.filter((issue) => issue.status === "OVERDUE").length,
+    issuedBooks,
+    overdueBooks,
+    returnedBooks: returnedCount,
     recentlyIssued: recentlyIssued.map((issue) => formatIssue(issue as Record<string, unknown>)),
+    recentlyReturned: recentlyReturned.map((issue) =>
+      formatIssue(issue as Record<string, unknown>)
+    ),
     inventoryAccessEnabled
   });
 });

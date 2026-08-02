@@ -159,13 +159,12 @@ export const StudentForm = ({
       year1FeeNpr: year1,
       year2FeeNpr: year2,
       year3FeeNpr: year3,
-      // Planned/expected deposit (server maps to securityDepositExpectedNpr)
+      // Planned deposit only — NOT collected. Held/paid is set only in Accounts.
       securityDepositExpectedNpr: securityDepositWaived
         ? 0
         : Number(form.securityDepositNpr) || 0,
-      securityDepositNpr: securityDepositWaived
-        ? 0
-        : Number(form.securityDepositNpr) || 0,
+      // Do not send held amount from this form (avoids merging plan into "paid")
+      securityDepositNpr: undefined,
       // Total tuition due = sum of year fees when set, else manual total
       feesDueNpr: hasScholarship
         ? 0
@@ -559,7 +558,7 @@ export const StudentForm = ({
             </FormField>
           </>
         )}
-        <FormField label="Security deposit expected (NPR)">
+        <FormField label="Security deposit to be deposited (NPR)">
           <NumberInput
             min={0}
             disabled={Boolean(form.securityDepositWaived)}
@@ -575,16 +574,17 @@ export const StudentForm = ({
                 securityDepositWaived: false,
               }))
             }
-            placeholder="Planned caution / security deposit"
+            placeholder="Amount student must deposit (not yet paid)"
           />
         </FormField>
         <div className="md:col-span-2 xl:col-span-2">
           <p className="mb-2 rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
-            This is the <strong>planned</strong> deposit amount only. Actual
-            collection is recorded under{" "}
+            This is the amount <strong>to be deposited</strong> (plan only). It
+            does <strong>not</strong> mark the deposit as paid. When money is
+            collected, record it under{" "}
             <strong>Accounts → Student Fee Records → Record payment</strong>{" "}
-            (include security deposit). Deposit refunds are allowed only after
-            collection is recorded.
+            using the Security deposit field. Only then will “deposit held /
+            paid” appear. Refunds are allowed only after that collection.
           </p>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 text-sm">
             <input
