@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const journalLineSchema = new Schema(
   {
@@ -58,4 +59,5 @@ journalEntrySchema.index({ schoolId: 1, voucherNumber: 1 }, { unique: true });
 journalEntrySchema.index({ schoolId: 1, referenceType: 1, referenceId: 1 });
 
 export type JournalEntryDocument = InferSchemaType<typeof journalEntrySchema>;
+journalEntrySchema.plugin(softDeletePlugin);
 export const JournalEntry = mongoose.model("JournalEntry", journalEntrySchema);

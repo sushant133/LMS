@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const salaryPaymentSchema = new Schema(
   {
@@ -78,4 +79,5 @@ salaryPaymentSchema.index({ schoolId: 1, teacherId: 1, monthBs: 1 }, { unique: t
 salaryPaymentSchema.index({ schoolId: 1, staffId: 1, monthBs: 1 }, { unique: true, sparse: true });
 
 export type SalaryPaymentDocument = InferSchemaType<typeof salaryPaymentSchema>;
+salaryPaymentSchema.plugin(softDeletePlugin);
 export const SalaryPayment = mongoose.model("SalaryPayment", salaryPaymentSchema);

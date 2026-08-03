@@ -219,8 +219,16 @@ export const StudentDocumentsSection = ({
     }
   };
 
-  const handleDelete = async (documentId: string) => {
+  const handleDelete = async (documentId: string, documentName?: string) => {
     if (!studentId || !canManage) return;
+    const label = documentName?.trim() || "this document";
+    if (
+      !window.confirm(
+        `Delete “${label}”?\n\nThis will remove it from the student profile. You can cancel if you selected the wrong file.`,
+      )
+    ) {
+      return;
+    }
     try {
       const result = await unwrap<{
         student: { documents: StudentDocument[] };
@@ -237,11 +245,22 @@ export const StudentDocumentsSection = ({
   };
 
   const handleRemovePending = (id: string) => {
+    if (
+      !window.confirm(
+        "Remove this queued document before save?\n\nIt will not be uploaded.",
+      )
+    ) {
+      return;
+    }
     onPendingChange?.(pendingDocuments.filter((item) => item.id !== id));
   };
 
   const docsByCategory = (type: string) =>
-    documents.filter((doc) => doc.type === type);
+    documents.filter(
+      (doc) =>
+        doc.type === type &&
+        !(doc as { isDeleted?: boolean }).isDeleted,
+    );
 
   return (
     <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
@@ -404,7 +423,9 @@ export const StudentDocumentsSection = ({
                       doc={doc}
                       canManage={canManage}
                       uploading={uploading && replacingId === doc._id}
-                      onDelete={() => doc._id && void handleDelete(doc._id)}
+                      onDelete={() =>
+                        doc._id && void handleDelete(doc._id, doc.name)
+                      }
                       onReplace={(event) =>
                         void handleFileSelect(event, doc._id)
                       }
@@ -594,9 +615,7 @@ const DocumentPreviewModal = ({
       );
       toast.success("Download started");
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Could not download document",
-      );
+      toast.error("Document unavailable.");
     }
   };
 
@@ -647,11 +666,22 @@ const DocumentPreviewModal = ({
               Loading document…
             </div>
           ) : error ? (
-            <div className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-6 text-center text-sm text-rose-900">
-              <p className="font-medium">Could not open this document</p>
-              <p className="text-rose-800/90">{error}</p>
-              <p className="text-xs text-rose-700">
-                If the file is missing on the server, re-upload it from Replace.
+            <div className="flex min-h-[12rem] flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-600">
+              <FileText className="h-10 w-10 text-slate-300" />
+              <p className="font-medium text-slate-800">Document unavailable</p>
+              <p className="max-w-sm text-slate-500">
+                This file cannot be previewed right now. Use{" "}
+                <span className="font-medium text-slate-700">Download</span>
+                {doc.url ? (
+                  <>
+                    {" "}
+                    or ask an admin to use{" "}
+                    <span className="font-medium text-slate-700">Replace</span>{" "}
+                    if a new copy is needed.
+                  </>
+                ) : (
+                  "."
+                )}
               </p>
             </div>
           ) : blobUrl && isImage ? (
@@ -694,7 +724,7 @@ const DocumentRow = ({
 
   const handlePreview = async () => {
     if (!doc.url?.trim()) {
-      toast.error("No file linked to this document. Re-upload it.");
+      toast.message("Document unavailable.");
       return;
     }
     // In-app modal is reliable; also try external tab as secondary path for desktop.
@@ -709,10 +739,8 @@ const DocumentRow = ({
         doc.url,
         doc.originalName || doc.name || "document",
       );
-    } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Could not open document preview",
-      );
+    } catch {
+      toast.message("Document unavailable.");
     } finally {
       setBusy(null);
     }
@@ -720,7 +748,7 @@ const DocumentRow = ({
 
   const handleDownload = async () => {
     if (!doc.url?.trim()) {
-      toast.error("No file linked to this document. Re-upload it.");
+      toast.message("Document unavailable.");
       return;
     }
     setBusy("download");
@@ -733,10 +761,8 @@ const DocumentRow = ({
         ),
       );
       toast.success("Download started");
-    } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Could not download document",
-      );
+    } catch {
+      toast.message("Document unavailable.");
     } finally {
       setBusy(null);
     }
@@ -766,9 +792,7 @@ const DocumentRow = ({
             {getDocumentStatusLabel(doc.status)}
           </Badge>
           {!doc.url?.trim() ? (
-            <p className="mt-1 text-xs text-amber-800">
-              File missing — use Replace to upload again.
-            </p>
+            <p className="mt-1 text-xs text-slate-500">Document unavailable</p>
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-1">

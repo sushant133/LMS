@@ -72,54 +72,16 @@ export const isCloudinaryUrl = (url?: string | null): boolean =>
  *
  * Never throws — deletion failures are logged so business deletes still succeed.
  */
+/**
+ * Soft-delete policy: never permanently remove media (local or Cloudinary).
+ * Callers still invoke this after business deletes/replacements; we only log.
+ */
 export const deleteStoredMediaUrl = async (url?: string | null): Promise<void> => {
   if (!url || typeof url !== "string" || !url.trim()) return;
   const trimmed = url.trim();
-
-  const cloud = extractCloudinaryPublicId(trimmed);
-  if (cloud && isCloudinaryEnabled()) {
-    try {
-      ensureCloudinaryConfigured();
-      const result = await cloudinary.uploader.destroy(cloud.publicId, {
-        resource_type: cloud.resourceType,
-        invalidate: true
-      });
-      if (result?.result === "not found") {
-        for (const rt of ["image", "raw", "video"] as const) {
-          if (rt === cloud.resourceType) continue;
-          const retry = await cloudinary.uploader.destroy(cloud.publicId, {
-            resource_type: rt,
-            invalidate: true
-          });
-          if (retry?.result === "ok") break;
-        }
-      }
-      logger.debug(`Cloudinary destroy ${cloud.publicId}: ${result?.result ?? "done"}`);
-    } catch (error) {
-      logger.warn(
-        `Cloudinary delete failed for ${cloud.publicId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-    return;
-  }
-
-  // Attempt destroy if URL looks like Cloudinary even when env is partial
-  if (cloud && env.CLOUDINARY_CLOUD_NAME) {
-    try {
-      ensureCloudinaryConfigured();
-      await cloudinary.uploader.destroy(cloud.publicId, {
-        resource_type: cloud.resourceType,
-        invalidate: true
-      });
-    } catch {
-      /* best-effort legacy cleanup */
-    }
-    return;
-  }
-
-  await deleteLocalFileByPublicPath(trimmed);
+  logger.debug(
+    `Soft-delete policy: retained media (not deleted): ${trimmed}`,
+  );
 };
 
 /** Delete many media URLs (deduped). Safe to call with empty/mixed arrays. */
@@ -131,8 +93,9 @@ export const deleteStoredMediaUrls = async (
 };
 
 /**
- * When a photo/document is replaced or cleared, remove the previous asset if the URL changed.
- * Handles both VPS `/uploads/...` paths and legacy Cloudinary URLs.
+ * When a photo/document is replaced or cleared, previous file is retained on disk
+ * (soft-delete / recoverability policy). Cloudinary destroy is also skipped for
+ * the same reason unless explicitly re-enabled later for GDPR erase.
  */
 export const deleteReplacedMedia = async (
   previousUrl?: string | null,
@@ -141,7 +104,10 @@ export const deleteReplacedMedia = async (
   const prev = (previousUrl ?? "").trim();
   const next = (nextUrl ?? "").trim();
   if (!prev || prev === next) return;
-  await deleteStoredMediaUrl(prev);
+  // Soft-delete: keep previous file on VPS; only log for audit.
+  logger.debug(
+    `Soft-delete policy: retained replaced media (not deleted): ${prev} (new=${next || "cleared"})`,
+  );
 };
 
 /** Collect attachment-like { url } entries. */

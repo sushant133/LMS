@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 /** Registry of hospitals / clinical sites used by Hospital Roster (additive). */
 const fieldHospitalSchema = new Schema(
@@ -24,4 +25,5 @@ const fieldHospitalSchema = new Schema(
 fieldHospitalSchema.index({ schoolId: 1, name: 1 });
 
 export type FieldHospitalDocument = InferSchemaType<typeof fieldHospitalSchema>;
+fieldHospitalSchema.plugin(softDeletePlugin);
 export const FieldHospital = mongoose.model("FieldHospital", fieldHospitalSchema);

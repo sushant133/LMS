@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   BIOMETRIC_PERSON_TYPES,
   BIOMETRIC_PUNCH_ACTIONS,
@@ -53,4 +54,5 @@ biometricPunchLogSchema.index(
 );
 
 export type BiometricPunchLogDocument = InferSchemaType<typeof biometricPunchLogSchema>;
+biometricPunchLogSchema.plugin(softDeletePlugin);
 export const BiometricPunchLog = mongoose.model("BiometricPunchLog", biometricPunchLogSchema);

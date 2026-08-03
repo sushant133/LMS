@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { COMPLAINT_CATEGORIES, COMPLAINT_STATUSES, USER_ROLES } from "@phit-erp/shared";
 
 const complaintAttachmentSchema = new Schema(
@@ -29,4 +30,5 @@ const complaintSchema = new Schema(
 );
 
 export type ComplaintDocument = InferSchemaType<typeof complaintSchema>;
+complaintSchema.plugin(softDeletePlugin);
 export const Complaint = mongoose.model("Complaint", complaintSchema);

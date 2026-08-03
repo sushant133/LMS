@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const transportStopSchema = new Schema(
   {
@@ -23,6 +24,7 @@ const transportRouteSchema = new Schema(
 );
 
 export type TransportRouteDocument = InferSchemaType<typeof transportRouteSchema>;
+transportRouteSchema.plugin(softDeletePlugin);
 export const TransportRoute = mongoose.model("TransportRoute", transportRouteSchema);
 
 const transportAssignmentSchema = new Schema(
@@ -40,4 +42,5 @@ const transportAssignmentSchema = new Schema(
 transportAssignmentSchema.index({ schoolId: 1, studentId: 1 }, { unique: true });
 
 export type TransportAssignmentDocument = InferSchemaType<typeof transportAssignmentSchema>;
+transportAssignmentSchema.plugin(softDeletePlugin);
 export const TransportAssignment = mongoose.model("TransportAssignment", transportAssignmentSchema);

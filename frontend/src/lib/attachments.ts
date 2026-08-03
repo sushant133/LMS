@@ -154,30 +154,17 @@ export const fetchAuthenticatedBlobUrl = async (url: string): Promise<string> =>
     throw new Error("You do not have permission to open this file.");
   }
   if (response.status === 404) {
-    // Prefer the API message when present (e.g. re-upload / restore guidance).
-    let apiMessage = "";
-    try {
-      const clone = response.clone();
-      const body = (await clone.json()) as { message?: string };
-      if (body?.message?.trim()) apiMessage = body.message.trim();
-    } catch {
-      /* not JSON */
-    }
-    throw new Error(
-      apiMessage ||
-        "File not found on the server (404). The document record exists, but the file is missing from disk — re-upload it.",
-    );
+    // Keep message user-facing only (no server paths / UPLOAD_DIR details)
+    throw new Error("Document unavailable.");
   }
   if (!response.ok) {
-    throw new Error(`Could not open file (${response.status}).`);
+    throw new Error("Document unavailable.");
   }
 
   // Reject HTML error pages (SPA index.html served as 200 for unknown paths)
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("text/html")) {
-    throw new Error(
-      "File route is not reaching the API. Ensure the server proxies /api (and /uploads) to the backend.",
-    );
+    throw new Error("Document unavailable.");
   }
 
   const blob = await response.blob();

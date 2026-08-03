@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import mongoose, { Schema, type HydratedDocument, type Model } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   MODULE_PERMISSION_ACTIONS,
   USER_ROLES,
@@ -122,4 +123,5 @@ userSchema.methods.comparePassword = function comparePassword(candidate: string)
   return bcrypt.compare(candidate, this.password);
 };
 
+userSchema.plugin(softDeletePlugin);
 export const User = mongoose.model<UserDocument, UserModel>("User", userSchema);

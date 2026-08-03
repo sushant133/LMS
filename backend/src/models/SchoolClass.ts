@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { CLASS_LEVELS } from "@phit-erp/shared";
 
 const schoolClassSchema = new Schema(
@@ -16,4 +17,5 @@ const schoolClassSchema = new Schema(
 schoolClassSchema.index({ schoolId: 1, name: 1, academicYearBs: 1 }, { unique: true });
 
 export type SchoolClassDocument = InferSchemaType<typeof schoolClassSchema>;
+schoolClassSchema.plugin(softDeletePlugin);
 export const SchoolClass = mongoose.model("SchoolClass", schoolClassSchema);

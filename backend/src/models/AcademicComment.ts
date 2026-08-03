@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const commentSchema = new Schema(
   {
@@ -19,4 +20,5 @@ const commentSchema = new Schema(
 );
 
 export type AcademicCommentDocument = InferSchemaType<typeof commentSchema>;
+commentSchema.plugin(softDeletePlugin);
 export const AcademicComment = mongoose.model("AcademicComment", commentSchema);

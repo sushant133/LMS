@@ -1,4 +1,5 @@
 import mongoose, { Schema, type HydratedDocument, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   LABORATORY_EQUIPMENT_CONDITIONS,
   LABORATORY_EQUIPMENT_STATUSES,
@@ -47,6 +48,7 @@ laboratorySchema.index({ schoolId: 1, inChargeTeacherId: 1 });
 laboratorySchema.set("autoIndex", false);
 
 export type LaboratoryDocument = HydratedDocument<InferSchemaType<typeof laboratorySchema>>;
+laboratorySchema.plugin(softDeletePlugin);
 export const Laboratory = mongoose.model("Laboratory", laboratorySchema);
 
 const laboratoryCategorySchema = new Schema(
@@ -64,6 +66,7 @@ laboratoryCategorySchema.index({ laboratoryId: 1, name: 1 }, { unique: true });
 export type LaboratoryCategoryDocument = HydratedDocument<
   InferSchemaType<typeof laboratoryCategorySchema>
 >;
+laboratoryCategorySchema.plugin(softDeletePlugin);
 export const LaboratoryCategory = mongoose.model("LaboratoryCategory", laboratoryCategorySchema);
 
 const laboratoryEquipmentSchema = new Schema(
@@ -109,6 +112,7 @@ laboratoryEquipmentSchema.index({ schoolId: 1, availableQuantity: 1, minimumStoc
 export type LaboratoryEquipmentDocument = HydratedDocument<
   InferSchemaType<typeof laboratoryEquipmentSchema>
 >;
+laboratoryEquipmentSchema.plugin(softDeletePlugin);
 export const LaboratoryEquipment = mongoose.model("LaboratoryEquipment", laboratoryEquipmentSchema);
 
 const laboratoryIssueSchema = new Schema(
@@ -126,6 +130,7 @@ const laboratoryIssueSchema = new Schema(
 );
 
 export type LaboratoryIssueDocument = HydratedDocument<InferSchemaType<typeof laboratoryIssueSchema>>;
+laboratoryIssueSchema.plugin(softDeletePlugin);
 export const LaboratoryIssue = mongoose.model("LaboratoryIssue", laboratoryIssueSchema);
 
 const laboratoryStockMovementSchema = new Schema(
@@ -149,10 +154,8 @@ laboratoryStockMovementSchema.index({ equipmentId: 1, createdAt: -1 });
 export type LaboratoryStockMovementDocument = HydratedDocument<
   InferSchemaType<typeof laboratoryStockMovementSchema>
 >;
-export const LaboratoryStockMovement = mongoose.model(
-  "LaboratoryStockMovement",
-  laboratoryStockMovementSchema
-);
+laboratoryStockMovementSchema.plugin(softDeletePlugin);
+export const LaboratoryStockMovement = mongoose.model("LaboratoryStockMovement", laboratoryStockMovementSchema);
 
 const laboratoryStockRequestSchema = new Schema(
   {
@@ -196,7 +199,5 @@ laboratoryStockRequestSchema.index(
 export type LaboratoryStockRequestDocument = HydratedDocument<
   InferSchemaType<typeof laboratoryStockRequestSchema>
 >;
-export const LaboratoryStockRequest = mongoose.model(
-  "LaboratoryStockRequest",
-  laboratoryStockRequestSchema
-);
+laboratoryStockRequestSchema.plugin(softDeletePlugin);
+export const LaboratoryStockRequest = mongoose.model("LaboratoryStockRequest", laboratoryStockRequestSchema);

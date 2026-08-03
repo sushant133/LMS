@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const accountingSettingsSchema = new Schema(
   {
@@ -37,4 +38,5 @@ const accountingSettingsSchema = new Schema(
 );
 
 export type AccountingSettingsDocument = InferSchemaType<typeof accountingSettingsSchema>;
+accountingSettingsSchema.plugin(softDeletePlugin);
 export const AccountingSettings = mongoose.model("AccountingSettings", accountingSettingsSchema);

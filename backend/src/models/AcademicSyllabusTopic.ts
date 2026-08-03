@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 /** Unit (topic) under a syllabus chapter. */
 const topicSchema = new Schema(
@@ -25,4 +26,5 @@ topicSchema.index({ syllabusId: 1, sortOrder: 1 });
 topicSchema.index({ chapterId: 1, sortOrder: 1 });
 
 export type AcademicSyllabusTopicDocument = InferSchemaType<typeof topicSchema>;
+topicSchema.plugin(softDeletePlugin);
 export const AcademicSyllabusTopic = mongoose.model("AcademicSyllabusTopic", topicSchema);

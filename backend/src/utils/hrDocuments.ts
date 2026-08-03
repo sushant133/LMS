@@ -173,24 +173,33 @@ export const deleteHrDocument = async (params: {
     entity.documents = [];
   }
 
-  const index = entity.documents.findIndex((doc) => doc._id === documentId);
+  const index = entity.documents.findIndex(
+    (doc) => doc._id === documentId && !(doc as { isDeleted?: boolean }).isDeleted,
+  );
   if (index < 0) throw new ApiError(404, "Document not found");
 
   const removed = entity.documents[index]!;
   const removedUrl = removed.url;
-  entity.documents.splice(index, 1);
+  // Soft-delete embedded HR document — keep file on VPS
+  Object.assign(removed, {
+    isDeleted: true,
+    deletedAt: new Date(),
+  });
+  entity.markModified("documents");
 
   if (isPhotoType(removed.type ?? "")) {
     const photoDoc = entity.documents.find(
-      (doc) => isPhotoType(doc.type ?? "") && doc.status !== "PENDING" && doc.url
+      (doc) =>
+        isPhotoType(doc.type ?? "") &&
+        doc.status !== "PENDING" &&
+        doc.url &&
+        !(doc as { isDeleted?: boolean }).isDeleted,
     );
     entity.photoUrl = photoDoc?.url || undefined;
   }
 
   await entity.save();
-  if (removedUrl && entity.photoUrl !== removedUrl) {
-    await deleteStoredMediaUrl(removedUrl);
-  } else if (removedUrl && !entity.photoUrl) {
+  if (removedUrl) {
     await deleteStoredMediaUrl(removedUrl);
   }
 

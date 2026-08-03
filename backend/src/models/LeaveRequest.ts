@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { LEAVE_TYPES } from "@phit-erp/shared";
 
 const leaveRequestSchema = new Schema(
@@ -16,6 +17,7 @@ const leaveRequestSchema = new Schema(
 );
 
 export type LeaveRequestDocument = InferSchemaType<typeof leaveRequestSchema>;
+leaveRequestSchema.plugin(softDeletePlugin);
 export const LeaveRequest = mongoose.model("LeaveRequest", leaveRequestSchema);
 
 const payrollSchema = new Schema(
@@ -36,4 +38,5 @@ const payrollSchema = new Schema(
 payrollSchema.index({ schoolId: 1, teacherId: 1, monthBs: 1 }, { unique: true });
 
 export type PayrollDocument = InferSchemaType<typeof payrollSchema>;
+payrollSchema.plugin(softDeletePlugin);
 export const Payroll = mongoose.model("Payroll", payrollSchema);

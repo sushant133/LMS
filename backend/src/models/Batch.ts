@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const batchSchema = new Schema(
   {
@@ -13,4 +14,5 @@ const batchSchema = new Schema(
 batchSchema.index({ schoolId: 1, name: 1, academicYearBs: 1 }, { unique: true });
 
 export type BatchDocument = InferSchemaType<typeof batchSchema>;
+batchSchema.plugin(softDeletePlugin);
 export const Batch = mongoose.model("Batch", batchSchema);

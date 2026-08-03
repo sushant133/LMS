@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const goshwaraLineSchema = new Schema(
   {
@@ -70,4 +71,5 @@ goshwaraVoucherSchema.index({ schoolId: 1, voucherNo: 1 }, { unique: true });
 goshwaraVoucherSchema.index({ schoolId: 1, journalEntryId: 1 });
 
 export type GoshwaraVoucherDocument = InferSchemaType<typeof goshwaraVoucherSchema>;
+goshwaraVoucherSchema.plugin(softDeletePlugin);
 export const GoshwaraVoucher = mongoose.model("GoshwaraVoucher", goshwaraVoucherSchema);

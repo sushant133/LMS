@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   FINANCE_EXPENSE_TYPES,
   FINANCE_OWNER_SCOPES,
@@ -80,7 +81,5 @@ financeTransactionSchema.index({ schoolId: 1, createdAt: -1 });
 financeTransactionSchema.index({ schoolId: 1, ownerScope: 1, createdBy: 1, dateBs: -1 });
 
 export type FinanceTransactionDocument = InferSchemaType<typeof financeTransactionSchema>;
-export const FinanceTransaction = mongoose.model(
-  "FinanceTransaction",
-  financeTransactionSchema
-);
+financeTransactionSchema.plugin(softDeletePlugin);
+export const FinanceTransaction = mongoose.model("FinanceTransaction", financeTransactionSchema);

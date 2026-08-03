@@ -222,8 +222,16 @@ export const HrDocumentsSection = ({
     }
   };
 
-  const handleDelete = async (documentId: string) => {
+  const handleDelete = async (documentId: string, documentName?: string) => {
     if (!entityId || !canManage) return;
+    const label = documentName?.trim() || "this document";
+    if (
+      !window.confirm(
+        `Delete “${label}”?\n\nThis will remove it from the profile. You can cancel if you selected the wrong file.`,
+      )
+    ) {
+      return;
+    }
     try {
       const result = await unwrap<{
         documents?: HrDocument[];
@@ -248,11 +256,22 @@ export const HrDocumentsSection = ({
   };
 
   const handleRemovePending = (id: string) => {
+    if (
+      !window.confirm(
+        "Remove this queued document before save?\n\nIt will not be uploaded.",
+      )
+    ) {
+      return;
+    }
     onPendingChange?.(pendingDocuments.filter((item) => item.id !== id));
   };
 
   const docsByCategory = (type: string) =>
-    documents.filter((doc) => doc.type === type);
+    documents.filter(
+      (doc) =>
+        doc.type === type &&
+        !(doc as { isDeleted?: boolean }).isDeleted,
+    );
 
   return (
     <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
@@ -371,7 +390,7 @@ export const HrDocumentsSection = ({
                         void handleFileSelect(event, doc._id)
                       }
                       onDelete={() => {
-                        if (doc._id) void handleDelete(doc._id);
+                        if (doc._id) void handleDelete(doc._id, doc.name);
                       }}
                     />
                   ))}

@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const hospitalDepartmentSchema = new Schema(
   {
@@ -18,6 +19,7 @@ hospitalDepartmentSchema.index({ schoolId: 1, shortCode: 1 }, { unique: true });
 export type HospitalDepartmentDocument = InferSchemaType<
   typeof hospitalDepartmentSchema
 >;
+hospitalDepartmentSchema.plugin(softDeletePlugin);
 export const HospitalDepartment = mongoose.model(
   "HospitalDepartment",
   hospitalDepartmentSchema,

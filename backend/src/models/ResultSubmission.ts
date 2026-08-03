@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const resultSubmissionSchema = new Schema(
   {
@@ -48,4 +49,5 @@ resultSubmissionSchema.index(
 resultSubmissionSchema.index({ schoolId: 1, status: 1, examId: 1 });
 
 export type ResultSubmissionDocument = InferSchemaType<typeof resultSubmissionSchema>;
+resultSubmissionSchema.plugin(softDeletePlugin);
 export const ResultSubmission = mongoose.model("ResultSubmission", resultSubmissionSchema);

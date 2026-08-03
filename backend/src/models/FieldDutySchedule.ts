@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 /**
  * Field Management posting (Community/PHC/Hospital and future types).
@@ -92,4 +93,5 @@ fieldDutyScheduleSchema.index({ schoolId: 1, postingType: 1, status: 1 });
 fieldDutyScheduleSchema.index({ schoolId: 1, assistantCoordinatorStaffIds: 1 });
 
 export type FieldDutyScheduleDocument = InferSchemaType<typeof fieldDutyScheduleSchema>;
+fieldDutyScheduleSchema.plugin(softDeletePlugin);
 export const FieldDutySchedule = mongoose.model("FieldDutySchedule", fieldDutyScheduleSchema);

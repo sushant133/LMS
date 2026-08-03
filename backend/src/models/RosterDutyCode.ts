@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 /**
  * Free-form roster cell codes (Off, Leave, ID, DW, …).
@@ -25,4 +26,5 @@ const rosterDutyCodeSchema = new Schema(
 rosterDutyCodeSchema.index({ schoolId: 1, code: 1 }, { unique: true });
 
 export type RosterDutyCodeDocument = InferSchemaType<typeof rosterDutyCodeSchema>;
+rosterDutyCodeSchema.plugin(softDeletePlugin);
 export const RosterDutyCode = mongoose.model("RosterDutyCode", rosterDutyCodeSchema);

@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const chapterSchema = new Schema(
   {
@@ -32,4 +33,5 @@ chapterSchema.index({ syllabusId: 1, chapterNo: 1 }, { unique: true });
 chapterSchema.index({ syllabusId: 1, sortOrder: 1 });
 
 export type AcademicSyllabusChapterDocument = InferSchemaType<typeof chapterSchema>;
+chapterSchema.plugin(softDeletePlugin);
 export const AcademicSyllabusChapter = mongoose.model("AcademicSyllabusChapter", chapterSchema);

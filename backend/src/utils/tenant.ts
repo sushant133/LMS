@@ -47,6 +47,11 @@ export const getTenantSchoolId = (req: Request): string => {
 export const tenantObjectId = (req: Request): mongoose.Types.ObjectId =>
   new mongoose.Types.ObjectId(getTenantSchoolId(req));
 
+/**
+ * Tenant-scoped query. Soft-deleted rows are excluded by Mongoose softDeletePlugin
+ * on find/count automatically. Pass `includeDeleted: true` as a filter flag only
+ * when intentionally querying trash (plugin respects explicit isDeleted queries).
+ */
 export const withTenantScope = <T extends Record<string, unknown>>(
   req: Request,
   query: T = {} as T
@@ -54,3 +59,8 @@ export const withTenantScope = <T extends Record<string, unknown>>(
   ...query,
   schoolId: tenantObjectId(req)
 });
+
+/** Active (not soft-deleted) filter for aggregations / raw queries. */
+export const activeRecordFilter = {
+  isDeleted: { $ne: true }
+} as const;

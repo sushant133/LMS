@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const emailDeliveryLogSchema = new Schema(
   {
@@ -30,4 +31,5 @@ emailDeliveryLogSchema.index({ schoolId: 1, createdAt: -1 });
 emailDeliveryLogSchema.index({ userId: 1, createdAt: -1 });
 
 export type EmailDeliveryLogDocument = InferSchemaType<typeof emailDeliveryLogSchema>;
+emailDeliveryLogSchema.plugin(softDeletePlugin);
 export const EmailDeliveryLog = mongoose.model("EmailDeliveryLog", emailDeliveryLogSchema);

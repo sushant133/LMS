@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const auditSchema = new Schema(
   {
@@ -62,4 +63,5 @@ academicSyllabusSchema.index(
 );
 
 export type AcademicSyllabusDocument = InferSchemaType<typeof academicSyllabusSchema>;
+academicSyllabusSchema.plugin(softDeletePlugin);
 export const AcademicSyllabus = mongoose.model("AcademicSyllabus", academicSyllabusSchema);

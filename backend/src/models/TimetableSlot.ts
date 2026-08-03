@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { TIMETABLE_ROOM_KINDS, TIMETABLE_SESSION_TYPES } from "@phit-erp/shared";
 
 const timetableSlotSchema = new Schema(
@@ -51,4 +52,5 @@ timetableSlotSchema.index({ schoolId: 1, teacherId: 1, dayOfWeek: 1, academicYea
 timetableSlotSchema.index({ schoolId: 1, room: 1, dayOfWeek: 1, academicYearBs: 1 });
 
 export type TimetableSlotDocument = InferSchemaType<typeof timetableSlotSchema>;
+timetableSlotSchema.plugin(softDeletePlugin);
 export const TimetableSlot = mongoose.model("TimetableSlot", timetableSlotSchema);

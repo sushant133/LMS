@@ -295,37 +295,17 @@ export const finalizeLocalUploads = async (
   Promise.all(files.map((file) => finalizeLocalUpload(req, file, modulePath, options)));
 
 /**
- * Delete a file from the VPS by its public relative path.
- * No-op for external URLs (Cloudinary legacy handled elsewhere).
- * Never throws — logs failures so business deletes still succeed.
+ * Soft-delete policy: do NOT remove files from VPS storage.
+ * Records are soft-deleted in MongoDB; binaries stay for restore.
+ * Never throws — always safe to call from business delete paths.
  */
 export const deleteLocalFileByPublicPath = async (
   publicPath?: string | null
 ): Promise<boolean> => {
   if (!publicPath) return false;
-  try {
-    const absolute = resolvePublicPathToAbsolute(publicPath);
-    if (!absolute) return false;
-
-    if (await fs.pathExists(absolute)) {
-      await fs.remove(absolute);
-      logger.debug(`Deleted local upload ${publicPath}`);
-
-      // Banner thumbnails share the base name with `-thumb` suffix
-      const ext = path.extname(absolute);
-      const thumb = absolute.replace(ext, `-thumb${ext}`);
-      if (await fs.pathExists(thumb)) {
-        await fs.remove(thumb);
-      }
-      return true;
-    }
-  } catch (error) {
-    logger.warn(
-      `Local file delete failed for ${publicPath}: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-  }
+  logger.debug(
+    `Soft-delete policy: skipped disk unlink for ${publicPath} (file retained on server)`,
+  );
   return false;
 };
 

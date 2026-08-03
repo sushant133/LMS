@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   BLOOD_GROUPS,
   DISABILITY_CATEGORIES,
@@ -23,7 +24,11 @@ const studentDocumentSchema = new Schema(
     uploadedAt: { type: String, default: "" },
     uploadedBy: { type: String, default: "" },
     uploadedByName: { type: String },
-    notes: { type: String }
+    notes: { type: String },
+    /** Soft-delete for embedded student documents (file retained on VPS). */
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+    deletedBy: { type: String },
   },
   { _id: false }
 );
@@ -116,15 +121,17 @@ const studentSchema = new Schema(
   { timestamps: true }
 );
 
+// Note: MongoDB partial unique indexes cannot use $ne; soft-deleted students
+// keep their admission number reserved (restore-friendly, no re-use collision).
 studentSchema.index({ schoolId: 1, admissionNumber: 1 }, { unique: true });
 studentSchema.index(
   { schoolId: 1, registrationNumber: 1 },
   {
     unique: true,
     partialFilterExpression: {
-      registrationNumber: { $type: "string", $gt: "" }
-    }
-  }
+      registrationNumber: { $type: "string", $gt: "" },
+    },
+  },
 );
 studentSchema.index({ schoolId: 1, academicStatus: 1 });
 studentSchema.index(
@@ -137,4 +144,5 @@ studentSchema.index(
 );
 
 export type StudentDocument = InferSchemaType<typeof studentSchema>;
+studentSchema.plugin(softDeletePlugin);
 export const Student = mongoose.model("Student", studentSchema);

@@ -1,7 +1,5 @@
 import type { ClientSession } from "mongoose";
 import mongoose from "mongoose";
-import path from "path";
-import fs from "fs-extra";
 import { AcademicApproval } from "../models/AcademicApproval.js";
 import { AcademicCalendarEvent } from "../models/AcademicCalendarEvent.js";
 import { AcademicComment } from "../models/AcademicComment.js";
@@ -74,10 +72,7 @@ import { TimetableSlot } from "../models/TimetableSlot.js";
 import { TransportAssignment, TransportRoute } from "../models/TransportRoute.js";
 import { User } from "../models/User.js";
 import { Year } from "../models/Year.js";
-import { getUploadDir } from "../config/env.js";
 import { getSessionOption } from "./transaction.js";
-
-const UPLOAD_ROOT = getUploadDir();
 
 export const deleteSchoolCascade = async (
   schoolId: mongoose.Types.ObjectId | string,
@@ -166,11 +161,13 @@ export const deleteSchoolCascade = async (
 
   await User.deleteMany({ schoolId: schoolObjectId }, options);
 
-  const school = await School.findByIdAndDelete(schoolObjectId, options);
+  // Soft-delete school record — never wipe tenant upload folder (restore policy)
+  const school = await School.findByIdAndUpdate(
+    schoolObjectId,
+    { $set: { isDeleted: true, deletedAt: new Date() } },
+    { ...options, new: true },
+  );
   if (!school) {
     return;
   }
-
-  const uploadDir = path.join(UPLOAD_ROOT, schoolObjectId.toString());
-  await fs.remove(uploadDir).catch(() => undefined);
 };

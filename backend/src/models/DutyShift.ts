@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const dutyShiftSchema = new Schema(
   {
@@ -20,4 +21,5 @@ const dutyShiftSchema = new Schema(
 dutyShiftSchema.index({ schoolId: 1, shortCode: 1 }, { unique: true });
 
 export type DutyShiftDocument = InferSchemaType<typeof dutyShiftSchema>;
+dutyShiftSchema.plugin(softDeletePlugin);
 export const DutyShift = mongoose.model("DutyShift", dutyShiftSchema);

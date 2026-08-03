@@ -274,13 +274,11 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
         parentSample = [];
       }
     }
+    // Detailed path stays in server logs only — never expose UPLOAD_DIR to clients
     logger.warn(
       `Upload 404: public=${publicRelative} expected=${expected} root=${primaryRoot} parentDirExists=${parentExists} parentSample=${JSON.stringify(parentSample)} rootsTried=${getCandidateUploadRoots().join(" | ")}`,
     );
-    throw new ApiError(
-      404,
-      `File not found on server storage (looking in ${primaryRoot}). Re-upload the document, or set UPLOAD_DIR to the folder that still has your files and restart the backend.`,
-    );
+    throw new ApiError(404, "Document unavailable.");
   }
 
   const { filePath } = resolved;

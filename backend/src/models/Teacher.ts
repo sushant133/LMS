@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { HR_DOCUMENT_STATUSES } from "@phit-erp/shared";
 
 const addressSchema = new Schema(
@@ -27,7 +28,10 @@ const hrDocumentSchema = new Schema(
     uploadedAt: { type: String, default: "" },
     uploadedBy: { type: String, default: "" },
     uploadedByName: { type: String },
-    notes: { type: String }
+    notes: { type: String },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+    deletedBy: { type: String },
   },
   { _id: false }
 );
@@ -77,4 +81,5 @@ teacherSchema.index({ schoolId: 1, teacherCode: 1 }, { unique: true });
 teacherSchema.index({ schoolId: 1, status: 1 });
 
 export type TeacherDocument = InferSchemaType<typeof teacherSchema>;
+teacherSchema.plugin(softDeletePlugin);
 export const Teacher = mongoose.model("Teacher", teacherSchema);

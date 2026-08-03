@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const fiscalYearSchema = new Schema(
   {
@@ -17,4 +18,5 @@ const fiscalYearSchema = new Schema(
 fiscalYearSchema.index({ schoolId: 1, yearBs: 1 }, { unique: true });
 
 export type FiscalYearDocument = InferSchemaType<typeof fiscalYearSchema>;
+fiscalYearSchema.plugin(softDeletePlugin);
 export const FiscalYear = mongoose.model("FiscalYear", fiscalYearSchema);

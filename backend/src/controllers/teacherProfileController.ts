@@ -141,8 +141,11 @@ export const deleteTeacherDocument = asyncHandler(async (req: Request, res: Resp
   });
 
   await teacher.populate("user", "-password");
+  const docs = (teacher.documents ?? []).filter(
+    (d) => !(d as { isDeleted?: boolean }).isDeleted,
+  );
   return sendSuccess(res, "Document deleted", {
     teacher,
-    documents: teacher.documents ?? []
+    documents: docs,
   });
 });

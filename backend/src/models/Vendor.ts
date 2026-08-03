@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const vendorSchema = new Schema(
   {
@@ -19,4 +20,5 @@ const vendorSchema = new Schema(
 vendorSchema.index({ schoolId: 1, name: 1 });
 
 export type VendorDocument = InferSchemaType<typeof vendorSchema>;
+vendorSchema.plugin(softDeletePlugin);
 export const Vendor = mongoose.model("Vendor", vendorSchema);

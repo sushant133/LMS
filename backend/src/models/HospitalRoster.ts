@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const rosterCellSchema = new Schema(
   {
@@ -71,4 +72,5 @@ hospitalRosterSchema.index({ schoolId: 1, startDateBs: 1, endDateBs: 1 });
 hospitalRosterSchema.index({ schoolId: 1, batchId: 1, yearId: 1, status: 1 });
 
 export type HospitalRosterDocument = InferSchemaType<typeof hospitalRosterSchema>;
+hospitalRosterSchema.plugin(softDeletePlugin);
 export const HospitalRoster = mongoose.model("HospitalRoster", hospitalRosterSchema);

@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { SUBJECT_ASSIGNMENT_STATUSES, SUBJECT_ASSIGNMENT_TYPES } from "@phit-erp/shared";
 
 const subjectAssignmentSchema = new Schema(
@@ -132,4 +133,5 @@ subjectAssignmentSchema.pre("validate", function normalizeGroupAndTypeKeys() {
 });
 
 export type SubjectAssignmentDocument = InferSchemaType<typeof subjectAssignmentSchema>;
+subjectAssignmentSchema.plugin(softDeletePlugin);
 export const SubjectAssignment = mongoose.model("SubjectAssignment", subjectAssignmentSchema);

@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { COLLEGE_YEAR_NAMES } from "@phit-erp/shared";
 
 const yearSchema = new Schema(
@@ -16,4 +17,5 @@ const yearSchema = new Schema(
 yearSchema.index({ schoolId: 1, batchId: 1, level: 1 }, { unique: true });
 
 export type YearDocument = InferSchemaType<typeof yearSchema>;
+yearSchema.plugin(softDeletePlugin);
 export const Year = mongoose.model("Year", yearSchema);

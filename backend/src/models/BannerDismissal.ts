@@ -1,4 +1,5 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
+import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const bannerDismissalSchema = new Schema(
   {
@@ -12,4 +13,5 @@ const bannerDismissalSchema = new Schema(
 bannerDismissalSchema.index({ userId: 1, bannerId: 1 }, { unique: true });
 
 export type BannerDismissalDocument = InferSchemaType<typeof bannerDismissalSchema>;
+bannerDismissalSchema.plugin(softDeletePlugin);
 export const BannerDismissal = mongoose.model("BannerDismissal", bannerDismissalSchema);
