@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { PARENT_LINK_STATUSES, PARENT_RELATIONSHIPS } from "@phit-erp/shared";
 
 const parentChildLinkSchema = new Schema(
@@ -22,5 +21,4 @@ parentChildLinkSchema.index({ schoolId: 1, parentUserId: 1, studentId: 1 }, { un
 parentChildLinkSchema.index({ schoolId: 1, status: 1, createdAt: -1 });
 
 export type ParentChildLinkDocument = InferSchemaType<typeof parentChildLinkSchema>;
-parentChildLinkSchema.plugin(softDeletePlugin);
 export const ParentChildLink = mongoose.model("ParentChildLink", parentChildLinkSchema);

@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   ACADEMIC_CALENDAR_EVENT_STATUSES,
   ACADEMIC_CALENDAR_EVENT_TYPES
@@ -48,5 +47,4 @@ academicCalendarEventSchema.index({ schoolId: 1, startDateBs: 1, endDateBs: 1 })
 academicCalendarEventSchema.index({ schoolId: 1, dateBs: 1, name: 1 });
 
 export type AcademicCalendarEventDocument = InferSchemaType<typeof academicCalendarEventSchema>;
-academicCalendarEventSchema.plugin(softDeletePlugin);
 export const AcademicCalendarEvent = mongoose.model("AcademicCalendarEvent", academicCalendarEventSchema);

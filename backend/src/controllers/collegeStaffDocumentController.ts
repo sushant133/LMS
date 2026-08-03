@@ -170,11 +170,8 @@ export const deleteCollegeStaffDocument = asyncHandler(async (req: Request, res:
     before: { documentId: removed._id, type: removed.type, name: removed.name }
   });
 
-  const docs = (staff.documents ?? []).filter(
-    (d) => !(d as { isDeleted?: boolean }).isDeleted,
-  );
   return sendSuccess(res, "Document deleted", {
     staff,
-    documents: docs,
+    documents: staff.documents ?? [],
   });
 });

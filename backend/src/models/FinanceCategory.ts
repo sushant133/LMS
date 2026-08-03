@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { FINANCE_CATEGORY_KINDS } from "@phit-erp/shared";
 
 const financeCategorySchema = new Schema(
@@ -24,5 +23,4 @@ financeCategorySchema.index({ schoolId: 1, name: 1 }, { unique: true });
 financeCategorySchema.index({ schoolId: 1, kind: 1, isActive: 1 });
 
 export type FinanceCategoryDocument = InferSchemaType<typeof financeCategorySchema>;
-financeCategorySchema.plugin(softDeletePlugin);
 export const FinanceCategory = mongoose.model("FinanceCategory", financeCategorySchema);

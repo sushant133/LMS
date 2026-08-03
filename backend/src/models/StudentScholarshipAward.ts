@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 /**
  * HA (and multi-year) scholarship awards.
@@ -42,5 +41,4 @@ studentScholarshipAwardSchema.index({ schoolId: 1, studentId: 1, coversProgramYe
 export type StudentScholarshipAwardDocument = InferSchemaType<
   typeof studentScholarshipAwardSchema
 >;
-studentScholarshipAwardSchema.plugin(softDeletePlugin);
 export const StudentScholarshipAward = mongoose.model("StudentScholarshipAward", studentScholarshipAwardSchema);

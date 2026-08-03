@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const sectionSchema = new Schema(
   {
@@ -16,5 +15,4 @@ const sectionSchema = new Schema(
 sectionSchema.index({ schoolId: 1, classId: 1, name: 1 }, { unique: true });
 
 export type SectionDocument = InferSchemaType<typeof sectionSchema>;
-sectionSchema.plugin(softDeletePlugin);
 export const Section = mongoose.model("Section", sectionSchema);

@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 /**
  * Multi-lab responsibility for a single Teacher account.
@@ -49,5 +48,4 @@ teacherLaboratoryAssignmentSchema.index({ schoolId: 1, laboratoryId: 1, status: 
 export type TeacherLaboratoryAssignmentDocument = InferSchemaType<
   typeof teacherLaboratoryAssignmentSchema
 >;
-teacherLaboratoryAssignmentSchema.plugin(softDeletePlugin);
 export const TeacherLaboratoryAssignment = mongoose.model("TeacherLaboratoryAssignment", teacherLaboratoryAssignmentSchema);

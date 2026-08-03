@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const bankAccountSchema = new Schema(
   {
@@ -18,5 +17,4 @@ const bankAccountSchema = new Schema(
 bankAccountSchema.index({ schoolId: 1, accountNumber: 1 }, { unique: true });
 
 export type BankAccountDocument = InferSchemaType<typeof bankAccountSchema>;
-bankAccountSchema.plugin(softDeletePlugin);
 export const BankAccount = mongoose.model("BankAccount", bankAccountSchema);

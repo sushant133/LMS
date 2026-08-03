@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const dailyAttendanceLogSchema = new Schema(
   {
@@ -21,5 +20,4 @@ const dailyAttendanceLogSchema = new Schema(
 );
 
 export type DailyAttendanceLogDocument = InferSchemaType<typeof dailyAttendanceLogSchema>;
-dailyAttendanceLogSchema.plugin(softDeletePlugin);
 export const DailyAttendanceLog = mongoose.model("DailyAttendanceLog", dailyAttendanceLogSchema);

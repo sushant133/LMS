@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { USER_ROLES } from "@phit-erp/shared";
 
 const noticeSchema = new Schema(
@@ -20,5 +19,4 @@ const noticeSchema = new Schema(
 );
 
 export type NoticeDocument = InferSchemaType<typeof noticeSchema>;
-noticeSchema.plugin(softDeletePlugin);
 export const Notice = mongoose.model("Notice", noticeSchema);

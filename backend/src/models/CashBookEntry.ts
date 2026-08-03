@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const cashBookEntrySchema = new Schema(
   {
@@ -34,5 +33,4 @@ const cashBookEntrySchema = new Schema(
 );
 
 export type CashBookEntryDocument = InferSchemaType<typeof cashBookEntrySchema>;
-cashBookEntrySchema.plugin(softDeletePlugin);
 export const CashBookEntry = mongoose.model("CashBookEntry", cashBookEntrySchema);

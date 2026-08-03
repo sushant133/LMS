@@ -1,6 +1,5 @@
 import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   BLOOD_GROUPS,
   DISABILITY_CATEGORIES,
@@ -24,11 +23,7 @@ const studentDocumentSchema = new Schema(
     uploadedAt: { type: String, default: "" },
     uploadedBy: { type: String, default: "" },
     uploadedByName: { type: String },
-    notes: { type: String },
-    /** Soft-delete for embedded student documents (file retained on VPS). */
-    isDeleted: { type: Boolean, default: false },
-    deletedAt: { type: Date },
-    deletedBy: { type: String },
+    notes: { type: String }
   },
   { _id: false }
 );
@@ -144,5 +139,4 @@ studentSchema.index(
 );
 
 export type StudentDocument = InferSchemaType<typeof studentSchema>;
-studentSchema.plugin(softDeletePlugin);
 export const Student = mongoose.model("Student", studentSchema);

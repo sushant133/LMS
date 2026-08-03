@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   ACADEMIC_PROMOTION_OUTCOMES,
   ACADEMIC_PROMOTION_STATUSES,
@@ -69,5 +68,4 @@ academicPromotionSchema.index(
 );
 
 export type AcademicPromotionDocument = InferSchemaType<typeof academicPromotionSchema>;
-academicPromotionSchema.plugin(softDeletePlugin);
 export const AcademicPromotion = mongoose.model("AcademicPromotion", academicPromotionSchema);

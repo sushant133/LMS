@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { BANNER_TARGET_ROLES } from "@phit-erp/shared";
 
 const bannerSchema = new Schema(
@@ -29,5 +28,4 @@ const bannerSchema = new Schema(
 bannerSchema.index({ schoolId: 1, isActive: 1, createdAt: -1 });
 
 export type BannerDocument = InferSchemaType<typeof bannerSchema>;
-bannerSchema.plugin(softDeletePlugin);
 export const Banner = mongoose.model("Banner", bannerSchema);

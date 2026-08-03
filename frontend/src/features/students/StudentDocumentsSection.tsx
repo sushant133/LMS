@@ -256,11 +256,7 @@ export const StudentDocumentsSection = ({
   };
 
   const docsByCategory = (type: string) =>
-    documents.filter(
-      (doc) =>
-        doc.type === type &&
-        !(doc as { isDeleted?: boolean }).isDeleted,
-    );
+    documents.filter((doc) => doc.type === type);
 
   return (
     <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/50 p-4">

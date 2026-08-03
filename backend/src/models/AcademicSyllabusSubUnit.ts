@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const attachmentSchema = new Schema(
   {
@@ -84,5 +83,4 @@ subUnitSchema.index({ parentSubUnitId: 1, sortOrder: 1 });
 subUnitSchema.index({ heading: "text", description: "text", learningOutcomes: "text" });
 
 export type AcademicSyllabusSubUnitDocument = InferSchemaType<typeof subUnitSchema>;
-subUnitSchema.plugin(softDeletePlugin);
 export const AcademicSyllabusSubUnit = mongoose.model("AcademicSyllabusSubUnit", subUnitSchema);

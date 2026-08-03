@@ -38,11 +38,10 @@ const loadUserFromCookie = async (req: Request): Promise<boolean> => {
     const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as JwtPayload;
 
     const dbUser = await User.findById(decoded.userId)
-      .select("isActive role email schoolId isDeleted")
+      .select("isActive role email schoolId")
       .lean();
 
-    // Soft-deleted accounts cannot use the app (plugin also hides them from find)
-    if (!dbUser || !dbUser.isActive || (dbUser as { isDeleted?: boolean }).isDeleted) {
+    if (!dbUser || !dbUser.isActive) {
       return false;
     }
 

@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const chartOfAccountSchema = new Schema(
   {
@@ -19,5 +18,4 @@ const chartOfAccountSchema = new Schema(
 chartOfAccountSchema.index({ schoolId: 1, code: 1 }, { unique: true });
 
 export type ChartOfAccountDocument = InferSchemaType<typeof chartOfAccountSchema>;
-chartOfAccountSchema.plugin(softDeletePlugin);
 export const ChartOfAccount = mongoose.model("ChartOfAccount", chartOfAccountSchema);

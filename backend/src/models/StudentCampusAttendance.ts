@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import {
   STUDENT_CAMPUS_ATTENDANCE_SOURCES,
   STUDENT_CAMPUS_ATTENDANCE_STATUSES
@@ -47,5 +46,4 @@ studentCampusAttendanceSchema.index({ schoolId: 1, admissionNumber: 1, dateBs: 1
 export type StudentCampusAttendanceDocument = InferSchemaType<
   typeof studentCampusAttendanceSchema
 >;
-studentCampusAttendanceSchema.plugin(softDeletePlugin);
 export const StudentCampusAttendance = mongoose.model("StudentCampusAttendance", studentCampusAttendanceSchema);

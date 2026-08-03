@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const markSchema = new Schema(
   {
@@ -45,5 +44,4 @@ const resultSchema = new Schema(
 resultSchema.index({ schoolId: 1, examId: 1, studentId: 1 }, { unique: true });
 
 export type ResultDocument = InferSchemaType<typeof resultSchema>;
-resultSchema.plugin(softDeletePlugin);
 export const Result = mongoose.model("Result", resultSchema);

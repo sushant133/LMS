@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const masterSubjectSchema = new Schema(
   {
@@ -22,5 +21,4 @@ masterSubjectSchema.index({ schoolId: 1, code: 1 }, { unique: true });
 masterSubjectSchema.index({ schoolId: 1, yearLevel: 1, name: 1 });
 
 export type MasterSubjectDocument = InferSchemaType<typeof masterSubjectSchema>;
-masterSubjectSchema.plugin(softDeletePlugin);
 export const MasterSubject = mongoose.model("MasterSubject", masterSubjectSchema);

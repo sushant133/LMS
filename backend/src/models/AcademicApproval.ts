@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const approvalSchema = new Schema(
   {
@@ -20,5 +19,4 @@ const approvalSchema = new Schema(
 );
 
 export type AcademicApprovalDocument = InferSchemaType<typeof approvalSchema>;
-approvalSchema.plugin(softDeletePlugin);
 export const AcademicApproval = mongoose.model("AcademicApproval", approvalSchema);

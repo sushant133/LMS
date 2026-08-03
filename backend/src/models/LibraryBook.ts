@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { LIBRARY_YEAR_LEVELS } from "@phit-erp/shared";
 
 /** Book master (shared bibliographic data for a title). */
@@ -32,7 +31,6 @@ libraryBookSchema.index({ schoolId: 1, yearLevel: 1 });
 libraryBookSchema.index({ schoolId: 1, category: 1 });
 
 export type LibraryBookDocument = InferSchemaType<typeof libraryBookSchema>;
-libraryBookSchema.plugin(softDeletePlugin);
 export const LibraryBook = mongoose.model("LibraryBook", libraryBookSchema);
 
 /**
@@ -64,7 +62,6 @@ libraryBookCopySchema.index({ schoolId: 1, bookCode: 1 }, { unique: true });
 libraryBookCopySchema.index({ schoolId: 1, bookId: 1, status: 1 });
 
 export type LibraryBookCopyDocument = InferSchemaType<typeof libraryBookCopySchema>;
-libraryBookCopySchema.plugin(softDeletePlugin);
 export const LibraryBookCopy = mongoose.model("LibraryBookCopy", libraryBookCopySchema);
 
 const libraryIssueSchema = new Schema(
@@ -94,5 +91,4 @@ libraryIssueSchema.index({ schoolId: 1, copyId: 1, status: 1 });
 libraryIssueSchema.index({ schoolId: 1, studentId: 1, status: 1 });
 
 export type LibraryIssueDocument = InferSchemaType<typeof libraryIssueSchema>;
-libraryIssueSchema.plugin(softDeletePlugin);
 export const LibraryIssue = mongoose.model("LibraryIssue", libraryIssueSchema);

@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const notificationSchema = new Schema(
   {
@@ -22,5 +21,4 @@ const notificationSchema = new Schema(
 );
 
 export type NotificationDocument = InferSchemaType<typeof notificationSchema>;
-notificationSchema.plugin(softDeletePlugin);
 export const Notification = mongoose.model("Notification", notificationSchema);

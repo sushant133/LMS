@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 import { ASSIGNMENT_TYPES, USER_ROLES } from "@phit-erp/shared";
 
 const attachmentSchema = new Schema(
@@ -53,7 +52,6 @@ assignmentSchema.index({ schoolId: 1, subjectId: 1, topic: 1 });
 assignmentSchema.index({ schoolId: 1, isPinned: -1, createdAt: -1 });
 
 export type AssignmentDocument = InferSchemaType<typeof assignmentSchema>;
-assignmentSchema.plugin(softDeletePlugin);
 export const Assignment = mongoose.model("Assignment", assignmentSchema);
 
 const submissionSchema = new Schema(
@@ -74,5 +72,4 @@ const submissionSchema = new Schema(
 submissionSchema.index({ schoolId: 1, assignmentId: 1, studentId: 1 }, { unique: true });
 
 export type AssignmentSubmissionDocument = InferSchemaType<typeof submissionSchema>;
-submissionSchema.plugin(softDeletePlugin);
 export const AssignmentSubmission = mongoose.model("AssignmentSubmission", submissionSchema);

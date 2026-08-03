@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const feeRefundSchema = new Schema(
   {
@@ -65,5 +64,4 @@ const feeRefundSchema = new Schema(
 feeRefundSchema.index({ schoolId: 1, refundNumber: 1 }, { unique: true });
 
 export type FeeRefundDocument = InferSchemaType<typeof feeRefundSchema>;
-feeRefundSchema.plugin(softDeletePlugin);
 export const FeeRefund = mongoose.model("FeeRefund", feeRefundSchema);

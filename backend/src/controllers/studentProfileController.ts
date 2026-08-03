@@ -236,17 +236,11 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
   if (!student) throw new ApiError(404, "Student not found");
 
   // Backfill PENDING placeholders for required docs missing on older records
-  // Soft-deleted embedded docs are hidden from the profile payload by default
-  const liveDocuments = (student.documents ?? [])
-    .map((doc) => doc.toObject?.() ?? doc)
-    .filter((doc) => !(doc as { isDeleted?: boolean }).isDeleted);
-  const mergedDocuments = ensurePendingRequiredDocuments(liveDocuments);
-  if (mergedDocuments.length !== liveDocuments.length) {
-    // Keep soft-deleted rows; only append missing PENDING placeholders
-    const softDeleted = (student.documents ?? []).filter(
-      (doc) => (doc as { isDeleted?: boolean }).isDeleted,
-    );
-    student.set("documents", [...softDeleted, ...mergedDocuments]);
+  const mergedDocuments = ensurePendingRequiredDocuments(
+    (student.documents ?? []).map((doc) => doc.toObject?.() ?? doc),
+  );
+  if (mergedDocuments.length !== (student.documents?.length ?? 0)) {
+    student.set("documents", mergedDocuments);
     await student.save();
   }
 
@@ -488,18 +482,11 @@ export const getStudentProfileOverview = asyncHandler(async (req: Request, res: 
     }));
   }
 
-  const studentObj = student.toObject
-    ? student.toObject()
-    : (student as unknown as Record<string, unknown>);
-  // Never expose soft-deleted embedded documents to the client
-  if (Array.isArray((studentObj as { documents?: unknown[] }).documents)) {
-    (studentObj as { documents: Array<{ isDeleted?: boolean }> }).documents = (
-      studentObj as { documents: Array<{ isDeleted?: boolean }> }
-    ).documents.filter((d) => !d.isDeleted);
-  }
   const studentPayload = permissions.canViewFullPersonal
-    ? studentObj
-    : sanitizeStudentForLimitedView(studentObj as Record<string, unknown>);
+    ? student
+    : sanitizeStudentForLimitedView(
+        student.toObject ? student.toObject() : (student as unknown as Record<string, unknown>),
+      );
 
   return sendSuccess(res, "Student profile fetched", {
     student: studentPayload,
@@ -676,29 +663,16 @@ export const deleteStudentDocument = asyncHandler(async (req: Request, res: Resp
   if (!student) throw new ApiError(404, "Student not found");
 
   const documentId = req.params.documentId;
-  const index = student.documents.findIndex(
-    (doc) => doc._id === documentId && !(doc as { isDeleted?: boolean }).isDeleted,
-  );
+  const index = student.documents.findIndex((doc) => doc._id === documentId);
   if (index < 0) throw new ApiError(404, "Document not found");
 
   const removed = student.documents[index]!;
   const removedUrl = removed.url;
-  // Soft-delete embedded document — keep row + VPS file for restore
-  Object.assign(removed, {
-    isDeleted: true,
-    deletedAt: new Date(),
-    deletedBy: req.user?.userId ? String(req.user.userId) : undefined,
-  });
-  student.markModified("documents");
+  student.documents.splice(index, 1);
 
   // Required categories fall back to PENDING so the profile still tracks them
   const category = STUDENT_DOCUMENT_CATEGORIES.find((item) => item.key === removed.type);
-  const stillHasType = student.documents.some(
-    (doc) =>
-      doc.type === removed.type &&
-      !(doc as { isDeleted?: boolean }).isDeleted &&
-      doc._id !== removed._id,
-  );
+  const stillHasType = student.documents.some((doc) => doc.type === removed.type);
   if (category?.required && !stillHasType) {
     student.documents.push({
       _id: crypto.randomUUID(),
@@ -709,25 +683,22 @@ export const deleteStudentDocument = asyncHandler(async (req: Request, res: Resp
       size: 0,
       status: "PENDING",
       uploadedAt: "",
-      uploadedBy: "",
-      isDeleted: false,
+      uploadedBy: ""
     } as (typeof student.documents)[number]);
   }
 
   if (removed.type === "STUDENT_PHOTOGRAPH") {
     const photoDoc = student.documents.find(
-      (doc) =>
-        doc.type === "STUDENT_PHOTOGRAPH" &&
-        doc.status !== "PENDING" &&
-        doc.url &&
-        !(doc as { isDeleted?: boolean }).isDeleted,
+      (doc) => doc.type === "STUDENT_PHOTOGRAPH" && doc.status !== "PENDING" && doc.url
     );
     student.photoUrl = photoDoc?.url || undefined;
   }
 
   await student.save();
-  // Soft-delete policy: file retained on VPS (deleteStoredMediaUrl is a no-op retain)
-  if (removedUrl) {
+  // Remove the deleted file from Cloudinary/local (unless still referenced as photo)
+  if (removedUrl && student.photoUrl !== removedUrl) {
+    await deleteStoredMediaUrl(removedUrl);
+  } else if (removedUrl && !student.photoUrl) {
     await deleteStoredMediaUrl(removedUrl);
   }
 
@@ -738,13 +709,5 @@ export const deleteStudentDocument = asyncHandler(async (req: Request, res: Resp
     before: { documentId: removed._id, type: removed.type, name: removed.name }
   });
 
-  const studentOut = (
-    student.toObject ? student.toObject() : student
-  ) as Record<string, unknown>;
-  if (Array.isArray(studentOut.documents)) {
-    studentOut.documents = (
-      studentOut.documents as Array<{ isDeleted?: boolean }>
-    ).filter((d) => !d.isDeleted);
-  }
-  return sendSuccess(res, "Document deleted", { student: studentOut });
+  return sendSuccess(res, "Document deleted", { student });
 });

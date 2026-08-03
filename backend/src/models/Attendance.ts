@@ -1,5 +1,4 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { softDeletePlugin } from "../plugins/softDeletePlugin.js";
 
 const attendanceEntrySchema = new Schema(
   {
@@ -35,5 +34,4 @@ attendanceSchema.index(
 );
 
 export type AttendanceDocument = InferSchemaType<typeof attendanceSchema>;
-attendanceSchema.plugin(softDeletePlugin);
 export const Attendance = mongoose.model("Attendance", attendanceSchema);
