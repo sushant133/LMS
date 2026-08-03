@@ -29,8 +29,11 @@ export interface TeacherLaboratoryAssignmentRecord {
   _id: string;
   schoolId: string;
   teacherId: string;
+  teacherName?: string;
   laboratoryId: string;
   laboratoryName?: string;
+  laboratoryCode?: string;
+  laboratoryYearLevel?: string;
   role: TeacherLabAssignmentRole;
   assignedFromBs: string;
   assignedToBs?: string | null;

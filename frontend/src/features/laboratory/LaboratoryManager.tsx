@@ -38,6 +38,7 @@ import {
   Printer,
   ShoppingCart,
   Trash2,
+  UserPlus,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -47,6 +48,7 @@ import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { useModuleAccess } from "hooks/useModuleAccess";
+import { LaboratoryAllotPanel } from "features/laboratory/LaboratoryAllotPanel";
 import { LaboratoryPrintInventoryPanel } from "features/laboratory/LaboratoryPrintInventoryPanel";
 import { StockStatusBadge } from "features/library/StockStatusBadge";
 import { Badge } from "components/ui/badge";
@@ -93,6 +95,7 @@ const tabs: Array<{
 }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "labs", label: "Laboratories", icon: FlaskConical },
+  { id: "allot", label: "Allot Laboratory", icon: UserPlus, adminOnly: true },
   { id: "inventory", label: "Inventory", icon: Package },
   { id: "print-inventory", label: "Print inventory", icon: Printer },
   { id: "requests", label: "Required Items", icon: ClipboardList },
@@ -109,8 +112,14 @@ export const LaboratoryManager = () => {
   const isTeacher = user?.role === "TEACHER";
   const { canWrite: labModuleWrite, isReadOnly: labReadOnly } =
     useModuleAccess("laboratory");
+  /** Full lab inventory/meta management: Admin or Lab Staff with write access. */
   const canManageLabsMeta =
     labModuleWrite && (isAdmin || user?.role === "LABORATORY_STAFF");
+  /**
+   * Allotted lab teachers can view inventory and submit/edit required-item
+   * requests without Module Access write — allotment is independent.
+   */
+  const canRequestLabItems = canManageLabsMeta || isTeacher;
 
   const [tab, setTab] = useState<LabTab>("dashboard");
   const [labForm, setLabForm] = useState<LaboratoryInput>(defaultLabForm);
@@ -775,7 +784,7 @@ export const LaboratoryManager = () => {
 
   const canEditRequest = (req: LaboratoryStockRequestRecord): boolean => {
     if (isAdmin) return true;
-    if (!canManageLabsMeta) return false;
+    if (!canRequestLabItems) return false;
     return req.status !== "RECEIVED" && req.status !== "REJECTED";
   };
 
@@ -807,11 +816,12 @@ export const LaboratoryManager = () => {
         title="Laboratory Management"
         description={
           isTeacher
-            ? "Manage inventory for your assigned laboratories, track stock, and submit replenishment requests."
-            : "Create laboratories, assign in-charge teachers, manage independent inventories, stock requests, and reports."
+            ? "View inventory for laboratories allotted to you and submit required-item requests for Admin approval."
+            : "Create laboratories, allot labs to practical teachers, manage inventories, stock requests, and reports."
         }
       />
-      <ModuleReadOnlyBanner show={labReadOnly} />
+      {/* Teachers use lab allotment (not module write) for inventory view + requests */}
+      <ModuleReadOnlyBanner show={labReadOnly && !isTeacher} />
 
       <div className="flex min-w-0 flex-wrap gap-2">
         {visibleTabs.map((item) => {
@@ -924,8 +934,8 @@ export const LaboratoryManager = () => {
             <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               {(dashboardQuery.data.totalLaboratories ?? 0) === 0
-                ? "You are not assigned as Laboratory In-Charge for any laboratory yet. Ask an administrator to assign you."
-                : "Showing metrics only for laboratories assigned to you as Laboratory In-Charge."}
+                ? "No laboratory is allotted to you yet. Ask Admin to use Laboratory Management → Allot Laboratory (or Teachers → Assignments)."
+                : "Showing only laboratories allotted to you. You can view inventory and submit Required items requests for Admin approval."}
             </div>
           ) : null}
 
@@ -1554,8 +1564,25 @@ export const LaboratoryManager = () => {
             )}
           </Card>
 
-          <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
-            {/* Add / Edit equipment */}
+          {isTeacher && !canManageLabsMeta ? (
+            <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm text-sky-950">
+              You can view inventory for laboratories allotted to you and submit{" "}
+              <strong>Required items</strong> requests. Admin / Super Admin
+              approve and process purchases. Stock updates and equipment setup are
+              managed by Lab Staff or Admin.
+            </div>
+          ) : null}
+
+          <div
+            className={cn(
+              "grid min-w-0 gap-6",
+              canManageLabsMeta
+                ? "xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]"
+                : "grid-cols-1",
+            )}
+          >
+            {/* Add / Edit equipment — staff & admin only */}
+            {canManageLabsMeta ? (
             <Card className="h-fit xl:sticky xl:top-4">
               <CardHeader className="border-b border-slate-100 pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -1853,12 +1880,15 @@ export const LaboratoryManager = () => {
                 </div>
               </CardContent>
             </Card>
+            ) : null}
 
-            {/* Left–right slider: Update stock ↔ Equipment inventory */}
+            {/* Left–right slider: Update stock ↔ Equipment inventory (staff/admin).
+                Allotted teachers only see the inventory list + Request. */}
             <div
               id="lab-inventory-slider"
               className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
             >
+              {canManageLabsMeta ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
                 <div className="flex flex-wrap items-center gap-1 rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
                   <button
@@ -1916,15 +1946,22 @@ export const LaboratoryManager = () => {
                   </Button>
                 </div>
               </div>
+              ) : null}
 
               <div className="relative overflow-hidden">
                 <div
-                  className="flex w-[200%] transition-transform duration-300 ease-out"
+                  className={cn(
+                    "flex transition-transform duration-300 ease-out",
+                    canManageLabsMeta ? "w-[200%]" : "w-full",
+                  )}
                   style={{
-                    transform: `translateX(-${inventorySlide * 50}%)`,
+                    transform: canManageLabsMeta
+                      ? `translateX(-${inventorySlide * 50}%)`
+                      : "translateX(0)",
                   }}
                 >
-                  {/* Panel 1: Update stock */}
+                  {/* Panel 1: Update stock (staff / admin only) */}
+                  {canManageLabsMeta ? (
                   <div className="w-1/2 shrink-0 px-1 sm:px-0">
                     <Card
                       id="lab-update-stock"
@@ -2121,9 +2158,15 @@ export const LaboratoryManager = () => {
                       </CardContent>
                     </Card>
                   </div>
+                  ) : null}
 
                   {/* Panel 2: Equipment inventory */}
-                  <div className="w-1/2 shrink-0 px-1 sm:px-0">
+                  <div
+                    className={cn(
+                      "shrink-0 px-1 sm:px-0",
+                      canManageLabsMeta ? "w-1/2" : "w-full",
+                    )}
+                  >
                     <Card className="border-0 shadow-none">
                       <CardHeader className="space-y-3 border-b border-slate-100 pb-3">
                         <div className="flex flex-row flex-wrap items-center justify-between gap-3">
@@ -2325,66 +2368,74 @@ export const LaboratoryManager = () => {
                                         </Td>
                                         <Td className="text-right">
                                           <div className="flex flex-wrap justify-end gap-1">
-                                            <Button
-                                              size="sm"
-                                              variant={
-                                                isSelected
-                                                  ? "default"
-                                                  : "secondary"
-                                              }
-                                              title="Adjust stock"
-                                              onClick={() =>
-                                                beginStockAdjust(item)
-                                              }
-                                            >
-                                              <Package className="mr-1 h-3.5 w-3.5" />
-                                              Stock
-                                            </Button>
-                                            <Button
-                                              size="sm"
-                                              variant="secondary"
-                                              title="Edit equipment"
-                                              onClick={() =>
-                                                beginEditEquipment(item)
-                                              }
-                                            >
-                                              <Pencil className="mr-1 h-3.5 w-3.5" />
-                                              Edit
-                                            </Button>
-                                            <Button
-                                              size="sm"
-                                              variant="secondary"
-                                              title="Create purchase request"
-                                              onClick={() =>
-                                                fillRequestFromEquipment(item)
-                                              }
-                                            >
-                                              <ShoppingCart className="mr-1 h-3.5 w-3.5" />
-                                              Request
-                                            </Button>
-                                            <Button
-                                              size="sm"
-                                              variant="outline"
-                                              className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                                              title="Delete equipment"
-                                              disabled={
-                                                deleteEquipment.isPending
-                                              }
-                                              onClick={() => {
-                                                if (
-                                                  confirm(
-                                                    `Delete equipment "${item.name}" (${item.itemCode || "no code"})?\n\nThis cannot be undone. Items with active issues cannot be deleted.`,
-                                                  )
-                                                ) {
-                                                  deleteEquipment.mutate(
-                                                    item._id,
-                                                  );
+                                            {canManageLabsMeta ? (
+                                              <Button
+                                                size="sm"
+                                                variant={
+                                                  isSelected
+                                                    ? "default"
+                                                    : "secondary"
                                                 }
-                                              }}
-                                            >
-                                              <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                              Delete
-                                            </Button>
+                                                title="Adjust stock"
+                                                onClick={() =>
+                                                  beginStockAdjust(item)
+                                                }
+                                              >
+                                                <Package className="mr-1 h-3.5 w-3.5" />
+                                                Stock
+                                              </Button>
+                                            ) : null}
+                                            {canManageLabsMeta ? (
+                                              <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                title="Edit equipment"
+                                                onClick={() =>
+                                                  beginEditEquipment(item)
+                                                }
+                                              >
+                                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                                Edit
+                                              </Button>
+                                            ) : null}
+                                            {canRequestLabItems ? (
+                                              <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                title="Create purchase request for this item"
+                                                onClick={() =>
+                                                  fillRequestFromEquipment(item)
+                                                }
+                                              >
+                                                <ShoppingCart className="mr-1 h-3.5 w-3.5" />
+                                                Request
+                                              </Button>
+                                            ) : null}
+                                            {canManageLabsMeta ? (
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                                title="Delete equipment"
+                                                disabled={
+                                                  deleteEquipment.isPending
+                                                }
+                                                onClick={() => {
+                                                  if (
+                                                    confirm(
+                                                      `Delete equipment "${item.name}" (${item.itemCode || "no code"})?\n\nThis cannot be undone. Items with active issues cannot be deleted.`,
+                                                    )
+                                                  ) {
+                                                    deleteEquipment.mutate(
+                                                      item._id,
+                                                    );
+                                                  }
+                                                }}
+                                              >
+                                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                                Delete
+                                              </Button>
+                                            ) : null}
                                           </div>
                                         </Td>
                                       </tr>
@@ -2417,6 +2468,12 @@ export const LaboratoryManager = () => {
                   <p className="mt-1 text-xs text-slate-500">
                     Update fields below, then save. Workflow status (approve / receive) is
                     managed from the list actions.
+                  </p>
+                ) : isTeacher ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Request items needed for your allotted laboratory. Admin / Super Admin
+                    receive the request and handle approve / purchase / receive — same
+                    workflow as Lab Staff.
                   </p>
                 ) : null}
               </CardHeader>
@@ -2682,7 +2739,7 @@ export const LaboratoryManager = () => {
                           <col className="w-[10%]" />
                           <col className="w-[7%]" />
                           <col className="w-[7%]" />
-                          {isAdmin || canManageLabsMeta ? (
+                          {isAdmin || canRequestLabItems ? (
                             <col className="w-[14%]" />
                           ) : null}
                         </colgroup>
@@ -2699,7 +2756,7 @@ export const LaboratoryManager = () => {
                             <Th className="bg-slate-50">Requested by</Th>
                             <Th className="bg-slate-50">Date</Th>
                             <Th className="bg-slate-50">Status</Th>
-                            {isAdmin || canManageLabsMeta ? (
+                            {isAdmin || canRequestLabItems ? (
                               <Th className="bg-slate-50 text-right">Actions</Th>
                             ) : null}
                           </tr>
@@ -2720,7 +2777,7 @@ export const LaboratoryManager = () => {
                           <col className="w-[10%]" />
                           <col className="w-[7%]" />
                           <col className="w-[7%]" />
-                          {isAdmin || canManageLabsMeta ? (
+                          {isAdmin || canRequestLabItems ? (
                             <col className="w-[14%]" />
                           ) : null}
                         </colgroup>
@@ -2777,7 +2834,7 @@ export const LaboratoryManager = () => {
                                   {req.status}
                                 </Badge>
                               </Td>
-                              {isAdmin || canManageLabsMeta ? (
+                              {isAdmin || canRequestLabItems ? (
                                 <Td className="whitespace-nowrap text-right">
                                   <div className="inline-flex flex-wrap items-center justify-end gap-1">
                                     {canEditRequest(req) ? (
@@ -3308,6 +3365,8 @@ export const LaboratoryManager = () => {
       )}
 
       {tab === "print-inventory" && <LaboratoryPrintInventoryPanel />}
+
+      {tab === "allot" && isAdmin ? <LaboratoryAllotPanel /> : null}
     </div>
   );
 };

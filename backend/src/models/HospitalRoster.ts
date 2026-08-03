@@ -3,7 +3,11 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 const rosterCellSchema = new Schema(
   {
     studentId: { type: Schema.Types.ObjectId, ref: "Student", required: true },
-    day: { type: Number, required: true, min: 1, max: 32 },
+    /**
+     * Day index within the roster period (1 = startDateBs).
+     * Legacy month-only rosters used calendar day-of-month.
+     */
+    day: { type: Number, required: true, min: 1, max: 93 },
     shiftId: { type: Schema.Types.ObjectId, ref: "DutyShift" },
     departmentId: { type: Schema.Types.ObjectId, ref: "HospitalDepartment" },
     code: { type: String, default: "", trim: true },
@@ -13,8 +17,8 @@ const rosterCellSchema = new Schema(
 );
 
 /**
- * Monthly hospital clinical duty roster (student × day grid).
- * Independent of FieldDutySchedule so existing postings/attendance stay intact.
+ * Hospital clinical duty roster (student × day grid).
+ * Period is From–To BS dates (min 1 day). Independent of FieldDutySchedule.
  */
 const hospitalRosterSchema = new Schema(
   {
@@ -31,8 +35,14 @@ const hospitalRosterSchema = new Schema(
       required: true,
       index: true,
     },
+    /** Inclusive period start (BS YYYY-MM-DD). */
+    startDateBs: { type: String, default: "", index: true },
+    /** Inclusive period end (BS YYYY-MM-DD). */
+    endDateBs: { type: String, default: "", index: true },
+    /** BS month of start (YYYY-MM) — kept for list filters / legacy attendance. */
     monthBs: { type: String, required: true, index: true },
-    daysInMonth: { type: Number, required: true, min: 28, max: 32, default: 30 },
+    /** Inclusive day count for the period (1–93). */
+    daysInMonth: { type: Number, required: true, min: 1, max: 93, default: 30 },
     coordinatorStaffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff" },
     remarks: { type: String, default: "" },
     status: {
@@ -57,6 +67,7 @@ const hospitalRosterSchema = new Schema(
 );
 
 hospitalRosterSchema.index({ schoolId: 1, monthBs: 1, hospitalId: 1 });
+hospitalRosterSchema.index({ schoolId: 1, startDateBs: 1, endDateBs: 1 });
 hospitalRosterSchema.index({ schoolId: 1, batchId: 1, yearId: 1, status: 1 });
 
 export type HospitalRosterDocument = InferSchemaType<typeof hospitalRosterSchema>;

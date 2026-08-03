@@ -30,11 +30,17 @@ import { api, unwrap } from "lib/api";
 import { parseErrorMessage } from "lib/utils";
 import {
   defaultPostingTypeForSection,
+  fieldCodeClass,
+  FIELD_REGISTER_LEGEND,
   FIELD_SHIFTS,
   FIELD_STATUSES,
+  fieldStatusToCode,
+  monthBsFromDate,
   postingTypeLabel,
   postingTypeOptionsForSection,
   sectionLabel,
+  shiftLabel,
+  shiftMonthBs,
   statusClass,
 } from "./fieldUtils";
 
@@ -119,8 +125,16 @@ export const FieldPostingSectionPanel = ({
   const [rosterSearch, setRosterSearch] = useState("");
   /** Filter postings list by shift (optional). */
   const [shiftFilter, setShiftFilter] = useState<"" | FieldDutyShift>("");
-  /** Shift for this day's register sheet. */
-  const [markShift, setMarkShift] = useState<FieldDutyShift>("DAY");
+  /**
+   * Shift for this day's register sheet.
+   * Empty until coordinator explicitly chooses a shift (proper daily attendance).
+   */
+  const [markShift, setMarkShift] = useState<"" | FieldDutyShift>("");
+  /**
+   * True only after Load attendance sheet with posting + date + shift.
+   * Prevents marking before date/shift are set intentionally.
+   */
+  const [sheetLoaded, setSheetLoaded] = useState(false);
   /** Attendance record currently loaded for mark panel (authoritative for read-only). */
   const [loadedAttendance, setLoadedAttendance] =
     useState<FieldDutyAttendanceRecord | null>(null);
@@ -138,6 +152,14 @@ export const FieldPostingSectionPanel = ({
     status: string;
     assignmentCount: number;
   } | null>(null);
+  /** Traditional monthly register filters (Attendance Register tab). */
+  const [registerMonthBs, setRegisterMonthBs] = useState(() =>
+    monthBsFromDate(todayBsString()) || "",
+  );
+  const [registerScheduleId, setRegisterScheduleId] = useState("");
+  const [registerShiftFilter, setRegisterShiftFilter] = useState<
+    "" | FieldDutyShift
+  >("");
 
   useEffect(() => {
     setForm((f) => ({
@@ -148,14 +170,15 @@ export const FieldPostingSectionPanel = ({
     setSelectedScheduleId("");
     setSelectedSchedule(null);
     setMarkRows([]);
+    setMarkShift("");
+    setSheetLoaded(false);
     setLoadedAttendance(null);
-    setNotes("");
-    setShiftFilter("");
-    setMarkShift("DAY");
-    setMarkDateBs(todayBsString());
-    setRosterSearch("");
     setFromHospitalRoster(false);
     setHospitalRosterInfo(null);
+    setNotes("");
+    setShiftFilter("");
+    setMarkDateBs(todayBsString());
+    setRosterSearch("");
   }, [section, isCoordinatorView, canWrite]);
 
   const settingsQuery = useQuery({
@@ -224,11 +247,31 @@ export const FieldPostingSectionPanel = ({
   });
 
   const registerQuery = useQuery({
-    queryKey: ["field-duty", "register", section],
-    queryFn: () =>
-      unwrap<FieldDutyRegisterBook>(
-        api.get("/field-duty/register", { params: { section } }),
-      ),
+    queryKey: [
+      "field-duty",
+      "register",
+      section,
+      registerMonthBs,
+      registerScheduleId,
+      registerShiftFilter,
+    ],
+    queryFn: () => {
+      const month = registerMonthBs || monthBsFromDate(todayBsString());
+      const fromDateBs = month ? `${month}-01` : undefined;
+      // Fetch full month window (BS months up to 32 days)
+      const toDateBs = month ? `${month}-32` : undefined;
+      return unwrap<FieldDutyRegisterBook>(
+        api.get("/field-duty/register", {
+          params: {
+            section,
+            scheduleId: registerScheduleId || undefined,
+            shift: registerShiftFilter || undefined,
+            fromDateBs,
+            toDateBs,
+          },
+        }),
+      );
+    },
     enabled: tab === "history" || tab === "reports",
   });
 
@@ -376,8 +419,12 @@ export const FieldPostingSectionPanel = ({
 
   const submitAttendance = useMutation({
     mutationFn: () => {
-      if (!markDateBs) throw new Error("Select attendance date (BS)");
-      if (!markShift) throw new Error("Select duty shift for this day");
+      if (!selectedScheduleId) throw new Error("Select a posting first");
+      if (!markDateBs?.trim()) throw new Error("Select attendance date (BS)");
+      if (!markShift) throw new Error("Select duty shift before marking attendance");
+      if (!sheetLoaded) {
+        throw new Error("Load the attendance sheet for this date and shift first");
+      }
       const onDuty = markRows.filter((r) => r.onRoster);
       if (onDuty.length === 0) {
         throw new Error("Select at least one student for today's roster");
@@ -399,7 +446,7 @@ export const FieldPostingSectionPanel = ({
     onSuccess: async (data) => {
       const rec = data as FieldDutyAttendanceRecord;
       toast.success(
-        `Register saved · ${markDateBs} · ${markShift.replace(/_/g, " ")} · ${rec.entries?.length ?? 0} students`,
+        `Register saved · ${markDateBs} · ${shiftLabel(markShift)} · ${rec.entries?.length ?? 0} students`,
       );
       setLoadedAttendance(rec);
       await invalidate();
@@ -480,11 +527,24 @@ export const FieldPostingSectionPanel = ({
     existing?: FieldDutyAttendanceRecord | null,
     shiftForMark?: FieldDutyShift | "",
   ) => {
-    const date = dateBs || todayBsString();
-    const shift = (shiftForMark || markShift || "DAY") as FieldDutyShift;
+    const date = (dateBs || markDateBs || todayBsString()).trim();
+    const shift = (shiftForMark || markShift) as FieldDutyShift | "";
+    if (!scheduleId) {
+      toast.error("Select a posting first");
+      return;
+    }
+    if (!date) {
+      toast.error("Select attendance date (BS) first");
+      return;
+    }
+    if (!shift) {
+      toast.error("Select duty shift first, then load the sheet");
+      return;
+    }
     setSelectedScheduleId(scheduleId);
     setMarkDateBs(date);
     setMarkShift(shift);
+    setSheetLoaded(false);
     setLoadingMark(true);
     try {
       const ctx = await unwrap<{
@@ -582,31 +642,58 @@ export const FieldPostingSectionPanel = ({
 
       if (attendance?.notes) setNotes(attendance.notes);
       else setNotes("");
+      setSheetLoaded(true);
     } catch (e) {
+      setSheetLoaded(false);
+      setMarkRows([]);
       toast.error(parseErrorMessage(e));
     } finally {
       setLoadingMark(false);
     }
   };
 
-  /** When user changes attendance date, re-load pool + register for that date. */
+  /** Date/shift changes invalidate the loaded sheet — must Load again. */
   const onMarkDateChange = (dateBs: string) => {
     setMarkDateBs(dateBs);
-    if (selectedScheduleId && dateBs) {
-      void loadRosterForMarking(selectedScheduleId, dateBs, null, markShift);
-    }
+    setSheetLoaded(false);
+    setMarkRows([]);
+    setLoadedAttendance(null);
+    setFromHospitalRoster(false);
+    setHospitalRosterInfo(null);
   };
 
-  const onMarkShiftChange = (shift: FieldDutyShift) => {
+  const onMarkShiftChange = (shift: FieldDutyShift | "") => {
     setMarkShift(shift);
-    if (selectedScheduleId) {
-      void loadRosterForMarking(
-        selectedScheduleId,
-        markDateBs || todayBsString(),
-        null,
-        shift,
-      );
+    setSheetLoaded(false);
+    setMarkRows([]);
+    setLoadedAttendance(null);
+    setFromHospitalRoster(false);
+    setHospitalRosterInfo(null);
+  };
+
+  const selectPostingForMark = (
+    schedule: FieldDutyScheduleRecord,
+    preferredShift?: FieldDutyShift | "",
+  ) => {
+    setSelectedScheduleId(schedule._id);
+    setSelectedSchedule(schedule);
+    setSheetLoaded(false);
+    setMarkRows([]);
+    setLoadedAttendance(null);
+    setFromHospitalRoster(false);
+    setHospitalRosterInfo(null);
+    setNotes("");
+    // Prefer multi-shift / posting default only as suggestion — user must confirm Load
+    if (preferredShift) {
+      setMarkShift(preferredShift);
+    } else if (schedule.rosterMode === "MULTI_SHIFT") {
+      setMarkShift("");
+    } else if (schedule.shift) {
+      setMarkShift(schedule.shift as FieldDutyShift);
+    } else {
+      setMarkShift("");
     }
+    if (!markDateBs) setMarkDateBs(todayBsString());
   };
 
   const onDutyCount = markRows.filter((r) => r.onRoster).length;
@@ -663,44 +750,72 @@ export const FieldPostingSectionPanel = ({
   };
 
   const printReport = () => {
-    const byDate = registerQuery.data?.byDate ?? [];
     const win = window.open("", "_blank");
     if (!win) {
       toast.error("Pop-up blocked — allow pop-ups to print");
       return;
     }
-    const body =
-      byDate.length > 0
-        ? byDate
-            .map((day) => {
-              const blocks = day.shifts
-                .map((block) => {
-                  const entries = block.entries
-                    .map(
-                      (e) =>
-                        `<tr><td>${e.rollNumber ?? ""}</td><td>${e.fullName ?? ""}</td><td>${e.status}</td><td>${e.remarks ?? ""}</td></tr>`,
-                    )
-                    .join("");
-                  return `<h3>${day.dateBs} · ${block.shift} · ${block.siteName}</h3>
-                    <p style="font-size:12px">P:${block.summary.present} A:${block.summary.absent} L:${block.summary.late} Leave:${block.summary.leave} · Total ${block.summary.total} · ${block.recordStatus}</p>
-                    <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px">
-                      <thead><tr><th>Roll</th><th>Name</th><th>Status</th><th>Remarks</th></tr></thead>
-                      <tbody>${entries}</tbody>
-                    </table>`;
+    const { month, days, students } = monthlyRegister;
+    const headDays = days.map((d) => `<th>${d}</th>`).join("");
+    const bodyRows =
+      students.length > 0
+        ? students
+            .map((st, i) => {
+              const dayCells = days
+                .map((d) => {
+                  const code = st.cells[d]?.code || "";
+                  return `<td style="text-align:center;font-weight:600">${code || ""}</td>`;
                 })
                 .join("");
-              return blocks;
+              return `<tr>
+                <td style="text-align:center">${i + 1}</td>
+                <td>${st.fullName}</td>
+                <td style="text-align:center">${st.rollNumber ?? ""}</td>
+                ${dayCells}
+                <td style="text-align:center">${st.present}</td>
+                <td style="text-align:center">${st.absent}</td>
+                <td style="text-align:center">${st.late}</td>
+                <td style="text-align:center">${st.leave}</td>
+              </tr>`;
             })
-            .join("<hr/>")
-        : "<p>No register records.</p>";
+            .join("")
+        : `<tr><td colspan="${days.length + 7}">No register records for this month.</td></tr>`;
 
-    win.document.write(`<!DOCTYPE html><html><head><title>PHIT LMS — Field Attendance Register</title>
-      <style>body{font-family:system-ui,sans-serif;padding:24px} h1{font-size:18px} h3{font-size:14px;margin-top:16px}</style>
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"/>
+      <title>PHIT LMS — ${sectionLabel(section)} Attendance Register</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; padding: 10mm 8mm; color: #0f172a; }
+        h1 { font-size: 15px; margin: 0 0 4px; }
+        .meta { font-size: 11px; color: #475569; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 9px; }
+        th, td { border: 1px solid #94a3b8; padding: 2px 3px; }
+        th { background: #f1f5f9; font-weight: 600; }
+        thead { display: table-header-group; }
+        tr { page-break-inside: avoid; }
+        @page { size: A4 landscape; margin: 8mm; }
+      </style>
       </head><body>
       <h1>PHIT LMS — ${sectionLabel(section)} Attendance Register</h1>
-      <p>Generated ${new Date().toLocaleString()}</p>
-      ${body}
-      <script>window.onload=()=>{window.print()}</script>
+      <div class="meta">
+        Month (BS): <strong>${month || "—"}</strong>
+        ${registerShiftFilter ? ` · Shift: ${shiftLabel(registerShiftFilter)}` : " · All shifts"}
+        · ${students.length} student(s)
+        · Printed ${new Date().toLocaleString()}
+      </div>
+      <p class="meta">Legend: P=Present · A=Absent · L=Late · Lv=Leave · E=Emergency duty</p>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Student</th><th>Roll</th>
+            ${headDays}
+            <th>P</th><th>A</th><th>L</th><th>Lv</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+      <script>window.onload=function(){window.print()}</script>
       </body></html>`);
     win.document.close();
   };
@@ -796,12 +911,136 @@ export const FieldPostingSectionPanel = ({
     return cards;
   }, [schedules, todayQuery.data, shiftFilter, markDateBs]);
 
+  /**
+   * Traditional monthly register matrix: students × day-of-month cells.
+   * Built client-side from register API rows for the selected BS month.
+   */
+  const monthlyRegister = useMemo(() => {
+    const month = registerMonthBs || monthBsFromDate(todayBsString());
+    const allRows = registerQuery.data?.rows ?? [];
+    const siteFilterName = (() => {
+      if (!registerScheduleId) return "";
+      const sch = schedules.find((s) => s._id === registerScheduleId);
+      return (sch?.siteName || sch?.hospitalName || "").trim().toLowerCase();
+    })();
+
+    const rows = allRows.filter((r) => {
+      if (month && !String(r.dateBs).startsWith(month)) return false;
+      if (
+        siteFilterName &&
+        String(r.siteName || "")
+          .trim()
+          .toLowerCase() !== siteFilterName
+      ) {
+        return false;
+      }
+      if (registerShiftFilter && r.shift !== registerShiftFilter) return false;
+      return true;
+    });
+
+    const daySet = new Set<number>();
+    for (const r of rows) {
+      const day = Number(String(r.dateBs).split("-")[2]);
+      if (Number.isFinite(day) && day >= 1) daySet.add(day);
+    }
+    // Always show 1–daysInMonth style grid when empty month of data
+    const maxDay = daySet.size
+      ? Math.max(...daySet)
+      : 32;
+    const days = Array.from({ length: maxDay }, (_, i) => i + 1);
+
+    type StudentAgg = {
+      studentId: string;
+      fullName: string;
+      rollNumber?: number;
+      admissionNumber?: string;
+      batchName?: string;
+      yearName?: string;
+      cells: Record<number, { code: string; status: string; shift: string; siteName: string }>;
+      present: number;
+      absent: number;
+      late: number;
+      leave: number;
+      emergency: number;
+    };
+
+    const byStudent = new Map<string, StudentAgg>();
+    for (const r of rows) {
+      const day = Number(String(r.dateBs).split("-")[2]);
+      if (!Number.isFinite(day)) continue;
+      let row = byStudent.get(r.studentId);
+      if (!row) {
+        row = {
+          studentId: r.studentId,
+          fullName: r.fullName ?? "Student",
+          rollNumber: r.rollNumber,
+          admissionNumber: r.admissionNumber,
+          batchName: r.batchName,
+          yearName: r.yearName,
+          cells: {},
+          present: 0,
+          absent: 0,
+          late: 0,
+          leave: 0,
+          emergency: 0,
+        };
+        byStudent.set(r.studentId, row);
+      }
+      // Prefer first mark of the day; if multi-shift same day, keep latest by overwriting when same day
+      row.cells[day] = {
+        code: fieldStatusToCode(r.status),
+        status: r.status,
+        shift: r.shift,
+        siteName: r.siteName,
+      };
+    }
+
+    // Recompute totals from cells
+    for (const row of byStudent.values()) {
+      row.present = 0;
+      row.absent = 0;
+      row.late = 0;
+      row.leave = 0;
+      row.emergency = 0;
+      for (const cell of Object.values(row.cells)) {
+        if (cell.status === "PRESENT") row.present += 1;
+        else if (cell.status === "ABSENT") row.absent += 1;
+        else if (cell.status === "LATE") row.late += 1;
+        else if (cell.status === "LEAVE") row.leave += 1;
+        else if (cell.status === "EMERGENCY_DUTY") row.emergency += 1;
+      }
+    }
+
+    const students = [...byStudent.values()].sort((a, b) => {
+      const ra = a.rollNumber ?? 9999;
+      const rb = b.rollNumber ?? 9999;
+      if (ra !== rb) return ra - rb;
+      return a.fullName.localeCompare(b.fullName);
+    });
+
+    return { month, days, students, totalMarks: rows.length };
+  }, [
+    registerQuery.data?.rows,
+    registerMonthBs,
+    registerScheduleId,
+    registerShiftFilter,
+    schedules,
+  ]);
+
+  const canLoadSheet =
+    Boolean(selectedScheduleId) &&
+    Boolean(markDateBs?.trim()) &&
+    Boolean(markShift) &&
+    !loadingMark;
+
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">{sectionLabel(section)}</h2>
         <p className="text-sm text-slate-600">
-          Coordinators use their staff login. Attendance is locked after submit; edit requests go to admin.
+          {section === "HOSPITAL"
+            ? "Hospital Posting: take daily attendance with date + shift (like Daily Attendance), then view a traditional monthly register."
+            : "Coordinators use their staff login. Attendance is locked after submit; edit requests go to admin."}
         </p>
       </div>
 
@@ -1482,14 +1721,10 @@ export const FieldPostingSectionPanel = ({
                                   FIELD_SHIFTS.find(
                                     (sh) => (s.shiftCounts?.[sh] ?? 0) > 0,
                                   ) ||
-                                  "DAY"
-                                : s.shift || "DAY";
-                            void loadRosterForMarking(
-                              s._id,
-                              todayBsString() || s.startDateBs,
-                              null,
-                              firstShift,
-                            );
+                                  ""
+                                : (s.shift as FieldDutyShift) || "";
+                            selectPostingForMark(s, firstShift || undefined);
+                            setMarkDateBs(todayBsString() || s.startDateBs);
                           }}
                         >
                           Take attendance
@@ -1506,21 +1741,43 @@ export const FieldPostingSectionPanel = ({
 
       {tab === "mark" && canWrite ? (
         <div className="space-y-4">
+          {/* Workflow banner — same spirit as Daily Attendance */}
+          <Card className="border-brand-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_white_55%)]">
+            <CardContent className="py-4">
+              <p className="text-sm font-semibold text-slate-900">
+                Daily Attendance — {sectionLabel(section)}
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-600">
+                <li>
+                  <strong>Select posting</strong> (hospital / site)
+                </li>
+                <li>
+                  Choose <strong>date (BS)</strong> and <strong>duty shift</strong>
+                </li>
+                <li>
+                  Click <strong>Load attendance sheet</strong>
+                  {section === "HOSPITAL"
+                    ? " — students come from Hospital Roster for that day when available"
+                    : ""}
+                </li>
+                <li>
+                  Mark Present / Absent / Late / Leave, then <strong>Save register</strong>
+                </li>
+              </ol>
+            </CardContent>
+          </Card>
+
+          {/* Step 1 — Posting */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                Daily attendance register
-              </CardTitle>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">1. Select posting</CardTitle>
               <p className="text-sm font-normal text-slate-500">
-                1) Open a posting · 2) Choose <strong>attendance date</strong> and{" "}
-                <strong>shift</strong> · 3) For <strong>Hospital</strong> postings, students
-                load from the <strong>Hospital Roster</strong> grid for that day · 4) Mark
-                Present / Absent / Late / Leave · 5) Save register.
+                Choose the hospital posting you are marking for today.
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <FormField label="Filter postings by shift (optional)">
+              <div className="max-w-xs">
+                <FormField label="Filter list by shift (optional)">
                   <Select
                     value={shiftFilter}
                     onChange={(e) =>
@@ -1530,7 +1787,7 @@ export const FieldPostingSectionPanel = ({
                     <option value="">All shifts</option>
                     {FIELD_SHIFTS.map((s) => (
                       <option key={s} value={s}>
-                        {s.replace(/_/g, " ")}
+                        {shiftLabel(s)}
                       </option>
                     ))}
                   </Select>
@@ -1543,535 +1800,851 @@ export const FieldPostingSectionPanel = ({
                 <EmptyState
                   title={
                     shiftFilter
-                      ? `No ${shiftFilter.replace(/_/g, " ")} postings assigned`
+                      ? `No ${shiftLabel(shiftFilter)} postings assigned`
                       : "No active postings"
                   }
                   description={
                     isCoordinatorView
-                      ? "You have no assigned field postings for this section (and shift filter). Ask admin to assign you as field coordinator."
+                      ? "You have no assigned field postings for this section. Ask admin to assign you as field coordinator."
                       : "Create an active posting and assign a coordinator first."
                   }
                 />
               ) : (
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    Shift rosters to mark
-                    {shiftFilter ? ` · ${shiftFilter.replace(/_/g, " ")}` : " · all shifts"}
-                  </p>
                   {markablePostings.map((ctx) => {
-                    const isSelected =
-                      selectedScheduleId === ctx.schedule._id &&
-                      markShift === ctx.shift;
+                    const isSelected = selectedScheduleId === ctx.schedule._id;
                     const submitted =
                       ctx.existingAttendance?.status === "LOCKED" ||
                       ctx.existingAttendance?.status === "SUBMITTED";
                     return (
                       <div
                         key={ctx.key}
-                        className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 ${
+                        className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 transition ${
                           isSelected
-                            ? "border-brand-500 bg-brand-50/50"
-                            : "border-slate-200"
+                            ? "border-brand-500 bg-brand-50/60 shadow-sm"
+                            : "border-slate-200 hover:border-slate-300"
                         }`}
                       >
-                        <div>
-                          <p className="font-medium">
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-900">
                             {ctx.schedule.siteName || ctx.schedule.hospitalName}
-                            <Badge className="ml-2 bg-indigo-100 text-indigo-800">
-                              {ctx.shift.replace(/_/g, " ")}
-                            </Badge>
                             {ctx.isMultiShift ? (
-                              <Badge className="ml-1 bg-violet-100 text-violet-800">
-                                multi-shift
+                              <Badge className="ml-2 bg-violet-100 text-violet-800">
+                                multi-shift · {shiftLabel(ctx.shift)}
                               </Badge>
-                            ) : null}
+                            ) : ctx.schedule.rosterMode !== "DAILY" ? (
+                              <Badge className="ml-2 bg-indigo-100 text-indigo-800">
+                                {shiftLabel(ctx.shift)}
+                              </Badge>
+                            ) : (
+                              <Badge className="ml-2 bg-slate-100 text-slate-700">
+                                Daily shift pick
+                              </Badge>
+                            )}
                             {submitted ? (
                               <Badge className="ml-1 bg-emerald-100 text-emerald-800">
-                                {ctx.existingAttendance?.status}
+                                Today: {ctx.existingAttendance?.status}
                               </Badge>
                             ) : (
                               <Badge className="ml-1 bg-amber-100 text-amber-900">
-                                Not submitted
+                                Pending today
                               </Badge>
                             )}
                           </p>
                           <p className="text-xs text-slate-600">
-                            <span className="font-medium">
-                              {ctx.schedule.batch?.name ?? "Batch"} ·{" "}
-                              {ctx.schedule.year?.name ?? "Year"}
-                            </span>
-                            {" · "}
-                            {postingTypeLabel(ctx.schedule.postingType)}
-                            {" · "}
-                            <span className="font-medium">{ctx.studentCount}</span>{" "}
-                            students on this shift
-                            {ctx.activeToday ? (
-                              <span className="ml-1 text-emerald-700">· Active today</span>
-                            ) : null}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {ctx.schedule.startDateBs} → {ctx.schedule.endDateBs}
+                            {ctx.schedule.batch?.name ?? "Batch"} ·{" "}
+                            {ctx.schedule.year?.name ?? "Year"} ·{" "}
+                            {postingTypeLabel(ctx.schedule.postingType)} ·{" "}
+                            {ctx.studentCount} students · {ctx.schedule.startDateBs} →{" "}
+                            {ctx.schedule.endDateBs}
                           </p>
                         </div>
                         <Button
                           size="sm"
                           variant={isSelected ? "default" : "outline"}
-                          onClick={() => {
-                            const date =
-                              ctx.dateBs ||
-                              markDateBs ||
-                              ctx.schedule.startDateBs ||
-                              "";
-                            void loadRosterForMarking(
-                              ctx.schedule._id,
-                              date,
-                              ctx.existingAttendance,
-                              ctx.shift,
-                            );
-                          }}
+                          onClick={() =>
+                            selectPostingForMark(
+                              ctx.schedule,
+                              ctx.isMultiShift
+                                ? ctx.shift
+                                : ctx.schedule.rosterMode === "DAILY"
+                                  ? undefined
+                                  : ctx.shift,
+                            )
+                          }
                         >
-                          {submitted && isSelected
-                            ? "View / re-open"
-                            : isSelected
-                              ? "Selected"
-                              : `Mark ${ctx.shift.replace(/_/g, " ")}`}
+                          {isSelected ? "Selected" : "Select"}
                         </Button>
                       </div>
                     );
                   })}
                 </div>
               )}
+            </CardContent>
+          </Card>
 
-              {selectedScheduleId && selectedSchedule ? (
-                <div className="space-y-3 border-t border-slate-100 pt-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+          {/* Step 2 — Date + Shift + Load */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">2. Date & shift</CardTitle>
+              <p className="text-sm font-normal text-slate-500">
+                You must set both fields, then load the sheet — same as classroom Daily
+                Attendance.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!selectedSchedule ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  Select a posting above first.
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm">
                     <p className="font-semibold text-slate-900">
                       {selectedSchedule.siteName || selectedSchedule.hospitalName}
                     </p>
-                    <p className="mt-1 text-slate-600">
-                      <span className="font-medium">Batch:</span>{" "}
-                      {selectedSchedule.batch?.name ?? "—"}
-                      {" · "}
-                      <span className="font-medium">Year:</span>{" "}
-                      {selectedSchedule.year?.name ?? "—"}
-                      {" · "}
-                      Pool: <span className="font-medium">{markRows.length}</span>
-                      {" · "}
-                      On duty:{" "}
-                      <span className="font-medium text-indigo-700">{onDutyCount}</span>
+                    <p className="mt-0.5 text-slate-600">
+                      {selectedSchedule.batch?.name ?? "Batch"} ·{" "}
+                      {selectedSchedule.year?.name ?? "Year"} · Posting period{" "}
+                      {selectedSchedule.startDateBs} → {selectedSchedule.endDateBs}
                     </p>
-                    {fromHospitalRoster && hospitalRosterInfo ? (
-                      <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-900">
-                        <p className="font-semibold">
-                          Attendance from Hospital Roster
-                        </p>
-                        <p className="mt-0.5">
-                          {hospitalRosterInfo.rosterName}
-                          {hospitalRosterInfo.hospitalName
-                            ? ` · ${hospitalRosterInfo.hospitalName}`
-                            : ""}
-                          {" · "}
-                          Day {hospitalRosterInfo.day} of {hospitalRosterInfo.monthBs}
-                          {" · "}
-                          {hospitalRosterInfo.assignmentCount} assigned
-                          {hospitalRosterInfo.status === "LOCKED" ? " · Locked roster" : ""}
-                        </p>
-                        <p className="mt-1 text-emerald-800/80">
-                          Students are loaded from the monthly roster grid. Mark Present /
-                          Absent / Late / Leave only — change duty list in Hospital Roster if
-                          needed.
-                        </p>
-                      </div>
-                    ) : section === "HOSPITAL" ? (
-                      <p className="mt-1 text-xs text-amber-800">
-                        No matching Hospital Roster for this batch/year/hospital/month.
-                        Create a roster under <strong>Hospital Roster</strong> (same batch,
-                        year, hospital, month) so attendance loads from the duty grid.
-                        Meanwhile you can tick students manually.
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Tick students on duty for this date and shift, then mark attendance.
-                      </p>
-                    )}
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="space-y-2">
-                      <FormField label="Attendance date (BS) *">
-                        <NepaliDateField value={markDateBs} onChange={onMarkDateChange} />
-                      </FormField>
-                      <p className="text-xs text-slate-500">
-                        Posting {selectedSchedule.startDateBs} →{" "}
-                        {selectedSchedule.endDateBs}. Choose today or a previous date
-                        within this range to keep past records.
-                      </p>
-                    </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <FormField label="Attendance date (BS) *">
+                      <NepaliDateField
+                        value={markDateBs}
+                        onChange={onMarkDateChange}
+                      />
+                    </FormField>
                     <FormField label="Duty shift *">
                       <Select
                         value={markShift}
-                        disabled={isReadOnly}
                         onChange={(e) =>
-                          onMarkShiftChange(e.target.value as FieldDutyShift)
+                          onMarkShiftChange(
+                            (e.target.value || "") as FieldDutyShift | "",
+                          )
                         }
                       >
+                        <option value="">Select shift…</option>
                         {FIELD_SHIFTS.map((s) => (
                           <option key={s} value={s}>
-                            {s.replace(/_/g, " ")}
+                            {shiftLabel(s)}
                           </option>
                         ))}
                       </Select>
                     </FormField>
-                    <FormField label="Search students">
-                      <Input
-                        value={rosterSearch}
-                        onChange={(e) => setRosterSearch(e.target.value)}
-                        placeholder="Name, roll, admission…"
-                      />
-                    </FormField>
-                    <FormField label="Notes (optional)">
-                      <Input
-                        value={notes}
-                        disabled={isReadOnly}
-                        onChange={(e) => setNotes(e.target.value)}
-                      />
-                    </FormField>
+                    <div className="flex items-end">
+                      <Button
+                        className="w-full sm:w-auto"
+                        disabled={!canLoadSheet}
+                        onClick={() =>
+                          void loadRosterForMarking(
+                            selectedScheduleId,
+                            markDateBs,
+                            null,
+                            markShift,
+                          )
+                        }
+                      >
+                        {loadingMark
+                          ? "Loading…"
+                          : sheetLoaded
+                            ? "Reload sheet"
+                            : "Load attendance sheet"}
+                      </Button>
+                    </div>
                   </div>
 
-                  {isReadOnly ? (
-                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      This day&apos;s register is locked (read-only).
-                      {isAdmin ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-2"
-                          onClick={() =>
-                            loadedAttendance &&
-                            unlockAttendance.mutate(loadedAttendance._id)
-                          }
-                        >
-                          Unlock
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-2"
-                          disabled={loadedAttendance?.editRequest?.status === "PENDING"}
-                          onClick={() =>
-                            loadedAttendance &&
-                            requestEdit.mutate(loadedAttendance._id)
-                          }
-                        >
-                          {loadedAttendance?.editRequest?.status === "PENDING"
-                            ? "Edit request pending"
-                            : "Request edit"}
-                        </Button>
-                      )}
-                    </div>
-                  ) : null}
-
-                  {loadingMark ? (
-                    <LoadingState />
-                  ) : markRows.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      {fromHospitalRoster
-                        ? "No students are assigned on the Hospital Roster for this day and shift. Update the roster grid, or pick another shift."
-                        : "No students in the batch/year pool. Check posting batch and year."}
+                  {!markDateBs || !markShift ? (
+                    <p className="text-xs text-amber-800">
+                      Set <strong>date</strong> and <strong>shift</strong> before loading the
+                      sheet. Marking is disabled until the sheet is loaded.
+                    </p>
+                  ) : !sheetLoaded ? (
+                    <p className="text-xs text-slate-500">
+                      Ready — click <strong>Load attendance sheet</strong> for{" "}
+                      {markDateBs} · {shiftLabel(markShift)}.
                     </p>
                   ) : (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200">
-                      <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-                        Daily register sheet · {markDateBs || "—"} ·{" "}
-                        {markShift.replace(/_/g, " ")} ·{" "}
-                        {selectedSchedule.siteName || selectedSchedule.hospitalName}
-                        {fromHospitalRoster ? " · from Hospital Roster" : ""}
-                      </div>
-                      <Table>
-                        <TableHead>
-                          <tr>
-                            {!fromHospitalRoster ? (
-                              <Th>
-                                <span className="sr-only">On roster</span>
-                                Duty
-                              </Th>
-                            ) : null}
-                            <Th>Roll</Th>
-                            <Th>Student Name</Th>
-                            {fromHospitalRoster ? <Th>Dept / Shift</Th> : null}
-                            <Th>Present</Th>
-                            <Th>Absent</Th>
-                            <Th>Late</Th>
-                            <Th>Leave</Th>
-                            <Th>Remarks</Th>
-                          </tr>
-                        </TableHead>
-                        <TableBody>
-                          {filteredMarkRows.map((row) => {
-                            const idx = markRows.findIndex(
-                              (r) => r.studentId === row.studentId,
-                            );
-                            return (
-                              <tr
-                                key={row.studentId}
-                                className={row.onRoster ? "" : "opacity-50"}
-                              >
-                                {!fromHospitalRoster ? (
-                                  <Td className="text-center">
-                                    <input
-                                      type="checkbox"
-                                      disabled={isReadOnly}
-                                      checked={row.onRoster}
-                                      title="Include on today's roster"
-                                      onChange={() =>
-                                        setMarkRows((rows) =>
-                                          rows.map((r, i) =>
-                                            i === idx
-                                              ? { ...r, onRoster: !r.onRoster }
-                                              : r,
-                                          ),
-                                        )
-                                      }
-                                    />
-                                  </Td>
-                                ) : null}
-                                <Td className="text-sm">{row.rollNumber}</Td>
-                                <Td className="text-sm">
-                                  {row.fullName}
-                                  <div className="text-xs text-slate-400">
-                                    {row.admissionNumber}
-                                  </div>
-                                </Td>
-                                {fromHospitalRoster ? (
-                                  <Td className="text-xs text-slate-600">
-                                    {[row.departmentLabel, row.shiftLabel, row.rosterCode]
-                                      .filter(Boolean)
-                                      .join(" · ") || "—"}
-                                  </Td>
-                                ) : null}
-                                {(["PRESENT", "ABSENT", "LATE", "LEAVE"] as const).map(
-                                  (st) => (
-                                    <Td key={st} className="text-center">
-                                      <input
-                                        type="radio"
-                                        name={`status-${row.studentId}`}
-                                        disabled={isReadOnly || !row.onRoster}
-                                        checked={row.onRoster && row.status === st}
-                                        onChange={() =>
-                                          setMarkRows((rows) =>
-                                            rows.map((r, i) =>
-                                              i === idx
-                                                ? { ...r, onRoster: true, status: st }
-                                                : r,
-                                            ),
-                                          )
-                                        }
-                                      />
-                                    </Td>
-                                  ),
-                                )}
-                                <Td>
-                                  <Input
-                                    className="min-w-[120px]"
-                                    disabled={isReadOnly || !row.onRoster}
-                                    value={row.remarks}
-                                    onChange={(e) =>
+                    <p className="text-xs text-emerald-800">
+                      Sheet loaded for {markDateBs} · {shiftLabel(markShift)}. Changing date
+                      or shift requires loading again.
+                    </p>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Step 3 — Marking sheet */}
+          {selectedSchedule && sheetLoaded ? (
+            <Card className="overflow-hidden border-slate-200 shadow-sm">
+              <div className="border-b border-slate-200 bg-[linear-gradient(135deg,_#0c2d6b_0%,_#1e4a8c_100%)] px-4 py-3 text-white">
+                <p className="text-xs font-medium uppercase tracking-wider text-white/80">
+                  Daily attendance register sheet
+                </p>
+                <p className="mt-0.5 text-lg font-semibold">
+                  {selectedSchedule.siteName || selectedSchedule.hospitalName}
+                </p>
+                <p className="mt-1 text-sm text-white/90">
+                  Date (BS): <strong>{markDateBs}</strong>
+                  {" · "}
+                  Shift: <strong>{shiftLabel(markShift)}</strong>
+                  {" · "}
+                  {selectedSchedule.batch?.name}/{selectedSchedule.year?.name}
+                  {" · "}
+                  On duty: <strong>{onDutyCount}</strong>
+                  {loadedAttendance ? (
+                    <>
+                      {" · "}
+                      Status:{" "}
+                      <span className="rounded bg-white/20 px-1.5 py-0.5 text-xs font-semibold">
+                        {loadedAttendance.status}
+                      </span>
+                    </>
+                  ) : null}
+                </p>
+              </div>
+              <CardContent className="space-y-3 pt-4">
+                {fromHospitalRoster && hospitalRosterInfo ? (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                    <span className="font-semibold">From Hospital Roster:</span>{" "}
+                    {hospitalRosterInfo.rosterName}
+                    {hospitalRosterInfo.hospitalName
+                      ? ` · ${hospitalRosterInfo.hospitalName}`
+                      : ""}{" "}
+                    · day {hospitalRosterInfo.day}
+                    {hospitalRosterInfo.status === "LOCKED" ? " · Locked" : ""} ·{" "}
+                    {hospitalRosterInfo.assignmentCount} assigned
+                  </div>
+                ) : section === "HOSPITAL" ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    No matching Hospital Roster for this day. Tick duty students manually, or
+                    create a roster under <strong>Hospital Roster</strong>.
+                  </div>
+                ) : null}
+
+                {isReadOnly ? (
+                  <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    This day&apos;s register is locked (read-only).
+                    {isAdmin ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="ml-2"
+                        onClick={() =>
+                          loadedAttendance &&
+                          unlockAttendance.mutate(loadedAttendance._id)
+                        }
+                      >
+                        Unlock
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="ml-2"
+                        disabled={
+                          loadedAttendance?.editRequest?.status === "PENDING"
+                        }
+                        onClick={() =>
+                          loadedAttendance &&
+                          requestEdit.mutate(loadedAttendance._id)
+                        }
+                      >
+                        {loadedAttendance?.editRequest?.status === "PENDING"
+                          ? "Edit request pending"
+                          : "Request edit"}
+                      </Button>
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Search students">
+                    <Input
+                      value={rosterSearch}
+                      onChange={(e) => setRosterSearch(e.target.value)}
+                      placeholder="Name, roll, admission…"
+                    />
+                  </FormField>
+                  <FormField label="Notes (optional)">
+                    <Input
+                      value={notes}
+                      disabled={isReadOnly}
+                      onChange={(e) => setNotes(e.target.value)}
+                    />
+                  </FormField>
+                </div>
+
+                {loadingMark ? (
+                  <LoadingState />
+                ) : markRows.length === 0 ? (
+                  <EmptyState
+                    title="No students on this sheet"
+                    description={
+                      fromHospitalRoster
+                        ? "No students on Hospital Roster for this day and shift."
+                        : "No students in the batch/year pool for this posting."
+                    }
+                  />
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-300">
+                    <table className="w-full min-w-[720px] border-collapse text-sm">
+                      <thead>
+                        <tr className="bg-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          <th className="border border-slate-300 px-2 py-2 text-center">
+                            S.N.
+                          </th>
+                          {!fromHospitalRoster ? (
+                            <th className="border border-slate-300 px-2 py-2 text-center">
+                              Duty
+                            </th>
+                          ) : null}
+                          <th className="border border-slate-300 px-2 py-2">Roll</th>
+                          <th className="border border-slate-300 px-2 py-2">
+                            Student name
+                          </th>
+                          {fromHospitalRoster || section === "HOSPITAL" ? (
+                            <th className="border border-slate-300 px-2 py-2">
+                              Dept / roster
+                            </th>
+                          ) : null}
+                          <th className="border border-slate-300 px-2 py-2 text-center">
+                            P
+                          </th>
+                          <th className="border border-slate-300 px-2 py-2 text-center">
+                            A
+                          </th>
+                          <th className="border border-slate-300 px-2 py-2 text-center">
+                            Late
+                          </th>
+                          <th className="border border-slate-300 px-2 py-2 text-center">
+                            Leave
+                          </th>
+                          <th className="border border-slate-300 px-2 py-2">Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredMarkRows.map((row, sn) => {
+                          const idx = markRows.findIndex(
+                            (r) => r.studentId === row.studentId,
+                          );
+                          return (
+                            <tr
+                              key={row.studentId}
+                              className={
+                                row.onRoster
+                                  ? "bg-white hover:bg-slate-50/80"
+                                  : "bg-slate-50/50 opacity-60"
+                              }
+                            >
+                              <td className="border border-slate-200 px-2 py-1.5 text-center tabular-nums text-slate-500">
+                                {sn + 1}
+                              </td>
+                              {!fromHospitalRoster ? (
+                                <td className="border border-slate-200 px-2 py-1.5 text-center">
+                                  <input
+                                    type="checkbox"
+                                    disabled={isReadOnly}
+                                    checked={row.onRoster}
+                                    title="On duty today"
+                                    onChange={() =>
                                       setMarkRows((rows) =>
                                         rows.map((r, i) =>
                                           i === idx
-                                            ? { ...r, remarks: e.target.value }
+                                            ? { ...r, onRoster: !r.onRoster }
                                             : r,
                                         ),
                                       )
                                     }
                                   />
-                                </Td>
-                              </tr>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
+                                </td>
+                              ) : null}
+                              <td className="border border-slate-200 px-2 py-1.5 tabular-nums">
+                                {row.rollNumber}
+                              </td>
+                              <td className="border border-slate-200 px-2 py-1.5 font-medium">
+                                {row.fullName}
+                                <div className="text-xs font-normal text-slate-400">
+                                  {row.admissionNumber}
+                                </div>
+                              </td>
+                              {fromHospitalRoster || section === "HOSPITAL" ? (
+                                <td className="border border-slate-200 px-2 py-1.5 text-xs text-slate-600">
+                                  {[
+                                    row.departmentLabel,
+                                    row.shiftLabel,
+                                    row.rosterCode,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ") || "—"}
+                                </td>
+                              ) : null}
+                              {(
+                                [
+                                  "PRESENT",
+                                  "ABSENT",
+                                  "LATE",
+                                  "LEAVE",
+                                ] as const
+                              ).map((st) => (
+                                <td
+                                  key={st}
+                                  className="border border-slate-200 px-1 py-1.5 text-center"
+                                >
+                                  <input
+                                    type="radio"
+                                    className="h-4 w-4"
+                                    name={`status-${row.studentId}`}
+                                    disabled={isReadOnly || !row.onRoster}
+                                    checked={row.onRoster && row.status === st}
+                                    onChange={() =>
+                                      setMarkRows((rows) =>
+                                        rows.map((r, i) =>
+                                          i === idx
+                                            ? {
+                                                ...r,
+                                                onRoster: true,
+                                                status: st,
+                                              }
+                                            : r,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </td>
+                              ))}
+                              <td className="border border-slate-200 px-1 py-1">
+                                <Input
+                                  className="min-w-[100px] border-0 bg-transparent shadow-none focus-visible:ring-1"
+                                  disabled={isReadOnly || !row.onRoster}
+                                  value={row.remarks}
+                                  onChange={(e) =>
+                                    setMarkRows((rows) =>
+                                      rows.map((r, i) =>
+                                        i === idx
+                                          ? { ...r, remarks: e.target.value }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
-                  {!isReadOnly && markRows.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {!fromHospitalRoster ? (
-                        <>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() =>
-                              setMarkRows((rows) =>
-                                rows.map((r) => ({ ...r, onRoster: true })),
-                              )
-                            }
-                          >
-                            Select all for today
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() =>
-                              setMarkRows((rows) =>
-                                rows.map((r) => ({ ...r, onRoster: false })),
-                              )
-                            }
-                          >
-                            Clear selection
-                          </Button>
-                        </>
-                      ) : null}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          setMarkRows((rows) =>
-                            rows.map((r) =>
-                              r.onRoster ? { ...r, status: "PRESENT" } : r,
-                            ),
-                          )
-                        }
-                      >
-                        On-duty → Present
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          setMarkRows((rows) =>
-                            rows.map((r) =>
-                              r.onRoster ? { ...r, status: "ABSENT" } : r,
-                            ),
-                          )
-                        }
-                      >
-                        On-duty → Absent
-                      </Button>
-                      <Button
-                        onClick={() => submitAttendance.mutate()}
-                        disabled={
-                          submitAttendance.isPending ||
-                          !markDateBs ||
-                          !markShift ||
-                          onDutyCount === 0
-                        }
-                      >
-                        Save register ({onDutyCount} students · {markDateBs} ·{" "}
-                        {markShift.replace(/_/g, " ")})
-                      </Button>
-                    </div>
-                  ) : null}
+                {!isReadOnly && markRows.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                    {!fromHospitalRoster ? (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setMarkRows((rows) =>
+                              rows.map((r) => ({ ...r, onRoster: true })),
+                            )
+                          }
+                        >
+                          All on duty
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setMarkRows((rows) =>
+                              rows.map((r) => ({ ...r, onRoster: false })),
+                            )
+                          }
+                        >
+                          Clear duty
+                        </Button>
+                      </>
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setMarkRows((rows) =>
+                          rows.map((r) =>
+                            r.onRoster ? { ...r, status: "PRESENT" } : r,
+                          ),
+                        )
+                      }
+                    >
+                      Mark all Present
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setMarkRows((rows) =>
+                          rows.map((r) =>
+                            r.onRoster ? { ...r, status: "ABSENT" } : r,
+                          ),
+                        )
+                      }
+                    >
+                      Mark all Absent
+                    </Button>
+                    <Button
+                      className="ml-auto"
+                      onClick={() => submitAttendance.mutate()}
+                      disabled={
+                        submitAttendance.isPending ||
+                        !markDateBs ||
+                        !markShift ||
+                        !sheetLoaded ||
+                        onDutyCount === 0
+                      }
+                    >
+                      {submitAttendance.isPending
+                        ? "Saving…"
+                        : `Save register · ${onDutyCount} · ${markDateBs} · ${shiftLabel(markShift)}`}
+                    </Button>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+                  <span className="font-semibold text-slate-700">Legend:</span>
+                  {FIELD_REGISTER_LEGEND.map((item) => (
+                    <span
+                      key={item.code}
+                      className={`rounded px-1.5 py-0.5 ${item.className}`}
+                    >
+                      {item.code} = {item.label}
+                    </span>
+                  ))}
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ) : selectedSchedule && !sheetLoaded ? (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-slate-500">
+                Set date and shift, then load the attendance sheet to mark students.
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
       ) : null}
 
       {tab === "history" || tab === "reports" ? (
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle className="text-base">
-              {tab === "reports" ? "Reports" : "Attendance register (manual book)"}
-            </CardTitle>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={exportExcel}>
-                Excel
-              </Button>
-              <Button size="sm" variant="outline" onClick={printReport}>
-                Print / PDF
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {registerQuery.isLoading || historyQuery.isLoading ? (
-              <LoadingState />
-            ) : (registerQuery.data?.byDate ?? []).length === 0 &&
-              (historyQuery.data ?? []).length === 0 ? (
-              <EmptyState
-                title="No register entries yet"
-                description="Saved daily attendance sheets will appear here as a date-wise register."
-              />
-            ) : (registerQuery.data?.byDate ?? []).length > 0 ? (
-              <div className="space-y-6">
-                {(registerQuery.data?.byDate ?? []).map((day) => (
-                  <div key={day.dateBs} className="space-y-3">
-                    <h3 className="text-sm font-semibold text-slate-800">
-                      Date (BS): {day.dateBs}
-                    </h3>
-                    {day.shifts.map((block) => (
-                      <div
-                        key={block.attendanceId}
-                        className="overflow-hidden rounded-xl border border-slate-200"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm">
-                          <div>
-                            <span className="font-medium">{block.siteName}</span>
-                            <Badge className="ml-2 bg-indigo-100 text-indigo-800">
-                              {block.shift.replace(/_/g, " ")}
-                            </Badge>
-                            <Badge className={`ml-1 ${statusClass(block.recordStatus)}`}>
-                              {block.recordStatus}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-slate-600">
-                            P {block.summary.present} · A {block.summary.absent} · Late{" "}
-                            {block.summary.late} · Leave {block.summary.leave} · Total{" "}
-                            {block.summary.total}
-                          </p>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <Table>
-                            <TableHead>
-                              <tr>
-                                <Th>Roll</Th>
-                                <Th>Student Name</Th>
-                                <Th>Admission</Th>
-                                <Th>Status</Th>
-                                <Th>Remarks</Th>
-                              </tr>
-                            </TableHead>
-                            <TableBody>
-                              {block.entries.map((e) => (
-                                <tr key={`${block.attendanceId}-${e.studentId}`}>
-                                  <Td className="text-sm">{e.rollNumber ?? "—"}</Td>
-                                  <Td className="text-sm">{e.fullName ?? "—"}</Td>
-                                  <Td className="text-sm text-slate-500">
-                                    {e.admissionNumber ?? "—"}
-                                  </Td>
-                                  <Td>
-                                    <Badge className={statusClass(e.status)}>
-                                      {e.status}
-                                    </Badge>
-                                  </Td>
-                                  <Td className="text-sm text-slate-600">
-                                    {e.remarks || "—"}
-                                  </Td>
-                                </tr>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                        {isAdmin ? (
-                          <div className="flex flex-wrap gap-1 border-t border-slate-100 px-3 py-2">
-                            {block.recordStatus === "LOCKED" ||
-                            block.recordStatus === "SUBMITTED" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => unlockAttendance.mutate(block.attendanceId)}
+        <div className="space-y-4">
+          <Card className="border-brand-100">
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="text-base">
+                  {tab === "reports"
+                    ? "Reports"
+                    : `Attendance Register — ${sectionLabel(section)}`}
+                </CardTitle>
+                <p className="mt-1 text-sm text-slate-500">
+                  Traditional monthly register (students × days), similar to Attendance
+                  Management. Read from saved daily sheets.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={exportExcel}>
+                  Excel
+                </Button>
+                <Button size="sm" variant="outline" onClick={printReport}>
+                  Print
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <FormField label="Month (BS)">
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-10 w-10 shrink-0 px-0"
+                    onClick={() =>
+                      setRegisterMonthBs(
+                        shiftMonthBs(
+                          registerMonthBs || monthBsFromDate(todayBsString()) || "2082-01",
+                          -1,
+                        ),
+                      )
+                    }
+                    aria-label="Previous month"
+                  >
+                    ‹
+                  </Button>
+                  <Input
+                    className="text-center"
+                    value={registerMonthBs}
+                    onChange={(e) => setRegisterMonthBs(e.target.value)}
+                    placeholder="YYYY-MM"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-10 w-10 shrink-0 px-0"
+                    onClick={() =>
+                      setRegisterMonthBs(
+                        shiftMonthBs(
+                          registerMonthBs || monthBsFromDate(todayBsString()) || "2082-01",
+                          1,
+                        ),
+                      )
+                    }
+                    aria-label="Next month"
+                  >
+                    ›
+                  </Button>
+                </div>
+              </FormField>
+              <FormField label="Posting / site">
+                <Select
+                  value={registerScheduleId}
+                  onChange={(e) => setRegisterScheduleId(e.target.value)}
+                >
+                  <option value="">All postings</option>
+                  {schedules.map((s) => (
+                    <option key={s._id} value={s._id}>
+                      {s.siteName || s.hospitalName} · {s.batch?.name}/{s.year?.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Shift">
+                <Select
+                  value={registerShiftFilter}
+                  onChange={(e) =>
+                    setRegisterShiftFilter(
+                      (e.target.value || "") as "" | FieldDutyShift,
+                    )
+                  }
+                >
+                  <option value="">All shifts</option>
+                  {FIELD_SHIFTS.map((s) => (
+                    <option key={s} value={s}>
+                      {shiftLabel(s)}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Go to current">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() =>
+                    setRegisterMonthBs(monthBsFromDate(todayBsString()) || "")
+                  }
+                >
+                  Current month
+                </Button>
+              </FormField>
+            </CardContent>
+          </Card>
+
+          {/* Legend + stats */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-semibold text-slate-600">Legend:</span>
+            {FIELD_REGISTER_LEGEND.map((item) => (
+              <span
+                key={item.code}
+                className={`rounded px-1.5 py-0.5 ${item.className}`}
+              >
+                {item.code} = {item.label}
+              </span>
+            ))}
+            <span className="ml-auto text-slate-500">
+              {monthlyRegister.students.length} students · {monthlyRegister.totalMarks}{" "}
+              marks · {monthlyRegister.month || "—"}
+            </span>
+          </div>
+
+          {registerQuery.isLoading ? (
+            <LoadingState />
+          ) : monthlyRegister.students.length === 0 ? (
+            <EmptyState
+              title="No register entries this month"
+              description="Save daily attendance sheets first — they appear here as a traditional monthly grid."
+            />
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  Monthly attendance register · BS {monthlyRegister.month}
+                  {registerShiftFilter
+                    ? ` · ${shiftLabel(registerShiftFilter)}`
+                    : " · all shifts"}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Columns = day of month · Codes match traditional school/hospital registers
+                </p>
+              </div>
+              <CardContent className="p-0">
+                <div className="max-h-[min(75vh,820px)] overflow-auto">
+                  <table className="w-full min-w-[900px] border-collapse text-xs">
+                    <thead className="sticky top-0 z-10 bg-slate-100">
+                      <tr>
+                        <th className="sticky left-0 z-20 border border-slate-300 bg-slate-100 px-2 py-2 text-left font-semibold">
+                          S.N.
+                        </th>
+                        <th className="sticky left-8 z-20 min-w-[140px] border border-slate-300 bg-slate-100 px-2 py-2 text-left font-semibold">
+                          Student
+                        </th>
+                        <th className="border border-slate-300 px-1 py-2 font-semibold">
+                          Roll
+                        </th>
+                        {monthlyRegister.days.map((d) => (
+                          <th
+                            key={d}
+                            className="border border-slate-300 px-0.5 py-2 text-center font-semibold tabular-nums text-slate-600"
+                          >
+                            {d}
+                          </th>
+                        ))}
+                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-emerald-800">
+                          P
+                        </th>
+                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-rose-800">
+                          A
+                        </th>
+                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-amber-800">
+                          L
+                        </th>
+                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-sky-800">
+                          Lv
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monthlyRegister.students.map((st, idx) => (
+                        <tr key={st.studentId} className="hover:bg-slate-50/80">
+                          <td className="sticky left-0 z-10 border border-slate-200 bg-white px-2 py-1 text-center tabular-nums text-slate-500">
+                            {idx + 1}
+                          </td>
+                          <td className="sticky left-8 z-10 max-w-[160px] border border-slate-200 bg-white px-2 py-1 font-medium text-slate-900">
+                            <div className="truncate" title={st.fullName}>
+                              {st.fullName}
+                            </div>
+                            <div className="truncate text-[10px] font-normal text-slate-400">
+                              {st.admissionNumber || "—"}
+                            </div>
+                          </td>
+                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                            {st.rollNumber ?? "—"}
+                          </td>
+                          {monthlyRegister.days.map((d) => {
+                            const cell = st.cells[d];
+                            const code = cell?.code || "";
+                            return (
+                              <td
+                                key={d}
+                                className={`border border-slate-200 px-0.5 py-1 text-center ${fieldCodeClass(code)}`}
+                                title={
+                                  cell
+                                    ? `${cell.status} · ${shiftLabel(cell.shift)} · ${cell.siteName}`
+                                    : undefined
+                                }
                               >
-                                Unlock day sheet
-                              </Button>
-                            ) : null}
+                                {code || "·"}
+                              </td>
+                            );
+                          })}
+                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums font-medium">
+                            {st.present}
+                          </td>
+                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                            {st.absent}
+                          </td>
+                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                            {st.late}
+                          </td>
+                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                            {st.leave}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Day-wise sheets + admin unlock (secondary) */}
+          {(registerQuery.data?.byDate ?? []).length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Day-wise sheets</CardTitle>
+                <p className="text-sm font-normal text-slate-500">
+                  Open a saved day to re-mark (if unlocked) or review details.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(registerQuery.data?.byDate ?? [])
+                  .filter((day) =>
+                    !registerMonthBs
+                      ? true
+                      : String(day.dateBs).startsWith(registerMonthBs),
+                  )
+                  .map((day) => (
+                    <div key={day.dateBs} className="space-y-2">
+                      <h3 className="text-sm font-semibold text-slate-800">
+                        Date (BS): {day.dateBs}
+                      </h3>
+                      {day.shifts.map((block) => (
+                        <div
+                          key={block.attendanceId}
+                          className="overflow-hidden rounded-xl border border-slate-200"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                            <div>
+                              <span className="font-medium">{block.siteName}</span>
+                              <Badge className="ml-2 bg-indigo-100 text-indigo-800">
+                                {shiftLabel(block.shift)}
+                              </Badge>
+                              <Badge
+                                className={`ml-1 ${statusClass(block.recordStatus)}`}
+                              >
+                                {block.recordStatus}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-slate-600">
+                              P {block.summary.present} · A {block.summary.absent} · Late{" "}
+                              {block.summary.late} · Leave {block.summary.leave} · Total{" "}
+                              {block.summary.total}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-1 px-3 py-2">
                             {canWrite ? (
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => {
                                   setTab("mark");
+                                  const sch = schedules.find(
+                                    (s) => s._id === block.scheduleId,
+                                  );
+                                  if (sch) {
+                                    selectPostingForMark(
+                                      sch,
+                                      block.shift as FieldDutyShift,
+                                    );
+                                  } else {
+                                    setSelectedScheduleId(block.scheduleId);
+                                    setMarkShift(block.shift as FieldDutyShift);
+                                  }
+                                  setMarkDateBs(day.dateBs);
                                   void loadRosterForMarking(
                                     block.scheduleId,
                                     day.dateBs,
@@ -2080,109 +2653,86 @@ export const FieldPostingSectionPanel = ({
                                   );
                                 }}
                               >
-                                Open / re-mark
+                                Open day sheet
+                              </Button>
+                            ) : null}
+                            {isAdmin &&
+                            (block.recordStatus === "LOCKED" ||
+                              block.recordStatus === "SUBMITTED") ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  unlockAttendance.mutate(block.attendanceId)
+                                }
+                              >
+                                Unlock
                               </Button>
                             ) : null}
                           </div>
-                        ) : canWrite ? (
-                          <div className="border-t border-slate-100 px-3 py-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setTab("mark");
-                                void loadRosterForMarking(
-                                  block.scheduleId,
-                                  day.dateBs,
-                                  null,
-                                  block.shift as FieldDutyShift,
-                                );
-                              }}
-                            >
-                              Open day sheet
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {(historyQuery.data ?? []).map((rec) => (
-                  <div
-                    key={rec._id}
-                    className="rounded-xl border border-slate-200 p-3 text-sm"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="font-medium">
-                          {rec.dateBs} · {rec.siteName || rec.hospitalName} ·{" "}
-                          {rec.shift}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {postingTypeLabel(rec.postingType)} ·{" "}
-                          <Badge className={statusClass(rec.status)}>{rec.status}</Badge>
-                          {rec.summary
-                            ? ` · P ${rec.summary.present} A ${rec.summary.absent} L ${rec.summary.late} Lv ${rec.summary.leave}`
-                            : ""}
-                          {rec.editRequest?.status === "PENDING"
-                            ? " · Edit request pending"
-                            : ""}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {isAdmin && rec.editRequest?.status === "PENDING" ? (
-                          <>
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                reviewEdit.mutate({ id: rec._id, decision: "APPROVED" })
-                              }
-                            >
-                              Approve edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                reviewEdit.mutate({ id: rec._id, decision: "REJECTED" })
-                              }
-                            >
-                              Reject
-                            </Button>
-                          </>
-                        ) : null}
-                        {isAdmin &&
-                        (rec.status === "LOCKED" || rec.status === "SUBMITTED") ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => unlockAttendance.mutate(rec._id)}
-                          >
-                            Unlock
-                          </Button>
-                        ) : null}
-                        {!isAdmin &&
-                        (rec.status === "LOCKED" || rec.status === "SUBMITTED") &&
-                        rec.editRequest?.status !== "PENDING" ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => requestEdit.mutate(rec._id)}
-                          >
-                            Request edit
-                          </Button>
-                        ) : null}
-                      </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  ))}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {/* Edit requests */}
+          {(historyQuery.data ?? []).some(
+            (r) => r.editRequest?.status === "PENDING",
+          ) ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pending edit requests</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {(historyQuery.data ?? [])
+                  .filter((r) => r.editRequest?.status === "PENDING")
+                  .map((rec) => (
+                    <div
+                      key={rec._id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-200 bg-violet-50/50 px-3 py-2 text-sm"
+                    >
+                      <p>
+                        {rec.dateBs} · {rec.siteName || rec.hospitalName} ·{" "}
+                        {shiftLabel(rec.shift)}
+                      </p>
+                      {isAdmin ? (
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              reviewEdit.mutate({
+                                id: rec._id,
+                                decision: "APPROVED",
+                              })
+                            }
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              reviewEdit.mutate({
+                                id: rec._id,
+                                decision: "REJECTED",
+                              })
+                            }
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        <Badge className="bg-violet-100 text-violet-800">Pending</Badge>
+                      )}
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

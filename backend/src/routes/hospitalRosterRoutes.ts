@@ -1,10 +1,12 @@
 import { Router } from "express";
 import {
   createDepartment,
+  createDutyCode,
   createHospital,
   createHospitalRoster,
   createShift,
   deleteDepartment,
+  deleteDutyCode,
   deleteHospital,
   deleteHospitalRoster,
   deleteShift,
@@ -12,12 +14,14 @@ import {
   getHospitalRosterDayAssignments,
   getHospitalRosterSummary,
   listDepartments,
+  listDutyCodes,
   listHospitalRosters,
   listHospitals,
   listShifts,
   lockHospitalRoster,
   unlockHospitalRoster,
   updateDepartment,
+  updateDutyCode,
   updateHospital,
   updateHospitalRoster,
   updateHospitalRosterCells,
@@ -58,7 +62,13 @@ router.post("/shifts", authorize(...FIELD_ADMIN), createShift);
 router.put("/shifts/:id", authorize(...FIELD_ADMIN), updateShift);
 router.delete("/shifts/:id", authorize(...FIELD_ADMIN), deleteShift);
 
-// Monthly hospital rosters
+// Free codes (Off / Leave / custom) — same pattern as departments & shifts
+router.get("/duty-codes", authorize(...FIELD_READ), listDutyCodes);
+router.post("/duty-codes", authorize(...FIELD_ADMIN), createDutyCode);
+router.put("/duty-codes/:id", authorize(...FIELD_ADMIN), updateDutyCode);
+router.delete("/duty-codes/:id", authorize(...FIELD_ADMIN), deleteDutyCode);
+
+// Hospital rosters (From–To date period)
 router.get("/hospital-rosters", authorize(...FIELD_READ), listHospitalRosters);
 router.post("/hospital-rosters", authorize(...FIELD_ADMIN), createHospitalRoster);
 router.get("/hospital-rosters/:id", authorize(...FIELD_READ), getHospitalRoster);

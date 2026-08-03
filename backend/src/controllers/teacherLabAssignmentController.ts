@@ -11,25 +11,45 @@ import { sendSuccess } from "../utils/response.js";
 import { withTenantScope } from "../utils/tenant.js";
 
 const formatRow = (row: Record<string, unknown>) => {
-  const lab = row.laboratoryId as { _id?: unknown; name?: string } | string | null;
+  const lab = row.laboratoryId as
+    | { _id?: unknown; name?: string; code?: string; yearLevel?: string }
+    | string
+    | null;
+  const teacher = row.teacherId as
+    | { _id?: unknown; user?: { fullName?: string } | null }
+    | string
+    | null;
+
   const laboratoryId =
     lab && typeof lab === "object" && lab._id != null
       ? String(lab._id)
       : String(row.laboratoryId);
   const laboratoryName =
     lab && typeof lab === "object" ? lab.name : undefined;
+  const laboratoryCode =
+    lab && typeof lab === "object" ? lab.code : undefined;
+  const laboratoryYearLevel =
+    lab && typeof lab === "object" ? lab.yearLevel : undefined;
+
+  let teacherId: string;
+  let teacherName: string | undefined;
+  if (teacher && typeof teacher === "object" && teacher._id != null) {
+    teacherId = String(teacher._id);
+    teacherName = teacher.user?.fullName;
+  } else {
+    teacherId = String(row.teacherId);
+  }
 
   return {
     ...row,
     _id: String(row._id),
     schoolId: String(row.schoolId),
-    teacherId: String(
-      typeof row.teacherId === "object" && row.teacherId && "_id" in (row.teacherId as object)
-        ? (row.teacherId as { _id: unknown })._id
-        : row.teacherId
-    ),
+    teacherId,
+    teacherName,
     laboratoryId,
-    laboratoryName
+    laboratoryName,
+    laboratoryCode,
+    laboratoryYearLevel
   };
 };
 
@@ -46,6 +66,7 @@ export const listTeacherLabAssignments = asyncHandler(async (req: Request, res: 
 
   const rows = await TeacherLaboratoryAssignment.find(filter)
     .populate("laboratoryId", "name code yearLevel")
+    .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
     .sort({ createdAt: -1 })
     .lean();
 
@@ -112,6 +133,7 @@ export const createTeacherLabAssignment = asyncHandler(async (req: Request, res:
 
   const populated = await TeacherLaboratoryAssignment.findById(row._id)
     .populate("laboratoryId", "name code yearLevel")
+    .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
     .lean();
 
   return sendSuccess(
@@ -158,6 +180,7 @@ export const updateTeacherLabAssignment = asyncHandler(async (req: Request, res:
 
   const populated = await TeacherLaboratoryAssignment.findById(row._id)
     .populate("laboratoryId", "name code yearLevel")
+    .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
     .lean();
 
   return sendSuccess(

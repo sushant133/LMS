@@ -70,6 +70,23 @@ export const compareBsDates = (left: string, right: string): number => {
   return 0;
 };
 
+/**
+ * Inclusive calendar-day count between two BS dates (YYYY-MM-DD).
+ * Same day → 1. End before start throws.
+ */
+export const countInclusiveBsDays = (startBs: string, endBs: string): number => {
+  const startAd = bsToAdDate(startBs).dateAd;
+  const endAd = bsToAdDate(endBs).dateAd;
+  const [sy, sm, sd] = startAd.split("-").map(Number);
+  const [ey, em, ed] = endAd.split("-").map(Number);
+  const startMs = Date.UTC(sy!, (sm ?? 1) - 1, sd ?? 1);
+  const endMs = Date.UTC(ey!, (em ?? 1) - 1, ed ?? 1);
+  if (endMs < startMs) {
+    throw new ApiError(400, "End date must be on or after start date");
+  }
+  return Math.floor((endMs - startMs) / 86_400_000) + 1;
+};
+
 export const getDeadlineStatus = (dueDateBs: string | undefined, todayBs: string): AssignmentDeadlineStatus | null => {
   if (!dueDateBs) return null;
   const cmp = compareBsDates(dueDateBs, todayBs);

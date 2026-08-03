@@ -9,6 +9,7 @@ import { FieldHospital } from "../models/FieldHospital.js";
 import { HospitalDepartment } from "../models/HospitalDepartment.js";
 import { HospitalRoster } from "../models/HospitalRoster.js";
 import { Student } from "../models/Student.js";
+import { compareBsDates, countInclusiveBsDays } from "./nepaliDate.js";
 
 export type HospitalRosterDutyAssignment = {
   studentId: string;
@@ -119,8 +120,37 @@ const normalizeSite = (value: string) =>
     .replace(/\s+/g, " ");
 
 /**
+ * Day index within a roster for a BS date.
+ * New rosters: 1-based offset from startDateBs.
+ * Legacy month-only: calendar day-of-month.
+ */
+const dayIndexForRoster = (
+  roster: Record<string, unknown>,
+  dateBs: string,
+): number | null => {
+  const start = String(roster.startDateBs || "").trim();
+  const end = String(roster.endDateBs || "").trim();
+  if (start && end) {
+    try {
+      if (compareBsDates(dateBs, start) < 0 || compareBsDates(dateBs, end) > 0) {
+        return null;
+      }
+      return countInclusiveBsDays(start, dateBs);
+    } catch {
+      return null;
+    }
+  }
+  const day = Number(dateBs.split("-")[2]);
+  if (!Number.isFinite(day) || day < 1) return null;
+  const max = Number(roster.daysInMonth) || 32;
+  if (day > max) return null;
+  return day;
+};
+
+/**
  * Find the best HospitalRoster for a field posting on a given BS date.
- * Match: school + batch + year + monthBs, prefer hospital name match, prefer LOCKED/PUBLISHED.
+ * Prefer From–To range match; fall back to monthBs + day-of-month (legacy).
+ * Prefer hospital name match, prefer LOCKED/PUBLISHED.
  */
 export const findMatchingHospitalRoster = async (opts: {
   schoolId: unknown;
@@ -138,27 +168,47 @@ export const findMatchingHospitalRoster = async (opts: {
   if (parts.length < 3) return null;
   const year = parts[0];
   const month = parts[1];
-  const day = Number(parts[2]);
-  if (!year || !month || !Number.isFinite(day) || day < 1) return null;
+  if (!year || !month) return null;
   const monthBs = `${year}-${month.padStart(2, "0")}`;
 
-  const baseFilter = {
+  // Load candidate rosters for batch/year (active period or same month)
+  let rows = await HospitalRoster.find({
     schoolId: opts.schoolId,
     batchId: opts.batchId,
     yearId: opts.yearId,
-    monthBs,
     isDeleted: false,
-  };
-
-  let rows = await HospitalRoster.find(baseFilter)
+    $or: [
+      { startDateBs: { $lte: dateBs }, endDateBs: { $gte: dateBs } },
+      {
+        $or: [{ startDateBs: { $in: ["", null] } }, { startDateBs: { $exists: false } }],
+        monthBs,
+      },
+    ],
+  })
     .sort({ updatedAt: -1 })
     .lean();
 
+  if (!rows.length) {
+    // Broader fallback: same month only
+    rows = await HospitalRoster.find({
+      schoolId: opts.schoolId,
+      batchId: opts.batchId,
+      yearId: opts.yearId,
+      monthBs,
+      isDeleted: false,
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+  }
+
+  if (!rows.length) return null;
+
+  // Keep only rows that resolve a valid day index for this date
+  rows = rows.filter((r) => dayIndexForRoster(r as Record<string, unknown>, dateBs) != null);
   if (!rows.length) return null;
 
   const site = normalizeSite(opts.siteName || "");
   if (site) {
-    // Resolve hospital ids whose names match the posting site
     const hospitals = await FieldHospital.find({
       schoolId: opts.schoolId,
       isDeleted: false,
@@ -180,7 +230,6 @@ export const findMatchingHospitalRoster = async (opts: {
     if (byHospital.length) rows = byHospital;
   }
 
-  // Prefer locked / published over draft
   const rank = (status: string) => {
     if (status === "LOCKED") return 0;
     if (status === "PUBLISHED") return 1;
@@ -193,10 +242,12 @@ export const findMatchingHospitalRoster = async (opts: {
 
   const best = rows[0];
   if (!best) return null;
+  const day = dayIndexForRoster(best as Record<string, unknown>, dateBs);
+  if (day == null) return null;
   return {
     roster: best as Record<string, unknown> & { _id: { toString(): string } },
     day,
-    monthBs,
+    monthBs: String(best.monthBs || monthBs),
   };
 };
 

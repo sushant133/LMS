@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { adToBs, bsToAd, getTodayBs } from "@munatech/nepali-datepicker";
 import {
   type BatchRecord,
   type CollegeStaffRecord,
@@ -9,8 +10,8 @@ import {
   type HospitalRosterCell,
   type HospitalRosterRecord,
   type HospitalRosterSummary,
+  type RosterDutyCodeRecord,
   type YearRecord,
-  DEFAULT_ROSTER_FREE_CODES,
 } from "@phit-erp/shared";
 import {
   Building2,
@@ -18,14 +19,17 @@ import {
   ClipboardList,
   Lock,
   LockOpen,
+  Pencil,
   Plus,
   Printer,
+  Tag,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
+import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
@@ -43,7 +47,62 @@ type SubTab =
   | "summary"
   | "hospitals"
   | "departments"
-  | "shifts";
+  | "shifts"
+  | "codes";
+
+const todayBsString = (): string => {
+  const d = getTodayBs();
+  return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+};
+
+/** Offset a BS YYYY-MM-DD by N calendar days. */
+const offsetBsDate = (dateBs: string, offsetDays: number): string => {
+  const parts = dateBs.split("-").map(Number);
+  const y = parts[0];
+  const m = parts[1];
+  const d = parts[2];
+  if (!y || !m || !d) return dateBs;
+  try {
+    const ad = bsToAd(y, m, d);
+    const js = new Date(ad.year, ad.month - 1, ad.day, 12, 0, 0);
+    js.setDate(js.getDate() + offsetDays);
+    const bs = adToBs(js.getFullYear(), js.getMonth() + 1, js.getDate());
+    return `${bs.year}-${String(bs.month).padStart(2, "0")}-${String(bs.day).padStart(2, "0")}`;
+  } catch {
+    return dateBs;
+  }
+};
+
+/** Inclusive day count between two BS dates (same day → 1). */
+const countInclusiveDays = (startBs: string, endBs: string): number => {
+  const sp = startBs.split("-").map(Number);
+  const ep = endBs.split("-").map(Number);
+  if (sp.length < 3 || ep.length < 3) return 0;
+  try {
+    const sAd = bsToAd(sp[0]!, sp[1]!, sp[2]!);
+    const eAd = bsToAd(ep[0]!, ep[1]!, ep[2]!);
+    const s = Date.UTC(sAd.year, sAd.month - 1, sAd.day);
+    const e = Date.UTC(eAd.year, eAd.month - 1, eAd.day);
+    if (e < s) return 0;
+    return Math.floor((e - s) / 86_400_000) + 1;
+  } catch {
+    return 0;
+  }
+};
+
+const periodLabel = (r: {
+  startDateBs?: string;
+  endDateBs?: string;
+  monthBs?: string;
+  daysInMonth?: number;
+}) => {
+  if (r.startDateBs && r.endDateBs) {
+    if (r.startDateBs === r.endDateBs) return r.startDateBs;
+    return `${r.startDateBs} → ${r.endDateBs}`;
+  }
+  if (r.monthBs) return `Month ${r.monthBs}`;
+  return "—";
+};
 
 interface Props {
   isAdmin: boolean;
@@ -94,6 +153,11 @@ export const HospitalRosterPanel = ({ isAdmin }: Props) => {
   const shiftsQuery = useQuery({
     queryKey: ["field-duty", "shifts"],
     queryFn: () => unwrap<DutyShiftRecord[]>(api.get("/field-duty/shifts")),
+  });
+  const dutyCodesQuery = useQuery({
+    queryKey: ["field-duty", "duty-codes"],
+    queryFn: () =>
+      unwrap<RosterDutyCodeRecord[]>(api.get("/field-duty/duty-codes")),
   });
   const rostersQuery = useQuery({
     queryKey: ["field-duty", "hospital-rosters"],
@@ -154,6 +218,7 @@ export const HospitalRosterPanel = ({ isAdmin }: Props) => {
       { id: "hospitals", label: "Hospitals", icon: Building2 },
       { id: "departments", label: "Departments", icon: Building2 },
       { id: "shifts", label: "Shifts", icon: CalendarDays },
+      { id: "codes", label: "Codes", icon: Tag },
     ];
 
   return (
@@ -210,6 +275,15 @@ export const HospitalRosterPanel = ({ isAdmin }: Props) => {
         />
       ) : null}
 
+      {subTab === "codes" ? (
+        <DutyCodesManager
+          isAdmin={isAdmin}
+          codes={dutyCodesQuery.data ?? []}
+          loading={dutyCodesQuery.isLoading}
+          onChanged={invalidate}
+        />
+      ) : null}
+
       {subTab === "rosters" ? (
         <RostersList
           isAdmin={isAdmin}
@@ -238,6 +312,7 @@ export const HospitalRosterPanel = ({ isAdmin }: Props) => {
             roster={rosterQuery.data}
             shifts={shiftsQuery.data ?? []}
             departments={departmentsQuery.data ?? []}
+            dutyCodes={dutyCodesQuery.data ?? []}
             onChanged={async () => {
               await invalidate();
               await rosterQuery.refetch();
@@ -475,6 +550,9 @@ const DepartmentsManager = ({
 }) => {
   const [name, setName] = useState("");
   const [shortCode, setShortCode] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
 
   const create = useMutation({
     mutationFn: () =>
@@ -488,54 +566,190 @@ const DepartmentsManager = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  const update = useMutation({
+    mutationFn: () =>
+      unwrap(
+        api.put(`/field-duty/departments/${editingId}`, {
+          name: editName,
+          shortCode: editCode,
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success("Department updated");
+      setEditingId(null);
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/field-duty/departments/${id}`)),
+    onSuccess: async () => {
+      toast.success("Department deleted");
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   if (loading) return <LoadingState />;
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-        <CardTitle>Hospital departments</CardTitle>
-        {isAdmin ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <Input
-              className="w-40"
-              placeholder="Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <Input
-              className="w-24"
-              placeholder="Code"
-              value={shortCode}
-              onChange={(e) => setShortCode(e.target.value.toUpperCase())}
-            />
+    <div className="space-y-4">
+      {isAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Add department</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-end gap-2">
+            <FormField label="Name">
+              <Input
+                className="w-48"
+                placeholder="e.g. Emergency"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </FormField>
+            <FormField label="Code">
+              <Input
+                className="w-28"
+                placeholder="ER"
+                value={shortCode}
+                onChange={(e) => setShortCode(e.target.value.toUpperCase())}
+              />
+            </FormField>
             <Button
               size="sm"
               disabled={!name.trim() || !shortCode.trim() || create.isPending}
               onClick={() => create.mutate()}
             >
+              <Plus className="mr-1 h-4 w-4" />
               Add
             </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Hospital departments ({departments.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="min-w-0">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[520px]">
+              <TableHead>
+                <tr>
+                  <Th>Code</Th>
+                  <Th>Name</Th>
+                  <Th>Status</Th>
+                  {isAdmin ? <Th className="text-right">Actions</Th> : null}
+                </tr>
+              </TableHead>
+              <TableBody>
+                {departments.map((d) => (
+                  <tr key={d._id}>
+                    <Td className="font-mono font-semibold">
+                      {editingId === d._id ? (
+                        <Input
+                          className="w-24"
+                          value={editCode}
+                          onChange={(e) =>
+                            setEditCode(e.target.value.toUpperCase())
+                          }
+                        />
+                      ) : (
+                        d.shortCode
+                      )}
+                    </Td>
+                    <Td>
+                      {editingId === d._id ? (
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                        />
+                      ) : (
+                        d.name
+                      )}
+                    </Td>
+                    <Td>
+                      <Badge
+                        className={
+                          d.isActive
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-slate-100 text-slate-600"
+                        }
+                      >
+                        {d.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </Td>
+                    {isAdmin ? (
+                      <Td className="text-right">
+                        <div className="inline-flex flex-wrap justify-end gap-1">
+                          {editingId === d._id ? (
+                            <>
+                              <Button
+                                size="sm"
+                                disabled={
+                                  !editName.trim() ||
+                                  !editCode.trim() ||
+                                  update.isPending
+                                }
+                                onClick={() => update.mutate()}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditingId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  setEditingId(d._id);
+                                  setEditName(d.name);
+                                  setEditCode(d.shortCode);
+                                }}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-rose-200 text-rose-700"
+                                disabled={remove.isPending}
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Delete department “${d.shortCode} — ${d.name}”?`,
+                                    )
+                                  ) {
+                                    remove.mutate(d._id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </Td>
+                    ) : null}
+                  </tr>
+                ))}
+              </TableBody>
+            </Table>
           </div>
-        ) : null}
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-2">
-          {departments.map((d) => (
-            <Badge
-              key={d._id}
-              className={cn(
-                "text-sm",
-                d.isActive ? "bg-indigo-100 text-indigo-900" : "bg-slate-100 text-slate-500",
-              )}
-            >
-              <span className="font-mono font-semibold">{d.shortCode}</span>
-              <span className="mx-1 text-slate-400">·</span>
-              {d.name}
-            </Badge>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 
@@ -552,25 +766,42 @@ const ShiftsManager = ({
   loading: boolean;
   onChanged: () => Promise<void>;
 }) => {
-  const [form, setForm] = useState({
+  const emptyForm = {
     name: "",
     shortCode: "",
     startTime: "07:00",
     endTime: "13:00",
     dutyHours: 6,
-  });
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState(emptyForm);
 
   const create = useMutation({
     mutationFn: () => unwrap(api.post("/field-duty/shifts", form)),
     onSuccess: async () => {
       toast.success("Shift added");
-      setForm({
-        name: "",
-        shortCode: "",
-        startTime: "07:00",
-        endTime: "13:00",
-        dutyHours: 6,
-      });
+      setForm(emptyForm);
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      unwrap(api.put(`/field-duty/shifts/${editingId}`, editForm)),
+    onSuccess: async () => {
+      toast.success("Shift updated");
+      setEditingId(null);
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => unwrap(api.delete(`/field-duty/shifts/${id}`)),
+    onSuccess: async () => {
+      toast.success("Shift deleted");
       await onChanged();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -637,6 +868,7 @@ const ShiftsManager = ({
                 }
                 onClick={() => create.mutate()}
               >
+                <Plus className="mr-1 h-4 w-4" />
                 Add shift
               </Button>
             </div>
@@ -646,34 +878,437 @@ const ShiftsManager = ({
 
       <Card>
         <CardHeader>
-          <CardTitle>Duty shifts</CardTitle>
+          <CardTitle>Duty shifts ({shifts.length})</CardTitle>
         </CardHeader>
         <CardContent className="min-w-0">
           <div className="overflow-x-auto">
-            <Table className="min-w-[560px]">
+            <Table className="min-w-[720px]">
               <TableHead>
                 <tr>
                   <Th>Name</Th>
                   <Th>Code</Th>
                   <Th>Time</Th>
                   <Th>Hours</Th>
+                  {isAdmin ? <Th className="text-right">Actions</Th> : null}
                 </tr>
               </TableHead>
               <TableBody>
                 {shifts.map((s) => (
                   <tr key={s._id}>
-                    <Td>
-                      <span
-                        className="mr-2 inline-block h-3 w-3 rounded-sm"
-                        style={{ background: s.color || "#e2e8f0" }}
-                      />
-                      {s.name}
-                    </Td>
-                    <Td className="font-mono font-semibold">{s.shortCode}</Td>
-                    <Td>
-                      {s.startTime} – {s.endTime}
-                    </Td>
-                    <Td>{s.dutyHours}</Td>
+                    {editingId === s._id ? (
+                      <>
+                        <Td>
+                          <Input
+                            value={editForm.name}
+                            onChange={(e) =>
+                              setEditForm((f) => ({ ...f, name: e.target.value }))
+                            }
+                          />
+                        </Td>
+                        <Td>
+                          <Input
+                            className="w-20"
+                            value={editForm.shortCode}
+                            onChange={(e) =>
+                              setEditForm((f) => ({
+                                ...f,
+                                shortCode: e.target.value.toUpperCase(),
+                              }))
+                            }
+                          />
+                        </Td>
+                        <Td>
+                          <div className="flex flex-wrap gap-1">
+                            <Input
+                              type="time"
+                              className="time-input w-28"
+                              value={editForm.startTime}
+                              onChange={(e) =>
+                                setEditForm((f) => ({
+                                  ...f,
+                                  startTime: e.target.value,
+                                }))
+                              }
+                            />
+                            <Input
+                              type="time"
+                              className="time-input w-28"
+                              value={editForm.endTime}
+                              onChange={(e) =>
+                                setEditForm((f) => ({
+                                  ...f,
+                                  endTime: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                        </Td>
+                        <Td>
+                          <NumberInput
+                            className="w-20"
+                            min={0}
+                            max={24}
+                            step={0.5}
+                            value={editForm.dutyHours}
+                            onChange={(e) =>
+                              setEditForm((f) => ({
+                                ...f,
+                                dutyHours: e.target.valueAsNumber || 0,
+                              }))
+                            }
+                          />
+                        </Td>
+                        <Td className="text-right">
+                          <div className="inline-flex gap-1">
+                            <Button
+                              size="sm"
+                              disabled={
+                                !editForm.name.trim() ||
+                                !editForm.shortCode.trim() ||
+                                update.isPending
+                              }
+                              onClick={() => update.mutate()}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </Td>
+                      </>
+                    ) : (
+                      <>
+                        <Td>
+                          <span
+                            className="mr-2 inline-block h-3 w-3 rounded-sm"
+                            style={{ background: s.color || "#e2e8f0" }}
+                          />
+                          {s.name}
+                        </Td>
+                        <Td className="font-mono font-semibold">{s.shortCode}</Td>
+                        <Td>
+                          {s.startTime} – {s.endTime}
+                        </Td>
+                        <Td>{s.dutyHours}</Td>
+                        {isAdmin ? (
+                          <Td className="text-right">
+                            <div className="inline-flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  setEditingId(s._id);
+                                  setEditForm({
+                                    name: s.name,
+                                    shortCode: s.shortCode,
+                                    startTime: s.startTime,
+                                    endTime: s.endTime,
+                                    dutyHours: s.dutyHours,
+                                  });
+                                }}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-rose-200 text-rose-700"
+                                disabled={remove.isPending}
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Delete shift “${s.shortCode} — ${s.name}”?`,
+                                    )
+                                  ) {
+                                    remove.mutate(s._id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </Td>
+                        ) : null}
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+// ─── Duty codes (Off / Leave / custom) ──────────────────────────────────────
+
+const DutyCodesManager = ({
+  isAdmin,
+  codes,
+  loading,
+  onChanged,
+}: {
+  isAdmin: boolean;
+  codes: RosterDutyCodeRecord[];
+  loading: boolean;
+  onChanged: () => Promise<void>;
+}) => {
+  const [form, setForm] = useState({
+    code: "",
+    label: "",
+    isLeave: false,
+    isOff: false,
+  });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    code: "",
+    label: "",
+    isLeave: false,
+    isOff: false,
+  });
+
+  const create = useMutation({
+    mutationFn: () => unwrap(api.post("/field-duty/duty-codes", form)),
+    onSuccess: async () => {
+      toast.success("Code added");
+      setForm({ code: "", label: "", isLeave: false, isOff: false });
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      unwrap(api.put(`/field-duty/duty-codes/${editingId}`, editForm)),
+    onSuccess: async () => {
+      toast.success("Code updated");
+      setEditingId(null);
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/field-duty/duty-codes/${id}`)),
+    onSuccess: async () => {
+      toast.success("Code deleted");
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  if (loading) return <LoadingState />;
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-brand-100 bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
+        <CardContent className="py-3 text-sm text-slate-600">
+          Codes are free labels for a cell when not assigning a shift/department
+          (e.g. Off, Leave). Create custom codes here — they appear in the Roster
+          Builder cell editor like departments and shifts.
+        </CardContent>
+      </Card>
+
+      {isAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Add code</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <FormField label="Code *">
+              <Input
+                value={form.code}
+                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+                placeholder="e.g. Off"
+              />
+            </FormField>
+            <FormField label="Label *">
+              <Input
+                value={form.label}
+                onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+                placeholder="e.g. Day off"
+              />
+            </FormField>
+            <FormField label="Counts as">
+              <Select
+                value={
+                  form.isLeave ? "leave" : form.isOff ? "off" : "other"
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setForm((f) => ({
+                    ...f,
+                    isLeave: v === "leave",
+                    isOff: v === "off",
+                  }));
+                }}
+              >
+                <option value="other">Other / duty note</option>
+                <option value="off">Off day</option>
+                <option value="leave">Leave</option>
+              </Select>
+            </FormField>
+            <div className="flex items-end lg:col-span-2">
+              <Button
+                disabled={
+                  !form.code.trim() || !form.label.trim() || create.isPending
+                }
+                onClick={() => create.mutate()}
+              >
+                <Plus className="mr-1 h-4 w-4" />
+                Add code
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Roster codes ({codes.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="min-w-0">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[560px]">
+              <TableHead>
+                <tr>
+                  <Th>Code</Th>
+                  <Th>Label</Th>
+                  <Th>Type</Th>
+                  {isAdmin ? <Th className="text-right">Actions</Th> : null}
+                </tr>
+              </TableHead>
+              <TableBody>
+                {codes.map((c) => (
+                  <tr key={c._id}>
+                    {editingId === c._id ? (
+                      <>
+                        <Td>
+                          <Input
+                            className="w-24"
+                            value={editForm.code}
+                            onChange={(e) =>
+                              setEditForm((f) => ({ ...f, code: e.target.value }))
+                            }
+                          />
+                        </Td>
+                        <Td>
+                          <Input
+                            value={editForm.label}
+                            onChange={(e) =>
+                              setEditForm((f) => ({ ...f, label: e.target.value }))
+                            }
+                          />
+                        </Td>
+                        <Td>
+                          <Select
+                            value={
+                              editForm.isLeave
+                                ? "leave"
+                                : editForm.isOff
+                                  ? "off"
+                                  : "other"
+                            }
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setEditForm((f) => ({
+                                ...f,
+                                isLeave: v === "leave",
+                                isOff: v === "off",
+                              }));
+                            }}
+                          >
+                            <option value="other">Other</option>
+                            <option value="off">Off</option>
+                            <option value="leave">Leave</option>
+                          </Select>
+                        </Td>
+                        <Td className="text-right">
+                          <div className="inline-flex gap-1">
+                            <Button
+                              size="sm"
+                              disabled={
+                                !editForm.code.trim() ||
+                                !editForm.label.trim() ||
+                                update.isPending
+                              }
+                              onClick={() => update.mutate()}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </Td>
+                      </>
+                    ) : (
+                      <>
+                        <Td className="font-mono font-semibold">{c.code}</Td>
+                        <Td>{c.label}</Td>
+                        <Td>
+                          {c.isLeave ? (
+                            <Badge className="bg-amber-100 text-amber-900">Leave</Badge>
+                          ) : c.isOff ? (
+                            <Badge className="bg-slate-200 text-slate-800">Off</Badge>
+                          ) : (
+                            <Badge className="bg-sky-100 text-sky-900">Other</Badge>
+                          )}
+                        </Td>
+                        {isAdmin ? (
+                          <Td className="text-right">
+                            <div className="inline-flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  setEditingId(c._id);
+                                  setEditForm({
+                                    code: c.code,
+                                    label: c.label,
+                                    isLeave: Boolean(c.isLeave),
+                                    isOff: Boolean(c.isOff),
+                                  });
+                                }}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-rose-200 text-rose-700"
+                                disabled={remove.isPending}
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Delete code “${c.code} — ${c.label}”?`,
+                                    )
+                                  ) {
+                                    remove.mutate(c._id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </Td>
+                        ) : null}
+                      </>
+                    )}
                   </tr>
                 ))}
               </TableBody>
@@ -715,11 +1350,16 @@ const RostersList = ({
     batchId: "",
     yearId: "",
     hospitalId: "",
-    monthBs: "2083-01",
-    daysInMonth: 30,
+    startDateBs: todayBsString(),
+    endDateBs: todayBsString(),
     coordinatorStaffId: "",
     remarks: "",
   });
+
+  const periodDays = useMemo(
+    () => countInclusiveDays(form.startDateBs, form.endDateBs),
+    [form.startDateBs, form.endDateBs],
+  );
 
   /**
    * College years are fixed per batch (1st / 2nd / 3rd …).
@@ -741,14 +1381,31 @@ const RostersList = ({
   }, [years, form.batchId]);
 
   const create = useMutation({
-    mutationFn: () =>
-      unwrap<HospitalRosterRecord>(
+    mutationFn: () => {
+      if (!form.startDateBs?.trim() || !form.endDateBs?.trim()) {
+        throw new Error("Select From and To dates");
+      }
+      if (periodDays < 1) {
+        throw new Error("To date must be on or after From date");
+      }
+      if (periodDays > 93) {
+        throw new Error("Roster period cannot exceed 93 days");
+      }
+      return unwrap<HospitalRosterRecord>(
         api.post("/field-duty/hospital-rosters", {
-          ...form,
+          name: form.name,
+          academicYearBs: form.academicYearBs,
+          program: form.program,
+          batchId: form.batchId,
+          yearId: form.yearId,
+          hospitalId: form.hospitalId,
+          startDateBs: form.startDateBs,
+          endDateBs: form.endDateBs,
           coordinatorStaffId: cleanOptionalId(form.coordinatorStaffId),
-          daysInMonth: Number(form.daysInMonth) || 30,
+          remarks: form.remarks,
         }),
-      ),
+      );
+    },
     onSuccess: async (row) => {
       toast.success("Roster created — students loaded from batch/year");
       await onChanged();
@@ -851,28 +1508,34 @@ const RostersList = ({
                   ))}
               </Select>
             </FormField>
-            <div className="grid grid-cols-2 gap-3">
-              <FormField label="Month (BS YYYY-MM) *">
-                <Input
-                  value={form.monthBs}
-                  onChange={(e) => setForm((f) => ({ ...f, monthBs: e.target.value }))}
-                  placeholder="2083-03"
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="From date (BS) *">
+                <NepaliDateField
+                  value={form.startDateBs}
+                  onChange={(v) => {
+                    setForm((f) => {
+                      const next = { ...f, startDateBs: v };
+                      // Keep end on/after start when user moves From forward
+                      if (v && f.endDateBs && countInclusiveDays(v, f.endDateBs) < 1) {
+                        next.endDateBs = v;
+                      }
+                      return next;
+                    });
+                  }}
                 />
               </FormField>
-              <FormField label="Days">
-                <NumberInput
-                  min={28}
-                  max={32}
-                  value={form.daysInMonth}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      daysInMonth: e.target.valueAsNumber || 30,
-                    }))
-                  }
+              <FormField label="To date (BS) *">
+                <NepaliDateField
+                  value={form.endDateBs}
+                  onChange={(v) => setForm((f) => ({ ...f, endDateBs: v }))}
                 />
               </FormField>
             </div>
+            <p className="text-xs text-slate-500">
+              {periodDays >= 1
+                ? `Period: ${periodDays} day${periodDays === 1 ? "" : "s"} (minimum 1 day, maximum 93).`
+                : "To date must be on or after From date."}
+            </p>
             <FormField label="Coordinator">
               <Select
                 value={form.coordinatorStaffId}
@@ -902,7 +1565,10 @@ const RostersList = ({
                 !form.batchId ||
                 !form.yearId ||
                 !form.hospitalId ||
-                !form.monthBs
+                !form.startDateBs ||
+                !form.endDateBs ||
+                periodDays < 1 ||
+                periodDays > 93
               }
               onClick={() => create.mutate()}
             >
@@ -930,7 +1596,8 @@ const RostersList = ({
                 <div className="min-w-0">
                   <p className="font-medium text-slate-900">{r.name}</p>
                   <p className="text-xs text-slate-500">
-                    {r.hospitalName ?? "Hospital"} · {r.monthBs} ·{" "}
+                    {r.hospitalName ?? "Hospital"} · {periodLabel(r)}
+                    {r.daysInMonth ? ` (${r.daysInMonth}d)` : ""} ·{" "}
                     {r.batchName ?? "Batch"} / {r.yearName ?? "Year"} ·{" "}
                     {(r.studentIds?.length ?? r.students?.length ?? 0)} students
                   </p>
@@ -970,20 +1637,33 @@ const RosterBuilder = ({
   roster,
   shifts,
   departments,
+  dutyCodes,
   onChanged,
 }: {
   isAdmin: boolean;
   roster: HospitalRosterRecord;
   shifts: DutyShiftRecord[];
   departments: HospitalDepartmentRecord[];
+  dutyCodes: RosterDutyCodeRecord[];
   onChanged: () => Promise<void>;
 }) => {
   const locked = roster.status === "LOCKED";
-  const days = Array.from(
-    { length: Math.max(28, Math.min(32, roster.daysInMonth || 30)) },
-    (_, i) => i + 1,
+  const dayCount = Math.max(1, Math.min(93, roster.daysInMonth || 1));
+  const days = Array.from({ length: dayCount }, (_, i) => i + 1);
+  const dayDateLabel = useCallback(
+    (dayIndex: number) => {
+      if (roster.startDateBs) {
+        return offsetBsDate(roster.startDateBs, dayIndex - 1);
+      }
+      return String(dayIndex);
+    },
+    [roster.startDateBs],
   );
   const students = roster.students ?? [];
+  const activeCodes = useMemo(
+    () => dutyCodes.filter((c) => c.isActive !== false),
+    [dutyCodes],
+  );
 
   const [localCells, setLocalCells] = useState<HospitalRosterCell[]>(
     () => roster.cells ?? [],
@@ -1198,8 +1878,8 @@ const RosterBuilder = ({
           <div>
             <CardTitle>{roster.name}</CardTitle>
             <p className="mt-1 text-sm text-slate-500">
-              {roster.hospitalName} · Month {roster.monthBs} ·{" "}
-              {roster.batchName}/{roster.yearName} ·{" "}
+              {roster.hospitalName} · {periodLabel(roster)} ({dayCount} day
+              {dayCount === 1 ? "" : "s"}) · {roster.batchName}/{roster.yearName} ·{" "}
               <Badge className={statusBadge(roster.status)}>{roster.status}</Badge>
               {dirty ? (
                 <span className="ml-2 text-amber-700">Unsaved changes</span>
@@ -1252,14 +1932,19 @@ const RosterBuilder = ({
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  if (roster.daysInMonth >= 2) copyDay(1, 2);
-                  toast.success("Copied day 1 → day 2 (adjust as needed)");
+                  if (dayCount >= 2) {
+                    copyDay(1, 2);
+                    toast.success("Copied day 1 → day 2 (adjust as needed)");
+                  } else {
+                    toast.message("Need at least 2 days in this roster period");
+                  }
                 }}
               >
                 Copy day 1 → 2
               </Button>
               <span className="self-center text-xs text-slate-500">
-                Select a cell to set shift + department. Use Fill row / Clear row per student.
+                Select a cell to set shift + department + code. Columns are From→To dates
+                (1 day minimum).
               </span>
             </div>
           ) : null}
@@ -1276,8 +1961,14 @@ const RosterBuilder = ({
                     <th
                       key={d}
                       className="border border-slate-200 px-1 py-2 text-center font-semibold text-slate-600"
+                      title={dayDateLabel(d)}
                     >
-                      {d}
+                      <div>{d}</div>
+                      {roster.startDateBs ? (
+                        <div className="text-[9px] font-normal text-slate-400">
+                          {dayDateLabel(d).slice(5)}
+                        </div>
+                      ) : null}
                     </th>
                   ))}
                   <th className="border border-slate-200 px-2 py-2 text-left font-semibold text-slate-700">
@@ -1424,12 +2115,15 @@ const RosterBuilder = ({
                     }
                   >
                     <option value="">—</option>
-                    {DEFAULT_ROSTER_FREE_CODES.map((c) => (
-                      <option key={c.code} value={c.code}>
+                    {activeCodes.map((c) => (
+                      <option key={c._id} value={c.code}>
                         {c.code} — {c.label}
                       </option>
                     ))}
                   </Select>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Manage codes under the Codes tab (create / edit / delete).
+                  </p>
                 </FormField>
                 <FormField label="Cell remarks">
                   <Input
@@ -1476,8 +2170,8 @@ const RosterBuilder = ({
                   {s.dutyHours}h)
                 </span>
               ))}
-            {DEFAULT_ROSTER_FREE_CODES.map((c) => (
-              <span key={c.code}>
+            {activeCodes.map((c) => (
+              <span key={c._id}>
                 <span className="font-mono font-semibold">{c.code}</span>={c.label}
               </span>
             ))}
@@ -1493,20 +2187,34 @@ const RosterBuilder = ({
 const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
   const deptCodes = useMemo(() => {
     const set = new Set<string>();
-    for (const row of summary.clinicalRecord) {
+    for (const row of summary.dutySummary) {
       Object.keys(row.byDepartment).forEach((k) => set.add(k));
     }
     summary.departmentLegend.forEach((d) => set.add(d.shortCode));
     return Array.from(set).sort();
   }, [summary]);
 
+  const shiftCodes = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of summary.dutySummary) {
+      Object.keys(row.byShift).forEach((k) => set.add(k));
+    }
+    summary.shiftLegend.forEach((s) => set.add(s.shortCode));
+    return Array.from(set).sort();
+  }, [summary]);
+
+  const roster = summary.roster;
+
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle>Student duty summary</CardTitle>
-            <p className="text-sm text-slate-500">{summary.roster.name}</p>
+            <p className="text-sm text-slate-500">
+              {roster.name} · {periodLabel(roster)}
+              {roster.daysInMonth ? ` · ${roster.daysInMonth} day(s)` : ""}
+            </p>
           </div>
           <Button size="sm" variant="outline" onClick={() => window.print()}>
             <Printer className="mr-1 h-3.5 w-3.5" />
@@ -1524,29 +2232,17 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                   <Th>Working days</Th>
                   <Th>Leave</Th>
                   <Th>Off</Th>
-                  <Th>By shift</Th>
-                  <Th>By department</Th>
                 </tr>
               </TableHead>
               <TableBody>
                 {summary.dutySummary.map((row) => (
                   <tr key={row.studentId}>
                     <Td className="font-medium">{row.fullName}</Td>
-                    <Td>{row.totalDuties}</Td>
-                    <Td>{row.totalDutyHours}</Td>
-                    <Td>{row.workingDays}</Td>
-                    <Td>{row.leaveDays}</Td>
-                    <Td>{row.offDays}</Td>
-                    <Td className="text-xs">
-                      {Object.entries(row.byShift)
-                        .map(([k, v]) => `${k}:${v}`)
-                        .join(" · ") || "—"}
-                    </Td>
-                    <Td className="text-xs">
-                      {Object.entries(row.byDepartment)
-                        .map(([k, v]) => `${k}:${v}`)
-                        .join(" · ") || "—"}
-                    </Td>
+                    <Td className="tabular-nums">{row.totalDuties}</Td>
+                    <Td className="tabular-nums">{row.totalDutyHours}</Td>
+                    <Td className="tabular-nums">{row.workingDays}</Td>
+                    <Td className="tabular-nums">{row.leaveDays}</Td>
+                    <Td className="tabular-nums">{row.offDays}</Td>
                   </tr>
                 ))}
               </TableBody>
@@ -1557,7 +2253,131 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Clinical duty record</CardTitle>
+          <CardTitle>Department days by student</CardTitle>
+          <p className="text-sm text-slate-500">
+            How many days each student worked in each department (column = department code).
+          </p>
+        </CardHeader>
+        <CardContent className="min-w-0">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[960px]">
+              <TableHead>
+                <tr>
+                  <Th>Student</Th>
+                  {deptCodes.map((c) => {
+                    const name =
+                      summary.departmentLegend.find((d) => d.shortCode === c)?.name ??
+                      c;
+                    return (
+                      <Th key={c} className="text-center" title={name}>
+                        {c}
+                      </Th>
+                    );
+                  })}
+                  <Th className="text-right">Dept days</Th>
+                </tr>
+              </TableHead>
+              <TableBody>
+                {summary.dutySummary.map((row) => {
+                  const deptTotal = Object.values(row.byDepartment).reduce(
+                    (a, b) => a + b,
+                    0,
+                  );
+                  return (
+                    <tr key={row.studentId}>
+                      <Td className="font-medium">{row.fullName}</Td>
+                      {deptCodes.map((c) => (
+                        <Td key={c} className="text-center tabular-nums">
+                          {row.byDepartment[c] ?? 0}
+                        </Td>
+                      ))}
+                      <Td className="text-right font-semibold tabular-nums">
+                        {deptTotal}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          {deptCodes.length === 0 ? (
+            <p className="py-4 text-center text-sm text-slate-500">
+              No department assignments in this roster yet.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Shift days by student</CardTitle>
+          <p className="text-sm text-slate-500">
+            How many days each student worked each shift (column = shift code). Separate from
+            department counts.
+          </p>
+        </CardHeader>
+        <CardContent className="min-w-0">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[960px]">
+              <TableHead>
+                <tr>
+                  <Th>Student</Th>
+                  {shiftCodes.map((c) => {
+                    const sh = summary.shiftLegend.find((s) => s.shortCode === c);
+                    return (
+                      <Th
+                        key={c}
+                        className="text-center"
+                        title={sh ? `${sh.name} (${sh.dutyHours}h)` : c}
+                      >
+                        {c}
+                      </Th>
+                    );
+                  })}
+                  <Th className="text-right">Shift days</Th>
+                  <Th className="text-right">Hours</Th>
+                </tr>
+              </TableHead>
+              <TableBody>
+                {summary.dutySummary.map((row) => {
+                  const shiftTotal = Object.values(row.byShift).reduce(
+                    (a, b) => a + b,
+                    0,
+                  );
+                  return (
+                    <tr key={row.studentId}>
+                      <Td className="font-medium">{row.fullName}</Td>
+                      {shiftCodes.map((c) => (
+                        <Td key={c} className="text-center tabular-nums">
+                          {row.byShift[c] ?? 0}
+                        </Td>
+                      ))}
+                      <Td className="text-right font-semibold tabular-nums">
+                        {shiftTotal}
+                      </Td>
+                      <Td className="text-right tabular-nums">
+                        {row.totalDutyHours}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          {shiftCodes.length === 0 ? (
+            <p className="py-4 text-center text-sm text-slate-500">
+              No shift assignments in this roster yet.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Clinical duty record (departments)</CardTitle>
+          <p className="text-sm text-slate-500">
+            Same department matrix as above — compact clinical record view.
+          </p>
         </CardHeader>
         <CardContent className="min-w-0">
           <div className="overflow-x-auto">
@@ -1570,7 +2390,7 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                       {c}
                     </Th>
                   ))}
-                  <Th className="text-right">Total</Th>
+                  <Th className="text-right">Total duties</Th>
                 </tr>
               </TableHead>
               <TableBody>

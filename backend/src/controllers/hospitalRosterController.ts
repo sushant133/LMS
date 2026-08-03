@@ -3,6 +3,7 @@ import {
   canManageInstitution,
   DEFAULT_DUTY_SHIFTS,
   DEFAULT_HOSPITAL_DEPARTMENTS,
+  DEFAULT_ROSTER_FREE_CODES,
   dutyShiftSchema,
   dutyShiftUpdateSchema,
   fieldHospitalSchema,
@@ -13,6 +14,8 @@ import {
   hospitalRosterSchema,
   hospitalRosterStudentsUpdateSchema,
   hospitalRosterUpdateSchema,
+  rosterDutyCodeSchema,
+  rosterDutyCodeUpdateSchema,
   type ClinicalDutyRecordRow,
   type HospitalRosterCell,
   type StudentDutySummaryRow,
@@ -23,10 +26,18 @@ import { DutyShift } from "../models/DutyShift.js";
 import { FieldHospital } from "../models/FieldHospital.js";
 import { HospitalDepartment } from "../models/HospitalDepartment.js";
 import { HospitalRoster } from "../models/HospitalRoster.js";
+import { RosterDutyCode } from "../models/RosterDutyCode.js";
 import { Student } from "../models/Student.js";
 import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  compareBsDates,
+  countInclusiveBsDays,
+  ensureValidBsDate,
+  getDaysInBsMonth,
+  getOffsetFromBsDate,
+} from "../utils/nepaliDate.js";
 import { sendSuccess } from "../utils/response.js";
 import { withTenantScope } from "../utils/tenant.js";
 
@@ -105,6 +116,85 @@ export const ensureDefaultShifts = async (schoolId: string) => {
     })),
   );
 };
+
+export const ensureDefaultDutyCodes = async (schoolId: string) => {
+  const count = await RosterDutyCode.countDocuments({ schoolId, isDeleted: false });
+  if (count > 0) return;
+  await RosterDutyCode.insertMany(
+    DEFAULT_ROSTER_FREE_CODES.map((c) => ({
+      schoolId,
+      code: c.code,
+      label: c.label,
+      sortOrder: c.sortOrder,
+      isLeave: c.isLeave,
+      isOff: c.isOff,
+      isActive: true,
+      isSystem: true,
+      color: "",
+    })),
+  );
+};
+
+/** Resolve From–To BS dates + inclusive day count for a roster create/update. */
+const resolveRosterPeriod = (payload: {
+  startDateBs?: string;
+  endDateBs?: string;
+  monthBs?: string;
+  daysInMonth?: number;
+}): { startDateBs: string; endDateBs: string; monthBs: string; daysInMonth: number } => {
+  const startRaw = payload.startDateBs?.trim() || "";
+  const endRaw = payload.endDateBs?.trim() || "";
+
+  if (startRaw && endRaw) {
+    const startDateBs = ensureValidBsDate(startRaw);
+    const endDateBs = ensureValidBsDate(endRaw);
+    if (compareBsDates(endDateBs, startDateBs) < 0) {
+      throw new ApiError(400, "To date must be on or after From date");
+    }
+    const daysInMonth = countInclusiveBsDays(startDateBs, endDateBs);
+    if (daysInMonth < 1 || daysInMonth > 93) {
+      throw new ApiError(400, "Roster period must be between 1 and 93 days");
+    }
+    const monthBs = startDateBs.slice(0, 7);
+    return { startDateBs, endDateBs, monthBs, daysInMonth };
+  }
+
+  const monthBs = payload.monthBs?.trim() || "";
+  if (!/^\d{4}-\d{2}$/.test(monthBs)) {
+    throw new ApiError(400, "Provide From–To dates or a valid month (YYYY-MM)");
+  }
+  const [yStr, mStr] = monthBs.split("-");
+  const year = Number(yStr);
+  const month = Number(mStr);
+  const dim =
+    typeof payload.daysInMonth === "number" && payload.daysInMonth >= 1
+      ? Math.min(93, Math.max(1, Math.floor(payload.daysInMonth)))
+      : getDaysInBsMonth(year, month);
+  const startDateBs = ensureValidBsDate(`${monthBs}-01`);
+  let endDateBs: string;
+  try {
+    endDateBs = ensureValidBsDate(
+      `${monthBs}-${String(Math.min(dim, getDaysInBsMonth(year, month))).padStart(2, "0")}`,
+    );
+  } catch {
+    endDateBs = getOffsetFromBsDate(startDateBs, dim - 1);
+  }
+  const daysInMonth = countInclusiveBsDays(startDateBs, endDateBs);
+  return { startDateBs, endDateBs, monthBs, daysInMonth };
+};
+
+const formatDutyCode = (doc: Record<string, unknown>) => ({
+  _id: String(doc._id),
+  schoolId: String(doc.schoolId),
+  code: doc.code as string,
+  label: doc.label as string,
+  sortOrder: Number(doc.sortOrder) || 100,
+  isActive: doc.isActive !== false,
+  isSystem: Boolean(doc.isSystem),
+  isLeave: Boolean(doc.isLeave),
+  isOff: Boolean(doc.isOff),
+  color: (doc.color as string) || "",
+});
 
 // ─── Format helpers ─────────────────────────────────────────────────────────
 
@@ -194,6 +284,8 @@ const formatRoster = async (doc: Record<string, unknown>) => {
     sectionId: doc.sectionId ? String(doc.sectionId) : undefined,
     hospitalId,
     hospitalName: hospital?.name,
+    startDateBs: (doc.startDateBs as string) || "",
+    endDateBs: (doc.endDateBs as string) || "",
     monthBs: doc.monthBs as string,
     daysInMonth: Number(doc.daysInMonth) || 30,
     coordinatorStaffId,
@@ -491,6 +583,72 @@ export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, "Shift deleted");
 });
 
+// ─── Duty codes (Off / Leave / custom) ──────────────────────────────────────
+
+export const listDutyCodes = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantId(req);
+  await ensureDefaultDutyCodes(schoolId);
+  const rows = await RosterDutyCode.find({ schoolId, isDeleted: false })
+    .sort({ sortOrder: 1, code: 1 })
+    .lean();
+  return sendSuccess(
+    res,
+    "Duty codes fetched",
+    rows.map((r) => formatDutyCode(r as Record<string, unknown>)),
+  );
+});
+
+export const createDutyCode = asyncHandler(async (req: Request, res: Response) => {
+  assertAdmin(req);
+  const schoolId = tenantId(req);
+  await ensureDefaultDutyCodes(schoolId);
+  const payload = rosterDutyCodeSchema.parse(req.body);
+  try {
+    const doc = await RosterDutyCode.create({
+      schoolId,
+      ...payload,
+      isSystem: false,
+    });
+    return sendSuccess(
+      res,
+      "Duty code created",
+      formatDutyCode(doc.toObject() as Record<string, unknown>),
+      201,
+    );
+  } catch {
+    throw new ApiError(409, "Duty code already exists");
+  }
+});
+
+export const updateDutyCode = asyncHandler(async (req: Request, res: Response) => {
+  assertAdmin(req);
+  const schoolId = tenantId(req);
+  const payload = rosterDutyCodeUpdateSchema.parse(req.body);
+  const doc = await RosterDutyCode.findOneAndUpdate(
+    { _id: req.params.id, schoolId, isDeleted: false },
+    { $set: payload },
+    { new: true },
+  ).lean();
+  if (!doc) throw new ApiError(404, "Duty code not found");
+  return sendSuccess(res, "Duty code updated", formatDutyCode(doc as Record<string, unknown>));
+});
+
+export const deleteDutyCode = asyncHandler(async (req: Request, res: Response) => {
+  assertAdmin(req);
+  const schoolId = tenantId(req);
+  const existing = await RosterDutyCode.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false,
+  });
+  if (!existing) throw new ApiError(404, "Duty code not found");
+  existing.code = `${existing.code}__DEL_${Date.now().toString(36).slice(-6)}`;
+  existing.isDeleted = true;
+  existing.isActive = false;
+  await existing.save();
+  return sendSuccess(res, "Duty code deleted");
+});
+
 // ─── Rosters ────────────────────────────────────────────────────────────────
 
 const loadBatchYearStudents = async (
@@ -587,6 +745,8 @@ export const listHospitalRosters = asyncHandler(async (req: Request, res: Respon
       yearName: yearMap.get(String(r.yearId)),
       hospitalId: String(r.hospitalId),
       hospitalName: hospitalMap.get(String(r.hospitalId)),
+      startDateBs: (r.startDateBs as string) || "",
+      endDateBs: (r.endDateBs as string) || "",
       monthBs: r.monthBs as string,
       daysInMonth: Number(r.daysInMonth) || 30,
       status: (r.status as string) || "DRAFT",
@@ -642,6 +802,13 @@ export const createHospitalRoster = asyncHandler(async (req: Request, res: Respo
     throw new ApiError(401, "Authentication required");
   }
 
+  const period = resolveRosterPeriod({
+    startDateBs: payload.startDateBs,
+    endDateBs: payload.endDateBs,
+    monthBs: payload.monthBs,
+    daysInMonth: payload.daysInMonth,
+  });
+
   const doc = await HospitalRoster.create({
     schoolId,
     name: payload.name,
@@ -651,8 +818,10 @@ export const createHospitalRoster = asyncHandler(async (req: Request, res: Respo
     yearId: payload.yearId,
     sectionId: cleanId(payload.sectionId),
     hospitalId: payload.hospitalId,
-    monthBs: payload.monthBs,
-    daysInMonth: payload.daysInMonth,
+    startDateBs: period.startDateBs,
+    endDateBs: period.endDateBs,
+    monthBs: period.monthBs,
+    daysInMonth: period.daysInMonth,
     coordinatorStaffId: cleanId(payload.coordinatorStaffId),
     remarks: payload.remarks ?? "",
     status: "DRAFT",
@@ -704,12 +873,33 @@ export const updateHospitalRoster = asyncHandler(async (req: Request, res: Respo
   if (payload.hospitalId !== undefined) {
     existing.hospitalId = payload.hospitalId as unknown as typeof existing.hospitalId;
   }
-  if (payload.monthBs !== undefined) existing.monthBs = payload.monthBs;
-  if (payload.daysInMonth !== undefined) {
-    existing.daysInMonth = payload.daysInMonth;
-    // Drop cells that fall outside the new month length.
-    const maxDay = payload.daysInMonth;
-    const pruned = (existing.cells ?? []).filter((c) => c.day <= maxDay);
+  const periodTouched =
+    payload.startDateBs !== undefined ||
+    payload.endDateBs !== undefined ||
+    payload.monthBs !== undefined ||
+    payload.daysInMonth !== undefined;
+  if (periodTouched) {
+    const period = resolveRosterPeriod({
+      startDateBs:
+        payload.startDateBs !== undefined
+          ? payload.startDateBs
+          : existing.startDateBs || undefined,
+      endDateBs:
+        payload.endDateBs !== undefined
+          ? payload.endDateBs
+          : existing.endDateBs || undefined,
+      monthBs:
+        payload.monthBs !== undefined ? payload.monthBs : existing.monthBs || undefined,
+      daysInMonth:
+        payload.daysInMonth !== undefined
+          ? payload.daysInMonth
+          : existing.daysInMonth || undefined,
+    });
+    existing.startDateBs = period.startDateBs;
+    existing.endDateBs = period.endDateBs;
+    existing.monthBs = period.monthBs;
+    existing.daysInMonth = period.daysInMonth;
+    const pruned = (existing.cells ?? []).filter((c) => c.day <= period.daysInMonth);
     existing.set("cells", pruned as unknown as typeof existing.cells);
   }
   if (Object.prototype.hasOwnProperty.call(payload, "coordinatorStaffId")) {
@@ -929,12 +1119,16 @@ export const deleteHospitalRoster = asyncHandler(async (req: Request, res: Respo
 
 const buildSummary = async (schoolId: string, rosterDoc: Record<string, unknown>) => {
   const roster = await formatRoster(rosterDoc);
-  const [shifts, departments] = await Promise.all([
+  const [shifts, departments, dutyCodes] = await Promise.all([
     DutyShift.find({ schoolId, isDeleted: false }).lean(),
     HospitalDepartment.find({ schoolId, isDeleted: false }).lean(),
+    RosterDutyCode.find({ schoolId, isDeleted: false }).lean(),
   ]);
   const shiftById = new Map(shifts.map((s) => [s._id.toString(), s]));
   const deptById = new Map(departments.map((d) => [d._id.toString(), d]));
+  const codeByValue = new Map(
+    dutyCodes.map((c) => [String(c.code).trim().toLowerCase(), c]),
+  );
 
   const dutySummary: StudentDutySummaryRow[] = (roster.students ?? []).map((st) => {
     const byShift: Record<string, number> = {};
@@ -950,14 +1144,19 @@ const buildSummary = async (schoolId: string, rosterDoc: Record<string, unknown>
     for (const cell of studentCells) {
       const code = (cell.code || "").trim();
       const codeLower = code.toLowerCase();
-      if (codeLower === "leave") {
+      const codeMeta = codeLower ? codeByValue.get(codeLower) : undefined;
+      const isLeave =
+        Boolean(codeMeta?.isLeave) || codeLower === "leave";
+      const isOff = Boolean(codeMeta?.isOff) || codeLower === "off";
+
+      if (isLeave && !cell.shiftId && !cell.departmentId) {
         leaveDays += 1;
-        byCode[code] = (byCode[code] ?? 0) + 1;
+        byCode[code || "Leave"] = (byCode[code || "Leave"] ?? 0) + 1;
         continue;
       }
-      if (codeLower === "off") {
+      if (isOff && !cell.shiftId && !cell.departmentId) {
         offDays += 1;
-        byCode[code] = (byCode[code] ?? 0) + 1;
+        byCode[code || "Off"] = (byCode[code || "Off"] ?? 0) + 1;
         continue;
       }
 
@@ -1027,6 +1226,14 @@ const buildSummary = async (schoolId: string, rosterDoc: Record<string, unknown>
     departmentLegend: departments
       .filter((d) => d.isActive)
       .map((d) => ({ shortCode: d.shortCode, name: d.name })),
+    codeLegend: dutyCodes
+      .filter((c) => c.isActive)
+      .map((c) => ({
+        code: c.code,
+        label: c.label,
+        isLeave: Boolean(c.isLeave),
+        isOff: Boolean(c.isOff),
+      })),
   };
 };
 
@@ -1040,6 +1247,7 @@ export const getHospitalRosterSummary = asyncHandler(async (req: Request, res: R
   if (!doc) throw new ApiError(404, "Roster not found");
   await ensureDefaultDepartments(schoolId);
   await ensureDefaultShifts(schoolId);
+  await ensureDefaultDutyCodes(schoolId);
   const summary = await buildSummary(schoolId, doc as Record<string, unknown>);
   return sendSuccess(res, "Roster summary fetched", summary);
 });
@@ -1049,8 +1257,8 @@ export const getHospitalRosterDayAssignments = asyncHandler(
   async (req: Request, res: Response) => {
     const schoolId = tenantId(req);
     const day = Number(req.query.day);
-    if (!Number.isFinite(day) || day < 1 || day > 32) {
-      throw new ApiError(400, "Query ?day=1-32 is required");
+    if (!Number.isFinite(day) || day < 1 || day > 93) {
+      throw new ApiError(400, "Query ?day=1-93 is required");
     }
     const doc = await HospitalRoster.findOne({
       _id: req.params.id,
@@ -1098,6 +1306,8 @@ export const getHospitalRosterDayAssignments = asyncHandler(
       rosterName: roster.name,
       hospitalName: roster.hospitalName,
       monthBs: roster.monthBs,
+      startDateBs: roster.startDateBs,
+      endDateBs: roster.endDateBs,
       day,
       assignments,
     });

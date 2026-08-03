@@ -56,10 +56,26 @@ export interface DutyShiftRecord {
   updatedAt?: string;
 }
 
+/** Free-form cell codes (Off / Leave / custom) — managed like shifts/departments. */
+export interface RosterDutyCodeRecord {
+  _id: string;
+  schoolId: string;
+  code: string;
+  label: string;
+  sortOrder: number;
+  isActive: boolean;
+  isSystem?: boolean;
+  isLeave?: boolean;
+  isOff?: boolean;
+  color?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 /** One cell in the student × day grid. */
 export interface HospitalRosterCell {
   studentId: string;
-  /** Day of month 1–31 (or daysInMonth). */
+  /** Day index within period (1 = startDateBs). Legacy: day-of-month. */
   day: number;
   shiftId?: string;
   departmentId?: string;
@@ -88,8 +104,13 @@ export interface HospitalRosterRecord {
   sectionId?: string;
   hospitalId: string;
   hospitalName?: string;
-  /** BS month as YYYY-MM (e.g. 2083-03). */
+  /** Inclusive period start BS (YYYY-MM-DD). */
+  startDateBs?: string;
+  /** Inclusive period end BS (YYYY-MM-DD). */
+  endDateBs?: string;
+  /** BS month of start as YYYY-MM (e.g. 2083-03) — legacy list/filter key. */
   monthBs: string;
+  /** Inclusive days in the From–To period (1–93). */
   daysInMonth: number;
   coordinatorStaffId?: string;
   coordinatorName?: string;
@@ -143,6 +164,7 @@ export interface HospitalRosterSummary {
   clinicalRecord: ClinicalDutyRecordRow[];
   shiftLegend: Array<{ shortCode: string; name: string; dutyHours: number }>;
   departmentLegend: Array<{ shortCode: string; name: string }>;
+  codeLegend?: Array<{ code: string; label: string; isLeave?: boolean; isOff?: boolean }>;
 }
 
 /** Default departments seeded per school on first use. */
@@ -252,8 +274,8 @@ export const DEFAULT_DUTY_SHIFTS: Array<{
 ];
 
 export const DEFAULT_ROSTER_FREE_CODES = [
-  { code: "Off", label: "Off" },
-  { code: "Leave", label: "Leave" },
-  { code: "ID", label: "Infectious Duty" },
-  { code: "DW", label: "Duty Ward" },
+  { code: "Off", label: "Off", isOff: true, isLeave: false, sortOrder: 10 },
+  { code: "Leave", label: "Leave", isOff: false, isLeave: true, sortOrder: 20 },
+  { code: "ID", label: "Infectious Duty", isOff: false, isLeave: false, sortOrder: 30 },
+  { code: "DW", label: "Duty Ward", isOff: false, isLeave: false, sortOrder: 40 },
 ] as const;

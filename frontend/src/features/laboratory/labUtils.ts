@@ -24,6 +24,7 @@ export type LaboratoryYearLevel = (typeof LABORATORY_YEAR_LEVELS)[number];
 export type LabTab =
   | "dashboard"
   | "labs"
+  | "allot"
   | "inventory"
   | "print-inventory"
   | "requests"
