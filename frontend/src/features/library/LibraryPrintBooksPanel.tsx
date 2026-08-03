@@ -22,6 +22,7 @@ import { StockStatusBadge } from "features/library/StockStatusBadge";
 import { exportLibraryInventoryPdf } from "features/library/libraryUtils";
 import { api, unwrap } from "lib/api";
 import { getCollegeDisplayName } from "lib/auth";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { printElementById } from "lib/printUtils";
 import { parseErrorMessage } from "lib/utils";
 
@@ -238,7 +239,12 @@ const PrintBookBlock = ({ book, index }: PrintBookBlockProps) => {
 
 export const LibraryPrintBooksPanel = () => {
   const { user, availableSchools } = useAuth();
-  const institutionName = getCollegeDisplayName(availableSchools, user);
+  const printBranding = getPrintInstitutionBranding();
+  const institutionName =
+    getCollegeDisplayName(availableSchools, user) ||
+    printBranding.name ||
+    "Institution";
+  const institutionAddress = printBranding.address?.trim() || "";
 
   const [search, setSearch] = useState("");
   const [yearFilter, setYearFilter] = useState<"ALL" | LibraryYearLevel>("ALL");
@@ -322,6 +328,7 @@ export const LibraryPrintBooksPanel = () => {
         // jsPDF text layout — includes every book + every copy (no html2canvas clipping)
         await exportLibraryInventoryPdf(books, {
           institutionName,
+          institutionAddress,
           title,
           filename: `${fileBase}.pdf`,
         });
@@ -587,6 +594,18 @@ export const LibraryPrintBooksPanel = () => {
                 >
                   {institutionName || "Institution"}
                 </p>
+                {institutionAddress ? (
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      fontSize: 12,
+                      color: "#475569",
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    {institutionAddress}
+                  </p>
+                ) : null}
                 <p
                   style={{
                     margin: "2px 0 0",

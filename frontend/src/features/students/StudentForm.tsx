@@ -1,6 +1,7 @@
 import {
   BLOOD_GROUPS,
   DISABILITY_CATEGORIES,
+  ETHNICITY_CATEGORIES,
   getCastesForReligion,
   RELIGIONS,
   STUDENT_ACADEMIC_STATUSES,
@@ -60,6 +61,7 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   gender: "",
   bloodGroup: undefined,
   disabilityCategory: undefined,
+  ethnicityCategory: undefined,
   religion: undefined,
   caste: "",
   address: {
@@ -178,6 +180,7 @@ export const StudentForm = ({
           : Number(form.feesDueNpr) || 0,
       bloodGroup: form.bloodGroup || undefined,
       disabilityCategory: form.disabilityCategory || undefined,
+      ethnicityCategory: form.ethnicityCategory || undefined,
       religion: form.religion || undefined,
       caste: form.caste?.trim() || undefined,
       documents,
@@ -441,6 +444,25 @@ export const StudentForm = ({
           >
             <option value="">Select category</option>
             {DISABILITY_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <FormField label="Ethnicity">
+          <Select
+            value={form.ethnicityCategory ?? ""}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                ethnicityCategory: (event.target.value ||
+                  undefined) as StudentInput["ethnicityCategory"],
+              }))
+            }
+          >
+            <option value="">Select ethnicity</option>
+            {ETHNICITY_CATEGORIES.map((category) => (
               <option key={category} value={category}>
                 {category}
               </option>

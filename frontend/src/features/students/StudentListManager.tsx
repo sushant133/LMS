@@ -42,6 +42,10 @@ import {
 import { api, unwrap } from "lib/api";
 import { toastResendCredentials } from "lib/credentialsEmail";
 import { queryClient } from "lib/queryClient";
+import {
+  formatPrintAddress,
+  getPrintInstitutionBranding,
+} from "lib/printBranding";
 import { printElementById } from "lib/printUtils";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { Badge } from "components/ui/badge";
@@ -74,6 +78,12 @@ export const StudentListManager = () => {
   const [searchParams] = useSearchParams();
   const { user, availableSchools } = useAuth();
   const institutionName = getCollegeDisplayName(availableSchools, user);
+  const printBranding = getPrintInstitutionBranding();
+  const institutionAddress =
+    printBranding.address?.trim() ||
+    formatPrintAddress(
+      availableSchools[0]?.address ?? user?.school?.address,
+    );
   const [printing, setPrinting] = useState(false);
   const role = useNormalizedRole();
   const isCollege = useIsCollege();
@@ -955,8 +965,20 @@ export const StudentListManager = () => {
                   color: "#0f172a",
                 }}
               >
-                {institutionName || "Institution"}
+                {institutionName || printBranding.name || "Institution"}
               </p>
+              {institutionAddress ? (
+                <p
+                  style={{
+                    margin: "2px 0 0",
+                    fontSize: 11,
+                    color: "#475569",
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {institutionAddress}
+                </p>
+              ) : null}
               <p
                 style={{
                   margin: "2px 0 0",

@@ -24,6 +24,7 @@ import {
 } from "features/laboratory/labUtils";
 import { api, unwrap } from "lib/api";
 import { getCollegeDisplayName } from "lib/auth";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { printElementById } from "lib/printUtils";
 import { parseErrorMessage } from "lib/utils";
 
@@ -69,7 +70,12 @@ const tdStyle: CSSProperties = {
 
 export const LaboratoryPrintInventoryPanel = () => {
   const { user, availableSchools } = useAuth();
-  const institutionName = getCollegeDisplayName(availableSchools, user);
+  const printBranding = getPrintInstitutionBranding();
+  const institutionName =
+    getCollegeDisplayName(availableSchools, user) ||
+    printBranding.name ||
+    "Institution";
+  const institutionAddress = printBranding.address?.trim() || "";
 
   const [search, setSearch] = useState("");
   const [labFilter, setLabFilter] = useState("");
@@ -144,6 +150,7 @@ export const LaboratoryPrintInventoryPanel = () => {
             : "laboratory-inventory-all";
         await exportLaboratoryInventoryPdf(selected, {
           institutionName,
+          institutionAddress,
           title,
           filename: `${fileBase}.pdf`,
         });
@@ -462,6 +469,18 @@ export const LaboratoryPrintInventoryPanel = () => {
               >
                 {institutionName || "Institution"}
               </p>
+              {institutionAddress ? (
+                <p
+                  style={{
+                    margin: "2px 0 0",
+                    fontSize: 10,
+                    color: "#475569",
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {institutionAddress}
+                </p>
+              ) : null}
               <p
                 style={{
                   margin: "2px 0 0",

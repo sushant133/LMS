@@ -6,6 +6,7 @@ import {
   COLLEGE_STAFF_CATEGORIES,
   DISABILITY_CATEGORIES,
   EMPLOYMENT_TYPES,
+  ETHNICITY_CATEGORIES,
   EXAM_ATTENDANCE_STATUSES,
   EXAM_STATUSES,
   isValidCasteForReligion,
@@ -195,6 +196,7 @@ export const studentSchema = z.object({
   gender: z.string().optional().or(z.literal("")).default(""),
   bloodGroup: z.enum(BLOOD_GROUPS).optional(),
   disabilityCategory: z.enum(DISABILITY_CATEGORIES).optional(),
+  ethnicityCategory: z.enum(ETHNICITY_CATEGORIES).optional(),
   religion: z.enum(RELIGIONS).optional(),
   /** Caste/community; must match options for the selected religion when both are set. */
   caste: z.string().trim().optional().or(z.literal("")),

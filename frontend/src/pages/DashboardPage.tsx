@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -53,7 +53,11 @@ import { useNotificationBadge } from "hooks/useNotificationBadge";
 import { applyNotificationReadLocally, invalidateNotificationQueries } from "lib/notificationQueries";
 import { cn, formatCurrencyNpr } from "lib/utils";
 
-const INSTITUTION_MIX_COLORS = ["#0c2d6b", "#3b82f6", "#f59e0b"];
+/** Soft premium surfaces — restrained color, fine borders, light elevation */
+const panelClass =
+  "border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_28px_-12px_rgba(15,23,42,0.12)]";
+
+const INSTITUTION_MIX_COLORS = ["#0f172a", "#475569", "#94a3b8"];
 /** Male / Female / Other pie colors */
 const GENDER_CHART_COLORS: Record<string, string> = {
   Male: "#2563eb",
@@ -93,6 +97,31 @@ const religionColor = (name: string, index: number): string => {
   return fixed[name] ?? RELIGION_CHART_COLORS[index % RELIGION_CHART_COLORS.length]!;
 };
 
+/** Ethnicity category palette (stable by index for unknown labels) */
+const ETHNICITY_CHART_COLORS = [
+  "#0c2d6b",
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#ea580c",
+  "#059669",
+  "#64748b",
+];
+
+const ethnicityColor = (name: string, index: number): string => {
+  const fixed: Record<string, string> = {
+    "Brahmin / Chhetri": "#0c2d6b",
+    Dalit: "#db2777",
+    "Janajati / Indigenous": "#059669",
+    Madhesi: "#ea580c",
+    Muslim: "#2563eb",
+    Other: "#94a3b8",
+    "Prefer not to say": "#64748b",
+    Unset: "#cbd5e1",
+  };
+  return fixed[name] ?? ETHNICITY_CHART_COLORS[index % ETHNICITY_CHART_COLORS.length]!;
+};
+
 type BreakdownSlice = { name: string; value: number };
 
 type DemoRow = NonNullable<DashboardResponse["studentDemographics"]>[number];
@@ -125,7 +154,18 @@ const tallyReligionSlices = (rows: DemoRow[]): BreakdownSlice[] => {
     .map(([name, value]) => ({ name, value }));
 };
 
-/** Gender + religion donuts with batch / year (or class / section) filters. */
+const tallyEthnicitySlices = (rows: DemoRow[]): BreakdownSlice[] => {
+  const counts = new Map<string, number>();
+  for (const s of rows) {
+    const ethnicity = (s.ethnicityCategory ?? "").trim() || "Unset";
+    counts.set(ethnicity, (counts.get(ethnicity) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, value]) => ({ name, value }));
+};
+
+/** Gender + ethnicity + religion donuts with batch / year (or class / section) filters. */
 const StudentDemographicsCharts = ({
   data,
 }: {
@@ -160,6 +200,10 @@ const StudentDemographicsCharts = ({
     () => tallyReligionSlices(filteredRows),
     [filteredRows],
   );
+  const ethnicityData = useMemo(
+    () => tallyEthnicitySlices(filteredRows),
+    [filteredRows],
+  );
 
   const batchLabel = isCollege ? "Batch" : "Class";
   const yearLabel = isCollege ? "Year" : "Section";
@@ -176,7 +220,8 @@ const StudentDemographicsCharts = ({
   const hasAnyDemo =
     rows.length > 0 ||
     (data.genderChart?.length ?? 0) > 0 ||
-    (data.religionChart?.length ?? 0) > 0;
+    (data.religionChart?.length ?? 0) > 0 ||
+    (data.ethnicityChart?.length ?? 0) > 0;
 
   if (!hasAnyDemo) return null;
 
@@ -193,10 +238,17 @@ const StudentDemographicsCharts = ({
     hasChartFilter && rows.length > 0
       ? religionData
       : (data.religionChart ?? religionData);
+  const ethnicitySlices =
+    hasChartFilter && rows.length > 0
+      ? ethnicityData
+      : (data.ethnicityChart ?? ethnicityData);
 
   const chartScope = hasChartFilter
     ? scope
-    : data.genderChartScope || data.religionChartScope || scope;
+    : data.genderChartScope ||
+      data.ethnicityChartScope ||
+      data.religionChartScope ||
+      scope;
 
   const legendBase = "/students/list";
 
@@ -206,14 +258,14 @@ const StudentDemographicsCharts = ({
   return (
     <div className="space-y-4">
       {showFilters ? (
-        <Card className="border-slate-200/80 shadow-sm">
+        <Card className={cn(panelClass)}>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">
+            <CardTitle className="text-base font-semibold tracking-tight">
               Student demographics filters
             </CardTitle>
             <p className="text-sm text-slate-500">
-              Filter gender and religion charts by {batchLabel.toLowerCase()}{" "}
-              and {yearLabel.toLowerCase()}.
+              Filter gender, ethnicity, and religion charts by{" "}
+              {batchLabel.toLowerCase()} and {yearLabel.toLowerCase()}.
             </p>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -264,11 +316,11 @@ const StudentDemographicsCharts = ({
         </Card>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
         <BreakdownDonutCard
           title="Students by Gender"
           scope={chartScope}
-          icon={<Users className="h-5 w-5 text-brand-700" />}
+          icon={<Users className="h-4 w-4 text-slate-600" strokeWidth={1.75} />}
           data={genderSlices}
           colorFor={(name) =>
             GENDER_CHART_COLORS[name] ?? INSTITUTION_MIX_COLORS[0]!
@@ -281,9 +333,25 @@ const StudentDemographicsCharts = ({
           legendLinkBase={legendBase}
         />
         <BreakdownDonutCard
+          title="Students by Ethnicity"
+          scope={chartScope}
+          icon={
+            <Sparkles className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+          }
+          data={ethnicitySlices}
+          colorFor={ethnicityColor}
+          emptyMessage={
+            hasChartFilter
+              ? "No active students match this batch/year filter."
+              : "No active students with ethnicity recorded yet."
+          }
+        />
+        <BreakdownDonutCard
           title="Students by Religion"
           scope={chartScope}
-          icon={<Sparkles className="h-5 w-5 text-brand-700" />}
+          icon={
+            <Sparkles className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+          }
           data={religionSlices}
           colorFor={religionColor}
           emptyMessage={
@@ -353,10 +421,12 @@ const BreakdownDonutCard = ({
   };
 
   return (
-    <Card className="border-slate-200/80 shadow-sm">
-      <CardHeader className="space-y-1 pb-2">
-        <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-          {icon}
+    <Card className={cn(panelClass)}>
+      <CardHeader className="space-y-1 border-slate-100/80 pb-2">
+        <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight sm:text-lg">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+            {icon}
+          </span>
           {title}
         </CardTitle>
         {scope ? (
@@ -468,7 +538,7 @@ const BreakdownDonutCard = ({
                     to={href}
                     className={cn(
                       rowClass,
-                      "hover:border-brand-200 hover:bg-brand-50/50",
+                      "hover:border-slate-300 hover:bg-white",
                     )}
                   >
                     {inner}
@@ -563,10 +633,10 @@ const dashboardStatHint = (label: string, href?: string): string | null => {
 };
 
 const highlightToneClass: Record<NonNullable<DashboardHighlight["tone"]>, string> = {
-  default: "border-slate-200 bg-white",
-  info: "border-sky-200 bg-sky-50/70",
-  success: "border-brand-200 bg-brand-50/70",
-  warning: "border-amber-200 bg-amber-50/70"
+  default: "border-slate-200/80 bg-white",
+  info: "border-slate-200/80 bg-slate-50/80",
+  success: "border-slate-200/80 bg-white",
+  warning: "border-slate-200/90 bg-amber-50/40",
 };
 
 const formatNotificationTime = (value?: string): string => {
@@ -587,6 +657,196 @@ const formatNotificationTime = (value?: string): string => {
   });
 };
 
+/** Live analog wall clock for the dashboard hero (right column under Notice Board). */
+const DashboardWallClock = ({ size = 132 }: { size?: number }) => {
+  const reactId = useId().replace(/:/g, "");
+  const faceGlowId = `clockFaceGlow-${reactId}`;
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const hours = now.getHours() % 12;
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+  // Standard analog geometry: 0° at 12 o'clock
+  const secondDeg = seconds * 6;
+  const minuteDeg = minutes * 6 + seconds * 0.1;
+  const hourDeg = hours * 30 + minutes * 0.5;
+
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - 3;
+  const hourLen = r * 0.42;
+  const minuteLen = r * 0.58;
+  const secondLen = r * 0.68;
+
+  const handEnd = (deg: number, length: number) => {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return {
+      x: cx + length * Math.cos(rad),
+      y: cy + length * Math.sin(rad),
+    };
+  };
+
+  const hourTip = handEnd(hourDeg, hourLen);
+  const minuteTip = handEnd(minuteDeg, minuteLen);
+  const secondTip = handEnd(secondDeg, secondLen);
+  const secondTail = handEnd(secondDeg + 180, r * 0.14);
+
+  const ticks = Array.from({ length: 60 }, (_, i) => {
+    const deg = i * 6;
+    const rad = ((deg - 90) * Math.PI) / 180;
+    const major = i % 5 === 0;
+    const outer = r - 2;
+    const inner = major ? r - 10 : r - 5;
+    return {
+      key: i,
+      x1: cx + outer * Math.cos(rad),
+      y1: cy + outer * Math.sin(rad),
+      x2: cx + inner * Math.cos(rad),
+      y2: cy + inner * Math.sin(rad),
+      major,
+    };
+  });
+
+  const hourLabels = Array.from({ length: 12 }, (_, i) => {
+    const n = i === 0 ? 12 : i;
+    const deg = i * 30;
+    const rad = ((deg - 90) * Math.PI) / 180;
+    const lr = r * 0.72;
+    return {
+      n,
+      x: cx + lr * Math.cos(rad),
+      y: cy + lr * Math.sin(rad),
+    };
+  });
+
+  const timeLabel = now.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  return (
+    <div
+      className="relative mx-auto shrink-0 select-none sm:mx-0"
+      style={{ width: size, height: size }}
+      role="img"
+      aria-label={`Current time ${timeLabel}`}
+      title={timeLabel}
+    >
+      {/* Bezel / rim */}
+      <div
+        className="absolute inset-0 rounded-full shadow-[0_4px_16px_rgba(15,23,42,0.12),inset_0_1px_0_rgba(255,255,255,0.65)]"
+        style={{
+          background:
+            "radial-gradient(circle at 35% 28%, #f8fafc 0%, #e2e8f0 55%, #cbd5e1 100%)",
+          boxShadow:
+            "0 6px 18px rgba(15,23,42,0.12), 0 1px 0 rgba(255,255,255,0.7) inset, 0 -1px 0 rgba(15,23,42,0.06) inset",
+        }}
+      />
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        className="relative block"
+        aria-hidden
+      >
+        {/* Face */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r - 5}
+          fill="#fafbfc"
+          stroke="#94a3b8"
+          strokeWidth={1.25}
+        />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r - 5}
+          fill={`url(#${faceGlowId})`}
+          opacity={0.55}
+        />
+        <defs>
+          <radialGradient id={faceGlowId} cx="38%" cy="32%" r="65%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#e2e8f0" stopOpacity={0} />
+          </radialGradient>
+        </defs>
+
+        {/* Tick marks */}
+        {ticks.map((t) => (
+          <line
+            key={t.key}
+            x1={t.x1}
+            y1={t.y1}
+            x2={t.x2}
+            y2={t.y2}
+            stroke={t.major ? "#0f172a" : "#94a3b8"}
+            strokeWidth={t.major ? 1.75 : 0.9}
+            strokeLinecap="round"
+          />
+        ))}
+
+        {/* Hour numerals */}
+        {hourLabels.map((h) => (
+          <text
+            key={h.n}
+            x={h.x}
+            y={h.y}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="#0f172a"
+            fontSize={size * 0.095}
+            fontWeight={600}
+            fontFamily="system-ui, -apple-system, Segoe UI, sans-serif"
+          >
+            {h.n}
+          </text>
+        ))}
+
+        {/* Hour hand */}
+        <line
+          x1={cx}
+          y1={cy}
+          x2={hourTip.x}
+          y2={hourTip.y}
+          stroke="#0f172a"
+          strokeWidth={3.2}
+          strokeLinecap="round"
+        />
+        {/* Minute hand */}
+        <line
+          x1={cx}
+          y1={cy}
+          x2={minuteTip.x}
+          y2={minuteTip.y}
+          stroke="#1e293b"
+          strokeWidth={2.2}
+          strokeLinecap="round"
+        />
+        {/* Second hand */}
+        <line
+          x1={secondTail.x}
+          y1={secondTail.y}
+          x2={secondTip.x}
+          y2={secondTip.y}
+          stroke="#64748b"
+          strokeWidth={1.15}
+          strokeLinecap="round"
+        />
+        {/* Center hub */}
+        <circle cx={cx} cy={cy} r={3.6} fill="#0f172a" />
+        <circle cx={cx} cy={cy} r={1.5} fill="#f8fafc" />
+      </svg>
+    </div>
+  );
+};
+
 const DashboardHero = ({
   title,
   description,
@@ -605,24 +865,38 @@ const DashboardHero = ({
   institutionName?: string;
   unreadCount: number;
 }) => (
-  <section className="overflow-hidden rounded-2xl border border-brand-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_#ffffff_45%,_#eff6ff_100%)] p-4 shadow-sm sm:rounded-3xl sm:p-6 md:p-8">
+  <section
+    className={cn(
+      "relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 sm:rounded-[1.75rem] sm:p-6 md:p-8",
+      "shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_40px_-20px_rgba(15,23,42,0.14)]",
+    )}
+  >
+    {/* Thin premium accent — not a loud gradient wash */}
+    <div
+      className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-slate-800 via-slate-600 to-slate-400"
+      aria-hidden
+    />
+    <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-slate-100/70 blur-3xl" aria-hidden />
+    <div className="pointer-events-none absolute -bottom-24 -left-10 h-48 w-48 rounded-full bg-slate-50 blur-3xl" aria-hidden />
     {/*
       CSS grid keeps the action buttons pinned to the trailing edge.
       Flex + w-full previously allowed the button group to jump left after client navigation.
     */}
-    <div className="grid min-h-0 gap-4 sm:gap-5 lg:min-h-[11.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
-      <div className="min-w-0 space-y-2.5 sm:space-y-3">
+    <div className="relative grid min-h-0 gap-4 sm:gap-5 lg:min-h-[10.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
+      <div className="min-w-0 space-y-3 sm:space-y-3.5">
         <div className="flex min-h-7 flex-wrap items-center gap-2">
-          <Badge className="shrink-0 bg-brand-600 text-white">{roleLabel}</Badge>
+          <Badge className="shrink-0 border border-slate-800/10 bg-slate-900 text-white">
+            {roleLabel}
+          </Badge>
           {roleSubtitle ? (
-            <Badge className="shrink-0 bg-slate-100 text-slate-700">
+            <Badge className="shrink-0 border border-slate-200 bg-slate-50 font-medium text-slate-600">
               {roleSubtitle}
             </Badge>
           ) : null}
           <Badge
             className={cn(
-              "shrink-0 bg-amber-100 text-amber-800 transition-opacity",
-              unreadCount > 0 ? "opacity-100" : "pointer-events-none opacity-0"
+              "shrink-0 border border-slate-200 bg-slate-50 font-medium text-slate-700 transition-opacity",
+              unreadCount > 0 ? "opacity-100" : "pointer-events-none opacity-0",
             )}
             aria-hidden={unreadCount === 0}
           >
@@ -632,57 +906,69 @@ const DashboardHero = ({
           </Badge>
         </div>
         <div className="space-y-1.5 sm:space-y-2">
-          {/* Brand first on mobile; full legal name stays secondary */}
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-700 sm:text-xs">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400 sm:text-xs">
             {appConfig.appName}
           </p>
-          <p className="text-sm font-medium text-brand-800">{title}</p>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-3xl md:text-4xl">
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl md:text-[2.15rem] md:leading-tight">
             Welcome back, {userName}
           </h1>
           {institutionName ? (
-            <p className="truncate text-xs font-medium text-slate-500 sm:text-sm sm:text-slate-600">
+            <p className="truncate text-xs font-medium text-slate-500 sm:text-sm">
               {institutionName}
             </p>
           ) : null}
-          <p className="max-w-2xl text-sm leading-6 text-slate-600 line-clamp-3 sm:line-clamp-none">
+          <p className="max-w-2xl text-sm leading-relaxed text-slate-500 line-clamp-3 sm:line-clamp-none">
             {description}
           </p>
         </div>
       </div>
-      <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:justify-end lg:w-auto lg:justify-self-end lg:pt-1">
-        <Link
-          to="/notifications"
-          className={cn(
-            "inline-flex h-10 min-w-0 flex-1 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50 sm:min-w-[9.75rem] sm:flex-none sm:px-4"
-          )}
-        >
-          <Bell className="mr-2 h-4 w-4 shrink-0" />
-          Notifications
-        </Link>
-        <Link
-          to="/notices"
-          className={cn(
-            "inline-flex h-10 min-w-0 flex-1 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-50 sm:min-w-[9.75rem] sm:flex-none sm:px-4"
-          )}
-        >
-          <Megaphone className="mr-2 h-4 w-4 shrink-0" />
-          Notice Board
-        </Link>
+      {/* Right column: action buttons + wall clock under Notice Board (see screenshot marker) */}
+      <div className="relative flex w-full shrink-0 flex-col items-stretch gap-4 sm:items-end lg:w-auto lg:justify-self-end lg:pt-1">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <Link
+            to="/notifications"
+            className={cn(
+              "inline-flex h-10 min-w-0 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 sm:min-w-[9.75rem] sm:flex-none sm:px-4",
+            )}
+          >
+            <Bell className="mr-2 h-4 w-4 shrink-0 text-slate-500" />
+            Notifications
+          </Link>
+          <Link
+            to="/notices"
+            className={cn(
+              "inline-flex h-10 min-w-0 flex-1 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 sm:min-w-[9.75rem] sm:flex-none sm:px-4",
+            )}
+          >
+            <Megaphone className="mr-2 h-4 w-4 shrink-0 opacity-90" />
+            Notice Board
+          </Link>
+        </div>
+        {/* Extra top margin so the clock sits a little lower under Notice Board */}
+        <div className="mt-3 flex justify-center sm:mt-4 sm:justify-end sm:pr-2 lg:mt-5 lg:pr-3">
+          <DashboardWallClock size={128} />
+        </div>
       </div>
     </div>
   </section>
 );
 
 const DashboardHeroSkeleton = () => (
-  <section className="overflow-hidden rounded-3xl border border-brand-100 bg-[linear-gradient(135deg,_#eef3fb_0%,_#ffffff_45%,_#eff6ff_100%)] p-6 shadow-sm md:p-8">
-    <div className="grid min-h-0 gap-5 lg:min-h-[11.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
+  <section
+    className={cn(
+      "relative overflow-hidden rounded-[1.75rem] border border-slate-200/80 bg-white p-6 md:p-8",
+      "shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_40px_-20px_rgba(15,23,42,0.14)]",
+    )}
+  >
+    <div className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-slate-300" aria-hidden />
+    <div className="grid min-h-0 gap-5 lg:min-h-[10.5rem] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-8">
       <div className="min-w-0 space-y-3">
         <div className="flex min-h-7 gap-2">
-          <div className="h-6 w-36 animate-pulse rounded-full bg-brand-100" />
+          <div className="h-6 w-36 animate-pulse rounded-full bg-slate-100" />
         </div>
         <div className="space-y-2">
-          <div className="h-4 w-40 animate-pulse rounded bg-brand-50" />
+          <div className="h-4 w-40 animate-pulse rounded bg-slate-100" />
           <div className="h-9 w-3/4 max-w-lg animate-pulse rounded bg-slate-100" />
           <div className="h-4 w-56 animate-pulse rounded bg-slate-100" />
           <div className="h-16 w-full max-w-2xl animate-pulse rounded bg-slate-50" />
@@ -697,7 +983,7 @@ const DashboardHeroSkeleton = () => (
 );
 
 const StatGrid = ({ stats }: { stats: DashboardMetric[] }) => (
-  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
     {stats.map((stat) => {
       const Icon = statIconMap[stat.label] ?? Sparkles;
       const href = resolveDashboardStatHref(stat.label);
@@ -705,31 +991,32 @@ const StatGrid = ({ stats }: { stats: DashboardMetric[] }) => (
       const content = (
         <Card
           className={cn(
-            "h-full min-w-0 overflow-hidden border-slate-200/80 shadow-sm transition",
+            "h-full min-w-0 overflow-hidden transition duration-200",
+            panelClass,
             href
-              ? "cursor-pointer hover:shadow-md hover:ring-2 hover:ring-brand-200"
-              : "hover:shadow-md",
+              ? "cursor-pointer hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_8px_30px_-12px_rgba(15,23,42,0.18)]"
+              : "hover:border-slate-300",
           )}
         >
-          <CardContent className="flex min-h-[6.5rem] items-start justify-between gap-4 py-5">
+          <CardContent className="relative flex min-h-[6.75rem] items-start justify-between gap-4 py-5">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-slate-500">
+              <p className="truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                 {stat.label}
               </p>
-              <p className="mt-2 break-words text-3xl font-semibold tracking-tight text-slate-900 tabular-nums">
+              <p className="mt-2.5 break-words text-3xl font-semibold tracking-tight text-slate-900 tabular-nums">
                 {stat.value}
               </p>
               {stat.change ? (
-                <p className="mt-1 text-xs text-brand-700">{stat.change}</p>
+                <p className="mt-1.5 text-xs font-medium text-slate-500">{stat.change}</p>
               ) : null}
               {hint ? (
-                <p className="mt-2 truncate text-xs font-medium text-brand-600">
+                <p className="mt-2.5 truncate text-xs font-medium text-slate-500">
                   {hint}
                 </p>
               ) : null}
             </div>
-            <div className="shrink-0 rounded-2xl bg-brand-50 p-3 text-brand-700">
-              <Icon className="h-5 w-5" />
+            <div className="shrink-0 rounded-2xl border border-slate-100 bg-slate-50 p-3 text-slate-600">
+              <Icon className="h-5 w-5" strokeWidth={1.75} />
             </div>
           </CardContent>
         </Card>
@@ -764,16 +1051,30 @@ const HighlightsRow = ({
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
       {highlights.map((highlight) => {
         const content = (
-          <Card className={cn("h-full border shadow-sm transition hover:shadow-md", highlightToneClass[highlight.tone ?? "default"])}>
+          <Card
+            className={cn(
+              "h-full transition duration-200 hover:-translate-y-0.5 hover:border-slate-300",
+              panelClass,
+              highlightToneClass[highlight.tone ?? "default"],
+            )}
+          >
             <CardContent className="flex items-center justify-between gap-4 py-5">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-500">{highlight.label}</p>
-                <p className="mt-1 text-lg font-semibold text-slate-900">{highlight.value}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                  {highlight.label}
+                </p>
+                <p className="mt-1.5 text-lg font-semibold tracking-tight text-slate-900">
+                  {highlight.value}
+                </p>
               </div>
-              {highlight.href || highlight.action ? <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" /> : null}
+              {highlight.href || highlight.action ? (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-100 bg-slate-50">
+                  <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
+                </span>
+              ) : null}
             </CardContent>
           </Card>
         );
@@ -839,19 +1140,25 @@ const NotificationsPanel = ({
   });
 
   return (
-    <Card className="border-slate-200/80 shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+    <Card className={cn(panelClass)}>
+      <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 border-slate-100/80">
         <div>
-          <CardTitle className="flex items-center gap-2">
-            <Bell className="h-5 w-5 text-brand-700" />
+          <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+              <Bell className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+            </span>
             Latest Notifications
           </CardTitle>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1.5 text-sm text-slate-500">
             Alerts clear from your inbox after you open them.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {unreadCount > 0 ? <Badge className="bg-amber-100 text-amber-800">{unreadCount} unread</Badge> : null}
+          {unreadCount > 0 ? (
+            <Badge className="border border-slate-200 bg-slate-50 font-medium text-slate-700">
+              {unreadCount} unread
+            </Badge>
+          ) : null}
           {unreadCount > 0 ? (
             <Button size="sm" variant="secondary" onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
               Clear all
@@ -859,9 +1166,9 @@ const NotificationsPanel = ({
           ) : null}
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-2.5">
         {unreadNotifications.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+          <div className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/40 px-4 py-10 text-center text-sm text-slate-500">
             You&apos;re all caught up. No notifications.
           </div>
         ) : (
@@ -870,8 +1177,8 @@ const NotificationsPanel = ({
               key={notification._id}
               type="button"
               className={cn(
-                "w-full rounded-2xl border px-4 py-3 text-left transition hover:shadow-sm",
-                "border-brand-200 bg-brand-50/50"
+                "w-full rounded-2xl border border-slate-200/90 bg-white px-4 py-3.5 text-left transition",
+                "hover:border-slate-300 hover:bg-slate-50/60 hover:shadow-sm",
               )}
               onClick={() => markRead.mutate(notification._id)}
               disabled={markRead.isPending}
@@ -879,18 +1186,28 @@ const NotificationsPanel = ({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-slate-900">{notification.title}</p>
-                    <Badge>{notification.type}</Badge>
-                    <Badge className="bg-brand-600 text-white">New</Badge>
+                    <p className="font-semibold tracking-tight text-slate-900">
+                      {notification.title}
+                    </p>
+                    <Badge className="border border-slate-200 bg-slate-50 text-slate-600">
+                      {notification.type}
+                    </Badge>
+                    <Badge className="border border-slate-800/10 bg-slate-900 text-white">
+                      New
+                    </Badge>
                   </div>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">{notification.message}</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                    {notification.message}
+                  </p>
                 </div>
               </div>
-              <p className="mt-2 text-xs text-slate-500">{formatNotificationTime(notification.createdAt)}</p>
+              <p className="mt-2.5 text-xs font-medium text-slate-400">
+                {formatNotificationTime(notification.createdAt)}
+              </p>
             </button>
           ))
         )}
-        <Button asChild variant="outline" className="w-full">
+        <Button asChild variant="outline" className="w-full border-slate-200">
           <Link to="/notifications">View all notifications</Link>
         </Button>
       </CardContent>
@@ -899,30 +1216,41 @@ const NotificationsPanel = ({
 };
 
 const NoticesPanel = ({ notices, title }: { notices: NoticeRecord[]; title?: string }) => (
-  <Card className="border-slate-200/80 bg-white shadow-sm">
-    <CardHeader className="bg-white">
-      <CardTitle className="flex items-center gap-2">
-        <Megaphone className="h-5 w-5 text-slate-500" />
+  <Card className={cn(panelClass)}>
+    <CardHeader className="border-slate-100/80 bg-white">
+      <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+          <Megaphone className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+        </span>
         {title ?? "Notice Board"}
       </CardTitle>
     </CardHeader>
-    <CardContent className="space-y-3 bg-white">
+    <CardContent className="space-y-2.5 bg-white">
       {notices.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+        <div className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/40 px-4 py-10 text-center text-sm text-slate-500">
           No notices published right now.
         </div>
       ) : (
         notices.map((notice) => (
-          <div key={notice._id} className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div
+            key={notice._id}
+            className="rounded-2xl border border-slate-200/90 bg-slate-50/30 p-4 transition hover:bg-slate-50/70"
+          >
             <div className="flex items-center justify-between gap-4">
-              <h3 className="font-semibold text-slate-900">{notice.title}</h3>
-              <span className="shrink-0 text-xs text-slate-500">{notice.publishDateBs}</span>
+              <h3 className="font-semibold tracking-tight text-slate-900">
+                {notice.title}
+              </h3>
+              <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-500">
+                {notice.publishDateBs}
+              </span>
             </div>
-            <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{notice.content}</p>
+            <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-slate-600">
+              {notice.content}
+            </p>
           </div>
         ))
       )}
-      <Button asChild variant="outline" className="w-full">
+      <Button asChild variant="outline" className="w-full border-slate-200">
         <Link to="/notices">Open notice board</Link>
       </Button>
     </CardContent>
@@ -932,7 +1260,13 @@ const NoticesPanel = ({ notices, title }: { notices: NoticeRecord[]; title?: str
 const QuickActions = ({ actions }: { actions: Array<{ label: string; href: string }> }) => (
   <div className="flex flex-wrap gap-2">
     {actions.map((action) => (
-      <Button key={`${action.href}-${action.label}`} asChild variant="outline" size="sm">
+      <Button
+        key={`${action.href}-${action.label}`}
+        asChild
+        variant="outline"
+        size="sm"
+        className="rounded-full border-slate-200 bg-white font-medium text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+      >
         <Link to={action.href}>{action.label}</Link>
       </Button>
     ))}
@@ -1040,7 +1374,7 @@ const StaffModuleDashboard = ({
             : "Role-based operational dashboard for college staff. Teachers use a separate Teacher portal.";
 
   return (
-    <PageContent className="space-y-6">
+    <PageContent className="space-y-5 sm:space-y-6">
       <DashboardBannerPopup banners={data.banners} />
       <DashboardHero
         title={heroTitle}
@@ -1055,7 +1389,7 @@ const StaffModuleDashboard = ({
       <QuickActions actions={staffQuickActions} />
       <AcademicCalendarWidgets />
       <DashboardSchedulePanels />
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr] xl:gap-6">
         <NotificationsPanel notifications={data.notifications} unreadCount={unreadCount} />
         <NoticesPanel notices={data.notices} />
       </div>
@@ -1081,9 +1415,12 @@ export const DashboardPage = () => {
     return (
       <PageContent className="space-y-6">
         <DashboardHeroSkeleton />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
           {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+            <div
+              key={index}
+              className="h-28 animate-pulse rounded-2xl border border-slate-200/80 bg-white shadow-sm"
+            />
           ))}
         </div>
       </PageContent>
@@ -1147,7 +1484,7 @@ export const DashboardPage = () => {
 
   if (user.role === "STUDENT") {
     return (
-      <PageContent className="space-y-6">
+      <PageContent className="space-y-5 sm:space-y-6">
         <DashboardBannerPopup banners={data.banners} />
         <DashboardHero
           title="Student Dashboard"
@@ -1173,10 +1510,12 @@ export const DashboardPage = () => {
           ]}
         />
         <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-          <Card className="border-slate-200/80 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-brand-700" />
+          <Card className={cn(panelClass)}>
+            <CardHeader className="border-slate-100/80">
+              <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+                  <BarChart3 className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+                </span>
                 Attendance Trend
               </CardTitle>
             </CardHeader>
@@ -1188,12 +1527,19 @@ export const DashboardPage = () => {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={data.attendanceChart}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" />
-                    <YAxis allowDecimals={false} />
-                    <Tooltip />
-                    <Bar dataKey="present" fill="#0c2d6b" radius={[10, 10, 0, 0]} />
-                    <Bar dataKey="absent" fill="#fb7185" radius={[10, 10, 0, 0]} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid #e2e8f0",
+                        boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
+                        fontSize: 13,
+                      }}
+                    />
+                    <Bar dataKey="present" fill="#0f172a" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="absent" fill="#cbd5e1" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -1210,7 +1556,7 @@ export const DashboardPage = () => {
 
   if (user.role === "PARENT") {
     return (
-      <PageContent className="space-y-6">
+      <PageContent className="space-y-5 sm:space-y-6">
         <DashboardBannerPopup banners={data.banners} />
         <DashboardHero
           title="Parent Dashboard"
@@ -1240,10 +1586,17 @@ export const DashboardPage = () => {
                 to="/parent-portal"
                 className="block"
               >
-                <Card className="h-full border-slate-200/80 shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-brand-200">
+                <Card
+                  className={cn(
+                    "h-full transition duration-200 hover:-translate-y-0.5 hover:border-slate-300",
+                    panelClass,
+                  )}
+                >
                   <CardContent className="py-5">
-                    <p className="text-sm text-slate-500">Linked child</p>
-                    <p className="mt-1 text-xl font-semibold text-slate-900">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                      Linked child
+                    </p>
+                    <p className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">
                       {child.fullName}
                     </p>
                     <p className="mt-3 text-sm text-slate-600">
@@ -1252,7 +1605,7 @@ export const DashboardPage = () => {
                         {formatCurrencyNpr(child.feesDueNpr)}
                       </span>
                     </p>
-                    <p className="mt-2 text-xs font-medium text-brand-600">
+                    <p className="mt-2.5 text-xs font-medium text-slate-500">
                       Open parent portal →
                     </p>
                   </CardContent>
@@ -1281,7 +1634,7 @@ export const DashboardPage = () => {
   );
 
   return (
-    <PageContent className="space-y-6">
+    <PageContent className="space-y-5 sm:space-y-6">
       <DashboardBannerPopup banners={data.banners} />
       <DashboardHero
         title={`${t("dashboard")} · ${roleLabel}`}
@@ -1337,10 +1690,12 @@ export const DashboardPage = () => {
 
       <div className="grid gap-6 xl:grid-cols-[1.45fr_0.55fr]">
         <div className="space-y-6">
-          <Card className="border-slate-200/80 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-brand-700" />
+          <Card className={cn(panelClass)}>
+            <CardHeader className="border-slate-100/80">
+              <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+                  <BarChart3 className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+                </span>
                 Attendance Trend
               </CardTitle>
             </CardHeader>
@@ -1352,12 +1707,19 @@ export const DashboardPage = () => {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={data.attendanceChart}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" />
-                    <YAxis allowDecimals={false} />
-                    <Tooltip />
-                    <Bar dataKey="present" fill="#0c2d6b" radius={[12, 12, 0, 0]} />
-                    <Bar dataKey="absent" fill="#fb7185" radius={[12, 12, 0, 0]} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid #e2e8f0",
+                        boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
+                        fontSize: 13,
+                      }}
+                    />
+                    <Bar dataKey="present" fill="#0f172a" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="absent" fill="#cbd5e1" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -1366,23 +1728,32 @@ export const DashboardPage = () => {
 
           <div className="grid gap-6 lg:grid-cols-2">
             {isCollegeAdmin ? (
-              <Card className="border-slate-200/80 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Wallet className="h-5 w-5 text-brand-700" />
+              <Card className={cn(panelClass)}>
+                <CardHeader className="border-slate-100/80">
+                  <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+                      <Wallet className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+                    </span>
                     Fee Collection
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-2.5">
                   {data.feeChart.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                    <div className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/40 px-4 py-8 text-center text-sm text-slate-500">
                       Fee collection summaries will appear after payments are recorded.
                     </div>
                   ) : (
                     data.feeChart.map((item) => (
-                      <div key={item.label} className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
-                        <span className="font-medium text-slate-700">BS {item.label}</span>
-                        <Badge>{formatCurrencyNpr(item.amount)}</Badge>
+                      <div
+                        key={item.label}
+                        className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3"
+                      >
+                        <span className="text-sm font-medium text-slate-700">
+                          BS {item.label}
+                        </span>
+                        <Badge className="border border-slate-200 bg-white font-semibold text-slate-800">
+                          {formatCurrencyNpr(item.amount)}
+                        </Badge>
                       </div>
                     ))
                   )}
@@ -1391,19 +1762,42 @@ export const DashboardPage = () => {
             ) : null}
 
             {data.counts.length > 0 ? (
-              <Card className="border-slate-200/80 shadow-sm">
-                <CardHeader>
-                  <CardTitle>{isTeacher ? "Teaching Load" : "Institution Mix"}</CardTitle>
+              <Card className={cn(panelClass)}>
+                <CardHeader className="border-slate-100/80">
+                  <CardTitle className="text-base font-semibold tracking-tight">
+                    {isTeacher ? "Teaching Load" : "Institution Mix"}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="h-[280px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={data.counts} dataKey="value" nameKey="name" outerRadius={95} label>
+                      <Pie
+                        data={data.counts}
+                        dataKey="value"
+                        nameKey="name"
+                        outerRadius={95}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                        label
+                      >
                         {data.counts.map((entry, index) => (
-                          <Cell key={entry.name} fill={INSTITUTION_MIX_COLORS[index % INSTITUTION_MIX_COLORS.length]} />
+                          <Cell
+                            key={entry.name}
+                            fill={
+                              INSTITUTION_MIX_COLORS[
+                                index % INSTITUTION_MIX_COLORS.length
+                              ]
+                            }
+                          />
                         ))}
                       </Pie>
-                      <Tooltip />
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid #e2e8f0",
+                          fontSize: 13,
+                        }}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 </CardContent>

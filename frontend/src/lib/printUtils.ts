@@ -111,7 +111,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       @page {
         size: A4 ${isLandscape ? "landscape" : "portrait"};
-        margin: ${isLandscape ? "10mm 12mm" : "6mm 7mm"};
+        margin: ${isLandscape ? "6mm 5mm" : "5mm 4mm"};
       }
       .font-nepali,
       [lang="ne"] {
@@ -123,6 +123,171 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         width: 100%;
         color: #000000;
         background: #ffffff;
+      }
+      .iar-report {
+        display: block !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        color: #000 !important;
+        background: #fff !important;
+        font-family: "Times New Roman", Times, Georgia, serif !important;
+        font-size: 8.5px !important;
+        line-height: 1.15 !important;
+      }
+      .iar-report *,
+      .iar-report *::before,
+      .iar-report *::after {
+        box-sizing: border-box !important;
+      }
+      .iar-title {
+        text-align: center;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        margin: 0 0 2px;
+      }
+      .iar-office {
+        text-align: center;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin: 0 0 2px;
+      }
+      .iar-sheet-title {
+        text-align: center;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin: 0 0 5px;
+      }
+      .iar-meta {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        border: 1px solid #000 !important;
+        margin: 0 0 5px !important;
+        table-layout: fixed !important;
+        font-size: 8px !important;
+      }
+      .iar-meta td {
+        border: 1px solid #000 !important;
+        padding: 2px 4px !important;
+        vertical-align: top !important;
+        text-align: left !important;
+      }
+      .iar-meta-k { font-weight: 700; }
+      .iar-marks {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        border: 1px solid #000 !important;
+        table-layout: fixed !important;
+        font-size: 7px !important;
+      }
+      .iar-marks th,
+      .iar-marks td {
+        border: 1px solid #000 !important;
+        padding: 1.5px 1px !important;
+        vertical-align: middle !important;
+        background: #fff !important;
+      }
+      .iar-marks thead th {
+        font-weight: 700 !important;
+        text-align: center !important;
+      }
+      .iar-col-sn { width: 3.2% !important; }
+      .iar-col-regd { width: 7.5% !important; }
+      .iar-col-symbol { width: 3.5% !important; }
+      .iar-col-name { width: 14% !important; }
+      .iar-col-label { width: 5% !important; }
+      .iar-col-total { width: 5.5% !important; }
+      .iar-col-pct { width: 3.5% !important; }
+      .iar-col-grade { width: 3.5% !important; }
+      .iar-col-remarks { width: 5% !important; }
+      .iar-sn { text-align: center !important; font-weight: 600; }
+      .iar-regd {
+        text-align: center !important;
+        font-family: Consolas, "Courier New", monospace !important;
+        font-size: 6px !important;
+        word-break: break-all;
+        line-height: 1.1;
+      }
+      .iar-symbol { text-align: center !important; font-size: 6.5px !important; }
+      .iar-name {
+        text-align: left !important;
+        font-weight: 700 !important;
+        font-size: 6.5px !important;
+        line-height: 1.1;
+        padding-left: 2px !important;
+        padding-right: 2px !important;
+        word-break: break-word;
+      }
+      .iar-corner {
+        text-align: center !important;
+        font-weight: 700 !important;
+        font-size: 6px !important;
+        line-height: 1.1;
+        vertical-align: middle !important;
+      }
+      .iar-corner-empty { background: #fff !important; }
+      .iar-subject-name {
+        text-align: center !important;
+        font-weight: 700 !important;
+        font-size: 6px !important;
+        line-height: 1.05;
+        word-break: break-word;
+        hyphens: auto;
+        vertical-align: middle !important;
+      }
+      .iar-tp {
+        text-align: center !important;
+        font-weight: 700 !important;
+        font-size: 6.5px !important;
+      }
+      .iar-num {
+        text-align: center !important;
+        font-variant-numeric: tabular-nums;
+        font-size: 6.5px !important;
+        white-space: nowrap;
+      }
+      .iar-total,
+      .iar-pct,
+      .iar-grade {
+        text-align: center !important;
+        font-size: 6.5px !important;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .iar-grade { font-weight: 700 !important; }
+      .iar-remarks {
+        text-align: left !important;
+        font-size: 6px !important;
+        padding-left: 2px !important;
+      }
+      .iar-legend {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        border: 1px solid #000 !important;
+        margin-top: 5px !important;
+        table-layout: fixed !important;
+        font-size: 7px !important;
+      }
+      .iar-legend td {
+        border: 1px solid #000 !important;
+        padding: 2px 4px !important;
+      }
+      .iar-signatures {
+        display: flex !important;
+        justify-content: space-between !important;
+        margin-top: 22px !important;
+        padding: 0 24px !important;
+        font-size: 9px !important;
+        font-weight: 700 !important;
+      }
+      .iar-sign { text-align: center; min-width: 140px; }
+      .iar-sign-line {
+        border-top: 1px dotted #000 !important;
+        margin: 0 auto 5px !important;
+        width: 140px !important;
       }
       .official-marksheet {
         max-width: none;
@@ -329,7 +494,7 @@ export const printMarksheetElement = async (element: HTMLElement | null): Promis
 };
 
 export const printBulkResultsElement = async (element: HTMLElement | null): Promise<void> => {
-  await printElement(element, "a4-landscape");
+  await printElement(element, "a4-portrait");
 };
 
 export const downloadMarksheetPdfFromElement = async (

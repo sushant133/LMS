@@ -124,6 +124,7 @@ const assertCanEditOrDeleteFeePayment = async (req: {
     "Only Super Admin or College Admin can edit or delete fee payment transactions"
   );
 };
+import { formatAddressLine } from "../utils/formatAddress.js";
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { sendSuccess } from "../utils/response.js";
@@ -1845,10 +1846,15 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
     }
   });
 
+  const schoolAddress = formatAddressLine(
+    settings?.address ?? (school as { address?: Parameters<typeof formatAddressLine>[0] }).address
+  );
+
   await generateFeeReceiptPDF(
     {
       schoolName: settings?.schoolName ?? school.name,
       schoolNameNp: settings?.schoolNameNp ?? school.nameNp,
+      schoolAddress,
       receiptNumber: collection.receiptNumber,
       paidDateBs: collection.paidDateBs,
       studentName: String((student.user as { fullName?: string } | null)?.fullName ?? ""),

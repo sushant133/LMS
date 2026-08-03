@@ -30,6 +30,10 @@ import {
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { api, unwrap } from "lib/api";
+import {
+  buildPrintInstitutionHeaderHtml,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { resolveStudentId } from "lib/resolveStudentId";
 import { queryClient } from "lib/queryClient";
@@ -315,6 +319,7 @@ export const LibraryIssuedBooksPanel = ({
       .join(" · ");
 
     const printedAt = new Date().toLocaleString();
+    const institutionHeader = buildPrintInstitutionHeaderHtml();
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -329,7 +334,7 @@ export const LibraryIssuedBooksPanel = ({
       color: #0f172a;
       background: #fff;
     }
-    h1 { font-size: 16px; margin: 0 0 4px; font-weight: 700; }
+    h1 { font-size: 15px; margin: 8px 0 4px; font-weight: 700; }
     .meta { font-size: 11px; color: #475569; margin-bottom: 12px; line-height: 1.4; }
     table { width: 100%; border-collapse: collapse; font-size: 10px; }
     th, td {
@@ -345,9 +350,11 @@ export const LibraryIssuedBooksPanel = ({
     .mono { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
     tfoot td { font-weight: 600; background: #f8fafc; }
     @page { size: A4 landscape; margin: 8mm; }
+    ${PRINT_INSTITUTION_HEADER_CSS}
   </style>
 </head>
 <body>
+  ${institutionHeader}
   <h1>Library — ${escapeHtml(statusLabel)}</h1>
   <div class="meta">
     ${filteredIssues.length} record${filteredIssues.length === 1 ? "" : "s"}

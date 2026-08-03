@@ -104,7 +104,7 @@ export const ReportsPage = () => {
               <CardTitle className="text-brand-800">Student Master Data</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-sm text-slate-600">Full student roster with disability, religion, caste, and guardian details.</p>
+              <p className="text-sm text-slate-600">Full student roster with disability, ethnicity, religion, caste, and guardian details.</p>
               <Button
                 onClick={() => downloadExport("iemis/student-master", "IEMIS_Student_Master")}
                 disabled={!!loading}
@@ -200,7 +200,7 @@ export const ReportsPage = () => {
               <CardTitle>Enrollment Summary (Legacy)</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-sm text-slate-600">Gender, class, disability, religion, and caste aggregates (original export).</p>
+              <p className="text-sm text-slate-600">Gender, class, disability, ethnicity, religion, and caste aggregates (original export).</p>
               <div className="flex gap-2">
                 <Button
                   variant="outline"

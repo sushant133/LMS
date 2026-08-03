@@ -31,6 +31,11 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import {
+  buildPrintInstitutionHeaderHtml,
+  getPrintInstitutionBranding,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import {
@@ -517,6 +522,8 @@ export const SecurityDepositRecordsPanel = () => {
       .join("");
 
     const printedAt = new Date().toLocaleString();
+    const branding = getPrintInstitutionBranding();
+    const institutionHeader = buildPrintInstitutionHeaderHtml({ branding });
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -525,7 +532,7 @@ export const SecurityDepositRecordsPanel = () => {
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; color: #0f172a; }
-    h1 { font-size: 18px; margin: 0 0 4px; }
+    h1 { font-size: 16px; margin: 8px 0 4px; }
     .meta { font-size: 12px; color: #475569; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; font-size: 11px; }
     th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
@@ -537,9 +544,11 @@ export const SecurityDepositRecordsPanel = () => {
       body { margin: 12mm; }
       @page { size: A4 landscape; margin: 10mm; }
     }
+    ${PRINT_INSTITUTION_HEADER_CSS}
   </style>
 </head>
 <body>
+  ${institutionHeader}
   <h1>Security Deposit Receipts</h1>
   <div class="meta">
     ${depositReceipts.length} receipt${depositReceipts.length === 1 ? "" : "s"}

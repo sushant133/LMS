@@ -33,6 +33,7 @@ import { Textarea } from "components/ui/textarea";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { useIsSystemAdministrator } from "hooks/useNormalizedRole";
@@ -1307,6 +1308,25 @@ export const DailyAttendanceManager = ({
                     Print
                   </Button>
                 </div>
+
+                {(() => {
+                  const branding = getPrintInstitutionBranding();
+                  return (
+                    <div className="mb-2 hidden border-b border-slate-300 pb-2 text-center print:block">
+                      <p className="text-sm font-bold uppercase tracking-wide text-slate-900">
+                        {branding.name || "Institution"}
+                      </p>
+                      {branding.address ? (
+                        <p className="mt-0.5 text-xs text-slate-600">
+                          {branding.address}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        Daily Attendance Report
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {reportType === "summary" && reportsQuery.data ? (
                   <div className="space-y-4">

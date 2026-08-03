@@ -4,6 +4,7 @@ import type { WeeklyMatrix } from "./timetableMatrixUtils";
 export type TimetablePrintMeta = {
   collegeName: string;
   collegeNameNp?: string;
+  collegeAddress?: string;
   logoUrl?: string;
   batchName?: string;
   yearName?: string;
@@ -43,6 +44,9 @@ export const TimetablePrintView = ({
       </h1>
       {meta.collegeNameNp ? (
         <p className="text-sm text-slate-600">{meta.collegeNameNp}</p>
+      ) : null}
+      {meta.collegeAddress ? (
+        <p className="mt-1 text-sm text-slate-600">{meta.collegeAddress}</p>
       ) : null}
       <p className="mt-2 text-lg font-semibold">Weekly Class Timetable</p>
       <p className="text-sm text-slate-700">{meta.viewTitle}</p>

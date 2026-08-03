@@ -1,9 +1,7 @@
 import { LogOut, Menu, PanelLeftClose, X } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
-import { LoadingState } from "components/shared/LoadingState";
-import { ReadOnlyBanner } from "components/shared/ReadOnlyBanner";
-import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import {
   INSTITUTION_NAME,
   canAccessAttendanceManagement,
@@ -15,10 +13,15 @@ import {
   normalizeUserRole,
   resolveModuleFromRoutePath,
   type ModuleAccessMap,
+  type SchoolSettingsRecord,
   type UserRole,
 } from "@phit-erp/shared";
+import { LoadingState } from "components/shared/LoadingState";
+import { ReadOnlyBanner } from "components/shared/ReadOnlyBanner";
+import { useTranslation } from "react-i18next";
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { Button } from "components/ui/button";
+import { api, unwrap } from "lib/api";
 import { cn } from "lib/utils";
 import { appConfig } from "lib/config";
 import { useAuth } from "features/auth/AuthProvider";
@@ -33,6 +36,10 @@ import {
   getUserRoleSubtitle,
   roleLabelMap,
 } from "lib/auth";
+import {
+  formatPrintAddress,
+  setPrintInstitutionBranding,
+} from "lib/printBranding";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
 
@@ -446,6 +453,15 @@ export const AppLayout = () => {
   const { unreadCount } = useNotificationBadge();
   const { t } = useTranslation();
 
+  /** Settings name/address are preferred for print/PDF headers when available. */
+  const printSettingsQuery = useQuery({
+    queryKey: ["settings", "print-branding"],
+    queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
+    enabled: Boolean(user),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
   const setDesktopSidebarHidden = (hidden: boolean) => {
     setSidebarHidden(hidden);
     saveSidebarHidden(hidden);
@@ -549,6 +565,32 @@ export const AppLayout = () => {
   const moduleAccessConfigured = Boolean(user.moduleAccessConfigured);
   const collegeName = getCollegeDisplayName(availableSchools, user);
   const showCollegeContext = !institutionAccess;
+
+  /** Keep print/PDF headers in sync with current school name + address. */
+  useEffect(() => {
+    const school = availableSchools[0] ?? user?.school ?? null;
+    const settings = printSettingsQuery.data;
+    const name =
+      settings?.schoolName?.trim() ||
+      collegeName ||
+      school?.name ||
+      INSTITUTION_NAME;
+    const nameNp =
+      settings?.schoolNameNp?.trim() || school?.nameNp || undefined;
+    const address =
+      formatPrintAddress(settings?.address) ||
+      formatPrintAddress(school?.address);
+    setPrintInstitutionBranding({
+      name,
+      nameNp,
+      address,
+    });
+  }, [
+    availableSchools,
+    collegeName,
+    user?.school,
+    printSettingsQuery.data,
+  ]);
 
   /**
    * Modules that power a teacher's "My Work" tools.

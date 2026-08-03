@@ -11,6 +11,11 @@ import {
 import { jsPDF } from "jspdf";
 import * as XLSX from "xlsx";
 import { api, resolveMediaUrl, unwrap } from "lib/api";
+import {
+  buildPrintInstitutionHeaderHtml,
+  getPrintInstitutionBranding,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { formatCurrencyNpr } from "lib/utils";
 
 type SheetCell = string | number | null;
@@ -359,9 +364,20 @@ export type FinanceLedgerLine = {
 export type FinanceLedgerMeta = {
   title?: string;
   institutionName?: string;
+  institutionAddress?: string;
   fromDateBs?: string;
   toDateBs?: string;
   generatedAt?: string;
+};
+
+/** Resolve college name + address for finance print/PDF headers. */
+const resolveFinanceInstitution = (meta?: FinanceLedgerMeta) => {
+  const branding = getPrintInstitutionBranding();
+  return {
+    name: meta?.institutionName?.trim() || branding.name || "Institution",
+    address:
+      meta?.institutionAddress?.trim() || branding.address?.trim() || "",
+  };
 };
 
 /**
@@ -531,6 +547,11 @@ const buildLedgerHtml = (
     )
     .join("");
 
+  const inst = resolveFinanceInstitution(meta);
+  const institutionHeader = buildPrintInstitutionHeaderHtml({
+    branding: { name: inst.name, address: inst.address || undefined },
+  });
+
   return `<!doctype html>
 <html>
 <head>
@@ -539,7 +560,7 @@ const buildLedgerHtml = (
   <style>
     * { box-sizing: border-box; }
     body { font-family: "IBM Plex Sans", system-ui, sans-serif; color: #0f172a; padding: 28px; margin: 0; background: #fff; }
-    h1 { font-size: 18px; margin: 0 0 4px; }
+    h1 { font-size: 18px; margin: 8px 0 4px; }
     .sub { color: #64748b; font-size: 12px; margin: 0 0 4px; }
     .meta { color: #475569; font-size: 12px; margin: 0 0 18px; }
     table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -555,11 +576,12 @@ const buildLedgerHtml = (
       body { padding: 12px; }
       .no-print { display: none !important; }
     }
+    ${PRINT_INSTITUTION_HEADER_CSS}
   </style>
 </head>
 <body>
+  ${institutionHeader}
   <h1>${escapeHtml(meta?.title || "Finance Management — Transaction Ledger")}</h1>
-  ${meta?.institutionName ? `<p class="sub">${escapeHtml(meta.institutionName)}</p>` : ""}
   <p class="meta">
     Period: ${escapeHtml(ledgerPeriodLabel(meta))} ·
     Generated: ${escapeHtml(meta?.generatedAt || new Date().toLocaleString())} ·
@@ -708,22 +730,37 @@ export async function exportTransactionsLedgerPdf(
   let y = marginTop;
   let pageNo = 1;
 
+  const inst = resolveFinanceInstitution(meta);
+
   const drawPageHeader = () => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(13);
+    doc.setTextColor(15, 23, 42);
+    doc.text(inst.name, marginX, y);
+    y += 5;
+
+    if (inst.address) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      doc.text(inst.address, marginX, y);
+      y += 5;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
     doc.setTextColor(15, 23, 42);
     doc.text(
       meta?.title || "Finance Management — Transaction Ledger",
       marginX,
       y,
     );
-    y += 6;
+    y += 5;
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(71, 85, 105);
     const sub = [
-      meta?.institutionName,
       `Period: ${ledgerPeriodLabel(meta)}`,
       `Generated: ${meta?.generatedAt || new Date().toLocaleString()}`,
       `${lines.length} entr${lines.length === 1 ? "y" : "ies"}`,
@@ -917,16 +954,19 @@ export function printFinanceReport(report: FinanceReportResponse) {
     )
     .join("");
 
+  const institutionHeader = buildPrintInstitutionHeaderHtml();
   const html = `<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(report.title)}</title>
     <style>
       body{font-family:system-ui,sans-serif;padding:24px;color:#0f172a}
-      h1{font-size:18px;margin:0 0 4px}
+      h1{font-size:18px;margin:8px 0 4px}
       p{color:#64748b;margin:0 0 16px;font-size:13px}
       table{width:100%;border-collapse:collapse;font-size:12px}
       th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:left}
       th{background:#f8fafc}
       .totals{margin-top:16px;font-size:13px}
+      ${PRINT_INSTITUTION_HEADER_CSS}
     </style></head><body>
+    ${institutionHeader}
     <h1>${escapeHtml(report.title)}</h1>
     <p>Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())} · ${report.totals.count} row(s)</p>
     <table><thead><tr>

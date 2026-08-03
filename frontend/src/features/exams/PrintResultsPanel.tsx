@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   ClassRecord,
@@ -18,12 +18,28 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
-import { CollegeLogo } from "components/shared/CollegeLogo";
 import { ResultMarksheetView } from "features/exams/ResultMarksheetView";
 import { api, unwrap } from "lib/api";
 import { getPdfErrorMessage, printBulkResultsElement } from "lib/printUtils";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
+
+/** Match CTEVT sample: always two decimal places (e.g. 20.00). */
+const formatMark = (value: number | string | null | undefined): string => {
+  if (value === null || value === undefined || value === "") return "";
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return "";
+  return n.toFixed(2);
+};
+
+type IaSubjectCol = PrintResultsGridResponse["subjects"][number];
+
+/** Theory / practical sub-columns for one subject (aligned header + body). */
+const subjectComponents = (subject: IaSubjectCol) => {
+  const showP = Boolean(subject.hasPractical);
+  const showT = subject.hasTheory !== false || !showP;
+  return { showT, showP, span: (showT ? 1 : 0) + (showP ? 1 : 0) || 1 };
+};
 
 interface PrintResultsPanelProps {
   isCollege: boolean;
@@ -164,6 +180,15 @@ export const PrintResultsPanel = ({
   const scopeLabel = isCollege
     ? [grid?.batchName, grid?.yearName].filter(Boolean).join(" · ")
     : [grid?.className, grid?.sectionName].filter(Boolean).join(" · ");
+
+  /** Total T/P mark columns — used for colgroup equal widths. */
+  const markColumnCount = useMemo(() => {
+    if (!grid?.subjects?.length) return 0;
+    return grid.subjects.reduce(
+      (sum, subject) => sum + subjectComponents(subject).span,
+      0,
+    );
+  }, [grid?.subjects]);
 
   const exportParams = isCollege
     ? { examId, batchId, yearId, studentId: studentId || undefined }
@@ -471,125 +496,284 @@ export const PrintResultsPanel = ({
             </CardContent>
           </Card>
 
-          <div ref={bulkResultsRef} className="print-results-bulk-table">
-            <header className="print-results-bulk-header">
-              <div className="print-results-bulk-logo">
-                <CollegeLogo
-                  src={grid.collegeLogoUrl}
-                  alt={`${grid.collegeName ?? "College"} logo`}
-                  className="h-16 w-16"
-                />
-              </div>
-              <div className="print-results-bulk-heading">
-                <h1 className="print-results-bulk-college">
-                  {grid.collegeName ?? "College"}
-                </h1>
-                {grid.collegeNameNp ? (
-                  <p className="print-results-bulk-college-np">
-                    {grid.collegeNameNp}
-                  </p>
-                ) : null}
-                {grid.collegeAddress ? (
-                  <p className="print-results-bulk-address">
-                    {grid.collegeAddress}
-                  </p>
-                ) : null}
-                <h2 className="print-results-bulk-exam">
-                  {selectedExam?.name}
-                </h2>
-                <p className="print-results-bulk-meta">
-                  {scopeLabel}
-                  {grid.academicYearBs
-                    ? ` · Academic Session: ${grid.academicYearBs}`
-                    : ""}
-                </p>
-                <p className="print-results-bulk-count">
-                  Published Results · {grid.rows.length} students
-                </p>
-              </div>
-            </header>
-            <table className="w-full border-collapse border border-slate-300 text-[10px]">
+          {/*
+            CTEVT Internal Assessment Report — Print Bulk only.
+            Header nesting matches the official PDF:
+            SN | Regd | Symbol | Name | [Subjects / Full / Pass labels] | subject T/P cols | Total | % | Grade | Remarks
+            Body rows include an empty cell under the label column so columns stay aligned.
+          */}
+          <div ref={bulkResultsRef} className="print-results-bulk-table iar-report">
+            <div className="iar-title">INTERNAL ASSESSMENT REPORT</div>
+            <div className="iar-office">
+              OFFICE OF THE CONTROLLER OF EXAMINATIONS
+            </div>
+            <div className="iar-sheet-title">
+              DIPLOMA INTERNAL ASSESSMENT MARKSHEET
+              {grid.academicYearBs ? ` (${grid.academicYearBs})` : ""}
+            </div>
+
+            <table className="iar-meta" cellSpacing={0} cellPadding={0}>
+              <colgroup>
+                <col style={{ width: "50%" }} />
+                <col style={{ width: "50%" }} />
+              </colgroup>
+              <tbody>
+                <tr>
+                  <td colSpan={2}>
+                    <span className="iar-meta-k">Name Of Institute/Address:</span>{" "}
+                    {[grid.collegeName, grid.collegeAddress]
+                      .filter(Boolean)
+                      .join(", ") || "—"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span className="iar-meta-k">Program:</span>{" "}
+                    {selectedExam?.name || "—"}
+                  </td>
+                  <td>
+                    <span className="iar-meta-k">Type Of Examination :</span>{" "}
+                    Regular
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span className="iar-meta-k">Year :</span>{" "}
+                    {grid.yearName || grid.className || "—"}
+                  </td>
+                  <td>
+                    <span className="iar-meta-k">Curriculum Year :</span>{" "}
+                    {grid.academicYearBs || "—"}
+                    {grid.batchName ? ` · ${grid.batchName}` : ""}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <table className="iar-marks" cellSpacing={0} cellPadding={0}>
+              <colgroup>
+                <col className="iar-col-sn" />
+                <col className="iar-col-regd" />
+                <col className="iar-col-symbol" />
+                <col className="iar-col-name" />
+                <col className="iar-col-label" />
+                {Array.from({ length: markColumnCount }).map((_, i) => (
+                  <col key={`mcol-${i}`} className="iar-col-mark" />
+                ))}
+                <col className="iar-col-total" />
+                <col className="iar-col-pct" />
+                <col className="iar-col-grade" />
+                <col className="iar-col-remarks" />
+              </colgroup>
               <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                {/* Row 1: fixed cols + Subjects label + subject names + summary cols */}
+                <tr>
+                  <th rowSpan={4} className="iar-sn">
                     S.N.
                   </th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
-                    Student
+                  <th rowSpan={4} className="iar-regd">
+                    Regd.No.
                   </th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
-                    Roll
+                  <th rowSpan={4} className="iar-symbol">
+                    Symbol
+                    <br />
+                    No.
                   </th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
-                    Reg. No.
+                  <th rowSpan={4} className="iar-name">
+                    Student&apos;s
+                    <br />
+                    Name
                   </th>
-                  {grid.subjects.map((subject) => (
-                    <th
-                      key={subject.subjectId}
-                      className="border border-slate-300 px-1.5 py-1 text-left"
-                    >
-                      {subject.subjectName}
-                    </th>
-                  ))}
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                  <th className="iar-corner">Subjects</th>
+                  {grid.subjects.map((subject) => {
+                    const { span } = subjectComponents(subject);
+                    return (
+                      <th
+                        key={subject.subjectId}
+                        colSpan={span}
+                        className="iar-subject-name"
+                      >
+                        {subject.subjectName}
+                      </th>
+                    );
+                  })}
+                  <th rowSpan={4} className="iar-total">
                     Total
+                    <br />
+                    Marks
                   </th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                  <th rowSpan={4} className="iar-pct">
                     %
                   </th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
+                  <th rowSpan={4} className="iar-grade">
                     Grade
                   </th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
-                    GPA
+                  <th rowSpan={4} className="iar-remarks">
+                    Remarks
                   </th>
-                  <th className="border border-slate-300 px-1.5 py-1 text-left">
-                    Status
+                </tr>
+                {/* Row 2: empty corner + T / P under each subject */}
+                <tr>
+                  <th className="iar-corner iar-corner-empty" />
+                  {grid.subjects.flatMap((subject) => {
+                    const { showT, showP } = subjectComponents(subject);
+                    const cells: ReactNode[] = [];
+                    if (showT) {
+                      cells.push(
+                        <th key={`${subject.subjectId}-t`} className="iar-tp">
+                          T
+                        </th>,
+                      );
+                    }
+                    if (showP) {
+                      cells.push(
+                        <th key={`${subject.subjectId}-p`} className="iar-tp">
+                          P
+                        </th>,
+                      );
+                    }
+                    return cells;
+                  })}
+                </tr>
+                {/* Row 3: Full Marks */}
+                <tr>
+                  <th className="iar-corner">
+                    Full
+                    <br />
+                    Marks
                   </th>
+                  {grid.subjects.flatMap((subject) => {
+                    const { showT, showP } = subjectComponents(subject);
+                    const tFull =
+                      subject.theoryFullMarks ??
+                      (showP ? undefined : subject.fullMarks);
+                    const cells: ReactNode[] = [];
+                    if (showT) {
+                      cells.push(
+                        <th
+                          key={`${subject.subjectId}-fm-t`}
+                          className="iar-num"
+                        >
+                          {formatMark(tFull ?? subject.fullMarks)}
+                        </th>,
+                      );
+                    }
+                    if (showP) {
+                      cells.push(
+                        <th
+                          key={`${subject.subjectId}-fm-p`}
+                          className="iar-num"
+                        >
+                          {formatMark(subject.practicalFullMarks)}
+                        </th>,
+                      );
+                    }
+                    return cells;
+                  })}
+                </tr>
+                {/* Row 4: Pass Marks */}
+                <tr>
+                  <th className="iar-corner">
+                    Pass
+                    <br />
+                    Marks
+                  </th>
+                  {grid.subjects.flatMap((subject) => {
+                    const { showT, showP } = subjectComponents(subject);
+                    const tPass =
+                      subject.theoryPassMarks ??
+                      (showP ? undefined : subject.passMarks);
+                    const cells: ReactNode[] = [];
+                    if (showT) {
+                      cells.push(
+                        <th
+                          key={`${subject.subjectId}-pm-t`}
+                          className="iar-num"
+                        >
+                          {formatMark(tPass ?? subject.passMarks)}
+                        </th>,
+                      );
+                    }
+                    if (showP) {
+                      cells.push(
+                        <th
+                          key={`${subject.subjectId}-pm-p`}
+                          className="iar-num"
+                        >
+                          {formatMark(subject.practicalPassMarks)}
+                        </th>,
+                      );
+                    }
+                    return cells;
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {grid.rows.map((row) => (
                   <tr key={row.resultId}>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.sn}
+                    <td className="iar-sn">{row.sn}</td>
+                    <td className="iar-regd">{row.registrationNumber}</td>
+                    <td className="iar-symbol">{row.symbolNumber || ""}</td>
+                    <td className="iar-name">{row.studentName}</td>
+                    {/* Align under Subjects / Full / Pass corner column */}
+                    <td className="iar-corner iar-corner-empty" />
+                    {grid.subjects.flatMap((subject) => {
+                      const { showT, showP } = subjectComponents(subject);
+                      const detail = row.subjectDetails?.[subject.subjectId];
+                      const theory =
+                        detail?.theory ??
+                        row.subjectMarks[subject.subjectId] ??
+                        null;
+                      const practical = detail?.practical ?? null;
+                      const cells: ReactNode[] = [];
+                      if (showT) {
+                        cells.push(
+                          <td
+                            key={`${row.resultId}-${subject.subjectId}-t`}
+                            className="iar-num"
+                          >
+                            {formatMark(theory)}
+                          </td>,
+                        );
+                      }
+                      if (showP) {
+                        cells.push(
+                          <td
+                            key={`${row.resultId}-${subject.subjectId}-p`}
+                            className="iar-num"
+                          >
+                            {formatMark(practical)}
+                          </td>,
+                        );
+                      }
+                      return cells;
+                    })}
+                    <td className="iar-total">
+                      {row.totalMarks}
+                      {row.totalFullMarks ? `/${row.totalFullMarks}` : ""}
                     </td>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.studentName}
+                    <td className="iar-pct">
+                      {Number.isFinite(row.percentage)
+                        ? Number(row.percentage).toFixed(2)
+                        : ""}
                     </td>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.rollNumber}
-                    </td>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.registrationNumber}
-                    </td>
-                    {grid.subjects.map((subject) => (
-                      <td
-                        key={subject.subjectId}
-                        className="border border-slate-300 px-1.5 py-1"
-                      >
-                        {row.subjectMarks[subject.subjectId] ?? "—"}
-                      </td>
-                    ))}
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.totalMarks}/{row.totalFullMarks}
-                    </td>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.percentage}%
-                    </td>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.grade}
-                    </td>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.gpa.toFixed(2)}
-                    </td>
-                    <td className="border border-slate-300 px-1.5 py-1">
-                      {row.passFailStatus}
-                    </td>
+                    <td className="iar-grade">{row.grade || ""}</td>
+                    <td className="iar-remarks">{row.remarks || ""}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            <div className="iar-signatures">
+              <div className="iar-sign">
+                <div className="iar-sign-line" />
+                <div>Checked By</div>
+              </div>
+              <div className="iar-sign">
+                <div className="iar-sign-line" />
+                <div>Verified By</div>
+              </div>
+            </div>
           </div>
 
           {studentId ? (

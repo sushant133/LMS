@@ -115,6 +115,7 @@ export const exportEnrollmentSummary = asyncHandler(async (req: Request, res: Re
       ...Object.entries(summary.byGender).map(([k, v]) => ({ metric: `Gender - ${k}`, value: v })),
       ...summary.byClass.map((c: any) => ({ metric: `Class - ${c.className}`, value: c.count })),
       ...summary.byDisability.map((d: any) => ({ metric: `Disability - ${d.category}`, value: d.count })),
+      ...summary.byEthnicity.map((e: any) => ({ metric: `Ethnicity - ${e.category}`, value: e.count })),
       ...summary.byReligion.map((e: any) => ({ metric: `Religion - ${e.category}`, value: e.count })),
       ...summary.byCaste.map((e: any) => ({ metric: `Caste - ${e.category}`, value: e.count }))
     ];

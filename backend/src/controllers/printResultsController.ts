@@ -40,11 +40,42 @@ const loadSubjectColumns = async (schoolId: Types.ObjectId, yearId?: string, cla
   }
 
   const subjects = await Subject.find(subjectFilter).sort({ name: 1 }).lean();
-  return subjects.map((subject) => ({
-    subjectId: subject._id.toString(),
-    subjectName: subject.name,
-    subjectCode: subject.code
-  }));
+  return subjects.map((subject) => {
+    const fullMarks = Number(subject.fullMarks) || 0;
+    const passMarks = Number(subject.passMarks) || 0;
+    const theoryConfigured = Number(subject.theoryMarks) || 0;
+    const practicalConfigured = Number(subject.practicalMarks) || 0;
+    // Prefer configured component full marks; fall back to single theory column.
+    const hasPractical = practicalConfigured > 0;
+    const hasTheory = theoryConfigured > 0 || !hasPractical;
+    const theoryFullMarks = hasTheory
+      ? theoryConfigured > 0
+        ? theoryConfigured
+        : hasPractical
+          ? Math.max(0, fullMarks - practicalConfigured)
+          : fullMarks
+      : 0;
+    const practicalFullMarks = hasPractical ? practicalConfigured : 0;
+    const ratio = fullMarks > 0 ? passMarks / fullMarks : 0;
+    const theoryPassMarks =
+      theoryFullMarks > 0 ? Number((theoryFullMarks * ratio).toFixed(2)) : 0;
+    const practicalPassMarks =
+      practicalFullMarks > 0 ? Number((practicalFullMarks * ratio).toFixed(2)) : 0;
+
+    return {
+      subjectId: subject._id.toString(),
+      subjectName: subject.name,
+      subjectCode: subject.code,
+      fullMarks,
+      passMarks,
+      theoryFullMarks,
+      practicalFullMarks,
+      theoryPassMarks,
+      practicalPassMarks,
+      hasTheory,
+      hasPractical
+    };
+  });
 };
 
 const buildPrintResultsGrid = async (req: Request) => {
@@ -127,9 +158,43 @@ const buildPrintResultsGrid = async (req: Request) => {
       }
 
       const user = student.user as { fullName?: string } | undefined;
-      const markBySubject = new Map(result.marks.map((mark) => [mark.subjectId.toString(), mark.obtainedMarks]));
+      const markBySubject = new Map(
+        result.marks.map((mark) => [mark.subjectId.toString(), mark])
+      );
       const subjectMarks = Object.fromEntries(
-        subjectOrder.map((subjectId) => [subjectId, markBySubject.get(subjectId) ?? null])
+        subjectOrder.map((subjectId) => {
+          const mark = markBySubject.get(subjectId);
+          return [subjectId, mark ? mark.obtainedMarks : null];
+        })
+      );
+      const subjectDetails = Object.fromEntries(
+        subjectOrder.map((subjectId) => {
+          const mark = markBySubject.get(subjectId);
+          if (!mark) {
+            return [
+              subjectId,
+              { theory: null, practical: null, obtained: null }
+            ] as const;
+          }
+          const theory = Number(mark.theoryMarks) || 0;
+          const practical = Number(mark.practicalMarks) || 0;
+          const internal = Number(mark.internalMarks) || 0;
+          // When components are zero but obtained is set, treat obtained as theory.
+          const theoryOut =
+            theory > 0 || practical > 0 || internal > 0
+              ? theory + internal
+              : mark.obtainedMarks;
+          return [
+            subjectId,
+            {
+              theory: theoryOut,
+              practical: practical > 0 ? practical : null,
+              obtained: mark.obtainedMarks,
+              fullMarks: mark.fullMarks,
+              passMarks: mark.passMarks
+            }
+          ] as const;
+        })
       );
       const remarks = result.marks
         .map((mark) => mark.teacherRemarks?.trim())
@@ -138,6 +203,10 @@ const buildPrintResultsGrid = async (req: Request) => {
 
       const totalMarks = result.marks.reduce((sum, mark) => sum + mark.obtainedMarks, 0);
       const totalFullMarks = result.marks.reduce((sum, mark) => sum + (mark.fullMarks ?? 0), 0);
+      const regNo =
+        (student.registrationNumber && String(student.registrationNumber).trim()) ||
+        student.admissionNumber ||
+        "";
 
       return {
         sn: index + 1,
@@ -146,12 +215,14 @@ const buildPrintResultsGrid = async (req: Request) => {
         studentId: result.studentId.toString(),
         studentName: user?.fullName ?? "Student",
         rollNumber: student.rollNumber,
-        registrationNumber: student.admissionNumber,
+        registrationNumber: regNo,
+        symbolNumber: "",
         batchName: batch?.name,
         yearName: year?.name,
         className: schoolClass?.name,
         sectionName: section?.name,
         subjectMarks,
+        subjectDetails,
         totalMarks,
         totalFullMarks,
         percentage: result.percentage,
@@ -162,6 +233,21 @@ const buildPrintResultsGrid = async (req: Request) => {
       };
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  // If any student has practical marks for a subject marked theory-only, enable P columns.
+  for (const subject of subjects) {
+    if (subject.hasPractical) continue;
+    const anyPractical = rows.some((row) => {
+      const d = row.subjectDetails?.[subject.subjectId];
+      return d != null && d.practical != null && d.practical > 0;
+    });
+    if (anyPractical) {
+      subject.hasPractical = true;
+      if (!subject.practicalFullMarks) {
+        subject.practicalFullMarks = 0;
+      }
+    }
+  }
 
   return {
     exam: {
@@ -181,7 +267,8 @@ const buildPrintResultsGrid = async (req: Request) => {
     collegeName: branding.collegeName,
     collegeNameNp: branding.collegeNameNp,
     collegeAddress: branding.collegeAddress,
-    collegeLogoUrl: branding.collegeLogoUrl
+    collegeLogoUrl: branding.collegeLogoUrl,
+    formsSubmitted: rows.length
   };
 };
 

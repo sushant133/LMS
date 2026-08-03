@@ -531,6 +531,17 @@ export const DISABILITY_CATEGORIES = [
   "Autism Spectrum / Other Developmental"
 ] as const;
 
+/** Common Nepal caste/ethnicity groupings for equity reporting (flexible for IEMIS). */
+export const ETHNICITY_CATEGORIES = [
+  "Brahmin / Chhetri",
+  "Dalit",
+  "Janajati / Indigenous",
+  "Madhesi",
+  "Muslim",
+  "Other",
+  "Prefer not to say"
+] as const;
+
 /**
  * Main religions in Nepal (2021 census order + minor recognized groups).
  * Hinduism ~81%, Buddhism ~8%, Islam ~5%, Kirat ~3%, Christianity ~1.8%,

@@ -28,6 +28,8 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import { getCollegeDisplayName } from "lib/auth";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -53,9 +55,15 @@ import {
 const EMPTY_EVENTS: AcademicCalendarEventRecord[] = [];
 
 export const AcademicCalendarHub = () => {
-  const { user } = useAuth();
+  const { user, availableSchools } = useAuth();
   const canManage = canManageInstitution(user?.role ?? "");
   const schoolAcademicYearBs = user?.school?.academicYearBs ?? "";
+  const printBranding = getPrintInstitutionBranding();
+  const institutionName =
+    getCollegeDisplayName(availableSchools, user) ||
+    printBranding.name ||
+    "Institution";
+  const institutionAddress = printBranding.address?.trim() || "";
   const [academicYearBs, setAcademicYearBs] = useState(schoolAcademicYearBs);
   const [draftFilters, setDraftFilters] = useState<AcademicCalendarFilters>(
     defaultCalendarFilters(),
@@ -400,6 +408,18 @@ export const AcademicCalendarHub = () => {
       </Card>
 
       <div id="academic-calendar-print" className="space-y-6">
+        {/* Included in Print/PDF clone — keep visible (not `hidden`) so export captures branding */}
+        <div className="border-b border-slate-300 pb-3 text-center">
+          <p className="text-base font-bold uppercase tracking-wide text-slate-900">
+            {institutionName}
+          </p>
+          {institutionAddress ? (
+            <p className="mt-1 text-sm text-slate-600">{institutionAddress}</p>
+          ) : null}
+          <p className="mt-2 text-sm font-semibold text-slate-800">
+            Academic Calendar {formatAcademicYearLabel(resolvedYear)}
+          </p>
+        </div>
         {eventsQuery.isPending ? (
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 12 }).map((_, index) => (

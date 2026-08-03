@@ -6,6 +6,11 @@
  * without popup blockers and without a null window handle.
  */
 
+import {
+  getPrintInstitutionBranding,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
+
 const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, "&amp;")
@@ -63,9 +68,14 @@ export const printSimpleDocument = (opts: {
   bodyHtml: string;
   subtitle?: string;
 }): void => {
-  const college =
-    (document.querySelector("[data-college-name]") as HTMLElement | null)
-      ?.dataset.collegeName || "PHIT COLLEGE";
+  const branding = getPrintInstitutionBranding();
+  const college = branding.name || "Institution";
+  const addressLine = branding.address
+    ? `<p class="header-address">${escapeHtml(branding.address)}</p>`
+    : "";
+  const nameNp = branding.nameNp
+    ? `<p class="header-np">${escapeHtml(branding.nameNp)}</p>`
+    : "";
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -83,9 +93,11 @@ export const printSimpleDocument = (opts: {
       background: #fff;
     }
     .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 16px; }
-    .header h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; }
-    .header h2 { margin: 6px 0 0; font-size: 15px; font-weight: 600; }
-    .header p { margin: 4px 0 0; font-size: 12px; color: #475569; }
+    .header h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; text-transform: uppercase; }
+    .header-np { margin: 4px 0 0; font-size: 13px; color: #334155; }
+    .header-address { margin: 4px 0 0; font-size: 12px; color: #475569; line-height: 1.35; }
+    .header h2 { margin: 8px 0 0; font-size: 15px; font-weight: 600; }
+    .header p.subtitle { margin: 4px 0 0; font-size: 12px; color: #475569; }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
     th { background: #f1f5f9; font-size: 12px; }
@@ -103,16 +115,19 @@ export const printSimpleDocument = (opts: {
       body { padding: 0; }
       .no-print { display: none !important; }
     }
+    ${PRINT_INSTITUTION_HEADER_CSS}
   </style>
 </head>
 <body>
   <div class="header">
     <h1>${escapeHtml(college)}</h1>
+    ${nameNp}
+    ${addressLine}
     <h2>${escapeHtml(opts.title)}</h2>
-    ${opts.subtitle ? `<p>${escapeHtml(opts.subtitle)}</p>` : ""}
+    ${opts.subtitle ? `<p class="subtitle">${escapeHtml(opts.subtitle)}</p>` : ""}
   </div>
   ${opts.bodyHtml}
-  <div class="footer">Generated from PHIT COLLEGE Accounting · ${escapeHtml(new Date().toLocaleString())}</div>
+  <div class="footer">Generated from ${escapeHtml(college)} Accounting · ${escapeHtml(new Date().toLocaleString())}</div>
 </body>
 </html>`;
 

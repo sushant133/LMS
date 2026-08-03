@@ -19,6 +19,7 @@ const fontsAvailable = (): boolean =>
 interface ReceiptData {
   schoolName: string;
   schoolNameNp?: string;
+  schoolAddress?: string;
   receiptNumber: string;
   paidDateBs: string;
   studentName: string;
@@ -145,41 +146,63 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
     doc.fillColor("#0f172a");
   }
 
-  // Header band
+  // Header band — college name + address + document title
   const headerTop = 40;
   const logoSize = 64;
   const logoInset = 14;
+  const hasNp =
+    Boolean(data.schoolNameNp) &&
+    fonts.devanagari !== fonts.regular &&
+    hasDevanagari(data.schoolNameNp ?? "");
+  const hasAddress = Boolean(data.schoolAddress?.trim());
+  // Grow header height when nameNp and/or address are present
+  const headerHeight = 88 + (hasNp ? 8 : 0) + (hasAddress ? 16 : 0);
   doc
-    .roundedRect(50, headerTop, contentWidth, 88, 8)
+    .roundedRect(50, headerTop, contentWidth, headerHeight, 8)
     .lineWidth(1)
     .strokeColor("#0c2d6b")
     .stroke();
 
   drawCollegeLogo(doc, 50 + logoInset, headerTop + 12, logoSize);
 
-  doc.font(fonts.bold).fontSize(18).fillColor("#0f172a").text(data.schoolName, 50, headerTop + 16, {
+  let headerY = headerTop + 16;
+  doc.font(fonts.bold).fontSize(18).fillColor("#0f172a").text(data.schoolName, 50, headerY, {
     align: "center",
     width: contentWidth
   });
+  headerY += 22;
 
-  if (data.schoolNameNp && fonts.devanagari !== fonts.regular && hasDevanagari(data.schoolNameNp)) {
-    doc.font(fonts.devanagari).fontSize(13).fillColor("#334155").text(data.schoolNameNp, 50, headerTop + 42, {
+  if (hasNp && data.schoolNameNp) {
+    doc.font(fonts.devanagari).fontSize(12).fillColor("#334155").text(data.schoolNameNp, 50, headerY, {
       align: "center",
       width: contentWidth
     });
+    headerY += 16;
+  }
+
+  if (hasAddress && data.schoolAddress) {
+    doc
+      .font(fonts.regular)
+      .fontSize(9)
+      .fillColor("#475569")
+      .text(data.schoolAddress.trim(), 50, headerY, {
+        align: "center",
+        width: contentWidth
+      });
+    headerY += 14;
   }
 
   doc
     .font(fonts.regular)
     .fontSize(10)
     .fillColor("#0c2d6b")
-    .text("OFFICIAL FEE RECEIPT", 50, headerTop + (data.schoolNameNp ? 64 : 52), {
+    .text("OFFICIAL FEE RECEIPT", 50, headerY, {
       align: "center",
       width: contentWidth,
       characterSpacing: 1.2
     });
 
-  let y = headerTop + 108;
+  let y = headerTop + headerHeight + 20;
 
   // Receipt meta
   doc.font(fonts.bold).fontSize(11).fillColor("#0f172a").text("Receipt Information", 50, y);

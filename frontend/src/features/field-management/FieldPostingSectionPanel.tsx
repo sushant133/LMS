@@ -27,6 +27,10 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { api, unwrap } from "lib/api";
+import {
+  buildPrintInstitutionHeaderHtml,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { parseErrorMessage } from "lib/utils";
 import {
   defaultPostingTypeForSection,
@@ -781,13 +785,14 @@ export const FieldPostingSectionPanel = ({
             .join("")
         : `<tr><td colspan="${days.length + 7}">No register records for this month.</td></tr>`;
 
+    const institutionHeader = buildPrintInstitutionHeaderHtml();
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"/>
-      <title>PHIT LMS — ${sectionLabel(section)} Attendance Register</title>
+      <title>${sectionLabel(section)} Attendance Register</title>
       <style>
         * { box-sizing: border-box; }
         body { font-family: system-ui, sans-serif; padding: 10mm 8mm; color: #0f172a; }
-        h1 { font-size: 15px; margin: 0 0 4px; }
+        h1 { font-size: 15px; margin: 8px 0 4px; }
         .meta { font-size: 11px; color: #475569; margin-bottom: 10px; }
         table { width: 100%; border-collapse: collapse; font-size: 9px; }
         th, td { border: 1px solid #94a3b8; padding: 2px 3px; }
@@ -795,9 +800,11 @@ export const FieldPostingSectionPanel = ({
         thead { display: table-header-group; }
         tr { page-break-inside: avoid; }
         @page { size: A4 landscape; margin: 8mm; }
+        ${PRINT_INSTITUTION_HEADER_CSS}
       </style>
       </head><body>
-      <h1>PHIT LMS — ${sectionLabel(section)} Attendance Register</h1>
+      ${institutionHeader}
+      <h1>${sectionLabel(section)} Attendance Register</h1>
       <div class="meta">
         Month (BS): <strong>${month || "—"}</strong>
         ${registerShiftFilter ? ` · Shift: ${shiftLabel(registerShiftFilter)}` : " · All shifts"}

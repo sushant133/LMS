@@ -347,69 +347,244 @@ input.time-input[type="time"]::-webkit-calendar-picker-indicator:hover {
   touch-action: pan-y;
 }
 
-/* Screen: hide dedicated print-only layouts */
+/* Screen: hide dedicated print-only bulk layouts */
 .print-results-bulk-table {
   display: none;
 }
 
-.print-results-bulk-header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-  text-align: center;
-  border-bottom: 1px solid #cbd5e1;
-  padding-bottom: 0.75rem;
-}
-
-.print-results-bulk-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 4rem;
-  height: 4rem;
-}
-
-.print-results-bulk-logo img {
+/* ── CTEVT Internal Assessment Report (Print Bulk only) ─────────────────── */
+.iar-report {
+  box-sizing: border-box;
+  color: #000;
+  background: #fff;
+  font-family: "Times New Roman", Times, Georgia, serif;
+  font-size: 9px;
+  line-height: 1.2;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
 }
 
-.print-results-bulk-college {
-  margin: 0;
-  font-size: 1.125rem;
+.iar-report *,
+.iar-report *::before,
+.iar-report *::after {
+  box-sizing: border-box;
+}
+
+.iar-title {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0 0 2px;
+}
+
+.iar-office {
+  text-align: center;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: #0f172a;
+  margin: 0 0 2px;
 }
 
-.print-results-bulk-college-np {
-  margin: 0.25rem 0 0;
-  font-size: 0.875rem;
-  color: #334155;
+.iar-sheet-title {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin: 0 0 6px;
 }
 
-.print-results-bulk-address {
-  margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  color: #475569;
+/* Meta info: strict 2-column grid like sample PDF */
+.iar-meta {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #000;
+  margin: 0 0 6px;
+  table-layout: fixed;
+  font-size: 8.5px;
 }
 
-.print-results-bulk-exam {
-  margin: 0.5rem 0 0;
-  font-size: 1rem;
+.iar-meta td {
+  border: 1px solid #000;
+  padding: 3px 5px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.iar-meta-k {
+  font-weight: 700;
+}
+
+/* Marks table: colgroup drives alignment */
+.iar-marks {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #000;
+  table-layout: fixed;
+  font-size: 7.5px;
+}
+
+.iar-marks th,
+.iar-marks td {
+  border: 1px solid #000;
+  padding: 2px 1px;
+  vertical-align: middle;
+  background: #fff;
+}
+
+.iar-marks thead th {
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Column widths via colgroup classes */
+.iar-col-sn {
+  width: 3.2%;
+}
+.iar-col-regd {
+  width: 7.5%;
+}
+.iar-col-symbol {
+  width: 3.5%;
+}
+.iar-col-name {
+  width: 14%;
+}
+.iar-col-label {
+  width: 5%;
+}
+.iar-col-mark {
+  /* remaining width shared equally among T/P columns */
+}
+.iar-col-total {
+  width: 5.5%;
+}
+.iar-col-pct {
+  width: 3.5%;
+}
+.iar-col-grade {
+  width: 3.5%;
+}
+.iar-col-remarks {
+  width: 5%;
+}
+
+.iar-sn {
+  text-align: center;
   font-weight: 600;
-  color: #0f172a;
 }
 
-.print-results-bulk-meta,
-.print-results-bulk-count {
-  margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  color: #475569;
+.iar-regd {
+  text-align: center;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 6.5px;
+  word-break: break-all;
+  line-height: 1.15;
+}
+
+.iar-symbol {
+  text-align: center;
+  font-size: 7px;
+}
+
+.iar-name {
+  text-align: left;
+  font-weight: 700;
+  font-size: 7px;
+  line-height: 1.15;
+  padding-left: 2px !important;
+  padding-right: 2px !important;
+  word-break: break-word;
+}
+
+/* Corner: Subjects / Full Marks / Pass Marks */
+.iar-corner {
+  text-align: center;
+  font-weight: 700;
+  font-size: 6.5px;
+  line-height: 1.1;
+  vertical-align: middle;
+}
+
+.iar-corner-empty {
+  background: #fff;
+}
+
+.iar-subject-name {
+  text-align: center;
+  font-weight: 700;
+  font-size: 6.5px;
+  line-height: 1.1;
+  word-break: break-word;
+  hyphens: auto;
+  vertical-align: middle;
+}
+
+.iar-tp {
+  text-align: center;
+  font-weight: 700;
+  font-size: 7px;
+}
+
+.iar-num {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.iar-total,
+.iar-pct,
+.iar-grade {
+  text-align: center;
+  font-size: 7px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.iar-grade {
+  font-weight: 700;
+}
+
+.iar-remarks {
+  text-align: left;
+  font-size: 6.5px;
+  padding-left: 2px !important;
+}
+
+.iar-legend {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #000;
+  margin-top: 6px;
+  table-layout: fixed;
+  font-size: 7.5px;
+}
+
+.iar-legend td {
+  border: 1px solid #000;
+  padding: 3px 5px;
+  vertical-align: middle;
+}
+
+.iar-signatures {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 28px;
+  padding: 0 32px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.iar-sign {
+  text-align: center;
+  min-width: 150px;
+}
+
+.iar-sign-line {
+  border-top: 1px dotted #000;
+  margin: 0 auto 6px;
+  width: 150px;
 }
 
 @media print {

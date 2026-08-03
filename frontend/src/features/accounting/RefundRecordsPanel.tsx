@@ -38,6 +38,10 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, resolveApiUrl, unwrap } from "lib/api";
+import {
+  buildPrintInstitutionHeaderHtml,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
@@ -467,6 +471,7 @@ export const RefundRecordsPanel = () => {
     const student = studentLabel(row);
     const admission = admissionOf(row);
     const printedAt = new Date().toLocaleString();
+    const institutionHeader = buildPrintInstitutionHeaderHtml();
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -475,7 +480,7 @@ export const RefundRecordsPanel = () => {
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 28px; color: #0f172a; }
-    h1 { font-size: 18px; margin: 0 0 4px; }
+    h1 { font-size: 18px; margin: 8px 0 4px; }
     .sub { font-size: 12px; color: #64748b; margin-bottom: 20px; }
     .box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; max-width: 640px; }
     .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
@@ -488,9 +493,11 @@ export const RefundRecordsPanel = () => {
       body { margin: 12mm; }
       @page { size: A4 portrait; margin: 12mm; }
     }
+    ${PRINT_INSTITUTION_HEADER_CSS}
   </style>
 </head>
 <body>
+  ${institutionHeader}
   <h1>Student Refund Voucher</h1>
   <div class="sub">Refund register · Printed ${escapeHtml(printedAt)}</div>
   <div class="box">
@@ -566,6 +573,7 @@ export const RefundRecordsPanel = () => {
       .filter(Boolean)
       .join(" · ");
 
+    const institutionHeader = buildPrintInstitutionHeaderHtml();
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -574,7 +582,7 @@ export const RefundRecordsPanel = () => {
   <style>
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; color: #0f172a; }
-    h1 { font-size: 18px; margin: 0 0 4px; }
+    h1 { font-size: 16px; margin: 8px 0 4px; }
     .meta { font-size: 12px; color: #475569; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; font-size: 11px; }
     th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
@@ -586,9 +594,11 @@ export const RefundRecordsPanel = () => {
       body { margin: 12mm; }
       @page { size: A4 landscape; margin: 10mm; }
     }
+    ${PRINT_INSTITUTION_HEADER_CSS}
   </style>
 </head>
 <body>
+  ${institutionHeader}
   <h1>Student Refund Register</h1>
   <div class="meta">
     ${filtered.length} record${filtered.length === 1 ? "" : "s"}

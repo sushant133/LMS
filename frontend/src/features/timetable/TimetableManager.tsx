@@ -32,6 +32,10 @@ import { useIsCollege } from "hooks/useInstitutionType";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
+import {
+  formatPrintAddress,
+  getPrintInstitutionBranding,
+} from "lib/printBranding";
 import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import {
@@ -1185,8 +1189,18 @@ export const TimetableManager = () => {
                     matrix={matrix}
                     meta={{
                       collegeName:
-                        settingsQuery.data?.schoolName ?? "College",
+                        settingsQuery.data?.schoolName ||
+                        getPrintInstitutionBranding().name ||
+                        "College",
                       collegeNameNp: settingsQuery.data?.schoolNameNp,
+                      collegeAddress:
+                        formatPrintAddress(
+                          (
+                            settingsQuery.data as
+                              | { address?: Parameters<typeof formatPrintAddress>[0] }
+                              | undefined
+                          )?.address,
+                        ) || getPrintInstitutionBranding().address,
                       principalName: settingsQuery.data?.principalName,
                       batchName: isCollege ? batchName : undefined,
                       yearName: isCollege ? table.title : undefined,
@@ -1290,8 +1304,16 @@ const StudentMatrix = ({
           printId={printId}
           matrix={matrix}
           meta={{
-            collegeName: settings?.schoolName ?? "College",
+            collegeName:
+              settings?.schoolName ||
+              getPrintInstitutionBranding().name ||
+              "College",
             collegeNameNp: settings?.schoolNameNp,
+            collegeAddress:
+              formatPrintAddress(
+                (settings as { address?: Parameters<typeof formatPrintAddress>[0] } | undefined)
+                  ?.address,
+              ) || getPrintInstitutionBranding().address,
             principalName: settings?.principalName,
             batchName,
             yearName,

@@ -24,6 +24,7 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { api, unwrap } from "lib/api";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { parseErrorMessage } from "lib/utils";
 
 const STATUSES: EmployeeAttendanceStatus[] = [
@@ -348,11 +349,16 @@ export const EmployeeAttendancePanel = ({
         return `<tr><td>${r.dateBs ?? ""}</td><td>${r.employeeCode ?? ""}</td><td>${r.fullName ?? ""}</td><td>${r.department ?? ""}</td><td>${r.designation ?? ""}</td><td>${r.status ?? ""}</td><td>${r.checkInTime ?? ""}</td><td>${r.checkOutTime ?? ""}</td>${periodCell}<td>${r.remarks ?? ""}</td></tr>`;
       })
       .join("");
-    win.document.write(`<!DOCTYPE html><html><head><title>PHIT LMS — ${label} Attendance</title>
-      <style>body{font-family:system-ui,sans-serif;padding:24px} table{border-collapse:collapse;width:100%;font-size:12px} th,td{border:1px solid #ccc;padding:4px}</style>
+    const branding = getPrintInstitutionBranding();
+    const instName = branding.name || "Institution";
+    const instAddr = branding.address
+      ? `<p style="margin:2px 0 0;font-size:12px;color:#475569">${branding.address}</p>`
+      : "";
+    win.document.write(`<!DOCTYPE html><html><head><title>${instName} — ${label} Attendance</title>
+      <style>body{font-family:system-ui,sans-serif;padding:24px;color:#0f172a} .hdr{text-align:center;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:14px} .hdr h1{margin:0;font-size:18px;text-transform:uppercase} table{border-collapse:collapse;width:100%;font-size:12px} th,td{border:1px solid #ccc;padding:4px} th{background:#f1f5f9}</style>
       </head><body>
-      <h1>PHIT LMS — ${label} Attendance Register</h1>
-      <p>Generated ${new Date().toLocaleString()}</p>
+      <div class="hdr"><h1>${instName}</h1>${instAddr}<p style="margin:8px 0 0;font-size:15px;font-weight:600">${label} Attendance Register</p></div>
+      <p style="font-size:12px;color:#475569">Generated ${new Date().toLocaleString()}</p>
       <table><thead><tr><th>Date</th><th>ID</th><th>Name</th><th>Dept</th><th>Designation</th><th>Status</th><th>In</th><th>Out</th>${periodHeader}<th>Remarks</th></tr></thead>
       <tbody>${body || `<tr><td colspan='${colSpan}'>No records</td></tr>`}</tbody></table>
       <script>window.onload=()=>window.print()</script></body></html>`);

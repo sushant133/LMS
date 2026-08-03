@@ -24,6 +24,7 @@ export interface StudentMasterRow {
   sectionName: string;
   rollNumber: number;
   disabilityCategory: string;
+  ethnicityCategory: string;
   religion: string;
   caste: string;
   fatherPhone: string;
@@ -97,6 +98,7 @@ export async function generateStudentMasterExport(req: Request): Promise<Student
     sectionName: s.yearId?.name || s.sectionId?.name || "",
     rollNumber: s.rollNumber,
     disabilityCategory: s.disabilityCategory || "None",
+    ethnicityCategory: s.ethnicityCategory || "",
     religion: s.religion || "",
     caste: s.caste || "",
     fatherPhone: s.fatherPhone || "",
@@ -212,6 +214,7 @@ export async function generateEnrollmentSummary(req: Request) {
     byGender: {},
     byClass: [],
     byDisability: [],
+    byEthnicity: [],
     byReligion: [],
     byCaste: []
   };
@@ -229,6 +232,11 @@ export async function generateEnrollmentSummary(req: Request) {
     const existingD = summary.byDisability.find((x: any) => x.category === d);
     if (existingD) existingD.count++;
     else summary.byDisability.push({ category: d, count: 1 });
+
+    const eth = s.ethnicityCategory || "Unset";
+    const existingEth = summary.byEthnicity.find((x: any) => x.category === eth);
+    if (existingEth) existingEth.count++;
+    else summary.byEthnicity.push({ category: eth, count: 1 });
 
     const r = s.religion || "Unset";
     const existingR = summary.byReligion.find((x: any) => x.category === r);

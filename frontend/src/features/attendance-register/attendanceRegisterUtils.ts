@@ -3,6 +3,7 @@ import type {
   AttendanceRegisterResponse,
   AttendanceRegisterRowSummary,
 } from "@phit-erp/shared";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 
 export const REGISTER_CODE_COLORS: Record<string, string> = {
   P: "bg-emerald-100 text-emerald-800",
@@ -143,6 +144,10 @@ export type RegisterPrintOptions = {
   preparedBy?: string;
   /** e.g. STUDENT / TEACHER / STAFF */
   tabLabel?: string;
+  /** Institution name for print header (falls back to branding cache). */
+  institutionName?: string;
+  /** Institution address line. */
+  institutionAddress?: string;
 };
 
 /**
@@ -165,6 +170,20 @@ export const buildAttendanceRegisterPrintHtml = (
       ? new Date(data.generatedAt).toLocaleString()
       : new Date().toLocaleString(),
   );
+
+  const branding = getPrintInstitutionBranding();
+  const instName = (options.institutionName || branding.name || "").trim();
+  const instAddress = (
+    options.institutionAddress ||
+    branding.address ||
+    ""
+  ).trim();
+  const institutionBlock = instName
+    ? `<div class="inst-header">
+        <div class="inst-name">${escapeHtml(instName)}</div>
+        ${instAddress ? `<div class="inst-address">${escapeHtml(instAddress)}</div>` : ""}
+      </div>`
+    : "";
 
   const dayHeaders = data.days
     .map((d) => {
@@ -219,7 +238,26 @@ export const buildAttendanceRegisterPrintHtml = (
       color: #0f172a;
       background: #fff;
     }
-    h1 { font-size: 15px; margin: 0 0 2px; font-weight: 700; }
+    .inst-header {
+      text-align: center;
+      margin: 0 0 8px;
+      padding: 0 0 6px;
+      border-bottom: 2px solid #0f172a;
+    }
+    .inst-name {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .inst-address {
+      margin: 3px 0 0;
+      font-size: 10px;
+      color: #475569;
+      line-height: 1.35;
+    }
+    h1 { font-size: 14px; margin: 0 0 2px; font-weight: 700; }
     h2 { font-size: 12px; margin: 0 0 6px; font-weight: 600; color: #334155; }
     .meta { margin-bottom: 8px; color: #475569; font-size: 9px; line-height: 1.4; }
     table {
@@ -284,6 +322,7 @@ export const buildAttendanceRegisterPrintHtml = (
   </style>
 </head>
 <body>
+  ${institutionBlock}
   <h1>${appName}</h1>
   <h2>Attendance Register — ${tabLabel}</h2>
   <div class="meta">

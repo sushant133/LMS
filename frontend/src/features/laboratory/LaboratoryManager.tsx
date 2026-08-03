@@ -61,6 +61,7 @@ import { Textarea } from "components/ui/textarea";
 import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
 import {
@@ -3243,6 +3244,26 @@ export const LaboratoryManager = () => {
               </CardHeader>
               <CardContent>
                 <div id="lab-report-preview" className="overflow-x-auto bg-white p-2">
+                  {(() => {
+                    const branding = getPrintInstitutionBranding();
+                    return (
+                      <div className="mb-3 border-b border-slate-300 pb-2 text-center">
+                        <p className="text-sm font-bold uppercase tracking-wide text-slate-900">
+                          {branding.name || "Institution"}
+                        </p>
+                        {branding.address ? (
+                          <p className="mt-0.5 text-xs text-slate-600">
+                            {branding.address}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-sm font-semibold text-slate-800">
+                          {reportTypeOptions.find(
+                            (r) => r.value === reportData.reportType,
+                          )?.label ?? reportData.reportType}
+                        </p>
+                      </div>
+                    );
+                  })()}
                   <p className="mb-3 text-sm text-slate-500">
                     Generated {new Date(reportData.generatedAt).toLocaleString()} ·{" "}
                     {reportData.summary?.rowCount ?? reportData.rows.length} rows

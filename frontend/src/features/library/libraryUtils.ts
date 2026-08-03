@@ -191,6 +191,7 @@ const COPY_STATUS_LABEL: Record<LibraryCopyStatus, string> = {
 
 export type LibraryInventoryPdfMeta = {
   institutionName?: string;
+  institutionAddress?: string;
   title?: string;
   filename?: string;
 };
@@ -281,9 +282,22 @@ export async function exportLibraryInventoryPdf(
     doc.setFontSize(14);
     doc.setTextColor(15, 23, 42);
     doc.text(meta?.institutionName?.trim() || "Institution", marginX, y);
-    y += 6;
+    y += 5;
 
+    const address = meta?.institutionAddress?.trim() || "";
+    if (address) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      doc.text(address, marginX, y);
+      y += 5;
+    } else {
+      y += 1;
+    }
+
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
+    doc.setTextColor(15, 23, 42);
     doc.text(meta?.title?.trim() || "Library Book Inventory", marginX, y);
     y += 5;
 

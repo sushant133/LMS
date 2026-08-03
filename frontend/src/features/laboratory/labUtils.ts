@@ -6,6 +6,10 @@ import type {
   LaboratoryReportType,
   LaboratoryStockRequestStatus,
 } from "@phit-erp/shared";
+import {
+  buildPrintInstitutionHeaderHtml,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 
 /**
  * Must stay in sync with `@phit-erp/shared` LABORATORY_YEAR_LEVELS.
@@ -290,6 +294,9 @@ export type LabListPrintOptions = {
 
 /** Build a landscape A4 printable HTML table for lab lists. */
 export function buildLabListPrintHtml(options: LabListPrintOptions): string {
+  const institutionHeader = buildPrintInstitutionHeaderHtml();
+  const institutionCss = PRINT_INSTITUTION_HEADER_CSS;
+
   const mono = new Set(options.monoColumnIndexes ?? []);
   const headerCells = options.columns
     .map((c) => `<th>${escapePrintHtml(c)}</th>`)
@@ -321,7 +328,7 @@ export function buildLabListPrintHtml(options: LabListPrintOptions): string {
       color: #0f172a;
       background: #fff;
     }
-    h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; }
+    h1 { font-size: 14px; margin: 8px 0 4px; font-weight: 700; }
     .meta { font-size: 10px; color: #475569; margin-bottom: 10px; line-height: 1.4; }
     table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
     th, td {
@@ -337,9 +344,11 @@ export function buildLabListPrintHtml(options: LabListPrintOptions): string {
     .mono { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
     tfoot td { font-weight: 600; background: #f8fafc; }
     @page { size: A4 landscape; margin: 7mm; }
+    ${institutionCss}
   </style>
 </head>
 <body>
+  ${institutionHeader}
   <h1>${escapePrintHtml(options.title)}</h1>
   <div class="meta">
     ${options.rows.length} record${options.rows.length === 1 ? "" : "s"}
@@ -373,6 +382,7 @@ export function printLabList(options: LabListPrintOptions): void {
 
 export type LaboratoryInventoryPdfMeta = {
   institutionName?: string;
+  institutionAddress?: string;
   title?: string;
   filename?: string;
 };
@@ -497,9 +507,20 @@ export async function exportLaboratoryInventoryPdf(
     doc.setFontSize(12);
     doc.setTextColor(15, 23, 42);
     doc.text(meta?.institutionName?.trim() || "Institution", marginX, y);
-    y += 5;
+    y += 4;
 
+    const address = meta?.institutionAddress?.trim() || "";
+    if (address) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text(address, marginX, y);
+      y += 4;
+    }
+
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
+    doc.setTextColor(15, 23, 42);
     doc.text(meta?.title?.trim() || "Laboratory Equipment Inventory", marginX, y);
     y += 4;
 

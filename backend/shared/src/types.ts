@@ -102,6 +102,16 @@ export type DisabilityCategory =
   | "Multiple Disabilities"
   | "Autism Spectrum / Other Developmental";
 
+/** Equity ethnicity groupings (see ETHNICITY_CATEGORIES in constants). */
+export type EthnicityCategory =
+  | "Brahmin / Chhetri"
+  | "Dalit"
+  | "Janajati / Indigenous"
+  | "Madhesi"
+  | "Muslim"
+  | "Other"
+  | "Prefer not to say";
+
 /** Main religions in Nepal (see RELIGIONS in constants). */
 export type Religion =
   | "Hinduism"
@@ -307,6 +317,7 @@ export interface StudentRecord {
   gender: string;
   bloodGroup?: BloodGroup;
   disabilityCategory?: DisabilityCategory;
+  ethnicityCategory?: EthnicityCategory;
   religion?: Religion;
   caste?: Caste;
   address: AddressSelection;
@@ -896,6 +907,29 @@ export interface PrintResultsSubjectColumn {
   subjectId: string;
   subjectName: string;
   subjectCode?: string;
+  /** Overall full marks for the subject. */
+  fullMarks?: number;
+  /** Overall pass marks for the subject. */
+  passMarks?: number;
+  /** Theory component full marks (0 if theory not used). */
+  theoryFullMarks?: number;
+  /** Practical component full marks (0 if practical not used). */
+  practicalFullMarks?: number;
+  /** Theory component pass marks. */
+  theoryPassMarks?: number;
+  /** Practical component pass marks. */
+  practicalPassMarks?: number;
+  hasTheory?: boolean;
+  hasPractical?: boolean;
+}
+
+/** Per-subject obtained marks for CTEVT-style bulk internal assessment print. */
+export interface PrintResultsSubjectMarkDetail {
+  theory: number | null;
+  practical: number | null;
+  obtained: number | null;
+  fullMarks?: number;
+  passMarks?: number;
 }
 
 export interface PrintResultsGridRow {
@@ -905,12 +939,18 @@ export interface PrintResultsGridRow {
   studentId: string;
   studentName: string;
   rollNumber: number;
+  /** Admission / registration number shown as Regd. No. */
   registrationNumber: string;
+  /** Optional exam symbol number (blank when not used). */
+  symbolNumber?: string;
   batchName?: string;
   yearName?: string;
   className?: string;
   sectionName?: string;
+  /** Obtained total per subject (screen grid). */
   subjectMarks: Record<string, number | null>;
+  /** Theory / practical breakdown for bulk internal assessment print. */
+  subjectDetails?: Record<string, PrintResultsSubjectMarkDetail>;
   totalMarks: number;
   totalFullMarks: number;
   percentage: number;
@@ -933,6 +973,8 @@ export interface PrintResultsGridResponse {
   collegeNameNp?: string;
   collegeAddress?: string;
   collegeLogoUrl?: string;
+  /** Count of student forms in this bulk sheet (for CTEVT meta). */
+  formsSubmitted?: number;
 }
 
 export interface MarksheetViewResponse {
@@ -1170,13 +1212,20 @@ export interface DashboardResponse {
   religionChart?: Array<{ name: string; value: number }>;
   religionChartScope?: string;
   /**
-   * Active-student rows for client-side batch/year filtering of gender & religion charts.
+   * Ethnicity breakdown for currently enrolled (ACTIVE) students.
+   * Same scope as genderChart (current running years when college).
+   */
+  ethnicityChart?: Array<{ name: string; value: number }>;
+  ethnicityChartScope?: string;
+  /**
+   * Active-student rows for client-side batch/year filtering of demographics charts.
    * College: batchId + yearId; school: classId + sectionId (mapped to same fields).
    */
   studentDemographics?: Array<{
     batchId?: string;
     yearId?: string;
     gender?: string;
+    ethnicityCategory?: string;
     religion?: string;
     caste?: string;
   }>;

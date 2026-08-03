@@ -26,6 +26,7 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Textarea } from "components/ui/textarea";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { HrDocumentsSection } from "features/hr-documents/HrDocumentsSection";
 import { api, resolveApiUrl, unwrap } from "lib/api";
@@ -33,8 +34,9 @@ import {
   toastCredentialCreateResult,
   type CredentialsEmailResult,
 } from "lib/credentialsEmail";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { queryClient } from "lib/queryClient";
-import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import {
@@ -449,6 +451,26 @@ export const CollegeStaffManager = ({
             </CardHeader>
             <CardContent>
               <div id="staff-report-preview" className="overflow-x-auto bg-white p-2">
+                {(() => {
+                  const branding = getPrintInstitutionBranding();
+                  return (
+                    <div className="mb-3 border-b border-slate-300 pb-2 text-center">
+                      <p className="text-sm font-bold uppercase tracking-wide text-slate-900">
+                        {branding.name || "Institution"}
+                      </p>
+                      {branding.address ? (
+                        <p className="mt-0.5 text-xs text-slate-600">
+                          {branding.address}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-sm font-semibold text-slate-800">
+                        {staffReportOptions.find(
+                          (r) => r.value === reportData.reportType,
+                        )?.label ?? reportData.reportType}
+                      </p>
+                    </div>
+                  );
+                })()}
                 <p className="mb-3 text-sm text-slate-500">
                   Generated {new Date(reportData.generatedAt).toLocaleString()} ·{" "}
                   {reportData.summary?.rowCount ?? reportData.rows.length} rows
@@ -900,11 +922,11 @@ export const CollegeStaffManager = ({
         </div>
       ) : null}
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>{title}</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="min-w-0 space-y-4">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <FormField label="Search">
               <Input
@@ -955,227 +977,320 @@ export const CollegeStaffManager = ({
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th className="w-14 text-center">S.N.</Th>
-                    <Th>Photo</Th>
-                    <Th>Employee ID</Th>
-                    <Th>Name</Th>
-                    <Th>Role</Th>
-                    <Th>Department</Th>
-                    <Th>Designation</Th>
-                    <Th>Qualification</Th>
-                    <Th>Email / Login</Th>
-                    <Th>Phone</Th>
-                    <Th>Status</Th>
-                    <Th>Email delivery</Th>
-                    {canManage ? <Th>Actions</Th> : null}
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {staffList.map((staff, index) => (
-                    <tr key={staff._id}>
-                      <Td className="text-center tabular-nums text-slate-500">
-                        {index + 1}
-                      </Td>
-                      <Td>
-                        {staffPhotoSrc(staff.photoUrl) ? (
-                          <img
-                            src={staffPhotoSrc(staff.photoUrl)}
-                            alt={staff.fullName}
-                            className="h-10 w-10 rounded-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-500">
-                            {(staff.fullName || "?").slice(0, 1)}
-                          </div>
-                        )}
-                      </Td>
-                      <Td>{staff.staffId}</Td>
-                      <Td className="font-medium">
-                        <Link
-                          to={`/college-staff/${staff._id}/profile`}
-                          className="text-brand-700 hover:underline"
-                        >
-                          {staff.fullName}
-                        </Link>
-                      </Td>
-                      <Td className="text-xs">
-                        {categoryDisplayLabel(staff.category, staff.customRoleLabel)}
-                      </Td>
-                      <Td>{staff.department ?? "—"}</Td>
-                      <Td>{staff.designation}</Td>
-                      <Td className="text-sm text-slate-700">
-                        {staff.qualification?.trim() || "—"}
-                      </Td>
-                      <Td className="text-xs">{staff.user?.email ?? staff.email ?? "—"}</Td>
-                      <Td className="text-sm">
-                        <PhoneLink phone={staff.phone} />
-                      </Td>
-                      <Td>
-                        <div className="flex flex-col gap-1">
-                          <Badge
-                            className={
-                              staff.status === "ACTIVE"
-                                ? "bg-emerald-100 text-emerald-800"
-                                : "bg-slate-100 text-slate-600"
-                            }
-                          >
-                            {staff.status === "ACTIVE" ? "Employed" : "Inactive"}
-                          </Badge>
-                          <Badge
-                            className={
-                              staff.user?.isActive
-                                ? "bg-sky-100 text-sky-800"
-                                : "bg-slate-100 text-slate-600"
-                            }
-                          >
-                            Login {staff.user?.isActive ? "on" : "off"}
-                          </Badge>
-                        </div>
-                      </Td>
-                      <Td>
-                        <Badge
-                          className={
-                            emailStatusStyle[staff.credentialsEmailStatus ?? "PENDING"] ?? ""
-                          }
-                          title={staff.credentialsEmailError || undefined}
-                        >
-                          {staff.credentialsEmailStatus ?? "PENDING"}
-                        </Badge>
-                      </Td>
-                      {canManage ? (
-                        <Td>
-                          <div className="flex flex-wrap justify-end gap-1">
-                            <Button size="sm" variant="outline" asChild>
-                              <Link to={`/college-staff/${staff._id}/profile`}>
-                                <Eye className="mr-1 h-3.5 w-3.5" />
-                                Profile
-                              </Link>
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                loadStaff(staff);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!staff.user?._id}
-                              title={
-                                staff.user?._id
-                                  ? "Enable or disable ERP modules for this login"
-                                  : "No login account linked — edit staff and ensure email/login is set"
-                              }
-                              onClick={() => {
-                                if (!staff.user?._id) {
-                                  toast.error(
-                                    "This staff member has no login account. Edit them with a login email first.",
-                                  );
-                                  return;
-                                }
-                                setAccessStaff(staff);
-                                setEditing(null);
-                                setViewing(null);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                            >
-                              Module Access
-                            </Button>
-                            {staff.status === "ACTIVE" ? (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={statusMutation.isPending}
-                                onClick={() =>
-                                  statusMutation.mutate({ id: staff._id, status: "INACTIVE" })
-                                }
-                              >
-                                Deactivate
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={statusMutation.isPending}
-                                onClick={() =>
-                                  statusMutation.mutate({ id: staff._id, status: "ACTIVE" })
-                                }
-                              >
-                                Activate
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={
-                                !staff.user ||
-                                resetPasswordMutation.isPending ||
-                                resendMutation.isPending
-                              }
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    "Generate a new password and email login credentials to this staff member?",
-                                  )
-                                ) {
-                                  resetPasswordMutation.mutate(staff._id);
-                                }
-                              }}
-                            >
-                              Reset password
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={
-                                !staff.user ||
-                                resetPasswordMutation.isPending ||
-                                resendMutation.isPending
-                              }
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    "Resend login credentials? A new password will be generated and emailed.",
-                                  )
-                                ) {
-                                  resendMutation.mutate(staff._id);
-                                }
-                              }}
-                            >
-                              Resend credentials
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              disabled={deleteMutation.isPending}
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    `Delete staff "${staff.fullName}"? Their login will be deactivated.`,
-                                  )
-                                ) {
-                                  deleteMutation.mutate(staff._id);
-                                }
-                              }}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </Td>
-                      ) : null}
-                    </tr>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            (() => {
+              /**
+               * StickyTableScroll: sticky header + synced left-right horizontal scroll
+               * after the table fits the desktop viewport (same pattern as Students list).
+               */
+              const tableMinWidthClass = canManage
+                ? "min-w-[1680px]"
+                : "min-w-[1180px]";
+              const tableClassName = cn(
+                "w-full table-fixed",
+                tableMinWidthClass,
+              );
+              const thClass = "bg-slate-50 whitespace-nowrap";
+              const colGroup = canManage ? (
+                <colgroup>
+                  <col className="w-[3.5%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[16.5%]" />
+                </colgroup>
+              ) : (
+                <colgroup>
+                  <col className="w-[4%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[5%]" />
+                </colgroup>
+              );
+
+              return (
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200">
+                  <StickyTableScroll
+                    maxHeightClassName="max-h-[min(70vh,720px)]"
+                    header={
+                      <Table className={tableClassName}>
+                        {colGroup}
+                        <TableHead>
+                          <tr>
+                            <Th className={cn(thClass, "text-center")}>S.N.</Th>
+                            <Th className={thClass}>Photo</Th>
+                            <Th className={thClass}>Employee ID</Th>
+                            <Th className={thClass}>Name</Th>
+                            <Th className={thClass}>Role</Th>
+                            <Th className={thClass}>Department</Th>
+                            <Th className={thClass}>Designation</Th>
+                            <Th className={thClass}>Qualification</Th>
+                            <Th className={thClass}>Email / Login</Th>
+                            <Th className={thClass}>Phone</Th>
+                            <Th className={thClass}>Status</Th>
+                            <Th className={thClass}>Email delivery</Th>
+                            {canManage ? (
+                              <Th className={cn(thClass, "text-right")}>Actions</Th>
+                            ) : null}
+                          </tr>
+                        </TableHead>
+                      </Table>
+                    }
+                    body={
+                      <Table className={tableClassName}>
+                        {colGroup}
+                        <TableBody>
+                          {staffList.map((staff, index) => (
+                            <tr key={staff._id} className="align-top">
+                              <Td className="text-center tabular-nums text-slate-500">
+                                {index + 1}
+                              </Td>
+                              <Td>
+                                {staffPhotoSrc(staff.photoUrl) ? (
+                                  <img
+                                    src={staffPhotoSrc(staff.photoUrl)}
+                                    alt={staff.fullName}
+                                    className="h-10 w-10 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-500">
+                                    {(staff.fullName || "?").slice(0, 1)}
+                                  </div>
+                                )}
+                              </Td>
+                              <Td className="whitespace-nowrap text-sm">
+                                {staff.staffId}
+                              </Td>
+                              <Td className="font-medium">
+                                <Link
+                                  to={`/college-staff/${staff._id}/profile`}
+                                  className="text-brand-700 hover:underline"
+                                >
+                                  {staff.fullName}
+                                </Link>
+                              </Td>
+                              <Td className="text-xs">
+                                {categoryDisplayLabel(
+                                  staff.category,
+                                  staff.customRoleLabel,
+                                )}
+                              </Td>
+                              <Td className="text-sm">
+                                {staff.department ?? "—"}
+                              </Td>
+                              <Td className="text-sm">{staff.designation}</Td>
+                              <Td className="text-sm text-slate-700">
+                                {staff.qualification?.trim() || "—"}
+                              </Td>
+                              <Td className="break-all text-xs">
+                                {staff.user?.email ?? staff.email ?? "—"}
+                              </Td>
+                              <Td className="whitespace-nowrap text-sm">
+                                <PhoneLink phone={staff.phone} />
+                              </Td>
+                              <Td>
+                                <div className="flex flex-col gap-1">
+                                  <Badge
+                                    className={
+                                      staff.status === "ACTIVE"
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : "bg-slate-100 text-slate-600"
+                                    }
+                                  >
+                                    {staff.status === "ACTIVE"
+                                      ? "Employed"
+                                      : "Inactive"}
+                                  </Badge>
+                                  <Badge
+                                    className={
+                                      staff.user?.isActive
+                                        ? "bg-sky-100 text-sky-800"
+                                        : "bg-slate-100 text-slate-600"
+                                    }
+                                  >
+                                    Login {staff.user?.isActive ? "on" : "off"}
+                                  </Badge>
+                                </div>
+                              </Td>
+                              <Td>
+                                <Badge
+                                  className={
+                                    emailStatusStyle[
+                                      staff.credentialsEmailStatus ?? "PENDING"
+                                    ] ?? ""
+                                  }
+                                  title={
+                                    staff.credentialsEmailError || undefined
+                                  }
+                                >
+                                  {staff.credentialsEmailStatus ?? "PENDING"}
+                                </Badge>
+                              </Td>
+                              {canManage ? (
+                                <Td>
+                                  <div className="flex flex-wrap justify-end gap-1">
+                                    <Button size="sm" variant="outline" asChild>
+                                      <Link
+                                        to={`/college-staff/${staff._id}/profile`}
+                                      >
+                                        <Eye className="mr-1 h-3.5 w-3.5" />
+                                        Profile
+                                      </Link>
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        loadStaff(staff);
+                                        window.scrollTo({
+                                          top: 0,
+                                          behavior: "smooth",
+                                        });
+                                      }}
+                                    >
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={!staff.user?._id}
+                                      title={
+                                        staff.user?._id
+                                          ? "Enable or disable ERP modules for this login"
+                                          : "No login account linked — edit staff and ensure email/login is set"
+                                      }
+                                      onClick={() => {
+                                        if (!staff.user?._id) {
+                                          toast.error(
+                                            "This staff member has no login account. Edit them with a login email first.",
+                                          );
+                                          return;
+                                        }
+                                        setAccessStaff(staff);
+                                        setEditing(null);
+                                        setViewing(null);
+                                        window.scrollTo({
+                                          top: 0,
+                                          behavior: "smooth",
+                                        });
+                                      }}
+                                    >
+                                      Module Access
+                                    </Button>
+                                    {staff.status === "ACTIVE" ? (
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={statusMutation.isPending}
+                                        onClick={() =>
+                                          statusMutation.mutate({
+                                            id: staff._id,
+                                            status: "INACTIVE",
+                                          })
+                                        }
+                                      >
+                                        Deactivate
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        disabled={statusMutation.isPending}
+                                        onClick={() =>
+                                          statusMutation.mutate({
+                                            id: staff._id,
+                                            status: "ACTIVE",
+                                          })
+                                        }
+                                      >
+                                        Activate
+                                      </Button>
+                                    )}
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      disabled={
+                                        !staff.user ||
+                                        resetPasswordMutation.isPending ||
+                                        resendMutation.isPending
+                                      }
+                                      onClick={() => {
+                                        if (
+                                          confirm(
+                                            "Generate a new password and email login credentials to this staff member?",
+                                          )
+                                        ) {
+                                          resetPasswordMutation.mutate(
+                                            staff._id,
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      Reset password
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      disabled={
+                                        !staff.user ||
+                                        resetPasswordMutation.isPending ||
+                                        resendMutation.isPending
+                                      }
+                                      onClick={() => {
+                                        if (
+                                          confirm(
+                                            "Resend login credentials? A new password will be generated and emailed.",
+                                          )
+                                        ) {
+                                          resendMutation.mutate(staff._id);
+                                        }
+                                      }}
+                                    >
+                                      Resend credentials
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      disabled={deleteMutation.isPending}
+                                      onClick={() => {
+                                        if (
+                                          confirm(
+                                            `Delete staff "${staff.fullName}"? Their login will be deactivated.`,
+                                          )
+                                        ) {
+                                          deleteMutation.mutate(staff._id);
+                                        }
+                                      }}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </div>
+                                </Td>
+                              ) : null}
+                            </tr>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    }
+                  />
+                </div>
+              );
+            })()
           )}
         </CardContent>
       </Card>

@@ -727,7 +727,8 @@ export const LibraryManager = () => {
 
       {tab === "dashboard" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {/* Two compact stat boxes per row on desktop (smaller cards, less empty width) */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
             {[
               {
                 label: "Total Physical Books",
@@ -778,13 +779,13 @@ export const LibraryManager = () => {
                 )}
                 onClick={"onClick" in stat ? stat.onClick : undefined}
               >
-                <CardContent className="flex min-h-[7.5rem] flex-col justify-between gap-2 py-5">
-                  <p className="truncate text-sm font-medium text-slate-500">
+                <CardContent className="flex min-h-[6.25rem] flex-col justify-between gap-1.5 py-3.5 sm:py-4">
+                  <p className="truncate text-xs font-medium text-slate-500 sm:text-sm">
                     {stat.label}
                   </p>
                   <p
                     className={cn(
-                      "text-3xl font-semibold tabular-nums leading-none",
+                      "text-2xl font-semibold tabular-nums leading-none sm:text-3xl",
                       "valueClass" in stat && stat.valueClass
                         ? stat.valueClass
                         : "text-slate-900",
@@ -804,7 +805,8 @@ export const LibraryManager = () => {
             ))}
           </div>
 
-          <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+          {/* Recently issued + returned side by side from md up (two per row) */}
+          <div className="grid min-w-0 gap-4 md:grid-cols-2">
             <Card className="min-w-0 overflow-hidden">
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                 <CardTitle className="flex min-w-0 items-center gap-2">

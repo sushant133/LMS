@@ -254,9 +254,12 @@ export const DashboardSchedulePanels = () => {
     return null;
   }
 
+  const panelClass =
+    "border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_28px_-12px_rgba(15,23,42,0.12)]";
+
   if (loading) {
     return (
-      <Card className="border-slate-200/80 shadow-sm">
+      <Card className={panelClass}>
         <CardContent className="py-8">
           <LoadingState />
         </CardContent>
@@ -268,10 +271,10 @@ export const DashboardSchedulePanels = () => {
     <div className="space-y-6">
       {/* Filters for institution-wide view */}
       {canBrowseAll && isCollege && canAccessAcademics ? (
-        <Card className="border-slate-200/80 shadow-sm">
+        <Card className={panelClass}>
           <CardContent className="flex flex-wrap items-end gap-3 py-4">
             <div className="min-w-[10rem]">
-              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                 Batch
               </p>
               <Select
@@ -290,7 +293,7 @@ export const DashboardSchedulePanels = () => {
               </Select>
             </div>
             <div className="min-w-[10rem]">
-              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                 Year
               </p>
               <Select
@@ -316,13 +319,15 @@ export const DashboardSchedulePanels = () => {
 
       {/* Class timetable */}
       {canAccessTimetable ? (
-        <Card className="border-slate-200/80 shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle className="flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-brand-700" />
+        <Card className={panelClass}>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 border-slate-100/80">
+            <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+                <CalendarDays className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+              </span>
               {isStudent ? "My class timetable" : "Class timetable"}
             </CardTitle>
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" size="sm" asChild className="border-slate-200">
               <Link to="/timetable">
                 <BookOpen className="mr-1.5 h-4 w-4" />
                 Open full timetable
@@ -364,13 +369,15 @@ export const DashboardSchedulePanels = () => {
 
       {/* Exam routine */}
       {canAccessExams ? (
-        <Card className="border-slate-200/80 shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-brand-700" />
+        <Card className={panelClass}>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 border-slate-100/80">
+            <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+                <ClipboardList className="h-4 w-4 text-slate-600" strokeWidth={1.75} />
+              </span>
               {isStudent ? "My exam routine" : "Exam routine"}
             </CardTitle>
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" size="sm" asChild className="border-slate-200">
               <Link to="/exams">Open exams</Link>
             </Button>
           </CardHeader>

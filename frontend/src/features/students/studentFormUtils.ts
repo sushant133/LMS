@@ -16,6 +16,7 @@ export const mapStudentToInput = (student: StudentRecord): StudentInput => ({
   gender: student.gender,
   bloodGroup: student.bloodGroup,
   disabilityCategory: student.disabilityCategory ?? "None",
+  ethnicityCategory: student.ethnicityCategory,
   religion: student.religion,
   caste: student.caste ?? "",
   address: student.address,

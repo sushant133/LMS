@@ -355,6 +355,18 @@ export const StudentProfileView = () => {
                           },
                           { label: "Gender", value: student.gender },
                           {
+                            label: "Ethnicity",
+                            value: student.ethnicityCategory ?? "—",
+                          },
+                          {
+                            label: "Religion",
+                            value: student.religion ?? "—",
+                          },
+                          {
+                            label: "Caste",
+                            value: student.caste?.trim() || "—",
+                          },
+                          {
                             label: "Blood Group",
                             value: student.bloodGroup ?? "—",
                           },

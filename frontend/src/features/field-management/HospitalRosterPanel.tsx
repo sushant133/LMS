@@ -39,6 +39,7 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { api, unwrap } from "lib/api";
+import { getPrintInstitutionBranding } from "lib/printBranding";
 import { cn, parseErrorMessage } from "lib/utils";
 
 type SubTab =
@@ -1871,8 +1872,23 @@ const RosterBuilder = ({
     window.print();
   };
 
+  const printBranding = getPrintInstitutionBranding();
+  const institutionName = printBranding.name || "Institution";
+  const institutionAddress = printBranding.address?.trim() || "";
+
   return (
     <div className="space-y-4">
+      <div className="hidden border-b border-slate-300 pb-3 text-center print:block">
+        <p className="text-base font-bold uppercase tracking-wide text-slate-900">
+          {institutionName}
+        </p>
+        {institutionAddress ? (
+          <p className="mt-1 text-sm text-slate-600">{institutionAddress}</p>
+        ) : null}
+        <p className="mt-2 text-sm font-semibold text-slate-800">
+          Hospital Duty Roster
+        </p>
+      </div>
       <Card className="print:shadow-none">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -2204,9 +2220,23 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
   }, [summary]);
 
   const roster = summary.roster;
+  const printBranding = getPrintInstitutionBranding();
+  const institutionName = printBranding.name || "Institution";
+  const institutionAddress = printBranding.address?.trim() || "";
 
   return (
     <div className="space-y-6">
+      <div className="hidden border-b border-slate-300 pb-3 text-center print:block">
+        <p className="text-base font-bold uppercase tracking-wide text-slate-900">
+          {institutionName}
+        </p>
+        {institutionAddress ? (
+          <p className="mt-1 text-sm text-slate-600">{institutionAddress}</p>
+        ) : null}
+        <p className="mt-2 text-sm font-semibold text-slate-800">
+          Hospital Duty Summary
+        </p>
+      </div>
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
