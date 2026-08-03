@@ -117,9 +117,11 @@ app.get("/api/health", async (_req, res) => {
       uploadDir: uploadsDir,
       uploadDirExists,
       uploadDirWritable,
+      processCwd: process.cwd(),
       publicPrefix: "/uploads",
       serveRoutes: ["/uploads/:schoolId/*", "/api/uploads/:schoolId/*"],
-      note: "MongoDB stores relative paths only. A document 404 means the file is missing under uploadDir on this server."
+      note:
+        "MongoDB stores relative /uploads/{schoolId}/... paths only. 404 = file missing under uploadDir. Set UPLOAD_DIR to an absolute path on the VPS (outside deploy folder) so restarts do not wipe files."
     }
   });
 });
@@ -199,7 +201,9 @@ const startServer = async (): Promise<void> => {
     logger.info(
       `Backend listening on http://${env.HOST === "0.0.0.0" ? "localhost" : env.HOST}:${env.PORT} (${env.NODE_ENV})`
     );
-    logger.info(`File storage (VPS/local): ${uploadsDir} → public /uploads/*`);
+    logger.info(
+      `File storage (VPS/local): ${uploadsDir} → public /uploads/* (cwd=${process.cwd()})`,
+    );
     logger.debug(`CORS origins: ${configuredCorsOrigins().join(", ")}`);
     logger.debug(`Trust proxy hops: ${env.TRUST_PROXY}`);
   });

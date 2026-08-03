@@ -13,6 +13,8 @@
     "start": "node dist/server.js",
     "seed:superadmin": "npm run build:shared && tsx src/scripts/seedSuperAdmin.ts",
     "seed:demo": "npm run build:shared && tsx src/scripts/seedDemoSchool.ts",
+    "uploads:report": "tsx src/scripts/restoreMissingUploads.ts",
+    "uploads:restore": "tsx src/scripts/restoreMissingUploads.ts --apply",
     "typecheck": "npm run build:shared && tsc -p tsconfig.json --noEmit",
     "lint": "npm run build:shared && tsc -p tsconfig.json --noEmit",
     "install:frontend": "npm install --prefix ../frontend",

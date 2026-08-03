@@ -1,7 +1,8 @@
+import type { Dirent } from "node:fs";
 import type { Request, Response } from "express";
 import fs from "fs-extra";
 import path from "path";
-import { getUploadDir } from "../config/env.js";
+import { getBackendRoot, getUploadDir } from "../config/env.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { serveComplaintAttachment } from "./complaintFileController.js";
@@ -72,6 +73,127 @@ const contentTypeForPath = (filePath: string): string | undefined => {
   return undefined;
 };
 
+const isInsideRoot = (rootResolved: string, candidate: string): boolean => {
+  const relativeToRoot = path.relative(rootResolved, candidate);
+  return (
+    relativeToRoot !== "" &&
+    !relativeToRoot.startsWith("..") &&
+    !path.isAbsolute(relativeToRoot)
+  );
+};
+
+/**
+ * Candidate upload roots: configured root first, then common legacy locations
+ * when process.cwd() previously differed from the backend package directory.
+ */
+const getCandidateUploadRoots = (): string[] => {
+  const primary = path.resolve(getUploadDir());
+  const fromEnv = (process.env.UPLOAD_LEGACY_DIRS ?? "")
+    .split(/[;|]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const candidates = [
+    primary,
+    path.join(getBackendRoot(), "uploads"),
+    path.join(process.cwd(), "uploads"),
+    path.join(process.cwd(), "backend", "uploads"),
+    path.join(getBackendRoot(), "..", "uploads"),
+    path.join(getBackendRoot(), "dist", "uploads"),
+    ...fromEnv,
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of candidates) {
+    const n = path.resolve(c);
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+};
+
+/**
+ * When the exact path is missing (deploy / cwd drift), search by basename
+ * under that school's folder only (tenant isolation preserved).
+ */
+const findFileByBasenameUnderSchool = async (
+  rootResolved: string,
+  schoolId: string,
+  basename: string,
+): Promise<string | null> => {
+  if (!SAFE_SEGMENT.test(basename)) return null;
+  const schoolRoot = path.join(rootResolved, schoolId);
+  if (!(await fs.pathExists(schoolRoot))) return null;
+
+  const queue: string[] = [schoolRoot];
+  let visited = 0;
+  const maxVisit = 8_000;
+
+  while (queue.length > 0 && visited < maxVisit) {
+    const dir = queue.shift()!;
+    visited += 1;
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.name === "." || entry.name === "..") continue;
+      // Only traverse safe directory / file names
+      if (!SAFE_SEGMENT.test(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      if (!isInsideRoot(rootResolved, full)) continue;
+      if (entry.isFile() && entry.name === basename) {
+        return full;
+      }
+      if (entry.isDirectory()) {
+        queue.push(full);
+      }
+    }
+  }
+  return null;
+};
+
+const resolveExistingFile = async (
+  schoolId: string,
+  relativeParts: string[],
+): Promise<{ filePath: string; rootResolved: string } | null> => {
+  const basename = relativeParts[relativeParts.length - 1] ?? "";
+  const roots = getCandidateUploadRoots();
+
+  for (const rootResolved of roots) {
+    const exact = path.resolve(rootResolved, schoolId, ...relativeParts);
+    if (!isInsideRoot(rootResolved, exact)) {
+      continue;
+    }
+
+    if (await fs.pathExists(exact)) {
+      const st = await fs.stat(exact);
+      if (st.isFile()) {
+        return { filePath: exact, rootResolved };
+      }
+    }
+
+    // Exact path missing — try basename under this school (same tenant only)
+    if (basename) {
+      const found = await findFileByBasenameUnderSchool(
+        rootResolved,
+        schoolId,
+        basename,
+      );
+      if (found) {
+        logger.warn(
+          `Upload path remapped by basename: expected=${exact} found=${found} root=${rootResolved}`,
+        );
+        return { filePath: found, rootResolved };
+      }
+    }
+  }
+
+  return null;
+};
+
 /**
  * Authenticated file serving for all tenant uploads on the VPS filesystem.
  * Path: /uploads/:schoolId/{*filePath}
@@ -89,10 +211,15 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
 
   const schoolId = typeof req.params.schoolId === "string" ? req.params.schoolId.trim() : "";
   // Express 5: filePath is string[] — do NOT String(array) (becomes "a,b")
-  const relativeParts = parseWildcardPath(req.params.filePath ?? req.params[0]);
+  let relativeParts = parseWildcardPath(req.params.filePath ?? req.params[0]);
 
   if (!schoolId || !SAFE_SEGMENT.test(schoolId)) {
     throw new ApiError(400, "Invalid file path (school)");
+  }
+
+  // Tolerate accidental double schoolId prefix in stored URLs
+  if (relativeParts[0] === schoolId) {
+    relativeParts = relativeParts.slice(1);
   }
 
   if (relativeParts.length === 0) {
@@ -110,7 +237,7 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
     const userSchool = req.user.schoolId ? String(req.user.schoolId) : "";
     if (!userSchool || userSchool !== schoolId) {
       logger.warn(
-        `Upload access denied: user ${req.user.userId} school=${userSchool} tried schoolId=${schoolId}`
+        `Upload access denied: user ${req.user.userId} school=${userSchool} tried schoolId=${schoolId}`,
       );
       throw new ApiError(403, "Access denied");
     }
@@ -131,49 +258,55 @@ export const serveProtectedUpload = asyncHandler(async (req: Request, res: Respo
     return;
   }
 
-  const uploadsDir = getUploadDir();
-  const rootResolved = path.resolve(uploadsDir);
-  const filePath = path.resolve(rootResolved, schoolId, ...relativeParts);
   const publicRelative = `/uploads/${schoolId}/${relativeParts.join("/")}`;
+  const resolved = await resolveExistingFile(schoolId, relativeParts);
 
-  // Portable path containment (Windows-safe)
-  const relativeToRoot = path.relative(rootResolved, filePath);
-  if (
-    relativeToRoot.startsWith("..") ||
-    path.isAbsolute(relativeToRoot) ||
-    relativeToRoot === ""
-  ) {
-    throw new ApiError(400, "Invalid file path (outside uploads)");
-  }
-
-  if (!(await fs.pathExists(filePath))) {
-    // Common ops issue: Mongo has the URL but the binary was never written,
-    // wiped by a deploy, or UPLOAD_DIR pointed elsewhere when the file was saved.
-    const parentDir = path.dirname(filePath);
+  if (!resolved) {
+    const primaryRoot = path.resolve(getUploadDir());
+    const expected = path.join(primaryRoot, schoolId, ...relativeParts);
+    const parentDir = path.dirname(expected);
     const parentExists = await fs.pathExists(parentDir);
+    let parentSample: string[] = [];
+    if (parentExists) {
+      try {
+        parentSample = (await fs.readdir(parentDir)).slice(0, 8);
+      } catch {
+        parentSample = [];
+      }
+    }
     logger.warn(
-      `Upload 404: public=${publicRelative} abs=${filePath} root=${rootResolved} parentDirExists=${parentExists}`
+      `Upload 404: public=${publicRelative} expected=${expected} root=${primaryRoot} parentDirExists=${parentExists} parentSample=${JSON.stringify(parentSample)} rootsTried=${getCandidateUploadRoots().join(" | ")}`,
     );
     throw new ApiError(
       404,
-      "File not found on server storage. Re-upload the document, or restore it under UPLOAD_DIR on the VPS."
+      `File not found on server storage (looking in ${primaryRoot}). Re-upload the document, or set UPLOAD_DIR to the folder that still has your files and restart the backend.`,
     );
   }
 
-  const stat = await fs.stat(filePath);
-  if (!stat.isFile()) {
-    logger.warn(`Upload 404 (not a file): ${filePath}`);
-    throw new ApiError(404, "File not found");
-  }
+  const { filePath } = resolved;
 
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Cache-Control", "private, max-age=3600");
-  res.setHeader("Content-Disposition", "inline");
 
   const contentType = contentTypeForPath(filePath);
   if (contentType) {
     res.setHeader("Content-Type", contentType);
   }
+
+  // ?download=1 → force save-as; default is inline for in-app / blob preview
+  const forceDownload =
+    String(req.query.download ?? "").toLowerCase() === "1" ||
+    String(req.query.download ?? "").toLowerCase() === "true";
+  const basename = path.basename(filePath);
+  const safeAscii = basename.replace(/[^\w.\-()+ ]+/g, "_");
+  if (forceDownload) {
+    res.setHeader("Content-Disposition", `attachment; filename="${safeAscii}"`);
+  } else {
+    res.setHeader("Content-Disposition", `inline; filename="${safeAscii}"`);
+  }
+
+  // Allow same-origin SPA to fetch blob and embed (override global CORP if set)
+  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
 
   return res.sendFile(filePath);
 });

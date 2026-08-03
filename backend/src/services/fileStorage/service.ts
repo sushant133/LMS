@@ -246,7 +246,25 @@ export const finalizeLocalUpload = async (
     throw new ApiError(400, "Upload file is missing on server");
   }
 
+  // Re-stat so we fail closed if multer wrote to a different root than getStorageRoot()
+  const st = await fs.stat(absolute);
+  if (!st.isFile() || st.size <= 0) {
+    throw new ApiError(500, "Upload file is empty or not a regular file");
+  }
+
   const publicPath = toPublicRelativePath(absolute);
+  // Round-trip check: serve path must resolve back to this absolute file
+  const roundTrip = resolvePublicPathToAbsolute(publicPath);
+  if (!roundTrip || path.resolve(roundTrip) !== absolute) {
+    logger.error(
+      `Upload path round-trip failed: abs=${absolute} public=${publicPath} resolved=${roundTrip ?? "null"} root=${root}`,
+    );
+    throw new ApiError(
+      500,
+      "Upload storage path misconfigured. Set UPLOAD_DIR to an absolute folder on the VPS and restart.",
+    );
+  }
+
   const kind = inferAttachmentKind(file.mimetype);
   const uploadedBy =
     options.uploadedBy ??

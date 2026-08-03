@@ -203,8 +203,42 @@ const isProtectedUploadPath = (url: string): boolean => {
   );
 };
 
-/** Open a protected upload in a new tab using an authenticated blob URL. */
-export const openAuthenticatedAttachment = async (url: string): Promise<void> => {
+/** Safe download filename (no path separators; keep a useful extension when possible). */
+export const sanitizeDownloadFilename = (
+  name?: string,
+  fallbackUrl?: string,
+): string => {
+  let base = (name || "").trim().replace(/[/\\?%*:|"<>]/g, "_");
+  if (!base || base === "." || base === "..") {
+    base = "document";
+  }
+  // If name has no extension, try to take one from the storage URL
+  if (!/\.[a-z0-9]{2,5}$/i.test(base) && fallbackUrl) {
+    const m = fallbackUrl.match(/\.([a-z0-9]{2,5})(?:$|\?)/i);
+    if (m?.[1]) base = `${base}.${m[1]}`;
+  }
+  return base.slice(0, 180);
+};
+
+const triggerBlobDownload = (blobUrl: string, filename: string): void => {
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+};
+
+/**
+ * Open a protected upload for viewing.
+ * Uses an authenticated blob URL (cookies required on /api/uploads).
+ * Avoids `noopener` with blob: URLs — that combination blanks the tab in Chrome/Edge.
+ */
+export const openAuthenticatedAttachment = async (
+  url: string,
+  filename?: string,
+): Promise<void> => {
   if (!url?.trim()) {
     throw new Error("No file URL provided");
   }
@@ -215,19 +249,23 @@ export const openAuthenticatedAttachment = async (url: string): Promise<void> =>
   }
 
   const blobUrl = await fetchAuthenticatedBlobUrl(url);
-  const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
-  if (!opened) {
-    // Popup blocked — force download instead of navigating away from the app
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = "document";
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+  const safeName = sanitizeDownloadFilename(filename, url);
+
+  // Prefer a real browsing context without noopener so blob: stays readable
+  let opened: Window | null = null;
+  try {
+    opened = window.open(blobUrl, "_blank");
+  } catch {
+    opened = null;
   }
-  // Revoke later so the new tab has time to load
-  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+
+  if (!opened) {
+    // Popup blocked (common in mobile WebView) — fall back to download
+    triggerBlobDownload(blobUrl, safeName);
+  }
+
+  // Keep blob alive long enough for PDF viewers / slow devices
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 120_000);
 };
 
 /** Download a protected upload via authenticated fetch. */
@@ -239,25 +277,23 @@ export const downloadAuthenticatedAttachment = async (
     throw new Error("No file URL provided");
   }
   const resolved = resolveAttachmentUrl(url);
+  const safeName = sanitizeDownloadFilename(filename, url);
+
   if (!isProtectedUploadPath(resolved) && !isProtectedUploadPath(url)) {
     const a = document.createElement("a");
     a.href = resolved || url;
     a.target = "_blank";
     a.rel = "noopener noreferrer";
-    if (filename) a.download = filename;
+    a.download = safeName;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
     return;
   }
 
   const blobUrl = await fetchAuthenticatedBlobUrl(url);
-  const a = document.createElement("a");
-  a.href = blobUrl;
-  a.download = filename?.trim() || "download";
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
+  triggerBlobDownload(blobUrl, safeName);
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 };
 
 /**

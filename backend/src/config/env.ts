@@ -261,11 +261,31 @@ if (env.NODE_ENV === "production") {
 }
 
 /**
- * Absolute path for the centralized upload root.
- * Dev: <backend cwd>/uploads · Prod: set UPLOAD_DIR (e.g. /var/www/phit-erp/uploads).
+ * Absolute path of the backend package root (folder that contains package.json / .env).
+ * Keeps uploads stable when PM2/systemd starts with a different process.cwd().
  */
-export const getUploadDir = (): string =>
-  env.UPLOAD_DIR ? path.resolve(env.UPLOAD_DIR) : path.join(process.cwd(), "uploads");
+export const getBackendRoot = (): string => backendRoot;
+
+/**
+ * Absolute path for the centralized upload root.
+ *
+ * Priority:
+ * 1. UPLOAD_DIR absolute path (recommended on VPS: /var/www/phit-erp/uploads)
+ * 2. UPLOAD_DIR relative path → resolved against backend package root (not process.cwd())
+ * 3. Default: <backendRoot>/uploads
+ *
+ * Using process.cwd() previously caused "File not found" when the app was started
+ * from the monorepo root vs backend/ (files written to one place, served from another).
+ */
+export const getUploadDir = (): string => {
+  const configured = env.UPLOAD_DIR?.trim();
+  if (configured) {
+    return path.isAbsolute(configured)
+      ? path.normalize(configured)
+      : path.resolve(backendRoot, configured);
+  }
+  return path.join(backendRoot, "uploads");
+};
 
 /**
  * True when legacy Cloudinary credentials are fully configured.
