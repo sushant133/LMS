@@ -240,11 +240,22 @@ const sendGoshwaraPdfResponse = async (
     return;
   }
 
-  const buffer = await generateExactGoshwaraVoucherPDF(pdfData, schoolInfo);
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="${filename}.pdf"`);
-  res.setHeader("Content-Length", String(buffer.length));
-  res.send(buffer);
+  try {
+    const buffer = await generateExactGoshwaraVoucherPDF(pdfData, schoolInfo);
+    if (!buffer?.length) {
+      throw new ApiError(500, "PDF generation returned an empty document");
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}.pdf"`);
+    res.setHeader("Content-Length", String(buffer.length));
+    res.send(buffer);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    const message =
+      error instanceof Error ? error.message : "Failed to generate Goshwara PDF";
+    console.error("[goshwara-pdf]", message, error);
+    throw new ApiError(500, `Failed to generate PDF: ${message}`);
+  }
 };
 
 /**

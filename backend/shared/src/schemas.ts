@@ -6,12 +6,13 @@ import {
   COLLEGE_STAFF_CATEGORIES,
   DISABILITY_CATEGORIES,
   EMPLOYMENT_TYPES,
-  ETHNICITY_CATEGORIES,
   EXAM_ATTENDANCE_STATUSES,
   EXAM_STATUSES,
+  isValidCasteForReligion,
   RESULT_SUBMISSION_STATUSES,
   INSTITUTION_TYPES,
   PUBLIC_REGISTER_ROLES,
+  RELIGIONS,
   STUDENT_ACADEMIC_STATUSES,
   USER_ROLES
 } from "./constants.js";
@@ -194,7 +195,9 @@ export const studentSchema = z.object({
   gender: z.string().optional().or(z.literal("")).default(""),
   bloodGroup: z.enum(BLOOD_GROUPS).optional(),
   disabilityCategory: z.enum(DISABILITY_CATEGORIES).optional(),
-  ethnicityCategory: z.enum(ETHNICITY_CATEGORIES).optional(),
+  religion: z.enum(RELIGIONS).optional(),
+  /** Caste/community; must match options for the selected religion when both are set. */
+  caste: z.string().trim().optional().or(z.literal("")),
   address: optionalStudentAddressSchema.default({
     province: "",
     district: "",
@@ -258,6 +261,24 @@ export const studentSchema = z.object({
       })
     )
     .optional()
+}).superRefine((data, ctx) => {
+  const caste = (data.caste ?? "").trim();
+  if (!caste) return;
+  if (!data.religion) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Select a religion before choosing caste",
+      path: ["caste"]
+    });
+    return;
+  }
+  if (!isValidCasteForReligion(data.religion, caste)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Selected caste is not valid for the chosen religion",
+      path: ["caste"]
+    });
+  }
 });
 
 /**

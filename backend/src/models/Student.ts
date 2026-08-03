@@ -3,7 +3,7 @@ import mongoose, { Schema, type InferSchemaType } from "mongoose";
 import {
   BLOOD_GROUPS,
   DISABILITY_CATEGORIES,
-  ETHNICITY_CATEGORIES,
+  RELIGIONS,
   STUDENT_ACADEMIC_STATUSES,
   STUDENT_DOCUMENT_STATUSES
 } from "@phit-erp/shared";
@@ -61,7 +61,9 @@ const studentSchema = new Schema(
     gender: { type: String, default: "" },
     bloodGroup: { type: String, enum: BLOOD_GROUPS },
     disabilityCategory: { type: String, enum: DISABILITY_CATEGORIES },
-    ethnicityCategory: { type: String, enum: ETHNICITY_CATEGORIES },
+    religion: { type: String, enum: RELIGIONS },
+    /** Caste/community identity; options depend on religion (validated in shared schema). */
+    caste: { type: String, trim: true, default: "" },
     address: {
       type: addressSchema,
       default: () => ({

@@ -450,7 +450,7 @@ export const STUDENT_ACADEMIC_STATUS_LABELS: Record<(typeof STUDENT_ACADEMIC_STA
   PENDING_NOT_PASSED: "Pending / Not Passed",
   PASSED_OUT: "Passed Out",
   ALUMNI: "Alumni",
-  WITHDRAWN: "Withdrawn",
+  WITHDRAWN: "Dropped Out",
   CANCELLED: "Cancelled",
   SUSPENDED: "Suspended"
 };
@@ -531,16 +531,193 @@ export const DISABILITY_CATEGORIES = [
   "Autism Spectrum / Other Developmental"
 ] as const;
 
-// Common Nepal caste/ethnicity groupings for equity reporting (flexible for IEMIS)
-export const ETHNICITY_CATEGORIES = [
-  "Brahmin / Chhetri",
-  "Dalit",
-  "Janajati / Indigenous",
-  "Madhesi",
-  "Muslim",
+/**
+ * Main religions in Nepal (2021 census order + minor recognized groups).
+ * Hinduism ~81%, Buddhism ~8%, Islam ~5%, Kirat ~3%, Christianity ~1.8%,
+ * Prakriti, Bon, Sikhism, Jainism.
+ */
+export const RELIGIONS = [
+  "Hinduism",
+  "Buddhism",
+  "Islam",
+  "Kirat",
+  "Christianity",
+  "Prakriti",
+  "Bon",
+  "Sikhism",
+  "Jainism",
   "Other",
   "Prefer not to say"
 ] as const;
+
+/**
+ * Castes / community identities commonly associated with each religion in Nepal.
+ * "Caste" here includes jati and related community labels used on school forms
+ * (hill/Madhesi Hindu castes, Buddhist ethnic groups, Muslim biradari, Kirat peoples).
+ * Lists are practical for admission forms — not an exhaustive anthropological census.
+ */
+export const CASTES_BY_RELIGION = {
+  Hinduism: [
+    // Hill / Khas
+    "Bahun (Brahmin)",
+    "Chhetri",
+    "Thakuri",
+    "Sanyasi / Dasnami",
+    // Newar
+    "Newar",
+    // Major Janajati communities (many practice Hinduism)
+    "Magar",
+    "Gurung",
+    "Tamang",
+    "Rai",
+    "Limbu",
+    "Tharu",
+    "Sherpa",
+    "Thakali",
+    "Rajbanshi",
+    // Madhesi / Terai
+    "Yadav",
+    "Teli",
+    "Kalwar",
+    "Kurmi",
+    "Kushwaha / Koeri",
+    "Kayastha",
+    "Maithil Brahmin",
+    "Baniya / Marwari",
+    "Halwai",
+    "Sonar",
+    "Hajam / Thakur",
+    "Kanu",
+    "Mallah",
+    "Dhanuk",
+    // Hill Dalit
+    "Kami",
+    "Damai / Dholi",
+    "Sarki",
+    "Badi",
+    "Gaine / Gandarbha",
+    // Terai Dalit
+    "Chamar / Harijan",
+    "Musahar",
+    "Dusadh / Paswan",
+    "Dom",
+    "Tatma",
+    "Khatwe",
+    "Other",
+    "Prefer not to say"
+  ],
+  Buddhism: [
+    "Tamang",
+    "Gurung",
+    "Sherpa",
+    "Newar (Buddhist)",
+    "Magar",
+    "Thakali",
+    "Hyolmo / Yolmo",
+    "Lepcha",
+    "Bhote / Tibetan",
+    "Jirel",
+    "Other",
+    "Prefer not to say"
+  ],
+  Islam: [
+    "Ansari",
+    "Sheikh",
+    "Pathan",
+    "Sayyid",
+    "Mughal",
+    "Dhuniya",
+    "Hajam",
+    "Fakir",
+    "Other",
+    "Prefer not to say"
+  ],
+  Kirat: [
+    "Rai",
+    "Limbu",
+    "Yakkha",
+    "Sunwar / Sunuwar",
+    "Dhimal",
+    "Jirel",
+    "Other",
+    "Prefer not to say"
+  ],
+  Christianity: [
+    // Converts retain diverse ethnic/caste origins; offer common communities + N/A
+    "Not applicable",
+    "Bahun (Brahmin)",
+    "Chhetri",
+    "Newar",
+    "Magar",
+    "Gurung",
+    "Tamang",
+    "Rai",
+    "Limbu",
+    "Tharu",
+    "Dalit (general)",
+    "Other",
+    "Prefer not to say"
+  ],
+  Prakriti: [
+    "Tharu",
+    "Magar",
+    "Rai",
+    "Limbu",
+    "Other",
+    "Prefer not to say"
+  ],
+  Bon: [
+    "Hyolmo / Yolmo",
+    "Sherpa",
+    "Bhote / Tibetan",
+    "Other",
+    "Prefer not to say"
+  ],
+  Sikhism: [
+    "Sikh",
+    "Other",
+    "Prefer not to say"
+  ],
+  Jainism: [
+    "Jain",
+    "Other",
+    "Prefer not to say"
+  ],
+  Other: [
+    "Other",
+    "Prefer not to say"
+  ],
+  "Prefer not to say": [
+    "Prefer not to say",
+    "Other"
+  ]
+} as const;
+
+/** Flat unique list of all caste options (for type unions / loose validation). */
+export const ALL_CASTES = Array.from(
+  new Set(
+    (Object.values(CASTES_BY_RELIGION) as readonly (readonly string[])[]).flat()
+  )
+) as readonly string[];
+
+export function getCastesForReligion(
+  religion: string | undefined | null
+): readonly string[] {
+  if (!religion || !(religion in CASTES_BY_RELIGION)) {
+    return [];
+  }
+  return CASTES_BY_RELIGION[religion as keyof typeof CASTES_BY_RELIGION];
+}
+
+export function isValidCasteForReligion(
+  religion: string | undefined | null,
+  caste: string | undefined | null
+): boolean {
+  if (!caste) return true;
+  if (!religion) return false;
+  const options = getCastesForReligion(religion);
+  return options.includes(caste);
+}
 
 // Document types for student/teacher records and admissions
 export const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;

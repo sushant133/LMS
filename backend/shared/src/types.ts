@@ -102,14 +102,22 @@ export type DisabilityCategory =
   | "Multiple Disabilities"
   | "Autism Spectrum / Other Developmental";
 
-export type EthnicityCategory =
-  | "Brahmin / Chhetri"
-  | "Dalit"
-  | "Janajati / Indigenous"
-  | "Madhesi"
-  | "Muslim"
+/** Main religions in Nepal (see RELIGIONS in constants). */
+export type Religion =
+  | "Hinduism"
+  | "Buddhism"
+  | "Islam"
+  | "Kirat"
+  | "Christianity"
+  | "Prakriti"
+  | "Bon"
+  | "Sikhism"
+  | "Jainism"
   | "Other"
   | "Prefer not to say";
+
+/** Caste / community label; valid options depend on selected religion. */
+export type Caste = string;
 
 export type DocumentType =
   | "Photo"
@@ -299,7 +307,8 @@ export interface StudentRecord {
   gender: string;
   bloodGroup?: BloodGroup;
   disabilityCategory?: DisabilityCategory;
-  ethnicityCategory?: EthnicityCategory;
+  religion?: Religion;
+  caste?: Caste;
   address: AddressSelection;
   fatherName: string;
   fatherPhone?: string;
@@ -1155,20 +1164,21 @@ export interface DashboardResponse {
   /** Label for gender chart scope, e.g. "Active students (current years)". */
   genderChartScope?: string;
   /**
-   * Ethnicity breakdown for currently enrolled (ACTIVE) students.
+   * Religion breakdown for currently enrolled (ACTIVE) students.
    * Same scope as genderChart (current running years when college).
    */
-  ethnicityChart?: Array<{ name: string; value: number }>;
-  ethnicityChartScope?: string;
+  religionChart?: Array<{ name: string; value: number }>;
+  religionChartScope?: string;
   /**
-   * Active-student rows for client-side batch/year filtering of gender & ethnicity charts.
+   * Active-student rows for client-side batch/year filtering of gender & religion charts.
    * College: batchId + yearId; school: classId + sectionId (mapped to same fields).
    */
   studentDemographics?: Array<{
     batchId?: string;
     yearId?: string;
     gender?: string;
-    ethnicityCategory?: string;
+    religion?: string;
+    caste?: string;
   }>;
   /** Batches (college) or classes (school) for demographics filters. */
   chartBatches?: Array<{ _id: string; name: string }>;

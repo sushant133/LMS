@@ -24,7 +24,8 @@ export interface StudentMasterRow {
   sectionName: string;
   rollNumber: number;
   disabilityCategory: string;
-  ethnicityCategory: string;
+  religion: string;
+  caste: string;
   fatherPhone: string;
   motherPhone: string;
   guardianName: string;
@@ -96,7 +97,8 @@ export async function generateStudentMasterExport(req: Request): Promise<Student
     sectionName: s.yearId?.name || s.sectionId?.name || "",
     rollNumber: s.rollNumber,
     disabilityCategory: s.disabilityCategory || "None",
-    ethnicityCategory: s.ethnicityCategory || "Other",
+    religion: s.religion || "",
+    caste: s.caste || "",
     fatherPhone: s.fatherPhone || "",
     motherPhone: s.motherPhone || "",
     guardianName: s.guardianName,
@@ -210,7 +212,8 @@ export async function generateEnrollmentSummary(req: Request) {
     byGender: {},
     byClass: [],
     byDisability: [],
-    byEthnicity: []
+    byReligion: [],
+    byCaste: []
   };
 
   students.forEach((s: any) => {
@@ -227,10 +230,15 @@ export async function generateEnrollmentSummary(req: Request) {
     if (existingD) existingD.count++;
     else summary.byDisability.push({ category: d, count: 1 });
 
-    const e = s.ethnicityCategory || "Other";
-    const existingE = summary.byEthnicity.find((x: any) => x.category === e);
-    if (existingE) existingE.count++;
-    else summary.byEthnicity.push({ category: e, count: 1 });
+    const r = s.religion || "Unset";
+    const existingR = summary.byReligion.find((x: any) => x.category === r);
+    if (existingR) existingR.count++;
+    else summary.byReligion.push({ category: r, count: 1 });
+
+    const caste = (s.caste || "").trim() || "Unset";
+    const existingCaste = summary.byCaste.find((x: any) => x.category === caste);
+    if (existingCaste) existingCaste.count++;
+    else summary.byCaste.push({ category: caste, count: 1 });
   });
 
   return summary;

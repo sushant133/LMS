@@ -387,6 +387,9 @@ const ReceiptsTableScroll = ({
 
 export const StudentFeeRecordsPanel = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  /** Logged-in staff name (accountant / college admin / admin) — auto “Received by”. */
+  const currentUserName = user?.fullName?.trim() || "";
   /** Super Admin / College Admin only — edit amount paid / delete mistaken receipts */
   const canAdminEdit = useCanEditFeePayments();
   const [tab, setTab] = useState<PanelTab>("ledger");
@@ -888,17 +891,17 @@ export const StudentFeeRecordsPanel = () => {
     }
     const amountPaid = Number(paymentForm.amountPaidNpr);
     const charges = Number(paymentForm.currentChargesNpr);
-    const depositPaid = Math.max(0, Number(paymentForm.securityDepositPaidNpr) || 0);
+    // Security deposits are recorded in Security Deposit Records — not here.
+    // When editing an older receipt that had a deposit line, preserve it.
+    const depositPaid = editingReceipt
+      ? Math.max(0, Number(editingReceipt.securityDepositPaidNpr) || 0)
+      : 0;
     if (!Number.isFinite(amountPaid) || amountPaid < 0) {
       toast.error("Enter a valid amount paid (0 allowed for full scholarship)");
       return null;
     }
-    if (!Number.isFinite(depositPaid) || depositPaid < 0) {
-      toast.error("Enter a valid security deposit amount (0 if none)");
-      return null;
-    }
-    if (amountPaid <= 0 && depositPaid <= 0 && !(Number(paymentForm.scholarshipNpr) > 0)) {
-      toast.error("Enter fee amount paid and/or security deposit (or apply scholarship)");
+    if (amountPaid <= 0 && !(Number(paymentForm.scholarshipNpr) > 0)) {
+      toast.error("Enter fee amount paid (or apply scholarship)");
       return null;
     }
     const feeBreakdown: Array<{
@@ -934,7 +937,11 @@ export const StudentFeeRecordsPanel = () => {
       lateFeeNpr: 0,
       paymentMethod: paymentForm.paymentMethod,
       transactionNumber: paymentForm.transactionNumber || undefined,
-      receivedByName: paymentForm.receivedByName.trim() || undefined,
+      // Always the person recording this entry (not manual). Backend also enforces this on create.
+      receivedByName:
+        (editingReceipt
+          ? paymentForm.receivedByName.trim() || currentUserName
+          : currentUserName) || undefined,
       paidByName: paymentForm.paidByName.trim() || undefined,
       notes: paymentForm.notes || undefined,
       scholarshipType: paymentForm.scholarshipType,
@@ -982,37 +989,58 @@ export const StudentFeeRecordsPanel = () => {
     [scholarshipAwards],
   );
 
+  /** Super Admin / College Admin only — open single receipt PDF. */
   const downloadReceiptPdf = async (
     id: string,
     receiptNumber?: string,
+    options?: { silent?: boolean },
   ): Promise<void> => {
+    if (!canAdminEdit) {
+      toast.error("Only college admin or super admin can print receipts");
+      return;
+    }
     setPrintingReceiptId(id);
     try {
       const response = await api.get(`/accounting/collections/${id}/receipt`, {
         responseType: "blob",
         headers: { Accept: "application/pdf" },
+        timeout: 120_000,
       });
       const raw = response.data as Blob;
-      // API errors often return JSON with responseType blob
-      if (raw.type && raw.type.includes("json")) {
+      const headerType = String(response.headers["content-type"] ?? "");
+      const contentType = `${headerType} ${raw.type || ""}`.toLowerCase();
+
+      // API errors often arrive as JSON with responseType: blob
+      if (
+        contentType.includes("json") ||
+        contentType.includes("application/problem")
+      ) {
         const text = await raw.text();
         let message = "Could not open receipt PDF";
         try {
-          const parsed = JSON.parse(text) as { message?: string; error?: string };
+          const parsed = JSON.parse(text) as {
+            message?: string;
+            error?: string;
+          };
           message = parsed.message || parsed.error || message;
         } catch {
-          /* ignore */
+          if (text.trim()) message = text.slice(0, 200);
         }
         throw new Error(message);
       }
+
       const blob =
-        raw.type === "application/pdf"
+        contentType.includes("pdf") || raw.type === "application/pdf"
           ? raw
           : new Blob([raw], { type: "application/pdf" });
+      if (!blob.size) {
+        throw new Error("Receipt PDF was empty");
+      }
+
       const url = URL.createObjectURL(blob);
       const filename = `${(receiptNumber || id).replace(/[^\w.-]+/g, "_")}-receipt.pdf`;
 
-      // Prefer direct download (most reliable); also try open for print
+      // Download file (always works)
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
@@ -1021,21 +1049,53 @@ export const StudentFeeRecordsPanel = () => {
       a.click();
       a.remove();
 
-      const opened = window.open(url, "_blank");
-      if (opened) {
-        toast.success("Receipt PDF opened — use browser Print if needed");
-      } else {
-        toast.success("Receipt PDF downloaded");
+      // Open for print when not in bulk mode
+      if (!options?.silent) {
+        const opened = window.open(url, "_blank");
+        if (opened) {
+          toast.success("Receipt PDF opened — use browser Print if needed");
+        } else {
+          toast.success("Receipt PDF downloaded");
+        }
       }
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
     } catch (e) {
-      toast.error(parseErrorMessage(e) || "Could not open receipt PDF");
+      // Blob error body from axios
+      if (typeof e === "object" && e && "response" in e) {
+        const data = (e as { response?: { data?: unknown } }).response?.data;
+        if (data instanceof Blob) {
+          try {
+            const text = await data.text();
+            const parsed = JSON.parse(text) as {
+              message?: string;
+              error?: string;
+            };
+            throw new Error(
+              parsed.message || parsed.error || "Could not open receipt PDF",
+            );
+          } catch (inner) {
+            if (inner instanceof Error && inner.message !== "Could not open receipt PDF") {
+              throw inner;
+            }
+          }
+        }
+      }
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : parseErrorMessage(e) || "Could not open receipt PDF",
+      );
     } finally {
       setPrintingReceiptId(null);
     }
   };
 
+  /** Super Admin / College Admin only — print all currently filtered receipts. */
   const printAllFilteredReceipts = async () => {
+    if (!canAdminEdit) {
+      toast.error("Only college admin or super admin can print receipts");
+      return;
+    }
     if (filteredReceipts.length === 0) {
       toast.error("No receipts to print");
       return;
@@ -1043,18 +1103,25 @@ export const StudentFeeRecordsPanel = () => {
     if (filteredReceipts.length > 15) {
       if (
         !window.confirm(
-          `Print ${filteredReceipts.length} receipt PDFs? This will open multiple tabs (or download if pop-ups are blocked).`,
+          `Download ${filteredReceipts.length} receipt PDFs? Files will download one by one.`,
         )
       ) {
         return;
       }
     }
     toast.message(`Preparing ${filteredReceipts.length} receipt PDF(s)…`);
+    let ok = 0;
     for (const row of filteredReceipts) {
-      // Sequential to avoid browser pop-up / connection storms
+      // Sequential to avoid browser / connection storms
       // eslint-disable-next-line no-await-in-loop
-      await downloadReceiptPdf(row._id, row.receiptNumber);
+      await downloadReceiptPdf(row._id, row.receiptNumber, { silent: true });
+      ok += 1;
     }
+    toast.success(
+      ok === 1
+        ? "1 receipt PDF downloaded"
+        : `${ok} receipt PDFs downloaded`,
+    );
   };
 
   const exportExcel = () => {
@@ -1129,13 +1196,6 @@ export const StudentFeeRecordsPanel = () => {
               <Wallet className="h-5 w-5 text-brand-600" />
               Student Fee Records
             </CardTitle>
-            <p className="mt-1 text-sm text-slate-500">
-              HA program fee ledger — record tuition payments and security deposits
-              (deposit “to be deposited” on student create is plan only; paid only after entry here),
-              attach bank slips / screenshots, apply merit scholarships (merit Year N →
-              free Year N+1), and track paid vs remaining by year. Deposit refunds are
-              only allowed after a deposit is recorded here.
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             {(
@@ -1389,11 +1449,6 @@ export const StudentFeeRecordsPanel = () => {
                   ? `Edit fee payment — ${editingReceipt.receiptNumber}`
                   : "Record student fee payment"}
               </CardTitle>
-              <p className="text-sm text-slate-500">
-                {editingReceipt
-                  ? "Change amount paid, deposit, charges, or other fields. Saving reverses the old journal and cash book entries, re-posts corrected amounts, and updates the student balance."
-                  : "Posts to cash book / journal and updates the student's outstanding balance. Attach bank voucher, Fonepay screenshot, or invoice PDF."}
-              </p>
               {editingReceipt ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
                   <Pencil className="h-4 w-4 shrink-0" />
@@ -1430,19 +1485,6 @@ export const StudentFeeRecordsPanel = () => {
                     Delete payment
                   </Button>
                 </div>
-              ) : null}
-              {!editingReceipt && canAdminEdit ? (
-                <p className="mt-2 text-xs text-slate-500">
-                  To correct a past payment, open{" "}
-                  <button
-                    type="button"
-                    className="font-medium text-brand-700 underline-offset-2 hover:underline"
-                    onClick={() => setTab("receipts")}
-                  >
-                    All receipts
-                  </button>{" "}
-                  and use <strong>Edit</strong> or <strong>Delete</strong>.
-                </p>
               ) : null}
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1677,10 +1719,6 @@ export const StudentFeeRecordsPanel = () => {
                     }
                     placeholder="0"
                   />
-                  <p className="mt-1 text-xs text-slate-500">
-                    Leave 0 when paying the year fee plan already set at admission.
-                    Only enter amount for new/extra charges.
-                  </p>
                 </FormField>
                 <FormField label="Amount paid — fee (NPR) *">
                   <NumberInput
@@ -1705,49 +1743,6 @@ export const StudentFeeRecordsPanel = () => {
                       })()}
                     </p>
                   ) : null}
-                </FormField>
-                <FormField label="Security deposit paid on this receipt (NPR)">
-                  <NumberInput
-                    min={0}
-                    disabled={Boolean(selectedHistory?.securityDepositWaived)}
-                    value={
-                      selectedHistory?.securityDepositWaived
-                        ? "0"
-                        : paymentForm.securityDepositPaidNpr
-                    }
-                    onChange={(e) =>
-                      setPaymentForm((f) => ({
-                        ...f,
-                        securityDepositPaidNpr: e.target.value,
-                      }))
-                    }
-                    placeholder="0"
-                  />
-                  <p className="mt-1 text-xs text-slate-500">
-                    {selectedHistory?.securityDepositWaived
-                      ? "Not taken for this student"
-                      : selectedStudentId
-                        ? (() => {
-                            const expected =
-                              Number(
-                                selectedHistory?.securityDepositExpectedNpr,
-                              ) || 0;
-                            const held =
-                              Number(
-                                selectedHistory?.securityDepositHeldNpr,
-                              ) || 0;
-                            const refunded =
-                              Number(
-                                selectedHistory?.securityDepositRefundedNpr,
-                              ) || 0;
-                            const stillDue = Math.max(0, expected - held);
-                            if (expected <= 0 && held <= 0) {
-                              return "Optional — leave 0 if not collecting deposit on this receipt";
-                            }
-                            return `Plan ${formatCurrencyNpr(expected)} · Paid/held ${formatCurrencyNpr(held)} · Still due ${formatCurrencyNpr(stillDue)}${refunded > 0 ? ` · Refunded ${formatCurrencyNpr(refunded)}` : ""}`;
-                          })()
-                        : "Only enter amount actually received now — plan amount is not auto-paid"}
-                  </p>
                 </FormField>
                 <FormField label="Discount (NPR)">
                   <NumberInput
@@ -1803,33 +1798,33 @@ export const StudentFeeRecordsPanel = () => {
                     placeholder="Bank ref / cheque no. / eSewa ref"
                   />
                 </FormField>
+                <FormField label="Received by">
+                  <Input
+                    value={
+                      editingReceipt
+                        ? paymentForm.receivedByName || currentUserName
+                        : currentUserName
+                    }
+                    readOnly
+                    disabled
+                    className="bg-slate-50 text-slate-800"
+                    placeholder="Your account name"
+                    title="Automatically set to the person recording this payment"
+                  />
+                </FormField>
                 {paymentMethodNeedsHandover(paymentForm.paymentMethod) ? (
-                  <>
-                    <FormField label="Received by">
-                      <Input
-                        value={paymentForm.receivedByName}
-                        onChange={(e) =>
-                          setPaymentForm((f) => ({
-                            ...f,
-                            receivedByName: e.target.value,
-                          }))
-                        }
-                        placeholder="Staff who received cash / voucher"
-                      />
-                    </FormField>
-                    <FormField label="Paid by / Depositor">
-                      <Input
-                        value={paymentForm.paidByName}
-                        onChange={(e) =>
-                          setPaymentForm((f) => ({
-                            ...f,
-                            paidByName: e.target.value,
-                          }))
-                        }
-                        placeholder="Person who paid or deposited"
-                      />
-                    </FormField>
-                  </>
+                  <FormField label="Paid by / Depositor">
+                    <Input
+                      value={paymentForm.paidByName}
+                      onChange={(e) =>
+                        setPaymentForm((f) => ({
+                          ...f,
+                          paidByName: e.target.value,
+                        }))
+                      }
+                      placeholder="Person who paid or deposited"
+                    />
+                  </FormField>
                 ) : null}
                 <FormField label="Scholarship type">
                   <Select
@@ -1876,29 +1871,12 @@ export const StudentFeeRecordsPanel = () => {
                 </div>
               ) : null}
 
-              {(Number(paymentForm.amountPaidNpr) || 0) +
-                (Number(paymentForm.securityDepositPaidNpr) || 0) >
-              0 ? (
+              {(Number(paymentForm.amountPaidNpr) || 0) > 0 ? (
                 <p className="text-sm text-slate-600">
-                  Total cash this receipt:{" "}
+                  Amount paid this receipt:{" "}
                   <span className="font-semibold text-slate-900">
-                    {formatCurrencyNpr(
-                      (Number(paymentForm.amountPaidNpr) || 0) +
-                        (Number(paymentForm.securityDepositPaidNpr) || 0),
-                    )}
+                    {formatCurrencyNpr(Number(paymentForm.amountPaidNpr) || 0)}
                   </span>
-                  {(Number(paymentForm.securityDepositPaidNpr) || 0) > 0 ? (
-                    <span className="text-slate-500">
-                      {" "}
-                      (fee{" "}
-                      {formatCurrencyNpr(Number(paymentForm.amountPaidNpr) || 0)}{" "}
-                      + deposit{" "}
-                      {formatCurrencyNpr(
-                        Number(paymentForm.securityDepositPaidNpr) || 0,
-                      )}
-                      )
-                    </span>
-                  ) : null}
                 </p>
               ) : null}
 
@@ -2083,8 +2061,8 @@ export const StudentFeeRecordsPanel = () => {
                     {(selectedHistory.securityDepositHeldNpr ?? 0) <= 0 &&
                     !selectedHistory.securityDepositWaived ? (
                       <p className="mt-1 text-xs text-amber-900">
-                        Plan only — not paid yet. Enter Security deposit (NPR)
-                        when recording a payment to mark it collected.
+                        Plan only — not paid yet. Record collection under
+                        Security Deposit Records.
                       </p>
                     ) : null}
                   </div>
@@ -2546,29 +2524,26 @@ export const StudentFeeRecordsPanel = () => {
               <CardTitle className="text-base">All fee receipts</CardTitle>
               <p className="mt-1 text-xs text-slate-500">
                 Filter by batch, year, student search, and date range (BS or AD).
-                Print PDF for any receipt.
                 {canAdminEdit
-                  ? " As Super Admin / Administrator you can Edit amount paid or Delete a payment — balances and accounts update automatically."
+                  ? " Print PDF, edit, or delete payments as Super Admin / Administrator."
                   : ""}
               </p>
-              {canAdminEdit ? (
-                <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-950">
-                  <Pencil className="h-3.5 w-3.5" />
-                  Admin actions enabled: Edit payment · Delete payment
-                </div>
-              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={filteredReceipts.length === 0 || Boolean(printingReceiptId)}
-                onClick={() => void printAllFilteredReceipts()}
-              >
-                <Printer className="mr-1 h-4 w-4" />
-                Print all PDFs
-              </Button>
+              {canAdminEdit ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    filteredReceipts.length === 0 || Boolean(printingReceiptId)
+                  }
+                  onClick={() => void printAllFilteredReceipts()}
+                >
+                  <Printer className="mr-1 h-4 w-4" />
+                  {printingReceiptId ? "Printing…" : "Print PDF"}
+                </Button>
+              ) : null}
               <Button type="button" variant="outline" size="sm" onClick={exportExcel}>
                 <FileDown className="mr-1 h-4 w-4" />
                 Excel
@@ -2816,6 +2791,23 @@ export const StudentFeeRecordsPanel = () => {
                                 <>
                                   <Button
                                     size="sm"
+                                    variant="outline"
+                                    title="Print / download receipt PDF"
+                                    disabled={printingReceiptId === row._id}
+                                    onClick={() =>
+                                      void downloadReceiptPdf(
+                                        row._id,
+                                        row.receiptNumber,
+                                      )
+                                    }
+                                  >
+                                    <Printer className="mr-1 h-3.5 w-3.5" />
+                                    {printingReceiptId === row._id
+                                      ? "…"
+                                      : "Print"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
                                     variant="default"
                                     title="Edit amount paid, deposit, charges, date…"
                                     onClick={() => startEditReceipt(row)}
@@ -2834,23 +2826,11 @@ export const StudentFeeRecordsPanel = () => {
                                     Delete
                                   </Button>
                                 </>
-                              ) : null}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={printingReceiptId === row._id}
-                                onClick={() =>
-                                  void downloadReceiptPdf(
-                                    row._id,
-                                    row.receiptNumber,
-                                  )
-                                }
-                              >
-                                <Printer className="mr-1 h-3.5 w-3.5" />
-                                {printingReceiptId === row._id
-                                  ? "Opening…"
-                                  : "PDF"}
-                              </Button>
+                              ) : (
+                                <span className="text-xs text-slate-400">
+                                  View only
+                                </span>
+                              )}
                             </div>
                           </Td>
                         </tr>

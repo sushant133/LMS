@@ -72,13 +72,17 @@ import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { StudentNameLink } from "components/shared/StudentNameLink";
 import { LoadingState } from "components/shared/LoadingState";
-import { NepaliDateField } from "components/shared/NepaliDateField";
+import {
+  DualBsAdDateField,
+  NepaliDateField,
+} from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import {
   FINANCIAL_SUMMARY_SECTIONS,
   REPORT_COLUMNS,
+  bsDateToAdString,
   getReportCellValue,
   downloadFinancialSummaryExcel,
   downloadReportExcel,
@@ -380,8 +384,9 @@ export const AccountingManager = () => {
   const [selectedReport, setSelectedReport] = useState<
     (typeof reportTypes)[number]["id"]
   >("ledger");
-  const [reportMonth, setReportMonth] = useState("2081-09");
-  const [reportDate, setReportDate] = useState("2081-09-01");
+  /** From–To date range (BS stored; AD mirrors via DualBsAdDateField). */
+  const [reportFromBs, setReportFromBs] = useState("");
+  const [reportToBs, setReportToBs] = useState("");
   const [summarySection, setSummarySection] =
     useState<(typeof FINANCIAL_SUMMARY_SECTIONS)[number]["key"]>("fees");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(
@@ -559,8 +564,24 @@ export const AccountingManager = () => {
     onError: (error: Error) => toast.error(parseErrorMessage(error)),
   });
 
+  /** Month derived from From date for reports that still key on YYYY-MM. */
+  const reportMonthFromRange = reportFromBs.trim().slice(0, 7);
+  const reportUsesDateRange =
+    reportUsesMonthFilter(selectedReport) ||
+    selectedReport === "daily-fee-collection" ||
+    selectedReport === "day-book" ||
+    selectedReport === "student-ledger" ||
+    selectedReport === "fee-collection-summary" ||
+    selectedReport === "scholarship-report";
+
   const reportQuery = useQuery({
-    queryKey: ["accounting-report", selectedReport, reportMonth, reportDate],
+    queryKey: [
+      "accounting-report",
+      selectedReport,
+      reportFromBs,
+      reportToBs,
+      reportMonthFromRange,
+    ],
     queryFn: () => {
       const reportMeta = reportTypes.find((item) => item.id === selectedReport);
       const isLedgerReport =
@@ -568,15 +589,21 @@ export const AccountingManager = () => {
       const path = isLedgerReport
         ? `/accounting/ledger-reports/${selectedReport}`
         : `/accounting/reports/${selectedReport}`;
+      const from = reportFromBs.trim() || undefined;
+      const to = reportToBs.trim() || undefined;
       return unwrap<FinancialSummaryReport | { data: unknown[] }>(
         api.get(path, {
           params: {
-            monthBs: reportUsesMonthFilter(selectedReport)
-              ? reportMonth
-              : undefined,
+            fromDateBs: from,
+            toDateBs: to,
+            // Compatibility for APIs that still expect month/day
+            monthBs:
+              reportUsesMonthFilter(selectedReport) && reportMonthFromRange
+                ? reportMonthFromRange
+                : undefined,
             dateBs:
               selectedReport === "daily-fee-collection"
-                ? reportDate
+                ? from || to
                 : undefined,
           },
         }),
@@ -963,10 +990,15 @@ export const AccountingManager = () => {
     }
 
     const params = new URLSearchParams({ format });
-    if (reportUsesMonthFilter(selectedReport))
-      params.set("monthBs", reportMonth);
-    if (selectedReport === "daily-fee-collection")
-      params.set("dateBs", reportDate);
+    if (reportFromBs.trim()) params.set("fromDateBs", reportFromBs.trim());
+    if (reportToBs.trim()) params.set("toDateBs", reportToBs.trim());
+    if (reportUsesMonthFilter(selectedReport) && reportMonthFromRange) {
+      params.set("monthBs", reportMonthFromRange);
+    }
+    if (selectedReport === "daily-fee-collection") {
+      const day = reportFromBs.trim() || reportToBs.trim();
+      if (day) params.set("dateBs", day);
+    }
     const reportMeta = reportTypes.find((item) => item.id === selectedReport);
     const basePath =
       reportMeta && "ledger" in reportMeta && reportMeta.ledger
@@ -3075,64 +3107,144 @@ export const AccountingManager = () => {
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-3">
-              <Select
-                value={selectedReport}
-                onChange={(e) =>
-                  setSelectedReport(e.target.value as typeof selectedReport)
-                }
-              >
-                {reportTypes.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.label}
-                  </option>
-                ))}
-              </Select>
-              {selectedReport === "daily-fee-collection" ? (
-                <div className="min-w-[220px]">
-                  <NepaliDateField
-                    value={reportDate}
-                    onChange={setReportDate}
-                  />
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[14rem] flex-1 sm:flex-none sm:w-64">
+                  <FormField label="Report type">
+                    <Select
+                      value={selectedReport}
+                      onChange={(e) =>
+                        setSelectedReport(
+                          e.target.value as typeof selectedReport,
+                        )
+                      }
+                    >
+                      {reportTypes.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const printRoot = document.getElementById(
+                      "accounting-report-print",
+                    );
+                    if (!printRoot || !printRoot.innerHTML.trim()) {
+                      toast.error(
+                        "Nothing to print — generate or wait for report data first",
+                      );
+                      return;
+                    }
+                    try {
+                      const periodLabel =
+                        reportFromBs || reportToBs
+                          ? `From ${reportFromBs || "…"} to ${reportToBs || "…"}${
+                              reportFromBs
+                                ? ` (AD ${bsDateToAdString(reportFromBs) || "—"})`
+                                : ""
+                            }`
+                          : undefined;
+                      printSimpleDocument({
+                        title:
+                          reportTypes.find((r) => r.id === selectedReport)
+                            ?.label ?? "Report",
+                        subtitle: periodLabel,
+                        bodyHtml: printRoot.innerHTML,
+                      });
+                      toast.success(
+                        "Print dialog opening — choose printer or Save as PDF",
+                      );
+                    } catch (e) {
+                      toast.error(
+                        parseErrorMessage(e) || "Could not print report",
+                      );
+                    }
+                  }}
+                >
+                  <Printer className="mr-1.5 h-4 w-4" />
+                  Print / PDF
+                </Button>
+                <Button variant="outline" onClick={() => exportReport("csv")}>
+                  Export CSV
+                </Button>
+                <Button variant="outline" onClick={() => exportReport("xlsx")}>
+                  Export Excel
+                </Button>
+              </div>
+
+              {reportUsesDateRange ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="mb-3 text-sm font-medium text-slate-700">
+                    Date range (BS and AD — enter either side, the other fills
+                    automatically)
+                  </p>
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <FormField label="From date">
+                      <DualBsAdDateField
+                        valueBs={reportFromBs}
+                        onChangeBs={(bs) => {
+                          setReportFromBs(bs);
+                        }}
+                        bsPlaceholder="From date (BS)"
+                      />
+                    </FormField>
+                    <FormField label="To date">
+                      <DualBsAdDateField
+                        valueBs={reportToBs}
+                        onChangeBs={(bs) => {
+                          setReportToBs(bs);
+                        }}
+                        bsPlaceholder="To date (BS)"
+                      />
+                    </FormField>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setReportFromBs("");
+                        setReportToBs("");
+                      }}
+                    >
+                      Clear dates
+                    </Button>
+                    {reportFromBs || reportToBs ? (
+                      <p className="text-xs text-slate-500">
+                        Filter:{" "}
+                        {reportFromBs
+                          ? `from BS ${reportFromBs}${
+                              bsDateToAdString(reportFromBs)
+                                ? ` / AD ${bsDateToAdString(reportFromBs)}`
+                                : ""
+                            }`
+                          : "from start"}{" "}
+                        →{" "}
+                        {reportToBs
+                          ? `to BS ${reportToBs}${
+                              bsDateToAdString(reportToBs)
+                                ? ` / AD ${bsDateToAdString(reportToBs)}`
+                                : ""
+                            }`
+                          : "to end"}
+                        {reportMonthFromRange
+                          ? ` · month key ${reportMonthFromRange}`
+                          : ""}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Leave empty for all dates (where supported). For monthly
+                        summary / salary, set at least a From date.
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : null}
-              {reportUsesMonthFilter(selectedReport) ? (
-                <Input
-                  value={reportMonth}
-                  onChange={(e) => setReportMonth(e.target.value)}
-                  placeholder="YYYY-MM (BS month)"
-                />
-              ) : null}
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const printRoot = document.getElementById(
-                    "accounting-report-print",
-                  );
-                  if (!printRoot) {
-                    toast.error("Nothing to print");
-                    return;
-                  }
-                  printSimpleDocument({
-                    title:
-                      reportTypes.find((r) => r.id === selectedReport)?.label ??
-                      "Report",
-                    subtitle: reportUsesMonthFilter(selectedReport)
-                      ? `Period: ${reportMonth}`
-                      : undefined,
-                    bodyHtml: printRoot.innerHTML,
-                  });
-                }}
-              >
-                <Printer className="mr-1.5 h-4 w-4" />
-                Print / PDF
-              </Button>
-              <Button variant="outline" onClick={() => exportReport("csv")}>
-                Export CSV
-              </Button>
-              <Button variant="outline" onClick={() => exportReport("xlsx")}>
-                Export Excel
-              </Button>
             </div>
             {reportQuery.isLoading ? (
               <LoadingState />

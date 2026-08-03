@@ -11,6 +11,7 @@ import {
 import {
   Pencil,
   Plus,
+  Printer,
   Shield,
   Trash2,
   Wallet,
@@ -123,6 +124,9 @@ const emptyRecordForm = () => ({
 });
 
 export const SecurityDepositRecordsPanel = () => {
+  const { user } = useAuth();
+  /** Logged-in staff name — auto “Received by” (accountant / admin / college admin). */
+  const currentUserName = user?.fullName?.trim() || "";
   const canAdminEdit = useCanEditFeePayments();
   const [tab, setTab] = useState<PanelTab>("receipts");
   const [search, setSearch] = useState("");
@@ -142,6 +146,10 @@ export const SecurityDepositRecordsPanel = () => {
 
   const [recordForm, setRecordForm] = useState(emptyRecordForm);
   const [studentPickerSearch, setStudentPickerSearch] = useState("");
+  /** Admin-only: which single receipt PDF is loading */
+  const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(
+    null,
+  );
 
   const receiptsQuery = useQuery({
     queryKey: ["accounting-fee-records"],
@@ -391,7 +399,8 @@ export const SecurityDepositRecordsPanel = () => {
       scholarshipNpr: 0,
       lateFeeNpr: 0,
       paymentMethod: recordForm.paymentMethod,
-      receivedByName: recordForm.receivedByName.trim() || undefined,
+      // Always the person recording this entry (same as Student Fee Records).
+      receivedByName: currentUserName || undefined,
       paidByName: recordForm.paidByName.trim() || undefined,
       notes: recordForm.notes.trim() || undefined,
       feeBreakdown: [
@@ -402,6 +411,182 @@ export const SecurityDepositRecordsPanel = () => {
         },
       ],
     });
+  };
+
+  /** Admin only — open single deposit receipt PDF (same collection receipt API). */
+  const printSingleReceipt = async (
+    id: string,
+    receiptNumber?: string,
+  ): Promise<void> => {
+    if (!canAdminEdit) {
+      toast.error("Only college admin can print deposit receipts");
+      return;
+    }
+    setPrintingReceiptId(id);
+    try {
+      const response = await api.get(`/accounting/collections/${id}/receipt`, {
+        responseType: "blob",
+        headers: { Accept: "application/pdf" },
+      });
+      const raw = response.data as Blob;
+      if (raw.type && raw.type.includes("json")) {
+        const text = await raw.text();
+        let message = "Could not open receipt PDF";
+        try {
+          const parsed = JSON.parse(text) as {
+            message?: string;
+            error?: string;
+          };
+          message = parsed.message || parsed.error || message;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(message);
+      }
+      const blob =
+        raw.type === "application/pdf"
+          ? raw
+          : new Blob([raw], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const filename = `${(receiptNumber || id).replace(/[^\w.-]+/g, "_")}-deposit-receipt.pdf`;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      const opened = window.open(url, "_blank");
+      if (opened) {
+        toast.success("Deposit receipt opened — use browser Print if needed");
+      } else {
+        toast.success("Deposit receipt downloaded");
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      toast.error(parseErrorMessage(e) || "Could not open deposit receipt PDF");
+    } finally {
+      setPrintingReceiptId(null);
+    }
+  };
+
+  /** Admin only — print the current deposit receipts table (filtered list). */
+  const printDepositReceiptsTable = () => {
+    if (!canAdminEdit) {
+      toast.error("Only college admin can print deposit receipts");
+      return;
+    }
+    if (depositReceipts.length === 0) {
+      toast.error("No deposit receipts to print");
+      return;
+    }
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const rowsHtml = depositReceipts
+      .map((row, index) => {
+        const st = resolveStudent(row);
+        const dual = formatDualDateCell({
+          dateBs: row.paidDateBs,
+          dateAd: row.paidDateAd,
+        });
+        const dateLabel = [dual.primary, dual.secondary]
+          .filter(Boolean)
+          .join(" / ");
+        return `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(row.receiptNumber ?? "")}</td>
+          <td>${escapeHtml(st.name)}<br/><span class="muted">${escapeHtml(st.admission)}</span></td>
+          <td>${escapeHtml(st.batch)}${st.year !== "—" ? ` / ${escapeHtml(st.year)}` : ""}</td>
+          <td class="num">${escapeHtml(formatCurrencyNpr(row.securityDepositPaidNpr ?? 0))}</td>
+          <td class="num">${
+            (row.amountPaidNpr ?? 0) > 0
+              ? escapeHtml(formatCurrencyNpr(row.amountPaidNpr))
+              : "—"
+          }</td>
+          <td>${escapeHtml(paymentMethodLabel(row.paymentMethod))}</td>
+          <td>${escapeHtml(dateLabel)}</td>
+          <td>${escapeHtml(row.receivedByName?.trim() || "—")}<br/><span class="muted">${escapeHtml(row.paidByName?.trim() || "—")}</span></td>
+        </tr>`;
+      })
+      .join("");
+
+    const printedAt = new Date().toLocaleString();
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Security Deposit Receipts</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; color: #0f172a; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .meta { font-size: 12px; color: #475569; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; font-weight: 600; }
+    .num { text-align: right; white-space: nowrap; }
+    .muted { color: #64748b; font-size: 10px; }
+    tfoot td { font-weight: 600; background: #f8fafc; }
+    @media print {
+      body { margin: 12mm; }
+      @page { size: A4 landscape; margin: 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Security Deposit Receipts</h1>
+  <div class="meta">
+    ${depositReceipts.length} receipt${depositReceipts.length === 1 ? "" : "s"}
+    · Total collected ${escapeHtml(formatCurrencyNpr(totalDepositCollected))}
+    · Printed ${escapeHtml(printedAt)}
+    ${search.trim() ? ` · Filter: ${escapeHtml(search.trim())}` : ""}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Receipt</th>
+        <th>Student</th>
+        <th>Batch / Year</th>
+        <th>Deposit paid</th>
+        <th>Fee on receipt</th>
+        <th>Method</th>
+        <th>Date</th>
+        <th>Received / Paid by</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4">Total deposit collected</td>
+        <td class="num">${escapeHtml(formatCurrencyNpr(totalDepositCollected))}</td>
+        <td colspan="4"></td>
+      </tr>
+    </tfoot>
+  </table>
+  <script>
+    window.onload = function () {
+      window.focus();
+      window.print();
+    };
+  </script>
+</body>
+</html>`;
+
+    const w = window.open("", "_blank", "noopener,noreferrer,width=1100,height=800");
+    if (!w) {
+      toast.error("Popup blocked — allow popups to print the table");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
   };
 
   const exportReceipts = () => {
@@ -502,6 +687,17 @@ export const SecurityDepositRecordsPanel = () => {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              {canAdminEdit ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={depositReceipts.length === 0}
+                  onClick={printDepositReceiptsTable}
+                >
+                  <Printer className="mr-1.5 h-4 w-4" />
+                  Print table
+                </Button>
+              ) : null}
               <Button variant="outline" size="sm" onClick={exportReceipts}>
                 Export Excel
               </Button>
@@ -679,6 +875,23 @@ export const SecurityDepositRecordsPanel = () => {
                             <div className="flex flex-wrap justify-end gap-1">
                               {canAdminEdit ? (
                                 <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={printingReceiptId === row._id}
+                                    onClick={() =>
+                                      void printSingleReceipt(
+                                        row._id,
+                                        row.receiptNumber,
+                                      )
+                                    }
+                                    title="Print this deposit receipt"
+                                  >
+                                    <Printer className="mr-1 h-3.5 w-3.5" />
+                                    {printingReceiptId === row._id
+                                      ? "…"
+                                      : "Print"}
+                                  </Button>
                                   <Button
                                     size="sm"
                                     variant="default"
@@ -972,14 +1185,12 @@ export const SecurityDepositRecordsPanel = () => {
               </FormField>
               <FormField label="Received by">
                 <Input
-                  value={recordForm.receivedByName}
-                  onChange={(e) =>
-                    setRecordForm((f) => ({
-                      ...f,
-                      receivedByName: e.target.value,
-                    }))
-                  }
-                  placeholder="Staff who received cash / voucher"
+                  value={currentUserName}
+                  readOnly
+                  disabled
+                  className="bg-slate-50 text-slate-800"
+                  placeholder="Your account name"
+                  title="Automatically set to the person recording this deposit"
                 />
               </FormField>
               <FormField label="Paid by">

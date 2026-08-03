@@ -1,24 +1,77 @@
 /**
  * Simple professional print for Purchase / Expense / Income vouchers
  * and ledger reports — matches ERP print style (A4, clean table).
+ *
+ * Uses a hidden iframe (not window.open + noopener) so print works
+ * without popup blockers and without a null window handle.
  */
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const printHtmlViaIframe = (html: string): void => {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  const win = iframe.contentWindow;
+  if (!doc || !win) {
+    iframe.remove();
+    throw new Error("Could not open print preview");
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => {
+    try {
+      iframe.remove();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  window.setTimeout(() => {
+    try {
+      win.focus();
+      win.print();
+    } catch {
+      cleanup();
+      throw new Error("Print failed");
+    }
+    // Keep iframe alive until the print dialog is done
+    window.setTimeout(cleanup, 60_000);
+  }, 350);
+};
+
 export const printSimpleDocument = (opts: {
   title: string;
   bodyHtml: string;
   subtitle?: string;
 }): void => {
-  const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-  if (!w) return;
-
   const college =
     (document.querySelector("[data-college-name]") as HTMLElement | null)
       ?.dataset.collegeName || "PHIT COLLEGE";
 
-  w.document.write(`<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>${opts.title}</title>
+  <title>${escapeHtml(opts.title)}</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -27,6 +80,7 @@ export const printSimpleDocument = (opts: {
       padding: 16mm 14mm;
       color: #0f172a;
       font-size: 13px;
+      background: #fff;
     }
     .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 16px; }
     .header h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; }
@@ -35,6 +89,8 @@ export const printSimpleDocument = (opts: {
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
     th { background: #f1f5f9; font-size: 12px; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
     .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin: 12px 0; }
     .meta div { font-size: 13px; }
     .meta strong { display: inline-block; min-width: 120px; color: #334155; }
@@ -42,24 +98,25 @@ export const printSimpleDocument = (opts: {
     .signatures { display: flex; justify-content: space-between; margin-top: 48px; }
     .signatures div { text-align: center; min-width: 140px; border-top: 1px solid #94a3b8; padding-top: 6px; font-size: 12px; }
     .footer { margin-top: 24px; font-size: 11px; color: #64748b; text-align: center; }
+    @page { size: A4 portrait; margin: 10mm; }
     @media print {
-      body { padding: 8mm 10mm; }
+      body { padding: 0; }
       .no-print { display: none !important; }
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>${college}</h1>
-    <h2>${opts.title}</h2>
-    ${opts.subtitle ? `<p>${opts.subtitle}</p>` : ""}
+    <h1>${escapeHtml(college)}</h1>
+    <h2>${escapeHtml(opts.title)}</h2>
+    ${opts.subtitle ? `<p>${escapeHtml(opts.subtitle)}</p>` : ""}
   </div>
   ${opts.bodyHtml}
-  <div class="footer">Generated from PHIT COLLEGE Accounting · ${new Date().toLocaleString()}</div>
-  <script>window.onload = function () { window.print(); };</script>
+  <div class="footer">Generated from PHIT COLLEGE Accounting · ${escapeHtml(new Date().toLocaleString())}</div>
 </body>
-</html>`);
-  w.document.close();
+</html>`;
+
+  printHtmlViaIframe(html);
 };
 
 export const printRegisterVoucher = (opts: {
@@ -73,7 +130,7 @@ export const printRegisterVoucher = (opts: {
   const metaRows = opts.fields
     .map(
       (f) =>
-        `<div><strong>${f.label}:</strong> ${escapeHtml(f.value || "—")}</div>`,
+        `<div><strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.value || "—")}</div>`,
     )
     .join("");
 
@@ -105,10 +162,3 @@ export const printRegisterVoucher = (opts: {
     `,
   });
 };
-
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");

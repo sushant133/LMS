@@ -192,6 +192,8 @@ export const LibraryManager = () => {
   const [issuedStatusFilter, setIssuedStatusFilter] = useState<
     "ALL" | "ISSUED" | "OVERDUE"
   >("ALL");
+  /** When opening Returns from Dashboard “Returned” / “View returns” */
+  const [returnsFocusHistory, setReturnsFocusHistory] = useState(false);
   const [bookForm, setBookForm] = useState<LibraryBookInput>(defaultBook);
   const [copyDrafts, setCopyDrafts] = useState<CopyDraft[]>([emptyCopy()]);
   const [addCopyDrafts, setAddCopyDrafts] = useState<CopyDraft[]>([]);
@@ -706,6 +708,10 @@ export const LibraryManager = () => {
                 if (item.id === "issued") {
                   setIssuedStatusFilter("ALL");
                 }
+                // Sidebar Returns = full returns workspace (not forced history scroll)
+                if (item.id === "returns") {
+                  setReturnsFocusHistory(false);
+                }
                 setTab(item.id);
               }}
               className={cn(
@@ -756,7 +762,10 @@ export const LibraryManager = () => {
                 value: dashboardQuery.data?.returnedBooks ?? 0,
                 valueClass: "text-emerald-700",
                 hint: "View returns →",
-                onClick: () => setTab("returns"),
+                onClick: () => {
+                  setReturnsFocusHistory(true);
+                  setTab("returns");
+                },
               },
             ].map((stat) => (
               <Card
@@ -902,7 +911,10 @@ export const LibraryManager = () => {
                   size="sm"
                   variant="secondary"
                   className="shrink-0"
-                  onClick={() => setTab("returns")}
+                  onClick={() => {
+                    setReturnsFocusHistory(true);
+                    setTab("returns");
+                  }}
                 >
                   <RotateCcw className="mr-2 h-4 w-4" />
                   View returns
@@ -2302,7 +2314,12 @@ export const LibraryManager = () => {
         />
       )}
 
-      {tab === "returns" && <LibraryReturnsPanel />}
+      {tab === "returns" && (
+        <LibraryReturnsPanel
+          key={returnsFocusHistory ? "returns-history" : "returns"}
+          focusReturnHistory={returnsFocusHistory}
+        />
+      )}
 
       {tab === "staff" && isAdmin && (
         <div className="grid gap-6 xl:grid-cols-[360px_1fr]">

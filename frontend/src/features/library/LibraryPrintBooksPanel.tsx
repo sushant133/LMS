@@ -45,23 +45,28 @@ const formatPrice = (price?: number) => {
 type PrintBookBlockProps = {
   book: LibraryBookRecord;
   index: number;
-  showPageBreak?: boolean;
 };
 
-const PrintBookBlock = ({
-  book,
-  index,
-  showPageBreak = false,
-}: PrintBookBlockProps) => {
+/**
+ * One book block for the print layout.
+ * No forced page breaks between books — content flows continuously so book N+1
+ * starts immediately after book N (no blank half-pages between titles).
+ */
+const PrintBookBlock = ({ book, index }: PrintBookBlockProps) => {
   const copies = book.copies ?? [];
   return (
     <section
       style={{
-        marginBottom: 24,
+        marginBottom: 12,
         border: "1px solid #cbd5e1",
-        padding: 12,
-        pageBreakAfter: showPageBreak ? "always" : "auto",
-        breakAfter: showPageBreak ? "page" : "auto",
+        padding: 10,
+        // Continuous multi-book report: never force a new page after each book
+        pageBreakAfter: "auto",
+        breakAfter: "auto",
+        pageBreakBefore: "auto",
+        breakBefore: "auto",
+        pageBreakInside: "auto",
+        breakInside: "auto",
         color: "#0f172a",
         background: "#ffffff",
       }}
@@ -161,7 +166,7 @@ const PrintBookBlock = ({
             color: "#0f172a",
           }}
         >
-          <thead>
+          <thead style={{ display: "table-header-group" }}>
             <tr style={{ borderBottom: "1px solid #64748b", background: "#f1f5f9" }}>
               <th style={{ padding: "6px 8px", fontWeight: 600 }}>S.N.</th>
               <th style={{ padding: "6px 8px", fontWeight: 600 }}>Book code</th>
@@ -184,11 +189,16 @@ const PrintBookBlock = ({
               </th>
             </tr>
           </thead>
-          <tbody>
+          <tbody style={{ display: "table-row-group" }}>
             {copies.map((copy: LibraryBookCopyRecord, copyIndex: number) => (
               <tr
                 key={copy._id}
-                style={{ borderBottom: "1px solid #e2e8f0" }}
+                style={{
+                  borderBottom: "1px solid #e2e8f0",
+                  // Prefer keeping a single row intact; table may still span pages
+                  pageBreakInside: "avoid",
+                  breakInside: "avoid",
+                }}
               >
                 <td style={{ padding: "4px 8px", color: "#475569" }}>
                   {copyIndex + 1}
@@ -611,25 +621,27 @@ export const LibraryPrintBooksPanel = () => {
               No books selected to print.
             </p>
           ) : (
-            printBooks.map((book, index) => (
-              <PrintBookBlock
-                key={book._id}
-                book={book}
-                index={index}
-                showPageBreak={
-                  printBooks.length > 1 && index < printBooks.length - 1
-                }
-              />
-            ))
+            <div
+              style={{
+                // Flow books one after another with no forced page gaps
+                display: "block",
+              }}
+            >
+              {printBooks.map((book, index) => (
+                <PrintBookBlock key={book._id} book={book} index={index} />
+              ))}
+            </div>
           )}
 
           <footer
             style={{
-              marginTop: 24,
-              paddingTop: 12,
+              marginTop: 16,
+              paddingTop: 10,
               borderTop: "1px solid #cbd5e1",
               fontSize: 11,
               color: "#64748b",
+              pageBreakBefore: "auto",
+              breakBefore: "auto",
             }}
           >
             <p style={{ margin: 0 }}>

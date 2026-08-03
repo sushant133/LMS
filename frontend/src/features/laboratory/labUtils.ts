@@ -224,6 +224,152 @@ export async function exportElementToPdf(elementId: string, filename: string) {
     .save();
 }
 
+const escapePrintHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/**
+ * Reliable print without popup blockers (hidden iframe).
+ */
+export function printHtmlViaIframe(html: string): void {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  const win = iframe.contentWindow;
+  if (!doc || !win) {
+    iframe.remove();
+    throw new Error("Could not open print preview");
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => {
+    try {
+      iframe.remove();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  window.setTimeout(() => {
+    try {
+      win.focus();
+      win.print();
+    } catch {
+      cleanup();
+      throw new Error("Print failed");
+    }
+    window.setTimeout(cleanup, 60_000);
+  }, 350);
+}
+
+export type LabListPrintOptions = {
+  title: string;
+  subtitle?: string;
+  columns: string[];
+  /** Each row is an array of cell strings (S.N. is added automatically). */
+  rows: string[][];
+  monoColumnIndexes?: number[];
+};
+
+/** Build a landscape A4 printable HTML table for lab lists. */
+export function buildLabListPrintHtml(options: LabListPrintOptions): string {
+  const mono = new Set(options.monoColumnIndexes ?? []);
+  const headerCells = options.columns
+    .map((c) => `<th>${escapePrintHtml(c)}</th>`)
+    .join("");
+  const bodyRows = options.rows
+    .map((row, i) => {
+      const cells = row
+        .map((cell, idx) =>
+          mono.has(idx)
+            ? `<td class="mono">${escapePrintHtml(cell)}</td>`
+            : `<td>${escapePrintHtml(cell)}</td>`,
+        )
+        .join("");
+      return `<tr><td class="num">${i + 1}</td>${cells}</tr>`;
+    })
+    .join("");
+  const printedAt = new Date().toLocaleString();
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapePrintHtml(options.title)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 10mm 8mm;
+      color: #0f172a;
+      background: #fff;
+    }
+    h1 { font-size: 15px; margin: 0 0 4px; font-weight: 700; }
+    .meta { font-size: 10px; color: #475569; margin-bottom: 10px; line-height: 1.4; }
+    table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+    th, td {
+      border: 1px solid #94a3b8;
+      padding: 3px 5px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f1f5f9; font-weight: 600; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
+    .num { text-align: center; width: 26px; }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+    tfoot td { font-weight: 600; background: #f8fafc; }
+    @page { size: A4 landscape; margin: 7mm; }
+  </style>
+</head>
+<body>
+  <h1>${escapePrintHtml(options.title)}</h1>
+  <div class="meta">
+    ${options.rows.length} record${options.rows.length === 1 ? "" : "s"}
+    · Printed ${escapePrintHtml(printedAt)}
+    ${options.subtitle ? ` · ${escapePrintHtml(options.subtitle)}` : ""}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="num">#</th>
+        ${headerCells}
+      </tr>
+    </thead>
+    <tbody>${bodyRows || `<tr><td colspan="${options.columns.length + 1}">No data</td></tr>`}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="${options.columns.length + 1}">Total rows: ${options.rows.length}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+}
+
+export function printLabList(options: LabListPrintOptions): void {
+  if (!options.rows.length) {
+    throw new Error("No records to print");
+  }
+  printHtmlViaIframe(buildLabListPrintHtml(options));
+}
+
 export type LaboratoryInventoryPdfMeta = {
   institutionName?: string;
   title?: string;

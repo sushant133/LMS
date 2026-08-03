@@ -960,7 +960,8 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           paymentMethod,
           bankAccountId: payload.bankAccountId,
           transactionNumber: payload.transactionNumber,
-          receivedByName: payload.receivedByName?.trim() || "",
+          // Always the person recording this payment (accountant / admin / college admin)
+          receivedByName: accountantName,
           paidByName: payload.paidByName?.trim() || "",
           verificationCode,
           feeBreakdown: storedBreakdown,
@@ -2873,19 +2874,63 @@ const monthDateFilter = (monthBs?: string): Record<string, unknown> | undefined 
   return { $regex: `^${monthBs}` };
 };
 
+const isBsDay = (value?: string): value is string =>
+  Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+
+/**
+ * Build a Mongo date filter for a BS date field.
+ * Priority: exact dateBs → from/to range → month prefix.
+ */
+const bsFieldDateFilter = (
+  field: string,
+  opts: {
+    fromDateBs?: string;
+    toDateBs?: string;
+    monthBs?: string;
+    dateBs?: string;
+  }
+): Record<string, unknown> => {
+  if (isBsDay(opts.dateBs)) {
+    return { [field]: opts.dateBs };
+  }
+  if (isBsDay(opts.fromDateBs) || isBsDay(opts.toDateBs)) {
+    const range: Record<string, string> = {};
+    if (isBsDay(opts.fromDateBs)) range.$gte = opts.fromDateBs;
+    if (isBsDay(opts.toDateBs)) range.$lte = opts.toDateBs;
+    return { [field]: range };
+  }
+  const monthFilter = monthDateFilter(opts.monthBs);
+  if (monthFilter) return { [field]: monthFilter };
+  return {};
+};
+
 export const generateAccountingReport = asyncHandler(async (req: Request, res: Response) => {
   const reportType = req.params.reportType as AccountingReportType;
   const schoolId = tenantObjectId(req);
-  const monthBs = typeof req.query.monthBs === "string" ? req.query.monthBs : undefined;
+  let monthBs = typeof req.query.monthBs === "string" ? req.query.monthBs : undefined;
   const dateBs = typeof req.query.dateBs === "string" ? req.query.dateBs : undefined;
+  const fromDateBs =
+    typeof req.query.fromDateBs === "string" ? req.query.fromDateBs.trim() : undefined;
+  const toDateBs =
+    typeof req.query.toDateBs === "string" ? req.query.toDateBs.trim() : undefined;
+
+  // Derive month from from-date when month not provided (financial summary / salary)
+  if ((!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) && isBsDay(fromDateBs)) {
+    monthBs = fromDateBs.slice(0, 7);
+  }
+
+  const dateOpts = { fromDateBs, toDateBs, monthBs, dateBs };
 
   let data: unknown = [];
   let summaryPayload: FinancialSummaryReport | null = null;
 
   switch (reportType) {
     case "daily-fee-collection": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      if (dateBs) filter.paidDateBs = dateBs;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("paidDateBs", dateOpts)
+      };
       data = await FeeCollection.find(filter)
         .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
         .sort({ paidDateBs: -1 })
@@ -2893,9 +2938,11 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       break;
     }
     case "monthly-fee-collection": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.paidDateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("paidDateBs", dateOpts)
+      };
       data = await FeeCollection.find(filter)
         .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
         .sort({ paidDateBs: -1 })
@@ -2913,7 +2960,13 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
     }
     case "salary-payments": {
       const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      if (monthBs) filter.monthBs = monthBs;
+      // Prefer paid-date range when provided; else month sheet key
+      const paidRange = bsFieldDateFilter("paidDateBs", dateOpts);
+      if (Object.keys(paidRange).length > 0 && (isBsDay(fromDateBs) || isBsDay(toDateBs) || isBsDay(dateBs))) {
+        Object.assign(filter, paidRange);
+      } else if (monthBs) {
+        filter.monthBs = monthBs;
+      }
       // Flat populate (include-only) — avoid nested mixed projections
       data = await SalaryPayment.find(filter)
         .populate({ path: "teacherId", populate: { path: "user", select: "fullName email designation" } })
@@ -2923,30 +2976,38 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       break;
     }
     case "expenses": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.dateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("dateBs", dateOpts)
+      };
       data = await AccountingExpense.find(filter).sort({ dateBs: -1 }).lean();
       break;
     }
     case "purchases": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.purchaseDateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("purchaseDateBs", dateOpts)
+      };
       data = await AccountingPurchase.find(filter).sort({ purchaseDateBs: -1 }).lean();
       break;
     }
     case "income": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.dateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("dateBs", dateOpts)
+      };
       data = await AccountingIncome.find(filter).sort({ dateBs: -1 }).lean();
       break;
     }
     case "refunds": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.dateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("dateBs", dateOpts)
+      };
       const refunds = await FeeRefund.find(filter)
         .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
         .sort({ dateBs: -1 })
@@ -2966,16 +3027,20 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       break;
     }
     case "journal": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.dateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("dateBs", dateOpts)
+      };
       data = await JournalEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).limit(1000).lean();
       break;
     }
     case "ledger": {
-      const filter: Record<string, unknown> = { schoolId, isDeleted: false };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.dateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        isDeleted: false,
+        ...bsFieldDateFilter("dateBs", dateOpts)
+      };
       const accountCode =
         typeof req.query.accountCode === "string" ? req.query.accountCode.trim() : "";
       const entries = await JournalEntry.find(filter).sort({ dateBs: 1, createdAt: 1 }).limit(2000).lean();
@@ -3002,26 +3067,48 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       break;
     }
     case "cash-summary": {
-      const filter: Record<string, unknown> = { schoolId };
-      const monthFilter = monthDateFilter(monthBs);
-      if (monthFilter) filter.dateBs = monthFilter;
+      const filter: Record<string, unknown> = {
+        schoolId,
+        ...bsFieldDateFilter("dateBs", dateOpts)
+      };
       data = await CashBookEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).lean();
       break;
     }
     case "financial-summary": {
-      if (!monthBs) {
-        throw new ApiError(400, "Month (BS) is required for the financial summary report");
+      if (!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) {
+        throw new ApiError(
+          400,
+          "Select From date (BS) or month so the financial summary period can be determined"
+        );
       }
 
-      const monthFilter = monthDateFilter(monthBs);
+      // Prefer explicit from–to day range when both ends are set; else full month
+      const feeDateFilter =
+        isBsDay(fromDateBs) || isBsDay(toDateBs)
+          ? bsFieldDateFilter("paidDateBs", dateOpts)
+          : { paidDateBs: monthDateFilter(monthBs) };
+      const dayDateFilter =
+        isBsDay(fromDateBs) || isBsDay(toDateBs)
+          ? bsFieldDateFilter("dateBs", dateOpts)
+          : { dateBs: monthDateFilter(monthBs) };
+      const purchaseDateFilter =
+        isBsDay(fromDateBs) || isBsDay(toDateBs)
+          ? bsFieldDateFilter("purchaseDateBs", dateOpts)
+          : { purchaseDateBs: monthDateFilter(monthBs) };
       const [fees, income, expenses, purchases, salaries, pendingStudents] = await Promise.all([
-        FeeCollection.find({ schoolId, paidDateBs: monthFilter, isDeleted: false })
+        FeeCollection.find({ schoolId, isDeleted: false, ...feeDateFilter })
           .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
           .sort({ paidDateBs: -1 })
           .lean(),
-        AccountingIncome.find({ schoolId, dateBs: monthFilter, isDeleted: false }).sort({ dateBs: -1 }).lean(),
-        AccountingExpense.find({ schoolId, dateBs: monthFilter, isDeleted: false }).sort({ dateBs: -1 }).lean(),
-        AccountingPurchase.find({ schoolId, purchaseDateBs: monthFilter, isDeleted: false }).sort({ purchaseDateBs: -1 }).lean(),
+        AccountingIncome.find({ schoolId, isDeleted: false, ...dayDateFilter })
+          .sort({ dateBs: -1 })
+          .lean(),
+        AccountingExpense.find({ schoolId, isDeleted: false, ...dayDateFilter })
+          .sort({ dateBs: -1 })
+          .lean(),
+        AccountingPurchase.find({ schoolId, isDeleted: false, ...purchaseDateFilter })
+          .sort({ purchaseDateBs: -1 })
+          .lean(),
         SalaryPayment.find({ schoolId, monthBs, status: "PAID" })
           .populate({ path: "teacherId", populate: { path: "user", select: "-password" } })
           .populate("staffId")
@@ -3051,9 +3138,14 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
         netSurplusNpr: inflowNpr - outflowNpr
       };
 
+      const periodLabel =
+        isBsDay(fromDateBs) || isBsDay(toDateBs)
+          ? `BS ${fromDateBs || "…"} → ${toDateBs || "…"}`
+          : `BS ${monthBs}`;
+
       summaryPayload = {
         reportType: "financial-summary",
-        period: { monthBs, label: `BS ${monthBs}` },
+        period: { monthBs, label: periodLabel },
         totals,
         sections: { fees, income, expenses, purchases, salaries },
         data: buildFinancialSummaryRows(totals, {

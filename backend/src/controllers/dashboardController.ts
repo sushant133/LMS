@@ -260,29 +260,30 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
   /** Male/Female pie for currently enrolled (ACTIVE) students in running years. */
   let genderChart: Array<{ name: string; value: number }> = [];
   let genderChartScope = "";
-  /** Ethnicity pie — same active / current-running-year scope as gender. */
-  let ethnicityChart: Array<{ name: string; value: number }> = [];
-  let ethnicityChartScope = "";
+  /** Religion pie — same active / current-running-year scope as gender. */
+  let religionChart: Array<{ name: string; value: number }> = [];
+  let religionChartScope = "";
   /** Rows for client-side batch/year filter on demographics charts. */
   let studentDemographics: Array<{
     batchId?: string;
     yearId?: string;
     gender?: string;
-    ethnicityCategory?: string;
+    religion?: string;
+    caste?: string;
   }> = [];
   let chartBatches: Array<{ _id: string; name: string }> = [];
   let chartYears: Array<{ _id: string; name: string; batchId?: string }> = [];
 
-  const tallyGenderAndEthnicity = (
-    students: Array<{ gender?: string | null; ethnicityCategory?: string | null }>
+  const tallyGenderAndReligion = (
+    students: Array<{ gender?: string | null; religion?: string | null }>
   ): {
     gender: Array<{ name: string; value: number }>;
-    ethnicity: Array<{ name: string; value: number }>;
+    religion: Array<{ name: string; value: number }>;
   } => {
     let male = 0;
     let female = 0;
     let genderOther = 0;
-    const ethnicityCounts = new Map<string, number>();
+    const religionCounts = new Map<string, number>();
 
     for (const student of students) {
       const g = (student.gender ?? "").trim().toLowerCase();
@@ -290,11 +291,11 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       else if (g === "female") female += 1;
       else genderOther += 1;
 
-      const ethnicity = (student.ethnicityCategory ?? "").trim() || "Unset";
-      ethnicityCounts.set(ethnicity, (ethnicityCounts.get(ethnicity) ?? 0) + 1);
+      const religion = (student.religion ?? "").trim() || "Unset";
+      religionCounts.set(religion, (religionCounts.get(religion) ?? 0) + 1);
     }
 
-    const ethnicity = [...ethnicityCounts.entries()]
+    const religion = [...religionCounts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, value]) => ({ name, value }));
 
@@ -304,7 +305,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         { name: "Female", value: female },
         ...(genderOther > 0 ? [{ name: "Other / Unset", value: genderOther }] : [])
       ],
-      ethnicity
+      religion
     };
   };
 
@@ -324,7 +325,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
           Year.find({ schoolId }).select("_id name level isActive batchId").lean(),
           Batch.find({ schoolId }).select("_id name").sort({ name: 1 }).lean(),
           Student.find(activeStatusFilter)
-            .select("batchId yearId gender ethnicityCategory")
+            .select("batchId yearId gender religion caste")
             .lean(),
           Student.countDocuments({ schoolId, academicStatus: "PASSED_OUT" }),
           Student.countDocuments({ schoolId, academicStatus: "ALUMNI" })
@@ -342,7 +343,7 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
       const hasActiveYearFilter = activeYearIds.size > 0;
       const scopedForCharts: Array<{
         gender?: string | null;
-        ethnicityCategory?: string | null;
+        religion?: string | null;
       }> = [];
 
       studentDemographics = [];
@@ -358,7 +359,8 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
           batchId: batchId || undefined,
           yearId: yearId || undefined,
           gender: student.gender ?? undefined,
-          ethnicityCategory: student.ethnicityCategory ?? undefined
+          religion: student.religion ?? undefined,
+          caste: student.caste ?? undefined
         });
         // Default charts: students in currently active (running) academic years.
         // If no year is marked active, fall back to all ACTIVE students.
@@ -376,11 +378,11 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         { label: "Alumni", value: alumniCount }
       ];
 
-      const tallied = tallyGenderAndEthnicity(scopedForCharts);
+      const tallied = tallyGenderAndReligion(scopedForCharts);
       genderChart = tallied.gender;
-      ethnicityChart = tallied.ethnicity;
+      religionChart = tallied.religion;
       genderChartScope = "Active students in current running years";
-      ethnicityChartScope = "Active students in current running years";
+      religionChartScope = "Active students in current running years";
       chartBatches = batches.map((b) => ({
         _id: b._id.toString(),
         name: b.name
@@ -395,19 +397,20 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         SchoolClass.find({ schoolId }).select("_id name").sort({ name: 1 }).lean(),
         Section.find({ schoolId }).select("_id name classId").lean(),
         Student.find(activeStatusFilter)
-          .select("classId sectionId gender ethnicityCategory")
+          .select("classId sectionId gender religion caste")
           .lean()
       ]);
-      const tallied = tallyGenderAndEthnicity(activeStudents);
+      const tallied = tallyGenderAndReligion(activeStudents);
       genderChart = tallied.gender;
-      ethnicityChart = tallied.ethnicity;
+      religionChart = tallied.religion;
       genderChartScope = "Active (currently enrolled) students";
-      ethnicityChartScope = "Active (currently enrolled) students";
+      religionChartScope = "Active (currently enrolled) students";
       studentDemographics = activeStudents.map((s) => ({
         batchId: s.classId ? s.classId.toString() : undefined,
         yearId: s.sectionId ? s.sectionId.toString() : undefined,
         gender: s.gender ?? undefined,
-        ethnicityCategory: s.ethnicityCategory ?? undefined
+        religion: s.religion ?? undefined,
+        caste: s.caste ?? undefined
       }));
       chartBatches = classes.map((c) => ({
         _id: c._id.toString(),
@@ -579,8 +582,8 @@ export const getDashboard = asyncHandler(async (req: Request, res: Response) => 
         : [],
     genderChart: adminLike ? genderChart : [],
     genderChartScope: adminLike ? genderChartScope : undefined,
-    ethnicityChart: adminLike ? ethnicityChart : [],
-    ethnicityChartScope: adminLike ? ethnicityChartScope : undefined,
+    religionChart: adminLike ? religionChart : [],
+    religionChartScope: adminLike ? religionChartScope : undefined,
     studentDemographics: adminLike ? studentDemographics : undefined,
     chartBatches: adminLike ? chartBatches : undefined,
     chartYears: adminLike ? chartYears : undefined,

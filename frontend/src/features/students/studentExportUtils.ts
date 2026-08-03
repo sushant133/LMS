@@ -1,4 +1,5 @@
 import type { StudentRecord } from "@phit-erp/shared";
+import { bsDateToAdString } from "components/shared/NepaliDateField";
 import { saveAs } from "file-saver";
 import { formatCurrencyNpr } from "lib/utils";
 import * as XLSX from "xlsx";
@@ -38,7 +39,10 @@ export const downloadStudentsExcel = (
     options.primaryLabel,
     options.secondaryLabel,
     "Gender",
+    "Religion",
+    "Caste",
     "Date of Birth (BS)",
+    "Date of Birth (AD)",
     "Admission Date (BS)",
     "Father Name",
     "Father Phone",
@@ -65,7 +69,10 @@ export const downloadStudentsExcel = (
       (options.isCollege ? student.yearId : student.sectionId) ?? "",
     ) ?? "",
     student.gender,
+    student.religion ?? "",
+    student.caste ?? "",
     student.dateOfBirthBs,
+    student.dateOfBirthBs ? bsDateToAdString(student.dateOfBirthBs) : "",
     student.admissionDateBs,
     student.fatherName,
     student.fatherPhone ?? "",

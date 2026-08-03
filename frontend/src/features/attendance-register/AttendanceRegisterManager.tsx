@@ -39,7 +39,9 @@ import { cn, parseErrorMessage } from "lib/utils";
 import {
   buildRegisterCsv,
   cellClass,
+  downloadAttendanceRegisterPdf,
   downloadTextFile,
+  openAttendanceRegisterPrint,
   shiftMonthBs,
 } from "./attendanceRegisterUtils";
 
@@ -94,6 +96,7 @@ export const AttendanceRegisterManager = ({
   const [detail, setDetail] = useState<AttendanceRegisterCellDetail | null>(
     null,
   );
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   // Seed month from meta once
   const effectiveMonth = monthBs || meta?.defaultMonthBs || "";
@@ -239,44 +242,43 @@ export const AttendanceRegisterManager = ({
     }
   };
 
+  const printOptions = () => ({
+    appName: appConfig.appName || "Attendance Register",
+    preparedBy: user?.fullName ?? "—",
+    tabLabel:
+      tab === "TEACHER" ? "Teachers" : tab === "STAFF" ? "Staff" : "Students",
+  });
+
+  /** Browser print (Save as PDF from dialog). */
   const printRegister = () => {
-    const el = document.getElementById("attendance-register-print");
-    if (!el) {
+    if (!data || data.rows.length === 0) {
       toast.error("Register not ready to print");
       return;
     }
-    const win = window.open("", "_blank", "noopener,noreferrer");
-    if (!win) {
-      toast.error("Popup blocked — allow popups to print");
+    try {
+      openAttendanceRegisterPrint(data, printOptions());
+      toast.success("Print dialog opening — use Save as PDF if needed");
+    } catch (e) {
+      toast.error(parseErrorMessage(e) || "Could not open print dialog");
+    }
+  };
+
+  /** Download landscape PDF of the full register. */
+  const downloadRegisterPdf = async () => {
+    if (!data || data.rows.length === 0) {
+      toast.error("Register not ready for PDF");
       return;
     }
-    win.document.write(`<!DOCTYPE html><html><head><title>Attendance Register</title>
-      <style>
-        body { font-family: system-ui, sans-serif; font-size: 11px; color: #0f172a; }
-        h1 { font-size: 16px; margin: 0 0 4px; }
-        h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
-        .meta { margin-bottom: 10px; color: #475569; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #cbd5e1; padding: 2px 3px; text-align: center; }
-        th { background: #f1f5f9; font-size: 10px; }
-        td.name { text-align: left; white-space: nowrap; font-weight: 600; }
-        .sat { background: #e2e8f0; }
-        .p { background: #d1fae5; } .a { background: #fee2e2; }
-        .l { background: #dbeafe; } .late { background: #ffedd5; }
-        .h { background: #e2e8f0; }
-        .footer { margin-top: 24px; display: flex; justify-content: space-between; }
-        .sig { width: 28%; text-align: center; border-top: 1px solid #64748b; padding-top: 6px; margin-top: 40px; }
-        .legend { margin-top: 10px; font-size: 10px; }
-        @page { size: A4 landscape; margin: 8mm; }
-      </style></head><body>${el.innerHTML}
-      <div class="footer">
-        <div class="sig">Prepared By</div>
-        <div class="sig">Verified By</div>
-        <div class="sig">Approved By</div>
-      </div>
-      <script>window.onload=function(){window.print();}</script>
-      </body></html>`);
-    win.document.close();
+    setExportingPdf(true);
+    try {
+      const filename = `attendance-register-${tab.toLowerCase()}-${data.monthBs}.pdf`;
+      await downloadAttendanceRegisterPdf(data, printOptions(), filename);
+      toast.success("Register PDF downloaded");
+    } catch (e) {
+      toast.error(parseErrorMessage(e) || "Could not generate register PDF");
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   if (metaQuery.isLoading) return <LoadingState />;
@@ -307,11 +309,21 @@ export const AttendanceRegisterManager = ({
         type="button"
         variant="outline"
         size="sm"
-        disabled={!data}
+        disabled={!data || data.rows.length === 0}
         onClick={printRegister}
       >
         <Printer className="mr-1.5 h-4 w-4" />
-        Print / PDF
+        Print
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={!data || data.rows.length === 0 || exportingPdf}
+        onClick={() => void downloadRegisterPdf()}
+      >
+        <Download className="mr-1.5 h-4 w-4" />
+        {exportingPdf ? "PDF…" : "PDF"}
       </Button>
     </div>
   );
@@ -714,78 +726,6 @@ export const AttendanceRegisterManager = ({
             </CardContent>
           </Card>
 
-          {/* Hidden print layout */}
-          <div id="attendance-register-print" className="hidden">
-            <h1>{appConfig.appName}</h1>
-            <h2>Attendance Register — {data.tab}</h2>
-            <div className="meta">
-              Month: {data.monthLabel}
-              {data.scopeLabel ? ` · ${data.scopeLabel}` : ""}
-              <br />
-              Generated: {new Date(data.generatedAt).toLocaleString()} · By:{" "}
-              {user?.fullName ?? "—"}
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>SN</th>
-                  <th>Name</th>
-                  {data.days.map((d) => (
-                    <th key={d.dateBs} className={d.isSaturday ? "sat" : ""}>
-                      {d.dayOfMonth}
-                      <br />
-                      {d.weekdayShort}
-                    </th>
-                  ))}
-                  <th>P</th>
-                  <th>A</th>
-                  <th>L</th>
-                  <th>%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.rows.map((row) => (
-                  <tr key={row.personId}>
-                    <td>{row.sn}</td>
-                    <td className="name">{row.fullName}</td>
-                    {data.days.map((d) => {
-                      const code = row.cells[d.dateBs]?.code ?? (d.isSaturday ? "H" : "");
-                      const cls =
-                        code === "P"
-                          ? "p"
-                          : code === "A"
-                            ? "a"
-                            : code === "L"
-                              ? "l"
-                              : code === "Late"
-                                ? "late"
-                                : code === "H"
-                                  ? "h"
-                                  : d.isSaturday
-                                    ? "sat"
-                                    : "";
-                      return (
-                        <td key={d.dateBs} className={cls}>
-                          {code}
-                        </td>
-                      );
-                    })}
-                    <td>{row.summary.present}</td>
-                    <td>{row.summary.absent}</td>
-                    <td>{row.summary.leave}</td>
-                    <td>{row.summary.percentage}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="legend">
-              {(data.legend ?? []).map((l) => (
-                <span key={l.status} style={{ marginRight: 12 }}>
-                  <strong>{l.code}</strong>={l.label}
-                </span>
-              ))}
-            </div>
-          </div>
         </>
       )}
 

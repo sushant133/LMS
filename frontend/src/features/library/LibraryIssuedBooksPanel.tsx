@@ -5,6 +5,7 @@ import {
   BookMarked,
   ChevronLeft,
   ChevronRight,
+  Printer,
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -26,12 +27,72 @@ import {
   uniqueSectionOptionsFromIssues,
   uniqueYearOptionsFromIssues,
 } from "features/library/libraryUtils";
+import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
+import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { resolveStudentId } from "lib/resolveStudentId";
 import { queryClient } from "lib/queryClient";
 import { cn, parseErrorMessage } from "lib/utils";
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/**
+ * Print HTML via a hidden iframe (no popup, no noopener null window).
+ * More reliable than window.open + document.write.
+ */
+const printHtmlViaIframe = (html: string): void => {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  const win = iframe.contentWindow;
+  if (!doc || !win) {
+    iframe.remove();
+    throw new Error("Could not open print preview");
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => {
+    try {
+      iframe.remove();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const runPrint = () => {
+    try {
+      win.focus();
+      win.print();
+    } catch (err) {
+      cleanup();
+      throw err;
+    }
+    // Keep iframe until print dialog is done (user may cancel)
+    window.setTimeout(cleanup, 60_000);
+  };
+
+  // Wait for document to settle before printing
+  window.setTimeout(runPrint, 350);
+};
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
@@ -52,9 +113,18 @@ interface LibraryIssuedBooksPanelProps {
 export const LibraryIssuedBooksPanel = ({
   initialStatusFilter = "ALL",
 }: LibraryIssuedBooksPanelProps) => {
+  const { user } = useAuth();
   const isCollege = useIsCollege();
-  const canManageIssues = useIsTenantAdmin();
+  /** Super Admin / College Admin (primary or secondary role). */
+  const canManageIssues = Boolean(
+    user &&
+      (canManageInstitution(user.role) ||
+        (user.secondaryRoles ?? []).some((role) =>
+          canManageInstitution(normalizeUserRole(role)),
+        )),
+  );
   const [searchQuery, setSearchQuery] = useState("");
+  const [printing, setPrinting] = useState(false);
   const [batchId, setBatchId] = useState("");
   const [yearId, setYearId] = useState("");
   const [classId, setClassId] = useState("");
@@ -180,6 +250,144 @@ export const LibraryIssuedBooksPanel = ({
       Boolean,
     );
     return parts.length ? parts.join(" · ") : "—";
+  };
+
+  /** College admin / Super admin only — print currently filtered issued list. */
+  const printIssuedList = () => {
+    if (!canManageIssues) {
+      toast.error("Only college admin or super admin can print");
+      return;
+    }
+    if (filteredIssues.length === 0) {
+      toast.error("No issued books to print");
+      return;
+    }
+
+    const placementHeader = isCollege ? "Batch · Year" : "Class · Section";
+    const statusLabel =
+      statusFilter === "OVERDUE"
+        ? "Overdue books only"
+        : statusFilter === "ISSUED"
+          ? "Issued (not overdue)"
+          : "All issued books";
+
+    const rowsHtml = filteredIssues
+      .map((issue, index) => {
+        const borrower =
+          issue.borrowerName?.trim() ||
+          (issue.borrowerType === "TEACHER" ? "Teacher" : "Student");
+        const typeNote =
+          issue.borrowerType === "TEACHER"
+            ? " (Teacher)"
+            : issue.borrowerType === "STUDENT"
+              ? " (Student)"
+              : "";
+        return `<tr>
+          <td class="num">${index + 1}</td>
+          <td>${escapeHtml(issue.bookTitle ?? "—")}</td>
+          <td class="mono">${escapeHtml(issue.bookCode ?? "—")}</td>
+          <td>${escapeHtml(borrower)}${escapeHtml(typeNote)}</td>
+          <td>${escapeHtml(placementLabel(issue))}</td>
+          <td>${escapeHtml(issue.issuedDateBs ?? "—")}</td>
+          <td>${escapeHtml(issue.dueDateBs ?? "—")}</td>
+          <td>${escapeHtml(issue.status ?? "—")}</td>
+          <td>${escapeHtml(formatIssuedByLabel(issue))}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const filterBits = [
+      searchQuery.trim() ? `Search: ${searchQuery.trim()}` : null,
+      isCollege && batchId
+        ? `Batch: ${batchOptions.find((b) => b._id === batchId)?.name ?? batchId}`
+        : null,
+      isCollege && yearId
+        ? `Year: ${yearOptions.find((y) => y._id === yearId)?.name ?? yearId}`
+        : null,
+      !isCollege && classId
+        ? `Class: ${classOptions.find((c) => c._id === classId)?.name ?? classId}`
+        : null,
+      !isCollege && sectionId
+        ? `Section: ${sectionOptions.find((s) => s._id === sectionId)?.name ?? sectionId}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    const printedAt = new Date().toLocaleString();
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Issued Books — ${escapeHtml(statusLabel)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 12mm 10mm;
+      color: #0f172a;
+      background: #fff;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; font-weight: 700; }
+    .meta { font-size: 11px; color: #475569; margin-bottom: 12px; line-height: 1.4; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th, td {
+      border: 1px solid #94a3b8;
+      padding: 4px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f1f5f9; font-weight: 600; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
+    .num { text-align: center; width: 28px; }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+    tfoot td { font-weight: 600; background: #f8fafc; }
+    @page { size: A4 landscape; margin: 8mm; }
+  </style>
+</head>
+<body>
+  <h1>Library — ${escapeHtml(statusLabel)}</h1>
+  <div class="meta">
+    ${filteredIssues.length} record${filteredIssues.length === 1 ? "" : "s"}
+    · Overdue (all active): ${overdueCount}
+    · Printed ${escapeHtml(printedAt)}
+    ${filterBits ? ` · ${escapeHtml(filterBits)}` : ""}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="num">#</th>
+        <th>Book</th>
+        <th>Code</th>
+        <th>Student / Borrower</th>
+        <th>${escapeHtml(placementHeader)}</th>
+        <th>Issued</th>
+        <th>Due</th>
+        <th>Status</th>
+        <th>Issued by</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="9">Total rows: ${filteredIssues.length}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+    setPrinting(true);
+    try {
+      printHtmlViaIframe(html);
+      toast.success("Print dialog opening — choose printer or Save as PDF");
+    } catch (e) {
+      toast.error(parseErrorMessage(e) || "Could not print issued books");
+    } finally {
+      window.setTimeout(() => setPrinting(false), 500);
+    }
   };
 
   return (
@@ -313,15 +521,30 @@ export const LibraryIssuedBooksPanel = ({
                           : `Search and filter by ${isCollege ? "batch and year" : "class and section"}. Select a row or use Manage to open the detail panel.`}
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIssuedSlide(1)}
-                    >
-                      Manage issue
-                      <ChevronRight className="ml-1 h-4 w-4" />
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {canManageIssues ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={filteredIssues.length === 0 || printing}
+                          onClick={printIssuedList}
+                          title="Print issued books list"
+                        >
+                          <Printer className="mr-1.5 h-4 w-4" />
+                          {printing ? "Printing…" : "Print"}
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setIssuedSlide(1)}
+                      >
+                        Manage issue
+                        <ChevronRight className="ml-1 h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-end gap-3">
                     {isCollege ? (

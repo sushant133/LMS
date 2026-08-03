@@ -1,7 +1,8 @@
 import {
   BLOOD_GROUPS,
   DISABILITY_CATEGORIES,
-  ETHNICITY_CATEGORIES,
+  getCastesForReligion,
+  RELIGIONS,
   STUDENT_ACADEMIC_STATUSES,
   STUDENT_ACADEMIC_STATUS_LABELS,
   studentSchema,
@@ -17,8 +18,11 @@ import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { FormField } from "components/shared/FormField";
 import {
+  DualBsAdDateField,
   NepaliDateField,
+  studentBirthMaxAd,
   studentBirthMaxDate,
+  studentBirthMinAd,
   studentBirthMinDate,
 } from "components/shared/NepaliDateField";
 import {
@@ -56,7 +60,8 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   gender: "",
   bloodGroup: undefined,
   disabilityCategory: undefined,
-  ethnicityCategory: undefined,
+  religion: undefined,
+  caste: "",
   address: {
     province: "",
     district: "",
@@ -173,7 +178,8 @@ export const StudentForm = ({
           : Number(form.feesDueNpr) || 0,
       bloodGroup: form.bloodGroup || undefined,
       disabilityCategory: form.disabilityCategory || undefined,
-      ethnicityCategory: form.ethnicityCategory || undefined,
+      religion: form.religion || undefined,
+      caste: form.caste?.trim() || undefined,
       documents,
       photoUrl:
         documents.find(
@@ -375,16 +381,21 @@ export const StudentForm = ({
             }
           />
         </FormField>
-        <FormField label="Date of Birth (BS)">
-          <NepaliDateField
-            value={form.dateOfBirthBs}
-            onChange={(value) =>
-              setForm((current) => ({ ...current, dateOfBirthBs: value }))
-            }
-            minDate={studentBirthMinDate()}
-            maxDate={studentBirthMaxDate()}
-          />
-        </FormField>
+        <div className="md:col-span-2">
+          <FormField label="Date of Birth">
+            <DualBsAdDateField
+              valueBs={form.dateOfBirthBs}
+              onChangeBs={(value) =>
+                setForm((current) => ({ ...current, dateOfBirthBs: value }))
+              }
+              minDate={studentBirthMinDate()}
+              maxDate={studentBirthMaxDate()}
+              minAd={studentBirthMinAd()}
+              maxAd={studentBirthMaxAd()}
+              bsPlaceholder="Select date of birth (BS)"
+            />
+          </FormField>
+        </div>
         <FormField label="Gender">
           <Select
             value={form.gender || ""}
@@ -436,21 +447,51 @@ export const StudentForm = ({
             ))}
           </Select>
         </FormField>
-        <FormField label="Ethnicity">
+        <FormField label="Religion">
           <Select
-            value={form.ethnicityCategory ?? ""}
+            value={form.religion ?? ""}
+            onChange={(event) => {
+              const religion = (event.target.value ||
+                undefined) as StudentInput["religion"];
+              setForm((current) => {
+                const casteOptions = getCastesForReligion(religion);
+                const casteStillValid =
+                  current.caste && casteOptions.includes(current.caste)
+                    ? current.caste
+                    : "";
+                return {
+                  ...current,
+                  religion,
+                  caste: casteStillValid,
+                };
+              });
+            }}
+          >
+            <option value="">Select religion</option>
+            {RELIGIONS.map((religion) => (
+              <option key={religion} value={religion}>
+                {religion}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <FormField label="Caste">
+          <Select
+            value={form.caste ?? ""}
+            disabled={!form.religion}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
-                ethnicityCategory: (event.target.value ||
-                  undefined) as StudentInput["ethnicityCategory"],
+                caste: event.target.value || "",
               }))
             }
           >
-            <option value="">Select ethnicity</option>
-            {ETHNICITY_CATEGORIES.map((category) => (
-              <option key={category} value={category}>
-                {category}
+            <option value="">
+              {form.religion ? "Select caste" : "Select religion first"}
+            </option>
+            {getCastesForReligion(form.religion).map((caste) => (
+              <option key={caste} value={caste}>
+                {caste}
               </option>
             ))}
           </Select>
@@ -578,14 +619,6 @@ export const StudentForm = ({
           />
         </FormField>
         <div className="md:col-span-2 xl:col-span-2">
-          <p className="mb-2 rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
-            This is the amount <strong>to be deposited</strong> (plan only). It
-            does <strong>not</strong> mark the deposit as paid. When money is
-            collected, record it under{" "}
-            <strong>Accounts → Student Fee Records → Record payment</strong>{" "}
-            using the Security deposit field. Only then will “deposit held /
-            paid” appear. Refunds are allowed only after that collection.
-          </p>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3 text-sm">
             <input
               type="checkbox"

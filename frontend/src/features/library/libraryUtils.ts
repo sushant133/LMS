@@ -468,7 +468,8 @@ export async function exportLibraryInventoryPdf(
       );
     });
 
-    y += 6;
+    // Tight gap before next book — do not force a new page between titles
+    y += 4;
   });
 
   drawFooter();

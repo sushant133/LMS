@@ -70,7 +70,8 @@ const run = async (): Promise<void> => {
     gender: "Male",
     bloodGroup: "A+",
     disabilityCategory: "None",
-    ethnicityCategory: "Other",
+    religion: "Hinduism",
+    caste: "Other",
     address: {
       province: "Bagmati",
       district: "Kathmandu",

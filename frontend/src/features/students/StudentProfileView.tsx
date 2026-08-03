@@ -19,6 +19,7 @@ import {
 import { Link, useParams } from "react-router-dom";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
+import { bsDateToAdString } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -344,8 +345,13 @@ export const StudentProfileView = () => {
                             value: student.admissionDateBs ?? "—",
                           },
                           {
-                            label: "Date of Birth (BS)",
-                            value: student.dateOfBirthBs ?? "—",
+                            label: "Date of Birth",
+                            value: (() => {
+                              const bs = student.dateOfBirthBs?.trim() || "";
+                              if (!bs) return "—";
+                              const ad = bsDateToAdString(bs);
+                              return ad ? `BS ${bs} · AD ${ad}` : `BS ${bs}`;
+                            })(),
                           },
                           { label: "Gender", value: student.gender },
                           {

@@ -1,8 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 import { libraryReturnSchema, type LibraryIssueRecord } from "@phit-erp/shared";
-import { AlertCircle, CheckCircle2, RotateCcw, Search } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Printer,
+  RotateCcw,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
@@ -16,10 +22,150 @@ import {
   filterLibraryIssues,
   formatIssuedByLabel,
 } from "features/library/libraryUtils";
+import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { resolveStudentId } from "lib/resolveStudentId";
 import { queryClient } from "lib/queryClient";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
+
+const RETURN_HISTORY_ID = "library-return-history";
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/** Reliable print without popup blockers (hidden iframe). */
+const printHtmlViaIframe = (html: string): void => {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  const win = iframe.contentWindow;
+  if (!doc || !win) {
+    iframe.remove();
+    throw new Error("Could not open print preview");
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => {
+    try {
+      iframe.remove();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  window.setTimeout(() => {
+    try {
+      win.focus();
+      win.print();
+    } catch {
+      cleanup();
+      throw new Error("Print failed");
+    }
+    window.setTimeout(cleanup, 60_000);
+  }, 350);
+};
+
+const buildIssuesPrintHtml = (opts: {
+  title: string;
+  subtitle?: string;
+  columns: string[];
+  rows: string[][];
+  footerNote?: string;
+}): string => {
+  const headerCells = opts.columns
+    .map((c) => `<th>${escapeHtml(c)}</th>`)
+    .join("");
+  const bodyRows = opts.rows
+    .map(
+      (row, i) =>
+        `<tr><td class="num">${i + 1}</td>${row
+          .map((cell, idx) =>
+            idx === 1
+              ? `<td class="mono">${escapeHtml(cell)}</td>`
+              : `<td>${escapeHtml(cell)}</td>`,
+          )
+          .join("")}</tr>`,
+    )
+    .join("");
+  const printedAt = new Date().toLocaleString();
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(opts.title)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 12mm 10mm;
+      color: #0f172a;
+      background: #fff;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; font-weight: 700; }
+    .meta { font-size: 11px; color: #475569; margin-bottom: 12px; line-height: 1.4; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th, td {
+      border: 1px solid #94a3b8;
+      padding: 4px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f1f5f9; font-weight: 600; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
+    .num { text-align: center; width: 28px; }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+    tfoot td { font-weight: 600; background: #f8fafc; }
+    @page { size: A4 landscape; margin: 8mm; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(opts.title)}</h1>
+  <div class="meta">
+    ${opts.rows.length} record${opts.rows.length === 1 ? "" : "s"}
+    · Printed ${escapeHtml(printedAt)}
+    ${opts.subtitle ? ` · ${escapeHtml(opts.subtitle)}` : ""}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="num">#</th>
+        ${headerCells}
+      </tr>
+    </thead>
+    <tbody>${bodyRows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="${opts.columns.length + 1}">
+          Total rows: ${opts.rows.length}${
+            opts.footerNote ? ` · ${escapeHtml(opts.footerNote)}` : ""
+          }
+        </td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+};
 
 const issueStatusStyles: Record<string, string> = {
   ISSUED: "bg-sky-100 text-sky-800",
@@ -34,10 +180,52 @@ const formatTodayBs = (): string => {
 
 const defaultReturnDateBs = () => formatTodayBs();
 
-export const LibraryReturnsPanel = () => {
+type LibraryReturnsPanelProps = {
+  /**
+   * When true (e.g. from Dashboard “Returned” / “View returns”),
+   * scroll straight to Return History.
+   */
+  focusReturnHistory?: boolean;
+};
+
+export const LibraryReturnsPanel = ({
+  focusReturnHistory = false,
+}: LibraryReturnsPanelProps) => {
+  const { user } = useAuth();
+  /** Super Admin / College Admin (primary or secondary role). */
+  const canPrint = Boolean(
+    user &&
+      (canManageInstitution(user.role) ||
+        (user.secondaryRoles ?? []).some((role) =>
+          canManageInstitution(normalizeUserRole(role)),
+        )),
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [returnedDateBs, setReturnedDateBs] = useState(defaultReturnDateBs);
+  const [historyHighlight, setHistoryHighlight] = useState(focusReturnHistory);
+  const [printingKey, setPrintingKey] = useState<"to-return" | "history" | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!focusReturnHistory) return;
+    setHistoryHighlight(true);
+    // Wait for layout after tab switch / data paint
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(RETURN_HISTORY_ID);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 80);
+    const clearHighlight = window.setTimeout(() => {
+      setHistoryHighlight(false);
+    }, 2500);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearHighlight);
+    };
+  }, [focusReturnHistory]);
 
   const activeIssuesQuery = useQuery({
     queryKey: ["library-issues", "active"],
@@ -122,6 +310,79 @@ export const LibraryReturnsPanel = () => {
       id: selectedIssue._id,
       returnedDateBs: parsed.data.returnedDateBs,
     });
+  };
+
+  const runPrint = (
+    key: "to-return" | "history",
+    title: string,
+    columns: string[],
+    rows: string[][],
+    subtitle?: string,
+  ) => {
+    if (!canPrint) {
+      toast.error("Only college admin or super admin can print");
+      return;
+    }
+    if (rows.length === 0) {
+      toast.error("No records to print");
+      return;
+    }
+    setPrintingKey(key);
+    try {
+      const html = buildIssuesPrintHtml({
+        title,
+        subtitle,
+        columns,
+        rows,
+      });
+      printHtmlViaIframe(html);
+      toast.success("Print dialog opening — choose printer or Save as PDF");
+    } catch (e) {
+      toast.error(parseErrorMessage(e) || "Could not print");
+    } finally {
+      window.setTimeout(() => setPrintingKey(null), 500);
+    }
+  };
+
+  const printBooksToReturn = () => {
+    const rows = filteredActiveIssues.map((issue) => [
+      issue.bookTitle ?? "—",
+      issue.bookCode ?? "—",
+      issue.borrowerName?.trim() || "—",
+      issue.issuedDateBs ?? "—",
+      issue.dueDateBs ?? "—",
+      formatIssuedByLabel(issue),
+      issue.status ?? "—",
+    ]);
+    runPrint(
+      "to-return",
+      "Library — Books to return",
+      ["Book", "Code", "Borrower", "Issued", "Due", "Issued by", "Status"],
+      rows,
+      searchQuery.trim()
+        ? `Filter: ${searchQuery.trim()} · ${overdueCount} overdue among all active`
+        : `${overdueCount} overdue among all active`,
+    );
+  };
+
+  const printReturnHistory = () => {
+    const history = returnedIssuesQuery.data ?? [];
+    const rows = history.map((issue) => [
+      issue.bookTitle ?? "—",
+      issue.bookCode ?? "—",
+      issue.borrowerName?.trim() || "—",
+      issue.issuedDateBs ?? "—",
+      issue.dueDateBs ?? "—",
+      issue.returnedDateBs ?? "—",
+      formatIssuedByLabel(issue),
+    ]);
+    runPrint(
+      "history",
+      "Library — Return history",
+      ["Book", "Code", "Borrower", "Issued", "Due", "Returned", "Issued by"],
+      rows,
+      "Complete returned books history",
+    );
   };
 
   return (
@@ -249,14 +510,32 @@ export const LibraryReturnsPanel = () => {
         <Card className="min-w-0">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
             <CardTitle>Books to return</CardTitle>
-            <div className="relative w-full max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                className="pl-9"
-                placeholder="Search book, code, or borrower..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+            <div className="flex w-full max-w-md flex-wrap items-center gap-2 sm:w-auto">
+              <div className="relative min-w-[12rem] flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="pl-9"
+                  placeholder="Search book, code, or borrower..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              {canPrint ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    filteredActiveIssues.length === 0 ||
+                    printingKey === "to-return"
+                  }
+                  onClick={printBooksToReturn}
+                  title="Print books to return list"
+                >
+                  <Printer className="mr-1.5 h-4 w-4" />
+                  {printingKey === "to-return" ? "Printing…" : "Print"}
+                </Button>
+              ) : null}
             </div>
           </CardHeader>
           <CardContent className="p-0 sm:p-0">
@@ -355,12 +634,43 @@ export const LibraryReturnsPanel = () => {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Return history</CardTitle>
+      <Card
+        id={RETURN_HISTORY_ID}
+        className={cn(
+          "scroll-mt-4 transition ring-offset-2",
+          historyHighlight && "ring-2 ring-emerald-400",
+        )}
+      >
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              Return history
+            </CardTitle>
+            <p className="mt-1 text-sm text-slate-500">
+              All books marked returned (complete history).
+            </p>
+          </div>
+          {canPrint ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              disabled={
+                (returnedIssuesQuery.data ?? []).length === 0 ||
+                printingKey === "history"
+              }
+              onClick={printReturnHistory}
+              title="Print return history"
+            >
+              <Printer className="mr-1.5 h-4 w-4" />
+              {printingKey === "history" ? "Printing…" : "Print"}
+            </Button>
+          ) : null}
         </CardHeader>
         <CardContent className="p-0">
-          <div className="max-h-[min(40vh,360px)] overflow-auto">
+          <div className="max-h-[min(60vh,520px)] overflow-auto">
             <Table className="min-w-[640px]">
               <TableHead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                 <tr>

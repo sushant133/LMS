@@ -62,8 +62,8 @@ const GENDER_CHART_COLORS: Record<string, string> = {
   Other: "#94a3b8",
 };
 
-/** Ethnicity category palette (stable by index for unknown labels) */
-const ETHNICITY_CHART_COLORS = [
+/** Religion palette (stable by index for unknown labels) */
+const RELIGION_CHART_COLORS = [
   "#0c2d6b",
   "#2563eb",
   "#7c3aed",
@@ -75,18 +75,22 @@ const ETHNICITY_CHART_COLORS = [
   "#0891b2",
 ];
 
-const ethnicityColor = (name: string, index: number): string => {
+const religionColor = (name: string, index: number): string => {
   const fixed: Record<string, string> = {
-    "Brahmin / Chhetri": "#0c2d6b",
-    Dalit: "#7c3aed",
-    "Janajati / Indigenous": "#059669",
-    Madhesi: "#ea580c",
-    Muslim: "#0891b2",
-    Other: "#ca8a04",
+    Hinduism: "#ea580c",
+    Buddhism: "#ca8a04",
+    Islam: "#059669",
+    Kirat: "#7c3aed",
+    Christianity: "#2563eb",
+    Prakriti: "#0891b2",
+    Bon: "#0c2d6b",
+    Sikhism: "#db2777",
+    Jainism: "#64748b",
+    Other: "#94a3b8",
     "Prefer not to say": "#94a3b8",
     Unset: "#cbd5e1",
   };
-  return fixed[name] ?? ETHNICITY_CHART_COLORS[index % ETHNICITY_CHART_COLORS.length]!;
+  return fixed[name] ?? RELIGION_CHART_COLORS[index % RELIGION_CHART_COLORS.length]!;
 };
 
 type BreakdownSlice = { name: string; value: number };
@@ -110,18 +114,18 @@ const tallyGenderSlices = (rows: DemoRow[]): BreakdownSlice[] => {
   ];
 };
 
-const tallyEthnicitySlices = (rows: DemoRow[]): BreakdownSlice[] => {
+const tallyReligionSlices = (rows: DemoRow[]): BreakdownSlice[] => {
   const counts = new Map<string, number>();
   for (const s of rows) {
-    const ethnicity = (s.ethnicityCategory ?? "").trim() || "Unset";
-    counts.set(ethnicity, (counts.get(ethnicity) ?? 0) + 1);
+    const religion = (s.religion ?? "").trim() || "Unset";
+    counts.set(religion, (counts.get(religion) ?? 0) + 1);
   }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([name, value]) => ({ name, value }));
 };
 
-/** Gender + ethnicity donuts with batch / year (or class / section) filters. */
+/** Gender + religion donuts with batch / year (or class / section) filters. */
 const StudentDemographicsCharts = ({
   data,
 }: {
@@ -152,8 +156,8 @@ const StudentDemographicsCharts = ({
     () => tallyGenderSlices(filteredRows),
     [filteredRows],
   );
-  const ethnicityData = useMemo(
-    () => tallyEthnicitySlices(filteredRows),
+  const religionData = useMemo(
+    () => tallyReligionSlices(filteredRows),
     [filteredRows],
   );
 
@@ -172,7 +176,7 @@ const StudentDemographicsCharts = ({
   const hasAnyDemo =
     rows.length > 0 ||
     (data.genderChart?.length ?? 0) > 0 ||
-    (data.ethnicityChart?.length ?? 0) > 0;
+    (data.religionChart?.length ?? 0) > 0;
 
   if (!hasAnyDemo) return null;
 
@@ -185,14 +189,14 @@ const StudentDemographicsCharts = ({
     hasChartFilter && rows.length > 0
       ? genderData
       : (data.genderChart ?? genderData);
-  const ethnicitySlices =
+  const religionSlices =
     hasChartFilter && rows.length > 0
-      ? ethnicityData
-      : (data.ethnicityChart ?? ethnicityData);
+      ? religionData
+      : (data.religionChart ?? religionData);
 
   const chartScope = hasChartFilter
     ? scope
-    : data.genderChartScope || data.ethnicityChartScope || scope;
+    : data.genderChartScope || data.religionChartScope || scope;
 
   const legendBase = "/students/list";
 
@@ -208,7 +212,7 @@ const StudentDemographicsCharts = ({
               Student demographics filters
             </CardTitle>
             <p className="text-sm text-slate-500">
-              Filter gender and ethnicity charts by {batchLabel.toLowerCase()}{" "}
+              Filter gender and religion charts by {batchLabel.toLowerCase()}{" "}
               and {yearLabel.toLowerCase()}.
             </p>
           </CardHeader>
@@ -277,15 +281,15 @@ const StudentDemographicsCharts = ({
           legendLinkBase={legendBase}
         />
         <BreakdownDonutCard
-          title="Students by Ethnicity"
+          title="Students by Religion"
           scope={chartScope}
           icon={<Sparkles className="h-5 w-5 text-brand-700" />}
-          data={ethnicitySlices}
-          colorFor={ethnicityColor}
+          data={religionSlices}
+          colorFor={religionColor}
           emptyMessage={
             hasChartFilter
               ? "No active students match this batch/year filter."
-              : "No active students with ethnicity recorded yet."
+              : "No active students with religion recorded yet."
           }
         />
       </div>

@@ -11,12 +11,21 @@ import {
   type VoucherType,
 } from "@phit-erp/shared";
 import { getTodayBs } from "@munatech/nepali-datepicker";
-import { FileText, Plus, Printer, RotateCcw, Trash2 } from "lucide-react";
+import {
+  BookOpen,
+  FileText,
+  Plus,
+  Printer,
+  RotateCcw,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
 import { NepaliDateField } from "components/shared/NepaliDateField";
+import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
@@ -26,8 +35,98 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
-import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { formatDualDateCell } from "./accountingUtils";
+
+type JournalPanelTab = "ledger" | "create" | "vouchers";
+
+/**
+ * Open a protected accounting PDF/HTML via authenticated axios (session cookie).
+ * window.open(apiUrl) often fails (no credentials / error body as broken tab).
+ */
+const openAuthenticatedDocument = async (
+  apiPath: string,
+  filenameBase: string,
+): Promise<void> => {
+  const response = await api.get(apiPath, {
+    responseType: "blob",
+    headers: { Accept: "application/pdf, text/html;q=0.9, */*;q=0.8" },
+    // Puppeteer first launch can be slow
+    timeout: 120_000,
+  });
+
+  const raw = response.data as Blob;
+  const headerType = String(response.headers["content-type"] ?? "");
+  const blobType = raw.type || "";
+  const contentType = `${headerType} ${blobType}`.toLowerCase();
+
+  // API errors often arrive as JSON with responseType: blob
+  if (contentType.includes("json") || contentType.includes("application/problem")) {
+    const text = await raw.text();
+    let message = "Could not open PDF";
+    try {
+      const parsed = JSON.parse(text) as { message?: string; error?: string };
+      message = parsed.message || parsed.error || message;
+    } catch {
+      if (text.trim()) message = text.slice(0, 200);
+    }
+    throw new Error(message);
+  }
+
+  const isHtml = contentType.includes("text/html") || contentType.includes("html");
+  const blob = isHtml
+    ? raw.type.includes("html")
+      ? raw
+      : new Blob([raw], { type: "text/html;charset=utf-8" })
+    : blobType === "application/pdf" || contentType.includes("pdf")
+      ? raw
+      : new Blob([raw], { type: "application/pdf" });
+
+  const safeBase = filenameBase.replace(/[^\w.-]+/g, "_") || "document";
+  const filename = isHtml
+    ? `${safeBase}.html`
+    : safeBase.toLowerCase().endsWith(".pdf")
+      ? safeBase
+      : `${safeBase}.pdf`;
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast.success("PDF downloaded (popup blocked — file saved)");
+    } else {
+      toast.success("PDF opened — use browser Print if needed");
+    }
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  }
+};
+
+const messageFromPdfError = async (error: unknown): Promise<string> => {
+  if (typeof error === "object" && error && "response" in error) {
+    const data = (error as { response?: { data?: unknown } }).response?.data;
+    if (data instanceof Blob) {
+      try {
+        const text = await data.text();
+        const parsed = JSON.parse(text) as { message?: string; error?: string };
+        if (parsed.message || parsed.error) {
+          return parsed.message || parsed.error || "Could not open PDF";
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return parseErrorMessage(error) || "Could not open PDF";
+};
 
 const formatTodayBs = (): string => {
   const d = getTodayBs();
@@ -85,7 +184,10 @@ type CreateVoucherResponse = {
 };
 
 export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
-  const [showForm, setShowForm] = useState(false);
+  const [tab, setTab] = useState<JournalPanelTab>("ledger");
+  const [ledgerSearch, setLedgerSearch] = useState("");
+  /** Tracks which PDF action is in progress (button disable + feedback). */
+  const [printingKey, setPrintingKey] = useState<string | null>(null);
 
   // —— Manual header fields (printed as written) ——
   const [voucherNo, setVoucherNo] = useState("");
@@ -194,24 +296,31 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
     mutationFn: (payload: GoshwaraVoucherInput) =>
       unwrap<CreateVoucherResponse>(api.post("/accounting/goshwara-vouchers", payload)),
     onSuccess: async (data) => {
-      toast.success(`भौचर ${data.voucher.voucherNo} सुरक्षित भयो — PDF खोल्दै…`);
+      toast.success(`Voucher ${data.voucher.voucherNo} saved — opening PDF…`);
       resetForm();
-      setShowForm(false);
+      setTab("ledger");
       const { invalidateAccountingQueries } = await import(
         "./invalidateAccountingQueries"
       );
       await invalidateAccountingQueries();
-      // Open PDF immediately so line-level विवरण (particulars) is visible on print
-      window.open(
-        `${api.defaults.baseURL}/accounting/goshwara-vouchers/${data.voucher._id}/pdf`,
-        "_blank",
-        "noopener,noreferrer",
-      );
+      // Open PDF with session auth so line-level particulars are visible on print
+      const key = `voucher:${data.voucher._id}`;
+      setPrintingKey(key);
+      try {
+        await openAuthenticatedDocument(
+          `/accounting/goshwara-vouchers/${data.voucher._id}/pdf`,
+          `goshwara-${data.voucher.voucherNo || data.voucher._id}`,
+        );
+      } catch (e) {
+        toast.error(await messageFromPdfError(e));
+      } finally {
+        setPrintingKey(null);
+      }
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  const openJournalGoshwara = (
+  const openJournalGoshwara = async (
     journalId: string,
     opts?: { format?: "pdf" | "html"; blank?: boolean },
   ) => {
@@ -219,28 +328,49 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
     if (opts?.format === "html") params.set("format", "html");
     if (opts?.blank) params.set("blank", "1");
     const qs = params.toString() ? `?${params}` : "";
-    window.open(
-      `${api.defaults.baseURL}/accounting/journal-entries/${journalId}/goshwara-voucher${qs}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    const key = `journal:${journalId}:${opts?.blank ? "blank" : "print"}`;
+    setPrintingKey(key);
+    try {
+      await openAuthenticatedDocument(
+        `/accounting/journal-entries/${journalId}/goshwara-voucher${qs}`,
+        `goshwara-journal-${journalId}${opts?.blank ? "-blank" : ""}`,
+      );
+    } catch (e) {
+      toast.error(await messageFromPdfError(e));
+    } finally {
+      setPrintingKey(null);
+    }
   };
 
-  const openVoucherPdf = (voucherId: string, blank = false) => {
+  const openVoucherPdf = async (voucherId: string, blank = false) => {
     const qs = blank ? "?blank=1" : "";
-    window.open(
-      `${api.defaults.baseURL}/accounting/goshwara-vouchers/${voucherId}/pdf${qs}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    const key = `voucher:${voucherId}:${blank ? "blank" : "print"}`;
+    setPrintingKey(key);
+    try {
+      await openAuthenticatedDocument(
+        `/accounting/goshwara-vouchers/${voucherId}/pdf${qs}`,
+        `goshwara-${voucherId}${blank ? "-blank" : ""}`,
+      );
+    } catch (e) {
+      toast.error(await messageFromPdfError(e));
+    } finally {
+      setPrintingKey(null);
+    }
   };
 
-  const openBlankForm = () => {
-    window.open(
-      `${api.defaults.baseURL}/accounting/goshwara-vouchers/blank-form`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+  const openBlankForm = async () => {
+    const key = "blank-form";
+    setPrintingKey(key);
+    try {
+      await openAuthenticatedDocument(
+        "/accounting/goshwara-vouchers/blank-form",
+        "goshwara-blank",
+      );
+    } catch (e) {
+      toast.error(await messageFromPdfError(e));
+    } finally {
+      setPrintingKey(null);
+    }
   };
 
   const updateLine = (index: number, patch: Partial<JournalLineInput>) => {
@@ -283,13 +413,13 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
         credit: Number(l.creditNpr) || 0,
       })),
     );
-    toast.success("जर्नल लाइनहरू प्रिन्ट तालिकामा सारियो (सम्पादन गर्न सकिन्छ)");
+    toast.success("Journal lines copied to print table");
   };
 
-  /** Fill अक्षरेपी from journal debit total (Nepali words) */
+  /** Fill amount in words from journal debit total (Nepali) */
   const fillAmountInWords = () => {
     if (totals.debit <= 0) {
-      toast.error("पहिले जर्नलको जम्मा रकम राख्नुहोस्");
+      toast.error("Enter journal amounts first");
       return;
     }
     setAmountInWords(amountToWordsNepali(totals.debit));
@@ -301,39 +431,36 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
   const submitVoucher = (e: React.FormEvent) => {
     e.preventDefault();
     if (!particulars.trim()) {
-      toast.error("मुख्य विवरण / कैफियत लेख्नुहोस्");
+      toast.error("Enter narration / particulars");
       return;
     }
     if (!totals.balanced) {
-      toast.error("डेबिट र क्रेडिट जम्मा बराबर हुनुपर्छ");
+      toast.error("Debit and credit totals must match");
       return;
     }
     for (const [i, line] of lines.entries()) {
       if (!line.accountCode) {
-        toast.error(`लाइन ${i + 1}: खाता छान्नुहोस्`);
+        toast.error(`Line ${i + 1}: select an account`);
         return;
       }
       const d = Number(line.debitNpr) || 0;
       const c = Number(line.creditNpr) || 0;
       if ((d > 0 && c > 0) || (d <= 0 && c <= 0)) {
-        toast.error(`लाइन ${i + 1}: डेबिट वा क्रेडिट मध्ये एउटा मात्र राख्नुहोस्`);
+        toast.error(`Line ${i + 1}: enter debit or credit (not both)`);
         return;
       }
-      // Each debit/credit line needs its own Nepali particular (reason)
       if (!(line.description ?? "").trim()) {
         toast.error(
-          `लाइन ${i + 1}: यस डेबिट/क्रेडिटको विवरण (कारण) नेपालीमा लेख्नुहोस् — जस्तै «नगद प्राप्त», «शुल्क आम्दानी»`,
+          `Line ${i + 1}: enter a reason / particular (e.g. cash received)`,
         );
         return;
       }
     }
 
-    // Auto Nepali अक्षरेपी if user left it blank
     const words =
       amountInWords.trim() ||
       (totals.debit > 0 ? amountToWordsNepali(totals.debit) : undefined);
 
-    // Prefer explicit print rows; else build from journal lines with per-line विवरण
     const resolvedPrintLines = (
       printLines.some(
         (l) =>
@@ -362,11 +489,10 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
         credit: l.credit > 0 ? l.credit : undefined,
       }));
 
-    // Print rows that have amount must also have particulars
     for (const [i, pl] of resolvedPrintLines.entries()) {
       if ((pl.debit || pl.credit) && !(pl.particulars ?? "").trim()) {
         toast.error(
-          `प्रिन्ट तालिका लाइन ${i + 1}: डेबिट/क्रेडिटसँग विवरण (नेपालीमा) लेख्नुहोस्`,
+          `Print table line ${i + 1}: amount requires particulars`,
         );
         return;
       }
@@ -402,285 +528,373 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
     createVoucher.mutate(payload);
   };
 
+  const filteredEntries = useMemo(() => {
+    const rows = entriesQuery.data ?? [];
+    const q = ledgerSearch.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((entry) => {
+      const hay = [
+        entry.voucherNumber,
+        entry.narration,
+        entry.voucherType,
+        entry.dateBs,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [entriesQuery.data, ledgerSearch]);
+
+  const vouchers = vouchersQuery.data ?? [];
+
   if (entriesQuery.isLoading) return <LoadingState />;
 
+  const tabs: Array<{
+    id: JournalPanelTab;
+    label: string;
+    icon: typeof BookOpen;
+    hidden?: boolean;
+  }> = [
+    { id: "ledger", label: "Journal ledger", icon: BookOpen },
+    { id: "create", label: "New voucher", icon: Plus, hidden: !canWrite },
+    { id: "vouchers", label: "Goshwara list", icon: FileText },
+  ];
+
   return (
-    <div className="space-y-6">
-      {canWrite ? (
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle className="flex flex-col gap-0.5">
-              <span className="font-nepali">गोश्वारा भौचर बनाउनुहोस्</span>
-              <span className="text-sm font-normal text-muted-foreground font-nepali">
-                म.ले.प.फा.नं. १० · सबै विवरण नेपालीमा लेख्न सकिन्छ
-              </span>
+    <div className="min-w-0 max-w-full space-y-4">
+      <Card className="overflow-hidden">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <BookOpen className="h-5 w-5 shrink-0 text-brand-600" />
+              Journal Entries
             </CardTitle>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={openBlankForm}>
-                <Printer className="mr-1 h-4 w-4" />
-                खाली फारम
-              </Button>
-              <Button
-                type="button"
-                variant={showForm ? "outline" : "default"}
-                size="sm"
-                onClick={() => setShowForm((v) => !v)}
-              >
-                <Plus className="mr-1 h-4 w-4" />
-                {showForm ? "लुकाउनुहोस्" : "नयाँ भौचर"}
-              </Button>
+            <p className="mt-0.5 text-sm text-slate-500">
+              Ledger · गोश्वारा भौचर (म.ले.प.फा.नं. १०)
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {tabs
+              .filter((t) => !t.hidden)
+              .map(({ id, label, icon: Icon }) => (
+                <Button
+                  key={id}
+                  type="button"
+                  size="sm"
+                  variant={tab === id ? "default" : "outline"}
+                  onClick={() => setTab(id)}
+                >
+                  <Icon className="mr-1.5 h-4 w-4" />
+                  {label}
+                </Button>
+              ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={printingKey !== null}
+              onClick={() => void openBlankForm()}
+            >
+              <Printer className="mr-1 h-4 w-4" />
+              {printingKey === "blank-form" ? "Opening…" : "Blank form"}
+            </Button>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {/* ─── Journal ledger ─── */}
+      {tab === "ledger" ? (
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle className="text-base">Journal ledger</CardTitle>
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="pl-9"
+                value={ledgerSearch}
+                onChange={(e) => setLedgerSearch(e.target.value)}
+                placeholder="Search voucher, narration…"
+              />
             </div>
           </CardHeader>
-          {showForm ? (
-            <CardContent>
-              <form className="space-y-6 font-nepali" lang="ne" onSubmit={submitVoucher}>
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  भौचरमा छापिने सबै लेखाइ नेपालीमा राख्नुहोस्। Windows: नेपाली कीबोर्ड (नेपाली) /
-                  Preeti वा युनिकोड IME प्रयोग गर्नुहोस्।
+          <CardContent className="min-w-0 p-0 sm:p-6 sm:pt-0">
+            {filteredEntries.length === 0 ? (
+              <div className="px-6 pb-6">
+                <EmptyState
+                  title="No journal entries"
+                  description={
+                    ledgerSearch.trim()
+                      ? "No entries match your search."
+                      : "Create a Goshwara voucher or post fees/expenses to see entries here."
+                  }
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto overscroll-x-contain">
+                <Table className="min-w-[920px]">
+                  <TableHead>
+                    <tr>
+                      <Th>Voucher</Th>
+                      <Th>Date (BS / AD)</Th>
+                      <Th>Type</Th>
+                      <Th>Narration</Th>
+                      <Th className="text-right">Debit</Th>
+                      <Th className="text-right">Credit</Th>
+                      <Th>Status</Th>
+                      <Th className="text-right">Actions</Th>
+                    </tr>
+                  </TableHead>
+                  <TableBody>
+                    {filteredEntries.map((entry) => {
+                      const linked = voucherByJournalId.get(entry._id);
+                      const dual = formatDualDateCell({ dateBs: entry.dateBs });
+                      const printKey = linked
+                        ? `voucher:${linked._id}:print`
+                        : `journal:${entry._id}:print`;
+                      const blankKey = linked
+                        ? `voucher:${linked._id}:blank`
+                        : `journal:${entry._id}:blank`;
+                      return (
+                        <tr key={entry._id} className="align-top">
+                          <Td className="font-mono text-sm font-medium text-slate-900">
+                            {entry.voucherNumber}
+                          </Td>
+                          <Td className="whitespace-nowrap text-sm">
+                            <div className="font-medium text-slate-800">
+                              {dual.primary}
+                            </div>
+                            {dual.secondary ? (
+                              <div className="text-xs text-slate-500">
+                                {dual.secondary}
+                              </div>
+                            ) : null}
+                          </Td>
+                          <Td>
+                            <Badge className="bg-slate-100 font-normal text-slate-700">
+                              {VOUCHER_TYPE_NP[entry.voucherType as VoucherType] ??
+                                entry.voucherType}
+                            </Badge>
+                          </Td>
+                          <Td
+                            className="max-w-[220px] truncate text-sm text-slate-700"
+                            title={entry.narration}
+                          >
+                            {entry.narration || "—"}
+                          </Td>
+                          <Td className="whitespace-nowrap text-right tabular-nums">
+                            {formatCurrencyNpr(entry.totalDebitNpr)}
+                          </Td>
+                          <Td className="whitespace-nowrap text-right tabular-nums">
+                            {formatCurrencyNpr(entry.totalCreditNpr)}
+                          </Td>
+                          <Td>
+                            {entry.isReversal ? (
+                              <Badge className="bg-slate-100 text-slate-700">
+                                Reversal
+                              </Badge>
+                            ) : entry.isReversed ? (
+                              <Badge className="bg-amber-50 text-amber-800">
+                                Reversed
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-emerald-50 text-emerald-800">
+                                Posted
+                              </Badge>
+                            )}
+                          </Td>
+                          <Td>
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Print Goshwara voucher"
+                                disabled={printingKey !== null}
+                                onClick={() =>
+                                  void (linked
+                                    ? openVoucherPdf(linked._id)
+                                    : openJournalGoshwara(entry._id, {
+                                        format: "pdf",
+                                      }))
+                                }
+                              >
+                                <Printer className="mr-1 h-3.5 w-3.5" />
+                                {printingKey === printKey ? "…" : "Print"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title="Blank form"
+                                disabled={printingKey !== null}
+                                onClick={() =>
+                                  void (linked
+                                    ? openVoucherPdf(linked._id, true)
+                                    : openJournalGoshwara(entry._id, {
+                                        blank: true,
+                                      }))
+                                }
+                              >
+                                {printingKey === blankKey ? "…" : "Blank"}
+                              </Button>
+                              {canWrite &&
+                              !entry.isReversal &&
+                              !entry.isReversed ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => reverse.mutate(entry._id)}
+                                  disabled={reverse.isPending}
+                                >
+                                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                                  Reverse
+                                </Button>
+                              ) : null}
+                            </div>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ─── Create Goshwara voucher ─── */}
+      {tab === "create" && canWrite ? (
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader>
+            <CardTitle className="text-base">
+              New Goshwara voucher · गोश्वारा भौचर
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form
+              className="space-y-5"
+              lang="ne"
+              onSubmit={submitVoucher}
+            >
+              {/* Header identity */}
+              <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <p className="text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  नेपाल सरकार · Office header
                 </p>
-
-                {/* Header fields matching paper form */}
-                <div className="rounded-xl border bg-slate-50 p-4 space-y-3">
-                  <p className="text-center text-sm font-bold">नेपाल सरकार</p>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <FormField label="सरकारी कार्यालयको नाम (…कार्यालय)">
-                      <Input
-                        lang="ne"
-                        className={npInputClass}
-                        value={govOfficeName}
-                        onChange={(e) => setGovOfficeName(e.target.value)}
-                        placeholder="नेपालीमा लेख्नुहोस्"
-                      />
-                    </FormField>
-                    <FormField label="संस्थाको नाम (दोश्रो लाइन)">
-                      <Input
-                        lang="ne"
-                        className={npInputClass}
-                        value={instituteName}
-                        onChange={(e) => setInstituteName(e.target.value)}
-                        placeholder={SUGGESTED_INSTITUTE}
-                      />
-                    </FormField>
-                    <FormField label="ठेगाना (तेस्रो लाइन)">
-                      <Input
-                        lang="ne"
-                        className={npInputClass}
-                        value={addressLine}
-                        onChange={(e) => setAddressLine(e.target.value)}
-                        placeholder={SUGGESTED_ADDRESS}
-                      />
-                    </FormField>
-                  </div>
-                  <p className="text-xs text-muted-foreground text-center">
-                    छाप: नेपाल सरकार → [कार्यालय] कार्यालय → [संस्था] → [ठेगाना]
-                  </p>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-4">
-                  <FormField label="गो. भी. नं.">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <FormField label="Gov. office name">
                     <Input
                       lang="ne"
                       className={npInputClass}
-                      value={voucherNo}
-                      onChange={(e) => setVoucherNo(e.target.value)}
-                      placeholder="खाली = स्वतः नम्बर"
+                      value={govOfficeName}
+                      onChange={(e) => setGovOfficeName(e.target.value)}
+                      placeholder="…कार्यालय"
                     />
                   </FormField>
-                  <FormField label="मिति (वि.सं.)">
-                    <NepaliDateField value={dateBs} onChange={setDateBs} />
+                  <FormField label="Institute name">
+                    <Input
+                      lang="ne"
+                      className={npInputClass}
+                      value={instituteName}
+                      onChange={(e) => setInstituteName(e.target.value)}
+                      placeholder={SUGGESTED_INSTITUTE}
+                    />
                   </FormField>
-                  <FormField label="भौचर प्रकार">
-                    <Select
-                      value={voucherType}
-                      onChange={(e) => setVoucherType(e.target.value as VoucherType)}
-                    >
-                      {VOUCHER_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {VOUCHER_TYPE_NP[t]}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  <FormField label="अक्षरेपी (नेपालीमा)">
-                    <div className="flex gap-1">
-                      <Input
-                        lang="ne"
-                        className={npInputClass}
-                        value={amountInWords}
-                        onChange={(e) => setAmountInWords(e.target.value)}
-                        placeholder="एक हजार रूपैयाँ …"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0"
-                        onClick={fillAmountInWords}
-                        title="जम्माबाट अक्षरेपी भर्नुहोस्"
-                      >
-                        स्वतः
-                      </Button>
-                    </div>
+                  <FormField label="Address">
+                    <Input
+                      lang="ne"
+                      className={npInputClass}
+                      value={addressLine}
+                      onChange={(e) => setAddressLine(e.target.value)}
+                      placeholder={SUGGESTED_ADDRESS}
+                    />
                   </FormField>
                 </div>
+              </section>
 
-                <FormField label="विवरण / कैफियत">
-                  <Textarea
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <FormField label="Voucher no. (गो. भी. नं.)">
+                  <Input
                     lang="ne"
                     className={npInputClass}
-                    value={particulars}
-                    onChange={(e) => setParticulars(e.target.value)}
-                    rows={2}
-                    placeholder="नेपालीमा विवरण लेख्नुहोस्"
-                    required
+                    value={voucherNo}
+                    onChange={(e) => setVoucherNo(e.target.value)}
+                    placeholder="Auto if empty"
                   />
                 </FormField>
-
-                {/* Free-text print table — Nepali */}
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-medium">
-                      भौचर तालिका (विवरण / खाता / हि.नं. / डेबिट / क्रेडिट) — नेपालीमा
-                    </p>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={copyJournalToPrintLines}
-                      >
-                        जर्नलबाट सार्नुहोस्
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setPrintLines((prev) => [...prev, emptyPrintLine()])
-                        }
-                      >
-                        <Plus className="mr-1 h-3.5 w-3.5" />
-                        पङ्क्ति थप्नुहोस्
-                      </Button>
-                    </div>
+                <FormField label="Date (BS)">
+                  <NepaliDateField value={dateBs} onChange={setDateBs} />
+                </FormField>
+                <FormField label="Voucher type">
+                  <Select
+                    value={voucherType}
+                    onChange={(e) =>
+                      setVoucherType(e.target.value as VoucherType)
+                    }
+                  >
+                    {VOUCHER_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {VOUCHER_TYPE_NP[t]} ({t})
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Amount in words (अक्षरेपी)">
+                  <div className="flex gap-1">
+                    <Input
+                      lang="ne"
+                      className={cn(npInputClass, "min-w-0")}
+                      value={amountInWords}
+                      onChange={(e) => setAmountInWords(e.target.value)}
+                      placeholder="Auto from total"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={fillAmountInWords}
+                    >
+                      Auto
+                    </Button>
                   </div>
-                  <div className="overflow-x-auto rounded-lg border">
-                    <Table>
-                      <TableHead>
-                        <tr>
-                          <Th className="w-14">सि.नं.</Th>
-                          <Th>विवरण</Th>
-                          <Th>खाता</Th>
-                          <Th className="w-24">हि. नं.</Th>
-                          <Th className="w-28">डेबिट</Th>
-                          <Th className="w-28">क्रेडिट</Th>
-                          <Th className="w-10" />
-                        </tr>
-                      </TableHead>
-                      <TableBody>
-                        {printLines.map((row, index) => (
-                          <tr key={index}>
-                            <Td>
-                              <Input
-                                lang="ne"
-                                className={npInputClass}
-                                value={row.sn}
-                                onChange={(e) =>
-                                  updatePrintLine(index, { sn: e.target.value })
-                                }
-                                placeholder={String(index + 1)}
-                              />
-                            </Td>
-                            <Td className="min-w-[200px]">
-                              <Input
-                                lang="ne"
-                                className={npInputClass}
-                                value={row.particulars}
-                                onChange={(e) =>
-                                  updatePrintLine(index, {
-                                    particulars: e.target.value,
-                                  })
-                                }
-                                placeholder="कारण नेपालीमा — नगद प्राप्त, शुल्क आम्दानी…"
-                              />
-                            </Td>
-                            <Td>
-                              <Input
-                                lang="ne"
-                                className={npInputClass}
-                                value={row.account}
-                                onChange={(e) =>
-                                  updatePrintLine(index, { account: e.target.value })
-                                }
-                                placeholder="खाताको नाम"
-                              />
-                            </Td>
-                            <Td>
-                              <Input
-                                lang="ne"
-                                className={npInputClass}
-                                value={row.ledgerNo}
-                                onChange={(e) =>
-                                  updatePrintLine(index, {
-                                    ledgerNo: e.target.value,
-                                  })
-                                }
-                              />
-                            </Td>
-                            <Td>
-                              <NumberInput
-                                value={row.debit || ""}
-                                min={0}
-                                onChange={(e) =>
-                                  updatePrintLine(index, {
-                                    debit: Number(e.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </Td>
-                            <Td>
-                              <NumberInput
-                                value={row.credit || ""}
-                                min={0}
-                                onChange={(e) =>
-                                  updatePrintLine(index, {
-                                    credit: Number(e.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </Td>
-                            <Td>
-                              {printLines.length > 1 ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    setPrintLines((prev) =>
-                                      prev.filter((_, i) => i !== index),
-                                    )
-                                  }
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              ) : null}
-                            </Td>
-                          </tr>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    यो तालिका PDF मा छापिन्छ। खाली छोडेमा कागज जस्तै खाली कोठा रहन्छ।
-                  </p>
-                </div>
+                </FormField>
+              </div>
 
-                {/* Journal GL — each debit/credit needs its own Nepali particular */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">
-                      लेखा प्रविष्टि (जर्नल) — कम्तीमा २ लाइन, डेबिट = क्रेडिट
+              <FormField label="Narration / particulars *">
+                <Textarea
+                  lang="ne"
+                  className={npInputClass}
+                  value={particulars}
+                  onChange={(e) => setParticulars(e.target.value)}
+                  rows={2}
+                  placeholder="Main description for the voucher"
+                  required
+                />
+              </FormField>
+
+              {/* Journal GL lines first (source of truth) */}
+              <section className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Journal lines
                     </p>
+                    <p className="text-xs text-slate-500">
+                      Min. 2 lines · debit = credit · each line needs a reason
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      className={
+                        totals.balanced
+                          ? "bg-emerald-50 text-emerald-800"
+                          : "bg-amber-50 text-amber-900"
+                      }
+                    >
+                      {totals.balanced
+                        ? "Balanced"
+                        : `Out by ${formatCurrencyNpr(Math.abs(totals.debit - totals.credit))}`}
+                    </Badge>
                     <Button
                       type="button"
                       size="sm"
@@ -688,171 +902,303 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                       onClick={() => setLines((prev) => [...prev, emptyLine()])}
                     >
                       <Plus className="mr-1 h-3.5 w-3.5" />
-                      लाइन थप्नुहोस्
+                      Add line
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    प्रत्येक डेबिट/क्रेडिटसँग <strong>विवरण (कारण)</strong> नेपालीमा
-                    अनिवार्य छ — जस्तै «नगद प्राप्त», «बैंक जम्मा», «शुल्क आम्दानी»,
-                    «तलब भुक्तानी»। यो भौचरको «विवरण» स्तम्भमा छापिन्छ।
-                  </p>
-                  <div className="overflow-x-auto rounded-lg border">
-                    <Table>
-                      <TableHead>
-                        <tr>
-                          <Th>खाता</Th>
-                          <Th className="min-w-[240px]">
-                            विवरण / कारण (नेपाली) *
-                          </Th>
-                          <Th>डेबिट (रु.)</Th>
-                          <Th>क्रेडिट (रु.)</Th>
-                          <Th className="w-12" />
-                        </tr>
-                      </TableHead>
-                      <TableBody>
-                        {lines.map((line, index) => (
-                          <tr key={index}>
-                            <Td className="min-w-[200px]">
-                              <Select
-                                value={line.accountCode}
-                                onChange={(e) =>
-                                  updateLine(index, { accountCode: e.target.value })
-                                }
-                                required
-                              >
-                                <option value="">खाता छान्नुहोस्</option>
-                                {activeAccounts.map((a) => (
-                                  <option key={a._id} value={a.code}>
-                                    {a.code} — {a.nameNp || a.name}
-                                  </option>
-                                ))}
-                              </Select>
-                            </Td>
-                            <Td>
-                              <Input
-                                lang="ne"
-                                className={npInputClass}
-                                value={line.description ?? ""}
-                                onChange={(e) =>
-                                  updateLine(index, {
-                                    description: e.target.value,
-                                  })
-                                }
-                                required
-                                placeholder={
-                                  Number(line.debitNpr) > 0
-                                    ? "उदा. नगद प्राप्त / बैंकमा जम्मा"
-                                    : Number(line.creditNpr) > 0
-                                      ? "उदा. शुल्क आम्दानी / खर्च"
-                                      : "यस रकमको कारण नेपालीमा…"
-                                }
-                              />
-                            </Td>
-                            <Td>
-                              <NumberInput
-                                value={line.debitNpr || ""}
-                                min={0}
-                                step={0.01}
-                                onChange={(e) =>
-                                  updateLine(index, {
-                                    debitNpr: Number(e.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </Td>
-                            <Td>
-                              <NumberInput
-                                value={line.creditNpr || ""}
-                                min={0}
-                                step={0.01}
-                                onChange={(e) =>
-                                  updateLine(index, {
-                                    creditNpr: Number(e.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </Td>
-                            <Td>
-                              {lines.length > 2 ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    setLines((prev) =>
-                                      prev.filter((_, i) => i !== index),
-                                    )
-                                  }
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              ) : null}
-                            </Td>
-                          </tr>
-                        ))}
-                        <tr className="bg-muted/40 font-medium">
-                          <Td colSpan={2} className="text-right">
-                            जम्मा
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <Table className="min-w-[720px]">
+                    <TableHead>
+                      <tr>
+                        <Th>Account</Th>
+                        <Th>Particular / reason *</Th>
+                        <Th className="w-32">Debit</Th>
+                        <Th className="w-32">Credit</Th>
+                        <Th className="w-12" />
+                      </tr>
+                    </TableHead>
+                    <TableBody>
+                      {lines.map((line, index) => (
+                        <tr key={index}>
+                          <Td className="min-w-[180px]">
+                            <Select
+                              value={line.accountCode}
+                              onChange={(e) =>
+                                updateLine(index, {
+                                  accountCode: e.target.value,
+                                })
+                              }
+                              required
+                            >
+                              <option value="">Select account</option>
+                              {activeAccounts.map((a) => (
+                                <option key={a._id} value={a.code}>
+                                  {a.code} — {a.nameNp || a.name}
+                                </option>
+                              ))}
+                            </Select>
                           </Td>
-                          <Td>{formatCurrencyNpr(totals.debit)}</Td>
-                          <Td>{formatCurrencyNpr(totals.credit)}</Td>
+                          <Td className="min-w-[200px]">
+                            <Input
+                              lang="ne"
+                              className={npInputClass}
+                              value={line.description ?? ""}
+                              onChange={(e) =>
+                                updateLine(index, {
+                                  description: e.target.value,
+                                })
+                              }
+                              required
+                              placeholder="Reason (Nepali OK)"
+                            />
+                          </Td>
                           <Td>
-                            {totals.balanced ? (
-                              <span className="text-xs text-emerald-600">सन्तुलित</span>
-                            ) : (
-                              <span className="text-xs text-amber-600">असन्तुलित</span>
-                            )}
+                            <NumberInput
+                              value={line.debitNpr || ""}
+                              min={0}
+                              step={0.01}
+                              onChange={(e) =>
+                                updateLine(index, {
+                                  debitNpr: Number(e.target.value) || 0,
+                                })
+                              }
+                            />
+                          </Td>
+                          <Td>
+                            <NumberInput
+                              value={line.creditNpr || ""}
+                              min={0}
+                              step={0.01}
+                              onChange={(e) =>
+                                updateLine(index, {
+                                  creditNpr: Number(e.target.value) || 0,
+                                })
+                              }
+                            />
+                          </Td>
+                          <Td>
+                            {lines.length > 2 ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  setLines((prev) =>
+                                    prev.filter((_, i) => i !== index),
+                                  )
+                                }
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : null}
                           </Td>
                         </tr>
-                      </TableBody>
-                    </Table>
+                      ))}
+                      <tr className="bg-slate-50 font-medium">
+                        <Td colSpan={2} className="text-right text-slate-600">
+                          Total
+                        </Td>
+                        <Td className="tabular-nums">
+                          {formatCurrencyNpr(totals.debit)}
+                        </Td>
+                        <Td className="tabular-nums">
+                          {formatCurrencyNpr(totals.credit)}
+                        </Td>
+                        <Td />
+                      </tr>
+                    </TableBody>
+                  </Table>
+                </div>
+              </section>
+
+              {/* Print table (optional override for PDF) */}
+              <section className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Print table (PDF layout)
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Optional — leave empty to use journal lines on print
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={copyJournalToPrintLines}
+                    >
+                      Copy from journal
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setPrintLines((prev) => [...prev, emptyPrintLine()])
+                      }
+                    >
+                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      Row
+                    </Button>
                   </div>
                 </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <Table className="min-w-[800px]">
+                    <TableHead>
+                      <tr>
+                        <Th className="w-14">S.N.</Th>
+                        <Th>Particulars</Th>
+                        <Th>Account</Th>
+                        <Th className="w-24">Ledger no.</Th>
+                        <Th className="w-28">Debit</Th>
+                        <Th className="w-28">Credit</Th>
+                        <Th className="w-10" />
+                      </tr>
+                    </TableHead>
+                    <TableBody>
+                      {printLines.map((row, index) => (
+                        <tr key={index}>
+                          <Td>
+                            <Input
+                              lang="ne"
+                              className={npInputClass}
+                              value={row.sn}
+                              onChange={(e) =>
+                                updatePrintLine(index, { sn: e.target.value })
+                              }
+                              placeholder={String(index + 1)}
+                            />
+                          </Td>
+                          <Td className="min-w-[160px]">
+                            <Input
+                              lang="ne"
+                              className={npInputClass}
+                              value={row.particulars}
+                              onChange={(e) =>
+                                updatePrintLine(index, {
+                                  particulars: e.target.value,
+                                })
+                              }
+                              placeholder="Particulars"
+                            />
+                          </Td>
+                          <Td className="min-w-[120px]">
+                            <Input
+                              lang="ne"
+                              className={npInputClass}
+                              value={row.account}
+                              onChange={(e) =>
+                                updatePrintLine(index, {
+                                  account: e.target.value,
+                                })
+                              }
+                              placeholder="Account"
+                            />
+                          </Td>
+                          <Td>
+                            <Input
+                              lang="ne"
+                              className={npInputClass}
+                              value={row.ledgerNo}
+                              onChange={(e) =>
+                                updatePrintLine(index, {
+                                  ledgerNo: e.target.value,
+                                })
+                              }
+                            />
+                          </Td>
+                          <Td>
+                            <NumberInput
+                              value={row.debit || ""}
+                              min={0}
+                              onChange={(e) =>
+                                updatePrintLine(index, {
+                                  debit: Number(e.target.value) || 0,
+                                })
+                              }
+                            />
+                          </Td>
+                          <Td>
+                            <NumberInput
+                              value={row.credit || ""}
+                              min={0}
+                              onChange={(e) =>
+                                updatePrintLine(index, {
+                                  credit: Number(e.target.value) || 0,
+                                })
+                              }
+                            />
+                          </Td>
+                          <Td>
+                            {printLines.length > 1 ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  setPrintLines((prev) =>
+                                    prev.filter((_, i) => i !== index),
+                                  )
+                                }
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : null}
+                          </Td>
+                        </tr>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </section>
 
-                {/* Bottom paper fields — all Nepali */}
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2 rounded-lg border p-3">
-                    <p className="text-sm font-medium">बायाँ (रसिद / पेश)</p>
-                    <FormField label="रसिद नम्बर">
+              {/* Optional paper footer fields */}
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  <p className="text-sm font-semibold text-slate-900">
+                    Receipt / presenter
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label="Receipt no.">
                       <Input
                         lang="ne"
                         className={npInputClass}
                         value={receiptNo}
                         onChange={(e) => setReceiptNo(e.target.value)}
-                        placeholder="नेपाली / अंक"
                       />
                     </FormField>
-                    <FormField label="प्राप्त रकम">
+                    <FormField label="Amount received">
                       <Input
                         lang="ne"
                         className={npInputClass}
                         value={receivedAmount}
                         onChange={(e) => setReceivedAmount(e.target.value)}
-                        placeholder="रु. …"
                       />
                     </FormField>
-                    <FormField label="पेश गर्ने">
+                    <FormField label="Presented by">
                       <Input
                         lang="ne"
                         className={npInputClass}
                         value={presenterName}
                         onChange={(e) => setPresenterName(e.target.value)}
-                        placeholder="नाम नेपालीमा"
                       />
                     </FormField>
-                    <FormField label="दर्जा">
+                    <FormField label="Rank">
                       <Input
                         lang="ne"
                         className={npInputClass}
                         value={presenterRank}
                         onChange={(e) => setPresenterRank(e.target.value)}
-                        placeholder="पद / दर्जा"
                       />
                     </FormField>
                   </div>
-                  <div className="space-y-2 rounded-lg border p-3">
-                    <p className="text-sm font-medium">दायाँ (चेक)</p>
-                    <FormField label="चेक नं.">
+                </div>
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  <p className="text-sm font-semibold text-slate-900">Cheque</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label="Cheque no.">
                       <Input
                         lang="ne"
                         className={npInputClass}
@@ -860,7 +1206,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                         onChange={(e) => setChequeNo(e.target.value)}
                       />
                     </FormField>
-                    <FormField label="चेक रकम">
+                    <FormField label="Cheque amount">
                       <Input
                         lang="ne"
                         className={npInputClass}
@@ -868,7 +1214,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                         onChange={(e) => setChequeAmount(e.target.value)}
                       />
                     </FormField>
-                    <FormField label="पेश गर्ने">
+                    <FormField label="Presented by">
                       <Input
                         lang="ne"
                         className={npInputClass}
@@ -876,270 +1222,179 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                         onChange={(e) => setChequePresenter(e.target.value)}
                       />
                     </FormField>
-                    <FormField label="मिति / दर्जा">
+                    <FormField label="Date / rank">
                       <div className="flex gap-2">
                         <Input
                           lang="ne"
-                          className={npInputClass}
+                          className={cn(npInputClass, "min-w-0")}
                           value={chequeDate}
                           onChange={(e) => setChequeDate(e.target.value)}
-                          placeholder="मिति"
+                          placeholder="Date"
                         />
                         <Input
                           lang="ne"
-                          className={npInputClass}
+                          className={cn(npInputClass, "min-w-0")}
                           value={chequeRank}
                           onChange={(e) => setChequeRank(e.target.value)}
-                          placeholder="दर्जा"
+                          placeholder="Rank"
                         />
                       </div>
                     </FormField>
                   </div>
                 </div>
+              </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="submit"
-                    disabled={createVoucher.isPending || !totals.balanced}
-                  >
-                    {createVoucher.isPending
-                      ? "सुरक्षित हुँदै…"
-                      : "भौचर + जर्नल सुरक्षित गर्नुहोस्"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      resetForm();
-                      setShowForm(false);
-                    }}
-                  >
-                    रद्द
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          ) : null}
-        </Card>
-      ) : null}
-
-      {(vouchersQuery.data ?? []).length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-nepali">गोश्वारा भौचर सूची</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHead>
-                <tr>
-                  <Th>गो. भी. नं.</Th>
-                  <Th>मिति</Th>
-                  <Th>संस्था / कार्यालय</Th>
-                  <Th>लाइन विवरण (डेबिट/क्रेडिट कारण)</Th>
-                  <Th>रकम</Th>
-                  <Th>छाप्नुहोस्</Th>
-                </tr>
-              </TableHead>
-              <TableBody>
-                {(vouchersQuery.data ?? []).map((v) => {
-                  const lineDetails =
-                    (v.lines ?? [])
-                      .map((l) => {
-                        const reason = (l.description || "").trim();
-                        if (!reason) return null;
-                        const side =
-                          (l.debitNpr ?? 0) > 0
-                            ? `डेबिट ${formatCurrencyNpr(l.debitNpr)}`
-                            : (l.creditNpr ?? 0) > 0
-                              ? `क्रेडिट ${formatCurrencyNpr(l.creditNpr)}`
-                              : "";
-                        return `${reason}${side ? ` (${side})` : ""}`;
-                      })
-                      .filter(Boolean)
-                      .join(" · ") ||
-                    (v.printLines ?? [])
-                      .map((l) => (l.particulars || "").trim())
-                      .filter(Boolean)
-                      .join(" · ") ||
-                    v.particulars;
-                  return (
-                    <tr key={v._id}>
-                      <Td className="font-mono text-sm">{v.voucherNo}</Td>
-                      <Td className="whitespace-nowrap text-sm">
-                        {(() => {
-                          const dual = formatDualDateCell({ dateBs: v.dateBs });
-                          return (
-                            <>
-                              <div className="font-medium text-slate-800">{dual.primary}</div>
-                              {dual.secondary ? (
-                                <div className="text-xs text-slate-500">{dual.secondary}</div>
-                              ) : null}
-                            </>
-                          );
-                        })()}
-                      </Td>
-                      <Td className="max-w-[160px] truncate text-sm">
-                        {v.instituteName || v.govOfficeName || v.officeName || "—"}
-                      </Td>
-                      <Td
-                        className="max-w-md text-sm font-nepali"
-                        title={lineDetails}
-                      >
-                        <div className="space-y-0.5">
-                          {(v.lines ?? []).length > 0
-                            ? (v.lines ?? []).map((l, i) => (
-                                <div key={i} className="leading-snug">
-                                  <span className="font-medium">
-                                    {(l.description || "—").trim()}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {" "}
-                                    · {l.accountName}
-                                    {(l.debitNpr ?? 0) > 0
-                                      ? ` · डेबिट ${formatCurrencyNpr(l.debitNpr)}`
-                                      : ""}
-                                    {(l.creditNpr ?? 0) > 0
-                                      ? ` · क्रेडिट ${formatCurrencyNpr(l.creditNpr)}`
-                                      : ""}
-                                  </span>
-                                </div>
-                              ))
-                            : lineDetails}
-                        </div>
-                      </Td>
-                      <Td>{formatCurrencyNpr(v.totalAmount)}</Td>
-                      <Td>
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openVoucherPdf(v._id)}
-                          >
-                            <Printer className="mr-1 h-3.5 w-3.5" />
-                            छाप्नुहोस्
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            title="खाली फारम"
-                            onClick={() => openVoucherPdf(v._id, true)}
-                          >
-                            खाली
-                          </Button>
-                        </div>
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </TableBody>
-            </Table>
+              <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+                <Button
+                  type="submit"
+                  disabled={createVoucher.isPending || !totals.balanced}
+                >
+                  {createVoucher.isPending
+                    ? "Saving…"
+                    : "Save voucher & journal"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    resetForm();
+                    setTab("ledger");
+                  }}
+                >
+                  Cancel
+                </Button>
+                {!totals.balanced ? (
+                  <span className="text-xs text-amber-700">
+                    Balance debit and credit to enable save
+                  </span>
+                ) : null}
+              </div>
+            </form>
           </CardContent>
         </Card>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex flex-wrap items-center gap-2 font-nepali">
-            <span>जर्नल प्रविष्टि (लेखा किताब)</span>
-            <span className="text-sm font-normal text-muted-foreground">
-              · गोश्वारा भौचर
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {(entriesQuery.data ?? []).length === 0 ? (
-            <EmptyState
-              title="जर्नल प्रविष्टि छैन"
-              description="माथिबाट गोश्वारा भौचर बनाउनुहोस्, वा शुल्क/खर्चबाट स्वतः आउने प्रविष्टि हेर्नुहोस्।"
-            />
-          ) : (
-            <Table>
-              <TableHead>
-                <tr>
-                  <Th>भौचर</Th>
-                  <Th>मिति (BS / AD)</Th>
-                  <Th>प्रकार</Th>
-                  <Th>विवरण</Th>
-                  <Th>डेबिट</Th>
-                  <Th>क्रेडिट</Th>
-                  <Th>कार्य</Th>
-                </tr>
-              </TableHead>
-              <TableBody>
-                {(entriesQuery.data ?? []).map((entry) => {
-                  const linked = voucherByJournalId.get(entry._id);
-                  const dual = formatDualDateCell({ dateBs: entry.dateBs });
-                  return (
-                    <tr key={entry._id}>
-                      <Td className="font-mono text-sm">{entry.voucherNumber}</Td>
-                      <Td className="whitespace-nowrap text-sm">
-                        <div className="font-medium text-slate-800">{dual.primary}</div>
-                        {dual.secondary ? (
-                          <div className="text-xs text-slate-500">{dual.secondary}</div>
-                        ) : null}
-                      </Td>
-                      <Td>{entry.voucherType}</Td>
-                      <Td className="max-w-xs truncate" title={entry.narration}>
-                        {entry.narration}
-                      </Td>
-                      <Td>{formatCurrencyNpr(entry.totalDebitNpr)}</Td>
-                      <Td>{formatCurrencyNpr(entry.totalCreditNpr)}</Td>
-                      <Td>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            title="गोश्वारा भौचर छाप्नुहोस्"
-                            onClick={() =>
-                              linked
-                                ? openVoucherPdf(linked._id)
-                                : openJournalGoshwara(entry._id, { format: "pdf" })
-                            }
-                          >
-                            <FileText className="mr-1 h-3.5 w-3.5" />
-                            छाप्नुहोस्
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            title="खाली फारम"
-                            onClick={() =>
-                              linked
-                                ? openVoucherPdf(linked._id, true)
-                                : openJournalGoshwara(entry._id, { blank: true })
-                            }
-                          >
-                            खाली
-                          </Button>
-                          {canWrite && !entry.isReversal && !entry.isReversed ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => reverse.mutate(entry._id)}
-                              disabled={reverse.isPending}
-                            >
-                              <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                              उल्ट्याउनुहोस्
-                            </Button>
-                          ) : entry.isReversal ? (
-                            <span className="text-xs text-muted-foreground">
-                              उल्टो प्रविष्टि
-                            </span>
-                          ) : entry.isReversed ? (
-                            <span className="text-xs text-muted-foreground">
-                              उल्ट्याइएको
-                            </span>
-                          ) : null}
-                        </div>
-                      </Td>
+      {/* ─── Goshwara vouchers list ─── */}
+      {tab === "vouchers" ? (
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader>
+            <CardTitle className="text-base">Goshwara vouchers</CardTitle>
+          </CardHeader>
+          <CardContent className="min-w-0 p-0 sm:p-6 sm:pt-0">
+            {vouchers.length === 0 ? (
+              <div className="px-6 pb-6">
+                <EmptyState
+                  title="No Goshwara vouchers yet"
+                  description="Create a voucher from the New voucher tab."
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto overscroll-x-contain">
+                <Table className="min-w-[900px]">
+                  <TableHead>
+                    <tr>
+                      <Th>Voucher no.</Th>
+                      <Th>Date</Th>
+                      <Th>Institute / office</Th>
+                      <Th>Lines</Th>
+                      <Th className="text-right">Amount</Th>
+                      <Th className="text-right">Actions</Th>
                     </tr>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                  </TableHead>
+                  <TableBody>
+                    {vouchers.map((v) => {
+                      const dual = formatDualDateCell({ dateBs: v.dateBs });
+                      return (
+                        <tr key={v._id} className="align-top">
+                          <Td className="font-mono text-sm font-medium">
+                            {v.voucherNo}
+                          </Td>
+                          <Td className="whitespace-nowrap text-sm">
+                            <div className="font-medium text-slate-800">
+                              {dual.primary}
+                            </div>
+                            {dual.secondary ? (
+                              <div className="text-xs text-slate-500">
+                                {dual.secondary}
+                              </div>
+                            ) : null}
+                          </Td>
+                          <Td className="max-w-[160px] truncate text-sm">
+                            {v.instituteName ||
+                              v.govOfficeName ||
+                              v.officeName ||
+                              "—"}
+                          </Td>
+                          <Td className="max-w-sm text-sm">
+                            <div className="space-y-1 font-nepali">
+                              {(v.lines ?? []).length > 0
+                                ? (v.lines ?? []).slice(0, 4).map((l, i) => (
+                                    <div key={i} className="leading-snug">
+                                      <span className="font-medium text-slate-800">
+                                        {(l.description || "—").trim()}
+                                      </span>
+                                      <span className="text-xs text-slate-500">
+                                        {" "}
+                                        · {l.accountName}
+                                        {(l.debitNpr ?? 0) > 0
+                                          ? ` · Dr ${formatCurrencyNpr(l.debitNpr)}`
+                                          : ""}
+                                        {(l.creditNpr ?? 0) > 0
+                                          ? ` · Cr ${formatCurrencyNpr(l.creditNpr)}`
+                                          : ""}
+                                      </span>
+                                    </div>
+                                  ))
+                                : (
+                                    <span className="text-slate-600">
+                                      {v.particulars || "—"}
+                                    </span>
+                                  )}
+                              {(v.lines ?? []).length > 4 ? (
+                                <span className="text-xs text-slate-400">
+                                  +{(v.lines ?? []).length - 4} more
+                                </span>
+                              ) : null}
+                            </div>
+                          </Td>
+                          <Td className="whitespace-nowrap text-right tabular-nums font-medium">
+                            {formatCurrencyNpr(v.totalAmount)}
+                          </Td>
+                          <Td>
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={printingKey !== null}
+                                onClick={() => void openVoucherPdf(v._id)}
+                              >
+                                <Printer className="mr-1 h-3.5 w-3.5" />
+                                {printingKey === `voucher:${v._id}:print`
+                                  ? "…"
+                                  : "Print"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={printingKey !== null}
+                                onClick={() => void openVoucherPdf(v._id, true)}
+                              >
+                                {printingKey === `voucher:${v._id}:blank`
+                                  ? "…"
+                                  : "Blank"}
+                              </Button>
+                            </div>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 };

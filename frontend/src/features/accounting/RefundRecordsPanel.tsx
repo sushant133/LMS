@@ -17,6 +17,7 @@ import {
   GraduationCap,
   Paperclip,
   Plus,
+  Printer,
   RotateCcw,
   Upload,
   Wallet,
@@ -35,9 +36,45 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
+import { useAuth } from "features/auth/AuthProvider";
 import { api, resolveApiUrl, unwrap } from "lib/api";
+import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
+
+/** Super Admin / College Admin (primary or secondary role) — print + sensitive actions. */
+const useCanAdminPrintRefunds = (): boolean => {
+  const { user } = useAuth();
+  if (!user) return false;
+  if (canManageInstitution(user.role)) return true;
+  return (user.secondaryRoles ?? []).some((role) =>
+    canManageInstitution(normalizeUserRole(role)),
+  );
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const openPrintWindow = (html: string, title: string): boolean => {
+  const w = window.open(
+    "",
+    "_blank",
+    "noopener,noreferrer,width=1000,height=800",
+  );
+  if (!w) {
+    toast.error("Popup blocked — allow popups to print");
+    return false;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.document.title = title;
+  return true;
+};
 
 type PanelTab = "register" | "process";
 
@@ -120,6 +157,7 @@ const defaultReason = (type: FeeRefundType): string => {
 
 export const RefundRecordsPanel = () => {
   const queryClient = useQueryClient();
+  const canAdminPrint = useCanAdminPrintRefunds();
   const [tab, setTab] = useState<PanelTab>("register");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -414,6 +452,185 @@ export const RefundRecordsPanel = () => {
     toast.success("Excel exported");
   };
 
+  /** Admin only — print a single refund voucher (HTML → browser print). */
+  const printSingleRefund = (row: FeeRefundRecord) => {
+    if (!canAdminPrint) {
+      toast.error("Only college admin can print refund records");
+      return;
+    }
+    const typeLabel =
+      FEE_REFUND_TYPE_LABELS[
+        (row.refundType as FeeRefundType) || "OTHER"
+      ] ??
+      row.refundType ??
+      "Other";
+    const student = studentLabel(row);
+    const admission = admissionOf(row);
+    const printedAt = new Date().toLocaleString();
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Refund ${escapeHtml(row.refundNumber)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 28px; color: #0f172a; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .sub { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+    .box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; max-width: 640px; }
+    .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+    .row:last-child { border-bottom: none; }
+    .label { color: #64748b; min-width: 140px; }
+    .value { font-weight: 600; text-align: right; }
+    .amount { font-size: 20px; color: #0f172a; }
+    .reason { margin-top: 12px; font-size: 13px; white-space: pre-wrap; }
+    @media print {
+      body { margin: 12mm; }
+      @page { size: A4 portrait; margin: 12mm; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Student Refund Voucher</h1>
+  <div class="sub">Refund register · Printed ${escapeHtml(printedAt)}</div>
+  <div class="box">
+    <div class="row"><span class="label">Refund no.</span><span class="value">${escapeHtml(row.refundNumber)}</span></div>
+    <div class="row"><span class="label">Student</span><span class="value">${escapeHtml(student)}</span></div>
+    <div class="row"><span class="label">Admission no.</span><span class="value">${escapeHtml(admission)}</span></div>
+    <div class="row"><span class="label">Type</span><span class="value">${escapeHtml(String(typeLabel))}</span></div>
+    <div class="row"><span class="label">Amount</span><span class="value amount">${escapeHtml(formatCurrencyNpr(row.amountNpr))}</span></div>
+    <div class="row"><span class="label">Date (BS)</span><span class="value">${escapeHtml(row.dateBs ?? "")}</span></div>
+    <div class="row"><span class="label">Payment method</span><span class="value">${escapeHtml((row.paymentMethod ?? "").replace(/_/g, " "))}</span></div>
+    <div class="row"><span class="label">Transaction no.</span><span class="value">${escapeHtml(row.transactionNumber?.trim() || "—")}</span></div>
+    <div class="row"><span class="label">Approved by</span><span class="value">${escapeHtml(row.approvedBy?.trim() || "—")}</span></div>
+    <div class="reason"><strong>Reason</strong><br/>${escapeHtml(row.reason || "—")}</div>
+    ${
+      row.notes?.trim()
+        ? `<div class="reason"><strong>Remarks</strong><br/>${escapeHtml(row.notes.trim())}</div>`
+        : ""
+    }
+  </div>
+  <script>
+    window.onload = function () { window.focus(); window.print(); };
+  </script>
+</body>
+</html>`;
+    if (openPrintWindow(html, `Refund ${row.refundNumber}`)) {
+      toast.success("Refund voucher opened — use browser Print");
+    }
+  };
+
+  /** Admin only — print filtered refund register table. */
+  const printRefundRegisterTable = () => {
+    if (!canAdminPrint) {
+      toast.error("Only college admin can print refund records");
+      return;
+    }
+    if (filtered.length === 0) {
+      toast.error("No refund records to print");
+      return;
+    }
+    const rowsHtml = filtered
+      .map((row, index) => {
+        const typeLabel =
+          FEE_REFUND_TYPE_LABELS[
+            (row.refundType as FeeRefundType) || "OTHER"
+          ] ??
+          row.refundType ??
+          "Other";
+        return `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(row.refundNumber)}</td>
+          <td>${escapeHtml(studentLabel(row))}<br/><span class="muted">${escapeHtml(admissionOf(row))}</span></td>
+          <td>${escapeHtml(String(typeLabel))}</td>
+          <td class="num">${escapeHtml(formatCurrencyNpr(row.amountNpr))}</td>
+          <td>${escapeHtml(row.reason || "—")}</td>
+          <td>${escapeHtml(row.dateBs ?? "")}</td>
+          <td>${escapeHtml((row.paymentMethod ?? "").replace(/_/g, " "))}</td>
+          <td>${escapeHtml(row.approvedBy?.trim() || row.notes?.trim() || "—")}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const printedAt = new Date().toLocaleString();
+    const filterBits = [
+      typeFilter
+        ? `Type: ${
+            FEE_REFUND_TYPE_LABELS[typeFilter as FeeRefundType] ?? typeFilter
+          }`
+        : null,
+      fromDate ? `From: ${fromDate}` : null,
+      toDate ? `To: ${toDate}` : null,
+      search.trim() ? `Search: ${search.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Refund Register</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; color: #0f172a; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .meta { font-size: 12px; color: #475569; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; font-weight: 600; }
+    .num { text-align: right; white-space: nowrap; }
+    .muted { color: #64748b; font-size: 10px; }
+    tfoot td { font-weight: 600; background: #f8fafc; }
+    @media print {
+      body { margin: 12mm; }
+      @page { size: A4 landscape; margin: 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Student Refund Register</h1>
+  <div class="meta">
+    ${filtered.length} record${filtered.length === 1 ? "" : "s"}
+    · Total ${escapeHtml(formatCurrencyNpr(summary.allTotal))}
+    · Deposit refunds ${escapeHtml(formatCurrencyNpr(summary.depositTotal))}
+    · Other ${escapeHtml(formatCurrencyNpr(summary.otherTotal))}
+    · Printed ${escapeHtml(printedAt)}
+    ${filterBits ? ` · ${escapeHtml(filterBits)}` : ""}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Refund no.</th>
+        <th>Student</th>
+        <th>Type</th>
+        <th>Amount</th>
+        <th>Reason</th>
+        <th>Date (BS)</th>
+        <th>Method</th>
+        <th>Remarks</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4">Total refunded</td>
+        <td class="num">${escapeHtml(formatCurrencyNpr(summary.allTotal))}</td>
+        <td colspan="4"></td>
+      </tr>
+    </tfoot>
+  </table>
+  <script>
+    window.onload = function () { window.focus(); window.print(); };
+  </script>
+</body>
+</html>`;
+    if (openPrintWindow(html, "Refund Register")) {
+      toast.success("Refund register opened — use browser Print");
+    }
+  };
+
   if (refundsQuery.isLoading || studentsQuery.isLoading) {
     return <LoadingState />;
   }
@@ -516,10 +733,29 @@ export const RefundRecordsPanel = () => {
           <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="text-base">Refund register</CardTitle>
-              <Button type="button" variant="outline" size="sm" onClick={exportExcel}>
-                <FileDown className="mr-1 h-4 w-4" />
-                Excel
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {canAdminPrint ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={filtered.length === 0}
+                    onClick={printRefundRegisterTable}
+                  >
+                    <Printer className="mr-1 h-4 w-4" />
+                    Print table
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={exportExcel}
+                >
+                  <FileDown className="mr-1 h-4 w-4" />
+                  Excel
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
@@ -621,6 +857,9 @@ export const RefundRecordsPanel = () => {
                         <Th>Date</Th>
                         <Th>Method</Th>
                         <Th>Remarks</Th>
+                        {canAdminPrint ? (
+                          <Th className="text-right">Actions</Th>
+                        ) : null}
                       </tr>
                     </TableHead>
                     <TableBody>
@@ -660,6 +899,19 @@ export const RefundRecordsPanel = () => {
                           <Td className="max-w-[140px] truncate text-sm">
                             {row.approvedBy || row.notes || "—"}
                           </Td>
+                          {canAdminPrint ? (
+                            <Td className="text-right">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => printSingleRefund(row)}
+                                title="Print this refund voucher"
+                              >
+                                <Printer className="mr-1 h-3.5 w-3.5" />
+                                Print
+                              </Button>
+                            </Td>
+                          ) : null}
                         </tr>
                       ))}
                     </TableBody>
@@ -759,7 +1011,7 @@ export const RefundRecordsPanel = () => {
                             setForm((c) => ({ ...c, studentId: "" }));
                           }}
                         />
-                        Pass-out / withdrawn only
+                        Pass-out / dropped out only
                       </label>
                     ) : null}
                   </div>
