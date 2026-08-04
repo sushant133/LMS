@@ -589,6 +589,10 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       }
     ];
 
+    /** Retained for library issues / accounting seed rows below */
+    let libraryStaffUser: InstanceType<typeof User> | null = null;
+    let accountantUser: InstanceType<typeof User> | null = null;
+
     for (const row of specialistStaffSeed) {
       const [staffUser] = await User.create(
         [
@@ -604,6 +608,13 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
         ],
         options
       );
+
+      if (row.role === "LIBRARY_STAFF") {
+        libraryStaffUser = staffUser!;
+      }
+      if (row.role === "ACCOUNTANT") {
+        accountantUser = staffUser!;
+      }
 
       await CollegeStaff.create(
         [
