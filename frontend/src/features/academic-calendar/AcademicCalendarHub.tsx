@@ -450,7 +450,7 @@ export const AcademicCalendarHub = () => {
 
         <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3.5 text-xs text-slate-600 shadow-[0_1px_3px_rgba(15,23,42,0.04)] backdrop-blur-sm">
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            Legend
+            Note
           </span>
           {legendGroups.map((group) => (
             <span

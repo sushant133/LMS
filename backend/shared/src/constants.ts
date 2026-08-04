@@ -41,11 +41,21 @@ export const USER_ROLE_LABELS: Record<UserRole, string> = {
 
 /** @deprecated Legacy role stored on older accounts — normalized to COLLEGE_ADMIN */
 export const LEGACY_USER_ROLE_ALIASES: Record<string, UserRole> = {
-  SCHOOL_ADMIN: "COLLEGE_ADMIN"
+  SCHOOL_ADMIN: "COLLEGE_ADMIN",
+  school_admin: "COLLEGE_ADMIN",
+  Administrator: "COLLEGE_ADMIN",
+  ADMINISTRATOR: "COLLEGE_ADMIN"
 };
 
-export const normalizeUserRole = (role: string): UserRole =>
-  (LEGACY_USER_ROLE_ALIASES[role] ?? role) as UserRole;
+export const normalizeUserRole = (role: string): UserRole => {
+  const raw = String(role ?? "").trim();
+  if (!raw) return "COLLEGE_STAFF";
+  // Prefer exact alias, then uppercase key (DB/role strings may vary in case)
+  if (LEGACY_USER_ROLE_ALIASES[raw]) return LEGACY_USER_ROLE_ALIASES[raw]!;
+  const upper = raw.toUpperCase();
+  if (LEGACY_USER_ROLE_ALIASES[upper]) return LEGACY_USER_ROLE_ALIASES[upper]!;
+  return upper as UserRole;
+};
 
 /** Roles with full institution write access (Administrator + System Administrator). */
 export const INSTITUTION_ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "COLLEGE_ADMIN"];
@@ -483,6 +493,26 @@ export const RESULT_SUBMISSION_STATUSES = [
 export const EXAM_ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "EXEMPT"] as const;
 
 export const EXAM_PASS_FAIL_STATUSES = ["PASS", "FAIL"] as const;
+
+/**
+ * CTEVT fee payment status (Examination Management → CTEVT → Registration / Exam).
+ * Same values for registration fee and exam fee.
+ */
+export const CTEVT_FEE_STATUSES = ["PAID", "NOT_PAID"] as const;
+
+/** @deprecated Use CTEVT_FEE_STATUSES */
+export const CTEVT_REGISTRATION_FEE_STATUSES = CTEVT_FEE_STATUSES;
+
+export const CTEVT_FEE_STATUS_LABELS: Record<
+  (typeof CTEVT_FEE_STATUSES)[number],
+  string
+> = {
+  PAID: "Paid",
+  NOT_PAID: "Not Paid"
+};
+
+/** @deprecated Use CTEVT_FEE_STATUS_LABELS */
+export const CTEVT_REGISTRATION_FEE_STATUS_LABELS = CTEVT_FEE_STATUS_LABELS;
 
 export const GRADE_SCALE: Array<{
   symbol: GradeSymbol;

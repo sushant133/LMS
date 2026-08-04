@@ -115,7 +115,7 @@ router.get(
 );
 
 // Fee collection & receipts
-// Edit / delete (reverse) of posted fee payments: Super Admin + College Admin only
+// Edit / delete (reverse) of posted fee payments: Super Admin / College Admin only
 router.get("/collections", readers, requireAccountingPermission("read"), listFeeReceipts);
 router.post("/collections", cashiers, requireAccountingPermission("collect_fees"), collectAccountingFee);
 router.put(
@@ -148,13 +148,13 @@ router.put(
 );
 router.post(
   "/scholarships/:id/revoke",
-  managers,
+  admins,
   requireAccountingPermission("reverse_transaction"),
   revokeStudentScholarshipAward
 );
 router.delete(
   "/scholarships/:id",
-  managers,
+  admins,
   requireAccountingPermission("reverse_transaction"),
   deleteStudentScholarshipAward
 );
@@ -181,20 +181,21 @@ router.get("/refunds", readers, requireAccountingPermission("read"), listFeeRefu
 router.post("/refunds", managers, requireAccountingPermission("reverse_transaction"), createFeeRefund);
 
 // Expenses, purchases, income (void = soft-delete, never hard-delete)
+// Delete/void: Super Admin / College Admin only
 router.get("/expenses", readers, requireAccountingPermission("read"), listExpenses);
 router.post("/expenses", managers, requireAccountingPermission("manage_expenses"), createExpense);
 router.put("/expenses/:id", managers, requireAccountingPermission("manage_expenses"), updateExpense);
-router.delete("/expenses/:id", managers, requireAccountingPermission("reverse_transaction"), deleteExpense);
+router.delete("/expenses/:id", admins, requireAccountingPermission("reverse_transaction"), deleteExpense);
 
 router.get("/purchases", readers, requireAccountingPermission("read"), listPurchases);
 router.post("/purchases", managers, requireAccountingPermission("manage_purchases"), createPurchase);
 router.put("/purchases/:id", managers, requireAccountingPermission("manage_purchases"), updatePurchase);
-router.delete("/purchases/:id", managers, requireAccountingPermission("reverse_transaction"), deletePurchase);
+router.delete("/purchases/:id", admins, requireAccountingPermission("reverse_transaction"), deletePurchase);
 
 router.get("/income", readers, requireAccountingPermission("read"), listIncome);
 router.post("/income", managers, requireAccountingPermission("manage_income"), createIncome);
 router.put("/income/:id", managers, requireAccountingPermission("manage_income"), updateIncome);
-router.delete("/income/:id", managers, requireAccountingPermission("reverse_transaction"), deleteIncome);
+router.delete("/income/:id", admins, requireAccountingPermission("reverse_transaction"), deleteIncome);
 
 // Salaries / monthly salary sheet (payroll)
 router.get("/salaries", readers, requireAccountingPermission("read"), listSalaries);
@@ -226,7 +227,7 @@ router.put("/chart-of-accounts/:id", admins, requireAccountingPermission("manage
 
 router.get("/journal-entries", readers, requireAccountingPermission("read"), listJournalEntries);
 router.post("/journal-entries", managers, requireAccountingPermission("manage_journal"), createJournalEntry);
-router.post("/journal-entries/:id/reverse", managers, requireAccountingPermission("reverse_transaction"), reverseJournalEntryHandler);
+router.post("/journal-entries/:id/reverse", admins, requireAccountingPermission("reverse_transaction"), reverseJournalEntryHandler);
 router.get(
   "/journal-entries/:id/goshwara-voucher",
   readers,

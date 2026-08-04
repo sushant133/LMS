@@ -5,7 +5,16 @@ import {
   getStudentProfileOverview,
   replaceStudentDocument
 } from "../controllers/studentProfileController.js";
-import { createStudent, deleteStudent, getStudentById, listStudents, updateStudent } from "../controllers/studentController.js";
+import {
+  createStudent,
+  deleteStudent,
+  getStudentById,
+  listStudents,
+  setStudentLoginAccess,
+  updateCtevtExamFee,
+  updateCtevtRegistrationFee,
+  updateStudent
+} from "../controllers/studentController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
@@ -38,11 +47,35 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/", studentReaders, listStudents);
+/**
+ * CTEVT registration / exam fees — must be registered before `/:id` routes.
+ * Role list is broad so Module Access grants work; enforceModuleAccess requires
+ * examinations-ctevt (and WRITE for PATCH).
+ */
+const ctevtFeeRoles = authorize(
+  "SUPER_ADMIN",
+  "COLLEGE_ADMIN",
+  "COLLEGE_VIEWER",
+  "COLLEGE_STAFF",
+  "PRINCIPAL",
+  "TEACHER",
+  "ACCOUNTANT",
+  "CASHIER",
+  "AUDITOR"
+);
+router.patch("/ctevt-registration-fee", ctevtFeeRoles, updateCtevtRegistrationFee);
+router.patch("/ctevt-exam-fee", ctevtFeeRoles, updateCtevtExamFee);
 router.get("/:id/profile", profileReaders, getStudentProfileOverview);
 router.post("/:id/documents", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), addStudentDocument);
 router.put("/:id/documents/replace", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), replaceStudentDocument);
 router.delete("/:id/documents/:documentId", authorize("SUPER_ADMIN", "COLLEGE_ADMIN"), deleteStudentDocument);
 router.get("/:id", studentReaders, getStudentById);
+/** Enable / disable portal login — before generic PUT */
+router.put(
+  "/:id/login-access",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
+  setStudentLoginAccess
+);
 router.post("/", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createStudent);
 router.put("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), updateStudent);
 router.delete("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteStudent);

@@ -161,6 +161,29 @@ export const StudentListManager = () => {
     mutationFn: async (userId: string) => toastResendCredentials(userId),
   });
 
+  /** Enable / disable portal login (User.isActive). */
+  const loginAccessMutation = useMutation({
+    mutationFn: async ({
+      studentId,
+      isActive,
+    }: {
+      studentId: string;
+      isActive: boolean;
+    }) =>
+      unwrap(
+        api.put(`/students/${studentId}/login-access`, { isActive }),
+      ),
+    onSuccess: async (_data, vars) => {
+      toast.success(
+        vars.isActive
+          ? "Student access enabled — they can log in"
+          : "Student access disabled — they cannot log in",
+      );
+      await queryClient.invalidateQueries({ queryKey: ["students"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const classes = isTeacher
     ? (teacherScopeQuery.data?.classes ?? [])
     : (classesQuery.data ?? []);
@@ -735,6 +758,7 @@ export const StudentListManager = () => {
                         student.user?.fullName ?? "Unknown student";
                       const displayEmail = student.user?.email ?? "—";
                       const displayPhone = student.user?.phone || "—";
+                      const loginEnabled = student.user?.isActive !== false;
                       const primaryLabel =
                         primaryMap.get(
                           (isCollege ? student.batchId : student.classId) ?? "",
@@ -772,6 +796,18 @@ export const StudentListManager = () => {
                                 name={displayName}
                                 subtitle={displayEmail}
                               />
+                              {canManage && student.user?._id ? (
+                                <Badge
+                                  className={cn(
+                                    "max-w-full truncate",
+                                    loginEnabled
+                                      ? "bg-sky-100 text-sky-800"
+                                      : "bg-rose-100 text-rose-800",
+                                  )}
+                                >
+                                  Access {loginEnabled ? "enabled" : "disabled"}
+                                </Badge>
+                              ) : null}
                               {pendingDocs > 0 ? (
                                 <Badge className="max-w-full truncate bg-amber-100 text-amber-900">
                                   {pendingDocs} doc
@@ -877,28 +913,72 @@ export const StudentListManager = () => {
                                     Edit
                                   </Button>
                                   {student.user?._id ? (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="shrink-0 whitespace-nowrap"
-                                      disabled={
-                                        resendCredentialsMutation.isPending
-                                      }
-                                      onClick={() => {
-                                        if (
-                                          !window.confirm(
-                                            `Resend login credentials to ${displayName} (${student.user.email})?\n\nA new password will be generated and emailed to the student.`,
-                                          )
-                                        ) {
-                                          return;
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="shrink-0 whitespace-nowrap"
+                                        disabled={
+                                          resendCredentialsMutation.isPending
                                         }
-                                        void resendCredentialsMutation.mutateAsync(
-                                          student.user._id,
-                                        );
-                                      }}
-                                    >
-                                      Resend
-                                    </Button>
+                                        onClick={() => {
+                                          if (
+                                            !window.confirm(
+                                              `Resend login credentials to ${displayName} (${student.user.email})?\n\nA new password will be generated and emailed to the student.`,
+                                            )
+                                          ) {
+                                            return;
+                                          }
+                                          void resendCredentialsMutation.mutateAsync(
+                                            student.user._id,
+                                          );
+                                        }}
+                                      >
+                                        Resend
+                                      </Button>
+                                      {loginEnabled ? (
+                                        <Button
+                                          variant="secondary"
+                                          size="sm"
+                                          className="shrink-0 whitespace-nowrap"
+                                          disabled={
+                                            loginAccessMutation.isPending
+                                          }
+                                          onClick={() => {
+                                            if (
+                                              !window.confirm(
+                                                `Disable access for ${displayName}?\n\nThey will not be able to log in until you enable access again.`,
+                                              )
+                                            ) {
+                                              return;
+                                            }
+                                            loginAccessMutation.mutate({
+                                              studentId: student._id,
+                                              isActive: false,
+                                            });
+                                          }}
+                                        >
+                                          Disable access
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          variant="secondary"
+                                          size="sm"
+                                          className="shrink-0 whitespace-nowrap"
+                                          disabled={
+                                            loginAccessMutation.isPending
+                                          }
+                                          onClick={() =>
+                                            loginAccessMutation.mutate({
+                                              studentId: student._id,
+                                              isActive: true,
+                                            })
+                                          }
+                                        >
+                                          Enable access
+                                        </Button>
+                                      )}
+                                    </>
                                   ) : null}
                                   <Button
                                     variant="destructive"

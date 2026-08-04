@@ -111,7 +111,10 @@ const emptyToUndef = (value?: string | null): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
-/** Super Admin / College Admin (primary or secondary role) may edit/delete fee payments. */
+/**
+ * Super Admin / College Admin only may edit/delete fee payments
+ * (reverse journal + restore student balance).
+ */
 const assertCanEditOrDeleteFeePayment = async (req: {
   user?: { userId: string; role: string };
 }): Promise<void> => {

@@ -5,10 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import {
   INSTITUTION_NAME,
   canAccessAttendanceManagement,
+  canAccessExaminationManagement,
   canAccessModule,
   canManageInstitution,
   hasInstitutionAccess,
   isAttendanceManagementPath,
+  isExaminationManagementPath,
   isSystemAdministrator,
   normalizeUserRole,
   resolveModuleFromRoutePath,
@@ -639,6 +641,13 @@ export const AppLayout = () => {
     ) {
       return true;
     }
+    // Examination — College and/or CTEVT unlock Examination Management hub
+    if (
+      isExaminationManagementPath(path) &&
+      canAccessExaminationManagement(moduleAccessMap)
+    ) {
+      return true;
+    }
     const moduleKey = resolveModuleFromRoutePath(path);
     if (!moduleKey) return false;
     return canAccessModule(moduleAccessMap, moduleKey);
@@ -697,6 +706,14 @@ export const AppLayout = () => {
       if (hasTeachingCapability && path === "/attendance") return true;
       if (!moduleAccessConfigured) return hasAdminCapability || hasTeachingCapability;
       return canAccessAttendanceManagement(moduleAccessMap);
+    }
+    if (isExaminationManagementPath(path)) {
+      // Admin hub only — not My Examinations (/exams)
+      if (isUnrestrictedAdmin) return true;
+      if (!moduleAccessConfigured) {
+        return isAdmin || institutionAccess || effectiveRoles.has("COLLEGE_VIEWER");
+      }
+      return canAccessExaminationManagement(moduleAccessMap);
     }
     const moduleKey = resolveModuleFromRoutePath(path);
     if (!moduleKey) return true;

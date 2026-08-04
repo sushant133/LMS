@@ -811,7 +811,7 @@ export const FieldPostingSectionPanel = ({
         · ${students.length} student(s)
         · Printed ${new Date().toLocaleString()}
       </div>
-      <p class="meta">Legend: P=Present · A=Absent · L=Late · Lv=Leave · E=Emergency duty</p>
+      <p class="meta">Note: P=Present · A=Absent · L=Late · Lv=Leave · E=Emergency duty</p>
       <table>
         <thead>
           <tr>
@@ -2324,7 +2324,7 @@ export const FieldPostingSectionPanel = ({
                 ) : null}
 
                 <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-                  <span className="font-semibold text-slate-700">Legend:</span>
+                  <span className="font-semibold text-slate-700">Note:</span>
                   {FIELD_REGISTER_LEGEND.map((item) => (
                     <span
                       key={item.code}
@@ -2460,9 +2460,9 @@ export const FieldPostingSectionPanel = ({
             </CardContent>
           </Card>
 
-          {/* Legend + stats */}
+          {/* Note + stats */}
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-semibold text-slate-600">Legend:</span>
+            <span className="font-semibold text-slate-600">Note:</span>
             {FIELD_REGISTER_LEGEND.map((item) => (
               <span
                 key={item.code}

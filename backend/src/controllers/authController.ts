@@ -332,12 +332,15 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       }
     }
 
+    const role = normalizeUserRole(user.role as string);
     const roleLabel =
-      normalizeUserRole(user.role as string) === "TEACHER"
+      role === "TEACHER"
         ? "teacher"
-        : normalizeUserRole(user.role as string) === "COLLEGE_STAFF"
+        : role === "COLLEGE_STAFF"
           ? "staff"
-          : "account";
+          : role === "STUDENT"
+            ? "student"
+            : "account";
     throw new ApiError(
       403,
       `This ${roleLabel} account has been deactivated. Contact the college administrator.`

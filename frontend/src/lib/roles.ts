@@ -2,10 +2,12 @@ import {
   INSTITUTION_ACCESS_ROLES,
   INSTITUTION_ADMIN_ROLES,
   canAccessAttendanceManagement,
+  canAccessExaminationManagement,
   canAccessModule,
   canManageInstitution,
   hasInstitutionAccess,
   isAttendanceManagementPath,
+  isExaminationManagementPath,
   isInstitutionAdmin,
   isSystemAdministrator,
   normalizeUserRole,
@@ -80,6 +82,13 @@ export const hasProtectedRouteAccess = (
     if (
       isAttendanceManagementPath(options.pathname) &&
       canAccessAttendanceManagement(options.moduleAccess)
+    ) {
+      return true;
+    }
+    // Examination Management: College and/or CTEVT grants unlock /exams-view
+    if (
+      isExaminationManagementPath(options.pathname) &&
+      canAccessExaminationManagement(options.moduleAccess)
     ) {
       return true;
     }

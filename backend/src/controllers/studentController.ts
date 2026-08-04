@@ -728,6 +728,168 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
   });
 });
 
+type CtevtFeeKind = "registration" | "exam";
+
+const CTEVT_FEE_FIELDS: Record<
+  CtevtFeeKind,
+  { status: string; updatedAt: string; label: string; auditAction: string }
+> = {
+  registration: {
+    status: "ctevtRegistrationFeeStatus",
+    updatedAt: "ctevtRegistrationFeeUpdatedAt",
+    label: "registration fee",
+    auditAction: "student.ctevt_registration_fee"
+  },
+  exam: {
+    status: "ctevtExamFeeStatus",
+    updatedAt: "ctevtExamFeeUpdatedAt",
+    label: "exam fee",
+    auditAction: "student.ctevt_exam_fee"
+  }
+};
+
+/**
+ * CTEVT Examination Management — set fee status (PAID / NOT_PAID) or clear (blank).
+ * Used for Registration fee and Exam fee.
+ */
+const updateCtevtFeeStatus = (kind: CtevtFeeKind) =>
+  asyncHandler(async (req: Request, res: Response) => {
+    const fields = CTEVT_FEE_FIELDS[kind];
+    const statusRaw = String(req.body?.status ?? "").trim().toUpperCase();
+    const clearStatus =
+      statusRaw === "" ||
+      statusRaw === "CLEAR" ||
+      statusRaw === "NONE" ||
+      statusRaw === "UNSET" ||
+      req.body?.clear === true;
+
+    if (!clearStatus && statusRaw !== "PAID" && statusRaw !== "NOT_PAID") {
+      throw new ApiError(400, "Status must be PAID, NOT_PAID, or CLEAR");
+    }
+    const status = clearStatus ? null : (statusRaw as "PAID" | "NOT_PAID");
+
+    const rawIds = req.body?.studentIds;
+    const studentIds: string[] = Array.isArray(rawIds)
+      ? rawIds.map((id: unknown) => String(id ?? "").trim()).filter(Boolean)
+      : typeof req.body?.studentId === "string" && req.body.studentId.trim()
+        ? [req.body.studentId.trim()]
+        : [];
+
+    if (studentIds.length === 0) {
+      throw new ApiError(400, "Select at least one student");
+    }
+    if (studentIds.length > 500) {
+      throw new ApiError(400, "You can update at most 500 students at once");
+    }
+
+    const now = new Date();
+    const result = await Student.updateMany(
+      withTenantScope(req, { _id: { $in: studentIds } }),
+      clearStatus
+        ? {
+            $unset: {
+              [fields.status]: 1,
+              [fields.updatedAt]: 1
+            }
+          }
+        : {
+            $set: {
+              [fields.status]: status,
+              [fields.updatedAt]: now
+            }
+          }
+    );
+
+    await recordAudit(req, {
+      action: fields.auditAction,
+      entity: "Student",
+      entityId: studentIds[0] ?? "",
+      after: {
+        kind,
+        status: status ?? "CLEARED",
+        studentIds,
+        matched: result.matchedCount,
+        modified: result.modifiedCount
+      }
+    });
+
+    return sendSuccess(
+      res,
+      clearStatus
+        ? `CTEVT ${fields.label} status cleared`
+        : `CTEVT ${fields.label} status updated`,
+      {
+        kind,
+        status: status ?? null,
+        cleared: clearStatus,
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        studentIds
+      }
+    );
+  });
+
+/** CTEVT → Registration fee */
+export const updateCtevtRegistrationFee = updateCtevtFeeStatus("registration");
+
+/** CTEVT → Exam fee */
+export const updateCtevtExamFee = updateCtevtFeeStatus("exam");
+
+/**
+ * Enable / disable student portal login (User.isActive).
+ * When disabled, the student cannot sign in; existing sessions are rejected by protect().
+ */
+export const setStudentLoginAccess = asyncHandler(async (req: Request, res: Response) => {
+  const raw = req.body?.isActive ?? req.body?.status;
+  let nextActive: boolean | null = null;
+  if (raw === true || raw === "true" || raw === "ACTIVE" || raw === "ENABLED") {
+    nextActive = true;
+  } else if (
+    raw === false ||
+    raw === "false" ||
+    raw === "INACTIVE" ||
+    raw === "DISABLED"
+  ) {
+    nextActive = false;
+  }
+  if (nextActive === null) {
+    throw new ApiError(400, "Send isActive true/false (or status ACTIVE/INACTIVE)");
+  }
+
+  const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
+  if (!student) {
+    throw new ApiError(404, "Student not found");
+  }
+  if (!student.user) {
+    throw new ApiError(400, "This student has no login account linked");
+  }
+
+  const user = await User.findById(student.user);
+  if (!user) {
+    throw new ApiError(404, "User account not found for this student");
+  }
+
+  user.isActive = nextActive;
+  await user.save();
+
+  await recordAudit(req, {
+    action: nextActive ? "student.login_enable" : "student.login_disable",
+    entity: "Student",
+    entityId: student._id.toString(),
+    after: { isActive: nextActive, userId: user._id.toString() }
+  });
+
+  await student.populate("user", "-password");
+
+  return sendSuccess(
+    res,
+    nextActive
+      ? "Student access enabled — they can log in again"
+      : "Student access disabled — they cannot log in",
+    student
+  );
+});
+
 /**
  * Hard-delete student: removes Student + User (email, phone, password) and linked records
  * (attendance entries, results, fee rows, parent links, library/transport issues, notifications).

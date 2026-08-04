@@ -42,6 +42,11 @@ router.get("/:id", authorize(...READ), getEmployeeAttendanceById);
 router.post("/", authorize(...WRITE), submitEmployeeAttendance);
 router.put("/:id", authorize(...WRITE), updateEmployeeAttendance);
 router.post("/:id/unlock", authorize(...WRITE), unlockEmployeeAttendance);
-router.delete("/:id", authorize(...WRITE), deleteEmployeeAttendance);
+/** Delete day sheet: Super Admin / College Admin only */
+router.delete(
+  "/:id",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
+  deleteEmployeeAttendance
+);
 
 export default router;

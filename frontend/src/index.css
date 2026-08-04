@@ -315,10 +315,13 @@ input.number-input-no-spin[type="number"]::-webkit-inner-spin-button {
  */
 input[type="time"].time-input,
 input.time-input[type="time"] {
-  min-width: 9.5rem;
+  min-width: 9.75rem;
+  width: 9.75rem;
+  max-width: none;
   box-sizing: border-box;
   /* Room for HH:mm + picker icon on Chromium / Edge */
-  padding-inline-end: 0.35rem;
+  padding-inline-end: 1.75rem;
+  line-height: 1.25rem;
 }
 
 input[type="time"].time-input::-webkit-calendar-picker-indicator,
@@ -326,12 +329,20 @@ input.time-input[type="time"]::-webkit-calendar-picker-indicator {
   opacity: 1;
   cursor: pointer;
   display: block;
-  width: 1.25rem;
-  height: 1.25rem;
+  position: absolute;
+  right: 0.4rem;
+  width: 1.15rem;
+  height: 1.15rem;
   margin: 0;
-  padding: 0.1rem;
+  padding: 0;
   /* Ensure icon is not washed out on light backgrounds */
   filter: invert(0.35);
+}
+
+/* Position host so the absolute indicator sits inside the field */
+input[type="time"].time-input,
+input.time-input[type="time"] {
+  position: relative;
 }
 
 input[type="time"].time-input::-webkit-calendar-picker-indicator:hover,

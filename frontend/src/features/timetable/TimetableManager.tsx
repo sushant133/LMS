@@ -629,11 +629,11 @@ export const TimetableManager = () => {
         }
       />
 
-      {/* Legend + Saturday toggle */}
+      {/* Note + Saturday toggle */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 py-3">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Legend
+            Note
           </span>
           {(Object.keys(SESSION_LABELS) as Array<keyof typeof SESSION_LABELS>).map(
             (key) => (

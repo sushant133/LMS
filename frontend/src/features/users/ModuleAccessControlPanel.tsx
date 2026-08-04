@@ -389,7 +389,7 @@ export const ModuleAccessControlPanel = ({
           </div>
         ) : null}
 
-        {/* Legend */}
+        {/* Note */}
         <div className="flex flex-wrap gap-4 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
           {MODE_OPTIONS.map((opt) => {
             const Icon = opt.icon;

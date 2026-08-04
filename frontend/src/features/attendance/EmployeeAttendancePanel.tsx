@@ -22,10 +22,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { getPrintInstitutionBranding } from "lib/printBranding";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 
 const STATUSES: EmployeeAttendanceStatus[] = [
   "PRESENT",
@@ -190,12 +191,31 @@ export const EmployeeAttendancePanel = ({
     );
   }, [contextQuery.data, category]);
 
+  type SubmitPhase = "DRAFT" | "CHECK_IN" | "CHECK_OUT" | "FINAL";
+
+  const sheetStatus = loaded?.status ?? "NONE";
   const isLocked =
-    loaded?.status === "LOCKED" || loaded?.status === "SUBMITTED";
+    sheetStatus === "LOCKED" || sheetStatus === "SUBMITTED";
   const canWriteSheet =
     (canTake || canEdit) &&
     !isLocked &&
     (contextQuery.data?.canMark || contextQuery.data?.canEdit || canTake);
+
+  const phaseLabel = (() => {
+    switch (sheetStatus) {
+      case "DRAFT":
+        return "Draft — submit check-in when ready";
+      case "CHECK_IN_SUBMITTED":
+        return "Check-in submitted — record check-out, then submit check-out";
+      case "CHECK_OUT_SUBMITTED":
+        return "Check-out submitted — use Final submit to lock the day";
+      case "LOCKED":
+      case "SUBMITTED":
+        return "Final — day sheet locked";
+      default:
+        return "New sheet — mark status & check-in, then submit check-in";
+    }
+  })();
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -214,13 +234,14 @@ export const EmployeeAttendancePanel = ({
   };
 
   const submitMut = useMutation({
-    mutationFn: (asDraft: boolean) =>
+    mutationFn: (phase: SubmitPhase) =>
       unwrap(
         api.post("/employee-attendance", {
           category,
           dateBs,
           notes,
-          asDraft,
+          phase,
+          asDraft: phase === "DRAFT",
           entries: rows.map((r) => {
             const withTimes = hasCheckTimes(r.status);
             const periodsRaw = r.periodsTaught.trim();
@@ -249,12 +270,16 @@ export const EmployeeAttendancePanel = ({
           }),
         }),
       ),
-    onSuccess: async (data, asDraft) => {
-      toast.success(
-        asDraft
+    onSuccess: async (data, phase) => {
+      const msg =
+        phase === "DRAFT"
           ? "Draft saved"
-          : `${label} attendance submitted and locked for ${dateBs}`,
-      );
+          : phase === "CHECK_IN"
+            ? "Check-in submitted — you can return later for check-out"
+            : phase === "CHECK_OUT"
+              ? "Check-out submitted — use Final submit when the day is complete"
+              : `${label} attendance submitted and locked for ${dateBs}`;
+      toast.success(msg);
       setLoaded(data as EmployeeAttendanceRecord);
       await invalidate();
     },
@@ -461,8 +486,8 @@ export const EmployeeAttendancePanel = ({
               {label} attendance — {dateBs}
             </CardTitle>
             <p className="text-sm font-normal text-slate-500">
-              Uses existing {label.toLowerCase()} records only. Select date, mark status, then
-              submit to lock the day sheet.
+              Same table for all steps: mark status, record check-in and submit, then
+              check-out and submit, then Final submit to lock the day.
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -486,9 +511,27 @@ export const EmployeeAttendancePanel = ({
               </FormField>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <span className="font-semibold text-slate-800">Step:</span>
+              <Badge
+                className={
+                  isLocked
+                    ? "bg-slate-800 text-white"
+                    : sheetStatus === "CHECK_OUT_SUBMITTED"
+                      ? "bg-violet-100 text-violet-900"
+                      : sheetStatus === "CHECK_IN_SUBMITTED"
+                        ? "bg-sky-100 text-sky-900"
+                        : "bg-amber-100 text-amber-900"
+                }
+              >
+                {String(sheetStatus).replace(/_/g, " ")}
+              </Badge>
+              <span className="text-slate-600">{phaseLabel}</span>
+            </div>
+
             {isLocked ? (
               <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                This day sheet is locked.
+                This day sheet is locked (final submit done).
                 {canUnlock && loaded ? (
                   <Button
                     size="sm"
@@ -510,157 +553,263 @@ export const EmployeeAttendancePanel = ({
                 description={`Add ${label.toLowerCase()}s in the ${label} module first.`}
               />
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>ID</Th>
-                      <Th>Name</Th>
-                      <Th>Department</Th>
-                      <Th>Designation</Th>
-                      <Th>Status</Th>
-                      <Th>Check-in</Th>
-                      <Th>Check-out</Th>
-                      {showPeriods ? <Th>Period</Th> : null}
-                      <Th>Remarks</Th>
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {filteredRows.map((row) => (
-                      <tr key={row.id}>
-                        <Td className="text-sm">{row.employeeCode}</Td>
-                        <Td className="text-sm font-medium">{row.fullName}</Td>
-                        <Td className="text-sm text-slate-600">
-                          {row.department || "—"}
-                        </Td>
-                        <Td className="text-sm text-slate-600">
-                          {row.designation || "—"}
-                        </Td>
-                        <Td>
-                          <Select
-                            className="min-w-[130px]"
-                            disabled={!canWriteSheet}
-                            value={row.status}
-                            onChange={(e) => {
-                              const nextStatus = e.target
-                                .value as EmployeeAttendanceStatus;
-                              const withTimes = hasCheckTimes(nextStatus);
-                              setRows((list) =>
-                                list.map((r) =>
-                                  r.id === row.id
-                                    ? {
-                                        ...r,
-                                        status: nextStatus,
-                                        // Clear times when status does not use check-in/out
-                                        checkInTime: withTimes
-                                          ? r.checkInTime
-                                          : "",
-                                        checkOutTime: withTimes
-                                          ? r.checkOutTime
-                                          : "",
+              (() => {
+                /**
+                 * Fixed column widths (px) so Check-in / Check-out time fields
+                 * never crush under table-fixed percentages (screenshot bug).
+                 * Sticky ID + Name while scrolling left-right.
+                 */
+                const markMinW = showPeriods
+                  ? "min-w-[1360px]"
+                  : "min-w-[1280px]";
+                const markTableClass = cn(
+                  "w-full border-collapse table-fixed",
+                  markMinW,
+                );
+                const thClass =
+                  "bg-slate-50 whitespace-nowrap text-xs font-semibold text-slate-600";
+                const stickyId =
+                  "sticky left-0 z-20 border-r border-slate-100 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)]";
+                const stickyName =
+                  "sticky left-[6.5rem] z-20 border-r border-slate-100 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)]";
+                const markCols = showPeriods ? (
+                  <colgroup>
+                    <col style={{ width: "6.5rem" }} />
+                    <col style={{ width: "11rem" }} />
+                    <col style={{ width: "9rem" }} />
+                    <col style={{ width: "9.5rem" }} />
+                    <col style={{ width: "9.5rem" }} />
+                    <col style={{ width: "10.5rem" }} />
+                    <col style={{ width: "10.5rem" }} />
+                    <col style={{ width: "5rem" }} />
+                    <col style={{ width: "9rem" }} />
+                  </colgroup>
+                ) : (
+                  <colgroup>
+                    <col style={{ width: "6.5rem" }} />
+                    <col style={{ width: "11rem" }} />
+                    <col style={{ width: "9rem" }} />
+                    <col style={{ width: "9.5rem" }} />
+                    <col style={{ width: "9.5rem" }} />
+                    <col style={{ width: "10.5rem" }} />
+                    <col style={{ width: "10.5rem" }} />
+                    <col style={{ width: "9rem" }} />
+                  </colgroup>
+                );
+                return (
+                  <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                    <StickyTableScroll
+                      maxHeightClassName="max-h-[min(70vh,720px)]"
+                      header={
+                        <Table className={markTableClass}>
+                          {markCols}
+                          <TableHead>
+                            <tr>
+                              <Th
+                                className={cn(
+                                  thClass,
+                                  stickyId,
+                                  "bg-slate-50",
+                                )}
+                              >
+                                ID
+                              </Th>
+                              <Th
+                                className={cn(
+                                  thClass,
+                                  stickyName,
+                                  "bg-slate-50",
+                                )}
+                              >
+                                Name
+                              </Th>
+                              <Th className={thClass}>Department</Th>
+                              <Th className={thClass}>Designation</Th>
+                              <Th className={thClass}>Status</Th>
+                              <Th className={thClass}>Check-in</Th>
+                              <Th className={thClass}>Check-out</Th>
+                              {showPeriods ? (
+                                <Th className={thClass}>Period</Th>
+                              ) : null}
+                              <Th className={thClass}>Remarks</Th>
+                            </tr>
+                          </TableHead>
+                        </Table>
+                      }
+                      body={
+                        <Table className={markTableClass}>
+                          {markCols}
+                          <TableBody>
+                            {filteredRows.map((row) => (
+                              <tr key={row.id} className="align-middle">
+                                <Td
+                                  className={cn(
+                                    "bg-white text-sm tabular-nums text-slate-600",
+                                    stickyId,
+                                  )}
+                                >
+                                  {row.employeeCode}
+                                </Td>
+                                <Td
+                                  className={cn(
+                                    "bg-white text-sm font-medium text-slate-900",
+                                    stickyName,
+                                  )}
+                                >
+                                  <span className="line-clamp-2">
+                                    {row.fullName}
+                                  </span>
+                                </Td>
+                                <Td className="text-sm text-slate-600">
+                                  <span className="line-clamp-2">
+                                    {row.department || "—"}
+                                  </span>
+                                </Td>
+                                <Td className="text-sm text-slate-600">
+                                  <span className="line-clamp-2">
+                                    {row.designation || "—"}
+                                  </span>
+                                </Td>
+                                <Td>
+                                  <Select
+                                    className="h-10 w-[8.75rem] max-w-full"
+                                    disabled={!canWriteSheet}
+                                    value={row.status}
+                                    onChange={(e) => {
+                                      const nextStatus = e.target
+                                        .value as EmployeeAttendanceStatus;
+                                      const withTimes =
+                                        hasCheckTimes(nextStatus);
+                                      setRows((list) =>
+                                        list.map((r) =>
+                                          r.id === row.id
+                                            ? {
+                                                ...r,
+                                                status: nextStatus,
+                                                checkInTime: withTimes
+                                                  ? r.checkInTime
+                                                  : "",
+                                                checkOutTime: withTimes
+                                                  ? r.checkOutTime
+                                                  : "",
+                                              }
+                                            : r,
+                                        ),
+                                      );
+                                    }}
+                                  >
+                                    {STATUSES.map((s) => (
+                                      <option key={s} value={s}>
+                                        {s.replace(/_/g, " ")}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                </Td>
+                                <Td className="p-2">
+                                  {hasCheckTimes(row.status) ? (
+                                    <Input
+                                      className="time-input h-10 w-[9.75rem] max-w-none shrink-0"
+                                      type="time"
+                                      disabled={!canWriteSheet}
+                                      value={row.checkInTime}
+                                      onChange={(e) =>
+                                        setRows((list) =>
+                                          list.map((r) =>
+                                            r.id === row.id
+                                              ? {
+                                                  ...r,
+                                                  checkInTime: e.target.value,
+                                                }
+                                              : r,
+                                          ),
+                                        )
                                       }
-                                    : r,
-                                ),
-                              );
-                            }}
-                          >
-                            {STATUSES.map((s) => (
-                              <option key={s} value={s}>
-                                {s.replace(/_/g, " ")}
-                              </option>
+                                    />
+                                  ) : (
+                                    <span className="text-sm text-slate-400">
+                                      —
+                                    </span>
+                                  )}
+                                </Td>
+                                <Td className="p-2">
+                                  {hasCheckTimes(row.status) ? (
+                                    <Input
+                                      className="time-input h-10 w-[9.75rem] max-w-none shrink-0"
+                                      type="time"
+                                      disabled={!canWriteSheet}
+                                      value={row.checkOutTime}
+                                      onChange={(e) =>
+                                        setRows((list) =>
+                                          list.map((r) =>
+                                            r.id === row.id
+                                              ? {
+                                                  ...r,
+                                                  checkOutTime: e.target.value,
+                                                }
+                                              : r,
+                                          ),
+                                        )
+                                      }
+                                    />
+                                  ) : (
+                                    <span className="text-sm text-slate-400">
+                                      —
+                                    </span>
+                                  )}
+                                </Td>
+                                {showPeriods ? (
+                                  <Td className="p-2">
+                                    <NumberInput
+                                      className="h-10 w-16"
+                                      min={0}
+                                      max={24}
+                                      step={1}
+                                      placeholder=""
+                                      disabled={!canWriteSheet}
+                                      value={row.periodsTaught}
+                                      onChange={(e) =>
+                                        setRows((list) =>
+                                          list.map((r) =>
+                                            r.id === row.id
+                                              ? {
+                                                  ...r,
+                                                  periodsTaught: e.target.value,
+                                                }
+                                              : r,
+                                          ),
+                                        )
+                                      }
+                                    />
+                                  </Td>
+                                ) : null}
+                                <Td className="p-2">
+                                  <Input
+                                    className="h-10 w-full min-w-[6rem]"
+                                    disabled={!canWriteSheet}
+                                    value={row.remarks}
+                                    onChange={(e) =>
+                                      setRows((list) =>
+                                        list.map((r) =>
+                                          r.id === row.id
+                                            ? {
+                                                ...r,
+                                                remarks: e.target.value,
+                                              }
+                                            : r,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </Td>
+                              </tr>
                             ))}
-                          </Select>
-                        </Td>
-                        <Td className="whitespace-nowrap">
-                          {hasCheckTimes(row.status) ? (
-                            <Input
-                              className="time-input block min-w-[9.5rem] w-[9.5rem] px-2"
-                              type="time"
-                              placeholder="HH:mm"
-                              disabled={!canWriteSheet}
-                              value={row.checkInTime}
-                              onChange={(e) =>
-                                setRows((list) =>
-                                  list.map((r) =>
-                                    r.id === row.id
-                                      ? { ...r, checkInTime: e.target.value }
-                                      : r,
-                                  ),
-                                )
-                              }
-                            />
-                          ) : (
-                            <span className="text-sm text-slate-400">—</span>
-                          )}
-                        </Td>
-                        <Td className="whitespace-nowrap">
-                          {hasCheckTimes(row.status) ? (
-                            <Input
-                              className="time-input block min-w-[9.5rem] w-[9.5rem] px-2"
-                              type="time"
-                              placeholder="HH:mm"
-                              disabled={!canWriteSheet}
-                              value={row.checkOutTime}
-                              onChange={(e) =>
-                                setRows((list) =>
-                                  list.map((r) =>
-                                    r.id === row.id
-                                      ? { ...r, checkOutTime: e.target.value }
-                                      : r,
-                                  ),
-                                )
-                              }
-                            />
-                          ) : (
-                            <span className="text-sm text-slate-400">—</span>
-                          )}
-                        </Td>
-                        {showPeriods ? (
-                          <Td>
-                            <NumberInput
-                              className="w-16"
-                              min={0}
-                              max={24}
-                              step={1}
-                              placeholder=""
-                              disabled={!canWriteSheet}
-                              value={row.periodsTaught}
-                              onChange={(e) =>
-                                setRows((list) =>
-                                  list.map((r) =>
-                                    r.id === row.id
-                                      ? {
-                                          ...r,
-                                          periodsTaught: e.target.value,
-                                        }
-                                      : r,
-                                  ),
-                                )
-                              }
-                            />
-                          </Td>
-                        ) : null}
-                        <Td>
-                          <Input
-                            className="min-w-[100px]"
-                            disabled={!canWriteSheet}
-                            value={row.remarks}
-                            onChange={(e) =>
-                              setRows((list) =>
-                                list.map((r) =>
-                                  r.id === row.id
-                                    ? { ...r, remarks: e.target.value }
-                                    : r,
-                                ),
-                              )
-                            }
-                          />
-                        </Td>
-                      </tr>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                          </TableBody>
+                        </Table>
+                      }
+                    />
+                  </div>
+                );
+              })()
             )}
 
             {canWriteSheet && rows.length > 0 ? (
@@ -695,15 +844,62 @@ export const EmployeeAttendancePanel = ({
                 <Button
                   variant="outline"
                   disabled={submitMut.isPending}
-                  onClick={() => submitMut.mutate(true)}
+                  onClick={() => submitMut.mutate("DRAFT")}
                 >
                   Save draft
                 </Button>
                 <Button
-                  disabled={submitMut.isPending || !dateBs}
-                  onClick={() => submitMut.mutate(false)}
+                  variant="secondary"
+                  disabled={
+                    submitMut.isPending ||
+                    !dateBs ||
+                    sheetStatus === "CHECK_OUT_SUBMITTED"
+                  }
+                  onClick={() => submitMut.mutate("CHECK_IN")}
                 >
-                  Submit &amp; lock
+                  Submit check-in
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={
+                    submitMut.isPending ||
+                    !dateBs ||
+                    sheetStatus === "NONE" ||
+                    sheetStatus === "DRAFT"
+                  }
+                  onClick={() => submitMut.mutate("CHECK_OUT")}
+                  title={
+                    sheetStatus === "NONE" || sheetStatus === "DRAFT"
+                      ? "Submit check-in first"
+                      : undefined
+                  }
+                >
+                  Submit check-out
+                </Button>
+                <Button
+                  disabled={
+                    submitMut.isPending ||
+                    !dateBs ||
+                    (sheetStatus !== "CHECK_IN_SUBMITTED" &&
+                      sheetStatus !== "CHECK_OUT_SUBMITTED")
+                  }
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Final submit will lock this day sheet. Continue?",
+                      )
+                    ) {
+                      submitMut.mutate("FINAL");
+                    }
+                  }}
+                  title={
+                    sheetStatus !== "CHECK_IN_SUBMITTED" &&
+                    sheetStatus !== "CHECK_OUT_SUBMITTED"
+                      ? "Complete check-in (and preferably check-out) first"
+                      : undefined
+                  }
+                >
+                  Final submit &amp; lock
                 </Button>
               </div>
             ) : null}
@@ -735,72 +931,140 @@ export const EmployeeAttendancePanel = ({
                 description={`Submitted ${label.toLowerCase()} attendance will appear here.`}
               />
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>Date</Th>
-                      <Th>ID</Th>
-                      <Th>Name</Th>
-                      <Th>Dept</Th>
-                      <Th>Designation</Th>
-                      <Th>Status</Th>
-                      <Th>In</Th>
-                      <Th>Out</Th>
-                      {showPeriods ? <Th>Period</Th> : null}
-                      <Th>Remarks</Th>
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {(
-                      (registerQuery.data?.rows ?? []) as Array<{
-                        attendanceId?: string;
-                        dateBs?: string;
-                        employeeCode?: string;
-                        fullName?: string;
-                        department?: string;
-                        designation?: string;
-                        status?: string;
-                        checkInTime?: string;
-                        checkOutTime?: string;
-                        periodsTaught?: number;
-                        remarks?: string;
-                      }>
-                    ).map((r, i) => (
-                      <tr key={`${r.attendanceId ?? "x"}-${r.employeeCode ?? i}-${i}`}>
-                        <Td className="text-sm">{r.dateBs ?? "—"}</Td>
-                        <Td className="text-sm">{r.employeeCode ?? "—"}</Td>
-                        <Td className="text-sm">{r.fullName ?? "—"}</Td>
-                        <Td className="text-sm">{r.department ?? "—"}</Td>
-                        <Td className="text-sm">{r.designation ?? "—"}</Td>
-                        <Td>
-                          <Badge className={statusClass(String(r.status ?? ""))}>
-                            {String(r.status ?? "—").replace(/_/g, " ")}
-                          </Badge>
-                        </Td>
-                        <Td className="text-sm">
-                          {hasCheckTimes(String(r.status ?? ""))
-                            ? r.checkInTime || "—"
-                            : "—"}
-                        </Td>
-                        <Td className="text-sm">
-                          {hasCheckTimes(String(r.status ?? ""))
-                            ? r.checkOutTime || "—"
-                            : "—"}
-                        </Td>
-                        {showPeriods ? (
-                          <Td className="text-sm">
-                            {typeof r.periodsTaught === "number"
-                              ? r.periodsTaught
-                              : "—"}
-                          </Td>
-                        ) : null}
-                        <Td className="text-sm">{r.remarks ?? "—"}</Td>
-                      </tr>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              (() => {
+                const regMinW = showPeriods
+                  ? "min-w-[1100px]"
+                  : "min-w-[1000px]";
+                const regTableClass = cn("w-full table-fixed", regMinW);
+                const thClass = "bg-slate-50 whitespace-nowrap";
+                const regCols = showPeriods ? (
+                  <colgroup>
+                    <col className="w-[10%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[6%]" />
+                    <col className="w-[12%]" />
+                  </colgroup>
+                ) : (
+                  <colgroup>
+                    <col className="w-[11%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[10%]" />
+                  </colgroup>
+                );
+                const regRows = (registerQuery.data?.rows ?? []) as Array<{
+                  attendanceId?: string;
+                  dateBs?: string;
+                  employeeCode?: string;
+                  fullName?: string;
+                  department?: string;
+                  designation?: string;
+                  status?: string;
+                  checkInTime?: string;
+                  checkOutTime?: string;
+                  periodsTaught?: number;
+                  remarks?: string;
+                }>;
+                return (
+                  <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200">
+                    <StickyTableScroll
+                      maxHeightClassName="max-h-[min(70vh,720px)]"
+                      header={
+                        <Table className={regTableClass}>
+                          {regCols}
+                          <TableHead>
+                            <tr>
+                              <Th className={thClass}>Date</Th>
+                              <Th className={thClass}>ID</Th>
+                              <Th className={thClass}>Name</Th>
+                              <Th className={thClass}>Dept</Th>
+                              <Th className={thClass}>Designation</Th>
+                              <Th className={thClass}>Status</Th>
+                              <Th className={thClass}>In</Th>
+                              <Th className={thClass}>Out</Th>
+                              {showPeriods ? (
+                                <Th className={thClass}>Period</Th>
+                              ) : null}
+                              <Th className={thClass}>Remarks</Th>
+                            </tr>
+                          </TableHead>
+                        </Table>
+                      }
+                      body={
+                        <Table className={regTableClass}>
+                          {regCols}
+                          <TableBody>
+                            {regRows.map((r, i) => (
+                              <tr
+                                key={`${r.attendanceId ?? "x"}-${r.employeeCode ?? i}-${i}`}
+                              >
+                                <Td className="text-sm">
+                                  {r.dateBs ?? "—"}
+                                </Td>
+                                <Td className="text-sm">
+                                  {r.employeeCode ?? "—"}
+                                </Td>
+                                <Td className="text-sm">
+                                  {r.fullName ?? "—"}
+                                </Td>
+                                <Td className="text-sm">
+                                  {r.department ?? "—"}
+                                </Td>
+                                <Td className="text-sm">
+                                  {r.designation ?? "—"}
+                                </Td>
+                                <Td>
+                                  <Badge
+                                    className={statusClass(
+                                      String(r.status ?? ""),
+                                    )}
+                                  >
+                                    {String(r.status ?? "—").replace(
+                                      /_/g,
+                                      " ",
+                                    )}
+                                  </Badge>
+                                </Td>
+                                <Td className="text-sm">
+                                  {hasCheckTimes(String(r.status ?? ""))
+                                    ? r.checkInTime || "—"
+                                    : "—"}
+                                </Td>
+                                <Td className="text-sm">
+                                  {hasCheckTimes(String(r.status ?? ""))
+                                    ? r.checkOutTime || "—"
+                                    : "—"}
+                                </Td>
+                                {showPeriods ? (
+                                  <Td className="text-sm">
+                                    {typeof r.periodsTaught === "number"
+                                      ? r.periodsTaught
+                                      : "—"}
+                                  </Td>
+                                ) : null}
+                                <Td className="text-sm">
+                                  {r.remarks ?? "—"}
+                                </Td>
+                              </tr>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      }
+                    />
+                  </div>
+                );
+              })()
             )}
           </CardContent>
         </Card>
@@ -867,46 +1131,92 @@ const SelfPortal = ({
           {data.history.length === 0 ? (
             <p className="text-sm text-slate-500">No history yet.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>Date</Th>
-                    <Th>Status</Th>
-                    <Th>Check-in</Th>
-                    <Th>Check-out</Th>
-                    {showPeriods ? <Th>Period</Th> : null}
-                    <Th>Remarks</Th>
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {data.history.map((h) => (
-                    <tr key={h.dateBs + h.status}>
-                      <Td className="text-sm">{h.dateBs}</Td>
-                      <Td>
-                        <Badge className={statusClass(h.status)}>
-                          {h.status.replace(/_/g, " ")}
-                        </Badge>
-                      </Td>
-                      <Td className="text-sm">
-                        {hasCheckTimes(h.status) ? h.checkInTime || "—" : "—"}
-                      </Td>
-                      <Td className="text-sm">
-                        {hasCheckTimes(h.status) ? h.checkOutTime || "—" : "—"}
-                      </Td>
-                      {showPeriods ? (
-                        <Td className="text-sm">
-                          {typeof h.periodsTaught === "number"
-                            ? h.periodsTaught
-                            : "—"}
-                        </Td>
-                      ) : null}
-                      <Td className="text-sm">{h.remarks || "—"}</Td>
-                    </tr>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            (() => {
+              const histMinW = showPeriods
+                ? "min-w-[720px]"
+                : "min-w-[640px]";
+              const histClass = cn("w-full table-fixed", histMinW);
+              const thClass = "bg-slate-50 whitespace-nowrap";
+              const histCols = showPeriods ? (
+                <colgroup>
+                  <col className="w-[16%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[24%]" />
+                </colgroup>
+              ) : (
+                <colgroup>
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[28%]" />
+                </colgroup>
+              );
+              return (
+                <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200">
+                  <StickyTableScroll
+                    maxHeightClassName="max-h-[min(50vh,480px)]"
+                    header={
+                      <Table className={histClass}>
+                        {histCols}
+                        <TableHead>
+                          <tr>
+                            <Th className={thClass}>Date</Th>
+                            <Th className={thClass}>Status</Th>
+                            <Th className={thClass}>Check-in</Th>
+                            <Th className={thClass}>Check-out</Th>
+                            {showPeriods ? (
+                              <Th className={thClass}>Period</Th>
+                            ) : null}
+                            <Th className={thClass}>Remarks</Th>
+                          </tr>
+                        </TableHead>
+                      </Table>
+                    }
+                    body={
+                      <Table className={histClass}>
+                        {histCols}
+                        <TableBody>
+                          {data.history.map((h) => (
+                            <tr key={h.dateBs + h.status}>
+                              <Td className="text-sm">{h.dateBs}</Td>
+                              <Td>
+                                <Badge className={statusClass(h.status)}>
+                                  {h.status.replace(/_/g, " ")}
+                                </Badge>
+                              </Td>
+                              <Td className="text-sm">
+                                {hasCheckTimes(h.status)
+                                  ? h.checkInTime || "—"
+                                  : "—"}
+                              </Td>
+                              <Td className="text-sm">
+                                {hasCheckTimes(h.status)
+                                  ? h.checkOutTime || "—"
+                                  : "—"}
+                              </Td>
+                              {showPeriods ? (
+                                <Td className="text-sm">
+                                  {typeof h.periodsTaught === "number"
+                                    ? h.periodsTaught
+                                    : "—"}
+                                </Td>
+                              ) : null}
+                              <Td className="text-sm">
+                                {h.remarks || "—"}
+                              </Td>
+                            </tr>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    }
+                  />
+                </div>
+              );
+            })()
           )}
         </CardContent>
       </Card>

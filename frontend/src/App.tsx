@@ -465,7 +465,24 @@ export default function App() {
 
 
 
-            <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER"]} />}>
+            {/* Admin Examination Management; staff unlock via Module Access (College / CTEVT). */}
+            <Route
+              element={
+                <ProtectedRoute
+                  roles={[
+                    "SUPER_ADMIN",
+                    "COLLEGE_ADMIN",
+                    "COLLEGE_VIEWER",
+                    "COLLEGE_STAFF",
+                    "PRINCIPAL",
+                    "TEACHER",
+                    "ACCOUNTANT",
+                    "CASHIER",
+                    "AUDITOR",
+                  ]}
+                />
+              }
+            >
               <Route path="/exams-view" element={<ExamsPage />} />
             </Route>
 

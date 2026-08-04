@@ -252,8 +252,9 @@ export const getEmployeeAttendanceMarkContext = asyncHandler(
       canEdit = true;
     }
 
-    const locked =
-      existing && (existing.status === "LOCKED" || existing.status === "SUBMITTED");
+    const status = existing?.status ? String(existing.status) : "";
+    /** Only final lock blocks marking (CHECK_IN / CHECK_OUT phases stay editable). */
+    const locked = status === "LOCKED" || status === "SUBMITTED";
 
     return sendSuccess(res, "Employee attendance context fetched", {
       category,
@@ -349,6 +350,18 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
     );
   }
 
+  const phase =
+    payload.phase ??
+    (payload.asDraft ? "DRAFT" : "FINAL");
+
+  // Soft order: check-out only after check-in (or draft with data); final anytime after check-in
+  if (existing) {
+    const cur = String(existing.status);
+    if (phase === "CHECK_OUT" && cur === "DRAFT") {
+      // allow first-time check-out if they already saved check-in times as draft
+    }
+  }
+
   const entries = payload.entries.map((e) => ({
     teacherId: payload.category === "TEACHER" ? e.teacherId : undefined,
     staffId: payload.category === "STAFF" ? e.staffId : undefined,
@@ -373,7 +386,14 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
     geo: e.geo
   }));
 
-  const status = payload.asDraft ? "DRAFT" : "LOCKED";
+  const statusByPhase: Record<string, string> = {
+    DRAFT: "DRAFT",
+    CHECK_IN: "CHECK_IN_SUBMITTED",
+    CHECK_OUT: "CHECK_OUT_SUBMITTED",
+    FINAL: "LOCKED"
+  };
+  const status = statusByPhase[phase] ?? "DRAFT";
+  const isFinal = phase === "FINAL";
   const docPayload = {
     schoolId,
     category: payload.category,
@@ -383,9 +403,14 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
     notes: emptyToUndef(payload.notes) ?? "",
     status,
     sourceDefault: payload.sourceDefault || "MANUAL",
-    createdBy: actorId(req),
-    submittedBy: payload.asDraft ? undefined : actorId(req),
-    submittedAt: payload.asDraft ? undefined : new Date()
+    createdBy: existing?.createdBy ?? actorId(req),
+    submittedBy: isFinal || phase === "CHECK_IN" || phase === "CHECK_OUT"
+      ? actorId(req)
+      : existing?.submittedBy,
+    submittedAt:
+      isFinal || phase === "CHECK_IN" || phase === "CHECK_OUT"
+        ? new Date()
+        : existing?.submittedAt
   };
 
   let saved;
@@ -401,12 +426,19 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
     action: "employee_attendance.submit",
     entity: "EMPLOYEE_ATTENDANCE",
     entityId: saved._id.toString(),
-    after: saved
+    after: { phase, status, id: saved._id }
   });
+
+  const messages: Record<string, string> = {
+    DRAFT: "Attendance draft saved",
+    CHECK_IN: "Check-in submitted — you can return later for check-out",
+    CHECK_OUT: "Check-out submitted — use Final submit when the day is complete",
+    FINAL: "Attendance submitted and locked"
+  };
 
   return sendSuccess(
     res,
-    payload.asDraft ? "Attendance draft saved" : "Attendance submitted and locked",
+    messages[phase] ?? "Attendance saved",
     serializeRecord(saved.toObject() as never),
     existing ? 200 : 201
   );
@@ -429,6 +461,7 @@ export const updateEmployeeAttendance = asyncHandler(async (req: Request, res: R
   if (existing.status === "LOCKED" || existing.status === "SUBMITTED") {
     throw new ApiError(400, "Unlock attendance before editing");
   }
+  // DRAFT / CHECK_IN_SUBMITTED / CHECK_OUT_SUBMITTED remain editable
 
   existing.entries = payload.entries.map((e) => ({
     teacherId: e.teacherId as never,

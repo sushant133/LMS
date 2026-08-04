@@ -81,8 +81,18 @@ export const employeeAttendanceSubmitSchema = z.object({
   dateBs: z.string().min(1),
   entries: z.array(employeeAttendanceEntrySchema).min(1),
   notes: z.string().optional().or(z.literal("")),
-  /** When true, save as DRAFT without locking. Default false → LOCKED on submit. */
+  /**
+   * @deprecated Prefer `phase: "DRAFT"`. When true, save as DRAFT without locking.
+   */
   asDraft: z.boolean().optional().default(false),
+  /**
+   * Workflow step (same table):
+   * DRAFT | CHECK_IN | CHECK_OUT | FINAL (locks sheet)
+   * If omitted: asDraft → DRAFT, else FINAL (backward compatible).
+   */
+  phase: z
+    .enum(["DRAFT", "CHECK_IN", "CHECK_OUT", "FINAL"])
+    .optional(),
   sourceDefault: employeeAttendanceSourceSchema.optional().default("MANUAL")
 });
 

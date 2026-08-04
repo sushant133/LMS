@@ -55,8 +55,14 @@ const employeeAttendanceSchema = new Schema(
     notes: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["DRAFT", "SUBMITTED", "LOCKED"],
-      default: "LOCKED",
+      enum: [
+        "DRAFT",
+        "CHECK_IN_SUBMITTED",
+        "CHECK_OUT_SUBMITTED",
+        "SUBMITTED",
+        "LOCKED"
+      ],
+      default: "DRAFT",
       index: true
     },
     sourceDefault: {

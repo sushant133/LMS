@@ -2,6 +2,7 @@ import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 import {
   BLOOD_GROUPS,
+  CTEVT_FEE_STATUSES,
   DISABILITY_CATEGORIES,
   ETHNICITY_CATEGORIES,
   RELIGIONS,
@@ -108,6 +109,26 @@ const studentSchema = new Schema(
     securityDepositWaived: { type: Boolean, default: false },
     /** Full scholarship — UI shows "Scholarship" instead of a fee amount. */
     hasScholarship: { type: Boolean, default: false },
+    /**
+     * CTEVT examination registration fee (Examination Management → CTEVT → Registration).
+     * Independent of college tuition fees. Unset until staff marks Paid / Not Paid.
+     */
+    ctevtRegistrationFeeStatus: {
+      type: String,
+      enum: CTEVT_FEE_STATUSES,
+      index: true
+    },
+    ctevtRegistrationFeeUpdatedAt: { type: Date },
+    /**
+     * CTEVT exam fee (Examination Management → CTEVT → Exam).
+     * Independent of college tuition fees. Unset until staff marks Paid / Not Paid.
+     */
+    ctevtExamFeeStatus: {
+      type: String,
+      enum: CTEVT_FEE_STATUSES,
+      index: true
+    },
+    ctevtExamFeeUpdatedAt: { type: Date },
     remarks: { type: String },
     // Phase 0 - Foundation fields
     photoUrl: { type: String },

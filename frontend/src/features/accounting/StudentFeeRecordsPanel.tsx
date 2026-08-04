@@ -232,14 +232,15 @@ const resolveCollectionStudentId = (
   return String(s);
 };
 
-/** Super Admin / College Admin (primary or secondary role) may edit/delete payments. */
+/**
+ * Super Admin / College Admin only may edit/delete fee payments.
+ * Checks primary + secondary roles (normalized, case-safe).
+ */
 const useCanEditFeePayments = (): boolean => {
   const { user } = useAuth();
   if (!user) return false;
-  if (canManageInstitution(user.role)) return true;
-  return (user.secondaryRoles ?? []).some((role) =>
-    canManageInstitution(normalizeUserRole(role)),
-  );
+  const roles = [user.role, ...(user.secondaryRoles ?? [])].filter(Boolean);
+  return roles.some((role) => canManageInstitution(normalizeUserRole(String(role))));
 };
 
 /**
@@ -1474,16 +1475,18 @@ export const StudentFeeRecordsPanel = () => {
                   >
                     Cancel edit
                   </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    disabled={deleteCollectionMutation.isPending}
-                    onClick={() => confirmDeleteReceipt(editingReceipt)}
-                  >
-                    <Trash2 className="mr-1 h-3.5 w-3.5" />
-                    Delete payment
-                  </Button>
+                  {canAdminEdit ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      disabled={deleteCollectionMutation.isPending}
+                      onClick={() => confirmDeleteReceipt(editingReceipt)}
+                    >
+                      <Trash2 className="mr-1 h-3.5 w-3.5" />
+                      Delete payment
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
             </CardHeader>
@@ -2525,7 +2528,7 @@ export const StudentFeeRecordsPanel = () => {
               <p className="mt-1 text-xs text-slate-500">
                 Filter by batch, year, student search, and date range (BS or AD).
                 {canAdminEdit
-                  ? " Print PDF, edit, or delete payments as Super Admin / Administrator."
+                  ? " Print PDF, edit, or delete payments (Super Admin / College Admin only)."
                   : ""}
               </p>
             </div>
@@ -2785,27 +2788,25 @@ export const StudentFeeRecordsPanel = () => {
                               "—"
                             )}
                           </Td>
-                          <Td className="whitespace-nowrap bg-white group-hover:bg-slate-50 md:sticky md:right-0 md:z-10 md:shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.12)]">
-                            <div className="flex min-w-[11rem] flex-wrap justify-end gap-1">
+                          <Td className="whitespace-nowrap bg-white group-hover:bg-slate-50 md:sticky md:right-0 md:z-20 md:min-w-[14rem] md:shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.15)]">
+                            <div className="flex min-w-[14rem] flex-wrap items-center justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Print / download receipt PDF"
+                                disabled={printingReceiptId === row._id}
+                                onClick={() =>
+                                  void downloadReceiptPdf(
+                                    row._id,
+                                    row.receiptNumber,
+                                  )
+                                }
+                              >
+                                <Printer className="mr-1 h-3.5 w-3.5" />
+                                {printingReceiptId === row._id ? "…" : "Print"}
+                              </Button>
                               {canAdminEdit ? (
                                 <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    title="Print / download receipt PDF"
-                                    disabled={printingReceiptId === row._id}
-                                    onClick={() =>
-                                      void downloadReceiptPdf(
-                                        row._id,
-                                        row.receiptNumber,
-                                      )
-                                    }
-                                  >
-                                    <Printer className="mr-1 h-3.5 w-3.5" />
-                                    {printingReceiptId === row._id
-                                      ? "…"
-                                      : "Print"}
-                                  </Button>
                                   <Button
                                     size="sm"
                                     variant="default"
@@ -2819,18 +2820,16 @@ export const StudentFeeRecordsPanel = () => {
                                     size="sm"
                                     variant="destructive"
                                     title="Delete this payment and reverse accounts"
-                                    disabled={deleteCollectionMutation.isPending}
+                                    disabled={
+                                      deleteCollectionMutation.isPending
+                                    }
                                     onClick={() => confirmDeleteReceipt(row)}
                                   >
                                     <Trash2 className="mr-1 h-3.5 w-3.5" />
                                     Delete
                                   </Button>
                                 </>
-                              ) : (
-                                <span className="text-xs text-slate-400">
-                                  View only
-                                </span>
-                              )}
+                              ) : null}
                             </div>
                           </Td>
                         </tr>

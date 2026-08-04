@@ -63,6 +63,7 @@ import {
   Receipt,
   Shield,
   ShoppingCart,
+  Trash2,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
@@ -340,22 +341,43 @@ export const AccountingManager = () => {
     if (canAccessAccounts) return "ACCOUNTANT" as const;
     return primary;
   })();
-  const isAdmin = isInstitutionAdmin(normalizedRole) || allRoles.some(isInstitutionAdmin);
+  /**
+   * Institution admin from primary or secondary roles — never demote Super Admin /
+   * College Admin just because finance "normalizedRole" resolved to ACCOUNTANT.
+   */
+  const primaryRole = normalizeUserRole(user?.role ?? "");
+  const isAdmin =
+    primaryRole === "SUPER_ADMIN" ||
+    primaryRole === "COLLEGE_ADMIN" ||
+    isInstitutionAdmin(primaryRole) ||
+    allRoles.some(
+      (r) =>
+        r === "SUPER_ADMIN" ||
+        r === "COLLEGE_ADMIN" ||
+        isInstitutionAdmin(r),
+    );
   const isAuditor = normalizedRole === "AUDITOR" || allRoles.includes("AUDITOR");
   const isPrincipal =
     normalizedRole === "PRINCIPAL" || allRoles.includes("PRINCIPAL");
   const isCashier = normalizedRole === "CASHIER" && !allRoles.includes("ACCOUNTANT");
-  const isReadOnlyCollegeAdmin = normalizedRole === "COLLEGE_VIEWER";
-  const canWrite = !isAuditor && !isPrincipal && !isReadOnlyCollegeAdmin;
+  const isReadOnlyCollegeAdmin =
+    !isAdmin &&
+    (normalizedRole === "COLLEGE_VIEWER" || primaryRole === "COLLEGE_VIEWER");
+  const canWrite =
+    isAdmin || (!isAuditor && !isPrincipal && !isReadOnlyCollegeAdmin);
+  /**
+   * Delete / reverse of posted accounting records:
+   * Super Admin + College Admin only (not Accountant / Cashier / others).
+   */
+  const canDelete = isAdmin;
   const canApprove =
     ACCOUNTING_APPROVER_ROLES.some((r) => allRoles.includes(r)) ||
     allRoles.some(isInstitutionAdmin);
   const canViewAudit =
     hasAccountingPermission(normalizedRole, "view_audit") ||
     allRoles.some((r) => hasAccountingPermission(r, "view_audit"));
-  const canReverse =
-    hasAccountingPermission(normalizedRole, "reverse_transaction") ||
-    allRoles.some((r) => hasAccountingPermission(r, "reverse_transaction"));
+  /** Same gate as canDelete — reverse is a form of delete for posted books */
+  const canReverse = isAdmin;
   const [tab, setTab] = useState<Tab>("dashboard");
   const [studentSearch, setStudentSearch] = useState("");
   const [accountSearch, setAccountSearch] = useState("");
@@ -821,6 +843,37 @@ export const AccountingManager = () => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  /** Delete from Reports: reverse journal (day-book) or reverse fee collection (scholarship). */
+  const deleteFromReport = useMutation({
+    mutationFn: async ({
+      kind,
+      id,
+    }: {
+      kind: "journal" | "fee-collection";
+      id: string;
+    }) => {
+      if (kind === "journal") {
+        return unwrap(api.post(`/accounting/journal-entries/${id}/reverse`));
+      }
+      const reason =
+        window.prompt("Reason for deleting this fee payment (required):") ?? "";
+      if (reason.trim().length < 3) {
+        throw new Error("Reason must be at least 3 characters");
+      }
+      return unwrap(
+        api.post(`/accounting/collections/${id}/reverse`, {
+          reason: reason.trim(),
+        }),
+      );
+    },
+    onSuccess: async () => {
+      toast.success("Record deleted — accounts updated");
+      await invalidateAccounting();
+      await reportQuery.refetch();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   const updateExpense = useMutation({
     mutationFn: ({
       id,
@@ -1197,7 +1250,7 @@ export const AccountingManager = () => {
       {tab === "deposit-records" ? <SecurityDepositRecordsPanel /> : null}
       {tab === "salary-records" ? <SalaryPaymentRecordsPanel /> : null}
       {tab === "refund-records" ? <RefundRecordsPanel /> : null}
-      {tab === "ledger" ? <LedgerPanel /> : null}
+      {tab === "ledger" ? <LedgerPanel canDelete={canDelete} /> : null}
 
       {/* Legacy fee-collection UI disabled — replaced by Student Fee Records */}
       {false && tab === "fee-records" ? (
@@ -1387,17 +1440,19 @@ export const AccountingManager = () => {
                               >
                                 Edit
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() =>
-                                  void deleteStructure.mutateAsync(
-                                    structure._id,
-                                  )
-                                }
-                              >
-                                Delete
-                              </Button>
+                              {canDelete ? (
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() =>
+                                    void deleteStructure.mutateAsync(
+                                      structure._id,
+                                    )
+                                  }
+                                >
+                                  Delete
+                                </Button>
+                              ) : null}
                             </div>
                           </Td>
                         </tr>
@@ -2397,7 +2452,7 @@ export const AccountingManager = () => {
                           >
                             Edit
                           </Button>
-                          {isAdmin ? (
+                          {canDelete ? (
                             <Button
                               size="sm"
                               variant="destructive"
@@ -2740,7 +2795,7 @@ export const AccountingManager = () => {
                               Mark Paid
                             </Button>
                           ) : null}
-                          {isAdmin ? (
+                          {canDelete ? (
                             <Button
                               size="sm"
                               variant="destructive"
@@ -2966,7 +3021,7 @@ export const AccountingManager = () => {
                           >
                             Edit
                           </Button>
-                          {isAdmin ? (
+                          {canDelete ? (
                             <Button
                               size="sm"
                               variant="destructive"
@@ -3405,26 +3460,90 @@ export const AccountingManager = () => {
                       {REPORT_COLUMNS[selectedReport].map((column) => (
                         <Th key={column.key}>{column.label}</Th>
                       ))}
+                      {canDelete &&
+                      (selectedReport === "day-book" ||
+                        selectedReport === "scholarship-report") ? (
+                        <Th className="text-right print:hidden">Actions</Th>
+                      ) : null}
                     </tr>
                   </TableHead>
                   <TableBody>
                     {standardReportRows.length === 0 ? (
                       <tr>
-                        <Td colSpan={REPORT_COLUMNS[selectedReport].length}>
+                        <Td
+                          colSpan={
+                            REPORT_COLUMNS[selectedReport].length +
+                            (canDelete &&
+                            (selectedReport === "day-book" ||
+                              selectedReport === "scholarship-report")
+                              ? 1
+                              : 0)
+                          }
+                        >
                           No report data for the selected filters.
                         </Td>
                       </tr>
                     ) : (
                       getReportRows(selectedReport, standardReportRows).map(
-                        (row, index) => (
-                          <tr key={index}>
-                            {REPORT_COLUMNS[selectedReport].map((column) => (
-                              <Td key={column.key}>
-                                {getReportCellValue(row, column)}
-                              </Td>
-                            ))}
-                          </tr>
-                        ),
+                        (row, index) => {
+                          const raw = row as Record<string, unknown>;
+                          const rowId = String(raw._id ?? "");
+                          const isRev =
+                            Boolean(raw.isReversed) || Boolean(raw.isReversal);
+                          const showDelete =
+                            canDelete &&
+                            rowId &&
+                            ((selectedReport === "day-book" && !isRev) ||
+                              selectedReport === "scholarship-report");
+                          return (
+                            <tr key={index}>
+                              {REPORT_COLUMNS[selectedReport].map((column) => (
+                                <Td key={column.key}>
+                                  {getReportCellValue(row, column)}
+                                </Td>
+                              ))}
+                              {canDelete &&
+                              (selectedReport === "day-book" ||
+                                selectedReport === "scholarship-report") ? (
+                                <Td className="text-right print:hidden">
+                                  {showDelete ? (
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      className="print:hidden"
+                                      disabled={deleteFromReport.isPending}
+                                      onClick={() => {
+                                        if (
+                                          !window.confirm(
+                                            selectedReport === "day-book"
+                                              ? "Delete this day-book voucher (reverse journal)?"
+                                              : "Delete this scholarship fee payment?",
+                                          )
+                                        ) {
+                                          return;
+                                        }
+                                        deleteFromReport.mutate({
+                                          kind:
+                                            selectedReport === "day-book"
+                                              ? "journal"
+                                              : "fee-collection",
+                                          id: rowId,
+                                        });
+                                      }}
+                                    >
+                                      <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                      Delete
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-slate-400">
+                                      —
+                                    </span>
+                                  )}
+                                </Td>
+                              ) : null}
+                            </tr>
+                          );
+                        },
                       )
                     )}
                   </TableBody>
@@ -3439,7 +3558,10 @@ export const AccountingManager = () => {
         <ChartOfAccountsPanel isAdmin={isAdmin} />
       ) : null}
       {tab === "journal-entries" ? (
-        <JournalEntriesPanel canWrite={canWrite && !isCashier} />
+        <JournalEntriesPanel
+          canWrite={canWrite && !isCashier}
+          canDelete={canDelete}
+        />
       ) : null}
 
       {false ? (

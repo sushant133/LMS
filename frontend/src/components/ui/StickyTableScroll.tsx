@@ -89,11 +89,15 @@ export const StickyTableScroll = ({
         {header}
       </div>
 
-      {/* Only the body scrolls vertically; horizontal scroll stays in sync with header */}
+      {/* Body: vertical + horizontal scroll; horizontal stays in sync with header */}
       <div
         ref={bodyRef}
         className={cn(
-          "min-h-0 min-w-0 overflow-auto overscroll-contain [scrollbar-width:thin]",
+          "min-h-0 min-w-0 overflow-auto overscroll-contain",
+          /* Clear left-right slider (thumb) like other fixed tables */
+          "[scrollbar-width:auto] [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar]:w-2.5",
+          "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300",
+          "[&::-webkit-scrollbar-track]:bg-slate-100",
           maxHeightClassName,
         )}
         onScroll={onBodyScroll}

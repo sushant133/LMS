@@ -24,6 +24,8 @@ import {
   Printer,
   Tag,
   Trash2,
+  UserMinus,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -1323,6 +1325,32 @@ const DutyCodesManager = ({
 
 // ─── Rosters list + create ──────────────────────────────────────────────────
 
+type RosterFormState = {
+  name: string;
+  academicYearBs: string;
+  program: string;
+  batchId: string;
+  yearId: string;
+  hospitalId: string;
+  startDateBs: string;
+  endDateBs: string;
+  coordinatorStaffId: string;
+  remarks: string;
+};
+
+const emptyRosterForm = (): RosterFormState => ({
+  name: "",
+  academicYearBs: "2083",
+  program: "HA",
+  batchId: "",
+  yearId: "",
+  hospitalId: "",
+  startDateBs: todayBsString(),
+  endDateBs: todayBsString(),
+  coordinatorStaffId: "",
+  remarks: "",
+});
+
 const RostersList = ({
   isAdmin,
   rosters,
@@ -1344,18 +1372,8 @@ const RostersList = ({
   onOpen: (id: string) => void;
   onChanged: () => Promise<void>;
 }) => {
-  const [form, setForm] = useState({
-    name: "",
-    academicYearBs: "2083",
-    program: "HA",
-    batchId: "",
-    yearId: "",
-    hospitalId: "",
-    startDateBs: todayBsString(),
-    endDateBs: todayBsString(),
-    coordinatorStaffId: "",
-    remarks: "",
-  });
+  const [form, setForm] = useState<RosterFormState>(emptyRosterForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const periodDays = useMemo(
     () => countInclusiveDays(form.startDateBs, form.endDateBs),
@@ -1380,6 +1398,27 @@ const RostersList = ({
       .slice()
       .sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
   }, [years, form.batchId]);
+
+  const startEdit = (r: HospitalRosterRecord) => {
+    setEditingId(r._id);
+    setForm({
+      name: r.name ?? "",
+      academicYearBs: r.academicYearBs ?? "2083",
+      program: r.program ?? "HA",
+      batchId: r.batchId ?? "",
+      yearId: r.yearId ?? "",
+      hospitalId: r.hospitalId ?? "",
+      startDateBs: r.startDateBs || todayBsString(),
+      endDateBs: r.endDateBs || r.startDateBs || todayBsString(),
+      coordinatorStaffId: r.coordinatorStaffId ?? "",
+      remarks: r.remarks ?? "",
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setForm(emptyRosterForm());
+  };
 
   const create = useMutation({
     mutationFn: () => {
@@ -1409,8 +1448,44 @@ const RostersList = ({
     },
     onSuccess: async (row) => {
       toast.success("Roster created — students loaded from batch/year");
+      setForm(emptyRosterForm());
       await onChanged();
       if (row?._id) onOpen(row._id);
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const update = useMutation({
+    mutationFn: () => {
+      if (!editingId) throw new Error("No roster selected");
+      if (!form.startDateBs?.trim() || !form.endDateBs?.trim()) {
+        throw new Error("Select From and To dates");
+      }
+      if (periodDays < 1) {
+        throw new Error("To date must be on or after From date");
+      }
+      if (periodDays > 93) {
+        throw new Error("Roster period cannot exceed 93 days");
+      }
+      return unwrap<HospitalRosterRecord>(
+        api.put(`/field-duty/hospital-rosters/${editingId}`, {
+          name: form.name,
+          academicYearBs: form.academicYearBs,
+          program: form.program,
+          batchId: form.batchId,
+          yearId: form.yearId,
+          hospitalId: form.hospitalId,
+          startDateBs: form.startDateBs,
+          endDateBs: form.endDateBs,
+          coordinatorStaffId: cleanOptionalId(form.coordinatorStaffId) ?? "",
+          remarks: form.remarks,
+        }),
+      );
+    },
+    onSuccess: async () => {
+      toast.success("Roster updated");
+      cancelEdit();
+      await onChanged();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
@@ -1418,8 +1493,9 @@ const RostersList = ({
   const remove = useMutation({
     mutationFn: (id: string) =>
       unwrap(api.delete(`/field-duty/hospital-rosters/${id}`)),
-    onSuccess: async () => {
+    onSuccess: async (_data, id) => {
       toast.success("Roster deleted");
+      if (editingId === id) cancelEdit();
       await onChanged();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -1427,12 +1503,32 @@ const RostersList = ({
 
   if (loading) return <LoadingState />;
 
+  const formDisabled =
+    create.isPending ||
+    update.isPending ||
+    !form.name.trim() ||
+    !form.batchId ||
+    !form.yearId ||
+    !form.hospitalId ||
+    !form.startDateBs ||
+    !form.endDateBs ||
+    periodDays < 1 ||
+    periodDays > 93;
+
   return (
     <div className="grid gap-6 xl:grid-cols-[400px_1fr]">
       {isAdmin ? (
         <Card>
-          <CardHeader>
-            <CardTitle>Create hospital roster</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle>
+              {editingId ? "Edit hospital roster" : "Create hospital roster"}
+            </CardTitle>
+            {editingId ? (
+              <Button size="sm" variant="ghost" onClick={cancelEdit}>
+                <X className="mr-1 h-3.5 w-3.5" />
+                Cancel
+              </Button>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-3">
             <FormField label="Roster name *">
@@ -1516,7 +1612,6 @@ const RostersList = ({
                   onChange={(v) => {
                     setForm((f) => {
                       const next = { ...f, startDateBs: v };
-                      // Keep end on/after start when user moves From forward
                       if (v && f.endDateBs && countInclusiveDays(v, f.endDateBs) < 1) {
                         next.endDateBs = v;
                       }
@@ -1559,22 +1654,26 @@ const RostersList = ({
                 onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))}
               />
             </FormField>
-            <Button
-              disabled={
-                create.isPending ||
-                !form.name.trim() ||
-                !form.batchId ||
-                !form.yearId ||
-                !form.hospitalId ||
-                !form.startDateBs ||
-                !form.endDateBs ||
-                periodDays < 1 ||
-                periodDays > 93
-              }
-              onClick={() => create.mutate()}
-            >
-              Create roster
-            </Button>
+            {editingId ? (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={formDisabled}
+                  onClick={() => update.mutate()}
+                >
+                  {update.isPending ? "Saving…" : "Save changes"}
+                </Button>
+                <Button variant="outline" onClick={cancelEdit}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                disabled={formDisabled}
+                onClick={() => create.mutate()}
+              >
+                Create roster
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : null}
@@ -1592,7 +1691,12 @@ const RostersList = ({
             rosters.map((r) => (
               <div
                 key={r._id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-3"
+                className={cn(
+                  "flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-3",
+                  editingId === r._id
+                    ? "border-brand-300 bg-brand-50/50"
+                    : "border-slate-200",
+                )}
               >
                 <div className="min-w-0">
                   <p className="font-medium text-slate-900">{r.name}</p>
@@ -1612,12 +1716,35 @@ const RostersList = ({
                     <Button
                       size="sm"
                       variant="outline"
+                      onClick={() => startEdit(r)}
+                    >
+                      <Pencil className="mr-1 h-3.5 w-3.5" />
+                      Edit
+                    </Button>
+                  ) : null}
+                  {isAdmin ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-rose-700 hover:bg-rose-50"
+                      disabled={remove.isPending}
                       onClick={() => {
-                        if (window.confirm(`Delete roster "${r.name}"?`)) {
+                        if (r.status === "LOCKED") {
+                          toast.error(
+                            "Unlock the roster first, then delete it.",
+                          );
+                          return;
+                        }
+                        if (
+                          window.confirm(
+                            `Delete roster "${r.name}"? This cannot be undone.`,
+                          )
+                        ) {
                           remove.mutate(r._id);
                         }
                       }}
                     >
+                      <Trash2 className="mr-1 h-3.5 w-3.5" />
                       Delete
                     </Button>
                   ) : null}
@@ -1673,10 +1800,22 @@ const RosterBuilder = ({
     null,
   );
   const [dirty, setDirty] = useState(false);
+  /**
+   * In-app cell clipboard for Ctrl+C / Ctrl+V on individual student cells
+   * (shift, department, code, remarks) — not whole day columns.
+   */
+  const cellClipboardRef = useRef<{
+    shiftId?: string;
+    departmentId?: string;
+    code?: string;
+    remarks?: string;
+  } | null>(null);
   const localCellsRef = useRef(localCells);
   localCellsRef.current = localCells;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   // Re-sync when opening a different roster. When the server revision changes,
   // only apply if there are no local unsaved edits (avoids wiping work mid-type).
@@ -1684,6 +1823,7 @@ const RosterBuilder = ({
     setLocalCells(roster.cells ?? []);
     setDirty(false);
     setSelected(null);
+    cellClipboardRef.current = null;
   }, [roster._id]);
 
   useEffect(() => {
@@ -1760,6 +1900,80 @@ const RosterBuilder = ({
     });
     setDirty(true);
   };
+
+  // Ctrl+C / Ctrl+V / Backspace on selected student cell (not when typing in inputs)
+  useEffect(() => {
+    if (!isAdmin || locked) return;
+
+    const isTypingTarget = (el: EventTarget | null) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable
+      );
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      const sel = selectedRef.current;
+      if (!sel) return;
+      const key = e.key.toLowerCase();
+      const mod = e.ctrlKey || e.metaKey;
+
+      // Clear selected cell
+      if (!mod && (key === "backspace" || key === "delete")) {
+        e.preventDefault();
+        setCell(sel.studentId, sel.day, {
+          shiftId: "",
+          departmentId: "",
+          code: "",
+          remarks: "",
+        });
+        toast.success("Cell cleared");
+        return;
+      }
+
+      if (!mod) return;
+
+      if (key === "c") {
+        const cell = localCellsRef.current.find(
+          (c) => c.studentId === sel.studentId && c.day === sel.day,
+        );
+        cellClipboardRef.current = {
+          shiftId: cell?.shiftId,
+          departmentId: cell?.departmentId,
+          code: cell?.code ?? "",
+          remarks: cell?.remarks ?? "",
+        };
+        e.preventDefault();
+        toast.success("Cell copied — select another cell and press Ctrl+V");
+        return;
+      }
+
+      if (key === "v") {
+        const clip = cellClipboardRef.current;
+        if (!clip) {
+          toast.message("Nothing copied yet. Select a cell and press Ctrl+C first.");
+          return;
+        }
+        e.preventDefault();
+        setCell(sel.studentId, sel.day, {
+          shiftId: clip.shiftId ?? "",
+          departmentId: clip.departmentId ?? "",
+          code: clip.code ?? "",
+          remarks: clip.remarks ?? "",
+        });
+        toast.success("Pasted into selected cell");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, locked, roster._id]);
 
   const saveCells = useMutation({
     mutationFn: (cells: HospitalRosterCell[]) =>
@@ -1848,21 +2062,36 @@ const RosterBuilder = ({
     setDirty(true);
   };
 
-  const copyDay = (fromDay: number, toDay: number) => {
-    if (locked || !isAdmin) return;
-    setLocalCells((prev) => {
-      const from = prev.filter((c) => c.day === fromDay);
-      const rest = prev.filter((c) => c.day !== toDay);
-      const copied = from.map((c) => ({
-        ...c,
-        day: toDay,
-        shiftId: cleanOptionalId(c.shiftId),
-        departmentId: cleanOptionalId(c.departmentId),
-      }));
-      return [...rest, ...copied];
-    });
-    setDirty(true);
-  };
+  const removeStudentMut = useMutation({
+    mutationFn: async (studentId: string) => {
+      const remaining = (roster.studentIds ?? [])
+        .map(String)
+        .filter((id) => id !== studentId);
+      // Persist cell grid without this student, then update student list
+      // (backend also drops their cells when students are updated).
+      const cellsForSave = sanitizeCellsForApi(
+        localCellsRef.current.filter((c) => c.studentId !== studentId),
+      );
+      await unwrap(
+        api.put(`/field-duty/hospital-rosters/${roster._id}/cells`, {
+          cells: cellsForSave,
+          replace: true,
+        }),
+      );
+      return unwrap(
+        api.put(`/field-duty/hospital-rosters/${roster._id}/students`, {
+          studentIds: remaining,
+        }),
+      );
+    },
+    onSuccess: async () => {
+      toast.success("Student removed from roster");
+      setDirty(false);
+      setSelected(null);
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
 
   const selectedCell = selected
     ? cellMap.get(cellKey(selected.studentId, selected.day))
@@ -1941,30 +2170,6 @@ const RosterBuilder = ({
           </div>
         </CardHeader>
         <CardContent className="min-w-0 space-y-3">
-          {/* Quick tools */}
-          {isAdmin && !locked ? (
-            <div className="flex flex-wrap gap-2 print:hidden">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (dayCount >= 2) {
-                    copyDay(1, 2);
-                    toast.success("Copied day 1 → day 2 (adjust as needed)");
-                  } else {
-                    toast.message("Need at least 2 days in this roster period");
-                  }
-                }}
-              >
-                Copy day 1 → 2
-              </Button>
-              <span className="self-center text-xs text-slate-500">
-                Select a cell to set shift + department + code. Columns are From→To dates
-                (1 day minimum).
-              </span>
-            </div>
-          ) : null}
-
           {/* Grid */}
           <div className="max-h-[min(70vh,720px)] overflow-auto overscroll-contain rounded-xl border border-slate-200 [scrollbar-width:thin]">
             <table className="w-full min-w-[1100px] border-collapse text-xs">
@@ -2005,7 +2210,7 @@ const RosterBuilder = ({
                 ) : (
                   students.map((st) => (
                     <tr key={st.studentId}>
-                      <td className="sticky left-0 z-10 max-w-[160px] border border-slate-200 bg-white px-2 py-1 font-medium text-slate-900">
+                      <td className="sticky left-0 z-10 max-w-[180px] border border-slate-200 bg-white px-2 py-1 font-medium text-slate-900">
                         <div className="truncate" title={st.fullName}>
                           {st.fullName}
                         </div>
@@ -2014,7 +2219,7 @@ const RosterBuilder = ({
                           {st.admissionNumber ?? ""}
                         </div>
                         {isAdmin && !locked ? (
-                          <div className="mt-0.5 flex gap-1 print:hidden">
+                          <div className="mt-0.5 flex flex-wrap gap-1 print:hidden">
                             <button
                               type="button"
                               className="text-[10px] text-brand-700 underline"
@@ -2028,10 +2233,27 @@ const RosterBuilder = ({
                             </button>
                             <button
                               type="button"
-                              className="text-[10px] text-rose-700 underline"
+                              className="text-[10px] text-amber-700 underline"
                               onClick={() => clearRow(st.studentId)}
                             >
-                              Clear
+                              Clear days
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-rose-700 underline"
+                              disabled={removeStudentMut.isPending}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `Remove ${st.fullName} from this roster? Their day assignments will be deleted.`,
+                                  )
+                                ) {
+                                  removeStudentMut.mutate(st.studentId);
+                                }
+                              }}
+                            >
+                              <UserMinus className="h-3 w-3" />
+                              Remove
                             </button>
                           </div>
                         ) : null}
@@ -2083,6 +2305,7 @@ const RosterBuilder = ({
                   Editing day {selected.day} —{" "}
                   {students.find((s) => s.studentId === selected.studentId)?.fullName}
                 </p>
+
                 <FormField label="Shift">
                   <Select
                     value={selectedCell?.shiftId ?? ""}
@@ -2137,9 +2360,6 @@ const RosterBuilder = ({
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Manage codes under the Codes tab (create / edit / delete).
-                  </p>
                 </FormField>
                 <FormField label="Cell remarks">
                   <Input
@@ -2151,7 +2371,7 @@ const RosterBuilder = ({
                     }
                   />
                 </FormField>
-                <div className="sm:col-span-2 lg:col-span-4 flex gap-2">
+                <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -2175,9 +2395,9 @@ const RosterBuilder = ({
             </Card>
           ) : null}
 
-          {/* Legend */}
+          {/* Note */}
           <div className="flex flex-wrap gap-3 text-xs text-slate-600">
-            <span className="font-semibold text-slate-800">Legend:</span>
+            <span className="font-semibold text-slate-800">Note:</span>
             {shifts
               .filter((s) => s.isActive)
               .map((s) => (

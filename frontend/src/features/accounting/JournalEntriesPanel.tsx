@@ -16,7 +16,6 @@ import {
   FileText,
   Plus,
   Printer,
-  RotateCcw,
   Search,
   Trash2,
 } from "lucide-react";
@@ -183,7 +182,14 @@ type CreateVoucherResponse = {
   journalEntry: JournalEntryRecord;
 };
 
-export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
+export const JournalEntriesPanel = ({
+  canWrite,
+  /** Super Admin / College Admin only — delete (reverse) journal entries */
+  canDelete = false,
+}: {
+  canWrite: boolean;
+  canDelete?: boolean;
+}) => {
   const [tab, setTab] = useState<JournalPanelTab>("ledger");
   const [ledgerSearch, setLedgerSearch] = useState("");
   /** Tracks which PDF action is in progress (button disable + feedback). */
@@ -283,7 +289,7 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
     mutationFn: (id: string) =>
       unwrap(api.post(`/accounting/journal-entries/${id}/reverse`)),
     onSuccess: async () => {
-      toast.success("जर्नल प्रविष्टि उल्ट्याइयो");
+      toast.success("Journal entry deleted (reversed)");
       const { invalidateAccountingQueries } = await import(
         "./invalidateAccountingQueries"
       );
@@ -291,6 +297,17 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
+
+  const confirmDeleteJournal = (entry: JournalEntryRecord) => {
+    if (
+      !window.confirm(
+        `Delete journal ${entry.voucherNumber}?\n\nThis posts a reversing entry so the ledger stays correct. Linked fee/expense items must be deleted from their own module.`,
+      )
+    ) {
+      return;
+    }
+    reverse.mutate(entry._id);
+  };
 
   const createVoucher = useMutation({
     mutationFn: (payload: GoshwaraVoucherInput) =>
@@ -735,17 +752,18 @@ export const JournalEntriesPanel = ({ canWrite }: { canWrite: boolean }) => {
                               >
                                 {printingKey === blankKey ? "…" : "Blank"}
                               </Button>
-                              {canWrite &&
+                              {canDelete &&
                               !entry.isReversal &&
                               !entry.isReversed ? (
                                 <Button
                                   size="sm"
-                                  variant="outline"
-                                  onClick={() => reverse.mutate(entry._id)}
+                                  variant="destructive"
+                                  title="Delete (reverse) — Super Admin / College Admin only"
+                                  onClick={() => confirmDeleteJournal(entry)}
                                   disabled={reverse.isPending}
                                 >
-                                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                                  Reverse
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Delete
                                 </Button>
                               ) : null}
                             </div>

@@ -1,4 +1,5 @@
-import { ExamManager } from "features/exams/ExamManager";
+import { ExaminationManagementHub } from "features/exams/ExaminationManagementHub";
 
-export const ExamsPage = () => <ExamManager />;
+/** Examination Management — College (current exams) + CTEVT (upcoming). */
+export const ExamsPage = () => <ExaminationManagementHub />;
 

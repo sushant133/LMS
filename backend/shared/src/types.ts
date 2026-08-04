@@ -351,10 +351,29 @@ export interface StudentRecord {
   securityDepositWaived?: boolean;
   /** When true, student is on full scholarship (no fee amount due). */
   hasScholarship?: boolean;
+  /**
+   * CTEVT registration fee status (Examination Management → CTEVT → Registration).
+   * Unset until staff marks Paid / Not Paid.
+   */
+  ctevtRegistrationFeeStatus?: "PAID" | "NOT_PAID";
+  /** When registration fee status was last changed (ISO). */
+  ctevtRegistrationFeeUpdatedAt?: string;
+  /**
+   * CTEVT exam fee status (Examination Management → CTEVT → Exam).
+   * Unset until staff marks Paid / Not Paid.
+   */
+  ctevtExamFeeStatus?: "PAID" | "NOT_PAID";
+  /** When exam fee status was last changed (ISO). */
+  ctevtExamFeeUpdatedAt?: string;
   remarks?: string;
   // New for Phase 0 foundations
   photoUrl?: string;
   documents?: StudentDocument[];
+  /** Populated labels from list endpoints (not always present). */
+  batchName?: string;
+  yearName?: string;
+  className?: string;
+  sectionName?: string;
   createdAt?: string;
   updatedAt?: string;
 }

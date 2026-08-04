@@ -543,9 +543,9 @@ export const AttendanceRegisterManager = ({
         </div>
       ) : null}
 
-      {/* Legend */}
+      {/* Note */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="font-semibold text-slate-600">Legend:</span>
+        <span className="font-semibold text-slate-600">Note:</span>
         {(data?.legend ?? meta?.legend ?? []).map((item) => (
           <span
             key={item.status}

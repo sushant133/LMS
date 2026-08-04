@@ -22,6 +22,10 @@ export const ERP_MODULE_KEYS = [
   "academic-calendar",
   "timetable",
   "examinations",
+  /** Examination Management (admin) — College exams & results */
+  "examinations-college",
+  /** Examination Management (admin) — CTEVT registration & exam fees */
+  "examinations-ctevt",
   "results",
   "homework",
   "notices",
@@ -236,10 +240,11 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
   },
   {
     key: "examinations",
-    label: "Examination & Results",
-    description: "Exams, routines, marks, results, mark sheets",
+    label: "My Examinations (teaching)",
+    description:
+      "Teacher/student exam routines, marks entry, and published results (My Work). Not the admin Examination Management hub.",
     apiPrefixes: ["/exams"],
-    routePrefixes: ["/exams", "/examination", "/exams-view", "/results", "/print-results"],
+    routePrefixes: ["/exams"],
     availableActions: [
       "view",
       "create",
@@ -252,6 +257,36 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
       "export",
       "manage"
     ]
+  },
+  {
+    key: "examinations-college",
+    label: "Examination — College",
+    description:
+      "Examination Management → College: create exams, routines, marks, results, and marksheets",
+    apiPrefixes: ["/exams"],
+    routePrefixes: ["/exams-view", "/examination", "/results", "/print-results"],
+    availableActions: [
+      "view",
+      "create",
+      "edit",
+      "delete",
+      "verify",
+      "approve",
+      "publish",
+      "print",
+      "export",
+      "manage"
+    ]
+  },
+  {
+    key: "examinations-ctevt",
+    label: "Examination — CTEVT",
+    description:
+      "Examination Management → CTEVT: registration fee and exam fee tracking",
+    // Fee endpoints live under /students; access enforced via examinations-ctevt in the guard
+    apiPrefixes: [],
+    routePrefixes: ["/exams-view"],
+    availableActions: ["view", "edit", "manage", "export", "print"]
   },
   {
     key: "results",
@@ -664,7 +699,8 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
       "academic-management",
       "academic-calendar",
       "timetable",
-      "examinations",
+      "examinations-college",
+      "examinations-ctevt",
       "results",
       "homework"
     ]
@@ -754,6 +790,50 @@ export const canAccessAttendanceManagement = (
   map: ModuleAccessMap | null | undefined
 ): boolean =>
   ATTENDANCE_MANAGEMENT_MODULE_KEYS.some((key) => canAccessModule(map, key));
+
+/**
+ * Examination Management hub (/exams-view) — College and/or CTEVT.
+ * Admin / Super Admin assign each separately: College only, CTEVT only, both, or none.
+ * Note: teaching module `examinations` is separate (My Work) and does not unlock this hub.
+ */
+export const EXAMINATION_MANAGEMENT_MODULE_KEYS: readonly ErpModuleKey[] = [
+  "examinations-college",
+  "examinations-ctevt"
+] as const;
+
+export const isExaminationManagementPath = (routePath: string): boolean => {
+  const path = (routePath.split("?")[0] ?? routePath) || "/";
+  return (
+    path === "/exams-view" ||
+    path.startsWith("/exams-view/") ||
+    path === "/examination" ||
+    path.startsWith("/examination/")
+  );
+};
+
+/** College section of Examination Management. */
+export const canAccessExaminationCollege = (
+  map: ModuleAccessMap | null | undefined
+): boolean => canAccessModule(map, "examinations-college");
+
+/** CTEVT section of Examination Management (registration fee + exam fee). */
+export const canAccessExaminationCtevt = (
+  map: ModuleAccessMap | null | undefined
+): boolean => canAccessModule(map, "examinations-ctevt");
+
+/** True if the user may open the Examination Management hub at all. */
+export const canAccessExaminationManagement = (
+  map: ModuleAccessMap | null | undefined
+): boolean =>
+  canAccessExaminationCollege(map) || canAccessExaminationCtevt(map);
+
+export const canWriteExaminationCollege = (
+  map: ModuleAccessMap | null | undefined
+): boolean => canWriteModule(map, "examinations-college");
+
+export const canWriteExaminationCtevt = (
+  map: ModuleAccessMap | null | undefined
+): boolean => canWriteModule(map, "examinations-ctevt");
 
 export const canReadModule = (
   map: ModuleAccessMap | null | undefined,

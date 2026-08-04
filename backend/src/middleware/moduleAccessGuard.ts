@@ -1,6 +1,10 @@
 import type { NextFunction, Request, Response } from "express";
 import {
+  canAccessExaminationCollege,
+  canAccessExaminationCtevt,
   canAccessModule,
+  canWriteExaminationCollege,
+  canWriteExaminationCtevt,
   canWriteModule,
   hasModuleAction,
   inferActionFromApiPath,
@@ -128,6 +132,58 @@ export const enforceModuleAccess = async (
     }
 
     /**
+     * CTEVT fee endpoints (Examination Management → CTEVT).
+     * Require examinations-ctevt; not covered by the generic students module alone.
+     */
+    if (
+      /\/api\/students\/ctevt-(registration|exam)-fee(\/|$)/.test(originalPath)
+    ) {
+      const accessMap = await getUserModuleAccessMap(req.user.userId);
+      if (!canAccessExaminationCtevt(accessMap)) {
+        return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
+      }
+      if (!READ_METHODS.has(req.method) && !canWriteExaminationCtevt(accessMap)) {
+        return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
+      }
+      return next();
+    }
+
+    /**
+     * Exam APIs: teaching "examinations", admin "examinations-college", or "results".
+     * (Multiple modules share /exams prefixes.)
+     */
+    if (/\/api\/exams(\/|$)/.test(originalPath)) {
+      const [accessMap, secondaryRoles] = await Promise.all([
+        getUserModuleAccessMap(req.user.userId),
+        (async () => {
+          const { getUserSecondaryRoles } = await import("../utils/moduleAccessService.js");
+          return getUserSecondaryRoles(req.user!.userId);
+        })()
+      ]);
+      const isTeacherRole =
+        req.user.role === "TEACHER" || secondaryRoles.includes("TEACHER");
+      const canCollege = canAccessExaminationCollege(accessMap);
+      const canTeaching =
+        canAccessModule(accessMap, "examinations") ||
+        (isTeacherRole && TEACHER_MY_WORK_MODULE_KEYS.has("examinations"));
+      const canResults = canAccessModule(accessMap, "results");
+      if (!canCollege && !canTeaching && !canResults) {
+        return next(new ApiError(403, MODULE_ACCESS_DENIED_MESSAGE));
+      }
+      if (!READ_METHODS.has(req.method)) {
+        const canWrite =
+          canWriteExaminationCollege(accessMap) ||
+          canWriteModule(accessMap, "examinations") ||
+          (isTeacherRole && TEACHER_MY_WORK_MODULE_KEYS.has("examinations")) ||
+          canWriteModule(accessMap, "results");
+        if (!canWrite) {
+          return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
+        }
+      }
+      return next();
+    }
+
+    /**
      * Field Management (/api/field-duty):
      * - Student/parent portals: allow (route authorize enforces role)
      * - Module "field-duty" grant: allow
@@ -215,6 +271,18 @@ export const enforceModuleAccess = async (
       READ_METHODS.has(req.method) &&
       (moduleKey === "students" || moduleKey === "academics") &&
       canAccessModule(accessMap, "accounts")
+    ) {
+      return next();
+    }
+
+    /**
+     * CTEVT fee desk needs student roster + batch/year lists (read-only)
+     * even when only Examination — CTEVT is granted.
+     */
+    if (
+      READ_METHODS.has(req.method) &&
+      (moduleKey === "students" || moduleKey === "academics") &&
+      canAccessExaminationCtevt(accessMap)
     ) {
       return next();
     }

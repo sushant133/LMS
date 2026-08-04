@@ -1,5 +1,11 @@
 import { parseBsDate } from "@munatech/nepali-datepicker";
-import { Suspense, lazy, useMemo, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ClassRecord,
@@ -99,7 +105,15 @@ interface MarksheetResponse {
   subjects: SubjectRecord[];
 }
 
-export const ExamManager = () => {
+interface ExamManagerProps {
+  /**
+   * When true, omit outer PageContent / main PageHeader
+   * (used inside Examination Management → College section).
+   */
+  embedded?: boolean;
+}
+
+export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   const { user } = useAuth();
   const role = useNormalizedRole();
   const isTeacher = userIsTeacher(user) || role === "TEACHER";
@@ -828,43 +842,54 @@ export const ExamManager = () => {
             ? batchesQuery.isLoading || yearsQuery.isLoading
             : classesQuery.isLoading || sectionsQuery.isLoading)));
 
+  const shell = (children: ReactNode) =>
+    embedded ? (
+      <div className="space-y-6">{children}</div>
+    ) : (
+      <PageContent className="space-y-6">{children}</PageContent>
+    );
+
   if (isLoading) {
-    return <LoadingState />;
+    return shell(<LoadingState />);
   }
 
   if (isTeacher && teacherScopeQuery.isError) {
-    return (
-      <PageContent>
-        <PageHeader
-          title="Exams & Results"
-          description="View exam routines and enter marks for your assigned subjects."
-        />
+    return shell(
+      <>
+        {!embedded ? (
+          <PageHeader
+            title="Exams & Results"
+            description="View exam routines and enter marks for your assigned subjects."
+          />
+        ) : null}
         <EmptyState
           title="Could not load your teaching assignments"
           description={parseErrorMessage(teacherScopeQuery.error)}
         />
-      </PageContent>
+      </>,
     );
   }
 
   if (isTeacher && teacherScopeQuery.isLoading) {
-    return <LoadingState />;
+    return shell(<LoadingState />);
   }
 
-  return (
-    <PageContent className="space-y-6">
-      <PageHeader
-        title="Exams & Results"
-        description={
-          canManage
-            ? "Create exams, publish routines, manage results, and view analytics."
-            : isAdmin
-              ? "View exams, routines, results, and print published marksheets (read-only)."
-              : isTeacher
-                ? "View exam routines and enter marks for your assigned subjects."
-                : "View your exam schedule and published results."
-        }
-      />
+  return shell(
+    <>
+      {!embedded ? (
+        <PageHeader
+          title="Exams & Results"
+          description={
+            canManage
+              ? "Create exams, publish routines, manage results, and view analytics."
+              : isAdmin
+                ? "View exams, routines, results, and print published marksheets (read-only)."
+                : isTeacher
+                  ? "View exam routines and enter marks for your assigned subjects."
+                  : "View your exam schedule and published results."
+          }
+        />
+      ) : null}
 
       {isStudentOrParent ? (
         <Suspense fallback={<LoadingState />}>
@@ -2352,6 +2377,6 @@ export const ExamManager = () => {
           </CardContent>
         </Card>
       ) : null}
-    </PageContent>
+    </>,
   );
 };

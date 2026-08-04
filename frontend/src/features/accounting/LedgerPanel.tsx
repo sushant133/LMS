@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ChartOfAccountRecord,
   JournalEntryRecord,
@@ -9,6 +9,7 @@ import {
   FileDown,
   Printer,
   Search,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -21,12 +22,13 @@ import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
-import { formatCurrencyNpr } from "lib/utils";
+import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel, formatDualDateCell } from "./accountingUtils";
 import { printSimpleDocument } from "./voucherPrint";
 
 type LedgerLine = {
   key: string;
+  journalEntryId: string;
   dateBs: string;
   voucherNumber: string;
   accountCode: string;
@@ -36,6 +38,8 @@ type LedgerLine = {
   debitNpr: number;
   creditNpr: number;
   referenceType?: string;
+  isReversal?: boolean;
+  isReversed?: boolean;
   runningBalanceNpr: number;
 };
 
@@ -71,7 +75,12 @@ const groupLabel = (accountType?: string): string => {
  * Practical college ledger — account-wise view of posted journal lines.
  * Auto-filled by fee collections, salaries, refunds, expenses, purchases, and manual गोश्वारा.
  */
-export const LedgerPanel = () => {
+export const LedgerPanel = ({
+  /** Super Admin / College Admin only — delete ledger lines (reverse journal) */
+  canDelete = false,
+}: {
+  canDelete?: boolean;
+}) => {
   const [accountCode, setAccountCode] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -88,6 +97,19 @@ export const LedgerPanel = () => {
     queryKey: ["accounting-journal-entries"],
     queryFn: () =>
       unwrap<JournalEntryRecord[]>(api.get("/accounting/journal-entries")),
+  });
+
+  const deleteJournal = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/accounting/journal-entries/${id}/reverse`)),
+    onSuccess: async () => {
+      toast.success("Ledger entry deleted (journal reversed)");
+      const { invalidateAccountingQueries } = await import(
+        "./invalidateAccountingQueries"
+      );
+      await invalidateAccountingQueries();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
   const accounts = accountsQuery.data ?? [];
@@ -148,6 +170,7 @@ export const LedgerPanel = () => {
 
         allLines.push({
           key: `${je._id}-${line.accountCode}-${line.debitNpr}-${line.creditNpr}-${allLines.length}`,
+          journalEntryId: je._id,
           dateBs: je.dateBs,
           voucherNumber: je.voucherNumber,
           accountCode: line.accountCode,
@@ -157,6 +180,8 @@ export const LedgerPanel = () => {
           debitNpr: line.debitNpr,
           creditNpr: line.creditNpr,
           referenceType: je.referenceType,
+          isReversal: Boolean(je.isReversal),
+          isReversed: Boolean(je.isReversed),
           runningBalanceNpr: next,
         });
       }
@@ -485,11 +510,21 @@ export const LedgerPanel = () => {
                       <Th className="text-right">Debit</Th>
                       <Th className="text-right">Credit</Th>
                       <Th className="text-right">Running Balance</Th>
+                      {canDelete ? (
+                        <Th className="text-right">Actions</Th>
+                      ) : null}
                     </tr>
                   </TableHead>
                   <TableBody>
                     {[...lines].reverse().map((row) => {
                       const dual = formatDualDateCell({ dateBs: row.dateBs });
+                      const canDeleteLine =
+                        canDelete &&
+                        !row.isReversal &&
+                        !row.isReversed &&
+                        (!row.referenceType ||
+                          row.referenceType === "Manual" ||
+                          row.referenceType === "GoshwaraVoucher");
                       return (
                       <tr key={row.key}>
                         <Td className="whitespace-nowrap text-sm">
@@ -528,6 +563,44 @@ export const LedgerPanel = () => {
                         <Td className="text-right text-sm font-medium">
                           {formatCurrencyNpr(row.runningBalanceNpr)}
                         </Td>
+                        {canDelete ? (
+                          <Td className="text-right">
+                            {canDeleteLine ? (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={deleteJournal.isPending}
+                                title="Delete (reverse) — Super Admin / College Admin only"
+                                onClick={() => {
+                                  if (
+                                    !window.confirm(
+                                      `Delete voucher ${row.voucherNumber} from the ledger?\n\nThis reverses the full journal entry (all accounts).`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  deleteJournal.mutate(row.journalEntryId);
+                                }}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                Delete
+                              </Button>
+                            ) : (
+                              <span
+                                className="text-xs text-slate-400"
+                                title={
+                                  row.isReversed || row.isReversal
+                                    ? "Already reversed"
+                                    : "Delete from the source module (fees, expense, etc.)"
+                                }
+                              >
+                                {row.isReversed || row.isReversal
+                                  ? "Reversed"
+                                  : "—"}
+                              </span>
+                            )}
+                          </Td>
+                        ) : null}
                       </tr>
                       );
                     })}

@@ -17,9 +17,32 @@ export const EMPLOYEE_ATTENDANCE_STATUSES = [
 ] as const;
 export type EmployeeAttendanceStatus = (typeof EMPLOYEE_ATTENDANCE_STATUSES)[number];
 
-export const EMPLOYEE_ATTENDANCE_RECORD_STATUSES = ["DRAFT", "SUBMITTED", "LOCKED"] as const;
+/**
+ * Day-sheet lifecycle for teacher/staff attendance:
+ * - DRAFT — working draft
+ * - CHECK_IN_SUBMITTED — check-in times recorded (still editable for check-out)
+ * - CHECK_OUT_SUBMITTED — check-out times recorded (still open until final)
+ * - SUBMITTED / LOCKED — final day sheet (legacy SUBMITTED treated as locked)
+ */
+export const EMPLOYEE_ATTENDANCE_RECORD_STATUSES = [
+  "DRAFT",
+  "CHECK_IN_SUBMITTED",
+  "CHECK_OUT_SUBMITTED",
+  "SUBMITTED",
+  "LOCKED"
+] as const;
 export type EmployeeAttendanceRecordStatus =
   (typeof EMPLOYEE_ATTENDANCE_RECORD_STATUSES)[number];
+
+/** Submit step for the same table (check-in → check-out → final lock). */
+export const EMPLOYEE_ATTENDANCE_SUBMIT_PHASES = [
+  "DRAFT",
+  "CHECK_IN",
+  "CHECK_OUT",
+  "FINAL"
+] as const;
+export type EmployeeAttendanceSubmitPhase =
+  (typeof EMPLOYEE_ATTENDANCE_SUBMIT_PHASES)[number];
 
 /** Capture source — MANUAL today; ready for devices later. */
 export const EMPLOYEE_ATTENDANCE_SOURCES = [
