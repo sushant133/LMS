@@ -569,6 +569,10 @@ export const TEACHER_BASELINE_MODULE_KEYS: readonly ErpModuleKey[] = [
   "dashboard",
   "profile",
   "students",
+  /** Batches/years/subjects lists used as filters across teaching screens */
+  "academics",
+  /** Own subject assignment matrix (read via scope; admin UI still admin-only) */
+  "subject-assignment",
   "attendance",
   "daily-attendance",
   "academic-management",
@@ -661,6 +665,13 @@ export const applyFinanceRoleBaseline = (
   }
   if (next.profile === undefined || next.profile === "NONE") {
     next.profile = "WRITE";
+  }
+  // Fee/refund pickers need batch + year (+ student) lists even when Academics is Hidden
+  if (next.academics === undefined || next.academics === "NONE") {
+    next.academics = "READ_ONLY";
+  }
+  if (next.students === undefined || next.students === "NONE") {
+    next.students = "READ_ONLY";
   }
   return next;
 };

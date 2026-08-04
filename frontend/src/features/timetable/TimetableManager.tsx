@@ -155,7 +155,8 @@ export const TimetableManager = () => {
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/batches")),
-    enabled: (isAdmin || isTeacher) && isCollege,
+    // Teachers use /teacher/scope for assigned batches
+    enabled: isAdmin && isCollege,
   });
   const yearsQuery = useQuery({
     queryKey: ["years", form.batchId],
@@ -163,12 +164,12 @@ export const TimetableManager = () => {
       unwrap<Array<ScopeOption & { level?: number; name?: string }>>(
         api.get("/academics/years", { params: { batchId: form.batchId } }),
       ),
-    enabled: (isAdmin || isTeacher) && isCollege && Boolean(form.batchId),
+    enabled: isAdmin && isCollege && Boolean(form.batchId),
   });
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
     queryFn: () => unwrap<ScopeOption[]>(api.get("/academics/subjects")),
-    enabled: canWrite && !isStudent,
+    enabled: canWrite && !isStudent && !isTeacher,
   });
   const teachersQuery = useQuery({
     queryKey: ["teachers"],

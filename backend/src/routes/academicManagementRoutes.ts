@@ -50,7 +50,18 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 
-router.get("/dashboard", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getAcademicDashboard);
+router.get(
+  "/dashboard",
+  authorize(
+    "SUPER_ADMIN",
+    "COLLEGE_ADMIN",
+    "COLLEGE_VIEWER",
+    "TEACHER",
+    "PRINCIPAL",
+    "COLLEGE_STAFF"
+  ),
+  getAcademicDashboard
+);
 
 router.get("/syllabi", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listSyllabi);
 router.get("/syllabi/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getSyllabus);

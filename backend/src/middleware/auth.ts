@@ -137,6 +137,12 @@ export const authorize =
         const accessMap = await getUserModuleAccessMap(req.user!.userId);
         const isRead = ["GET", "HEAD", "OPTIONS"].includes(req.method);
 
+        // Shared academic reference data — any authenticated user may GET lists
+        // (mutations still require institution admin / module write via route authorize).
+        if (isRead && moduleKey === "academics") {
+          return next();
+        }
+
         // Accounts staff need student + academic batch/year lists for fee/refund pickers
         // (same dependency as moduleAccessGuard accounts→students/academics).
         if (
@@ -145,6 +151,14 @@ export const authorize =
           canAccessModule(accessMap, "accounts")
         ) {
           return next();
+        }
+
+        // Academic Management (session/lesson/log) — module grant or teaching baseline
+        if (moduleKey === "academic-management" && canAccessModule(accessMap, "academic-management")) {
+          if (isRead || canWriteModule(accessMap, "academic-management")) {
+            return next();
+          }
+          return next(new ApiError(403, MODULE_ACCESS_DISABLED_MESSAGE));
         }
 
         if (moduleKey) {

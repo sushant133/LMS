@@ -8,10 +8,12 @@ import {
   canWriteModule,
   hasModuleAction,
   inferActionFromApiPath,
+  isInstitutionAdmin,
   isSystemAdministrator,
   MODULE_ACCESS_DENIED_MESSAGE,
   MODULE_ACCESS_DISABLED_MESSAGE,
   normalizeModuleAccessMode,
+  normalizeUserRole,
   type ModuleAccessMode
 } from "@phit-erp/shared";
 import { ApiError } from "../utils/apiError.js";
@@ -21,7 +23,9 @@ import {
   getUserModuleAccessMap,
   getUserModuleActionsMap,
   isModuleAccessBypassPath,
-  resolveModuleForRequest
+  isSharedAcademicsReadPath,
+  resolveModuleForRequest,
+  resolveRequestPath
 } from "../utils/moduleAccessService.js";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -37,6 +41,8 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** Teaching modules that TEACHER role may always use (My Work), subject to teacher scope in controllers. */
 const TEACHER_MY_WORK_MODULE_KEYS = new Set([
   "students",
+  "academics",
+  "subject-assignment",
   "attendance",
   "daily-attendance",
   "academic-management",
@@ -60,17 +66,52 @@ export const enforceModuleAccess = async (
 ): Promise<void> => {
   try {
     if (!req.user) return next();
-    // Super Admin always unrestricted. Administrators (COLLEGE_ADMIN) honor their matrix
-    // when Super Admin has configured module access; unconfigured = full legacy access.
-    if (isSystemAdministrator(req.user.role)) return next();
-    if (isModuleAccessBypassPath(req.method, req.originalUrl || req.path || "")) return next();
+    // Super Admin + College Admin: unrestricted within their auth/tenant scope
+    const role = normalizeUserRole(req.user.role);
+    if (isSystemAdministrator(role) || isInstitutionAdmin(role)) return next();
 
-    const originalPath = (req.originalUrl || req.path || "").split("?")[0] ?? "";
+    const originalPath = resolveRequestPath(
+      req.method,
+      req.originalUrl,
+      req.baseUrl,
+      req.url,
+      req.path
+    );
+
+    // Shared academics lists + teacher self APIs — never blocked by module matrix
+    if (isModuleAccessBypassPath(req.method, originalPath)) return next();
+    if (READ_METHODS.has(req.method) && isSharedAcademicsReadPath(originalPath)) {
+      return next();
+    }
+
+    /**
+     * Teachers (primary role): always keep My Work APIs even if admin matrix was
+     * saved incomplete. Controllers still enforce subject/batch assignment scope.
+     */
+    if (role === "TEACHER") {
+      const teacherApiOk =
+        /(?:^|\/)api\/(teacher|exams|academic-management|homework|timetable|attendance|daily-attendance|notices|results)(\/|$)/i.test(
+          originalPath
+        ) ||
+        /(?:^|\/)(teacher|exams|academic-management|homework|timetable)(\/|$)/i.test(originalPath);
+      if (teacherApiOk) {
+        if (READ_METHODS.has(req.method)) return next();
+        // Writes on teaching tools (marks, plans, log book, homework)
+        if (
+          /(?:^|\/)api\/(exams|academic-management|homework|attendance|daily-attendance)(\/|$)/i.test(
+            originalPath
+          )
+        ) {
+          return next();
+        }
+      }
+    }
+
     // Self-service: any linked teacher/staff may read own attendance + permission flags
     if (
       READ_METHODS.has(req.method) &&
-      (/\/api\/employee-attendance\/me$/.test(originalPath) ||
-        /\/api\/employee-attendance\/permissions$/.test(originalPath))
+      (/(?:^|\/)(?:api\/)?employee-attendance\/me$/i.test(originalPath) ||
+        /(?:^|\/)(?:api\/)?employee-attendance\/permissions$/i.test(originalPath))
     ) {
       return next();
     }
@@ -219,6 +260,15 @@ export const enforceModuleAccess = async (
 
     const moduleKey = resolveModuleForRequest(req);
     if (!moduleKey) return next();
+
+    /**
+     * Academic structure (batches, years, classes, sections, subjects) is shared
+     * reference data used by Accounting, Exams, Field, Students, Attendance, etc.
+     * Always allow GET for any authenticated user past protect().
+     */
+    if (READ_METHODS.has(req.method) && moduleKey === "academics") {
+      return next();
+    }
 
     const [accessMap, actionsMap, secondaryRoles] = await Promise.all([
       getUserModuleAccessMap(req.user.userId),

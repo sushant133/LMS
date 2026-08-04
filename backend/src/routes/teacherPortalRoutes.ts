@@ -8,6 +8,7 @@ import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
 
+// Primary TEACHER or any account with secondaryRoles including TEACHER
 router.use(protect, tenantGuard, authorize("TEACHER"));
 router.get("/scope", getTeacherAssignments);
 router.get("/lab-access", getTeacherLabAccess);

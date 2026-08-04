@@ -546,54 +546,110 @@ export const seedDemoSchool = async ({ force = false }: SeedDemoSchoolOptions = 
       options
     );
 
-    const [libraryStaffUser] = await User.create(
-      [
-        {
-          schoolId,
-          fullName: demoCredentials.libraryStaff.name,
-          email: demoCredentials.libraryStaff.email,
-          phone: "9804100000",
-          password: DEMO_PASSWORD,
-          role: "LIBRARY_STAFF",
-          mustChangePassword: false
-        },
-        {
-          schoolId,
-          fullName: demoCredentials.laboratoryStaff.name,
-          email: demoCredentials.laboratoryStaff.email,
-          phone: "9804200000",
-          password: DEMO_PASSWORD,
-          role: "LABORATORY_STAFF",
-          mustChangePassword: false
-        },
-        {
-          schoolId,
-          fullName: demoCredentials.accountant.name,
-          email: demoCredentials.accountant.email,
-          phone: "9804300000",
-          password: demoCredentials.accountant.password,
-          role: "ACCOUNTANT",
-          mustChangePassword: false
-        }
-      ],
-      options
-    );
+    /**
+     * Library / Lab / Accountant users need both User (login role) and CollegeStaff
+     * (HR attendance, salary sheets, biometric). Accountant also has Accountant profile.
+     */
+    const specialistStaffSeed = [
+      {
+        credential: demoCredentials.libraryStaff,
+        role: "LIBRARY_STAFF" as const,
+        category: "LIBRARIAN" as const,
+        staffId: "LIB001",
+        designation: "Librarian",
+        department: "Library",
+        phone: "9804100000",
+        gender: "Female",
+        password: DEMO_PASSWORD,
+        basicSalaryNpr: 30000
+      },
+      {
+        credential: demoCredentials.laboratoryStaff,
+        role: "LABORATORY_STAFF" as const,
+        category: "LABORATORY_STAFF" as const,
+        staffId: "LAB001",
+        designation: "Lab In-Charge",
+        department: "Laboratory",
+        phone: "9804200000",
+        gender: "Male",
+        password: DEMO_PASSWORD,
+        basicSalaryNpr: 32000
+      },
+      {
+        credential: demoCredentials.accountant,
+        role: "ACCOUNTANT" as const,
+        category: "ACCOUNTANT" as const,
+        staffId: demoCredentials.accountant.employeeId,
+        designation: "Accountant",
+        department: "Accounts",
+        phone: "9804300000",
+        gender: "Female",
+        password: demoCredentials.accountant.password,
+        basicSalaryNpr: 40000
+      }
+    ];
 
-    const accountantUser = await User.findOne({ email: demoCredentials.accountant.email }).session(session);
-    await Accountant.create(
-      [
-        {
-          schoolId,
-          user: accountantUser!._id,
-          employeeId: demoCredentials.accountant.employeeId,
-          gender: "Female",
-          address,
-          joinedDateBs: "2080-04-01",
-          status: "ACTIVE"
-        }
-      ],
-      options
-    );
+    for (const row of specialistStaffSeed) {
+      const [staffUser] = await User.create(
+        [
+          {
+            schoolId,
+            fullName: row.credential.name,
+            email: row.credential.email,
+            phone: row.phone,
+            password: row.password,
+            role: row.role,
+            mustChangePassword: false
+          }
+        ],
+        options
+      );
+
+      await CollegeStaff.create(
+        [
+          {
+            schoolId,
+            user: staffUser!._id,
+            staffId: row.staffId,
+            fullName: row.credential.name,
+            gender: row.gender,
+            phone: row.phone,
+            email: row.credential.email,
+            address,
+            joinedDateBs: "2080-04-01",
+            designation: row.designation,
+            department: row.department,
+            category: row.category,
+            qualification: "As per HR record",
+            experienceYears: 3,
+            employmentType: "FULL_TIME",
+            basicSalaryNpr: row.basicSalaryNpr,
+            status: "ACTIVE",
+            enableLogin: true,
+            credentialsEmailStatus: "SENT",
+            credentialsEmailSentAt: new Date()
+          }
+        ],
+        options
+      );
+
+      if (row.role === "ACCOUNTANT") {
+        await Accountant.create(
+          [
+            {
+              schoolId,
+              user: staffUser!._id,
+              employeeId: row.staffId,
+              gender: row.gender,
+              address,
+              joinedDateBs: "2080-04-01",
+              status: "ACTIVE"
+            }
+          ],
+          options
+        );
+      }
+    }
 
     const collegeStaffSeedRows = [
       { credential: demoCredentials.collegeStaff.security, category: "SECURITY_GUARD" as const, staffId: "SEC001", designation: "Security Guard" },

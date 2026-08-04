@@ -23,9 +23,10 @@ const authStrictLimit = rateLimit({
 
 const loginLimit = rateLimit({
   name: "auth-login",
-  max: 10,
+  // Dev/QA needs multi-account probing; production stays strict
+  max: process.env.NODE_ENV === "production" ? 10 : 80,
   windowMs: 15 * 60 * 1000,
-  lockMs: 15 * 60 * 1000,
+  lockMs: process.env.NODE_ENV === "production" ? 15 * 60 * 1000 : 60 * 1000,
   message: "Too many login attempts. Please try again in 15 minutes."
 });
 

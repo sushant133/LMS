@@ -29,7 +29,9 @@ import {
   filterSectionsByClass,
   filterSubjectsByClass,
   filterSubjectsByYear,
+  filterSubjectsForTeacherCohort,
   filterYearsByBatch,
+  filterYearsForTeacherBatch,
   hasSingleOption,
 } from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
@@ -195,21 +197,55 @@ export const AttendanceManager = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const teacherAssignments = isTeacher
+    ? (teacherScopeQuery.data?.scope.assignments ?? [])
+    : [];
+  const teacherSubjectIds = isTeacher
+    ? (teacherScopeQuery.data?.scope.subjectIds ?? [])
+    : [];
+
   const filteredSections = useMemo(
     () => filterSectionsByClass(sections, classId),
     [classId, sections],
   );
-  const filteredYears = useMemo(
-    () => filterYearsByBatch(years, batchId),
-    [batchId, years],
-  );
-  const filteredSubjects = useMemo(
-    () =>
-      isCollege
+  const filteredYears = useMemo(() => {
+    if (!isCollege) return filterYearsByBatch(years, batchId);
+    if (!isTeacher) return filterYearsByBatch(years, batchId);
+    const studentYearIds = students
+      .filter((s) => String(s.batchId) === String(batchId))
+      .map((s) => String(s.yearId ?? ""))
+      .filter(Boolean);
+    return filterYearsForTeacherBatch(years, batchId, {
+      assignments: teacherAssignments,
+      studentYearIds,
+    });
+  }, [batchId, isCollege, isTeacher, students, teacherAssignments, years]);
+  const filteredSubjects = useMemo(() => {
+    if (!isTeacher) {
+      return isCollege
         ? filterSubjectsByYear(subjects, yearId)
-        : filterSubjectsByClass(subjects, classId),
-    [classId, isCollege, subjects, yearId],
-  );
+        : filterSubjectsByClass(subjects, classId);
+    }
+    return filterSubjectsForTeacherCohort(subjects, {
+      isCollege,
+      batchId,
+      yearId,
+      classId,
+      sectionId,
+      assignments: teacherAssignments,
+      assignedSubjectIds: teacherSubjectIds,
+    });
+  }, [
+    batchId,
+    classId,
+    isCollege,
+    isTeacher,
+    sectionId,
+    subjects,
+    teacherAssignments,
+    teacherSubjectIds,
+    yearId,
+  ]);
 
   useEffect(() => {
     if (!isTeacher) {

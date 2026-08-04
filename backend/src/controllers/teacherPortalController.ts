@@ -16,10 +16,7 @@ import { requireTeacherScope } from "../utils/teacherScope.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
 export const getTeacherAssignments = asyncHandler(async (req: Request, res: Response) => {
-  if (req.user?.role !== "TEACHER") {
-    throw new ApiError(403, "Only teachers can access assignment scope");
-  }
-
+  // Primary TEACHER or accounts with a linked Teacher profile + secondary TEACHER
   const scope = await requireTeacherScope(req);
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);

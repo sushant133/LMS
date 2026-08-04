@@ -177,6 +177,8 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections")),
     enabled: isAdmin && !isCollege,
   });
+  // Teachers load batch/year/subject/student lists from /teacher/scope (assigned only).
+  // Avoid parallel /academics/* calls that spam console if module matrix is incomplete.
   const batchesQuery = useQuery({
     queryKey: ["batches"],
     queryFn: () =>
@@ -188,7 +190,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
           isActive?: boolean;
         }>
       >(api.get("/academics/batches")),
-    enabled: (isAdmin || isTeacher) && isCollege,
+    enabled: isAdmin && isCollege,
   });
   const yearsQuery = useQuery({
     queryKey: ["years"],
@@ -196,7 +198,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
       unwrap<
         Array<{ _id: string; name: string; batchId: string; level?: number }>
       >(api.get("/academics/years")),
-    enabled: (isAdmin || isTeacher) && isCollege,
+    enabled: isAdmin && isCollege,
   });
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -1768,6 +1770,16 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                   sections={sections}
                   isCollege={isCollege}
                   resultsLockedExamIds={resultsLockedExamIds}
+                  assignments={
+                    isTeacher
+                      ? (teacherScopeQuery.data?.scope.assignments ?? [])
+                      : []
+                  }
+                  assignedSubjectIds={
+                    isTeacher
+                      ? (teacherScopeQuery.data?.scope.subjectIds ?? [])
+                      : []
+                  }
                 />
               </Suspense>
             </CardContent>

@@ -3,9 +3,9 @@ import { useIsCollege } from "hooks/useInstitutionType";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import {
   filterSectionsByClass,
-  filterSubjectsByClass,
-  filterSubjectsByYear,
+  filterSubjectsForTeacherCohort,
   filterYearsByBatch,
+  filterYearsForTeacherBatch,
   hasSingleOption,
   type ScopeOption,
 } from "lib/teacherScopeUtils";
@@ -16,6 +16,7 @@ import {
   type AssignmentInput,
   type AssignmentLink,
   type ClassroomPost,
+  type TeacherAssignmentPair,
 } from "@phit-erp/shared";
 import { FormField } from "components/shared/FormField";
 import { NepaliDateField } from "components/shared/NepaliDateField";
@@ -58,6 +59,11 @@ interface ComposePostModalProps {
   subjects: ScopeOption[];
   topicSuggestions: string[];
   scopedOnly?: boolean;
+  /** Teacher SubjectAssignment pairs — limits subjects to teachable cohorts */
+  assignments?: TeacherAssignmentPair[];
+  assignedSubjectIds?: string[];
+  /** Year ids that have roster students (optional UI narrowing) */
+  studentYearIdsByBatch?: Record<string, string[]>;
   onClose: () => void;
   onSave: (payload: AssignmentInput) => Promise<void>;
   saving?: boolean;
@@ -73,6 +79,9 @@ export const ComposePostModal = ({
   subjects,
   topicSuggestions,
   scopedOnly = false,
+  assignments = [],
+  assignedSubjectIds = [],
+  studentYearIdsByBatch = {},
   onClose,
   onSave,
   saving,
@@ -117,16 +126,36 @@ export const ComposePostModal = ({
     () => filterSectionsByClass(sections, form.classId ?? ""),
     [sections, form.classId],
   );
-  const filteredYears = useMemo(
-    () => filterYearsByBatch(years, form.batchId ?? ""),
-    [years, form.batchId],
-  );
+  const filteredYears = useMemo(() => {
+    if (!isCollege) return filterYearsByBatch(years, form.batchId ?? "");
+    const batchId = form.batchId ?? "";
+    return filterYearsForTeacherBatch(years, batchId, {
+      assignments,
+      studentYearIds: studentYearIdsByBatch[batchId] ?? [],
+    });
+  }, [assignments, form.batchId, isCollege, studentYearIdsByBatch, years]);
   const filteredSubjects = useMemo(
     () =>
-      isCollege
-        ? filterSubjectsByYear(subjects, form.yearId ?? "")
-        : filterSubjectsByClass(subjects, form.classId ?? ""),
-    [form.classId, form.yearId, isCollege, subjects],
+      filterSubjectsForTeacherCohort(subjects, {
+        isCollege,
+        batchId: form.batchId,
+        yearId: form.yearId,
+        classId: form.classId,
+        sectionId: form.sectionId,
+        assignments: scopedOnly ? assignments : [],
+        assignedSubjectIds: scopedOnly ? assignedSubjectIds : [],
+      }),
+    [
+      assignedSubjectIds,
+      assignments,
+      form.batchId,
+      form.classId,
+      form.sectionId,
+      form.yearId,
+      isCollege,
+      scopedOnly,
+      subjects,
+    ],
   );
 
   const primaryOptions = isCollege ? batches : classes;

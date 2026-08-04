@@ -5,6 +5,7 @@ import {
   expandModuleAccessMap,
   expandModuleActionsMap,
   hasConfiguredModuleAccess,
+  isInstitutionAdmin,
   isSystemAdministrator,
   MODULE_ACCESS_DENIED_MESSAGE,
   MODULE_ACCESS_DISABLED_MESSAGE,
@@ -32,9 +33,15 @@ const userHasTeacherRole = (
   return (secondaryRoles ?? []).some((r) => r === "TEACHER");
 };
 
-/** Super Admin always bypasses module access matrix. Administrators can be restricted. */
-const isModuleAccessUnrestricted = (role: string | undefined): boolean =>
-  isSystemAdministrator(role ?? "");
+/**
+ * Super Admin + College Admin bypass the module-access matrix for their tenant.
+ * (College Admin is still tenant-scoped; Super Admin remains system-wide.)
+ * Prevents 403s on core lists (batches/years/students) when a matrix is incomplete.
+ */
+const isModuleAccessUnrestricted = (role: string | undefined): boolean => {
+  const n = normalizeUserRole(role ?? "");
+  return isSystemAdministrator(n) || isInstitutionAdmin(n);
+};
 
 const mapFromUserDoc = (raw: unknown): ModuleAccessMap => {
   if (!raw) return {};
@@ -309,21 +316,69 @@ export const updateUserModuleAccess = async (
   };
 };
 
+/**
+ * Normalize Express path for module-access checks.
+ * Prefers originalUrl; falls back to baseUrl+url when mounted routers only expose a relative path.
+ */
+export const resolveRequestPath = (
+  _method: string,
+  originalUrl?: string,
+  baseUrl?: string,
+  url?: string,
+  pathOnly?: string
+): string => {
+  const raw =
+    (originalUrl && originalUrl.length > 0 ? originalUrl : null) ||
+    `${baseUrl || ""}${url || pathOnly || ""}` ||
+    pathOnly ||
+    "";
+  let path = (raw.split("?")[0] ?? raw) || "";
+  if (path && !path.startsWith("/")) path = `/${path}`;
+  // Collapse accidental double slashes (//api/…)
+  path = path.replace(/\/{2,}/g, "/");
+  return path;
+};
+
+/**
+ * Shared academic structure lists (batches/years/classes/sections/subjects/master-subjects).
+ * Used as filters across Exams, Attendance, Academic Management, Accounting, etc.
+ * Subject-assignment admin APIs are excluded (separate module).
+ */
+export const isSharedAcademicsReadPath = (path: string): boolean => {
+  if (!path) return false;
+  if (/subject-assignments/i.test(path)) return false;
+  return (
+    /(?:^|\/)api\/academics(\/|$)/i.test(path) ||
+    /(?:^|\/)academics(\/|$)/i.test(path) ||
+    /(?:^|\/)(batches|years|subjects|classes|sections|master-subjects)(\/|$)/i.test(path)
+  );
+};
+
 /** Paths that remain allowed even when modules are restricted (self-service). */
 export const isModuleAccessBypassPath = (method: string, originalUrl: string): boolean => {
-  const path = originalUrl.split("?")[0] ?? originalUrl;
-  if (method === "POST" && /\/api\/auth\/logout$/.test(path)) return true;
-  if (method === "PUT" && /\/api\/auth\/profile$/.test(path)) return true;
-  if (method === "POST" && /\/api\/auth\/change-password$/.test(path)) return true;
-  if (method === "GET" && /\/api\/auth\/me$/.test(path)) return true;
-  if (/\/api\/users\/me\/module-access$/.test(path)) return true;
-  if (/\/api\/users\/[^/]+\/module-access$/.test(path)) return true;
-  if (method === "GET" && /\/api\/users\/modules$/.test(path)) return true;
+  const path = resolveRequestPath(method, originalUrl);
+  const upper = method.toUpperCase();
+  if (upper === "POST" && /\/api\/auth\/logout$/i.test(path)) return true;
+  if (upper === "PUT" && /\/api\/auth\/profile$/i.test(path)) return true;
+  if (upper === "POST" && /\/api\/auth\/change-password$/i.test(path)) return true;
+  if (upper === "GET" && /\/api\/auth\/me$/i.test(path)) return true;
+  if (/\/api\/users\/me\/module-access$/i.test(path)) return true;
+  if (/\/api\/users\/[^/]+\/module-access$/i.test(path)) return true;
+  if (upper === "GET" && /\/api\/users\/modules$/i.test(path)) return true;
+  // Teacher self-scope (subjects, batches, years, students for mark entry)
+  if (upper === "GET" && /(?:^|\/)api\/teacher(\/|$)/i.test(path)) return true;
   // Notifications always available
-  if (/\/api\/notifications/.test(path)) return true;
+  if (/\/api\/notifications/i.test(path)) return true;
   // Authenticated file downloads (tenant isolation enforced in serveProtectedUpload)
-  if (method === "GET" && (/\/api\/uploads\//.test(path) || /^\/uploads\//.test(path))) {
+  if (upper === "GET" && (/\/api\/uploads\//i.test(path) || /^\/uploads\//i.test(path))) {
     return true;
+  }
+  /**
+   * Shared academic structure (batches/years/classes/sections/subjects) is reference data.
+   * Always allow GET for any authenticated user — never block via module matrix.
+   */
+  if (upper === "GET" || upper === "HEAD" || upper === "OPTIONS") {
+    if (isSharedAcademicsReadPath(path)) return true;
   }
   return false;
 };

@@ -8,6 +8,7 @@ import type {
   ResultSubmissionRecord,
   StudentRecord,
   SubjectRecord,
+  TeacherAssignmentPair,
 } from "@phit-erp/shared";
 import {
   EXAM_ATTENDANCE_STATUSES,
@@ -32,9 +33,8 @@ import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import {
   filterSectionsByClass,
-  filterYearsByBatch,
-  filterSubjectsByClass,
-  filterSubjectsByYear,
+  filterSubjectsForTeacherCohort,
+  filterYearsForTeacherBatch,
   hasSingleOption,
 } from "lib/teacherScopeUtils";
 import { parseErrorMessage } from "lib/utils";
@@ -58,6 +58,13 @@ interface ExamMarksEntryProps {
   sections: Array<{ _id: string; name: string; classId: string }>;
   isCollege: boolean;
   resultsLockedExamIds: Set<string>;
+  /**
+   * Teacher assignment pairs from /teacher/scope — used to show only subjects
+   * the teacher may grade for the selected batch/year (avoids 403 on save).
+   */
+  assignments?: TeacherAssignmentPair[];
+  /** Flat subject ids from teacher scope (legacy fallback when no pairs). */
+  assignedSubjectIds?: string[];
 }
 
 const buildDefaultMark = (subject?: SubjectRecord): ResultMarkInput => ({
@@ -81,38 +88,112 @@ export const ExamMarksEntry = ({
   sections,
   isCollege,
   resultsLockedExamIds,
+  assignments = [],
+  assignedSubjectIds = [],
 }: ExamMarksEntryProps) => {
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const [resultForm, setResultForm] = useState<ResultInput>(defaultResultValue);
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [markForm, setMarkForm] = useState<ResultMarkInput>(buildDefaultMark());
 
-  const filteredYears = useMemo(
-    () => filterYearsByBatch(years, resultForm.batchId ?? ""),
-    [resultForm.batchId, years],
-  );
-  const filteredSections = useMemo(
-    () => filterSectionsByClass(sections, resultForm.classId ?? ""),
-    [resultForm.classId, sections],
-  );
+  /**
+   * Prefer cohorts that actually have roster students (teacher scope expands
+   * same-level years across batches for Academic Management — mark entry should
+   * only offer batch/year pairs the teacher can grade).
+   */
+  const markEntryBatches = useMemo(() => {
+    const withStudents = new Set(
+      students.map((s) => String(s.batchId ?? "")).filter(Boolean),
+    );
+    // Also keep batches that appear on assignment pairs (even before students load)
+    for (const a of assignments) {
+      if (a.batchId) withStudents.add(String(a.batchId));
+    }
+    if (withStudents.size === 0) return batches;
+    const filtered = batches.filter((b) => withStudents.has(String(b._id)));
+    return filtered.length > 0 ? filtered : batches;
+  }, [assignments, batches, students]);
+
+  const markEntryClasses = useMemo(() => {
+    const withStudents = new Set(
+      students.map((s) => String(s.classId ?? "")).filter(Boolean),
+    );
+    for (const a of assignments) {
+      if (a.classId) withStudents.add(String(a.classId));
+    }
+    if (withStudents.size === 0) return classes;
+    const filtered = classes.filter((c) => withStudents.has(String(c._id)));
+    return filtered.length > 0 ? filtered : classes;
+  }, [assignments, classes, students]);
+
+  const filteredYears = useMemo(() => {
+    const studentYearIds = students
+      .filter((s) => String(s.batchId) === String(resultForm.batchId ?? ""))
+      .map((s) => String(s.yearId ?? ""))
+      .filter(Boolean);
+    return filterYearsForTeacherBatch(years, resultForm.batchId ?? "", {
+      assignments,
+      studentYearIds,
+    });
+  }, [assignments, resultForm.batchId, students, years]);
+
+  const filteredSections = useMemo(() => {
+    const byClass = filterSectionsByClass(sections, resultForm.classId ?? "");
+    if (!resultForm.classId) return byClass;
+    const sectionIdsWithStudents = new Set(
+      students
+        .filter((s) => String(s.classId) === String(resultForm.classId))
+        .map((s) => String(s.sectionId ?? ""))
+        .filter(Boolean),
+    );
+    for (const a of assignments) {
+      if (
+        String(a.classId ?? "") === String(resultForm.classId ?? "") &&
+        a.sectionId
+      ) {
+        sectionIdsWithStudents.add(String(a.sectionId));
+      }
+    }
+    if (sectionIdsWithStudents.size === 0) return byClass;
+    const withStudents = byClass.filter((s) =>
+      sectionIdsWithStudents.has(String(s._id)),
+    );
+    return withStudents.length > 0 ? withStudents : byClass;
+  }, [assignments, resultForm.classId, sections, students]);
+
+  /** Subjects teacher may grade for selected cohort (assignment-pair aware). */
   const teacherFormSubjects = useMemo(
     () =>
-      (isCollege
-        ? filterSubjectsByYear(subjects, resultForm.yearId ?? "")
-        : filterSubjectsByClass(
-            subjects,
-            resultForm.classId ?? "",
-          )) as SubjectRecord[],
-    [isCollege, resultForm.classId, resultForm.yearId, subjects],
+      filterSubjectsForTeacherCohort(subjects, {
+        isCollege,
+        batchId: resultForm.batchId,
+        yearId: resultForm.yearId,
+        classId: resultForm.classId,
+        sectionId: resultForm.sectionId,
+        assignments,
+        assignedSubjectIds,
+      }) as SubjectRecord[],
+    [
+      assignedSubjectIds,
+      assignments,
+      isCollege,
+      resultForm.batchId,
+      resultForm.classId,
+      resultForm.sectionId,
+      resultForm.yearId,
+      subjects,
+    ],
   );
+
   const filteredStudents = useMemo(
     () =>
       students.filter((student) =>
         isCollege
-          ? String(student.batchId) === String(resultForm.batchId) &&
-            String(student.yearId) === String(resultForm.yearId)
-          : String(student.classId) === String(resultForm.classId) &&
-            String(student.sectionId) === String(resultForm.sectionId),
+          ? String(student.batchId ?? "") === String(resultForm.batchId ?? "") &&
+            String(student.yearId ?? "") === String(resultForm.yearId ?? "")
+          : String(student.classId ?? "") === String(resultForm.classId ?? "") &&
+            String(student.sectionId ?? "") ===
+              String(resultForm.sectionId ?? ""),
       ),
     [
       isCollege,
@@ -139,9 +220,18 @@ export const ExamMarksEntry = ({
   const isLocked = selectedExam
     ? resultsLockedExamIds.has(selectedExam._id) || selectedExam.resultsLocked
     : false;
+  /** Full batch+year (or class+section) chosen — enables student/subject pickers */
   const scopeReady = isCollege
     ? Boolean(resultForm.batchId && resultForm.yearId)
     : Boolean(resultForm.classId && resultForm.sectionId);
+  /**
+   * Year/section dropdown only needs the primary (batch/class) selected.
+   * Do NOT gate on scopeReady — that required yearId before year could be chosen
+   * (chicken-and-egg: Year stayed disabled forever when multiple years exist).
+   */
+  const secondarySelectReady = isCollege
+    ? Boolean(resultForm.batchId)
+    : Boolean(resultForm.classId);
 
   const marksEntryResultsQuery = useQuery({
     queryKey: [
@@ -288,23 +378,34 @@ export const ExamMarksEntry = ({
                   : "";
 
   useEffect(() => {
+    const primaryList = isCollege ? markEntryBatches : markEntryClasses;
     if (
-      hasSingleOption(isCollege ? batches : classes) &&
-      (isCollege ? resultForm.batchId : resultForm.classId) !==
-        (isCollege ? batches : classes)[0]!._id
+      hasSingleOption(primaryList) &&
+      (isCollege ? resultForm.batchId : resultForm.classId) !== primaryList[0]!._id
     ) {
       setResultForm((current) =>
         isCollege
-          ? { ...current, batchId: batches[0]!._id, yearId: "", studentId: "" }
+          ? {
+              ...current,
+              batchId: primaryList[0]!._id,
+              yearId: "",
+              studentId: "",
+            }
           : {
               ...current,
-              classId: classes[0]!._id,
+              classId: primaryList[0]!._id,
               sectionId: "",
               studentId: "",
             },
       );
     }
-  }, [batches, classes, isCollege, resultForm.batchId, resultForm.classId]);
+  }, [
+    isCollege,
+    markEntryBatches,
+    markEntryClasses,
+    resultForm.batchId,
+    resultForm.classId,
+  ]);
 
   useEffect(() => {
     if (
@@ -493,10 +594,10 @@ export const ExamMarksEntry = ({
             ))}
           </Select>
         </FormField>
-        {hasSingleOption(isCollege ? batches : classes) ? (
+        {hasSingleOption(isCollege ? markEntryBatches : markEntryClasses) ? (
           <FormField label={labels.primary}>
             <Input
-              value={(isCollege ? batches : classes)[0]!.name}
+              value={(isCollege ? markEntryBatches : markEntryClasses)[0]!.name}
               readOnly
               disabled
             />
@@ -504,7 +605,11 @@ export const ExamMarksEntry = ({
         ) : (
           <FormField label={labels.primary}>
             <Select
-              value={isCollege ? resultForm.batchId : resultForm.classId}
+              value={
+                isCollege
+                  ? (resultForm.batchId ?? "")
+                  : (resultForm.classId ?? "")
+              }
               onChange={(event) => {
                 setSelectedSubjectId("");
                 setResultForm((current) =>
@@ -525,7 +630,7 @@ export const ExamMarksEntry = ({
               }}
             >
               <option value="">Select {labels.primary.toLowerCase()}</option>
-              {(isCollege ? batches : classes).map((item) => (
+              {(isCollege ? markEntryBatches : markEntryClasses).map((item) => (
                 <option key={item._id} value={item._id}>
                   {item.name}
                 </option>
@@ -544,8 +649,9 @@ export const ExamMarksEntry = ({
         ) : (
           <FormField label={labels.secondary}>
             <Select
-              value={isCollege ? resultForm.yearId : resultForm.sectionId}
-              onChange={(event) =>
+              value={isCollege ? (resultForm.yearId ?? "") : (resultForm.sectionId ?? "")}
+              onChange={(event) => {
+                setSelectedSubjectId("");
                 setResultForm((current) =>
                   isCollege
                     ? { ...current, yearId: event.target.value, studentId: "" }
@@ -554,11 +660,15 @@ export const ExamMarksEntry = ({
                         sectionId: event.target.value,
                         studentId: "",
                       },
-                )
-              }
-              disabled={!scopeReady}
+                );
+              }}
+              disabled={!secondarySelectReady}
             >
-              <option value="">Select {labels.secondary.toLowerCase()}</option>
+              <option value="">
+                {!secondarySelectReady
+                  ? `Select ${labels.primary.toLowerCase()} first`
+                  : `Select ${labels.secondary.toLowerCase()}`}
+              </option>
               {(isCollege ? filteredYears : filteredSections).map((item) => (
                 <option key={item._id} value={item._id}>
                   {item.name}
@@ -578,10 +688,17 @@ export const ExamMarksEntry = ({
             }
             disabled={!scopeReady}
           >
-            <option value="">Select student</option>
+            <option value="">
+              {!scopeReady
+                ? `Select ${labels.secondary.toLowerCase()} first`
+                : filteredStudents.length === 0
+                  ? "No students in this scope"
+                  : "Select student"}
+            </option>
             {filteredStudents.map((student) => (
               <option key={student._id} value={student._id}>
-                {student.user.fullName}
+                {student.user?.fullName ?? "Student"}
+                {student.rollNumber != null ? ` (Roll ${student.rollNumber})` : ""}
               </option>
             ))}
           </Select>

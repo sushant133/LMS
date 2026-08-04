@@ -118,33 +118,35 @@ export const AcademicManagementHub = () => {
     user?.school?.academicYearBs ||
     "";
 
+  // Teachers use /teacher/scope for assigned batch/year/subject lists (no admin matrix dependency).
   const classesQuery = useQuery({
     queryKey: ["academics", "classes"],
     queryFn: () => unwrap<ClassRecord[]>(api.get("/academics/classes")),
-    enabled: !isCollege,
+    enabled: !isCollege && !isTeacher,
   });
 
   const sectionsQuery = useQuery({
     queryKey: ["academics", "sections"],
     queryFn: () => unwrap<SectionRecord[]>(api.get("/academics/sections")),
-    enabled: !isCollege,
+    enabled: !isCollege && !isTeacher,
   });
 
   const batchesQuery = useQuery({
     queryKey: ["academics", "batches"],
     queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
-    enabled: isCollege,
+    enabled: isCollege && !isTeacher,
   });
 
   const yearsQuery = useQuery({
     queryKey: ["academics", "years"],
     queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
-    enabled: isCollege,
+    enabled: isCollege && !isTeacher,
   });
 
   const subjectsQuery = useQuery({
     queryKey: ["academics", "subjects"],
     queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects")),
+    enabled: !isTeacher,
   });
 
   const teachersQuery = useQuery({

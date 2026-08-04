@@ -11,6 +11,7 @@ import {
   type EmployeeAttendanceSummary,
   type ModulePermissionAction
 } from "@phit-erp/shared";
+import { Accountant } from "../models/Accountant.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { EmployeeAttendance } from "../models/EmployeeAttendance.js";
 import { Setting } from "../models/Setting.js";
@@ -26,6 +27,63 @@ import {
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
+
+/**
+ * Resolve the logged-in user's HR attendance identity.
+ * Teachers → Teacher profile; non-teaching → CollegeStaff; finance → Accountant fallback.
+ */
+const resolveEmployeeAttendanceIdentity = async (
+  schoolId: ReturnType<typeof tenantObjectId>,
+  userId: string
+): Promise<{
+  category: EmployeeAttendanceCategory;
+  teacherId?: string;
+  staffId?: string;
+  /** Always set for staff path so history can match biometric punches by user id */
+  employeeUserId: string;
+}> => {
+  const teacher = await Teacher.findOne({ schoolId, user: userId }).select("_id").lean();
+  if (teacher) {
+    return {
+      category: "TEACHER",
+      teacherId: teacher._id.toString(),
+      employeeUserId: userId
+    };
+  }
+
+  const staff = await CollegeStaff.findOne({
+    schoolId,
+    user: userId,
+    isDeleted: false
+  })
+    .select("_id")
+    .lean();
+  if (staff) {
+    return {
+      category: "STAFF",
+      staffId: staff._id.toString(),
+      employeeUserId: userId
+    };
+  }
+
+  // Accountants may only have the finance Accountant profile (legacy seed)
+  const accountant = await Accountant.findOne({
+    schoolId,
+    user: userId,
+    isDeleted: false
+  })
+    .select("_id")
+    .lean();
+  if (accountant) {
+    return {
+      category: "STAFF",
+      // No CollegeStaff id — history still matches entries.employeeUserId
+      employeeUserId: userId
+    };
+  }
+
+  throw new ApiError(404, "No teacher or staff profile linked to your account");
+};
 
 const actorId = (req: Request) => req.user!.userId;
 
@@ -691,28 +749,10 @@ export const getMyEmployeeAttendance = asyncHandler(async (req: Request, res: Re
   const userId = req.user?.userId;
   if (!userId) throw new ApiError(401, "Unauthorized");
 
-  let category: EmployeeAttendanceCategory = "TEACHER";
-  let teacherId: string | undefined;
-  let staffId: string | undefined;
-
-  const teacher = await Teacher.findOne({ schoolId, user: userId }).select("_id").lean();
-  if (teacher) {
-    category = "TEACHER";
-    teacherId = teacher._id.toString();
-  } else {
-    const staff = await CollegeStaff.findOne({
-      schoolId,
-      user: userId,
-      isDeleted: false
-    })
-      .select("_id")
-      .lean();
-    if (!staff) {
-      throw new ApiError(404, "No teacher or staff profile linked to your account");
-    }
-    category = "STAFF";
-    staffId = staff._id.toString();
-  }
+  const identity = await resolveEmployeeAttendanceIdentity(schoolId, userId);
+  let category = identity.category;
+  const teacherId = identity.teacherId;
+  const staffId = identity.staffId;
 
   if (typeof req.query.category === "string" && req.query.category) {
     // allow explicit override if user has both (rare)
@@ -742,7 +782,8 @@ export const getMyEmployeeAttendance = asyncHandler(async (req: Request, res: Re
       const match =
         category === "TEACHER"
           ? String(e.teacherId) === teacherId
-          : String(e.staffId) === staffId || String(e.employeeUserId) === userId;
+          : (staffId ? String(e.staffId) === staffId : false) ||
+            String(e.employeeUserId) === userId;
       if (!match) continue;
       history.push({
         dateBs: String(rec.dateBs),
@@ -829,7 +870,14 @@ export const getEmployeeAttendancePermissions = asyncHandler(
     const userId = req.user?.userId;
     if (!userId) throw new ApiError(401, "Unauthorized");
     const role = req.user?.role ?? "";
-    const isEmployeeLogin = role === "TEACHER" || role === "COLLEGE_STAFF";
+    const isEmployeeLogin =
+      role === "TEACHER" ||
+      role === "COLLEGE_STAFF" ||
+      role === "LIBRARY_STAFF" ||
+      role === "LABORATORY_STAFF" ||
+      role === "ACCOUNTANT" ||
+      role === "CASHIER" ||
+      role === "AUDITOR";
     const rawMap = await getUserModuleAccessMap(userId);
     const hasExplicitMatrix = Boolean(rawMap && Object.keys(rawMap).length > 0);
 

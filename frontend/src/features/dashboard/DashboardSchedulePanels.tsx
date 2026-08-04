@@ -55,6 +55,7 @@ export const DashboardSchedulePanels = () => {
     queryFn: () => unwrap<BatchOption[]>(api.get("/academics/batches")),
     enabled: showSchedule && canBrowseAll && isCollege && canAccessAcademics,
     staleTime: 60_000,
+    retry: false,
   });
 
   const yearsQuery = useQuery({
@@ -67,6 +68,7 @@ export const DashboardSchedulePanels = () => {
       ),
     enabled: showSchedule && canBrowseAll && isCollege && canAccessAcademics,
     staleTime: 60_000,
+    retry: false,
   });
 
   const timetableParams = useMemo(() => {

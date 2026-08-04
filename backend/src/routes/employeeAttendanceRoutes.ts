@@ -24,14 +24,47 @@ const READ = [
   "COLLEGE_ADMIN",
   "COLLEGE_VIEWER",
   "COLLEGE_STAFF",
-  "TEACHER"
+  "TEACHER",
+  // Specialist staff with CollegeStaff (or Accountant) HR profiles
+  "LIBRARY_STAFF",
+  "LABORATORY_STAFF",
+  "ACCOUNTANT",
+  "CASHIER",
+  "AUDITOR",
+  "PRINCIPAL"
 ] as const;
 
-const WRITE = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_STAFF", "TEACHER"] as const;
+const WRITE = [
+  "SUPER_ADMIN",
+  "COLLEGE_ADMIN",
+  "COLLEGE_STAFF",
+  "TEACHER",
+  "LIBRARY_STAFF",
+  "LABORATORY_STAFF",
+  "ACCOUNTANT",
+  "CASHIER",
+  "AUDITOR",
+  "PRINCIPAL"
+] as const;
 
-// Self-service portal (any authenticated teacher/staff)
-router.get("/me", authorize(...READ), getMyEmployeeAttendance);
-router.get("/permissions", authorize(...READ), getEmployeeAttendancePermissions);
+/** Self-service: any employee role that can have a Teacher / CollegeStaff / Accountant link */
+const SELF_SERVICE = [
+  "SUPER_ADMIN",
+  "COLLEGE_ADMIN",
+  "COLLEGE_VIEWER",
+  "COLLEGE_STAFF",
+  "TEACHER",
+  "LIBRARY_STAFF",
+  "LABORATORY_STAFF",
+  "ACCOUNTANT",
+  "CASHIER",
+  "AUDITOR",
+  "PRINCIPAL"
+] as const;
+
+// Self-service portal (linked teacher / staff / specialist profiles)
+router.get("/me", authorize(...SELF_SERVICE), getMyEmployeeAttendance);
+router.get("/permissions", authorize(...SELF_SERVICE), getEmployeeAttendancePermissions);
 
 router.get("/dashboard", authorize(...READ), getEmployeeAttendanceDashboard);
 router.get("/context", authorize(...READ), getEmployeeAttendanceMarkContext);

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { CollegeAcademicManager } from "./CollegeAcademicManager";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -54,6 +54,8 @@ const defaultSubjectValue: AcademicSubjectInput = {
 };
 
 const SchoolAcademicManager = () => {
+  const [searchParams] = useSearchParams();
+  const sectionParam = (searchParams.get("section") ?? "").toLowerCase();
   const [classForm, setClassForm] = useState<ClassInput>(defaultClassValue);
   const [sectionForm, setSectionForm] =
     useState<SectionInput>(defaultSectionValue);
@@ -62,6 +64,29 @@ const SchoolAcademicManager = () => {
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
+  const [highlightSection, setHighlightSection] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sectionParam) return;
+    const idMap: Record<string, string> = {
+      classes: "academic-section-classes",
+      class: "academic-section-classes",
+      batches: "academic-section-classes",
+      sections: "academic-section-sections",
+      subjects: "academic-section-subjects",
+    };
+    const elId = idMap[sectionParam];
+    if (!elId) return;
+    setHighlightSection(elId);
+    const timer = window.setTimeout(() => {
+      document.getElementById(elId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    const clear = window.setTimeout(() => setHighlightSection(null), 2800);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clear);
+    };
+  }, [sectionParam]);
 
   const classesQuery = useQuery({
     queryKey: ["classes"],
@@ -176,7 +201,14 @@ const SchoolAcademicManager = () => {
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-3">
-        <Card>
+        <Card
+          id="academic-section-classes"
+          className={
+            highlightSection === "academic-section-classes"
+              ? "scroll-mt-24 ring-2 ring-[var(--brand-primary,#0c2d6b)] ring-offset-2 transition"
+              : "scroll-mt-24"
+          }
+        >
           <CardHeader>
             <CardTitle>Classes</CardTitle>
           </CardHeader>
@@ -316,7 +348,14 @@ const SchoolAcademicManager = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          id="academic-section-sections"
+          className={
+            highlightSection === "academic-section-sections"
+              ? "scroll-mt-24 ring-2 ring-[var(--brand-primary,#0c2d6b)] ring-offset-2 transition"
+              : "scroll-mt-24"
+          }
+        >
           <CardHeader>
             <CardTitle>Sections</CardTitle>
           </CardHeader>
@@ -463,7 +502,14 @@ const SchoolAcademicManager = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          id="academic-section-subjects"
+          className={
+            highlightSection === "academic-section-subjects"
+              ? "scroll-mt-24 ring-2 ring-[var(--brand-primary,#0c2d6b)] ring-offset-2 transition"
+              : "scroll-mt-24"
+          }
+        >
           <CardHeader>
             <CardTitle>Subjects</CardTitle>
           </CardHeader>

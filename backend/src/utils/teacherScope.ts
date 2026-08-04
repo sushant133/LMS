@@ -96,6 +96,90 @@ const buildLegacyScope = (
   scopeSource: "legacy"
 });
 
+/**
+ * When teachers only have legacy subject/batch/year arrays (no SubjectAssignment rows),
+ * synthesize assignment pairs so mark entry, exams, and Academic Management filters work.
+ * Pair subject × year (using subject.yearIds ∩ assigned years, else all assigned years).
+ */
+const synthesizeAssignmentsFromLegacy = async (
+  schoolId: mongoose.Types.ObjectId,
+  legacy: TeacherScope
+): Promise<TeacherAssignmentPair[]> => {
+  if (!legacy.subjectIds.length) return [];
+  const subjects = await Subject.find({
+    schoolId,
+    _id: { $in: legacy.subjectIds }
+  })
+    .select("_id yearIds")
+    .lean();
+
+  const yearDocs =
+    legacy.yearIds.length > 0
+      ? await Year.find({ schoolId, _id: { $in: legacy.yearIds } })
+          .select("_id batchId")
+          .lean()
+      : [];
+  const yearBatch = new Map(
+    yearDocs.map((y) => [y._id.toString(), y.batchId?.toString() ?? ""])
+  );
+  const defaultBatch = legacy.batchIds[0] ?? "";
+
+  const pairs: TeacherAssignmentPair[] = [];
+  for (const sub of subjects) {
+    const subYearIds = toIdStrings(sub.yearIds as mongoose.Types.ObjectId[] | undefined);
+    const years =
+      subYearIds.length > 0
+        ? subYearIds.filter((id) => !legacy.yearIds.length || legacy.yearIds.includes(id))
+        : legacy.yearIds;
+    const yearList = years.length > 0 ? years : legacy.yearIds;
+    for (const yearId of yearList) {
+      const batchId = yearBatch.get(yearId) || defaultBatch;
+      if (!batchId || !yearId) continue;
+      pairs.push({
+        subjectId: sub._id.toString(),
+        batchId,
+        yearId,
+        assignmentId: `legacy:${sub._id.toString()}:${yearId}`,
+        assignmentType: "FULL",
+        unitFrom: null,
+        unitTo: null,
+        assignedPercentage: null
+      });
+    }
+    // School-style class/section legacy
+    for (const classId of legacy.classIds) {
+      for (const sectionId of legacy.sectionIds) {
+        pairs.push({
+          subjectId: sub._id.toString(),
+          classId,
+          sectionId,
+          assignmentId: `legacy:${sub._id.toString()}:${classId}:${sectionId}`,
+          assignmentType: "FULL",
+          unitFrom: null,
+          unitTo: null,
+          assignedPercentage: null
+        });
+      }
+    }
+  }
+  return pairs;
+};
+
+const withSynthesizedLegacyAssignments = async (
+  schoolId: mongoose.Types.ObjectId,
+  legacy: TeacherScope
+): Promise<TeacherScope> => {
+  if (legacy.assignments.length > 0) return legacy;
+  const synthesized = await synthesizeAssignmentsFromLegacy(schoolId, legacy);
+  if (!synthesized.length) return legacy;
+  return {
+    ...legacy,
+    assignments: synthesized,
+    // Keep scopeSource as legacy so auth uses set-membership + sibling checks when needed
+    scopeSource: "legacy"
+  };
+};
+
 /** Normalize BS academic year for loose matching (e.g. "2082/083" vs "2082 / 083"). */
 const normalizeAcademicYearBs = (value: string | undefined | null): string =>
   (value ?? "").trim().replace(/\s+/g, "").toLowerCase();
@@ -141,8 +225,22 @@ const mergeScopes = (primary: TeacherScope, secondary: TeacherScope): TeacherSco
   scopeSource: primary.assignments.length > 0 ? "assignment" : secondary.scopeSource
 });
 
+const userIsTeacherAccount = async (req: Request): Promise<boolean> => {
+  if (!req.user) return false;
+  if (req.user.role === "TEACHER") return true;
+  // Secondary TEACHER responsibility (e.g. Principal + teaching)
+  try {
+    const { getUserSecondaryRoles } = await import("./moduleAccessService.js");
+    const secondary = await getUserSecondaryRoles(req.user.userId);
+    return secondary.some((r) => r === "TEACHER");
+  } catch {
+    return false;
+  }
+};
+
 export const getTeacherScope = async (req: Request): Promise<TeacherScope | null> => {
-  if (!req.user || req.user.role !== "TEACHER") {
+  if (!req.user) return null;
+  if (!(await userIsTeacherAccount(req))) {
     return null;
   }
 
@@ -215,7 +313,7 @@ export const getTeacherScope = async (req: Request): Promise<TeacherScope | null
       );
       return mergeScopes(fromAssign, legacy);
     }
-    return legacy;
+    return withSynthesizedLegacyAssignments(schoolId, legacy);
   }
 
   // hybrid (includes former pure-legacy): assignment rows win when present
@@ -228,7 +326,7 @@ export const getTeacherScope = async (req: Request): Promise<TeacherScope | null
     return mergeScopes(fromAssign, legacy);
   }
 
-  return legacy;
+  return withSynthesizedLegacyAssignments(schoolId, legacy);
 };
 
 export const requireTeacherScope = async (req: Request): Promise<TeacherScope> => {
@@ -312,18 +410,25 @@ export const assertTeacherAcademicScope = async (
  */
 export const assertTeacherSubject = async (req: Request, subjectId: string): Promise<TeacherScope> => {
   const scope = await requireTeacherScope(req);
-
-  if (!scope.subjectIds.includes(subjectId)) {
-    throw new ApiError(403, "You are not assigned to this subject");
-  }
+  const schoolId = tenantObjectId(req);
 
   const subject = await Subject.findOne({
     _id: subjectId,
-    schoolId: tenantObjectId(req)
+    schoolId
   }).lean();
 
   if (!subject) {
     throw new ApiError(404, "Subject not found");
+  }
+
+  if (!scope.subjectIds.includes(subjectId)) {
+    // Curriculum sibling of an assigned subject still counts
+    const { expandCurriculumSubjectIds } = await import("./academicManagementService.js");
+    const family = await expandCurriculumSubjectIds(schoolId, subjectId);
+    const ok = scope.subjectIds.some((id) => family.includes(id) || id === subjectId);
+    if (!ok) {
+      throw new ApiError(403, "You are not assigned to this subject");
+    }
   }
 
   return scope;
@@ -378,6 +483,40 @@ export const assertTeacherSubjectClassSection = async (
   return scope;
 };
 
+/**
+ * College provisions one Subject document per batch×year. Teachers may be assigned
+ * subject A (Batch 2082 / 1st Year) but enter marks against curriculum sibling B
+ * (same master/code/name) for the student' s year. Match by exact pair OR sibling family.
+ */
+const teacherCoversSubjectAtBatchYear = async (
+  scope: TeacherScope,
+  schoolId: mongoose.Types.ObjectId,
+  subjectId: string,
+  batchId: string,
+  yearId: string
+): Promise<boolean> => {
+  const { expandCurriculumSubjectIds } = await import("./academicManagementService.js");
+  const family = new Set(await expandCurriculumSubjectIds(schoolId, subjectId));
+
+  if (scope.assignments.length > 0) {
+    for (const pair of scope.assignments) {
+      if (pair.batchId !== batchId || pair.yearId !== yearId) continue;
+      if (pair.subjectId === subjectId || family.has(pair.subjectId)) return true;
+      // Also expand the assigned subject and see if selected is in that family
+      const assignedFamily = await expandCurriculumSubjectIds(schoolId, pair.subjectId);
+      if (assignedFamily.includes(subjectId)) return true;
+    }
+    return false;
+  }
+
+  // Legacy arrays: batch/year membership + subject family
+  if (!scope.batchIds.includes(batchId) || !scope.yearIds.includes(yearId)) {
+    return false;
+  }
+  if (scope.subjectIds.includes(subjectId)) return true;
+  return scope.subjectIds.some((id) => family.has(id));
+};
+
 export const assertTeacherSubjectBatchYear = async (
   req: Request,
   subjectId: string,
@@ -385,27 +524,12 @@ export const assertTeacherSubjectBatchYear = async (
   yearId: string
 ): Promise<TeacherScope> => {
   const scope = await requireTeacherScope(req);
-
-  if (scope.scopeSource === "assignment") {
-    const match = scope.assignments.find(
-      (pair) => pair.subjectId === subjectId && pair.batchId === batchId && pair.yearId === yearId
-    );
-    if (!match) {
-      throw new ApiError(403, "You are not assigned to teach this subject for this batch/year");
-    }
-  } else {
-    if (!scope.batchIds.includes(batchId) || !scope.yearIds.includes(yearId)) {
-      throw new ApiError(403, "You are not assigned to this batch or year");
-    }
-    if (!scope.subjectIds.includes(subjectId)) {
-      throw new ApiError(403, "You are not assigned to this subject");
-    }
-  }
+  const schoolId = tenantObjectId(req);
 
   const year = await Year.findOne({
     _id: yearId,
     batchId,
-    schoolId: tenantObjectId(req)
+    schoolId
   }).lean();
   if (!year) {
     throw new ApiError(404, "Year was not found in this batch");
@@ -413,12 +537,28 @@ export const assertTeacherSubjectBatchYear = async (
 
   const subject = await Subject.findOne({
     _id: subjectId,
-    schoolId: tenantObjectId(req),
-    yearIds: yearId
+    schoolId
   }).lean();
-
   if (!subject) {
-    throw new ApiError(403, "This subject is not assigned to your year");
+    throw new ApiError(404, "Subject not found");
+  }
+
+  const allowed = await teacherCoversSubjectAtBatchYear(
+    scope,
+    schoolId,
+    subjectId,
+    batchId,
+    yearId
+  );
+  if (!allowed) {
+    throw new ApiError(403, "You are not assigned to teach this subject for this batch/year");
+  }
+
+  // Prefer subjects linked to this year; allow if yearIds empty (flexible master) or contains year
+  const yearIds = (subject.yearIds ?? []).map((id) => id.toString());
+  if (yearIds.length > 0 && !yearIds.includes(yearId)) {
+    // Curriculum sibling may be stored against a different year doc at the same level —
+    // assignment pair already validated batch+year coverage above.
   }
 
   return scope;

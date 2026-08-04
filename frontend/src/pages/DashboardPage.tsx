@@ -586,9 +586,10 @@ const resolveDashboardStatHref = (label: string): string | undefined => {
   const fixed: Record<string, string> = {
     Students: "/students/list",
     Teachers: "/teachers",
-    Batches: "/academics",
-    Classes: "/academics",
-    Years: "/academics",
+    /** Deep-link into Academic Structure → Batches panel */
+    Batches: "/academics?section=batches",
+    Classes: "/academics?section=classes",
+    Years: "/academics?section=batches",
     Notices: "/notices",
     "Visible Notices": "/notices",
     "Unread Alerts": "/notifications",
@@ -622,9 +623,9 @@ const dashboardStatHint = (label: string, href?: string): string | null => {
   }
   if (label === "Passed Out" || label === "Alumni") return "View list →";
   if (label === "Teachers") return "View teachers →";
-  if (label === "Batches" || label === "Classes" || label === "Years") {
-    return "Open academics →";
-  }
+  if (label === "Batches") return "Open batches →";
+  if (label === "Classes") return "Open classes →";
+  if (label === "Years") return "Open academic structure →";
   if (label.includes("Notice")) return "Open notices →";
   if (label.includes("Subject")) return "Open →";
   if (label.includes("Attendance")) return "Open attendance →";

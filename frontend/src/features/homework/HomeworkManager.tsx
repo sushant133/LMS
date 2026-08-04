@@ -84,6 +84,24 @@ export const HomeworkManager = () => {
     : isStudent
       ? (studentSubjectsQuery.data ?? [])
       : (subjectsQuery.data ?? []);
+  const teacherAssignments = isTeacher
+    ? (teacherScopeQuery.data?.scope.assignments ?? [])
+    : [];
+  const teacherSubjectIds = isTeacher
+    ? (teacherScopeQuery.data?.scope.subjectIds ?? [])
+    : [];
+  const studentYearIdsByBatch = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    if (!isTeacher) return map;
+    for (const s of teacherScopeQuery.data?.students ?? []) {
+      const bid = String(s.batchId ?? "");
+      const yid = String(s.yearId ?? "");
+      if (!bid || !yid) continue;
+      if (!map[bid]) map[bid] = [];
+      if (!map[bid]!.includes(yid)) map[bid]!.push(yid);
+    }
+    return map;
+  }, [isTeacher, teacherScopeQuery.data?.students]);
 
   const feedQuery = useQuery({
     queryKey: ["homework-feed", filters],
@@ -349,6 +367,9 @@ export const HomeworkManager = () => {
         subjects={subjects}
         topicSuggestions={topicSuggestions}
         scopedOnly={isTeacher}
+        assignments={teacherAssignments}
+        assignedSubjectIds={teacherSubjectIds}
+        studentYearIdsByBatch={studentYearIdsByBatch}
         onClose={() => {
           setComposeOpen(false);
           setEditingPost(null);

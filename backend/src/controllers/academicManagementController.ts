@@ -109,8 +109,14 @@ const parseFilters = (req: Request): AcademicManagementFilters => ({
 });
 
 export const getAcademicDashboard = asyncHandler(async (req: Request, res: Response) => {
-  const dashboard = await buildDashboard(req, parseFilters(req));
-  return sendSuccess(res, "Academic management dashboard fetched", dashboard);
+  try {
+    const dashboard = await buildDashboard(req, parseFilters(req));
+    return sendSuccess(res, "Academic management dashboard fetched", dashboard);
+  } catch (error) {
+    // Surface real cause in logs; rethrow so errorHandler formats the response
+    console.error("[academic-management/dashboard]", error);
+    throw error;
+  }
 });
 
 export const listSessionPlans = asyncHandler(async (req: Request, res: Response) => {

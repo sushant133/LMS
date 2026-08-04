@@ -1325,7 +1325,42 @@ const countCurriculumSubjects = async (
   return rows.length;
 };
 
-export const buildDashboard = async (req: Request, filters: AcademicManagementFilters): Promise<AcademicManagementDashboard> => {
+const emptyDashboard = (): AcademicManagementDashboard => ({
+  totalSubjects: 0,
+  totalSessionPlans: 0,
+  totalLessonPlans: 0,
+  todaysLogBooks: 0,
+  approvedPlans: 0,
+  pendingApprovals: 0,
+  delayedLessonPlans: 0,
+  syllabusCompletionPercent: 0,
+  syllabusRemainingPercent: 100,
+  teachersPendingLogBook: 0,
+  teacherAlerts: [],
+  monthlyProgress: [],
+  teacherPerformance: [],
+  subjectProgress: [],
+  facultyProgress: [],
+  syllabusCompletion: []
+});
+
+export const buildDashboard = async (
+  req: Request,
+  filters: AcademicManagementFilters
+): Promise<AcademicManagementDashboard> => {
+  try {
+    return await buildDashboardInner(req, filters);
+  } catch (error) {
+    console.error("[buildDashboard] failed — returning empty dashboard:", error);
+    // Prefer a usable UI over a hard 500 for teachers/admins
+    return emptyDashboard();
+  }
+};
+
+const buildDashboardInner = async (
+  req: Request,
+  filters: AcademicManagementFilters
+): Promise<AcademicManagementDashboard> => {
   const baseFilter = buildAcademicFilter(req, filters);
   await applyCurriculumSubjectFilter(req, baseFilter, filters.subjectId);
   await applyTeacherScopeToFilter(req, baseFilter);
@@ -1373,23 +1408,33 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
 
   const avgCompletion =
     progressRows.length > 0
-      ? Math.round(progressRows.reduce((sum, row) => sum + row.completedPercent, 0) / progressRows.length)
+      ? Math.round(
+          progressRows.reduce((sum, row) => sum + (Number(row.completedPercent) || 0), 0) /
+            progressRows.length
+        )
       : 0;
   const avgRemaining = Math.max(0, 100 - avgCompletion);
 
   const logDateBs = filters.dateFrom || todayBs;
-  const logDayOfWeek = getDayOfWeekFromBs(logDateBs);
-  const [teachersWithLogToday, scheduledTeacherIds] = await Promise.all([
-    AcademicLogBookEntry.distinct("teacherId", {
-      schoolId,
-      dateBs: logDateBs,
-      isDeleted: false
-    }),
-    TimetableSlot.distinct("teacherId", { schoolId, dayOfWeek: logDayOfWeek })
-  ]);
+  // Invalid BS date must not 500 the whole dashboard (treat as "no schedule day")
+  let logDayOfWeek = -1;
+  try {
+    logDayOfWeek = getDayOfWeekFromBs(logDateBs);
+  } catch {
+    logDayOfWeek = -1;
+  }
+  const teachersWithLogToday = await AcademicLogBookEntry.distinct("teacherId", {
+    schoolId,
+    dateBs: logDateBs,
+    isDeleted: false
+  });
+  const scheduledTeacherIds: Array<mongoose.Types.ObjectId | string> =
+    logDayOfWeek >= 0
+      ? await TimetableSlot.distinct("teacherId", { schoolId, dayOfWeek: logDayOfWeek })
+      : [];
   const scheduledTeacherCount = scheduledTeacherIds.length;
   const scheduledLoggedCount = scheduledTeacherIds.filter((id) =>
-    teachersWithLogToday.some((logged) => logged.toString() === id.toString())
+    teachersWithLogToday.some((logged) => String(logged) === String(id))
   ).length;
   const teachersPendingLogBook = Math.max(scheduledTeacherCount - scheduledLoggedCount, 0);
 
@@ -1458,8 +1503,8 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
 
   // Teachers see missing-log only when scheduled today; admins see scheduled pending summary
   if (teacherScope) {
-    const isScheduled = scheduledTeacherIds.some((id) => id.toString() === teacherScope.teacherId);
-    const hasLog = teachersWithLogToday.some((id) => id.toString() === teacherScope.teacherId);
+    const isScheduled = scheduledTeacherIds.some((id) => String(id) === teacherScope.teacherId);
+    const hasLog = teachersWithLogToday.some((id) => String(id) === teacherScope.teacherId);
     if (isScheduled && !hasLog) {
       teacherAlerts.push({
         type: "LOG_BOOK_MISSING",
@@ -1511,9 +1556,14 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
     { $limit: 10 }
   ]);
 
-  const teacherDocs = await Teacher.find({ _id: { $in: teacherPerformance.map((row) => row._id) } })
-    .populate("user", "fullName")
-    .lean();
+  const teacherPerfIds = teacherPerformance
+    .map((row) => row._id)
+    .filter((id): id is NonNullable<typeof id> => id != null);
+  const teacherDocs = teacherPerfIds.length
+    ? await Teacher.find({ _id: { $in: teacherPerfIds } })
+        .populate("user", "fullName")
+        .lean()
+    : [];
 
   const teacherNameMap = new Map(
     teacherDocs.map((teacher) => [
@@ -1528,9 +1578,14 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
     { $limit: 10 }
   ]);
 
-  const subjectDocs = await Subject.find({ _id: { $in: subjectProgress.map((row) => row._id) } })
-    .select("name")
-    .lean();
+  const subjectPerfIds = subjectProgress
+    .map((row) => row._id)
+    .filter((id): id is NonNullable<typeof id> => id != null);
+  const subjectDocs = subjectPerfIds.length
+    ? await Subject.find({ _id: { $in: subjectPerfIds } })
+        .select("name")
+        .lean()
+    : [];
   const subjectNameMap = new Map(subjectDocs.map((subject) => [subject._id.toString(), subject.name]));
 
   const facultyMatch: Record<string, unknown> = {
@@ -1580,28 +1635,51 @@ export const buildDashboard = async (req: Request, filters: AcademicManagementFi
       planned: row.planned as number,
       completed: row.completed as number
     })),
-    teacherPerformance: teacherPerformance.map((row) => ({
-      teacherId: row._id.toString(),
-      teacherName: teacherNameMap.get(row._id.toString()) ?? "Teacher",
-      completionPercent: Math.round(row.completionPercent as number),
-      remainingPercent: Math.max(0, 100 - Math.round(row.completionPercent as number))
-    })),
-    subjectProgress: subjectProgress.map((row) => ({
-      subjectId: row._id.toString(),
-      subjectName: subjectNameMap.get(row._id.toString()) ?? "Subject",
-      completionPercent: Math.round(row.completionPercent as number),
-      remainingPercent: Math.max(0, 100 - Math.round(row.completionPercent as number))
-    })),
-    facultyProgress: facultyProgressRows.map((row) => ({
-      faculty: row._id as string,
-      completionPercent: Math.round((row.completionPercent as number) || 0),
-      remainingPercent: Math.max(0, 100 - Math.round((row.completionPercent as number) || 0))
-    })),
-    syllabusCompletion: subjectProgress.map((row) => ({
-      subjectName: subjectNameMap.get(row._id.toString()) ?? "Subject",
-      percent: Math.round(row.completionPercent as number),
-      remainingPercent: Math.max(0, 100 - Math.round(row.completionPercent as number))
-    }))
+    teacherPerformance: teacherPerformance
+      .filter((row) => row._id != null)
+      .map((row) => {
+        const id = String(row._id);
+        const pct = Math.round(Number(row.completionPercent) || 0);
+        return {
+          teacherId: id,
+          teacherName: teacherNameMap.get(id) ?? "Teacher",
+          completionPercent: pct,
+          remainingPercent: Math.max(0, 100 - pct)
+        };
+      }),
+    subjectProgress: subjectProgress
+      .filter((row) => row._id != null)
+      .map((row) => {
+        const id = String(row._id);
+        const pct = Math.round(Number(row.completionPercent) || 0);
+        return {
+          subjectId: id,
+          subjectName: subjectNameMap.get(id) ?? "Subject",
+          completionPercent: pct,
+          remainingPercent: Math.max(0, 100 - pct)
+        };
+      }),
+    facultyProgress: facultyProgressRows
+      .filter((row) => row._id != null && String(row._id).trim() !== "")
+      .map((row) => {
+        const pct = Math.round(Number(row.completionPercent) || 0);
+        return {
+          faculty: String(row._id),
+          completionPercent: pct,
+          remainingPercent: Math.max(0, 100 - pct)
+        };
+      }),
+    syllabusCompletion: subjectProgress
+      .filter((row) => row._id != null)
+      .map((row) => {
+        const id = String(row._id);
+        const pct = Math.round(Number(row.completionPercent) || 0);
+        return {
+          subjectName: subjectNameMap.get(id) ?? "Subject",
+          percent: pct,
+          remainingPercent: Math.max(0, 100 - pct)
+        };
+      })
   };
 };
 

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   COLLEGE_PROGRAM_YEAR_NAMES,
@@ -36,12 +36,45 @@ const defaultBatchValue: BatchInput = {
 
 export const CollegeAcademicManager = () => {
   const canManage = useIsTenantAdmin();
+  const [searchParams] = useSearchParams();
+  const sectionParam = (searchParams.get("section") ?? "").toLowerCase();
   const [batchForm, setBatchForm] = useState<BatchInput>(defaultBatchValue);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [pendingMasterEditId, setPendingMasterEditId] = useState<string | null>(
     null,
   );
+  const [highlightSection, setHighlightSection] = useState<string | null>(null);
+
+  /** Dashboard (and other deep links) open Academic Structure on a specific panel */
+  useEffect(() => {
+    if (!sectionParam) return;
+    const idMap: Record<string, string> = {
+      batches: "academic-section-batches",
+      batch: "academic-section-batches",
+      years: "academic-section-batches",
+      "batch-subjects": "academic-section-batch-subjects",
+      subjects: "academic-section-batch-subjects",
+      "master-subjects": "academic-section-master-subjects",
+      master: "academic-section-master-subjects",
+      curriculum: "academic-section-master-subjects",
+    };
+    const elId = idMap[sectionParam];
+    if (!elId) return;
+
+    setHighlightSection(elId);
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(elId);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 80);
+    const clearHighlight = window.setTimeout(() => setHighlightSection(null), 2800);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearHighlight);
+    };
+  }, [sectionParam]);
 
   const batchesQuery = useQuery({
     queryKey: ["batches"],
@@ -177,14 +210,23 @@ export const CollegeAcademicManager = () => {
         </CardContent>
       </Card>
 
-      <MasterSubjectManager
-        canManage={canManage}
-        pendingEditId={pendingMasterEditId}
-        onPendingEditHandled={() => setPendingMasterEditId(null)}
-      />
+      <div id="academic-section-master-subjects" className="scroll-mt-24">
+        <MasterSubjectManager
+          canManage={canManage}
+          pendingEditId={pendingMasterEditId}
+          onPendingEditHandled={() => setPendingMasterEditId(null)}
+        />
+      </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
+        <Card
+          id="academic-section-batches"
+          className={
+            highlightSection === "academic-section-batches"
+              ? "scroll-mt-24 ring-2 ring-[var(--brand-primary,#0c2d6b)] ring-offset-2 transition"
+              : "scroll-mt-24"
+          }
+        >
           <CardHeader>
             <CardTitle>Batches</CardTitle>
           </CardHeader>
@@ -297,7 +339,14 @@ export const CollegeAcademicManager = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          id="academic-section-batch-subjects"
+          className={
+            highlightSection === "academic-section-batch-subjects"
+              ? "scroll-mt-24 ring-2 ring-[var(--brand-primary,#0c2d6b)] ring-offset-2 transition"
+              : "scroll-mt-24"
+          }
+        >
           <CardHeader>
             <CardTitle>Batch Subjects</CardTitle>
             <p className="text-sm text-slate-500">

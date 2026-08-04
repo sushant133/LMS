@@ -94,11 +94,15 @@ const persistResultMarks = async (
   }
 
   for (const mark of payload.marks) {
-    if (options.allowedSubjectIds && !options.allowedSubjectIds.includes(mark.subjectId)) {
-      throw new ApiError(403, "You can only enter marks for your assigned subjects");
-    }
     if (!options.isAdmin) {
+      // Authoritative: assignment matrix + curriculum siblings for this batch/year
       await assertTeacherSubjectAcademicScope(req, mark.subjectId, payload);
+    } else if (
+      options.allowedSubjectIds &&
+      options.allowedSubjectIds.length > 0 &&
+      !options.allowedSubjectIds.includes(mark.subjectId)
+    ) {
+      throw new ApiError(403, "You can only enter marks for your assigned subjects");
     }
   }
 
