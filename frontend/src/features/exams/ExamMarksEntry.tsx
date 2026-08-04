@@ -376,10 +376,13 @@ export const ExamMarksEntry = ({
         ? localCoverage.missingStudents
         : (submission?.missingStudents ?? []),
   };
+  /**
+   * Teachers may still edit DRAFT / RETURNED subjects after partial publish
+   * (exam locked). Other statuses stay locked.
+   */
   const canEditMarks =
-    !isLocked &&
-    (submissionStatus === "DRAFT" ||
-      submissionStatus === "RETURNED_FOR_CORRECTION");
+    submissionStatus === "DRAFT" ||
+    submissionStatus === "RETURNED_FOR_CORRECTION";
   const isPendingReview =
     submissionStatus === "PENDING_ADMIN_REVIEW" ||
     submissionStatus === "SUBMITTED_FOR_REVIEW";
@@ -779,13 +782,14 @@ export const ExamMarksEntry = ({
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        if (isLocked) {
-          toast.error("Results are locked by the college admin");
-          return;
-        }
         if (!canEditMarks) {
           toast.error(
-            "Marks cannot be edited while pending admin review or approved",
+            isLocked &&
+              (submissionStatus === "APPROVED" ||
+                submissionStatus === "PUBLISHED" ||
+                isPendingReview)
+              ? "This subject is locked (approved/published or pending review). Contact admin to unapprove if you need to correct marks."
+              : "Marks cannot be edited while pending admin review, approved, or published",
           );
           return;
         }
@@ -1058,10 +1062,19 @@ export const ExamMarksEntry = ({
         </div>
       ) : null}
 
-      {isLocked ? (
+      {isLocked && canEditMarks ? (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Results for this exam are locked. Contact the college admin to unlock
-          before editing marks.
+          Some results for this exam are already published/locked. You can still
+          enter or correct marks for this subject while it is in Draft or
+          Returned for correction.
+        </p>
+      ) : null}
+
+      {isLocked && !canEditMarks && selectedSubjectId ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This subject cannot be edited while it is pending review, approved, or
+          published. Ask the admin to unapprove and return it if corrections are
+          needed.
         </p>
       ) : null}
 

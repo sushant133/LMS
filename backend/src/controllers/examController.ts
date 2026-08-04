@@ -20,6 +20,7 @@ import {
   assertTeacherCanEditSubmission,
   buildSubmissionFilter,
   getOrCreateSubmission,
+  getPublishedSubjectIdsForStudentResult,
   type SubmissionScope
 } from "../utils/resultSubmission.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
@@ -79,7 +80,7 @@ const buildSubmissionScopeFromPayload = (payload: ResultPayload): SubmissionScop
 const persistResultMarks = async (
   req: Request,
   payload: ResultPayload,
-  options: { isAdmin: boolean; allowedSubjectIds?: string[] }
+  options: { trackSubmission: boolean; skipScopeCheck: boolean; allowedSubjectIds?: string[] }
 ) => {
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
@@ -89,12 +90,8 @@ const persistResultMarks = async (
     throw new ApiError(404, "Exam was not found");
   }
 
-  if (!options.isAdmin && exam.resultsLocked) {
-    throw new ApiError(403, "Results are locked by the college admin");
-  }
-
   for (const mark of payload.marks) {
-    if (!options.isAdmin) {
+    if (!options.skipScopeCheck) {
       // Authoritative: assignment matrix + curriculum siblings for this batch/year
       await assertTeacherSubjectAcademicScope(req, mark.subjectId, payload);
     } else if (
@@ -106,11 +103,12 @@ const persistResultMarks = async (
     }
   }
 
-  // Teachers must set full/pass once for exam+subject (ResultSubmission) before student entry
+  // Teachers/admins must set full/pass once for exam+subject (ResultSubmission) before student entry
   let schemeBySubject = new Map<string, { fullMarks: number; passMarks: number }>();
-  if (!options.isAdmin) {
+  if (options.trackSubmission) {
     const scope = buildSubmissionScopeFromPayload(payload);
     const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user?.userId);
+    // Uses submission status: allows DRAFT / RETURNED even when exam is locked (partial publish)
     assertTeacherCanEditSubmission(submission, exam);
 
     if (
@@ -153,7 +151,9 @@ const persistResultMarks = async (
   const subjectMap = new Map(subjects.map((subject) => [subject._id.toString(), subject]));
 
   const editableSubjectIds = new Set(
-    options.isAdmin ? payload.marks.map((mark) => mark.subjectId) : (options.allowedSubjectIds ?? [])
+    options.allowedSubjectIds && options.allowedSubjectIds.length > 0
+      ? options.allowedSubjectIds
+      : payload.marks.map((mark) => mark.subjectId)
   );
   const retainedMarks = (existingResult?.marks ?? []).filter((mark) => !editableSubjectIds.has(mark.subjectId.toString()));
 
@@ -255,7 +255,7 @@ const persistResultMarks = async (
   );
 
   await recordAudit(req, {
-    action: options.isAdmin ? "result.admin_edit_marks" : "result.teacher_save_marks",
+    action: req.user?.role === "TEACHER" ? "result.teacher_save_marks" : "result.admin_edit_marks",
     entity: "Result",
     entityId: result._id.toString(),
     before: beforeMarks?.length ? { studentId: payload.studentId, marks: beforeMarks } : null,
@@ -270,7 +270,7 @@ const persistResultMarks = async (
     }
   });
 
-  if (!options.isAdmin) {
+  if (options.trackSubmission) {
     const scope = buildSubmissionScopeFromPayload(payload);
     await getOrCreateSubmission(schoolId.toString(), scope, req.user?.userId);
   }
@@ -499,26 +499,56 @@ export const listResults = asyncHandler(async (req: Request, res: Response) => {
   }
 
   if (studentProfile || req.user?.role === "PARENT") {
+    const schoolIdStr = tenantObjectId(req).toString();
     const examIds = [...new Set(results.map((result) => result.examId.toString()))];
     const exams = await Exam.find({ _id: { $in: examIds }, schoolId: tenantObjectId(req) }).lean();
     const examMap = new Map(exams.map((exam) => [exam._id.toString(), exam]));
-    results = results.filter((result) => {
+    const filtered: typeof results = [];
+    for (const result of results) {
       const exam = examMap.get(result.examId.toString());
-      return exam ? canViewPublishedResults(exam) && Boolean(result.publishedAtBs) : false;
-    });
+      if (!exam || !canViewPublishedResults(exam) || !result.publishedAtBs) {
+        continue;
+      }
+      // Partial publish: only expose subjects that have PUBLISHED submissions
+      const publishedSubjects = await getPublishedSubjectIdsForStudentResult(
+        schoolIdStr,
+        result.examId.toString(),
+        result
+      );
+      const visibleMarks = result.marks.filter((mark) =>
+        publishedSubjects.has(mark.subjectId.toString())
+      );
+      if (visibleMarks.length === 0) {
+        continue;
+      }
+      filtered.push({
+        ...result,
+        marks: visibleMarks
+      } as (typeof results)[number]);
+    }
+    results = filtered;
   }
 
   return sendSuccess(res, "Results fetched", results);
 });
 
 export const upsertResult = asyncHandler(async (req: Request, res: Response) => {
-  if (req.user?.role !== "TEACHER") {
-    throw new ApiError(403, "Only teachers can enter exam results");
+  const payload = resultSchema.parse(req.body);
+
+  if (req.user?.role === "TEACHER") {
+    const scope = await assertTeacherAcademicScope(req, payload);
+    const result = await persistResultMarks(req, payload, {
+      trackSubmission: true,
+      skipScopeCheck: false,
+      allowedSubjectIds: scope.subjectIds
+    });
+    return sendSuccess(res, "Result saved successfully", result);
   }
 
-  const payload = resultSchema.parse(req.body);
-  const scope = await assertTeacherAcademicScope(req, payload);
-  const result = await persistResultMarks(req, payload, { isAdmin: false, allowedSubjectIds: scope.subjectIds });
+  // Admin/Super Admin can enter marks for any subject/batch/year/class/section
+  // directly, following the same submission → approval → publish workflow as teachers.
+  assertInstitutionWrite(req, "Only teachers or administrators can enter exam results");
+  const result = await persistResultMarks(req, payload, { trackSubmission: true, skipScopeCheck: true });
 
   return sendSuccess(res, "Result saved successfully", result);
 });
@@ -526,7 +556,7 @@ export const upsertResult = asyncHandler(async (req: Request, res: Response) => 
 export const adminUpsertResult = asyncHandler(async (req: Request, res: Response) => {
   assertInstitutionWrite(req);
   const payload = resultSchema.parse(req.body);
-  const result = await persistResultMarks(req, payload, { isAdmin: true });
+  const result = await persistResultMarks(req, payload, { trackSubmission: false, skipScopeCheck: true });
 
   return sendSuccess(res, "Result updated by administrator", result);
 });
@@ -556,14 +586,9 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
     throw new ApiError(404, "Exam not found");
   }
 
-  if (role === "TEACHER" && exam.resultsLocked) {
-    throw new ApiError(403, "Results are locked by the college admin");
-  }
-
   if (role === "TEACHER") {
     const student = await Student.findOne({ _id: studentId, schoolId }).lean();
     if (student) {
-      const institutionType = await getInstitutionType(req);
       const scope: SubmissionScope = {
         examId,
         subjectId,
@@ -576,7 +601,12 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
       const submission = await ResultSubmission.findOne(filter);
       if (submission) {
         assertTeacherCanEditSubmission(submission, exam);
+      } else if (exam.resultsLocked) {
+        // No submission yet while exam locked — allow starting DRAFT for remaining subjects
+        // (partial publish workflow). Block only if somehow no path to create.
       }
+    } else if (exam.resultsLocked) {
+      throw new ApiError(403, "Results are locked by the college admin");
     }
   }
 
@@ -659,33 +689,25 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
   const schoolId = getSchoolIdFromRequest(req);
   const todayBs = getTodayBs();
 
-  const blockingSubmissions = await ResultSubmission.find({
-    schoolId: tenantSchoolId,
-    examId,
-    status: {
-      $in: ["DRAFT", "PENDING_ADMIN_REVIEW", "SUBMITTED_FOR_REVIEW", "RETURNED_FOR_CORRECTION"]
-    }
-  }).lean();
-
-  if (blockingSubmissions.length > 0) {
-    const draftCount = blockingSubmissions.filter((row) => row.status === "DRAFT").length;
-    const reviewCount = blockingSubmissions.length - draftCount;
-    throw new ApiError(
-      400,
-      `Cannot publish results. ${draftCount > 0 ? `${draftCount} draft submission(s) not submitted. ` : ""}${
-        reviewCount > 0 ? `${reviewCount} submission(s) awaiting review or correction. ` : ""
-      }Approve all subject submissions before publishing.`
-    );
-  }
-
-  const approvedCount = await ResultSubmission.countDocuments({
+  // Partial publish: any approved subject can be released without waiting for all subjects
+  const approvedSubmissions = await ResultSubmission.find({
     schoolId: tenantSchoolId,
     examId,
     status: "APPROVED"
-  });
+  }).lean();
 
-  if (approvedCount === 0) {
-    throw new ApiError(400, "Cannot publish results. At least one subject submission must be approved before publishing.");
+  if (approvedSubmissions.length === 0) {
+    const alreadyPublished = await ResultSubmission.countDocuments({
+      schoolId: tenantSchoolId,
+      examId,
+      status: "PUBLISHED"
+    });
+    throw new ApiError(
+      400,
+      alreadyPublished > 0
+        ? "No newly approved subject submissions to publish. Approve additional subjects, then publish again."
+        : "Cannot publish results. Approve at least one subject submission first (other subjects can remain pending)."
+    );
   }
 
   const beforeExam = exam.toObject();
@@ -697,11 +719,12 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
   }
   await exam.save();
 
-  await Result.updateMany(
-    { schoolId: tenantSchoolId, examId },
-    { $set: { publishedAtBs: exam.resultPublishDateBs ?? todayBs } }
+  const publishDateBs = exam.resultPublishDateBs ?? todayBs;
+  const approvedSubjectIds = new Set(
+    approvedSubmissions.map((row) => row.subjectId.toString())
   );
 
+  // Mark approved submissions as published (only those, not drafts / pending)
   await ResultSubmission.updateMany(
     { schoolId: tenantSchoolId, examId, status: "APPROVED" },
     {
@@ -712,6 +735,34 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
       }
     }
   );
+
+  // Set publishedAtBs on student results that include at least one subject being published
+  // (scoped to matching batch/year or class/section when submission has cohort fields)
+  const allResults = await Result.find({ schoolId: tenantSchoolId, examId });
+  for (const result of allResults) {
+    const matchingSubjects = approvedSubmissions.filter((submission) => {
+      if (submission.batchId && submission.yearId) {
+        return (
+          String(submission.batchId) === String(result.batchId ?? "") &&
+          String(submission.yearId) === String(result.yearId ?? "")
+        );
+      }
+      if (submission.classId && submission.sectionId) {
+        return (
+          String(submission.classId) === String(result.classId ?? "") &&
+          String(submission.sectionId) === String(result.sectionId ?? "")
+        );
+      }
+      return approvedSubjectIds.has(submission.subjectId.toString());
+    });
+    const hasPublishedMark = result.marks.some((mark) =>
+      matchingSubjects.some((submission) => mark.subjectId.toString() === submission.subjectId.toString())
+    );
+    if (hasPublishedMark && !result.publishedAtBs) {
+      result.publishedAtBs = publishDateBs;
+      await result.save();
+    }
+  }
 
   await recordAudit(req, {
     action: "result.publish",
@@ -724,6 +775,7 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
   const students = await Student.find(examAudienceStudentFilter(tenantSchoolId, exam, college)).lean();
+  const subjectCount = approvedSubmissions.length;
 
   await Promise.all(
     students.map((student) =>
@@ -732,7 +784,7 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
           schoolId,
           recipientUserId: student.user.toString(),
           title: "Exam results published",
-          message: `Results for "${exam.name}" are now available.`,
+          message: `Results for "${exam.name}" are now available (${subjectCount} subject(s) released). More subjects may be published later.`,
           type: "EXAM",
           channel: "IN_APP",
           metadata: { examId }
@@ -748,7 +800,11 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
     )
   );
 
-  return sendSuccess(res, "Exam results published", exam);
+  return sendSuccess(
+    res,
+    `Published ${subjectCount} approved subject submission(s). Other subjects can be approved and published later.`,
+    exam
+  );
 });
 
 export const unpublishExamResults = asyncHandler(async (req: Request, res: Response) => {
@@ -938,10 +994,24 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
     }
   }
 
+  // Students/parents only see subjects with PUBLISHED submissions (partial publish support)
+  let marksForView: (typeof result.marks)[number][] = result.marks;
+  if (req.user?.role === "STUDENT" || req.user?.role === "PARENT") {
+    const publishedSubjects = await getPublishedSubjectIdsForStudentResult(
+      schoolId.toString(),
+      examId,
+      result
+    );
+    marksForView = result.marks.filter((mark) => publishedSubjects.has(mark.subjectId.toString()));
+    if (marksForView.length === 0) {
+      throw new ApiError(403, "No published subject results available yet");
+    }
+  }
+
   const [student, section, subjects, branding, batch, year, schoolClass] = await Promise.all([
     Student.findOne(withTenantScope(req, { _id: result.studentId })).populate("user", "-password"),
     result.sectionId ? Section.findOne(withTenantScope(req, { _id: result.sectionId })) : null,
-    Subject.find({ _id: { $in: result.marks.map((mark) => mark.subjectId) }, schoolId }),
+    Subject.find({ _id: { $in: marksForView.map((mark) => mark.subjectId) }, schoolId }),
     resolveSchoolBranding(schoolId),
     result.batchId ? Batch.findById(result.batchId).lean() : null,
     result.yearId ? Year.findById(result.yearId).lean() : null,
@@ -949,14 +1019,14 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
   ]);
 
   const scopedMarks = teacherScope
-    ? result.marks.filter((mark) => teacherScope.subjectIds.includes(mark.subjectId.toString()))
-    : result.marks;
+    ? marksForView.filter((mark) => teacherScope.subjectIds.includes(mark.subjectId.toString()))
+    : marksForView;
   const scopedSubjects = teacherScope
     ? subjects.filter((subject) => teacherScope.subjectIds.includes(subject._id.toString()))
     : subjects;
 
   const totals = buildResultTotals(
-    (teacherScope ? scopedMarks : result.marks).map((mark) => ({
+    scopedMarks.map((mark) => ({
       obtainedMarks: mark.obtainedMarks,
       fullMarks: mark.fullMarks,
       passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
@@ -964,7 +1034,7 @@ export const getMarksheet = asyncHandler(async (req: Request, res: Response) => 
   );
 
   return sendSuccess(res, "Marksheet generated", {
-    result: teacherScope ? { ...result.toObject(), marks: scopedMarks } : result,
+    result: { ...result.toObject(), marks: scopedMarks },
     exam,
     student,
     section,
@@ -1052,10 +1122,24 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     }
   }
 
-  const scopedMarks =
+  let scopedMarks =
     req.user?.role === "TEACHER" && teacherScope
       ? resultDoc.marks.filter((mark) => teacherScope.subjectIds.includes(mark.subjectId.toString()))
       : resultDoc.marks;
+
+  if (req.user?.role === "STUDENT" || req.user?.role === "PARENT") {
+    const publishedSubjects = await getPublishedSubjectIdsForStudentResult(
+      schoolId.toString(),
+      examId,
+      resultDoc
+    );
+    scopedMarks = resultDoc.marks.filter((mark) =>
+      publishedSubjects.has(mark.subjectId.toString())
+    );
+    if (scopedMarks.length === 0) {
+      throw new ApiError(404, "No published subject results available yet");
+    }
+  }
 
   const [student, branding, batch, year, schoolClass, section, subjects] = await Promise.all([
     Student.findOne(withTenantScope(req, { _id: studentId })).populate("user", "-password"),
@@ -1103,7 +1187,6 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
         obtained: mark.obtainedMarks,
         theory: mark.theoryMarks,
         practical: mark.practicalMarks,
-        internal: mark.internalMarks,
         grade: mark.grade ?? undefined,
         passFail: mark.passFail ?? undefined,
         remarks: mark.teacherRemarks ?? undefined

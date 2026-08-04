@@ -257,7 +257,6 @@
 .om-marks-table .col-sn,
 .om-marks-table .col-theory,
 .om-marks-table .col-practical,
-.om-marks-table .col-internal,
 .om-marks-table .col-total,
 .om-marks-table .col-full,
 .om-marks-table .col-grade,
@@ -279,14 +278,13 @@
 
 .om-marks-table .col-sn { width: 4%; }
 .om-marks-table .col-subject { width: 22%; }
-.om-marks-table .col-theory { width: 7%; }
-.om-marks-table .col-practical { width: 8%; }
-.om-marks-table .col-internal { width: 8%; }
+.om-marks-table .col-theory { width: 8%; }
+.om-marks-table .col-practical { width: 9%; }
 .om-marks-table .col-total { width: 8%; }
 .om-marks-table .col-full { width: 8%; }
 .om-marks-table .col-grade { width: 8%; }
 .om-marks-table .col-status { width: 9%; }
-.om-marks-table .col-remarks { width: 18%; }
+.om-marks-table .col-remarks { width: 24%; }
 
 /* B&W status: outlined pill, no colour */
 .om-badge {

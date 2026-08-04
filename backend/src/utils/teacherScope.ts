@@ -472,12 +472,23 @@ export const assertTeacherSubjectClassSection = async (
 
   const subject = await Subject.findOne({
     _id: subjectId,
-    schoolId: tenantObjectId(req),
-    classIds: classId
+    schoolId: tenantObjectId(req)
   }).lean();
-
   if (!subject) {
-    throw new ApiError(403, "This subject is not assigned to your class");
+    throw new ApiError(404, "Subject not found");
+  }
+
+  /**
+   * Subject.classIds is a non-authoritative cache (see comment above). When the
+   * assignment matrix already validated this exact subject/class/section pairing,
+   * trust it — do not re-block on a stale cache. Only enforce the cache for the
+   * legacy (non-assignment) scope path, matching the college counterpart's pattern.
+   */
+  if (scope.scopeSource !== "assignment") {
+    const classIds = (subject.classIds ?? []).map((id) => id.toString());
+    if (!classIds.includes(classId)) {
+      throw new ApiError(403, "This subject is not assigned to your class");
+    }
   }
 
   return scope;

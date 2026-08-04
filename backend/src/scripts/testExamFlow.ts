@@ -258,12 +258,12 @@ const run = async (): Promise<void> => {
       fail("Submitted results block teacher edits", `Expected 403, got ${editAfterSubmit.status}`);
     }
 
-    // Publish without approval should fail
+    // Publish without any approved subject should fail
     const prematurePublish = await admin.post(`/exams/${createdExam._id}/results/publish`);
     if (prematurePublish.status === 400) {
-      pass("Publish blocked until submissions approved", "400 Bad Request");
+      pass("Publish blocked until at least one subject is approved", "400 Bad Request");
     } else {
-      fail("Publish blocked until submissions approved", `Expected 400, got ${prematurePublish.status}`);
+      fail("Publish blocked until at least one subject is approved", `Expected 400, got ${prematurePublish.status}`);
     }
 
     // Admin approves submission

@@ -11,9 +11,11 @@ import { Subject } from "../models/Subject.js";
 import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { buildResultTotals } from "../utils/examResults.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { toCsv } from "../utils/iemisExport.js";
 import { assertInstitutionRead } from "../utils/institutionAccess.js";
+import { getPublishedSubjectIdsForStudentResult } from "../utils/resultSubmission.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
 
@@ -150,6 +152,20 @@ const buildPrintResultsGrid = async (req: Request) => {
     return leftRoll - rightRoll;
   });
 
+  // Partial publish: only expose marks for subjects with a PUBLISHED submission,
+  // same rule the student marksheet/results-list already enforce.
+  const publishedSubjectsByResultId = new Map(
+    await Promise.all(
+      sortedResults.map(
+        async (result) =>
+          [
+            result._id.toString(),
+            await getPublishedSubjectIdsForStudentResult(schoolId.toString(), examId, result)
+          ] as const
+      )
+    )
+  );
+
   const rows = sortedResults
     .map((result, index) => {
       const student = studentMap.get(result.studentId.toString());
@@ -157,9 +173,23 @@ const buildPrintResultsGrid = async (req: Request) => {
         return null;
       }
 
+      const publishedSubjectIds = publishedSubjectsByResultId.get(result._id.toString()) ?? new Set<string>();
+      const visibleMarks = result.marks.filter((mark) => publishedSubjectIds.has(mark.subjectId.toString()));
+      if (visibleMarks.length === 0) {
+        return null;
+      }
+
+      const totals = buildResultTotals(
+        visibleMarks.map((mark) => ({
+          obtainedMarks: mark.obtainedMarks,
+          fullMarks: mark.fullMarks,
+          passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
+        }))
+      );
+
       const user = student.user as { fullName?: string } | undefined;
       const markBySubject = new Map(
-        result.marks.map((mark) => [mark.subjectId.toString(), mark])
+        visibleMarks.map((mark) => [mark.subjectId.toString(), mark])
       );
       const subjectMarks = Object.fromEntries(
         subjectOrder.map((subjectId) => {
@@ -196,13 +226,13 @@ const buildPrintResultsGrid = async (req: Request) => {
           ] as const;
         })
       );
-      const remarks = result.marks
+      const remarks = visibleMarks
         .map((mark) => mark.teacherRemarks?.trim())
         .filter(Boolean)
         .join("; ");
 
-      const totalMarks = result.marks.reduce((sum, mark) => sum + mark.obtainedMarks, 0);
-      const totalFullMarks = result.marks.reduce((sum, mark) => sum + (mark.fullMarks ?? 0), 0);
+      const totalMarks = totals.totalObtained;
+      const totalFullMarks = totals.totalFull;
       const regNo =
         (student.registrationNumber && String(student.registrationNumber).trim()) ||
         student.admissionNumber ||
@@ -225,10 +255,10 @@ const buildPrintResultsGrid = async (req: Request) => {
         subjectDetails,
         totalMarks,
         totalFullMarks,
-        percentage: result.percentage,
-        grade: result.grade,
-        gpa: result.gpa,
-        passFailStatus: result.passFailStatus,
+        percentage: totals.percentage,
+        grade: totals.grade,
+        gpa: totals.gpa,
+        passFailStatus: totals.passFailStatus,
         remarks: remarks || undefined
       };
     })

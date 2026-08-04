@@ -19,6 +19,7 @@ import {
 } from "../controllers/examController.js";
 import {
   approveResultSubmission,
+  deleteResultSubmissionScope,
   getResultAuditLog,
   getSubmissionByScope,
   listResultSubmissions,
@@ -57,8 +58,10 @@ const examReaders = authorize(
   "LABORATORY_STAFF",
   "ACCOUNTANT"
 );
-const resultReaders = authorize("COLLEGE_ADMIN", "TEACHER", "STUDENT", "PARENT");
-const submissionReaders = authorize("COLLEGE_ADMIN", "TEACHER");
+const resultReaders = authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER", "STUDENT", "PARENT");
+const submissionReaders = authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER");
+/** Admin/Super Admin can enter, submit, and score marks directly (no teacher required). */
+const marksEntryWriters = authorize("TEACHER", "COLLEGE_ADMIN", "SUPER_ADMIN");
 
 router.use(protect, tenantGuard);
 
@@ -79,7 +82,7 @@ router.get("/results/published/grid", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"),
 router.get("/results/published/export", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), exportPrintResultsCsv);
 
 router.get("/results/all", resultReaders, listResults);
-router.post("/results", authorize("TEACHER"), upsertResult);
+router.post("/results", marksEntryWriters, upsertResult);
 router.post("/results/admin", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), adminUpsertResult);
 router.delete("/results/:resultId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteResult);
 router.delete("/results/:examId/:studentId/marks/:subjectId", authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER"), deleteResultMark);
@@ -87,11 +90,13 @@ router.delete("/results/:examId/:studentId/marks/:subjectId", authorize("COLLEGE
 router.get("/result-submissions", submissionReaders, listResultSubmissions);
 router.get("/result-submissions/scope", submissionReaders, getSubmissionByScope);
 router.get("/result-submissions/audit-log", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getResultAuditLog);
-router.post("/result-submissions/marks-scheme", authorize("TEACHER"), setResultMarksScheme);
-router.post("/result-submissions/submit", authorize("TEACHER"), submitResultForReview);
+router.post("/result-submissions/marks-scheme", marksEntryWriters, setResultMarksScheme);
+router.post("/result-submissions/submit", marksEntryWriters, submitResultForReview);
 router.post("/result-submissions/:submissionId/approve", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), approveResultSubmission);
 router.post("/result-submissions/:submissionId/return", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), returnResultSubmission);
 router.post("/result-submissions/:submissionId/reject", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), returnResultSubmission);
+router.post("/result-submissions/:submissionId/unapprove", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), returnResultSubmission);
+router.post("/result-submissions/:submissionId/delete", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), deleteResultSubmissionScope);
 
 router.post("/:examId/results/publish", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), publishExamResults);
 router.post("/:examId/results/unpublish", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), unpublishExamResults);

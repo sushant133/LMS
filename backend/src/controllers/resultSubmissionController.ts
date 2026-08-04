@@ -22,6 +22,8 @@ import {
   getStudentsInScope,
   notifySchoolAdmins,
   notifyTeacherOfSubmissionUpdate,
+  refreshResultPublishedFlagsForExam,
+  stripSubjectMarksInScope,
   type SubmissionScope
 } from "../utils/resultSubmission.js";
 import {
@@ -125,8 +127,9 @@ export const listResultSubmissions = asyncHandler(async (req: Request, res: Resp
  * Existing student mark rows for the subject are updated to the new scheme.
  */
 export const setResultMarksScheme = asyncHandler(async (req: Request, res: Response) => {
-  if (req.user?.role !== "TEACHER") {
-    throw new ApiError(403, "Only teachers can set full and pass marks for mark entry");
+  const role = req.user?.role;
+  if (role !== "TEACHER" && role !== "COLLEGE_ADMIN" && role !== "SUPER_ADMIN") {
+    throw new ApiError(403, "Only teachers or administrators can set full and pass marks for mark entry");
   }
 
   const payload = resultMarksSchemeSchema.parse(req.body);
@@ -142,14 +145,18 @@ export const setResultMarksScheme = asyncHandler(async (req: Request, res: Respo
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
 
-  await assertTeacherScopeForSubmission(req, scope);
+  if (role === "TEACHER") {
+    await assertTeacherScopeForSubmission(req, scope);
+  } else {
+    assertInstitutionWrite(req);
+  }
 
   const exam = await Exam.findOne({ _id: scope.examId, schoolId });
   if (!exam) {
     throw new ApiError(404, "Exam not found");
   }
 
-  const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user.userId);
+  const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user!.userId);
   assertTeacherCanEditSubmission(submission, exam);
 
   const before = submission.toObject();
@@ -157,7 +164,7 @@ export const setResultMarksScheme = asyncHandler(async (req: Request, res: Respo
   submission.passMarks = payload.passMarks;
   submission.marksSchemeSetAt = new Date();
   if (!submission.enteredByUserId) {
-    submission.enteredByUserId = req.user.userId as never;
+    submission.enteredByUserId = req.user!.userId as never;
   }
   await submission.save();
 
@@ -258,22 +265,27 @@ export const setResultMarksScheme = asyncHandler(async (req: Request, res: Respo
 });
 
 export const submitResultForReview = asyncHandler(async (req: Request, res: Response) => {
-  if (req.user?.role !== "TEACHER") {
-    throw new ApiError(403, "Only teachers can submit results for review");
+  const role = req.user?.role;
+  if (role !== "TEACHER" && role !== "COLLEGE_ADMIN" && role !== "SUPER_ADMIN") {
+    throw new ApiError(403, "Only teachers or administrators can submit results for review");
   }
 
   const scope = parseScope(req);
   const schoolId = tenantObjectId(req);
   const institutionType = await getInstitutionType(req);
 
-  await assertTeacherScopeForSubmission(req, scope);
+  if (role === "TEACHER") {
+    await assertTeacherScopeForSubmission(req, scope);
+  } else {
+    assertInstitutionWrite(req);
+  }
 
   const exam = await Exam.findOne({ _id: scope.examId, schoolId });
   if (!exam) {
     throw new ApiError(404, "Exam not found");
   }
 
-  const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user.userId);
+  const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user!.userId);
   assertTeacherCanEditSubmission(submission, exam);
 
   const coverage = await getMarksCoverage(schoolId.toString(), scope, institutionType);
@@ -292,7 +304,7 @@ export const submitResultForReview = asyncHandler(async (req: Request, res: Resp
 
   const before = submission.toObject();
   submission.status = "PENDING_ADMIN_REVIEW";
-  submission.submittedByUserId = req.user.userId as never;
+  submission.submittedByUserId = req.user!.userId as never;
   submission.submittedAt = new Date();
   submission.reviewComments = undefined;
   await submission.save();
@@ -377,6 +389,10 @@ export const approveResultSubmission = asyncHandler(async (req: Request, res: Re
   return sendSuccess(res, "Results approved", submission);
 });
 
+/**
+ * Return / unapprove a subject submission so the teacher can correct marks.
+ * Allowed from pending review, approved, or published (unapproves + unpublishes that subject).
+ */
 export const returnResultSubmission = asyncHandler(async (req: Request, res: Response) => {
   assertInstitutionWrite(req);
   const submissionId = String(req.params.submissionId);
@@ -391,26 +407,59 @@ export const returnResultSubmission = asyncHandler(async (req: Request, res: Res
     throw new ApiError(404, "Result submission not found");
   }
 
-  if (submission.status !== "PENDING_ADMIN_REVIEW" && submission.status !== "SUBMITTED_FOR_REVIEW" && submission.status !== "APPROVED") {
-    throw new ApiError(400, "This submission cannot be returned for correction");
+  const returnableStatuses = new Set([
+    "PENDING_ADMIN_REVIEW",
+    "SUBMITTED_FOR_REVIEW",
+    "APPROVED",
+    "PUBLISHED"
+  ]);
+  if (!returnableStatuses.has(submission.status)) {
+    throw new ApiError(
+      400,
+      "This submission cannot be returned for correction (already draft or returned)"
+    );
   }
 
-  const exam = await Exam.findOne({ _id: submission.examId, schoolId: tenantObjectId(req) });
+  const schoolId = tenantObjectId(req);
+  const exam = await Exam.findOne({ _id: submission.examId, schoolId });
   if (!exam) {
     throw new ApiError(404, "Exam not found");
   }
 
   const before = submission.toObject();
+  const wasApprovedOrPublished =
+    submission.status === "APPROVED" || submission.status === "PUBLISHED";
+  const wasPublished = submission.status === "PUBLISHED";
+
   submission.status = "RETURNED_FOR_CORRECTION";
   submission.reviewedByUserId = req.user!.userId as never;
   submission.reviewedAt = new Date();
   submission.reviewComments = comments.trim();
   submission.approvedByUserId = undefined;
   submission.approvedAt = undefined;
+  submission.publishedByUserId = undefined;
+  submission.publishedAt = undefined;
   await submission.save();
 
+  // If this subject was published, refresh student visibility for remaining published subjects
+  if (wasPublished) {
+    await refreshResultPublishedFlagsForExam(schoolId.toString(), submission.examId.toString());
+    const remainingPublished = await ResultSubmission.countDocuments({
+      schoolId,
+      examId: submission.examId,
+      status: "PUBLISHED"
+    });
+    if (remainingPublished === 0 && exam.resultsPublished) {
+      exam.resultsPublished = false;
+      if (exam.status === "PUBLISHED") {
+        exam.status = "COMPLETED";
+      }
+      await exam.save();
+    }
+  }
+
   await recordAudit(req, {
-    action: "result.return_for_correction",
+    action: wasApprovedOrPublished ? "result.unapprove" : "result.return_for_correction",
     entity: "ResultSubmission",
     entityId: submission._id.toString(),
     before,
@@ -427,17 +476,127 @@ export const returnResultSubmission = asyncHandler(async (req: Request, res: Res
       yearId: submission.yearId?.toString()
     };
     const institutionType = await getInstitutionType(req);
-    const scopeLabel = await buildScopeLabel(tenantObjectId(req).toString(), scope, institutionType);
+    const scopeLabel = await buildScopeLabel(schoolId.toString(), scope, institutionType);
+    const title = wasApprovedOrPublished
+      ? "Results unapproved — correction required"
+      : "Results returned for correction";
     await notifyTeacherOfSubmissionUpdate(
-      tenantObjectId(req).toString(),
+      schoolId.toString(),
       submission.submittedByUserId.toString(),
-      "Results returned for correction",
-      `Your results for "${exam.name}" (${scopeLabel}) were returned. Admin comments: ${comments.trim()}`,
+      title,
+      `Your results for "${exam.name}" (${scopeLabel}) were ${
+        wasApprovedOrPublished ? "unapproved and " : ""
+      }returned for correction. Admin comments: ${comments.trim()}`,
       { examId: submission.examId.toString(), submissionId: submission._id.toString() }
     );
   }
 
-  return sendSuccess(res, "Results returned to teacher for correction", submission);
+  return sendSuccess(
+    res,
+    wasApprovedOrPublished
+      ? "Results unapproved and returned to teacher for correction"
+      : "Results returned to teacher for correction",
+    submission
+  );
+});
+
+/**
+ * Delete all student marks for a subject/cohort submission and remove the submission.
+ * Teacher must re-enter marks and submit again. Requires confirmation token in body.
+ */
+export const deleteResultSubmissionScope = asyncHandler(async (req: Request, res: Response) => {
+  assertInstitutionWrite(req);
+  const submissionId = String(req.params.submissionId);
+  const confirm = String((req.body as { confirm?: string })?.confirm ?? "").trim().toUpperCase();
+
+  if (confirm !== "DELETE") {
+    throw new ApiError(
+      400,
+      'Confirmation required. Send { "confirm": "DELETE" } to permanently delete these results.'
+    );
+  }
+
+  const schoolId = tenantObjectId(req);
+  const submission = await ResultSubmission.findOne(withTenantScope(req, { _id: submissionId }));
+  if (!submission) {
+    throw new ApiError(404, "Result submission not found");
+  }
+
+  const exam = await Exam.findOne({ _id: submission.examId, schoolId });
+  if (!exam) {
+    throw new ApiError(404, "Exam not found");
+  }
+
+  const scope: SubmissionScope = {
+    examId: submission.examId.toString(),
+    subjectId: submission.subjectId.toString(),
+    classId: submission.classId?.toString(),
+    sectionId: submission.sectionId?.toString(),
+    batchId: submission.batchId?.toString(),
+    yearId: submission.yearId?.toString()
+  };
+
+  const institutionType = await getInstitutionType(req);
+  const scopeLabel = await buildScopeLabel(schoolId.toString(), scope, institutionType);
+  const before = submission.toObject();
+  const wasPublished = submission.status === "PUBLISHED";
+
+  const stripStats = await stripSubjectMarksInScope(
+    schoolId.toString(),
+    scope,
+    institutionType
+  );
+
+  await ResultSubmission.deleteOne({ _id: submission._id });
+
+  if (wasPublished) {
+    await refreshResultPublishedFlagsForExam(schoolId.toString(), scope.examId);
+    const remainingPublished = await ResultSubmission.countDocuments({
+      schoolId,
+      examId: scope.examId,
+      status: "PUBLISHED"
+    });
+    if (remainingPublished === 0 && exam.resultsPublished) {
+      exam.resultsPublished = false;
+      if (exam.status === "PUBLISHED") {
+        exam.status = "COMPLETED";
+      }
+      await exam.save();
+    }
+  }
+
+  await recordAudit(req, {
+    action: "result.delete_submission_scope",
+    entity: "ResultSubmission",
+    entityId: submissionId,
+    before,
+    after: {
+      deleted: true,
+      scope,
+      ...stripStats
+    }
+  });
+
+  if (submission.submittedByUserId || submission.enteredByUserId) {
+    const teacherUserId = (
+      submission.submittedByUserId ?? submission.enteredByUserId
+    )?.toString();
+    if (teacherUserId) {
+      await notifyTeacherOfSubmissionUpdate(
+        schoolId.toString(),
+        teacherUserId,
+        "Subject results deleted",
+        `Admin deleted all marks for "${exam.name}" (${scopeLabel}). Please re-enter marks and submit again for approval.`,
+        { examId: scope.examId, subjectId: scope.subjectId }
+      );
+    }
+  }
+
+  return sendSuccess(res, "Subject results deleted. Teacher must re-enter and resubmit marks.", {
+    submissionId,
+    scopeLabel,
+    ...stripStats
+  });
 });
 
 export const getResultAuditLog = asyncHandler(async (req: Request, res: Response) => {

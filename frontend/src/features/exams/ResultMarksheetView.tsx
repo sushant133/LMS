@@ -54,12 +54,11 @@ export const ResultMarksheetView = ({
           subjectName: subject?.name ?? "Subject",
           theory: mark.theoryMarks ?? 0,
           practical: mark.practicalMarks ?? 0,
-          internal: mark.internalMarks ?? 0,
           total: computed.obtainedMarks,
           fullMarks: computed.fullMarks,
           grade: computed.grade,
           status: computed.passFail,
-          remarks: mark.teacherRemarks || "—",
+          remarks: mark.teacherRemarks ?? "",
         };
       }),
     [data.result.marks, subjectMap],
@@ -228,7 +227,6 @@ export const ResultMarksheetView = ({
               <th className="col-subject">Subject</th>
               <th className="col-theory">Theory</th>
               <th className="col-practical">Practical</th>
-              <th className="col-internal">Internal</th>
               <th className="col-total">Total</th>
               <th className="col-full">Full</th>
               <th className="col-grade">Grade</th>
@@ -243,7 +241,6 @@ export const ResultMarksheetView = ({
                 <td className="col-subject">{row.subjectName}</td>
                 <td className="col-theory">{row.theory}</td>
                 <td className="col-practical">{row.practical}</td>
-                <td className="col-internal">{row.internal}</td>
                 <td className="col-total">{row.total}</td>
                 <td className="col-full">{row.fullMarks}</td>
                 <td className="col-grade">{row.grade}</td>
@@ -310,12 +307,11 @@ export const ResultMarksheetView = ({
 
       <footer className="om-footer">
         <div className="om-footer-block">
-          {data.principalName ? (
-            <p className="om-footer-name">{data.principalName}</p>
-          ) : null}
-          <div className="om-footer-line">Principal Signature</div>
+          <p className="om-footer-name">{data.principalName || " "}</p>
+          <div className="om-footer-line">Director Signature</div>
         </div>
         <div className="om-footer-block">
+          <p className="om-footer-name">{" "}</p>
           <div className="om-footer-line">
             {data.controllerOfExamination ?? "Controller of Examination"}
           </div>

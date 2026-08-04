@@ -234,17 +234,26 @@ export const ResultReviewPanel = ({
     mutationFn: async ({
       submissionId,
       comments,
+      unapprove,
     }: {
       submissionId: string;
       comments: string;
+      unapprove?: boolean;
     }) =>
       unwrap(
-        api.post(`/exams/result-submissions/${submissionId}/return`, {
-          comments,
-        }),
+        api.post(
+          unapprove
+            ? `/exams/result-submissions/${submissionId}/unapprove`
+            : `/exams/result-submissions/${submissionId}/return`,
+          { comments },
+        ),
       ),
-    onSuccess: async () => {
-      toast.success("Results returned to teacher for correction");
+    onSuccess: async (_data, variables) => {
+      toast.success(
+        variables.unapprove
+          ? "Results unapproved and returned to teacher for correction"
+          : "Results returned to teacher for correction",
+      );
       setReviewComments("");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["result-submissions"] }),
@@ -253,6 +262,33 @@ export const ResultReviewPanel = ({
         }),
         queryClient.invalidateQueries({ queryKey: ["result-audit-log"] }),
         queryClient.invalidateQueries({ queryKey: ["results"] }),
+        queryClient.invalidateQueries({ queryKey: ["exams"] }),
+      ]);
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const deleteSubmissionMutation = useMutation({
+    mutationFn: async (submissionId: string) =>
+      unwrap(
+        api.post(`/exams/result-submissions/${submissionId}/delete`, {
+          confirm: "DELETE",
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success(
+        "Subject results deleted. Teacher must re-enter and resubmit marks.",
+      );
+      setSelectedSubmissionId("");
+      setReviewComments("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["result-submissions"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["result-submission-scope"],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["result-audit-log"] }),
+        queryClient.invalidateQueries({ queryKey: ["results"] }),
+        queryClient.invalidateQueries({ queryKey: ["exams"] }),
       ]);
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -631,55 +667,127 @@ export const ResultReviewPanel = ({
           </div>
 
           {(selectedSubmission.status === "PENDING_ADMIN_REVIEW" ||
-            selectedSubmission.status === "SUBMITTED_FOR_REVIEW") && (
+            selectedSubmission.status === "SUBMITTED_FOR_REVIEW" ||
+            selectedSubmission.status === "APPROVED" ||
+            selectedSubmission.status === "PUBLISHED") && (
             <div className="space-y-3 border-t border-slate-200 pt-4">
-              <FormField label="Admin comments (required for return/reject)">
+              <FormField label="Admin comments (required for return / unapprove)">
                 <Textarea
                   value={reviewComments}
                   onChange={(event) => setReviewComments(event.target.value)}
-                  placeholder="Add review comments..."
+                  placeholder="Add review comments for the teacher..."
                 />
               </FormField>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={
-                    approveMutation.isPending ||
-                    selectedSubmission.missingStudents.length > 0
-                  }
-                  onClick={() =>
-                    void approveMutation.mutateAsync({
-                      submissionId: selectedSubmission._id,
-                      comments: reviewComments,
-                    })
-                  }
-                >
-                  Approve Results
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={returnMutation.isPending || !reviewComments.trim()}
-                  onClick={() =>
-                    void returnMutation.mutateAsync({
-                      submissionId: selectedSubmission._id,
-                      comments: reviewComments,
-                    })
-                  }
-                >
-                  Return for Correction
-                </Button>
+                {(selectedSubmission.status === "PENDING_ADMIN_REVIEW" ||
+                  selectedSubmission.status === "SUBMITTED_FOR_REVIEW") && (
+                  <>
+                    <Button
+                      disabled={
+                        approveMutation.isPending ||
+                        selectedSubmission.missingStudents.length > 0
+                      }
+                      onClick={() =>
+                        void approveMutation.mutateAsync({
+                          submissionId: selectedSubmission._id,
+                          comments: reviewComments,
+                        })
+                      }
+                    >
+                      Approve Results
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={
+                        returnMutation.isPending || !reviewComments.trim()
+                      }
+                      onClick={() =>
+                        void returnMutation.mutateAsync({
+                          submissionId: selectedSubmission._id,
+                          comments: reviewComments,
+                        })
+                      }
+                    >
+                      Return for Correction
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      disabled={
+                        returnMutation.isPending || !reviewComments.trim()
+                      }
+                      onClick={() =>
+                        void returnMutation.mutateAsync({
+                          submissionId: selectedSubmission._id,
+                          comments: reviewComments,
+                        })
+                      }
+                    >
+                      Reject Results
+                    </Button>
+                  </>
+                )}
+
+                {(selectedSubmission.status === "APPROVED" ||
+                  selectedSubmission.status === "PUBLISHED") && (
+                  <Button
+                    variant="outline"
+                    disabled={returnMutation.isPending || !reviewComments.trim()}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Unapprove "${selectedSubmission.scopeLabel}" and return it to the teacher for correction?\n\nStatus will become Returned for Correction. ${
+                            selectedSubmission.status === "PUBLISHED"
+                              ? "This subject will no longer be visible to students until re-approved and published."
+                              : "Teacher can edit marks and resubmit."
+                          }`,
+                        )
+                      ) {
+                        return;
+                      }
+                      void returnMutation.mutateAsync({
+                        submissionId: selectedSubmission._id,
+                        comments: reviewComments,
+                        unapprove: true,
+                      });
+                    }}
+                  >
+                    {returnMutation.isPending
+                      ? "Unapproving..."
+                      : "Unapprove & Return to Teacher"}
+                  </Button>
+                )}
+
                 <Button
                   variant="destructive"
-                  disabled={returnMutation.isPending || !reviewComments.trim()}
-                  onClick={() =>
-                    void returnMutation.mutateAsync({
-                      submissionId: selectedSubmission._id,
-                      comments: reviewComments,
-                    })
-                  }
+                  disabled={deleteSubmissionMutation.isPending}
+                  onClick={() => {
+                    const label = selectedSubmission.scopeLabel;
+                    const first = window.confirm(
+                      `Delete ALL student marks for "${label}"?\n\nThis permanently removes marks for this subject in this class/batch. The teacher must re-enter every student and submit again for approval.\n\nThis cannot be undone.`,
+                    );
+                    if (!first) return;
+                    const typed = window.prompt(
+                      `Type DELETE to confirm permanent deletion of results for:\n${label}`,
+                    );
+                    if (typed?.trim().toUpperCase() !== "DELETE") {
+                      toast.error("Deletion cancelled — confirmation text did not match");
+                      return;
+                    }
+                    void deleteSubmissionMutation.mutateAsync(
+                      selectedSubmission._id,
+                    );
+                  }}
                 >
-                  Reject Results
+                  {deleteSubmissionMutation.isPending
+                    ? "Deleting..."
+                    : "Delete Subject Results"}
                 </Button>
               </div>
+              <p className="text-xs text-slate-500">
+                You can publish approved subjects from the exam session without
+                waiting for every subject. Delete removes the submission and all
+                marks for this subject/cohort only.
+              </p>
             </div>
           )}
         </div>

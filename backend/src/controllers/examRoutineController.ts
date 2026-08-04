@@ -114,7 +114,8 @@ export const listExamRoutines = asyncHandler(async (req: Request, res: Response)
   }
 
   // Parents: limit to linked children's years when college + year-tagged routines exist
-  if (req.user?.role === "PARENT" && college && !yearIdFilter) {
+  // (always enforced, even when ?yearId= is passed, so a parent cannot request another cohort's schedule)
+  if (req.user?.role === "PARENT" && college) {
     const { getLinkedStudentIds } = await import("../utils/parentScope.js");
     const linkedIds = await getLinkedStudentIds(req);
     const children = linkedIds.length
@@ -274,10 +275,20 @@ export const updateExamRoutine = asyncHandler(async (req: Request, res: Response
     throw new ApiError(400, "Select a year (1st / 2nd / 3rd) for this exam routine entry");
   }
 
-  if (payload.yearId && exam.yearIds?.length) {
-    const allowed = exam.yearIds.map((id) => id.toString());
-    if (!allowed.includes(payload.yearId)) {
-      throw new ApiError(400, "Selected year is not part of this exam");
+  if (payload.yearId) {
+    const year = await Year.findOne({
+      _id: payload.yearId,
+      schoolId: tenantObjectId(req)
+    }).lean();
+    if (!year) throw new ApiError(404, "Year not found");
+    if (year.name === "Ended") {
+      throw new ApiError(400, "Cannot update exam routine to an Ended year");
+    }
+    if (exam.yearIds?.length) {
+      const allowed = exam.yearIds.map((id) => id.toString());
+      if (!allowed.includes(payload.yearId)) {
+        throw new ApiError(400, "Selected year is not part of this exam");
+      }
     }
   }
 

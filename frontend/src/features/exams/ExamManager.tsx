@@ -142,9 +142,9 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     studentId: string;
   } | null>(null);
   const [selectedExamId, setSelectedExamId] = useState("");
-  const [adminSection, setAdminSection] = useState<"manage" | "print-results">(
-    "manage",
-  );
+  const [adminSection, setAdminSection] = useState<
+    "manage" | "print-results" | "enter-marks"
+  >("manage");
   const [adminTab, setAdminTab] = useState<
     "routine" | "analytics" | "review" | "results"
   >("routine");
@@ -920,7 +920,51 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
             >
               Print Results
             </Button>
+            {canManage ? (
+              <Button
+                size="sm"
+                variant={
+                  adminSection === "enter-marks" ? "default" : "outline"
+                }
+                onClick={() => setAdminSection("enter-marks")}
+              >
+                Enter Marks
+              </Button>
+            ) : null}
           </div>
+
+          {adminSection === "enter-marks" && canManage ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Enter Marks (Admin)</CardTitle>
+                <p className="text-sm text-slate-600">
+                  Enter or correct marks for any subject,{" "}
+                  {labels.primary.toLowerCase()},{" "}
+                  {labels.secondary.toLowerCase()}, or exam — no teacher
+                  required. Uses the same Full/Pass Marks and student entry
+                  workflow as teachers. Submit for review, then approve,
+                  unapprove, and publish from the Exam Sessions tab&apos;s
+                  Result Approval Workflow (or unapprove your own submission
+                  there to correct marks after approval/publish).
+                </p>
+              </CardHeader>
+              <CardContent>
+                <Suspense fallback={<LoadingState />}>
+                  <ExamMarksEntry
+                    exams={examsQuery.data ?? []}
+                    subjects={subjectsQuery.data ?? []}
+                    students={studentsQuery.data ?? []}
+                    batches={batchesQuery.data ?? []}
+                    years={yearsQuery.data ?? []}
+                    classes={classesQuery.data ?? []}
+                    sections={sectionsQuery.data ?? []}
+                    isCollege={isCollege}
+                    resultsLockedExamIds={resultsLockedExamIds}
+                  />
+                </Suspense>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {adminSection === "print-results" ? (
             <Suspense fallback={<LoadingState />}>
@@ -1472,6 +1516,28 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                         </div>
                         {canManage ? (
                           <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    exam.resultsPublished
+                                      ? `Publish newly approved subjects for "${exam.name}"?\n\nOnly subjects with Approved status will be released. Other subjects can stay pending.`
+                                      : `Publish results for "${exam.name}"?\n\nAny subject already approved will be released to students. You do not need to wait for every subject — approve and publish more subjects later. Results will be locked and students will be notified.`,
+                                  )
+                                ) {
+                                  void examActionMutation.mutateAsync({
+                                    examId: exam._id,
+                                    action: "publish-results",
+                                  });
+                                }
+                              }}
+                            >
+                              {exam.resultsPublished
+                                ? "Publish Approved Subjects"
+                                : "Publish Results"}
+                            </Button>
                             {exam.resultsPublished ? (
                               <Button
                                 size="sm"
@@ -1483,28 +1549,9 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                                   })
                                 }
                               >
-                                Unpublish Results
+                                Unpublish All Results
                               </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  if (
-                                    window.confirm(
-                                      `Publish results for "${exam.name}"? All subject submissions must be approved first. Results will be locked and students will be notified.`,
-                                    )
-                                  ) {
-                                    void examActionMutation.mutateAsync({
-                                      examId: exam._id,
-                                      action: "publish-results",
-                                    });
-                                  }
-                                }}
-                              >
-                                Publish Results
-                              </Button>
-                            )}
+                            ) : null}
                             {exam.resultsLocked ? (
                               <Button
                                 size="sm"
@@ -1636,9 +1683,11 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                     ) : null}
                   </div>
                   <p className="text-sm text-slate-600">
-                    Teachers submit subject results here. Approve each
-                    submission, then use Publish Results on the exam session
-                    above.
+                    Teachers submit subject results here. Approve any subject,
+                    then use Publish Results on the exam session to release
+                    approved subjects (you can publish without waiting for all
+                    subjects). You can also unapprove or delete a subject&apos;s
+                    results to send them back to the teacher.
                   </p>
                 </CardHeader>
                 <CardContent>

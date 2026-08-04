@@ -68,14 +68,27 @@ export const assertTeacherCanEditSubmission = (
   submission: Pick<ResultSubmissionDocument, "status">,
   exam: Pick<ExamDocument, "resultsLocked">
 ): void => {
-  if (exam.resultsLocked) {
-    throw new ApiError(403, "Results are locked. Contact the college admin to unlock before editing.");
-  }
-
   if (!TEACHER_EDITABLE_STATUSES.includes(submission.status as ResultSubmissionStatus)) {
     throw new ApiError(
       403,
-      "Marks cannot be edited while results are pending admin review or approved. Wait for admin feedback or contact the college admin."
+      "Marks cannot be edited while results are pending admin review, approved, or published. Wait for admin feedback or contact the college admin."
+    );
+  }
+
+  /**
+   * Exam-level lock (after partial/full publish) still allows teachers to work on:
+   * - DRAFT subjects not yet submitted (other subjects can still be entered)
+   * - RETURNED_FOR_CORRECTION (admin unapproved / sent back)
+   * It blocks other non-editable statuses (handled above).
+   */
+  if (
+    exam.resultsLocked &&
+    submission.status !== "DRAFT" &&
+    submission.status !== "RETURNED_FOR_CORRECTION"
+  ) {
+    throw new ApiError(
+      403,
+      "Results are locked. Contact the college admin to unlock before editing."
     );
   }
 };
@@ -191,6 +204,139 @@ export const notifyTeacherOfSubmissionUpdate = async (
     channel: "IN_APP",
     metadata
   });
+};
+
+/**
+ * Subject IDs with PUBLISHED submissions that match a student's cohort on an exam.
+ * Used so partial publish only exposes approved-and-published subjects to students.
+ */
+export const getPublishedSubjectIdsForStudentResult = async (
+  schoolId: string,
+  examId: string,
+  result: {
+    batchId?: unknown;
+    yearId?: unknown;
+    classId?: unknown;
+    sectionId?: unknown;
+  }
+): Promise<Set<string>> => {
+  const submissions = await ResultSubmission.find({
+    schoolId,
+    examId,
+    status: "PUBLISHED"
+  }).lean();
+
+  const ids = new Set<string>();
+  for (const submission of submissions) {
+    const subjectId = submission.subjectId.toString();
+    if (submission.batchId && submission.yearId) {
+      if (
+        String(submission.batchId) === String(result.batchId ?? "") &&
+        String(submission.yearId) === String(result.yearId ?? "")
+      ) {
+        ids.add(subjectId);
+      }
+      continue;
+    }
+    if (submission.classId && submission.sectionId) {
+      if (
+        String(submission.classId) === String(result.classId ?? "") &&
+        String(submission.sectionId) === String(result.sectionId ?? "")
+      ) {
+        ids.add(subjectId);
+      }
+      continue;
+    }
+    ids.add(subjectId);
+  }
+  return ids;
+};
+
+/** Remove subject marks for a submission scope from all student results; recompute totals. */
+export const stripSubjectMarksInScope = async (
+  schoolId: string,
+  scope: SubmissionScope,
+  institutionType: InstitutionType
+): Promise<{ resultsUpdated: number; resultsDeleted: number }> => {
+  const { buildResultTotals } = await import("./examResults.js");
+  const students = await getStudentsInScope(schoolId, scope, institutionType);
+  const studentIds = students.map((student) => student._id);
+  if (studentIds.length === 0) {
+    return { resultsUpdated: 0, resultsDeleted: 0 };
+  }
+
+  const results = await Result.find({
+    schoolId,
+    examId: scope.examId,
+    studentId: { $in: studentIds }
+  });
+
+  let resultsUpdated = 0;
+  let resultsDeleted = 0;
+
+  for (const result of results) {
+    const hasSubject = result.marks.some(
+      (mark) => mark.subjectId.toString() === scope.subjectId
+    );
+    if (!hasSubject) continue;
+
+    const nextMarks = result.marks.filter(
+      (mark) => mark.subjectId.toString() !== scope.subjectId
+    );
+
+    if (nextMarks.length === 0) {
+      await Result.deleteOne({ _id: result._id });
+      resultsDeleted += 1;
+      continue;
+    }
+
+    const computed = buildResultTotals(
+      nextMarks.map((mark) => ({
+        obtainedMarks: mark.obtainedMarks ?? 0,
+        fullMarks: mark.fullMarks ?? 0,
+        passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
+      }))
+    );
+
+    result.set("marks", nextMarks);
+    result.percentage = computed.percentage;
+    result.gpa = computed.gpa;
+    result.grade = computed.grade;
+    result.passFailStatus = computed.passFailStatus;
+    await result.save();
+    resultsUpdated += 1;
+  }
+
+  return { resultsUpdated, resultsDeleted };
+};
+
+/**
+ * After a subject is unpublished/unapproved, clear publishedAtBs on results
+ * that no longer have any published subject marks for that exam.
+ */
+export const refreshResultPublishedFlagsForExam = async (
+  schoolId: string,
+  examId: string
+): Promise<void> => {
+  const results = await Result.find({ schoolId, examId });
+  for (const result of results) {
+    const publishedSubjects = await getPublishedSubjectIdsForStudentResult(
+      schoolId,
+      examId,
+      result
+    );
+    const hasPublishedMark = result.marks.some((mark) =>
+      publishedSubjects.has(mark.subjectId.toString())
+    );
+    if (hasPublishedMark) {
+      if (!result.publishedAtBs) {
+        // Leave unset — publish path sets the date
+      }
+    } else if (result.publishedAtBs) {
+      result.publishedAtBs = undefined;
+      await result.save();
+    }
+  }
 };
 
 export const buildScopeLabel = async (

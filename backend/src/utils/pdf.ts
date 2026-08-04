@@ -63,7 +63,6 @@ interface MarksheetData {
     obtained: number;
     theory?: number;
     practical?: number;
-    internal?: number;
     grade?: string;
     passFail?: string;
     remarks?: string;
@@ -471,12 +470,11 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
     { label: "Subject", x: leftX + 18, width: 100, align: "left" as const },
     { label: "Th", x: leftX + 118, width: 26, align: "center" as const },
     { label: "Pr", x: leftX + 144, width: 26, align: "center" as const },
-    { label: "In", x: leftX + 170, width: 26, align: "center" as const },
-    { label: "Total", x: leftX + 196, width: 32, align: "center" as const },
-    { label: "Full", x: leftX + 228, width: 28, align: "center" as const },
-    { label: "Grade", x: leftX + 256, width: 30, align: "center" as const },
-    { label: "Status", x: leftX + 286, width: 36, align: "center" as const },
-    { label: "Remarks", x: leftX + 322, width: contentWidth - 322, align: "left" as const }
+    { label: "Total", x: leftX + 170, width: 32, align: "center" as const },
+    { label: "Full", x: leftX + 202, width: 28, align: "center" as const },
+    { label: "Grade", x: leftX + 230, width: 30, align: "center" as const },
+    { label: "Status", x: leftX + 260, width: 36, align: "center" as const },
+    { label: "Remarks", x: leftX + 296, width: contentWidth - 296, align: "left" as const }
   ];
 
   // Shrink row height if many subjects so everything fits one page
@@ -511,15 +509,14 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
       mark.subject,
       String(mark.theory ?? 0),
       String(mark.practical ?? 0),
-      String(mark.internal ?? 0),
       String(mark.obtained),
       String(mark.fullMarks),
       mark.grade ?? "-",
       mark.passFail ?? "-",
-      mark.remarks && mark.remarks !== "-" ? mark.remarks : "—"
+      mark.remarks && mark.remarks !== "-" ? mark.remarks : ""
     ];
     columns.forEach((column, columnIndex) => {
-      const isBold = columnIndex === 5 || columnIndex === 7;
+      const isBold = columnIndex === 4 || columnIndex === 6;
       doc
         .fillColor(INK)
         .font(isBold ? fonts.bold : fonts.regular)
@@ -614,7 +611,7 @@ export async function generateMarksheetPDF(data: MarksheetData, res: Response): 
     .lineWidth(1)
     .strokeColor(INK)
     .stroke();
-  doc.font(fonts.bold).fontSize(6.5).fillColor(MUTED).text("PRINCIPAL SIGNATURE", leftX, y + 31, {
+  doc.font(fonts.bold).fontSize(6.5).fillColor(MUTED).text("DIRECTOR SIGNATURE", leftX, y + 31, {
     width: half - 16,
     align: "center",
     characterSpacing: 0.5

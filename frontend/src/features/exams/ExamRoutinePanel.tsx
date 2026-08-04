@@ -923,7 +923,8 @@ export const TeacherRoutineList = ({
       const group = byExam.get(eid)!;
       const yearKey = r.yearId || "__legacy__";
       const title = r.yearName || (r.yearId ? "Year" : "Exam schedule");
-      if ((title || "").toLowerCase() === "ended") continue;
+      // yearName may be "Ended · Batch 2081" (combined with batch name) — match the year part only.
+      if ((title || "").toLowerCase().startsWith("ended")) continue;
       let table = group.tables.find((t) => t.key === yearKey);
       if (!table) {
         table = {
