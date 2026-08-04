@@ -22,6 +22,7 @@ import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
+import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import {
   RESULT_SUBMISSION_STATUS_COLORS,
@@ -46,6 +47,11 @@ interface SubmissionScopeData {
   marksEntered: number;
   missingStudents: Array<{ studentId: string; studentName: string }>;
   reviewComments?: string;
+  /** Teacher-set once for this exam + subject + cohort */
+  fullMarks?: number;
+  passMarks?: number;
+  marksSchemeConfigured?: boolean;
+  marksSchemeSetAt?: string;
 }
 
 interface ExamMarksEntryProps {
@@ -67,10 +73,17 @@ interface ExamMarksEntryProps {
   assignedSubjectIds?: string[];
 }
 
-const buildDefaultMark = (subject?: SubjectRecord): ResultMarkInput => ({
+/** Subject has a practical component when practical full marks are configured (> 0). */
+const subjectHasPractical = (subject?: SubjectRecord | null): boolean =>
+  Number(subject?.practicalMarks ?? 0) > 0;
+
+const buildDefaultMark = (
+  subject?: SubjectRecord | null,
+  scheme?: { fullMarks: number; passMarks: number } | null,
+): ResultMarkInput => ({
   subjectId: subject?._id ?? "",
-  fullMarks: subject?.fullMarks ?? 100,
-  passMarks: subject?.passMarks ?? 35,
+  fullMarks: scheme?.fullMarks ?? subject?.fullMarks ?? 100,
+  passMarks: scheme?.passMarks ?? subject?.passMarks ?? 35,
   theoryMarks: 0,
   practicalMarks: 0,
   internalMarks: 0,
@@ -95,6 +108,8 @@ export const ExamMarksEntry = ({
   const [resultForm, setResultForm] = useState<ResultInput>(defaultResultValue);
   const [selectedSubjectId, setSelectedSubjectId] = useState("");
   const [markForm, setMarkForm] = useState<ResultMarkInput>(buildDefaultMark());
+  /** Draft values for exam-subject full/pass scheme (saved once before student entry). */
+  const [schemeForm, setSchemeForm] = useState({ fullMarks: 100, passMarks: 35 });
 
   /**
    * Prefer cohorts that actually have roster students (teacher scope expands
@@ -212,6 +227,8 @@ export const ExamMarksEntry = ({
       ) ?? subjects.find((subject) => subject._id === selectedSubjectId),
     [selectedSubjectId, subjects, teacherFormSubjects],
   );
+
+  const hasPractical = subjectHasPractical(selectedSubject);
 
   const selectedExam = useMemo(
     () => exams.find((exam) => exam._id === resultForm.examId),
@@ -336,6 +353,18 @@ export const ExamMarksEntry = ({
 
   const submission = submissionQuery.data;
   const submissionStatus = submission?.status ?? "DRAFT";
+  const marksSchemeConfigured = Boolean(
+    submission?.marksSchemeConfigured ||
+      (typeof submission?.fullMarks === "number" &&
+        submission.fullMarks > 0 &&
+        typeof submission?.passMarks === "number"),
+  );
+  const schemeFullMarks = marksSchemeConfigured
+    ? Number(submission?.fullMarks) || 0
+    : schemeForm.fullMarks || 0;
+  const schemePassMarks = marksSchemeConfigured
+    ? Number(submission?.passMarks) || 0
+    : schemeForm.passMarks || 0;
   const coverage = {
     studentsTotal: submission?.studentsTotal ?? localCoverage.studentsTotal,
     marksEntered: Math.max(
@@ -356,6 +385,7 @@ export const ExamMarksEntry = ({
     submissionStatus === "SUBMITTED_FOR_REVIEW";
   const canSubmitForReview =
     canEditMarks &&
+    marksSchemeConfigured &&
     coverage.studentsTotal > 0 &&
     coverage.marksEntered >= coverage.studentsTotal &&
     coverage.missingStudents.length === 0;
@@ -363,19 +393,21 @@ export const ExamMarksEntry = ({
     ? `Select exam, ${labels.primary.toLowerCase()}, and ${labels.secondary.toLowerCase()} first`
     : !selectedSubjectId
       ? "Select a subject first"
-      : coverage.studentsTotal === 0
-        ? "No students found in this scope"
-        : coverage.missingStudents.length > 0
-          ? `Enter marks for ${coverage.missingStudents.length} remaining student(s)`
-          : isPendingReview
-            ? "Already submitted — waiting for admin review"
-            : submissionStatus === "APPROVED"
-              ? "Results approved by admin"
-              : submissionStatus === "PUBLISHED"
-                ? "Results already published"
-                : !canEditMarks
-                  ? "Marks are locked for editing"
-                  : "";
+      : !marksSchemeConfigured
+        ? "Set Full Marks and Pass Marks for this subject first"
+        : coverage.studentsTotal === 0
+          ? "No students found in this scope"
+          : coverage.missingStudents.length > 0
+            ? `Enter marks for ${coverage.missingStudents.length} remaining student(s)`
+            : isPendingReview
+              ? "Already submitted — waiting for admin review"
+              : submissionStatus === "APPROVED"
+                ? "Results approved by admin"
+                : submissionStatus === "PUBLISHED"
+                  ? "Results already published"
+                  : !canEditMarks
+                    ? "Marks are locked for editing"
+                    : "";
 
   useEffect(() => {
     const primaryList = isCollege ? markEntryBatches : markEntryClasses;
@@ -444,15 +476,56 @@ export const ExamMarksEntry = ({
     }
   }, [selectedSubjectId, teacherFormSubjects]);
 
+  // Prefill scheme form from saved submission or subject defaults (suggestion only)
+  useEffect(() => {
+    if (!selectedSubjectId) return;
+    if (submissionQuery.isFetching) return;
+
+    if (
+      typeof submission?.fullMarks === "number" &&
+      submission.fullMarks > 0 &&
+      typeof submission?.passMarks === "number"
+    ) {
+      setSchemeForm({
+        fullMarks: submission.fullMarks,
+        passMarks: submission.passMarks,
+      });
+      return;
+    }
+
+    setSchemeForm({
+      fullMarks: selectedSubject?.fullMarks ?? 100,
+      passMarks: selectedSubject?.passMarks ?? 35,
+    });
+  }, [
+    selectedSubject,
+    selectedSubjectId,
+    submission?.fullMarks,
+    submission?.passMarks,
+    submissionQuery.isFetching,
+  ]);
+
   useEffect(() => {
     if (!selectedSubjectId) {
       return;
     }
-    const subject =
-      teacherFormSubjects.find((item) => item._id === selectedSubjectId) ??
-      subjects.find((item) => item._id === selectedSubjectId);
-    setMarkForm(buildDefaultMark(subject));
-  }, [selectedSubjectId, subjects, teacherFormSubjects]);
+    const scheme =
+      marksSchemeConfigured &&
+      typeof submission?.fullMarks === "number" &&
+      typeof submission?.passMarks === "number"
+        ? {
+            fullMarks: submission.fullMarks,
+            passMarks: submission.passMarks,
+          }
+        : null;
+    setMarkForm(buildDefaultMark(selectedSubject, scheme));
+  }, [
+    marksSchemeConfigured,
+    selectedSubject,
+    selectedSubjectId,
+    submission?.fullMarks,
+    submission?.passMarks,
+  ]);
 
   useEffect(() => {
     if (!resultForm.examId || !resultForm.studentId || !selectedSubjectId) {
@@ -468,37 +541,161 @@ export const ExamMarksEntry = ({
       (mark) => String(mark.subjectId) === selectedSubjectId,
     );
     const subject = selectedSubject;
+    const scheme =
+      marksSchemeConfigured &&
+      typeof submission?.fullMarks === "number" &&
+      typeof submission?.passMarks === "number"
+        ? {
+            fullMarks: submission.fullMarks,
+            passMarks: submission.passMarks,
+          }
+        : null;
 
     if (existingMark) {
       setMarkForm({
         subjectId: selectedSubjectId,
-        fullMarks: existingMark.fullMarks ?? subject?.fullMarks ?? 100,
-        passMarks: existingMark.passMarks ?? subject?.passMarks ?? 35,
+        fullMarks: scheme?.fullMarks ?? existingMark.fullMarks ?? 100,
+        passMarks: scheme?.passMarks ?? existingMark.passMarks ?? 35,
         theoryMarks: existingMark.theoryMarks ?? 0,
-        practicalMarks: existingMark.practicalMarks ?? 0,
-        internalMarks: existingMark.internalMarks ?? 0,
+        practicalMarks: subjectHasPractical(subject)
+          ? (existingMark.practicalMarks ?? 0)
+          : 0,
+        internalMarks: 0,
         attendanceStatus: existingMark.attendanceStatus ?? "PRESENT",
         teacherRemarks: existingMark.teacherRemarks ?? "",
       });
+    } else {
+      setMarkForm(buildDefaultMark(subject, scheme));
     }
   }, [
     existingResults,
+    marksSchemeConfigured,
     resultForm.examId,
     resultForm.studentId,
     selectedSubject,
     selectedSubjectId,
+    submission?.fullMarks,
+    submission?.passMarks,
   ]);
 
   const computedPreview = useMemo(
-    () => computeSubjectMark({ ...markForm, obtainedMarks: 0 }),
-    [markForm],
+    () =>
+      computeSubjectMark({
+        ...markForm,
+        fullMarks: schemeFullMarks || 0,
+        passMarks: schemePassMarks || 0,
+        theoryMarks: Number(markForm.theoryMarks) || 0,
+        practicalMarks: hasPractical
+          ? Number(markForm.practicalMarks) || 0
+          : 0,
+        internalMarks: Number(markForm.internalMarks) || 0,
+        obtainedMarks: 0,
+      }),
+    [hasPractical, markForm, schemeFullMarks, schemePassMarks],
   );
+
+  /** Roster of students with current subject marks for review / edit. */
+  const studentMarksRows = useMemo(() => {
+    if (!selectedSubjectId || !scopeReady) return [];
+
+    return filteredStudents
+      .map((student) => {
+        const result = existingResults.find(
+          (item) => String(item.studentId) === String(student._id),
+        );
+        const mark = result?.marks.find(
+          (item) => String(item.subjectId) === selectedSubjectId,
+        );
+        return {
+          studentId: student._id,
+          studentName: student.user?.fullName ?? "Student",
+          rollNumber: student.rollNumber,
+          hasMarks: Boolean(mark),
+          theoryMarks: mark?.theoryMarks ?? null,
+          practicalMarks: mark?.practicalMarks ?? null,
+          obtainedMarks: mark?.obtainedMarks ?? null,
+          grade: mark?.grade ?? null,
+          passFail: mark?.passFail ?? null,
+          attendanceStatus: mark?.attendanceStatus ?? null,
+          teacherRemarks: mark?.teacherRemarks ?? null,
+        };
+      })
+      .sort((a, b) => {
+        // Missing marks first, then by roll / name
+        if (a.hasMarks !== b.hasMarks) return a.hasMarks ? 1 : -1;
+        const rollA = a.rollNumber ?? Number.MAX_SAFE_INTEGER;
+        const rollB = b.rollNumber ?? Number.MAX_SAFE_INTEGER;
+        if (rollA !== rollB) return Number(rollA) - Number(rollB);
+        return a.studentName.localeCompare(b.studentName);
+      });
+  }, [existingResults, filteredStudents, scopeReady, selectedSubjectId]);
+
+  const selectedStudentHasMarks = useMemo(
+    () =>
+      studentMarksRows.some(
+        (row) =>
+          row.studentId === resultForm.studentId && row.hasMarks,
+      ),
+    [resultForm.studentId, studentMarksRows],
+  );
+
+  const selectStudentForEdit = (studentId: string) => {
+    setResultForm((current) => ({
+      ...current,
+      studentId,
+    }));
+    // Scroll form into view so teacher can edit immediately
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById("exam-marks-entry-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  };
+
+  const marksSchemeMutation = useMutation({
+    mutationFn: async (payload: {
+      fullMarks: number;
+      passMarks: number;
+    }) =>
+      unwrap(
+        api.post("/exams/result-submissions/marks-scheme", {
+          examId: resultForm.examId,
+          subjectId: selectedSubjectId,
+          fullMarks: payload.fullMarks,
+          passMarks: payload.passMarks,
+          ...(isCollege
+            ? {
+                batchId: resultForm.batchId,
+                yearId: resultForm.yearId,
+              }
+            : {
+                classId: resultForm.classId,
+                sectionId: resultForm.sectionId,
+              }),
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success(
+        "Full Marks and Pass Marks saved for this exam subject. You can now enter student marks.",
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["result-submission-scope"],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["result-submissions"] }),
+        queryClient.invalidateQueries({ queryKey: ["results"] }),
+      ]);
+      await submissionQuery.refetch();
+      await marksEntryResultsQuery.refetch();
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
 
   const resultMutation = useMutation({
     mutationFn: async (payload: ResultInput) =>
       unwrap<ResultRecord>(api.post("/exams/results", payload)),
     onSuccess: async () => {
-      toast.success("Marks saved as draft");
+      toast.success("Student marks saved");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["results"] }),
         queryClient.invalidateQueries({
@@ -544,6 +741,39 @@ export const ExamMarksEntry = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const saveMarksScheme = () => {
+    if (!resultForm.examId || !selectedSubjectId || !scopeReady) {
+      toast.error(
+        `Select exam, ${labels.primary.toLowerCase()}, ${labels.secondary.toLowerCase()}, and subject first`,
+      );
+      return;
+    }
+    const fullMarks = Number(schemeForm.fullMarks);
+    const passMarks = Number(schemeForm.passMarks);
+    if (!Number.isFinite(fullMarks) || fullMarks < 1) {
+      toast.error("Full Marks must be at least 1");
+      return;
+    }
+    if (!Number.isFinite(passMarks) || passMarks < 0) {
+      toast.error("Pass Marks cannot be negative");
+      return;
+    }
+    if (passMarks > fullMarks) {
+      toast.error("Pass Marks cannot exceed Full Marks");
+      return;
+    }
+    if (
+      marksSchemeConfigured &&
+      coverage.marksEntered > 0 &&
+      !window.confirm(
+        "Updating Full/Pass Marks will recalculate grades for students already entered for this subject. Continue?",
+      )
+    ) {
+      return;
+    }
+    void marksSchemeMutation.mutateAsync({ fullMarks, passMarks });
+  };
+
   return (
     <form
       className="space-y-4"
@@ -563,9 +793,37 @@ export const ExamMarksEntry = ({
           toast.error("Select a subject");
           return;
         }
+        if (!marksSchemeConfigured) {
+          toast.error(
+            "Set Full Marks and Pass Marks for this subject first, then enter student marks",
+          );
+          return;
+        }
+        const theory = Number(markForm.theoryMarks) || 0;
+        const practical = hasPractical
+          ? Number(markForm.practicalMarks) || 0
+          : 0;
+        if (theory + practical > schemeFullMarks) {
+          toast.error(
+            `Total obtained marks (${theory + practical}) cannot exceed Full Marks (${schemeFullMarks})`,
+          );
+          return;
+        }
+
         const parsed = resultSchema.safeParse({
           ...resultForm,
-          marks: [{ ...markForm, subjectId: selectedSubjectId }],
+          // Teachers enter obtained theory (+ practical when configured) only
+          marks: [
+            {
+              ...markForm,
+              subjectId: selectedSubjectId,
+              fullMarks: schemeFullMarks,
+              passMarks: schemePassMarks,
+              theoryMarks: theory,
+              practicalMarks: practical,
+              internalMarks: 0,
+            },
+          ],
         });
         if (!parsed.success) {
           toast.error(parsed.error.issues[0]?.message ?? "Validation failed");
@@ -693,14 +951,28 @@ export const ExamMarksEntry = ({
                 ? `Select ${labels.secondary.toLowerCase()} first`
                 : filteredStudents.length === 0
                   ? "No students in this scope"
-                  : "Select student"}
+                  : "Select student to enter or edit marks"}
             </option>
-            {filteredStudents.map((student) => (
-              <option key={student._id} value={student._id}>
-                {student.user?.fullName ?? "Student"}
-                {student.rollNumber != null ? ` (Roll ${student.rollNumber})` : ""}
-              </option>
-            ))}
+            {filteredStudents.map((student) => {
+              const entered = selectedSubjectId
+                ? studentMarksRows.find(
+                    (row) => row.studentId === student._id,
+                  )?.hasMarks
+                : false;
+              return (
+                <option key={student._id} value={student._id}>
+                  {student.user?.fullName ?? "Student"}
+                  {student.rollNumber != null
+                    ? ` (Roll ${student.rollNumber})`
+                    : ""}
+                  {selectedSubjectId
+                    ? entered
+                      ? " — entered (edit)"
+                      : " — missing"
+                    : ""}
+                </option>
+              );
+            })}
           </Select>
         </FormField>
         {hasSingleOption(teacherFormSubjects) ? (
@@ -800,18 +1072,39 @@ export const ExamMarksEntry = ({
         </p>
       ) : null}
 
-      {selectedSubjectId && canEditMarks ? (
-        <div className="rounded-2xl border border-slate-200 p-4">
-          <h4 className="font-medium text-slate-900">
-            Marks — {selectedSubject?.name ?? "Subject"}
-          </h4>
-          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {selectedSubjectId && scopeReady ? (
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="font-semibold text-slate-900">
+                {marksSchemeConfigured
+                  ? "Full Marks & Pass Marks (editable)"
+                  : "Step 1 — Set Full Marks & Pass Marks"}
+              </h4>
+              <p className="mt-1 text-sm text-slate-600">
+                {marksSchemeConfigured
+                  ? "You can edit Full Marks and Pass Marks anytime while marks are unlocked. Changes apply to every student for this subject in this exam."
+                  : "Set these once for this subject in this exam. They apply to every student. Subject defaults are suggested but you can change them."}
+              </p>
+            </div>
+            {marksSchemeConfigured ? (
+              <Badge className="bg-brand-100 text-brand-800">
+                Current — Full {schemeFullMarks} / Pass {schemePassMarks}
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-100 text-amber-900">
+                Required before student entry
+              </Badge>
+            )}
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
             <FormField label="Full Marks">
               <NumberInput
                 min={1}
-                value={markForm.fullMarks}
+                value={schemeForm.fullMarks}
+                disabled={!canEditMarks}
                 onChange={(event) =>
-                  setMarkForm((current) => ({
+                  setSchemeForm((current) => ({
                     ...current,
                     fullMarks: event.target.valueAsNumber,
                   }))
@@ -821,14 +1114,251 @@ export const ExamMarksEntry = ({
             <FormField label="Pass Marks">
               <NumberInput
                 min={0}
-                value={markForm.passMarks}
+                value={schemeForm.passMarks}
+                disabled={!canEditMarks}
                 onChange={(event) =>
-                  setMarkForm((current) => ({
+                  setSchemeForm((current) => ({
                     ...current,
                     passMarks: event.target.valueAsNumber,
                   }))
                 }
               />
+            </FormField>
+            <div className="flex items-end">
+              <Button
+                type="button"
+                disabled={!canEditMarks || marksSchemeMutation.isPending}
+                onClick={saveMarksScheme}
+                className="w-full"
+              >
+                {marksSchemeMutation.isPending
+                  ? "Saving..."
+                  : marksSchemeConfigured
+                    ? "Save changes to Full & Pass Marks"
+                    : "Save Full & Pass Marks"}
+              </Button>
+            </div>
+          </div>
+          {selectedSubject &&
+          (selectedSubject.fullMarks != null ||
+            selectedSubject.passMarks != null) ? (
+            <p className="mt-3 text-xs text-slate-500">
+              Subject master defaults: Full {selectedSubject.fullMarks ?? "—"}{" "}
+              / Pass {selectedSubject.passMarks ?? "—"}
+              {hasPractical
+                ? ` · Has practical (theory + practical entry)`
+                : ` · Theory only`}
+              {marksSchemeConfigured && canEditMarks
+                ? " · Change values above and click save to update"
+                : ""}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {selectedSubjectId && canEditMarks && !marksSchemeConfigured ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Save Full Marks and Pass Marks above before entering student obtained
+          marks.
+        </p>
+      ) : null}
+
+      {/* Entered marks roster — review & edit any student */}
+      {selectedSubjectId && scopeReady && marksSchemeConfigured ? (
+        <div className="rounded-2xl border border-slate-200 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="font-semibold text-slate-900">
+                Entered marks — {selectedSubject?.name ?? "Subject"}
+              </h4>
+              <p className="mt-1 text-sm text-slate-600">
+                Review all students. Use{" "}
+                <strong>{canEditMarks ? "Edit" : "View"}</strong> to load a
+                student&apos;s marks
+                {canEditMarks
+                  ? " and update them below."
+                  : " (read-only while pending review)."}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+                Entered: {coverage.marksEntered} / {coverage.studentsTotal}
+              </span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+                Full {schemeFullMarks} / Pass {schemePassMarks}
+              </span>
+            </div>
+          </div>
+
+          {studentMarksRows.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">
+              No students in this scope.
+            </p>
+          ) : (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+              <Table>
+                <TableHead>
+                  <tr>
+                    <Th>Roll</Th>
+                    <Th>Student</Th>
+                    <Th>Status</Th>
+                    {hasPractical ? <Th>Theory</Th> : null}
+                    {hasPractical ? <Th>Practical</Th> : null}
+                    <Th>Obtained</Th>
+                    <Th>Grade</Th>
+                    <Th>P/F</Th>
+                    <Th className="text-right">Action</Th>
+                  </tr>
+                </TableHead>
+                <TableBody>
+                  {studentMarksRows.map((row) => {
+                    const isSelected =
+                      String(resultForm.studentId) === String(row.studentId);
+                    return (
+                      <tr
+                        key={row.studentId}
+                        className={
+                          isSelected ? "bg-brand-50/80" : undefined
+                        }
+                      >
+                        <Td className="whitespace-nowrap text-slate-600">
+                          {row.rollNumber != null ? row.rollNumber : "—"}
+                        </Td>
+                        <Td className="font-medium text-slate-900">
+                          {row.studentName}
+                        </Td>
+                        <Td>
+                          {row.hasMarks ? (
+                            <Badge className="bg-brand-100 text-brand-800">
+                              Entered
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-100 text-amber-900">
+                              Missing
+                            </Badge>
+                          )}
+                        </Td>
+                        {hasPractical ? (
+                          <Td>
+                            {row.hasMarks ? (row.theoryMarks ?? 0) : "—"}
+                          </Td>
+                        ) : null}
+                        {hasPractical ? (
+                          <Td>
+                            {row.hasMarks ? (row.practicalMarks ?? 0) : "—"}
+                          </Td>
+                        ) : null}
+                        <Td>
+                          {row.hasMarks
+                            ? `${row.obtainedMarks ?? 0} / ${schemeFullMarks}`
+                            : "—"}
+                        </Td>
+                        <Td>{row.hasMarks ? (row.grade ?? "—") : "—"}</Td>
+                        <Td>
+                          {row.hasMarks ? (
+                            <span
+                              className={
+                                row.passFail === "PASS"
+                                  ? "font-medium text-brand-700"
+                                  : "font-medium text-red-700"
+                              }
+                            >
+                              {row.passFail ?? "—"}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </Td>
+                        <Td className="text-right">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 px-3 text-xs"
+                            onClick={() =>
+                              selectStudentForEdit(row.studentId)
+                            }
+                          >
+                            {canEditMarks
+                              ? row.hasMarks
+                                ? "Edit"
+                                : "Enter"
+                              : "View"}
+                          </Button>
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {selectedSubjectId && canEditMarks && marksSchemeConfigured ? (
+        <div
+          id="exam-marks-entry-form"
+          className="rounded-2xl border border-slate-200 p-4"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="font-medium text-slate-900">
+                {selectedStudentHasMarks
+                  ? "Edit student marks"
+                  : "Enter student marks"}{" "}
+                — {selectedSubject?.name ?? "Subject"}
+              </h4>
+              <p className="mt-1 text-xs text-slate-500">
+                {resultForm.studentId
+                  ? selectedStudentHasMarks
+                    ? "Update obtained marks for the selected student, then save."
+                    : "Enter obtained marks for the selected student, then save."
+                  : "Select a student from the list above or the Student dropdown."}{" "}
+                Full Marks {schemeFullMarks} · Pass Marks {schemePassMarks}
+                {hasPractical ? " · Theory + Practical" : " · Theory only"}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+                Full Marks: {schemeFullMarks}
+              </span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+                Pass Marks: {schemePassMarks}
+              </span>
+              {selectedStudentHasMarks ? (
+                <Badge className="bg-blue-100 text-blue-800">
+                  Editing existing
+                </Badge>
+              ) : null}
+            </div>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <FormField label="Student">
+              <Select
+                value={resultForm.studentId}
+                onChange={(event) =>
+                  setResultForm((current) => ({
+                    ...current,
+                    studentId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Select student</option>
+                {filteredStudents.map((student) => {
+                  const entered = studentMarksRows.find(
+                    (row) => row.studentId === student._id,
+                  )?.hasMarks;
+                  return (
+                    <option key={student._id} value={student._id}>
+                      {student.user?.fullName ?? "Student"}
+                      {student.rollNumber != null
+                        ? ` (Roll ${student.rollNumber})`
+                        : ""}
+                      {entered ? " — entered" : " — missing"}
+                    </option>
+                  );
+                })}
+              </Select>
             </FormField>
             <FormField label="Attendance">
               <Select
@@ -848,42 +1378,44 @@ export const ExamMarksEntry = ({
                 ))}
               </Select>
             </FormField>
-            <FormField label="Theory Marks">
+            <FormField
+              label={
+                hasPractical
+                  ? "Theory Marks (obtained)"
+                  : `Obtained Marks (out of ${schemeFullMarks})`
+              }
+            >
               <NumberInput
                 min={0}
+                max={schemeFullMarks}
                 value={markForm.theoryMarks}
                 onChange={(event) =>
                   setMarkForm((current) => ({
                     ...current,
                     theoryMarks: event.target.valueAsNumber,
+                    fullMarks: schemeFullMarks,
+                    passMarks: schemePassMarks,
                   }))
                 }
               />
             </FormField>
-            <FormField label="Practical Marks">
-              <NumberInput
-                min={0}
-                value={markForm.practicalMarks}
-                onChange={(event) =>
-                  setMarkForm((current) => ({
-                    ...current,
-                    practicalMarks: event.target.valueAsNumber,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="Internal Marks">
-              <NumberInput
-                min={0}
-                value={markForm.internalMarks}
-                onChange={(event) =>
-                  setMarkForm((current) => ({
-                    ...current,
-                    internalMarks: event.target.valueAsNumber,
-                  }))
-                }
-              />
-            </FormField>
+            {hasPractical ? (
+              <FormField label="Practical Marks (obtained)">
+                <NumberInput
+                  min={0}
+                  max={schemeFullMarks}
+                  value={markForm.practicalMarks}
+                  onChange={(event) =>
+                    setMarkForm((current) => ({
+                      ...current,
+                      practicalMarks: event.target.valueAsNumber,
+                      fullMarks: schemeFullMarks,
+                      passMarks: schemePassMarks,
+                    }))
+                  }
+                />
+              </FormField>
+            ) : null}
             <div className="md:col-span-2 xl:col-span-3">
               <FormField label="Teacher Remarks">
                 <Textarea
@@ -898,17 +1430,50 @@ export const ExamMarksEntry = ({
               </FormField>
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-600">
-            <span>
-              Obtained: <strong>{computedPreview.obtainedMarks}</strong> /{" "}
-              {computedPreview.fullMarks}
-            </span>
-            <span>
-              Grade: <strong>{computedPreview.grade}</strong>
-            </span>
-            <span>
-              Status: <strong>{computedPreview.passFail}</strong>
-            </span>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+              <span>
+                Obtained: <strong>{computedPreview.obtainedMarks}</strong> /{" "}
+                {schemeFullMarks}
+              </span>
+              <span>
+                Grade: <strong>{computedPreview.grade}</strong>
+              </span>
+              <span>
+                Status: <strong>{computedPreview.passFail}</strong>
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {resultForm.studentId ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    setResultForm((current) => ({
+                      ...current,
+                      studentId: "",
+                    }))
+                  }
+                >
+                  Clear selection
+                </Button>
+              ) : null}
+              <Button
+                type="submit"
+                disabled={
+                  !resultForm.studentId ||
+                  !canEditMarks ||
+                  !marksSchemeConfigured ||
+                  resultMutation.isPending
+                }
+              >
+                {resultMutation.isPending
+                  ? "Saving..."
+                  : selectedStudentHasMarks
+                    ? "Update student marks"
+                    : "Save student marks"}
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -919,7 +1484,8 @@ export const ExamMarksEntry = ({
             <h4 className="font-semibold text-slate-900">Submit for Review</h4>
             <p className="mt-1 text-sm text-slate-600">
               Save marks for every student, then submit to the college admin.
-              You cannot edit after submission until results are returned.
+              You can edit Full/Pass and student marks anytime while status is
+              Draft or Returned for correction.
             </p>
             {submitBlockReason && !canSubmitForReview ? (
               <p className="mt-2 text-sm font-medium text-amber-800">
@@ -928,19 +1494,6 @@ export const ExamMarksEntry = ({
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="submit"
-              variant="outline"
-              disabled={
-                !selectedSubjectId ||
-                !resultForm.examId ||
-                !resultForm.studentId ||
-                !canEditMarks ||
-                resultMutation.isPending
-              }
-            >
-              Save Draft
-            </Button>
             <Button
               type="button"
               disabled={

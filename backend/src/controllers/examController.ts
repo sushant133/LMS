@@ -106,10 +106,29 @@ const persistResultMarks = async (
     }
   }
 
+  // Teachers must set full/pass once for exam+subject (ResultSubmission) before student entry
+  let schemeBySubject = new Map<string, { fullMarks: number; passMarks: number }>();
   if (!options.isAdmin) {
     const scope = buildSubmissionScopeFromPayload(payload);
     const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user?.userId);
     assertTeacherCanEditSubmission(submission, exam);
+
+    if (
+      typeof submission.fullMarks !== "number" ||
+      submission.fullMarks < 1 ||
+      typeof submission.passMarks !== "number"
+    ) {
+      throw new ApiError(
+        400,
+        "Set Full Marks and Pass Marks for this subject (for this exam) before entering student marks"
+      );
+    }
+    schemeBySubject = new Map([
+      [
+        scope.subjectId,
+        { fullMarks: submission.fullMarks, passMarks: submission.passMarks }
+      ]
+    ]);
   }
 
   const studentLookup: Record<string, unknown> = { _id: payload.studentId, schoolId };
@@ -140,10 +159,23 @@ const persistResultMarks = async (
 
   const incomingMarks = payload.marks.map((mark) => {
     const subject = subjectMap.get(mark.subjectId);
+    const scheme = schemeBySubject.get(mark.subjectId);
+    // Teacher entry: use exam-subject scheme. Admin may still send full/pass on the payload.
+    const fullMarks =
+      scheme?.fullMarks ?? mark.fullMarks ?? subject?.fullMarks ?? 100;
+    const passMarks =
+      scheme?.passMarks ?? mark.passMarks ?? subject?.passMarks ?? 35;
+    const practicalConfigured = Number(subject?.practicalMarks ?? 0);
+    const hasPractical = practicalConfigured > 0;
+    const theoryMarks = mark.theoryMarks ?? 0;
+    const practicalMarks = hasPractical ? (mark.practicalMarks ?? 0) : 0;
+
     const computed = computeSubjectMark({
       ...mark,
-      fullMarks: mark.fullMarks ?? subject?.fullMarks ?? 100,
-      passMarks: mark.passMarks ?? subject?.passMarks ?? 35,
+      fullMarks,
+      passMarks,
+      theoryMarks,
+      practicalMarks,
       obtainedMarks: 0
     });
     if (computed.obtainedMarks > computed.fullMarks) {

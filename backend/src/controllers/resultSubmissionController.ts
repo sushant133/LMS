@@ -1,6 +1,13 @@
 import type { Request, Response } from "express";
-import { hasInstitutionAccess, resultSubmissionReviewSchema, resultSubmissionScopeSchema } from "@phit-erp/shared";
+import {
+  computeSubjectMark,
+  hasInstitutionAccess,
+  resultMarksSchemeSchema,
+  resultSubmissionReviewSchema,
+  resultSubmissionScopeSchema
+} from "@phit-erp/shared";
 import { Exam } from "../models/Exam.js";
+import { Result } from "../models/Result.js";
 import { ResultSubmission } from "../models/ResultSubmission.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -12,6 +19,7 @@ import {
   buildSubmissionFilter,
   getMarksCoverage,
   getOrCreateSubmission,
+  getStudentsInScope,
   notifySchoolAdmins,
   notifyTeacherOfSubmissionUpdate,
   type SubmissionScope
@@ -26,6 +34,7 @@ import { sendSuccess } from "../utils/response.js";
 import { recordAudit } from "../utils/audit.js";
 import { assertInstitutionWrite } from "../utils/institutionAccess.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+import { buildResultTotals } from "../utils/examResults.js";
 
 const parseScope = (req: Request): SubmissionScope => {
   const payload = resultSubmissionScopeSchema.parse(req.body);
@@ -109,6 +118,143 @@ export const listResultSubmissions = asyncHandler(async (req: Request, res: Resp
   );
 
   return sendSuccess(res, "Result submissions fetched", enriched);
+});
+
+/**
+ * Teacher sets Full Marks and Pass Marks once for this exam + subject + cohort.
+ * Existing student mark rows for the subject are updated to the new scheme.
+ */
+export const setResultMarksScheme = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user?.role !== "TEACHER") {
+    throw new ApiError(403, "Only teachers can set full and pass marks for mark entry");
+  }
+
+  const payload = resultMarksSchemeSchema.parse(req.body);
+  const scope: SubmissionScope = {
+    examId: payload.examId,
+    subjectId: payload.subjectId,
+    classId: payload.classId,
+    sectionId: payload.sectionId,
+    batchId: payload.batchId,
+    yearId: payload.yearId
+  };
+
+  const schoolId = tenantObjectId(req);
+  const institutionType = await getInstitutionType(req);
+
+  await assertTeacherScopeForSubmission(req, scope);
+
+  const exam = await Exam.findOne({ _id: scope.examId, schoolId });
+  if (!exam) {
+    throw new ApiError(404, "Exam not found");
+  }
+
+  const submission = await getOrCreateSubmission(schoolId.toString(), scope, req.user.userId);
+  assertTeacherCanEditSubmission(submission, exam);
+
+  const before = submission.toObject();
+  submission.fullMarks = payload.fullMarks;
+  submission.passMarks = payload.passMarks;
+  submission.marksSchemeSetAt = new Date();
+  if (!submission.enteredByUserId) {
+    submission.enteredByUserId = req.user.userId as never;
+  }
+  await submission.save();
+
+  // Propagate scheme to any existing student marks for this subject in scope
+  const students = await getStudentsInScope(schoolId.toString(), scope, institutionType);
+  const studentIds = students.map((student) => student._id);
+  if (studentIds.length > 0) {
+    const results = await Result.find({
+      schoolId,
+      examId: scope.examId,
+      studentId: { $in: studentIds }
+    });
+
+    for (const result of results) {
+      let changed = false;
+      const nextMarks = result.marks.map((mark) => {
+        if (mark.subjectId.toString() !== scope.subjectId) {
+          return {
+            subjectId: mark.subjectId,
+            fullMarks: mark.fullMarks,
+            passMarks: mark.passMarks,
+            theoryMarks: mark.theoryMarks ?? 0,
+            practicalMarks: mark.practicalMarks ?? 0,
+            internalMarks: mark.internalMarks ?? 0,
+            obtainedMarks: mark.obtainedMarks,
+            attendanceStatus: mark.attendanceStatus ?? "PRESENT",
+            teacherRemarks: mark.teacherRemarks,
+            percentage: mark.percentage,
+            grade: mark.grade,
+            passFail: mark.passFail
+          };
+        }
+        changed = true;
+        const recomputed = computeSubjectMark({
+          subjectId: mark.subjectId.toString(),
+          fullMarks: payload.fullMarks,
+          passMarks: payload.passMarks,
+          theoryMarks: mark.theoryMarks ?? 0,
+          practicalMarks: mark.practicalMarks ?? 0,
+          internalMarks: mark.internalMarks ?? 0,
+          attendanceStatus: mark.attendanceStatus ?? "PRESENT",
+          teacherRemarks: mark.teacherRemarks ?? undefined,
+          obtainedMarks: 0
+        });
+        return {
+          subjectId: mark.subjectId,
+          fullMarks: recomputed.fullMarks,
+          passMarks: recomputed.passMarks,
+          theoryMarks: recomputed.theoryMarks ?? 0,
+          practicalMarks: recomputed.practicalMarks ?? 0,
+          internalMarks: recomputed.internalMarks ?? 0,
+          obtainedMarks: recomputed.obtainedMarks,
+          attendanceStatus: recomputed.attendanceStatus ?? "PRESENT",
+          teacherRemarks: recomputed.teacherRemarks,
+          percentage: recomputed.percentage,
+          grade: recomputed.grade,
+          passFail: recomputed.passFail
+        };
+      });
+
+      if (!changed) continue;
+
+      const totals = buildResultTotals(
+        nextMarks.map((mark) => ({
+          obtainedMarks: mark.obtainedMarks ?? 0,
+          fullMarks: mark.fullMarks ?? 0,
+          passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
+        }))
+      );
+
+      result.set("marks", nextMarks);
+      result.percentage = totals.percentage;
+      result.gpa = totals.gpa;
+      result.grade = totals.grade;
+      result.passFailStatus = totals.passFailStatus;
+      await result.save();
+    }
+  }
+
+  await recordAudit(req, {
+    action: "result.set_marks_scheme",
+    entity: "ResultSubmission",
+    entityId: submission._id.toString(),
+    before,
+    after: submission.toObject()
+  });
+
+  const coverage = await getMarksCoverage(schoolId.toString(), scope, institutionType);
+  const scopeLabel = await buildScopeLabel(schoolId.toString(), scope, institutionType);
+
+  return sendSuccess(res, "Full marks and pass marks saved for this exam subject", {
+    ...submission.toObject(),
+    examName: exam.name,
+    scopeLabel,
+    marksSchemeConfigured: true,
+    ...coverage
+  });
 });
 
 export const submitResultForReview = asyncHandler(async (req: Request, res: Response) => {
@@ -366,14 +512,23 @@ export const getSubmissionByScope = asyncHandler(async (req: Request, res: Respo
       status: "DRAFT",
       examName: exam?.name ?? "Exam",
       scopeLabel,
+      fullMarks: undefined,
+      passMarks: undefined,
+      marksSchemeConfigured: false,
       ...coverage
     });
   }
+
+  const marksSchemeConfigured =
+    typeof submission.fullMarks === "number" &&
+    submission.fullMarks > 0 &&
+    typeof submission.passMarks === "number";
 
   return sendSuccess(res, "Result submission fetched", {
     ...submission,
     examName: exam?.name ?? "Exam",
     scopeLabel,
+    marksSchemeConfigured,
     ...coverage
   });
 });

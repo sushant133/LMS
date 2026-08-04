@@ -636,6 +636,22 @@ export const resultSubmissionScopeSchema = z.object({
   yearId: optionalObjectIdSchema
 });
 
+/** Teacher sets full/pass marks once per exam + subject + cohort. */
+export const resultMarksSchemeSchema = resultSubmissionScopeSchema
+  .extend({
+    fullMarks: z.coerce.number().min(1),
+    passMarks: z.coerce.number().min(0)
+  })
+  .superRefine((value, ctx) => {
+    if (value.passMarks > value.fullMarks) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pass marks cannot exceed full marks",
+        path: ["passMarks"]
+      });
+    }
+  });
+
 export const resultSubmissionReviewSchema = z.object({
   comments: z.string().optional().or(z.literal(""))
 });
@@ -861,6 +877,7 @@ export type ExamRoutineInput = z.infer<typeof examRoutineSchema>;
 export type ResultMarkInput = z.infer<typeof resultMarkSchema>;
 export type ResultInput = z.infer<typeof resultSchema>;
 export type ResultSubmissionScopeInput = z.infer<typeof resultSubmissionScopeSchema>;
+export type ResultMarksSchemeInput = z.infer<typeof resultMarksSchemeSchema>;
 export type ResultSubmissionReviewInput = z.infer<typeof resultSubmissionReviewSchema>;
 export type FeeStructureInput = z.infer<typeof feeStructureSchema>;
 export type FeeCollectionInput = z.infer<typeof feeCollectionSchema>;

@@ -166,6 +166,22 @@ const run = async (): Promise<void> => {
       throw new Error("No students in selected batch/year");
     }
 
+    // Teacher sets full/pass once for exam + subject before student entry
+    unwrap(
+      await teacher.post("/exams/result-submissions/marks-scheme", {
+        examId: createdExam._id,
+        subjectId: yearSubject._id,
+        batchId,
+        yearId,
+        fullMarks: yearSubject.fullMarks,
+        passMarks: yearSubject.passMarks
+      })
+    );
+    pass(
+      "Teacher sets full/pass marks scheme for exam subject",
+      `Full ${yearSubject.fullMarks} / Pass ${yearSubject.passMarks}`
+    );
+
     let savedResult: { _id: string; percentage: number; grade: string; passFailStatus: string; marks: Array<{ obtainedMarks: number }> } | null = null;
     for (const targetStudent of scopedStudents) {
       savedResult = unwrap(

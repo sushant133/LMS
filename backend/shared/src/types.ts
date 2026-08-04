@@ -801,6 +801,10 @@ export interface ResultSubmissionRecord {
   batchId?: string;
   yearId?: string;
   status: ResultSubmissionStatus;
+  /** Teacher-set once for this exam + subject + cohort before student entry. */
+  fullMarks?: number;
+  passMarks?: number;
+  marksSchemeSetAt?: string;
   enteredByUserId?: string;
   submittedByUserId?: string;
   submittedAt?: string;

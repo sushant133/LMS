@@ -23,6 +23,7 @@ import {
   getSubmissionByScope,
   listResultSubmissions,
   returnResultSubmission,
+  setResultMarksScheme,
   submitResultForReview
 } from "../controllers/resultSubmissionController.js";
 import {
@@ -86,6 +87,7 @@ router.delete("/results/:examId/:studentId/marks/:subjectId", authorize("COLLEGE
 router.get("/result-submissions", submissionReaders, listResultSubmissions);
 router.get("/result-submissions/scope", submissionReaders, getSubmissionByScope);
 router.get("/result-submissions/audit-log", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getResultAuditLog);
+router.post("/result-submissions/marks-scheme", authorize("TEACHER"), setResultMarksScheme);
 router.post("/result-submissions/submit", authorize("TEACHER"), submitResultForReview);
 router.post("/result-submissions/:submissionId/approve", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), approveResultSubmission);
 router.post("/result-submissions/:submissionId/return", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), returnResultSubmission);

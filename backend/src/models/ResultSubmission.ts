@@ -21,6 +21,13 @@ const resultSubmissionSchema = new Schema(
       ],
       default: "DRAFT"
     },
+    /**
+     * Teacher-set once per exam + subject + cohort (batch/year or class/section).
+     * Used for all student mark rows so full/pass are not re-entered per student.
+     */
+    fullMarks: { type: Number, min: 1 },
+    passMarks: { type: Number, min: 0 },
+    marksSchemeSetAt: { type: Date },
     enteredByUserId: { type: Schema.Types.ObjectId, ref: "User" },
     submittedByUserId: { type: Schema.Types.ObjectId, ref: "User" },
     submittedAt: { type: Date },
