@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import type { PDFOptions } from "puppeteer";
 
 /**
  * Convert HTML string to PDF Buffer.
@@ -9,10 +10,14 @@ import { fileURLToPath } from "url";
  * Prefer Puppeteer when available (exact HTML layout + Noto Devanagari web fonts).
  * Falls back to a minimal PDFKit document embedding the HTML as print-ready text
  * only if Chromium cannot launch (keeps production from hard-failing).
+ *
+ * `pdfOptions` overrides the default page.pdf() options — e.g. a template that
+ * defines its own `@page` margin should pass `{ preferCSSPageSize: true, margin: undefined }`
+ * so Puppeteer honors the CSS instead of the default fixed margins.
  */
-export async function convertHtmlToPdf(html: string): Promise<Buffer> {
+export async function convertHtmlToPdf(html: string, pdfOptions?: Partial<PDFOptions>): Promise<Buffer> {
   try {
-    return await convertWithPuppeteer(html);
+    return await convertWithPuppeteer(html, pdfOptions);
   } catch (error) {
     console.warn(
       "[convertHtmlToPdf] Puppeteer unavailable or failed, using PDFKit text fallback:",
@@ -22,7 +27,7 @@ export async function convertHtmlToPdf(html: string): Promise<Buffer> {
   }
 }
 
-async function convertWithPuppeteer(html: string): Promise<Buffer> {
+async function convertWithPuppeteer(html: string, pdfOptions?: Partial<PDFOptions>): Promise<Buffer> {
   // Dynamic import so the app still boots if puppeteer is not installed.
   const puppeteer = await import("puppeteer");
   const browser = await puppeteer.default.launch({
@@ -54,7 +59,8 @@ async function convertWithPuppeteer(html: string): Promise<Buffer> {
       printBackground: true,
       // Symmetric margins so header text centers on the page
       margin: { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" },
-      preferCSSPageSize: false
+      preferCSSPageSize: false,
+      ...pdfOptions
     });
 
     return Buffer.from(pdf);

@@ -7,11 +7,8 @@ import { CollegeLogo } from "components/shared/CollegeLogo";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Download, Printer } from "lucide-react";
-import {
-  downloadMarksheetPdfFromElement,
-  getPdfErrorMessage,
-  printMarksheetElement,
-} from "lib/printUtils";
+import { resolveApiUrl } from "lib/api";
+import { getPdfErrorMessage, printMarksheetElement } from "lib/printUtils";
 
 interface ResultMarksheetViewProps {
   data: MarksheetViewResponse;
@@ -33,8 +30,13 @@ export const ResultMarksheetView = ({
 
   const publishedDate =
     data.result.publishedAtBs ?? data.exam.resultPublishDateBs ?? "—";
+  const examHeldDate =
+    data.exam.startDateBs && data.exam.endDateBs
+      ? data.exam.startDateBs === data.exam.endDateBs
+        ? data.exam.startDateBs
+        : `${data.exam.startDateBs} – ${data.exam.endDateBs}`
+      : (data.exam.startDateBs ?? data.exam.endDateBs ?? "—");
   const studentName = data.student.user?.fullName ?? "Student";
-  const pdfFilename = `marksheet-${studentName.replace(/\s+/g, "-")}-${data.exam.name.replace(/\s+/g, "-")}.pdf`;
   const isPass = String(data.result.passFailStatus ?? "")
     .toUpperCase()
     .includes("PASS");
@@ -52,11 +54,11 @@ export const ResultMarksheetView = ({
         return {
           sn: index + 1,
           subjectName: subject?.name ?? "Subject",
+          fullMarks: computed.fullMarks,
+          passMarks: computed.passMarks,
           theory: mark.theoryMarks ?? 0,
           practical: mark.practicalMarks ?? 0,
-          total: computed.obtainedMarks,
-          fullMarks: computed.fullMarks,
-          grade: computed.grade,
+          obtained: computed.obtainedMarks,
           status: computed.passFail,
           remarks: mark.teacherRemarks ?? "",
         };
@@ -64,10 +66,21 @@ export const ResultMarksheetView = ({
     [data.result.marks, subjectMap],
   );
 
-  const handlePdf = async () => {
+  /**
+   * Opens the server-rendered marksheet PDF (pdfkit, pixel-precise layout) instead of
+   * rasterizing this DOM node client-side — html2canvas/jsPDF rendering of this element
+   * produced misaligned columns and page overflow, so the backend endpoint (already used
+   * for the same purpose elsewhere, e.g. the admin exam results view) is the source of truth.
+   */
+  const handlePdf = () => {
     setPdfLoading(true);
     try {
-      await downloadMarksheetPdfFromElement(marksheetRef.current, pdfFilename);
+      window.open(
+        resolveApiUrl(
+          `/exams/results/${data.exam._id}/${data.student._id}/marksheet/pdf`,
+        ),
+        "_blank",
+      );
     } catch (error) {
       toast.error(getPdfErrorMessage(error));
     } finally {
@@ -198,6 +211,10 @@ export const ResultMarksheetView = ({
               <dd>{data.exam.name}</dd>
             </div>
             <div className="om-info-row">
+              <dt>Exam Held Date</dt>
+              <dd>{examHeldDate}</dd>
+            </div>
+            <div className="om-info-row">
               <dt>Published Date</dt>
               <dd>{publishedDate}</dd>
             </div>
@@ -206,14 +223,6 @@ export const ResultMarksheetView = ({
               <dd className={isPass ? "om-status-pass" : "om-status-fail"}>
                 {data.result.passFailStatus}
               </dd>
-            </div>
-            <div className="om-info-row">
-              <dt>GPA</dt>
-              <dd>{data.result.gpa.toFixed(2)}</dd>
-            </div>
-            <div className="om-info-row">
-              <dt>Percentage</dt>
-              <dd>{data.result.percentage}%</dd>
             </div>
           </dl>
         </div>
@@ -225,11 +234,11 @@ export const ResultMarksheetView = ({
             <tr>
               <th className="col-sn">SN</th>
               <th className="col-subject">Subject</th>
+              <th className="col-full">Full Mark</th>
+              <th className="col-pass">Pass Mark</th>
               <th className="col-theory">Theory</th>
               <th className="col-practical">Practical</th>
-              <th className="col-total">Total</th>
-              <th className="col-full">Full</th>
-              <th className="col-grade">Grade</th>
+              <th className="col-obtained">Obtained Mark</th>
               <th className="col-status">Status</th>
               <th className="col-remarks">Remarks</th>
             </tr>
@@ -239,11 +248,11 @@ export const ResultMarksheetView = ({
               <tr key={`${row.sn}-${row.subjectName}`}>
                 <td className="col-sn">{row.sn}</td>
                 <td className="col-subject">{row.subjectName}</td>
+                <td className="col-full">{row.fullMarks}</td>
+                <td className="col-pass">{row.passMarks}</td>
                 <td className="col-theory">{row.theory}</td>
                 <td className="col-practical">{row.practical}</td>
-                <td className="col-total">{row.total}</td>
-                <td className="col-full">{row.fullMarks}</td>
-                <td className="col-grade">{row.grade}</td>
+                <td className="col-obtained">{row.obtained}</td>
                 <td className="col-status">
                   <span
                     className={
@@ -307,11 +316,9 @@ export const ResultMarksheetView = ({
 
       <footer className="om-footer">
         <div className="om-footer-block">
-          <p className="om-footer-name">{data.principalName || " "}</p>
-          <div className="om-footer-line">Director Signature</div>
+          <div className="om-footer-line">Verified By</div>
         </div>
         <div className="om-footer-block">
-          <p className="om-footer-name">{" "}</p>
           <div className="om-footer-line">
             {data.controllerOfExamination ?? "Controller of Examination"}
           </div>

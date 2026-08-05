@@ -25,8 +25,10 @@ import {
   type SubmissionScope
 } from "../utils/resultSubmission.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
-import { generateMarksheetPDF } from "../utils/pdf.js";
+import { generateMarksheetPdfFromHtml } from "../utils/templates/marksheetTemplate.js";
+import { collegeLogoExists, getCollegeLogoPath } from "../utils/collegeLogo.js";
 import { resolveSchoolBranding } from "../utils/schoolBranding.js";
+import fs from "fs";
 import { assertParentAccessToStudent, getLinkedStudentIds } from "../utils/parentScope.js";
 import { sendNotification, getSchoolIdFromRequest, notifyParentsOfStudent } from "../utils/notificationService.js";
 import { assertStudentOwnRecord, getStudentProfile } from "../utils/studentScope.js";
@@ -1251,42 +1253,61 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
     }))
   );
 
-  await generateMarksheetPDF(
-    {
-      schoolName: branding.collegeName,
-      schoolNameNp: branding.collegeNameNp,
-      schoolAddress: branding.collegeAddress,
-      principalName: branding.principalName,
-      controllerOfExamination: "Controller of Examination",
-      examName: exam.name,
-      academicYearBs: exam.academicYearBs,
-      studentName: user?.fullName ?? "Student",
-      registrationNumber: student.admissionNumber,
-      className: schoolClass?.name ?? "",
-      sectionName: section?.name ?? "",
-      batchName: batch?.name,
-      yearName: year?.name,
-      rollNumber: student.rollNumber,
-      marks: scopedMarks.map((mark) => ({
-        subject: subjectMap.get(mark.subjectId.toString())?.name ?? "Subject",
-        fullMarks: mark.fullMarks,
-        obtained: mark.obtainedMarks,
-        theory: mark.theoryMarks,
-        practical: mark.practicalMarks,
-        grade: mark.grade ?? undefined,
-        passFail: mark.passFail ?? undefined,
-        remarks: mark.teacherRemarks ?? undefined
-      })),
-      totalObtained: totals.totalObtained,
-      totalFull: totals.totalFull,
-      percentage: totals.percentage,
-      gpa: totals.gpa,
-      grade: totals.grade,
-      passFailStatus: resultDoc.passFailStatus,
-      publishDateBs: resultDoc.publishedAtBs ?? undefined,
-      printedDateBs: getTodayBs(),
-      verificationNumber: `MS-${resultDoc._id.toString().slice(-8).toUpperCase()}`
-    },
-    res
+  let collegeLogoDataUri: string | undefined;
+  if (collegeLogoExists()) {
+    try {
+      collegeLogoDataUri = `data:image/png;base64,${fs.readFileSync(getCollegeLogoPath()).toString("base64")}`;
+    } catch {
+      collegeLogoDataUri = undefined;
+    }
+  }
+
+  const pdfBuffer = await generateMarksheetPdfFromHtml({
+    collegeName: branding.collegeName,
+    collegeNameNp: branding.collegeNameNp,
+    collegeAddress: branding.collegeAddress,
+    collegeLogoDataUri,
+    controllerOfExamination: "Controller of Examination",
+    examName: exam.name,
+    academicYearBs: exam.academicYearBs,
+    examHeldDateBs:
+      exam.startDateBs && exam.endDateBs
+        ? exam.startDateBs === exam.endDateBs
+          ? exam.startDateBs
+          : `${exam.startDateBs} - ${exam.endDateBs}`
+        : (exam.startDateBs ?? exam.endDateBs ?? undefined),
+    studentName: user?.fullName ?? "Student",
+    registrationNumber: student.admissionNumber,
+    className: schoolClass?.name ?? "",
+    sectionName: section?.name ?? "",
+    batchName: batch?.name,
+    yearName: year?.name,
+    rollNumber: student.rollNumber,
+    marks: scopedMarks.map((mark) => ({
+      subject: subjectMap.get(mark.subjectId.toString())?.name ?? "Subject",
+      fullMarks: mark.fullMarks,
+      passMarks: mark.passMarks,
+      obtained: mark.obtainedMarks,
+      theory: mark.theoryMarks,
+      practical: mark.practicalMarks,
+      passFail: mark.passFail ?? undefined,
+      remarks: mark.teacherRemarks ?? undefined
+    })),
+    totalObtained: totals.totalObtained,
+    totalFull: totals.totalFull,
+    percentage: totals.percentage,
+    gpa: totals.gpa,
+    grade: totals.grade,
+    passFailStatus: resultDoc.passFailStatus,
+    publishDateBs: resultDoc.publishedAtBs ?? undefined,
+    printedDateBs: getTodayBs(),
+    verificationNumber: `MS-${resultDoc._id.toString().slice(-8).toUpperCase()}`
+  });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="marksheet-${(user?.fullName ?? "Student").replace(/\s+/g, "-")}.pdf"`
   );
+  res.send(pdfBuffer);
 });

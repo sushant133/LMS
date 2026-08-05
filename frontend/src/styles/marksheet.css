@@ -1,16 +1,19 @@
 /**
- * Official marksheet — single A4 page, B&W-first premium print design.
- * Uses black/gray structure (borders, weight, alignment) so colour printers
- * and mono printers both look formal.
+ * Official marksheet — single A4 page, premium formal print design.
+ * Deep navy + gold accents over a black/white structural base, so it
+ * reads as premium on screen and in colour print, while still resolving
+ * cleanly (borders, weight, alignment) on a mono printer.
  */
 
 .official-marksheet {
-  --om-ink: #000000;
-  --om-muted: #333333;
-  --om-line: #000000;
-  --om-soft: #f2f2f2;
-  --om-row: #f7f7f7;
+  --om-ink: #14213d;
+  --om-line: #14213d;
+  --om-muted: #4b5666;
+  --om-soft: #f4f5f8;
+  --om-row: #f8f9fb;
   --om-white: #ffffff;
+  --om-accent: #a9812f;
+  --om-accent-ink: #7c5e21;
 
   position: relative;
   width: 100%;
@@ -25,9 +28,12 @@
   font-size: 9.5pt;
   line-height: 1.25;
   box-sizing: border-box;
-  /* Double frame — works in B&W */
+  /* Double frame with gold hairline — formal, still B&W legible */
   border: 1.75px solid var(--om-ink);
-  box-shadow: inset 0 0 0 3.5px var(--om-white), inset 0 0 0 5px var(--om-ink);
+  box-shadow:
+    inset 0 0 0 3px var(--om-white),
+    inset 0 0 0 3.75px var(--om-accent),
+    inset 0 0 0 5px var(--om-ink);
 }
 
 .official-marksheet * {
@@ -49,25 +55,39 @@
   margin: 0 0 6px;
   padding: 0 0 6px;
   border-bottom: 1.5px solid var(--om-ink);
+  position: relative;
+}
+
+.om-header::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -2.5px;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 2px;
+  background: var(--om-accent);
 }
 
 .om-header-band {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 4px;
 }
 
 .om-logo {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   border: 1.5px solid var(--om-ink);
+  outline: 1px solid var(--om-accent);
+  outline-offset: 2px;
   border-radius: 50%;
   padding: 2px;
   background: var(--om-white);
@@ -92,12 +112,13 @@
 
 .om-college-name {
   margin: 0;
-  font-size: 13pt;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+  font-size: 18pt;
+  font-weight: 800;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--om-ink);
   line-height: 1.15;
+  font-family: "Times New Roman", "Noto Serif", Georgia, serif;
 }
 
 .om-college-name-np {
@@ -116,7 +137,7 @@
 .om-title-block {
   margin-top: 5px;
   padding-top: 4px;
-  border-top: 0.75px solid var(--om-ink);
+  border-top: 0.75px solid var(--om-accent);
 }
 
 .om-doc-title {
@@ -133,7 +154,7 @@
   font-size: 7pt;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--om-muted);
+  color: var(--om-accent-ink);
   font-weight: 600;
 }
 
@@ -163,6 +184,7 @@
   padding: 5px 7px 4px;
   background: var(--om-white);
   border: 1px solid var(--om-ink);
+  border-left: 2.5px solid var(--om-accent);
 }
 
 .om-info-panel-title {
@@ -209,6 +231,7 @@
   font-weight: 700 !important;
   text-decoration: underline;
   text-underline-offset: 2px;
+  text-decoration-color: var(--om-accent);
 }
 
 /* ——— Marks table ——— */
@@ -237,10 +260,11 @@
 .om-marks-table thead th {
   font-weight: 700;
   text-align: center;
-  /* Solid black header — crisp in B&W */
-  background: #000000;
+  /* Solid navy header with a gold rule — crisp in colour, still dark in B&W */
+  background: var(--om-ink);
   color: #ffffff;
-  border-color: #000000;
+  border-color: var(--om-ink);
+  border-bottom: 2px solid var(--om-accent);
   letter-spacing: 0.02em;
   font-size: 7pt;
   text-transform: uppercase;
@@ -255,11 +279,11 @@
 }
 
 .om-marks-table .col-sn,
+.om-marks-table .col-full,
+.om-marks-table .col-pass,
 .om-marks-table .col-theory,
 .om-marks-table .col-practical,
-.om-marks-table .col-total,
-.om-marks-table .col-full,
-.om-marks-table .col-grade,
+.om-marks-table .col-obtained,
 .om-marks-table .col-status {
   text-align: center;
 }
@@ -271,22 +295,22 @@
   word-break: break-word;
 }
 
-.om-marks-table .col-total,
-.om-marks-table .col-grade {
+.om-marks-table .col-obtained {
   font-weight: 700;
+  color: var(--om-accent-ink);
 }
 
 .om-marks-table .col-sn { width: 4%; }
-.om-marks-table .col-subject { width: 22%; }
+.om-marks-table .col-subject { width: 19%; }
+.om-marks-table .col-full { width: 8%; }
+.om-marks-table .col-pass { width: 8%; }
 .om-marks-table .col-theory { width: 8%; }
 .om-marks-table .col-practical { width: 9%; }
-.om-marks-table .col-total { width: 8%; }
-.om-marks-table .col-full { width: 8%; }
-.om-marks-table .col-grade { width: 8%; }
+.om-marks-table .col-obtained { width: 9%; }
 .om-marks-table .col-status { width: 9%; }
-.om-marks-table .col-remarks { width: 24%; }
+.om-marks-table .col-remarks { width: 26%; }
 
-/* B&W status: outlined pill, no colour */
+/* Status pill, gold-accented pass state */
 .om-badge {
   display: inline-block;
   min-width: 2.2rem;
@@ -302,9 +326,9 @@
 }
 
 .om-badge-pass {
-  background: #000000;
+  background: var(--om-ink);
   color: #ffffff;
-  border-color: #000000;
+  border-color: var(--om-accent);
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -375,13 +399,13 @@
 .om-summary-table tr:last-child th,
 .om-summary-table tr:last-child td {
   background: var(--om-soft);
-  border-top: 1.25px solid var(--om-ink);
+  border-top: 1.25px solid var(--om-accent);
   font-weight: 700;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
-/* GPA card — outlined box, not solid dark (B&W friendly) */
+/* GPA card — navy fill with gold hairline, premium focal point */
 .om-gpa-card {
   display: flex;
   flex-direction: column;
@@ -389,10 +413,12 @@
   justify-content: center;
   text-align: center;
   padding: 6px 6px;
-  background: var(--om-white);
-  color: var(--om-ink);
+  background: var(--om-ink);
+  color: var(--om-white);
   border: 1.75px solid var(--om-ink);
-  box-shadow: inset 0 0 0 2.5px var(--om-white), inset 0 0 0 3.5px var(--om-ink);
+  box-shadow: inset 0 0 0 2.5px var(--om-white), inset 0 0 0 3.5px var(--om-accent);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .om-gpa-label {
@@ -400,7 +426,7 @@
   font-size: 6.5pt;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--om-muted);
+  color: #cfd6e4;
   font-weight: 700;
 }
 
@@ -410,24 +436,24 @@
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.02em;
-  color: var(--om-ink);
+  color: #ffffff;
 }
 
 .om-gpa-meta {
   margin: 2px 0 0;
   font-size: 7.5pt;
-  color: var(--om-muted);
+  color: #cfd6e4;
 }
 
 .om-gpa-grade {
   margin: 4px 0 0;
   display: inline-block;
   padding: 1px 8px;
-  border: 1px solid var(--om-ink);
+  border: 1px solid var(--om-accent);
   font-size: 7.5pt;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: var(--om-ink);
+  color: #ffffff;
   text-transform: uppercase;
 }
 
@@ -436,7 +462,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  margin-top: 14px;
+  margin-top: 16px;
   padding-top: 2px;
   page-break-inside: avoid;
   break-inside: avoid;
@@ -444,25 +470,17 @@
 
 .om-footer-block {
   text-align: center;
-  min-height: 48px;
+  min-height: 44px;
   padding: 0 6px;
 }
 
-.om-footer-name {
-  margin: 0 0 2px;
-  font-size: 7.5pt;
-  font-weight: 600;
-  color: var(--om-ink);
-  min-height: 12px;
-}
-
 .om-footer-line {
-  margin-top: 28px;
+  margin-top: 34px;
   border-top: 1.25px solid var(--om-ink);
   padding-top: 3px;
   font-size: 7pt;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--om-muted);
 }
@@ -493,7 +511,7 @@
   font-style: italic;
 }
 
-/* Watermark — very light for B&W */
+/* Watermark — very light, tinted with the accent */
 .om-watermark {
   position: absolute;
   inset: 0;
@@ -510,7 +528,7 @@
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(0, 0, 0, 0.04);
+  color: rgba(20, 33, 61, 0.045);
   transform: rotate(-28deg);
   user-select: none;
   white-space: nowrap;
@@ -534,7 +552,10 @@
   }
 
   .official-marksheet {
-    box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 4.5px #000;
+    box-shadow:
+      inset 0 0 0 2.5px #fff,
+      inset 0 0 0 3.25px var(--om-accent),
+      inset 0 0 0 4.5px var(--om-ink);
     max-width: none;
     width: 100%;
     min-height: auto;
@@ -561,6 +582,7 @@
   .official-marksheet .om-marks-table thead th,
   .official-marksheet .om-badge-pass,
   .official-marksheet .om-summary-table th,
+  .official-marksheet .om-gpa-card,
   .official-marksheet .om-marks-table tbody tr:nth-child(even) {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
