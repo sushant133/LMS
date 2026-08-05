@@ -21,6 +21,7 @@ import {
   buildSubmissionFilter,
   getOrCreateSubmission,
   getPublishedSubjectIdsForStudentResult,
+  refreshResultPublishedFlagsForExam,
   type SubmissionScope
 } from "../utils/resultSubmission.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
@@ -681,6 +682,25 @@ export const deleteResultMark = asyncHandler(async (req: Request, res: Response)
   return sendSuccess(res, "Subject marks deleted successfully", updated);
 });
 
+/** Optional Batch+Year or Class+Section cohort scope from the request body, for per-cohort publish/unpublish. */
+const readCohortScopeFromBody = (
+  req: Request
+): { batchId?: string; yearId?: string; classId?: string; sectionId?: string } => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const batchId = typeof body.batchId === "string" && body.batchId ? body.batchId : undefined;
+  const yearId = typeof body.yearId === "string" && body.yearId ? body.yearId : undefined;
+  const classId = typeof body.classId === "string" && body.classId ? body.classId : undefined;
+  const sectionId = typeof body.sectionId === "string" && body.sectionId ? body.sectionId : undefined;
+
+  if (batchId && yearId) {
+    return { batchId, yearId };
+  }
+  if (classId && sectionId) {
+    return { classId, sectionId };
+  }
+  return {};
+};
+
 export const publishExamResults = asyncHandler(async (req: Request, res: Response) => {
   assertInstitutionWrite(req);
   const examId = String(req.params.examId);
@@ -688,31 +708,55 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
   const tenantSchoolId = tenantObjectId(req);
   const schoolId = getSchoolIdFromRequest(req);
   const todayBs = getTodayBs();
+  const cohort = readCohortScopeFromBody(req);
+  const hasCohortScope = Boolean((cohort.batchId && cohort.yearId) || (cohort.classId && cohort.sectionId));
 
-  // Partial publish: any approved subject can be released without waiting for all subjects
+  // Partial publish: any approved subject can be released without waiting for all subjects.
+  // When a batch/year (or class/section) cohort is specified, only that cohort's approved
+  // subjects are published, leaving other cohorts in the same exam untouched.
+  const alreadyPublishedCount = await ResultSubmission.countDocuments({
+    schoolId: tenantSchoolId,
+    examId,
+    status: "PUBLISHED",
+    ...cohort
+  });
+
   const approvedSubmissions = await ResultSubmission.find({
     schoolId: tenantSchoolId,
     examId,
-    status: "APPROVED"
+    status: "APPROVED",
+    ...cohort
   }).lean();
 
   if (approvedSubmissions.length === 0) {
-    const alreadyPublished = await ResultSubmission.countDocuments({
-      schoolId: tenantSchoolId,
-      examId,
-      status: "PUBLISHED"
-    });
     throw new ApiError(
       400,
-      alreadyPublished > 0
-        ? "No newly approved subject submissions to publish. Approve additional subjects, then publish again."
-        : "Cannot publish results. Approve at least one subject submission first (other subjects can remain pending)."
+      hasCohortScope
+        ? alreadyPublishedCount > 0
+          ? "No new approved subjects to publish for this batch/year. Approve additional subjects, then update published results."
+          : "Cannot publish results for this batch/year. Approve at least one subject submission first."
+        : alreadyPublishedCount > 0
+          ? "No newly approved subject submissions to publish. Approve additional subjects, then publish again."
+          : "Cannot publish results. Approve at least one subject submission first (other subjects can remain pending)."
     );
   }
 
+  /**
+   * Distinguishes the "Update Published Results" flow (this batch/year already has some
+   * subjects published and we're only releasing newly approved ones) from a first-time
+   * publish, purely for messaging — the underlying publish logic is identical either way:
+   * only APPROVED (not yet PUBLISHED) submissions in scope are touched, so already-published
+   * subjects and their results are left completely unchanged.
+   */
+  const isUpdateToExistingPublish = hasCohortScope && alreadyPublishedCount > 0;
+
   const beforeExam = exam.toObject();
   exam.resultsPublished = true;
-  exam.resultsLocked = true;
+  // A scoped (batch/year or class/section) publish must not freeze mark entry for other
+  // cohorts still in progress in the same exam. Only the unscoped bulk action auto-locks.
+  if (!hasCohortScope) {
+    exam.resultsLocked = true;
+  }
   exam.status = "PUBLISHED";
   if (!exam.resultPublishDateBs) {
     exam.resultPublishDateBs = todayBs;
@@ -724,9 +768,10 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
     approvedSubmissions.map((row) => row.subjectId.toString())
   );
 
-  // Mark approved submissions as published (only those, not drafts / pending)
+  // Mark approved submissions as published (only those, not drafts / pending; scoped to the
+  // requested cohort when one was given, so other cohorts' approved subjects stay untouched)
   await ResultSubmission.updateMany(
-    { schoolId: tenantSchoolId, examId, status: "APPROVED" },
+    { schoolId: tenantSchoolId, examId, status: "APPROVED", ...cohort },
     {
       $set: {
         status: "PUBLISHED",
@@ -738,7 +783,7 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
 
   // Set publishedAtBs on student results that include at least one subject being published
   // (scoped to matching batch/year or class/section when submission has cohort fields)
-  const allResults = await Result.find({ schoolId: tenantSchoolId, examId });
+  const allResults = await Result.find({ schoolId: tenantSchoolId, examId, ...cohort });
   for (const result of allResults) {
     const matchingSubjects = approvedSubmissions.filter((submission) => {
       if (submission.batchId && submission.yearId) {
@@ -774,8 +819,23 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
 
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
-  const students = await Student.find(examAudienceStudentFilter(tenantSchoolId, exam, college)).lean();
+  // When a cohort was specified, notify only that batch/year (or class/section) —
+  // not the whole exam audience — so unrelated cohorts don't get a false "published" alert.
+  const students = await Student.find(
+    hasCohortScope
+      ? { schoolId: tenantSchoolId, ...cohort }
+      : examAudienceStudentFilter(tenantSchoolId, exam, college)
+  ).lean();
   const subjectCount = approvedSubmissions.length;
+  const notificationTitle = isUpdateToExistingPublish
+    ? "Exam results updated"
+    : "Exam results published";
+  const notificationMessage = isUpdateToExistingPublish
+    ? `Your published results for "${exam.name}" have been updated with ${subjectCount} newly approved subject(s). Previously published subjects are unchanged.`
+    : `Results for "${exam.name}" are now available (${subjectCount} subject(s) released). More subjects may be published later.`;
+  const parentNotificationMessage = isUpdateToExistingPublish
+    ? `Published results for "${exam.name}" have been updated for your child with ${subjectCount} newly released subject(s).`
+    : `Results for "${exam.name}" are now available for your child.`;
 
   await Promise.all(
     students.map((student) =>
@@ -783,8 +843,8 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
         sendNotification({
           schoolId,
           recipientUserId: student.user.toString(),
-          title: "Exam results published",
-          message: `Results for "${exam.name}" are now available (${subjectCount} subject(s) released). More subjects may be published later.`,
+          title: notificationTitle,
+          message: notificationMessage,
           type: "EXAM",
           channel: "IN_APP",
           metadata: { examId }
@@ -792,8 +852,8 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
         notifyParentsOfStudent(
           schoolId,
           student._id.toString(),
-          "Exam results published",
-          `Results for "${exam.name}" are now available for your child.`,
+          notificationTitle,
+          parentNotificationMessage,
           "EXAM"
         )
       ])
@@ -802,7 +862,9 @@ export const publishExamResults = asyncHandler(async (req: Request, res: Respons
 
   return sendSuccess(
     res,
-    `Published ${subjectCount} approved subject submission(s). Other subjects can be approved and published later.`,
+    isUpdateToExistingPublish
+      ? `Updated published results for this batch/year — ${subjectCount} newly approved subject(s) released. Previously published subjects are unchanged.`
+      : `Published ${subjectCount} approved subject submission(s). Other subjects can be approved and published later.`,
     exam
   );
 });
@@ -813,17 +875,37 @@ export const unpublishExamResults = asyncHandler(async (req: Request, res: Respo
   const exam = await getExamOrThrow(req, examId);
   const schoolId = tenantObjectId(req);
   const beforeExam = exam.toObject();
+  const cohort = readCohortScopeFromBody(req);
+  const hasCohortScope = Boolean((cohort.batchId && cohort.yearId) || (cohort.classId && cohort.sectionId));
 
-  exam.resultsPublished = false;
-  if (exam.status === "PUBLISHED") {
+  const publishedFilter = { schoolId, examId, status: "PUBLISHED", ...cohort };
+  const publishedCount = await ResultSubmission.countDocuments(publishedFilter);
+  if (publishedCount === 0) {
+    throw new ApiError(
+      400,
+      hasCohortScope
+        ? "No published results for this batch/year to unpublish."
+        : "No published results to unpublish."
+    );
+  }
+
+  // Revert only the submissions in scope (all of them, when no cohort was given) back to
+  // APPROVED. Other cohorts' published submissions are left untouched.
+  await ResultSubmission.updateMany(publishedFilter, {
+    $set: { status: "APPROVED" },
+    $unset: { publishedByUserId: "", publishedAt: "" }
+  });
+
+  // Recompute each result's publishedAtBs from whichever subjects remain published —
+  // correctly clears it only where no published subject remains for that student.
+  await refreshResultPublishedFlagsForExam(schoolId.toString(), examId);
+
+  const stillPublished = await ResultSubmission.exists({ schoolId, examId, status: "PUBLISHED" });
+  exam.resultsPublished = Boolean(stillPublished);
+  if (!stillPublished && exam.status === "PUBLISHED") {
     exam.status = "COMPLETED";
   }
   await exam.save();
-  await Result.updateMany({ schoolId, examId }, { $unset: { publishedAtBs: "" } });
-  await ResultSubmission.updateMany(
-    { schoolId, examId, status: "PUBLISHED" },
-    { $set: { status: "APPROVED" }, $unset: { publishedByUserId: "", publishedAt: "" } }
-  );
 
   await recordAudit(req, {
     action: "result.unpublish",
@@ -833,7 +915,11 @@ export const unpublishExamResults = asyncHandler(async (req: Request, res: Respo
     after: exam.toObject()
   });
 
-  return sendSuccess(res, "Exam results unpublished", exam);
+  return sendSuccess(
+    res,
+    hasCohortScope ? "Results unpublished for this batch/year" : "Exam results unpublished",
+    exam
+  );
 });
 
 export const lockExamResults = asyncHandler(async (req: Request, res: Response) => {

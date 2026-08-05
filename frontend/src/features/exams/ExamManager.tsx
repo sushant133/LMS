@@ -113,6 +113,293 @@ interface ExamManagerProps {
   embedded?: boolean;
 }
 
+interface CohortSubmissionRow {
+  batchId?: string;
+  yearId?: string;
+  subjectId?: string;
+  status: string;
+}
+
+interface SubjectChip {
+  id: string;
+  name: string;
+}
+
+interface CohortPublishRow {
+  batchId: string;
+  yearId: string;
+  label: string;
+  subjectsTotal: number;
+  publishedSubjects: SubjectChip[];
+  approvedSubjects: SubjectChip[];
+  remainingSubjects: SubjectChip[];
+}
+
+const SubjectChipList = ({
+  subjects,
+  className,
+}: {
+  subjects: SubjectChip[];
+  className: string;
+}) => (
+  <div className="flex flex-wrap gap-1">
+    {subjects.map((subject) => (
+      <span
+        key={subject.id}
+        className={`rounded-full px-2 py-0.5 text-xs ${className}`}
+      >
+        {subject.name}
+      </span>
+    ))}
+  </div>
+);
+
+/**
+ * Per-exam panel letting admins publish/unpublish results independently for each
+ * Batch + Year cohort, instead of the whole exam session at once. Cohorts come from
+ * the exam's assigned year list; approval/publish status comes from that cohort's
+ * subject-level ResultSubmissions, cross-referenced against the year's full subject list
+ * so admins can see exactly which subjects are published, approved, or still pending.
+ */
+const PublishByBatchYearPanel = ({
+  examId,
+  examName,
+  yearIds,
+  batchIdByYearId,
+  yearLabelById,
+  allSubjects,
+  isMutating,
+  onPublish,
+  onUnpublish,
+}: {
+  examId: string;
+  examName: string;
+  yearIds: string[];
+  batchIdByYearId: Map<string, string>;
+  yearLabelById: Map<string, string>;
+  allSubjects: SubjectRecord[];
+  isMutating: boolean;
+  onPublish: (batchId: string, yearId: string, label: string) => void;
+  onUnpublish: (batchId: string, yearId: string, label: string) => void;
+}) => {
+  const [expandedYearIds, setExpandedYearIds] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const submissionsQuery = useQuery({
+    queryKey: ["result-submissions", "cohort-status", examId],
+    queryFn: () =>
+      unwrap<CohortSubmissionRow[]>(
+        api.get("/exams/result-submissions", { params: { examId } }),
+      ),
+    enabled: Boolean(examId),
+  });
+
+  const rows = useMemo<CohortPublishRow[]>(() => {
+    const statusBySubjectByYear = new Map<string, Map<string, string>>();
+    for (const submission of submissionsQuery.data ?? []) {
+      if (!submission.yearId || !submission.subjectId) continue;
+      const yearKey = String(submission.yearId);
+      if (!statusBySubjectByYear.has(yearKey)) {
+        statusBySubjectByYear.set(yearKey, new Map());
+      }
+      statusBySubjectByYear
+        .get(yearKey)!
+        .set(String(submission.subjectId), submission.status);
+    }
+
+    return yearIds
+      .map((yearId): CohortPublishRow | null => {
+        const batchId = batchIdByYearId.get(yearId);
+        if (!batchId) return null;
+        const statusBySubject = statusBySubjectByYear.get(yearId) ?? new Map();
+        const subjectsForYear = filterSubjectsByYear(allSubjects, yearId);
+
+        const publishedSubjects: SubjectChip[] = [];
+        const approvedSubjects: SubjectChip[] = [];
+        const remainingSubjects: SubjectChip[] = [];
+        for (const subject of subjectsForYear) {
+          const chip = { id: subject._id, name: subject.name };
+          const status = statusBySubject.get(subject._id);
+          if (status === "PUBLISHED") publishedSubjects.push(chip);
+          else if (status === "APPROVED") approvedSubjects.push(chip);
+          else remainingSubjects.push(chip);
+        }
+
+        return {
+          batchId,
+          yearId,
+          label: yearLabelById.get(yearId) ?? "Year",
+          subjectsTotal: subjectsForYear.length,
+          publishedSubjects,
+          approvedSubjects,
+          remainingSubjects,
+        };
+      })
+      .filter((row): row is CohortPublishRow => row !== null);
+  }, [submissionsQuery.data, yearIds, batchIdByYearId, yearLabelById, allSubjects]);
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const toggleExpanded = (yearId: string) => {
+    setExpandedYearIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(yearId)) next.delete(yearId);
+      else next.add(yearId);
+      return next;
+    });
+  };
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        Publish by Batch &amp; Year
+      </p>
+      {submissionsQuery.isLoading ? (
+        <p className="text-xs text-slate-400">Loading cohort status…</p>
+      ) : (
+        rows.map((row) => {
+          const newApprovedCount = row.approvedSubjects.length;
+          const hasNewApproved = newApprovedCount > 0;
+          const alreadyPublished = row.publishedSubjects.length > 0;
+          const canUnpublish = row.publishedSubjects.length > 0;
+          const isExpanded = expandedYearIds.has(row.yearId);
+          const statusText =
+            row.subjectsTotal === 0
+              ? "No subjects assigned to this year"
+              : alreadyPublished
+                ? `${row.publishedSubjects.length}/${row.subjectsTotal} subject(s) published` +
+                  (hasNewApproved
+                    ? ` · ${newApprovedCount} new approved subject${newApprovedCount === 1 ? "" : "s"} available`
+                    : " · No new approved subjects to publish")
+                : hasNewApproved
+                  ? `${newApprovedCount} approved & ready to publish`
+                  : "No approved subjects yet";
+          return (
+            <div
+              key={row.yearId}
+              className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">
+                    {row.label}
+                  </p>
+                  <p className="text-xs text-slate-500">{statusText}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => toggleExpanded(row.yearId)}
+                  >
+                    {isExpanded ? "Hide subjects" : "View subjects"}
+                  </Button>
+                  {alreadyPublished ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!hasNewApproved || isMutating}
+                      title={
+                        hasNewApproved
+                          ? undefined
+                          : "No new approved subjects to publish."
+                      }
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Update published results for "${examName}" — ${row.label}?\n\nOnly the ${newApprovedCount} newly approved subject(s) will be released. Already-published subjects and results stay unchanged.`,
+                          )
+                        ) {
+                          onPublish(row.batchId, row.yearId, row.label);
+                        }
+                      }}
+                    >
+                      Update Published Results
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!hasNewApproved || isMutating}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Publish approved results for "${examName}" — ${row.label}?\n\nOnly this batch/year's approved subjects will be released to students. Other batches/years are unaffected.`,
+                          )
+                        ) {
+                          onPublish(row.batchId, row.yearId, row.label);
+                        }
+                      }}
+                    >
+                      Publish
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!canUnpublish || isMutating}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Unpublish results for "${examName}" — ${row.label}?\n\nStudents in this batch/year will no longer be able to view these results. Other batches/years are unaffected.`,
+                        )
+                      ) {
+                        onUnpublish(row.batchId, row.yearId, row.label);
+                      }
+                    }}
+                  >
+                    Unpublish
+                  </Button>
+                </div>
+              </div>
+              {isExpanded ? (
+                <div className="mt-2 space-y-1.5 border-t border-slate-200 pt-2">
+                  {row.publishedSubjects.length > 0 ? (
+                    <div>
+                      <p className="text-[11px] font-medium text-emerald-700">
+                        Published ({row.publishedSubjects.length})
+                      </p>
+                      <SubjectChipList
+                        subjects={row.publishedSubjects}
+                        className="bg-emerald-100 text-emerald-800"
+                      />
+                    </div>
+                  ) : null}
+                  {row.approvedSubjects.length > 0 ? (
+                    <div>
+                      <p className="text-[11px] font-medium text-amber-700">
+                        Approved — ready to publish ({row.approvedSubjects.length})
+                      </p>
+                      <SubjectChipList
+                        subjects={row.approvedSubjects}
+                        className="bg-amber-100 text-amber-800"
+                      />
+                    </div>
+                  ) : null}
+                  {row.remainingSubjects.length > 0 ? (
+                    <div>
+                      <p className="text-[11px] font-medium text-slate-500">
+                        Remaining — not yet approved ({row.remainingSubjects.length})
+                      </p>
+                      <SubjectChipList
+                        subjects={row.remainingSubjects}
+                        className="bg-slate-200 text-slate-600"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+};
+
 export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   const { user } = useAuth();
   const role = useNormalizedRole();
@@ -430,9 +717,14 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     mutationFn: async ({
       examId,
       action,
+      batchId,
+      yearId,
     }: {
       examId: string;
       action: "publish-results" | "unpublish-results" | "lock" | "unlock";
+      /** When set, scopes publish/unpublish to a single Batch + Year cohort. */
+      batchId?: string;
+      yearId?: string;
     }) => {
       const path =
         action === "publish-results"
@@ -442,16 +734,28 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
             : action === "lock"
               ? `/exams/${examId}/results/lock`
               : `/exams/${examId}/results/unlock`;
-      return unwrap<ExamRecord>(api.post(path));
+      const body =
+        (action === "publish-results" || action === "unpublish-results") &&
+        batchId &&
+        yearId
+          ? { batchId, yearId }
+          : undefined;
+      const response = await api.post<{ message?: string; data: ExamRecord }>(
+        path,
+        body,
+      );
+      return response.data;
     },
-    onSuccess: async (_, variables) => {
+    onSuccess: async (result, variables) => {
       const labels: Record<string, string> = {
         "publish-results": "Results published",
         "unpublish-results": "Results unpublished",
         lock: "Results locked",
         unlock: "Results unlocked",
       };
-      toast.success(labels[variables.action]);
+      // Publish/unpublish messages differ (e.g. "Update Published Results" wording) —
+      // prefer the server's message when present, fall back to the generic label.
+      toast.success(result.message || labels[variables.action]);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["exams"] }),
         queryClient.invalidateQueries({ queryKey: ["results"] }),
@@ -646,6 +950,14 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
     }
     return map;
   }, [batchById, yearsQuery.data]);
+
+  const batchIdByYearId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const year of yearsQuery.data ?? []) {
+      map.set(year._id, year.batchId);
+    }
+    return map;
+  }, [yearsQuery.data]);
 
   /** Program years for the batch currently chosen in the add-cohort picker. */
   const scopeAddYearOptions = useMemo(() => {
@@ -1537,6 +1849,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                               {exam.resultsPublished
                                 ? "Publish Approved Subjects"
                                 : "Publish Results"}
+                              {isCollege ? " (All Batches/Years)" : ""}
                             </Button>
                             {exam.resultsPublished ? (
                               <Button
@@ -1550,6 +1863,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                                 }
                               >
                                 Unpublish All Results
+                                {isCollege ? " (All Batches/Years)" : ""}
                               </Button>
                             ) : null}
                             {exam.resultsLocked ? (
@@ -1580,6 +1894,33 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                               </Button>
                             )}
                           </div>
+                        ) : null}
+                        {canManage && isCollege ? (
+                          <PublishByBatchYearPanel
+                            examId={exam._id}
+                            examName={exam.name}
+                            yearIds={exam.yearIds ?? []}
+                            batchIdByYearId={batchIdByYearId}
+                            yearLabelById={yearLabelById}
+                            allSubjects={subjects}
+                            isMutating={examActionMutation.isPending}
+                            onPublish={(batchId, yearId) =>
+                              void examActionMutation.mutateAsync({
+                                examId: exam._id,
+                                action: "publish-results",
+                                batchId,
+                                yearId,
+                              })
+                            }
+                            onUnpublish={(batchId, yearId) =>
+                              void examActionMutation.mutateAsync({
+                                examId: exam._id,
+                                action: "unpublish-results",
+                                batchId,
+                                yearId,
+                              })
+                            }
+                          />
                         ) : null}
                       </div>
                     ))
