@@ -34,8 +34,6 @@ const buildPublishedExamFilter = (req: Request) => {
   return filter;
 };
 
-const round2 = (value: number): number => Number(value.toFixed(2));
-
 interface CohortScope {
   batchId?: string;
   yearId?: string;
@@ -144,11 +142,10 @@ const collectGradedSchemes = (
 };
 
 /**
- * Build one column per published subject. Full/pass come from the exam's own scheme
- * (ResultSubmission), then the marks students were actually graded against, and only
- * then the subject configuration — so the sheet prints what the teacher fixed for this
- * exam. The total is split across the Theory/Practical sub-columns using the subject's
- * configured component ratio.
+ * Build one column per published subject — a single combined column, never a
+ * Theory/Practical split. Full/pass come from the exam's own scheme (ResultSubmission),
+ * then the marks students were actually graded against, and only then the subject
+ * configuration — so the sheet prints what the teacher fixed for this exam.
  */
 const loadSubjectColumns = async (
   schoolId: Types.ObjectId,
@@ -174,57 +171,12 @@ const loadSubjectColumns = async (
     const fullMarks = scheme?.fullMarks ?? graded?.fullMarks ?? subjectFullMarks;
     const passMarks = scheme?.passMarks ?? graded?.passMarks ?? subjectPassMarks;
 
-    // Internal marks are printed inside the Theory column, so they count as theory here.
-    const theoryConfigured =
-      (Number(subject.theoryMarks) || 0) + (Number(subject.internalMarks) || 0);
-    const practicalConfigured = Number(subject.practicalMarks) || 0;
-    /**
-     * Whether a subject splits into Theory/Practical columns is decided ONLY by the
-     * subject's own configuration (theoryMarks/practicalMarks) — never by what happens
-     * to be stored in a student's marks. A subject with no practical component configured
-     * always prints as a single combined column, even if a stray mark record has a
-     * nonzero practicalMarks value from before the subject was reconfigured.
-     */
-    const hasPractical = practicalConfigured > 0;
-    // Pure-practical subjects (practical configured, no separate theory marks) omit the
-    // Theory column entirely rather than showing a misleading 0.00 full-marks column.
-    const hasTheory = theoryConfigured > 0 || !hasPractical;
-    const configuredTotal = theoryConfigured + practicalConfigured;
-
-    /**
-     * Practical full marks come from the practical configuration scaled to the exam's
-     * full marks — never a copy of the theory value. When the exam scheme matches the
-     * subject configuration (the usual case) this returns the configured numbers as-is.
-     */
-    const practicalFullMarks =
-      hasPractical && configuredTotal > 0
-        ? round2((fullMarks * practicalConfigured) / configuredTotal)
-        : 0;
-    // Theory takes the remainder so Theory + Practical always equals the exam full marks.
-    const theoryFullMarks = hasTheory ? round2(fullMarks - practicalFullMarks) : 0;
-
-    const ratio = fullMarks > 0 ? passMarks / fullMarks : 0;
-    const practicalPassMarks =
-      practicalFullMarks > 0 ? round2(practicalFullMarks * ratio) : 0;
-    const theoryPassMarks =
-      theoryFullMarks > 0
-        ? hasPractical
-          ? round2(passMarks - practicalPassMarks)
-          : round2(theoryFullMarks * ratio)
-        : 0;
-
     return {
-      subjectId: subject._id.toString(),
+      subjectId,
       subjectName: subject.name,
       subjectCode: subject.code,
       fullMarks,
-      passMarks,
-      theoryFullMarks,
-      practicalFullMarks,
-      theoryPassMarks,
-      practicalPassMarks,
-      hasTheory,
-      hasPractical
+      passMarks
     };
   });
 };
@@ -301,9 +253,6 @@ const buildPrintResultsGrid = async (req: Request) => {
   const columnFullMarksById = new Map(
     subjects.map((subject) => [subject.subjectId, subject.fullMarks])
   );
-  const practicalColumnSubjectIds = new Set(
-    subjects.filter((subject) => subject.hasPractical).map((subject) => subject.subjectId)
-  );
 
   const [batch, year, schoolClass, section, branding] = await Promise.all([
     batchId ? Batch.findById(batchId).lean() : null,
@@ -372,41 +321,6 @@ const buildPrintResultsGrid = async (req: Request) => {
           return [subjectId, mark ? mark.obtainedMarks : null];
         })
       );
-      const subjectDetails = Object.fromEntries(
-        subjectOrder.map((subjectId) => {
-          const mark = markBySubject.get(subjectId);
-          if (!mark) {
-            return [
-              subjectId,
-              { theory: null, practical: null, obtained: null }
-            ] as const;
-          }
-          const theory = Number(mark.theoryMarks) || 0;
-          const practical = Number(mark.practicalMarks) || 0;
-          const internal = Number(mark.internalMarks) || 0;
-          const splitsPractical = practicalColumnSubjectIds.has(subjectId);
-          /**
-           * When components are zero but obtained is set, treat obtained as theory —
-           * only for single-column subjects. On a subject that prints Theory and
-           * Practical separately, that fallback would repeat the combined total under
-           * Theory, so it stays at the recorded theory component.
-           */
-          const theoryOut =
-            theory > 0 || practical > 0 || internal > 0 || splitsPractical
-              ? theory + internal
-              : mark.obtainedMarks;
-          return [
-            subjectId,
-            {
-              theory: theoryOut,
-              practical: practical > 0 ? practical : null,
-              obtained: mark.obtainedMarks,
-              fullMarks: mark.fullMarks,
-              passMarks: mark.passMarks
-            }
-          ] as const;
-        })
-      );
       const totalMarks = totals.totalObtained;
       const totalFullMarks = totals.totalFull;
       const regNo =
@@ -428,7 +342,6 @@ const buildPrintResultsGrid = async (req: Request) => {
         className: schoolClass?.name,
         sectionName: section?.name,
         subjectMarks,
-        subjectDetails,
         totalMarks,
         totalFullMarks,
         percentage: totals.percentage,

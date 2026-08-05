@@ -930,28 +930,9 @@ export interface PrintResultsSubjectColumn {
   subjectId: string;
   subjectName: string;
   subjectCode?: string;
-  /** Overall full marks for the subject. */
+  /** Overall full marks for the subject, as fixed for this exam. */
   fullMarks?: number;
-  /** Overall pass marks for the subject. */
-  passMarks?: number;
-  /** Theory component full marks (0 if theory not used). */
-  theoryFullMarks?: number;
-  /** Practical component full marks (0 if practical not used). */
-  practicalFullMarks?: number;
-  /** Theory component pass marks. */
-  theoryPassMarks?: number;
-  /** Practical component pass marks. */
-  practicalPassMarks?: number;
-  hasTheory?: boolean;
-  hasPractical?: boolean;
-}
-
-/** Per-subject obtained marks for CTEVT-style bulk internal assessment print. */
-export interface PrintResultsSubjectMarkDetail {
-  theory: number | null;
-  practical: number | null;
-  obtained: number | null;
-  fullMarks?: number;
+  /** Overall pass marks for the subject, as fixed for this exam. */
   passMarks?: number;
 }
 
@@ -970,10 +951,8 @@ export interface PrintResultsGridRow {
   yearName?: string;
   className?: string;
   sectionName?: string;
-  /** Obtained total per subject (screen grid). */
+  /** Obtained total per subject — one printed column each. */
   subjectMarks: Record<string, number | null>;
-  /** Theory / practical breakdown for bulk internal assessment print. */
-  subjectDetails?: Record<string, PrintResultsSubjectMarkDetail>;
   totalMarks: number;
   totalFullMarks: number;
   percentage: number;

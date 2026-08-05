@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   ClassRecord,
@@ -30,15 +30,6 @@ const formatMark = (value: number | string | null | undefined): string => {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return "";
   return n.toFixed(2);
-};
-
-type IaSubjectCol = PrintResultsGridResponse["subjects"][number];
-
-/** Theory / practical sub-columns for one subject (aligned header + body). */
-const subjectComponents = (subject: IaSubjectCol) => {
-  const showP = Boolean(subject.hasPractical);
-  const showT = subject.hasTheory !== false || !showP;
-  return { showT, showP, span: (showT ? 1 : 0) + (showP ? 1 : 0) || 1 };
 };
 
 interface PrintResultsPanelProps {
@@ -181,14 +172,8 @@ export const PrintResultsPanel = ({
     ? [grid?.batchName, grid?.yearName].filter(Boolean).join(" · ")
     : [grid?.className, grid?.sectionName].filter(Boolean).join(" · ");
 
-  /** Total T/P mark columns — used for colgroup equal widths. */
-  const markColumnCount = useMemo(() => {
-    if (!grid?.subjects?.length) return 0;
-    return grid.subjects.reduce(
-      (sum, subject) => sum + subjectComponents(subject).span,
-      0,
-    );
-  }, [grid?.subjects]);
+  /** One mark column per subject — used for colgroup equal widths. */
+  const markColumnCount = grid?.subjects?.length ?? 0;
 
   const exportParams = isCollege
     ? { examId, batchId, yearId, studentId: studentId || undefined }
@@ -499,7 +484,8 @@ export const PrintResultsPanel = ({
           {/*
             CTEVT Internal Assessment Report — Print Bulk only.
             Header nesting matches the official PDF:
-            SN | Regd | Symbol | Name | [Subjects / Full / Pass labels] | subject T/P cols | Total | % | Grade | Remarks
+            SN | Regd | Symbol | Name | [Subjects / T / Full / Pass labels] | one column per
+            subject | Total | % | Grade | Remarks
             Body rows include an empty cell under the label column so columns stay aligned.
           */}
           <div ref={bulkResultsRef} className="print-results-bulk-table iar-report">
@@ -585,18 +571,14 @@ export const PrintResultsPanel = ({
                     Name
                   </th>
                   <th className="iar-corner">Subjects</th>
-                  {grid.subjects.map((subject) => {
-                    const { span } = subjectComponents(subject);
-                    return (
-                      <th
-                        key={subject.subjectId}
-                        colSpan={span}
-                        className="iar-subject-name"
-                      >
-                        {subject.subjectName}
-                      </th>
-                    );
-                  })}
+                  {grid.subjects.map((subject) => (
+                    <th
+                      key={subject.subjectId}
+                      className="iar-subject-name"
+                    >
+                      {subject.subjectName}
+                    </th>
+                  ))}
                   <th rowSpan={4} className="iar-total">
                     Total
                     <br />
@@ -612,67 +594,30 @@ export const PrintResultsPanel = ({
                     Remarks
                   </th>
                 </tr>
-                {/* Row 2: empty corner + T / P under each subject */}
+                {/* Row 2: empty corner + T under each subject (single column) */}
                 <tr>
                   <th className="iar-corner iar-corner-empty" />
-                  {grid.subjects.flatMap((subject) => {
-                    const { showT, showP } = subjectComponents(subject);
-                    const cells: ReactNode[] = [];
-                    if (showT) {
-                      cells.push(
-                        <th key={`${subject.subjectId}-t`} className="iar-tp">
-                          T
-                        </th>,
-                      );
-                    }
-                    if (showP) {
-                      cells.push(
-                        <th key={`${subject.subjectId}-p`} className="iar-tp">
-                          P
-                        </th>,
-                      );
-                    }
-                    return cells;
-                  })}
+                  {grid.subjects.map((subject) => (
+                    <th key={`${subject.subjectId}-t`} className="iar-tp">
+                      T
+                    </th>
+                  ))}
                 </tr>
-                {/* Row 3: Full Marks */}
+                {/* Row 3: Full Marks — the subject total the teacher fixed for this exam */}
                 <tr>
                   <th className="iar-corner">
                     Full
                     <br />
                     Marks
                   </th>
-                  {grid.subjects.flatMap((subject) => {
-                    const { showT, showP } = subjectComponents(subject);
-                    // Never fall back to the subject total when a practical column
-                    // exists — that would print the combined marks twice.
-                    const tFull =
-                      subject.theoryFullMarks ||
-                      (showP ? 0 : subject.fullMarks);
-                    const pFull = subject.practicalFullMarks;
-                    const cells: ReactNode[] = [];
-                    if (showT) {
-                      cells.push(
-                        <th
-                          key={`${subject.subjectId}-fm-t`}
-                          className="iar-num"
-                        >
-                          {formatMark(tFull)}
-                        </th>,
-                      );
-                    }
-                    if (showP) {
-                      cells.push(
-                        <th
-                          key={`${subject.subjectId}-fm-p`}
-                          className="iar-num"
-                        >
-                          {pFull ? formatMark(pFull) : ""}
-                        </th>,
-                      );
-                    }
-                    return cells;
-                  })}
+                  {grid.subjects.map((subject) => (
+                    <th
+                      key={`${subject.subjectId}-fm`}
+                      className="iar-num"
+                    >
+                      {formatMark(subject.fullMarks)}
+                    </th>
+                  ))}
                 </tr>
                 {/* Row 4: Pass Marks */}
                 <tr>
@@ -681,35 +626,14 @@ export const PrintResultsPanel = ({
                     <br />
                     Marks
                   </th>
-                  {grid.subjects.flatMap((subject) => {
-                    const { showT, showP } = subjectComponents(subject);
-                    const tPass =
-                      subject.theoryPassMarks ||
-                      (showP ? 0 : subject.passMarks);
-                    const pPass = subject.practicalPassMarks;
-                    const cells: ReactNode[] = [];
-                    if (showT) {
-                      cells.push(
-                        <th
-                          key={`${subject.subjectId}-pm-t`}
-                          className="iar-num"
-                        >
-                          {formatMark(tPass)}
-                        </th>,
-                      );
-                    }
-                    if (showP) {
-                      cells.push(
-                        <th
-                          key={`${subject.subjectId}-pm-p`}
-                          className="iar-num"
-                        >
-                          {pPass ? formatMark(pPass) : ""}
-                        </th>,
-                      );
-                    }
-                    return cells;
-                  })}
+                  {grid.subjects.map((subject) => (
+                    <th
+                      key={`${subject.subjectId}-pm`}
+                      className="iar-num"
+                    >
+                      {formatMark(subject.passMarks)}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -721,37 +645,15 @@ export const PrintResultsPanel = ({
                     <td className="iar-name">{row.studentName}</td>
                     {/* Align under Subjects / Full / Pass corner column */}
                     <td className="iar-corner iar-corner-empty" />
-                    {grid.subjects.flatMap((subject) => {
-                      const { showT, showP } = subjectComponents(subject);
-                      const detail = row.subjectDetails?.[subject.subjectId];
-                      const theory =
-                        detail?.theory ??
-                        row.subjectMarks[subject.subjectId] ??
-                        null;
-                      const practical = detail?.practical ?? null;
-                      const cells: ReactNode[] = [];
-                      if (showT) {
-                        cells.push(
-                          <td
-                            key={`${row.resultId}-${subject.subjectId}-t`}
-                            className="iar-num"
-                          >
-                            {formatMark(theory)}
-                          </td>,
-                        );
-                      }
-                      if (showP) {
-                        cells.push(
-                          <td
-                            key={`${row.resultId}-${subject.subjectId}-p`}
-                            className="iar-num"
-                          >
-                            {formatMark(practical)}
-                          </td>,
-                        );
-                      }
-                      return cells;
-                    })}
+                    {/* One column per subject: the total mark the teacher recorded. */}
+                    {grid.subjects.map((subject) => (
+                      <td
+                        key={`${row.resultId}-${subject.subjectId}`}
+                        className="iar-num"
+                      >
+                        {formatMark(row.subjectMarks[subject.subjectId])}
+                      </td>
+                    ))}
                     <td className="iar-total">
                       {row.totalMarks}
                       {row.totalFullMarks ? `/${row.totalFullMarks}` : ""}
