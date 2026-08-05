@@ -980,7 +980,6 @@ export interface PrintResultsGridRow {
   grade: GradeSymbol;
   gpa: number;
   passFailStatus: ExamPassFailStatus;
-  remarks?: string;
 }
 
 export interface PrintResultsGridResponse {

@@ -104,13 +104,56 @@ const loadPublishedSubjectSchemes = async (
 };
 
 /**
+ * Full/pass marks each subject was actually graded against, read back from the students'
+ * published mark rows. Used only when no exam scheme was recorded on the submission.
+ * The most frequent value wins so one stray row cannot skew the printed header.
+ */
+const collectGradedSchemes = (
+  results: Array<{ marks: Array<{ subjectId: unknown; fullMarks?: number | null; passMarks?: number | null }> }>
+): Map<string, PublishedSubjectScheme> => {
+  const tally = new Map<string, Map<string, { full: number; pass: number; count: number }>>();
+
+  for (const result of results) {
+    for (const mark of result.marks) {
+      const full = Number(mark.fullMarks);
+      if (!Number.isFinite(full) || full <= 0) continue;
+      const pass = Number(mark.passMarks);
+      const subjectId = String(mark.subjectId);
+      const key = `${full}/${Number.isFinite(pass) ? pass : ""}`;
+      const bySubject = tally.get(subjectId) ?? new Map();
+      const entry = bySubject.get(key) ?? {
+        full,
+        pass: Number.isFinite(pass) ? pass : 0,
+        count: 0
+      };
+      entry.count += 1;
+      bySubject.set(key, entry);
+      tally.set(subjectId, bySubject);
+    }
+  }
+
+  const schemes = new Map<string, PublishedSubjectScheme>();
+  for (const [subjectId, bySubject] of tally) {
+    const top = [...bySubject.values()].sort((left, right) => right.count - left.count)[0];
+    if (top) {
+      schemes.set(subjectId, { fullMarks: top.full, passMarks: top.pass });
+    }
+  }
+
+  return schemes;
+};
+
+/**
  * Build one column per published subject. Full/pass come from the exam's own scheme
- * (ResultSubmission) and fall back to the subject configuration, then split across the
- * Theory/Practical sub-columns using the subject's configured component ratio.
+ * (ResultSubmission), then the marks students were actually graded against, and only
+ * then the subject configuration — so the sheet prints what the teacher fixed for this
+ * exam. The total is split across the Theory/Practical sub-columns using the subject's
+ * configured component ratio.
  */
 const loadSubjectColumns = async (
   schoolId: Types.ObjectId,
-  schemes: Map<string, PublishedSubjectScheme>
+  schemes: Map<string, PublishedSubjectScheme>,
+  gradedSchemes: Map<string, PublishedSubjectScheme>
 ) => {
   const subjectIds = [...schemes.keys()];
   if (subjectIds.length === 0) {
@@ -122,12 +165,14 @@ const loadSubjectColumns = async (
     .lean();
 
   return subjects.map((subject) => {
-    const scheme = schemes.get(subject._id.toString());
+    const subjectId = subject._id.toString();
+    const scheme = schemes.get(subjectId);
+    const graded = gradedSchemes.get(subjectId);
     const subjectFullMarks = Number(subject.fullMarks) || 0;
     const subjectPassMarks = Number(subject.passMarks) || 0;
     // Exam scheme wins over the subject default — a term exam may be out of 50, not 100.
-    const fullMarks = scheme?.fullMarks ?? subjectFullMarks;
-    const passMarks = scheme?.passMarks ?? subjectPassMarks;
+    const fullMarks = scheme?.fullMarks ?? graded?.fullMarks ?? subjectFullMarks;
+    const passMarks = scheme?.passMarks ?? graded?.passMarks ?? subjectPassMarks;
 
     // Internal marks are printed inside the Theory column, so they count as theory here.
     const theoryConfigured =
@@ -236,20 +281,21 @@ const buildPrintResultsGrid = async (req: Request) => {
     sectionId: sectionId || undefined
   });
 
-  const [results, subjects] = await Promise.all([
-    Result.find({
-      schoolId,
-      examId,
-      studentId: { $in: studentIds },
-      publishedAtBs: { $exists: true, $nin: [null, ""] }
-    }).lean(),
-    loadSubjectColumns(schoolId, publishedSchemes)
-  ]);
+  const results = await Result.find({
+    schoolId,
+    examId,
+    studentId: { $in: studentIds },
+    publishedAtBs: { $exists: true, $nin: [null, ""] }
+  }).lean();
+
+  // Older results were graded before the per-exam marks scheme existed; their mark rows
+  // still carry the full/pass the teacher actually used, so they beat the subject default.
+  const gradedSchemes = collectGradedSchemes(results);
+  const subjects = await loadSubjectColumns(schoolId, publishedSchemes, gradedSchemes);
 
   const studentMap = new Map(students.map((student) => [student._id.toString(), student]));
   const subjectOrder = subjects.map((subject) => subject.subjectId);
-  const subjectNameById = new Map(subjects.map((subject) => [subject.subjectId, subject.subjectName]));
-  // Columns are the single source of truth for what the sheet shows, so marks, remarks
+  // Columns are the single source of truth for what the sheet shows, so marks
   // and totals are all restricted to this set.
   const columnSubjectIds = new Set(subjectOrder);
   const columnFullMarksById = new Map(
@@ -361,18 +407,6 @@ const buildPrintResultsGrid = async (req: Request) => {
           ] as const;
         })
       );
-      // Each subject teacher's remark is labeled with its subject so a combined remark
-      // on the bulk sheet is never mistaken for a single unexplained/auto-generated note.
-      const remarks = visibleMarks
-        .map((mark) => {
-          const trimmed = mark.teacherRemarks?.trim();
-          if (!trimmed) return null;
-          const subjectName = subjectNameById.get(mark.subjectId.toString());
-          return subjectName ? `${subjectName}: ${trimmed}` : trimmed;
-        })
-        .filter((entry): entry is string => Boolean(entry))
-        .join("; ");
-
       const totalMarks = totals.totalObtained;
       const totalFullMarks = totals.totalFull;
       const regNo =
@@ -400,8 +434,7 @@ const buildPrintResultsGrid = async (req: Request) => {
         percentage: totals.percentage,
         grade: totals.grade,
         gpa: totals.gpa,
-        passFailStatus: totals.passFailStatus,
-        remarks: remarks || undefined
+        passFailStatus: totals.passFailStatus
       };
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
@@ -454,7 +487,9 @@ export const exportPrintResultsCsv = asyncHandler(async (req: Request, res: Resp
     Grade: row.grade,
     GPA: row.gpa,
     "Pass/Fail": row.passFailStatus,
-    Remarks: row.remarks ?? ""
+    // Remarks stays blank on the report — per-subject teacher notes belong on the
+    // individual marksheet, not merged into one column here.
+    Remarks: ""
   }));
 
   const csv = toCsv(csvRows);

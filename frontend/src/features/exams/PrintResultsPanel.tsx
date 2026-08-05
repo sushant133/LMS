@@ -649,6 +649,7 @@ export const PrintResultsPanel = ({
                     const tFull =
                       subject.theoryFullMarks ||
                       (showP ? 0 : subject.fullMarks);
+                    const pFull = subject.practicalFullMarks;
                     const cells: ReactNode[] = [];
                     if (showT) {
                       cells.push(
@@ -661,12 +662,13 @@ export const PrintResultsPanel = ({
                       );
                     }
                     if (showP) {
-                      // Practical full marks are intentionally left blank on the sheet
                       cells.push(
                         <th
                           key={`${subject.subjectId}-fm-p`}
                           className="iar-num"
-                        />,
+                        >
+                          {pFull ? formatMark(pFull) : ""}
+                        </th>,
                       );
                     }
                     return cells;
@@ -684,6 +686,7 @@ export const PrintResultsPanel = ({
                     const tPass =
                       subject.theoryPassMarks ||
                       (showP ? 0 : subject.passMarks);
+                    const pPass = subject.practicalPassMarks;
                     const cells: ReactNode[] = [];
                     if (showT) {
                       cells.push(
@@ -696,12 +699,13 @@ export const PrintResultsPanel = ({
                       );
                     }
                     if (showP) {
-                      // Practical pass marks are intentionally left blank on the sheet
                       cells.push(
                         <th
                           key={`${subject.subjectId}-pm-p`}
                           className="iar-num"
-                        />,
+                        >
+                          {pPass ? formatMark(pPass) : ""}
+                        </th>,
                       );
                     }
                     return cells;
@@ -758,7 +762,9 @@ export const PrintResultsPanel = ({
                         : ""}
                     </td>
                     <td className="iar-grade">{row.grade || ""}</td>
-                    <td className="iar-remarks">{row.remarks || ""}</td>
+                    {/* Left blank on purpose — remarks are written by hand on the
+                        printed IAR sheet, never auto-filled from subject marks. */}
+                    <td className="iar-remarks" />
                   </tr>
                 ))}
               </tbody>
