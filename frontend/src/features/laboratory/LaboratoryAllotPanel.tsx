@@ -182,7 +182,7 @@ export const LaboratoryAllotPanel = () => {
               {teachers.map((t) => (
                 <option key={t._id} value={t._id}>
                   {t.user?.fullName ?? "Teacher"}
-                  {t.department ? ` · ${t.department}` : ""}
+                  {t.user?.department ? ` · ${t.user.department}` : ""}
                 </option>
               ))}
             </Select>

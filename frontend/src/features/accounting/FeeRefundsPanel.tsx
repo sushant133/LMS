@@ -23,14 +23,17 @@ import { invalidateDashboardQueries } from "lib/dashboardQueries";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 
+// Values match the zod defaults the server applies for these fields
 const defaultForm: FeeRefundInput = {
   studentId: "",
+  refundType: "OTHER",
   amountNpr: 0,
   dateBs: "",
   reason: "",
   paymentMethod: "CASH",
   transactionNumber: "",
   notes: "",
+  attachments: [],
 };
 
 export const FeeRefundsPanel = ({ canWrite }: { canWrite: boolean }) => {

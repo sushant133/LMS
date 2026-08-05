@@ -1393,7 +1393,10 @@ export const FieldPostingSectionPanel = ({
                               const take = base + (rem > 0 ? 1 : 0);
                               if (rem > 0) rem -= 1;
                               for (let i = 0; i < take && idx < n; i += 1, idx += 1) {
-                                map[students[idx]._id] = sh;
+                                const student = students[idx];
+                                if (student) {
+                                  map[student._id] = sh;
+                                }
                               }
                             }
                             setForm((f) => ({ ...f, studentShiftMap: map }));
@@ -1415,7 +1418,9 @@ export const FieldPostingSectionPanel = ({
                             };
                             const unassigned = students.filter((s) => !map[s._id]);
                             unassigned.forEach((s, i) => {
-                              map[s._id] = FIELD_SHIFTS[i % FIELD_SHIFTS.length];
+                              map[s._id] =
+                                FIELD_SHIFTS[i % FIELD_SHIFTS.length] ??
+                                "MORNING";
                             });
                             setForm((f) => ({ ...f, studentShiftMap: map }));
                             toast.success(

@@ -14,7 +14,17 @@
     "useDefineForClassFields": true,
     "jsx": "react-jsx",
     "noEmit": true,
-    // "baseUrl": "./src",
+    // Mirrors the vite `resolve.alias` entries. Without these, `npm run typecheck`
+    // fails on every alias import (components/…, lib/…) and checks nothing.
+    "paths": {
+      "components/*": ["./src/components/*"],
+      "features/*": ["./src/features/*"],
+      "hooks/*": ["./src/hooks/*"],
+      "i18n": ["./src/i18n"],
+      "i18n/*": ["./src/i18n/*"],
+      "lib/*": ["./src/lib/*"],
+      "pages/*": ["./src/pages/*"]
+    },
     "types": ["vite/client"]
   },
   "include": ["src"],

@@ -314,6 +314,7 @@ export const LibraryPrintBooksPanel = () => {
       setPrintBooks(books);
       setPrintTitle(title);
     });
+    const onlyBook = books.length === 1 ? books[0] : undefined;
     try {
       const el = document.getElementById(PRINT_AREA_ID);
       // Use textContent — innerText is empty for display:none nodes
@@ -321,10 +322,9 @@ export const LibraryPrintBooksPanel = () => {
         throw new Error("Print content is empty — try again");
       }
       if (mode === "pdf") {
-        const fileBase =
-          books.length === 1
-            ? `library-book-${safeFilename(books[0].title)}`
-            : "library-inventory-all-books";
+        const fileBase = onlyBook
+          ? `library-book-${safeFilename(onlyBook.title)}`
+          : "library-inventory-all-books";
         // jsPDF text layout — includes every book + every copy (no html2canvas clipping)
         await exportLibraryInventoryPdf(books, {
           institutionName,
@@ -333,15 +333,15 @@ export const LibraryPrintBooksPanel = () => {
           filename: `${fileBase}.pdf`,
         });
         toast.success(
-          books.length === 1
-            ? `PDF downloaded for “${books[0].title}” with all copies`
+          onlyBook
+            ? `PDF downloaded for “${onlyBook.title}” with all copies`
             : `PDF downloaded — ${books.length} books with full copy details`,
         );
       } else {
         await printElementById(PRINT_AREA_ID, "library-inventory-print");
         toast.success(
-          books.length === 1
-            ? `Print dialog opened for “${books[0].title}”`
+          onlyBook
+            ? `Print dialog opened for “${onlyBook.title}”`
             : `Print dialog opened for ${books.length} books`,
         );
       }

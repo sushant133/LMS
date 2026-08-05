@@ -824,7 +824,11 @@ export const StudentListManager = () => {
                           </Td>
                           <Td
                             className={cellTruncateClass}
-                            title={student.rollNumber || undefined}
+                            title={
+                              student.rollNumber
+                                ? String(student.rollNumber)
+                                : undefined
+                            }
                           >
                             {student.rollNumber || "—"}
                           </Td>

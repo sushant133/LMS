@@ -491,7 +491,7 @@ export async function exportLibraryInventoryPdf(
   const filename =
     meta?.filename?.trim() ||
     (books.length === 1
-      ? `library-book-${(books[0].title || "book")
+      ? `library-book-${(books[0]?.title || "book")
           .replace(/[^\w\s\-().]+/g, "")
           .trim()
           .replace(/\s+/g, "-")

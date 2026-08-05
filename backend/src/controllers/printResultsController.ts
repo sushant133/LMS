@@ -3,6 +3,7 @@ import type { Types } from "mongoose";
 import { Batch } from "../models/Batch.js";
 import { Exam } from "../models/Exam.js";
 import { Result } from "../models/Result.js";
+import { ResultSubmission } from "../models/ResultSubmission.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { resolveSchoolBranding } from "../utils/schoolBranding.js";
@@ -33,19 +34,104 @@ const buildPublishedExamFilter = (req: Request) => {
   return filter;
 };
 
-const loadSubjectColumns = async (schoolId: Types.ObjectId, yearId?: string, classId?: string) => {
-  const subjectFilter: Record<string, unknown> = { schoolId };
-  if (yearId) {
-    subjectFilter.yearIds = yearId;
-  } else if (classId) {
-    subjectFilter.classIds = classId;
+const round2 = (value: number): number => Number(value.toFixed(2));
+
+interface CohortScope {
+  batchId?: string;
+  yearId?: string;
+  classId?: string;
+  sectionId?: string;
+}
+
+/** Exam-level marks scheme a teacher/admin set for one subject (ResultSubmission). */
+interface PublishedSubjectScheme {
+  fullMarks: number | null;
+  passMarks: number | null;
+}
+
+/**
+ * Subjects whose results are APPROVED **and** PUBLISHED for this exam + cohort, with the
+ * full/pass scheme that was set for the exam. Anything still DRAFT, SUBMITTED_FOR_REVIEW,
+ * PENDING_ADMIN_REVIEW, RETURNED_FOR_CORRECTION, or APPROVED-but-not-published is excluded,
+ * so the bulk sheet never leaks an unpublished subject as a column.
+ * Cohort matching mirrors getPublishedSubjectIdsForStudentResult.
+ */
+const loadPublishedSubjectSchemes = async (
+  schoolId: Types.ObjectId,
+  examId: string,
+  scope: CohortScope
+): Promise<Map<string, PublishedSubjectScheme>> => {
+  const submissions = await ResultSubmission.find({
+    schoolId,
+    examId,
+    status: "PUBLISHED"
+  }).lean();
+
+  const schemes = new Map<string, PublishedSubjectScheme>();
+  for (const submission of submissions) {
+    if (submission.batchId && submission.yearId) {
+      if (
+        String(submission.batchId) !== String(scope.batchId ?? "") ||
+        String(submission.yearId) !== String(scope.yearId ?? "")
+      ) {
+        continue;
+      }
+    } else if (submission.classId && submission.sectionId) {
+      if (
+        String(submission.classId) !== String(scope.classId ?? "") ||
+        String(submission.sectionId) !== String(scope.sectionId ?? "")
+      ) {
+        continue;
+      }
+    }
+
+    const subjectId = submission.subjectId.toString();
+    const fullMarks = Number(submission.fullMarks);
+    const passMarks = Number(submission.passMarks);
+    const scheme: PublishedSubjectScheme = {
+      fullMarks: Number.isFinite(fullMarks) && fullMarks > 0 ? fullMarks : null,
+      passMarks: Number.isFinite(passMarks) ? passMarks : null
+    };
+
+    const existing = schemes.get(subjectId);
+    // A subject can have several published cohort rows; keep the one carrying a scheme.
+    if (!existing || (existing.fullMarks === null && scheme.fullMarks !== null)) {
+      schemes.set(subjectId, scheme);
+    }
   }
 
-  const subjects = await Subject.find(subjectFilter).sort({ name: 1 }).lean();
+  return schemes;
+};
+
+/**
+ * Build one column per published subject. Full/pass come from the exam's own scheme
+ * (ResultSubmission) and fall back to the subject configuration, then split across the
+ * Theory/Practical sub-columns using the subject's configured component ratio.
+ */
+const loadSubjectColumns = async (
+  schoolId: Types.ObjectId,
+  schemes: Map<string, PublishedSubjectScheme>
+) => {
+  const subjectIds = [...schemes.keys()];
+  if (subjectIds.length === 0) {
+    return [];
+  }
+
+  const subjects = await Subject.find({ _id: { $in: subjectIds }, schoolId })
+    .sort({ name: 1 })
+    .lean();
+
   return subjects.map((subject) => {
-    const fullMarks = Number(subject.fullMarks) || 0;
-    const passMarks = Number(subject.passMarks) || 0;
-    const theoryConfigured = Number(subject.theoryMarks) || 0;
+    const scheme = schemes.get(subject._id.toString());
+    const subjectFullMarks = Number(subject.fullMarks) || 0;
+    const subjectPassMarks = Number(subject.passMarks) || 0;
+    // Exam scheme wins over the subject default — a term exam may be out of 50, not 100.
+    const fullMarks = scheme?.fullMarks ?? subjectFullMarks;
+    const passMarks = scheme?.passMarks ?? subjectPassMarks;
+
+    // Internal marks are printed inside the Theory column, so they count as theory here.
+    const theoryConfigured =
+      (Number(subject.theoryMarks) || 0) + (Number(subject.internalMarks) || 0);
     const practicalConfigured = Number(subject.practicalMarks) || 0;
     /**
      * Whether a subject splits into Theory/Practical columns is decided ONLY by the
@@ -58,17 +144,29 @@ const loadSubjectColumns = async (schoolId: Types.ObjectId, yearId?: string, cla
     // Pure-practical subjects (practical configured, no separate theory marks) omit the
     // Theory column entirely rather than showing a misleading 0.00 full-marks column.
     const hasTheory = theoryConfigured > 0 || !hasPractical;
-    const theoryFullMarks = !hasTheory
-      ? 0
-      : theoryConfigured > 0
-        ? theoryConfigured
-        : fullMarks;
-    const practicalFullMarks = hasPractical ? practicalConfigured : 0;
+    const configuredTotal = theoryConfigured + practicalConfigured;
+
+    /**
+     * Practical full marks come from the practical configuration scaled to the exam's
+     * full marks — never a copy of the theory value. When the exam scheme matches the
+     * subject configuration (the usual case) this returns the configured numbers as-is.
+     */
+    const practicalFullMarks =
+      hasPractical && configuredTotal > 0
+        ? round2((fullMarks * practicalConfigured) / configuredTotal)
+        : 0;
+    // Theory takes the remainder so Theory + Practical always equals the exam full marks.
+    const theoryFullMarks = hasTheory ? round2(fullMarks - practicalFullMarks) : 0;
+
     const ratio = fullMarks > 0 ? passMarks / fullMarks : 0;
-    const theoryPassMarks =
-      theoryFullMarks > 0 ? Number((theoryFullMarks * ratio).toFixed(2)) : 0;
     const practicalPassMarks =
-      practicalFullMarks > 0 ? Number((practicalFullMarks * ratio).toFixed(2)) : 0;
+      practicalFullMarks > 0 ? round2(practicalFullMarks * ratio) : 0;
+    const theoryPassMarks =
+      theoryFullMarks > 0
+        ? hasPractical
+          ? round2(passMarks - practicalPassMarks)
+          : round2(theoryFullMarks * ratio)
+        : 0;
 
     return {
       subjectId: subject._id.toString(),
@@ -131,6 +229,13 @@ const buildPrintResultsGrid = async (req: Request) => {
   const students = await Student.find(studentFilter).populate("user", "fullName").lean();
   const studentIds = students.map((student) => student._id);
 
+  const publishedSchemes = await loadPublishedSubjectSchemes(schoolId, examId, {
+    batchId: batchId || undefined,
+    yearId: yearId || undefined,
+    classId: classId || undefined,
+    sectionId: sectionId || undefined
+  });
+
   const [results, subjects] = await Promise.all([
     Result.find({
       schoolId,
@@ -138,12 +243,21 @@ const buildPrintResultsGrid = async (req: Request) => {
       studentId: { $in: studentIds },
       publishedAtBs: { $exists: true, $nin: [null, ""] }
     }).lean(),
-    loadSubjectColumns(schoolId, yearId || undefined, classId || undefined)
+    loadSubjectColumns(schoolId, publishedSchemes)
   ]);
 
   const studentMap = new Map(students.map((student) => [student._id.toString(), student]));
   const subjectOrder = subjects.map((subject) => subject.subjectId);
   const subjectNameById = new Map(subjects.map((subject) => [subject.subjectId, subject.subjectName]));
+  // Columns are the single source of truth for what the sheet shows, so marks, remarks
+  // and totals are all restricted to this set.
+  const columnSubjectIds = new Set(subjectOrder);
+  const columnFullMarksById = new Map(
+    subjects.map((subject) => [subject.subjectId, subject.fullMarks])
+  );
+  const practicalColumnSubjectIds = new Set(
+    subjects.filter((subject) => subject.hasPractical).map((subject) => subject.subjectId)
+  );
 
   const [batch, year, schoolClass, section, branding] = await Promise.all([
     batchId ? Batch.findById(batchId).lean() : null,
@@ -181,15 +295,23 @@ const buildPrintResultsGrid = async (req: Request) => {
       }
 
       const publishedSubjectIds = publishedSubjectsByResultId.get(result._id.toString()) ?? new Set<string>();
-      const visibleMarks = result.marks.filter((mark) => publishedSubjectIds.has(mark.subjectId.toString()));
+      const visibleMarks = result.marks.filter((mark) => {
+        const subjectId = mark.subjectId.toString();
+        return publishedSubjectIds.has(subjectId) && columnSubjectIds.has(subjectId);
+      });
       if (visibleMarks.length === 0) {
         return null;
       }
 
+      // Totals cover exactly the published subjects printed above; a mark saved without
+      // its own full marks falls back to the column's exam/subject configuration.
       const totals = buildResultTotals(
         visibleMarks.map((mark) => ({
           obtainedMarks: mark.obtainedMarks,
-          fullMarks: mark.fullMarks,
+          fullMarks:
+            Number(mark.fullMarks) > 0
+              ? Number(mark.fullMarks)
+              : (columnFullMarksById.get(mark.subjectId.toString()) ?? 0),
           passFail: (mark.passFail ?? "FAIL") as "PASS" | "FAIL"
         }))
       );
@@ -216,9 +338,15 @@ const buildPrintResultsGrid = async (req: Request) => {
           const theory = Number(mark.theoryMarks) || 0;
           const practical = Number(mark.practicalMarks) || 0;
           const internal = Number(mark.internalMarks) || 0;
-          // When components are zero but obtained is set, treat obtained as theory.
+          const splitsPractical = practicalColumnSubjectIds.has(subjectId);
+          /**
+           * When components are zero but obtained is set, treat obtained as theory —
+           * only for single-column subjects. On a subject that prints Theory and
+           * Practical separately, that fallback would repeat the combined total under
+           * Theory, so it stays at the recorded theory component.
+           */
           const theoryOut =
-            theory > 0 || practical > 0 || internal > 0
+            theory > 0 || practical > 0 || internal > 0 || splitsPractical
               ? theory + internal
               : mark.obtainedMarks;
           return [

@@ -395,6 +395,28 @@ export interface ParentPortalChildSummary {
   attendanceRate: number;
   pendingHomework: number;
   relationship: ParentRelationship;
+  /** Fee fields below are returned by GET /parent/portal; blanked when the fee section is off. */
+  admissionNumber?: string;
+  registrationNumber?: string;
+  year1FeeNpr?: number;
+  year2FeeNpr?: number;
+  year3FeeNpr?: number;
+  securityDepositExpectedNpr?: number;
+  securityDepositNpr?: number;
+  securityDepositRefundedNpr?: number;
+  totalPaidNpr?: number;
+  totalScholarshipNpr?: number;
+  yearWise?: Array<{
+    programYear: number;
+    label: string;
+    chargedNpr: number;
+    paidNpr: number;
+    scholarshipNpr: number;
+    discountNpr: number;
+    remainingNpr: number;
+    status: "PAID" | "PARTIAL" | "DUE" | "SCHOLARSHIP" | "NO_RECORD";
+    scholarshipNote?: string;
+  }>;
 }
 
 export interface ParentPortalResponse {

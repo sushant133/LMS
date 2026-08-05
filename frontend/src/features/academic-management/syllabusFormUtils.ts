@@ -163,13 +163,21 @@ export const blankSyllabusForm = (
   chapters: [emptyChapter(1)],
 });
 
-/** Flatten nested sub-units depth-first. */
-export const flattenSubUnitDrafts = (subs: SubUnitDraft[]): SubUnitDraft[] => {
-  const out: SubUnitDraft[] = [];
-  const walk = (nodes: SubUnitDraft[]) => {
+/**
+ * Flatten nested sub-units depth-first.
+ * Generic so it also accepts payload sub-units (no clientKey), not just drafts.
+ */
+export const flattenSubUnitDrafts = <T extends { children?: unknown }>(
+  subs: T[],
+): T[] => {
+  const out: T[] = [];
+  const walk = (nodes: T[]) => {
     for (const node of nodes) {
       out.push(node);
-      if (node.children?.length) walk(node.children);
+      const children = node.children;
+      if (Array.isArray(children) && children.length) {
+        walk(children as T[]);
+      }
     }
   };
   walk(subs);
@@ -731,6 +739,12 @@ export const formToPayload = (
         internalAssessment: "",
         tentativeCompletionMonth: chapter.tentativeCompletionMonth || "",
         status: "PENDING" as const,
+        // Schema-defaulted fields — sent explicitly so the payload matches the parsed shape
+        startDateBs: "",
+        endDateBs: "",
+        syllabusId: "",
+        syllabusChapterId: "",
+        syllabusUnitId: "",
       };
     }),
   );
@@ -745,7 +759,8 @@ export const formToPayload = (
     academicYearBs,
     session: session || academicYearBs,
     faculty: form.faculty || undefined,
-    semesterBs: form.semesterBs || undefined,
+    // Schema defaults semesterBs to "" — send "" rather than undefined
+    semesterBs: form.semesterBs || "",
     // Never send "" for ObjectId fields (server CastError → 400)
     classId: form.classId?.trim() || undefined,
     sectionId: form.sectionId?.trim() || undefined,

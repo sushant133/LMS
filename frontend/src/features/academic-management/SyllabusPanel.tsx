@@ -83,6 +83,9 @@ import {
   type SyllabusFormState,
 } from "./syllabusFormUtils";
 
+/** Minimal recursive shape shared by draft and payload sub-units, for tree walks. */
+type SubUnitNode = { heading?: string; children?: SubUnitNode[] };
+
 interface SyllabusPanelProps {
   filters: AcademicManagementFilters;
   subjects: Array<
@@ -250,9 +253,7 @@ export const SyllabusPanel = ({
   /** Score hierarchy richness so we never open an empty form over real data. */
   const hierarchyScore = (record?: AcademicSyllabusRecord | null): number => {
     if (!record) return 0;
-    const walk = (
-      subs: Array<{ children?: Array<{ children?: unknown[] }>; heading?: string }>,
-    ): number =>
+    const walk = (subs: SubUnitNode[]): number =>
       subs.reduce(
         (n, s) =>
           n +
@@ -334,9 +335,7 @@ export const SyllabusPanel = ({
         );
         return;
       }
-      const walkSubs = (
-        subs: Array<{ children?: Array<{ children?: unknown[] }> }>,
-      ): number =>
+      const walkSubs = (subs: SubUnitNode[]): number =>
         subs.reduce((n, s) => n + 1 + walkSubs(s.children ?? []), 0);
       const subCount = (source.chapters ?? []).reduce(
         (n, ch) =>
@@ -463,9 +462,7 @@ export const SyllabusPanel = ({
   };
 
   const countRecordSubs = (plan: AcademicSyllabusRecord): number => {
-    const walk = (
-      subs: Array<{ children?: Array<{ children?: unknown[] }> }>,
-    ): number =>
+    const walk = (subs: SubUnitNode[]): number =>
       subs.reduce((n, s) => n + 1 + walk(s.children ?? []), 0);
     return (plan.chapters ?? []).reduce(
       (n, ch) =>
@@ -666,9 +663,7 @@ export const SyllabusPanel = ({
 
     // Count form sub-units for under-population checks (do NOT block normal
     // drafts that only have "Unit N" titles — those are valid partial saves).
-    const walkFormSubs = (
-      subs: Array<{ children?: Array<{ children?: unknown[] }> }>,
-    ): number =>
+    const walkFormSubs = (subs: SubUnitNode[]): number =>
       subs.reduce((n, s) => n + 1 + walkFormSubs(s.children ?? []), 0);
     const formSubCount = latest.chapters.reduce(
       (n, ch) =>

@@ -475,12 +475,15 @@ const BreakdownDonutCard = ({
                       border: "1px solid #e2e8f0",
                       fontSize: 13,
                     }}
-                    formatter={(value: number | string, name: string) => {
+                    formatter={(value, name) => {
                       const n = typeof value === "number" ? value : Number(value);
                       const pct =
                         total > 0 ? ((n / total) * 100).toFixed(0) : "0";
                       // Keep full category name in tooltip (Male, Female, Madhesi, …)
-                      return [`${n} student${n === 1 ? "" : "s"} (${pct}%)`, name];
+                      return [
+                        `${n} student${n === 1 ? "" : "s"} (${pct}%)`,
+                        String(name),
+                      ];
                     }}
                   />
                 </PieChart>

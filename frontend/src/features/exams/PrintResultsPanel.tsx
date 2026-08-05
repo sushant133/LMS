@@ -644,9 +644,11 @@ export const PrintResultsPanel = ({
                   </th>
                   {grid.subjects.flatMap((subject) => {
                     const { showT, showP } = subjectComponents(subject);
+                    // Never fall back to the subject total when a practical column
+                    // exists — that would print the combined marks twice.
                     const tFull =
-                      subject.theoryFullMarks ??
-                      (showP ? undefined : subject.fullMarks);
+                      subject.theoryFullMarks ||
+                      (showP ? 0 : subject.fullMarks);
                     const cells: ReactNode[] = [];
                     if (showT) {
                       cells.push(
@@ -654,18 +656,17 @@ export const PrintResultsPanel = ({
                           key={`${subject.subjectId}-fm-t`}
                           className="iar-num"
                         >
-                          {formatMark(tFull ?? subject.fullMarks)}
+                          {formatMark(tFull)}
                         </th>,
                       );
                     }
                     if (showP) {
+                      // Practical full marks are intentionally left blank on the sheet
                       cells.push(
                         <th
                           key={`${subject.subjectId}-fm-p`}
                           className="iar-num"
-                        >
-                          {formatMark(subject.practicalFullMarks)}
-                        </th>,
+                        />,
                       );
                     }
                     return cells;
@@ -681,8 +682,8 @@ export const PrintResultsPanel = ({
                   {grid.subjects.flatMap((subject) => {
                     const { showT, showP } = subjectComponents(subject);
                     const tPass =
-                      subject.theoryPassMarks ??
-                      (showP ? undefined : subject.passMarks);
+                      subject.theoryPassMarks ||
+                      (showP ? 0 : subject.passMarks);
                     const cells: ReactNode[] = [];
                     if (showT) {
                       cells.push(
@@ -690,18 +691,17 @@ export const PrintResultsPanel = ({
                           key={`${subject.subjectId}-pm-t`}
                           className="iar-num"
                         >
-                          {formatMark(tPass ?? subject.passMarks)}
+                          {formatMark(tPass)}
                         </th>,
                       );
                     }
                     if (showP) {
+                      // Practical pass marks are intentionally left blank on the sheet
                       cells.push(
                         <th
                           key={`${subject.subjectId}-pm-p`}
                           className="iar-num"
-                        >
-                          {formatMark(subject.practicalPassMarks)}
-                        </th>,
+                        />,
                       );
                     }
                     return cells;

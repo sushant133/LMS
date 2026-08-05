@@ -216,10 +216,12 @@ const defaultCollection: EnhancedFeeCollectionInput = {
   amountPaidNpr: 0,
   discountNpr: 0,
   scholarshipNpr: 0,
+  scholarshipType: "NONE",
   lateFeeNpr: 0,
   advancePaymentNpr: 0,
   paymentMethod: "CASH",
   feeBreakdown: [],
+  attachments: [],
   isInstallment: false,
   notes: "",
 };
@@ -275,9 +277,18 @@ const defaultSalary: SalaryPaymentInput = {
   loanDeductionNpr: 0,
   taxNpr: 0,
   otherDeductionsNpr: 0,
+  presentDays: 0,
+  absentDays: 0,
+  extraDuty: 0,
+  absentDeductionNpr: 0,
+  extraAmountNpr: 0,
+  salaryAmountNpr: 0,
+  attendanceIncomplete: false,
+  attendanceManualOverride: false,
   status: "DRAFT",
   paidDateBs: "",
   paymentMethod: "BANK_TRANSFER",
+  attachments: [],
 };
 
 const defaultCashEntry: CashBookEntryInput = {
@@ -1573,7 +1584,7 @@ export const AccountingManager = () => {
                 ) : null}
                 <FormField label="Paid Date (BS)">
                   <NepaliDateField
-                    value={collectionForm.paidDateBs}
+                    value={collectionForm.paidDateBs ?? ""}
                     onChange={(v) =>
                       setCollectionForm((c) => ({ ...c, paidDateBs: v }))
                     }
@@ -2160,9 +2171,22 @@ export const AccountingManager = () => {
                                 loanDeductionNpr: row.loanDeductionNpr,
                                 taxNpr: row.taxNpr,
                                 otherDeductionsNpr: row.otherDeductionsNpr,
+                                // Attendance-derived fields must be carried over, or
+                                // saving the edit resets them to 0 / drops attachments
+                                presentDays: row.presentDays ?? 0,
+                                absentDays: row.absentDays ?? 0,
+                                extraDuty: row.extraDuty ?? 0,
+                                absentDeductionNpr: row.absentDeductionNpr ?? 0,
+                                extraAmountNpr: row.extraAmountNpr ?? 0,
+                                salaryAmountNpr: row.salaryAmountNpr ?? 0,
+                                attendanceIncomplete:
+                                  row.attendanceIncomplete ?? false,
+                                attendanceManualOverride:
+                                  row.attendanceManualOverride ?? false,
                                 status: row.status,
                                 paidDateBs: row.paidDateBs ?? "",
                                 paymentMethod: row.paymentMethod,
+                                attachments: row.attachments ?? [],
                               });
                             }}
                           >

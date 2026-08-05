@@ -142,12 +142,12 @@ export const LaboratoryPrintInventoryPanel = () => {
       setPrintItems(selected);
       setPrintTitle(title);
     });
+    const onlyItem = selected.length === 1 ? selected[0] : undefined;
     try {
       if (mode === "pdf") {
-        const fileBase =
-          selected.length === 1
-            ? `lab-equipment-${safeFilename(selected[0].name)}`
-            : "laboratory-inventory-all";
+        const fileBase = onlyItem
+          ? `lab-equipment-${safeFilename(onlyItem.name)}`
+          : "laboratory-inventory-all";
         await exportLaboratoryInventoryPdf(selected, {
           institutionName,
           institutionAddress,
@@ -155,8 +155,8 @@ export const LaboratoryPrintInventoryPanel = () => {
           filename: `${fileBase}.pdf`,
         });
         toast.success(
-          selected.length === 1
-            ? `PDF downloaded for “${selected[0].name}”`
+          onlyItem
+            ? `PDF downloaded for “${onlyItem.name}”`
             : `PDF downloaded — ${selected.length} items with full details`,
         );
       } else {
@@ -166,8 +166,8 @@ export const LaboratoryPrintInventoryPanel = () => {
         }
         await printElementById(PRINT_AREA_ID, "laboratory-inventory-print");
         toast.success(
-          selected.length === 1
-            ? `Print dialog opened for “${selected[0].name}”`
+          onlyItem
+            ? `Print dialog opened for “${onlyItem.name}”`
             : `Print dialog opened for ${selected.length} items`,
         );
       }

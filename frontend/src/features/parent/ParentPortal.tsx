@@ -167,33 +167,13 @@ export const ParentPortal = () => {
                       <p className="font-semibold">{child.relationship}</p>
                     </div>
                   </div>
-                  {showFees &&
-                  Array.isArray(
-                    (child as { yearWise?: Array<Record<string, unknown>> })
-                      .yearWise,
-                  ) &&
-                  (
-                    (child as { yearWise?: Array<Record<string, unknown>> })
-                      .yearWise ?? []
-                  ).length > 0 ? (
+                  {showFees && (child.yearWise?.length ?? 0) > 0 ? (
                     <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-2">
                       <p className="mb-1 text-xs font-medium text-slate-600">
                         Year-wise fees
                       </p>
                       <div className="grid gap-1 sm:grid-cols-3">
-                        {(
-                          (
-                            child as {
-                              yearWise: Array<{
-                                label: string;
-                                status: string;
-                                paidNpr: number;
-                                remainingNpr: number;
-                                scholarshipNpr: number;
-                              }>;
-                            }
-                          ).yearWise ?? []
-                        ).map((y) => (
+                        {(child.yearWise ?? []).map((y) => (
                           <div
                             key={y.label}
                             className="rounded-lg bg-white px-2 py-1.5 text-xs"

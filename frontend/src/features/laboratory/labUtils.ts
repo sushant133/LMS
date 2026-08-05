@@ -658,7 +658,7 @@ export async function exportLaboratoryInventoryPdf(
   const filename =
     meta?.filename?.trim() ||
     (items.length === 1
-      ? `lab-equipment-${(items[0].name || "item")
+      ? `lab-equipment-${(items[0]?.name || "item")
           .replace(/[^\w\s\-().]+/g, "")
           .trim()
           .replace(/\s+/g, "-")
