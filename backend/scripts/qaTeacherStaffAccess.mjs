@@ -246,7 +246,8 @@ async function probeAccount(account) {
             practicalMarks: 10,
             internalMarks: 5,
             attendanceStatus: "PRESENT",
-            teacherRemarks: "qa-probe",
+            // No teacherRemarks: it is a real teacher-authored field that prints on
+            // the marksheet, so a probe must not leave test text behind.
           },
         ],
       };

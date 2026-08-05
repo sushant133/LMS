@@ -61,7 +61,8 @@ export const ResultMarksheetView = ({
           // before the grade was persisted fall back to the same grading scale.
           grade: mark.grade ?? computed.grade,
           status: computed.passFail,
-          remarks: mark.teacherRemarks ?? "",
+          // Only a remark a teacher actually typed prints here; blank otherwise.
+          remarks: mark.teacherRemarks?.trim() ?? "",
         };
       }),
     [data.result.marks, subjectMap],

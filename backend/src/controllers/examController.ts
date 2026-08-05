@@ -1291,7 +1291,8 @@ export const downloadMarksheetPdf = asyncHandler(async (req: Request, res: Respo
       theory: mark.theoryMarks,
       practical: mark.practicalMarks,
       passFail: mark.passFail ?? undefined,
-      remarks: mark.teacherRemarks ?? undefined
+      // Blank unless a teacher actually wrote something — never a placeholder.
+      remarks: mark.teacherRemarks?.trim() || undefined
     })),
     totalObtained: totals.totalObtained,
     totalFull: totals.totalFull,
