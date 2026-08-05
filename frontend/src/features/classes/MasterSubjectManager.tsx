@@ -24,13 +24,21 @@ import {
   downloadMasterSubjectsExcel,
 } from "./masterSubjectExportUtils";
 
+/**
+ * Practical Marks is genuinely optional (Bulk Print only shows a separate Practical
+ * column when it's configured). Defaulting it to a nonzero value would silently split
+ * every new subject's Full/Pass Marks into Theory + Practical on the printed sheet even
+ * when the admin never intended a practical component, so it starts blank like
+ * Internal Marks — theoryMarks defaults to the full marks so an unedited subject prints
+ * as a single combined column.
+ */
 const defaultMasterSubjectValue: MasterSubjectInput = {
   name: "",
   code: "",
   yearLevel: 1,
   creditHours: undefined,
-  theoryMarks: 70,
-  practicalMarks: 30,
+  theoryMarks: 100,
+  practicalMarks: undefined,
   internalMarks: undefined,
   passMarks: 35,
   fullMarks: 100,

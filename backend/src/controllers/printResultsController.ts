@@ -47,16 +47,22 @@ const loadSubjectColumns = async (schoolId: Types.ObjectId, yearId?: string, cla
     const passMarks = Number(subject.passMarks) || 0;
     const theoryConfigured = Number(subject.theoryMarks) || 0;
     const practicalConfigured = Number(subject.practicalMarks) || 0;
-    // Prefer configured component full marks; fall back to single theory column.
+    /**
+     * Whether a subject splits into Theory/Practical columns is decided ONLY by the
+     * subject's own configuration (theoryMarks/practicalMarks) — never by what happens
+     * to be stored in a student's marks. A subject with no practical component configured
+     * always prints as a single combined column, even if a stray mark record has a
+     * nonzero practicalMarks value from before the subject was reconfigured.
+     */
     const hasPractical = practicalConfigured > 0;
+    // Pure-practical subjects (practical configured, no separate theory marks) omit the
+    // Theory column entirely rather than showing a misleading 0.00 full-marks column.
     const hasTheory = theoryConfigured > 0 || !hasPractical;
-    const theoryFullMarks = hasTheory
-      ? theoryConfigured > 0
+    const theoryFullMarks = !hasTheory
+      ? 0
+      : theoryConfigured > 0
         ? theoryConfigured
-        : hasPractical
-          ? Math.max(0, fullMarks - practicalConfigured)
-          : fullMarks
-      : 0;
+        : fullMarks;
     const practicalFullMarks = hasPractical ? practicalConfigured : 0;
     const ratio = fullMarks > 0 ? passMarks / fullMarks : 0;
     const theoryPassMarks =
@@ -137,6 +143,7 @@ const buildPrintResultsGrid = async (req: Request) => {
 
   const studentMap = new Map(students.map((student) => [student._id.toString(), student]));
   const subjectOrder = subjects.map((subject) => subject.subjectId);
+  const subjectNameById = new Map(subjects.map((subject) => [subject.subjectId, subject.subjectName]));
 
   const [batch, year, schoolClass, section, branding] = await Promise.all([
     batchId ? Batch.findById(batchId).lean() : null,
@@ -226,9 +233,16 @@ const buildPrintResultsGrid = async (req: Request) => {
           ] as const;
         })
       );
+      // Each subject teacher's remark is labeled with its subject so a combined remark
+      // on the bulk sheet is never mistaken for a single unexplained/auto-generated note.
       const remarks = visibleMarks
-        .map((mark) => mark.teacherRemarks?.trim())
-        .filter(Boolean)
+        .map((mark) => {
+          const trimmed = mark.teacherRemarks?.trim();
+          if (!trimmed) return null;
+          const subjectName = subjectNameById.get(mark.subjectId.toString());
+          return subjectName ? `${subjectName}: ${trimmed}` : trimmed;
+        })
+        .filter((entry): entry is string => Boolean(entry))
         .join("; ");
 
       const totalMarks = totals.totalObtained;
@@ -263,21 +277,6 @@ const buildPrintResultsGrid = async (req: Request) => {
       };
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
-
-  // If any student has practical marks for a subject marked theory-only, enable P columns.
-  for (const subject of subjects) {
-    if (subject.hasPractical) continue;
-    const anyPractical = rows.some((row) => {
-      const d = row.subjectDetails?.[subject.subjectId];
-      return d != null && d.practical != null && d.practical > 0;
-    });
-    if (anyPractical) {
-      subject.hasPractical = true;
-      if (!subject.practicalFullMarks) {
-        subject.practicalFullMarks = 0;
-      }
-    }
-  }
 
   return {
     exam: {
