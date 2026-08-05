@@ -27,7 +27,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useAuth } from "features/auth/AuthProvider";
 import { useNormalizedRole } from "hooks/useNormalizedRole";
-import { api, resolveApiUrl, unwrap } from "lib/api";
+import { toast } from "sonner";
+import { api, unwrap } from "lib/api";
+import { downloadServerPdf, getPdfErrorMessage } from "lib/printUtils";
 import {
   getStudentProfileBackLabel,
   getStudentProfileBackPath,
@@ -784,16 +786,22 @@ export const StudentProfileView = () => {
                           {String(result.passFailStatus)}
                         </Badge>
                         {result.publishedAtBs ? (
-                          <Button variant="outline" size="sm" asChild>
-                            <a
-                              href={resolveApiUrl(
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              void downloadServerPdf(
                                 `/exams/results/${String(result.examId)}/${studentId}/marksheet/pdf`,
-                              )}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Download Marksheet
-                            </a>
+                                `marksheet-${
+                                  (result.exam as { name?: string } | null)
+                                    ?.name ?? "exam"
+                                }`,
+                              ).catch((error) => {
+                                toast.error(getPdfErrorMessage(error));
+                              });
+                            }}
+                          >
+                            Download Marksheet
                           </Button>
                         ) : null}
                       </div>

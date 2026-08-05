@@ -85,7 +85,8 @@ import {
 } from "hooks/useNormalizedRole";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
-import { api, resolveApiUrl, unwrap } from "lib/api";
+import { api, unwrap } from "lib/api";
+import { downloadServerPdf, getPdfErrorMessage } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { userIsTeacher } from "lib/teacherRole";
 import {
@@ -2583,14 +2584,18 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() =>
-                            window.open(
-                              resolveApiUrl(
-                                `/exams/results/${selectedStudentResult.examId}/${selectedStudentResult.studentId}/marksheet/pdf`,
-                              ),
-                              "_blank",
-                            )
-                          }
+                          onClick={() => {
+                            void downloadServerPdf(
+                              `/exams/results/${selectedStudentResult.examId}/${selectedStudentResult.studentId}/marksheet/pdf`,
+                              `marksheet-${
+                                viewFilteredStudents.find(
+                                  (s) => s._id === viewStudentId,
+                                )?.user.fullName ?? "student"
+                              }`,
+                            ).catch((error) => {
+                              toast.error(getPdfErrorMessage(error));
+                            });
+                          }}
                         >
                           PDF
                         </Button>

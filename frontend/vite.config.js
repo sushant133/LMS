@@ -52,6 +52,7 @@ export default defineConfig(({ mode }) => {
                 },
                 workbox: {
                     navigateFallback: '/index.html',
+                    navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
                     globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg}'],
                     runtimeCaching: [
                         {

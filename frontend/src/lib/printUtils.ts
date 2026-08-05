@@ -1,3 +1,4 @@
+import { api } from "lib/api";
 import { parseErrorMessage } from "lib/utils";
 
 export type PrintMode = "printing-bulk-results" | "printing-marksheet";
@@ -531,3 +532,54 @@ export const printWithMode = (mode: PrintMode): void => {
 };
 
 export const getPdfErrorMessage = (error: unknown): string => parseErrorMessage(error);
+
+/**
+ * Download a server-rendered PDF through authenticated axios.
+ *
+ * Never use window.open(resolveApiUrl(...)) for these: the PWA service worker
+ * (navigateFallback: /index.html) answers top-level navigations from the cache,
+ * so the tab renders the SPA "Page not found" screen instead of the PDF, and a
+ * cross-origin API base would also drop the session cookie.
+ */
+export const downloadServerPdf = async (apiPath: string, filenameBase: string): Promise<void> => {
+  const response = await api.get(apiPath, {
+    responseType: "blob",
+    headers: { Accept: "application/pdf, */*;q=0.8" },
+    timeout: 120_000
+  });
+
+  const raw = response.data as Blob;
+  const contentType = `${String(response.headers["content-type"] ?? "")} ${raw.type || ""}`.toLowerCase();
+
+  // API errors arrive as a JSON (or HTML) body even with responseType: "blob"
+  if (contentType.includes("json") || contentType.includes("html")) {
+    const text = await raw.text();
+    let message = "Could not generate the marksheet PDF";
+    try {
+      const parsed = JSON.parse(text) as { message?: string; error?: string };
+      message = parsed.message || parsed.error || message;
+    } catch {
+      if (text.trim() && !text.trim().startsWith("<")) {
+        message = text.slice(0, 200);
+      }
+    }
+    throw new Error(message);
+  }
+
+  const blob = raw.type === "application/pdf" ? raw : new Blob([raw], { type: "application/pdf" });
+  const safeBase = filenameBase.replace(/[^\w.-]+/g, "_") || "marksheet";
+  const filename = safeBase.toLowerCase().endsWith(".pdf") ? safeBase : `${safeBase}.pdf`;
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+};

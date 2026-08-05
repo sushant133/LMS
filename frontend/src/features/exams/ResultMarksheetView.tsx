@@ -7,8 +7,11 @@ import { CollegeLogo } from "components/shared/CollegeLogo";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { Download, Printer } from "lucide-react";
-import { resolveApiUrl } from "lib/api";
-import { getPdfErrorMessage, printMarksheetElement } from "lib/printUtils";
+import {
+  downloadServerPdf,
+  getPdfErrorMessage,
+  printMarksheetElement,
+} from "lib/printUtils";
 
 interface ResultMarksheetViewProps {
   data: MarksheetViewResponse;
@@ -67,19 +70,17 @@ export const ResultMarksheetView = ({
   );
 
   /**
-   * Opens the server-rendered marksheet PDF (pdfkit, pixel-precise layout) instead of
+   * Downloads the server-rendered marksheet PDF (pdfkit, pixel-precise layout) instead of
    * rasterizing this DOM node client-side — html2canvas/jsPDF rendering of this element
    * produced misaligned columns and page overflow, so the backend endpoint (already used
    * for the same purpose elsewhere, e.g. the admin exam results view) is the source of truth.
    */
-  const handlePdf = () => {
+  const handlePdf = async () => {
     setPdfLoading(true);
     try {
-      window.open(
-        resolveApiUrl(
-          `/exams/results/${data.exam._id}/${data.student._id}/marksheet/pdf`,
-        ),
-        "_blank",
+      await downloadServerPdf(
+        `/exams/results/${data.exam._id}/${data.student._id}/marksheet/pdf`,
+        `marksheet-${studentName}-${data.exam.name}`,
       );
     } catch (error) {
       toast.error(getPdfErrorMessage(error));

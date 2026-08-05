@@ -52,6 +52,11 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           navigateFallback: '/index.html',     // This ensures login page shows even offline on first open
+          // Never answer API/upload navigations from the app shell — without this the
+          // service worker returns index.html for links like
+          // /api/exams/results/:examId/:studentId/marksheet/pdf and the tab renders the
+          // SPA "Page not found" screen instead of the file.
+          navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
           runtimeCaching: [
             // Only cache static images - nothing else
