@@ -474,11 +474,11 @@ export const StudentListManager = () => {
    */
   const tableMinWidthClass = canManage
     ? isCollege
-      ? "min-w-[1680px]"
-      : "min-w-[1540px]"
+      ? "min-w-[1780px]"
+      : "min-w-[1640px]"
     : isCollege
-      ? "min-w-[1320px]"
-      : "min-w-[1200px]";
+      ? "min-w-[1420px]"
+      : "min-w-[1300px]";
 
   const tableClassName = cn("w-full table-fixed", tableMinWidthClass);
 
@@ -487,54 +487,58 @@ export const StudentListManager = () => {
       {canManage && isCollege ? (
         <>
           <col className="w-[4%]" />
-          <col className="w-[13%]" />
+          <col className="w-[12%]" />
           <col className="w-[8%]" />
+          <col className="w-[5%]" />
           <col className="w-[6%]" />
           <col className="w-[8%]" />
-          <col className="w-[8%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
           <col className="w-[7%]" />
           <col className="w-[8%]" />
           <col className="w-[8%]" />
-          <col className="w-[8%]" />
-          <col className="w-[22%]" />
+          <col className="w-[20%]" />
         </>
       ) : canManage ? (
         <>
           <col className="w-[4%]" />
-          <col className="w-[14%]" />
-          <col className="w-[9%]" />
+          <col className="w-[13%]" />
+          <col className="w-[8%]" />
+          <col className="w-[5%]" />
           <col className="w-[6%]" />
           <col className="w-[9%]" />
           <col className="w-[9%]" />
           <col className="w-[8%]" />
           <col className="w-[9%]" />
           <col className="w-[9%]" />
-          <col className="w-[23%]" />
+          <col className="w-[20%]" />
         </>
       ) : isCollege ? (
         <>
           <col className="w-[5%]" />
-          <col className="w-[16%]" />
+          <col className="w-[15%]" />
           <col className="w-[9%]" />
+          <col className="w-[5%]" />
           <col className="w-[7%]" />
           <col className="w-[9%]" />
           <col className="w-[9%]" />
           <col className="w-[8%]" />
-          <col className="w-[10%]" />
-          <col className="w-[10%]" />
-          <col className="w-[17%]" />
+          <col className="w-[9%]" />
+          <col className="w-[9%]" />
+          <col className="w-[15%]" />
         </>
       ) : (
         <>
           <col className="w-[5%]" />
-          <col className="w-[18%]" />
+          <col className="w-[17%]" />
           <col className="w-[10%]" />
+          <col className="w-[6%]" />
           <col className="w-[8%]" />
           <col className="w-[10%]" />
           <col className="w-[10%]" />
           <col className="w-[10%]" />
-          <col className="w-[11%]" />
-          <col className="w-[18%]" />
+          <col className="w-[10%]" />
+          <col className="w-[14%]" />
         </>
       )}
     </colgroup>
@@ -732,6 +736,7 @@ export const StudentListManager = () => {
                       <Th className={cn(thClass, "text-center")}>S.N.</Th>
                       <Th className={thClass}>Name</Th>
                       <Th className={thClass}>Mobile</Th>
+                      <Th className={thClass}>Gender</Th>
                       <Th className={thClass}>Roll No.</Th>
                       <Th className={thClass}>Admission No.</Th>
                       <Th className={thClass}>{labels.primary}</Th>
@@ -758,6 +763,7 @@ export const StudentListManager = () => {
                         student.user?.fullName ?? "Unknown student";
                       const displayEmail = student.user?.email ?? "—";
                       const displayPhone = student.user?.phone || "—";
+                      const displayGender = student.gender?.trim() || "—";
                       const loginEnabled = student.user?.isActive !== false;
                       const primaryLabel =
                         primaryMap.get(
@@ -821,6 +827,12 @@ export const StudentListManager = () => {
                             title={displayPhone}
                           >
                             {displayPhone}
+                          </Td>
+                          <Td
+                            className={cellTruncateClass}
+                            title={displayGender}
+                          >
+                            {displayGender}
                           </Td>
                           <Td
                             className={cellTruncateClass}
@@ -1124,6 +1136,7 @@ export const StudentListManager = () => {
               </th>
               <th style={printTh}>Name</th>
               <th style={printTh}>Mobile</th>
+              <th style={printTh}>Gender</th>
               <th style={printTh}>Roll No.</th>
               <th style={printTh}>Admission No.</th>
               <th style={printTh}>{labels.primary}</th>
@@ -1173,6 +1186,7 @@ export const StudentListManager = () => {
                     ) : null}
                   </td>
                   <td style={printTd}>{displayPhone}</td>
+                  <td style={printTd}>{student.gender?.trim() || "—"}</td>
                   <td style={printTd}>{student.rollNumber || "—"}</td>
                   <td style={printTd}>
                     {student.admissionNumber || "—"}

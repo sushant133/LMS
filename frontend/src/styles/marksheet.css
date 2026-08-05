@@ -284,8 +284,13 @@
 .om-marks-table .col-theory,
 .om-marks-table .col-practical,
 .om-marks-table .col-obtained,
+.om-marks-table .col-grade,
 .om-marks-table .col-status {
   text-align: center;
+}
+
+.om-marks-table .col-grade {
+  font-weight: 700;
 }
 
 .om-marks-table .col-subject,
@@ -300,15 +305,17 @@
   color: var(--om-accent-ink);
 }
 
+/* Ten columns, totalling 100% so the sheet never overflows the A4 print width. */
 .om-marks-table .col-sn { width: 4%; }
-.om-marks-table .col-subject { width: 19%; }
-.om-marks-table .col-full { width: 8%; }
-.om-marks-table .col-pass { width: 8%; }
-.om-marks-table .col-theory { width: 8%; }
-.om-marks-table .col-practical { width: 9%; }
+.om-marks-table .col-subject { width: 18%; }
+.om-marks-table .col-full { width: 7%; }
+.om-marks-table .col-pass { width: 7%; }
+.om-marks-table .col-theory { width: 7%; }
+.om-marks-table .col-practical { width: 8%; }
 .om-marks-table .col-obtained { width: 9%; }
+.om-marks-table .col-grade { width: 7%; }
 .om-marks-table .col-status { width: 9%; }
-.om-marks-table .col-remarks { width: 26%; }
+.om-marks-table .col-remarks { width: 24%; }
 
 /* Status pill, gold-accented pass state */
 .om-badge {

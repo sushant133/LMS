@@ -57,6 +57,9 @@ export const ResultMarksheetView = ({
           theory: mark.theoryMarks ?? 0,
           practical: mark.practicalMarks ?? 0,
           obtained: computed.obtainedMarks,
+          // Subject grade as stored with the published result; older marks saved
+          // before the grade was persisted fall back to the same grading scale.
+          grade: mark.grade ?? computed.grade,
           status: computed.passFail,
           remarks: mark.teacherRemarks ?? "",
         };
@@ -212,6 +215,7 @@ export const ResultMarksheetView = ({
               <th className="col-theory">Theory</th>
               <th className="col-practical">Practical</th>
               <th className="col-obtained">Obtained Mark</th>
+              <th className="col-grade">Grade</th>
               <th className="col-status">Status</th>
               <th className="col-remarks">Remarks</th>
             </tr>
@@ -226,6 +230,7 @@ export const ResultMarksheetView = ({
                 <td className="col-theory">{row.theory}</td>
                 <td className="col-practical">{row.practical}</td>
                 <td className="col-obtained">{row.obtained}</td>
+                <td className="col-grade">{row.grade}</td>
                 <td className="col-status">
                   <span
                     className={
