@@ -1,0 +1,57 @@
+# Nginx location blocks for frontend/dist (lms.phit.com.np).
+#
+# Why this file exists: a plain `try_files $uri /index.html;` for every path makes nginx
+# answer a missing/stale `/assets/<name>-<hash>.js` with index.html. The browser then logs
+#   "Failed to load module script: Expected a JavaScript-or-Wasm module script but the
+#    server responded with a MIME type of text/html"
+# and the lazy-loaded route never renders. Hashed assets must 404 instead, and index.html
+# / sw.js must never be cached, so a deploy is picked up on the next request.
+#
+# Merge these blocks into the existing server { } for the site, then:
+#   sudo nginx -t && sudo systemctl reload nginx
+
+root /var/www/LMS/frontend/dist;
+index index.html;
+
+# Hashed build output: immutable, and a miss must be a real 404 (never the app shell)
+location /assets/ {
+    try_files $uri =404;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+}
+
+# App shell + service worker: always revalidate, or clients keep booting the old build
+location = /index.html {
+    add_header Cache-Control "no-cache, must-revalidate" always;
+}
+
+location = /sw.js {
+    add_header Cache-Control "no-cache, must-revalidate" always;
+}
+
+location = /registerSW.js {
+    add_header Cache-Control "no-cache, must-revalidate" always;
+}
+
+location = /manifest.webmanifest {
+    add_header Cache-Control "no-cache, must-revalidate" always;
+}
+
+# API and protected uploads go to the Node process — never the SPA fallback
+location /api/ {
+    proxy_pass http://127.0.0.1:5000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    # Marksheet / receipt PDFs are generated on demand
+    proxy_read_timeout 180s;
+    proxy_buffering off;
+}
+
+# SPA routes only
+location / {
+    try_files $uri $uri/ /index.html;
+}

@@ -6,12 +6,8 @@ import {
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { toast } from "sonner";
 import { Button } from "components/ui/button";
-import { Download, Printer } from "lucide-react";
-import {
-  downloadServerPdf,
-  getPdfErrorMessage,
-  printMarksheetElement,
-} from "lib/printUtils";
+import { Printer } from "lucide-react";
+import { getPdfErrorMessage, printMarksheetElement } from "lib/printUtils";
 
 interface ResultMarksheetViewProps {
   data: MarksheetViewResponse;
@@ -23,7 +19,6 @@ export const ResultMarksheetView = ({
   showActions = true,
 }: ResultMarksheetViewProps) => {
   const marksheetRef = useRef<HTMLElement | null>(null);
-  const [pdfLoading, setPdfLoading] = useState(false);
   const [printLoading, setPrintLoading] = useState(false);
 
   const subjectMap = useMemo(
@@ -70,25 +65,11 @@ export const ResultMarksheetView = ({
   );
 
   /**
-   * Downloads the server-rendered marksheet PDF (pdfkit, pixel-precise layout) instead of
-   * rasterizing this DOM node client-side — html2canvas/jsPDF rendering of this element
-   * produced misaligned columns and page overflow, so the backend endpoint (already used
-   * for the same purpose elsewhere, e.g. the admin exam results view) is the source of truth.
+   * Print is the only export offered here: the browser's print dialog renders this exact
+   * DOM (fonts, logo, column widths) and offers "Save as PDF", so it matches what the user
+   * sees. Client-side rasterizing (html2canvas/jsPDF) misaligned the columns, and the
+   * server-rendered pdfkit copy dropped the Latin font and logo in production.
    */
-  const handlePdf = async () => {
-    setPdfLoading(true);
-    try {
-      await downloadServerPdf(
-        `/exams/results/${data.exam._id}/${data.student._id}/marksheet/pdf`,
-        `marksheet-${studentName}-${data.exam.name}`,
-      );
-    } catch (error) {
-      toast.error(getPdfErrorMessage(error));
-    } finally {
-      setPdfLoading(false);
-    }
-  };
-
   const handlePrint = async () => {
     setPrintLoading(true);
     try {
@@ -111,15 +92,6 @@ export const ResultMarksheetView = ({
 
       {showActions ? (
         <div className="om-actions no-print">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pdfLoading}
-            onClick={() => void handlePdf()}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            {pdfLoading ? "Preparing PDF..." : "Download PDF"}
-          </Button>
           <Button
             size="sm"
             variant="outline"

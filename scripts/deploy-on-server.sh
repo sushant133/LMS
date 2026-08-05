@@ -54,6 +54,11 @@ fi
 # Nginx usually serves frontend/dist as static files — no restart needed after rebuild.
 # Reload nginx if you changed proxy config only:
 #   sudo nginx -t && sudo systemctl reload nginx
+#
+# One-time nginx check: /assets/ must NOT fall back to index.html, and index.html/sw.js
+# must not be cached — otherwise clients boot an old shell and hit
+# "Expected a JavaScript-or-Wasm module script ... MIME type of text/html" after a deploy.
+# See scripts/nginx-frontend.conf.example.
 
 echo ""
 echo "==> Deploy finished."

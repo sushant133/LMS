@@ -8,6 +8,9 @@ import "./i18n";
 import "./index.css";
 import { AuthProvider } from "features/auth/AuthProvider";
 import { queryClient } from "lib/queryClient";
+import { installStaleChunkRecovery } from "lib/staleChunkRecovery";
+
+installStaleChunkRecovery();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
