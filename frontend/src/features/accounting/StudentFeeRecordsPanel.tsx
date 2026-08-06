@@ -452,8 +452,11 @@ export const StudentFeeRecordsPanel = () => {
   });
 
   const studentsQuery = useQuery({
-    queryKey: ["students", "fee-picker"],
-    queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    queryKey: ["students", "fee-picker", "login-active"],
+    queryFn: () =>
+      unwrap<StudentRecord[]>(
+        api.get("/students", { params: { loginActive: "1" } }),
+      ),
   });
 
   const batchesQuery = useQuery({

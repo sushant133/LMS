@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { FileText, Image as ImageIcon, Upload, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Loader2, Upload, X } from "lucide-react";
 import type { AssignmentAttachment } from "@phit-erp/shared";
+import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { resolveApiUrl } from "lib/api";
+import { openAuthenticatedAttachment } from "lib/attachments";
 
 interface ClassroomAttachmentUploadProps {
   attachments: AssignmentAttachment[];
@@ -17,6 +19,7 @@ export const ClassroomAttachmentUpload = ({
 }: ClassroomAttachmentUploadProps) => {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openingIndex, setOpeningIndex] = useState<number | null>(null);
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -54,6 +57,17 @@ export const ClassroomAttachmentUpload = ({
     onChange(attachments.filter((_, i) => i !== index));
   };
 
+  const handleOpen = async (file: AssignmentAttachment, index: number) => {
+    setOpeningIndex(index);
+    try {
+      await openAuthenticatedAttachment(file.url, file.name);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not open file");
+    } finally {
+      setOpeningIndex(null);
+    }
+  };
+
   return (
     <div className="space-y-2">
       <label className="cursor-pointer">
@@ -87,14 +101,21 @@ export const ClassroomAttachmentUpload = ({
                 ) : (
                   <FileText className="h-4 w-4 shrink-0 text-slate-500" />
                 )}
-                <a
-                  href={file.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate text-brand-700 hover:underline"
+                <button
+                  type="button"
+                  onClick={() => void handleOpen(file, index)}
+                  disabled={openingIndex === index}
+                  className="truncate text-left text-brand-700 hover:underline disabled:opacity-60"
                 >
-                  {file.name}
-                </a>
+                  {openingIndex === index ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Opening…
+                    </span>
+                  ) : (
+                    file.name
+                  )}
+                </button>
               </div>
               <Button
                 type="button"

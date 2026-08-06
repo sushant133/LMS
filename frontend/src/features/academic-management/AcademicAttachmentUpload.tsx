@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { DOCUMENT_MAX_SIZE_BYTES, type AssignmentAttachment } from "@phit-erp/shared";
-import { FileText, Upload, X } from "lucide-react";
+import { ExternalLink, FileText, Loader2, Upload, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "components/ui/button";
 import { resolveApiUrl } from "lib/api";
+import { openAuthenticatedAttachment } from "lib/attachments";
 
 interface AcademicAttachmentUploadProps {
   attachmentUrl?: string;
@@ -18,6 +20,7 @@ export const AcademicAttachmentUpload = ({
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
+  const [opening, setOpening] = useState(false);
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -50,7 +53,8 @@ export const AcademicAttachmentUpload = ({
       }
       const body = await response.json();
       const uploaded = (body.data?.attachments ?? [])[0] as
-        AssignmentAttachment | undefined;
+        | AssignmentAttachment
+        | undefined;
       if (!uploaded?.url) throw new Error("Upload failed");
       onChange(uploaded.url);
       setFileName(uploaded.name);
@@ -61,6 +65,18 @@ export const AcademicAttachmentUpload = ({
     } finally {
       setIsUploading(false);
       event.target.value = "";
+    }
+  };
+
+  const handleOpen = async () => {
+    if (!attachmentUrl) return;
+    setOpening(true);
+    try {
+      await openAuthenticatedAttachment(attachmentUrl, fileName || "attachment");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not open attachment");
+    } finally {
+      setOpening(false);
     }
   };
 
@@ -84,14 +100,24 @@ export const AcademicAttachmentUpload = ({
         <div className="flex items-center justify-between gap-2 rounded-xl border bg-slate-50 p-3 text-sm">
           <div className="flex min-w-0 items-center gap-2">
             <FileText className="h-4 w-4 shrink-0 text-slate-500" />
-            <a
-              href={attachmentUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="truncate text-brand-700 hover:underline"
+            <button
+              type="button"
+              onClick={() => void handleOpen()}
+              disabled={opening}
+              className="truncate text-left text-brand-700 hover:underline disabled:opacity-60"
             >
-              {fileName || "View attachment"}
-            </a>
+              {opening ? (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Opening…
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1">
+                  {fileName || "View attachment"}
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                </span>
+              )}
+            </button>
           </div>
           <Button
             type="button"

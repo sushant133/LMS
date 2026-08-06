@@ -1,6 +1,7 @@
 /**
- * School-level switches for what parents can see in portal / My Work.
- * Configured by Admin under Parent Management — independent of staff Module Access.
+ * Parent portal module access — student-account-related sections only.
+ * Configured by Admin / Super Admin under Parent Management.
+ * Parents never get staff ERP modules; only visibility into linked children’s data.
  */
 
 export const PARENT_PORTAL_MODULE_KEYS = [
@@ -11,10 +12,9 @@ export const PARENT_PORTAL_MODULE_KEYS = [
   "results",
   "timetable",
   "field-attendance",
+  "library",
   "notices",
-  "notifications",
-  "complaints",
-  "library"
+  "notifications"
 ] as const;
 
 export type ParentPortalModuleKey = (typeof PARENT_PORTAL_MODULE_KEYS)[number];
@@ -30,73 +30,71 @@ export const PARENT_PORTAL_MODULE_META: Array<{
 }> = [
   {
     key: "overview",
-    label: "Parent portal overview",
-    description: "Linked children summary cards on the Parent Portal home.",
+    label: "Student accounts overview",
+    description:
+      "Linked children’s student profiles and summary cards on the Parent Portal.",
     routePrefixes: ["/parent-portal"]
   },
   {
     key: "attendance",
-    label: "Attendance",
-    description: "Classroom / subject attendance summary for linked children.",
+    label: "Student attendance",
+    description:
+      "Daily attendance and subject-wise attendance for linked students (view + alerts).",
     routePrefixes: ["/attendance"]
   },
   {
     key: "fees",
-    label: "Fees & payments",
-    description: "Fee dues, payments, scholarship, and security deposit info.",
+    label: "Student fees & payments",
+    description:
+      "Fee dues, payments, scholarship, and security deposit for linked students.",
     routePrefixes: ["/my-fees"]
   },
   {
     key: "homework",
-    label: "Homework / assignments",
-    description: "Upcoming and pending assignments visible to parents.",
+    label: "Student homework",
+    description: "Assignments and homework for linked students.",
     routePrefixes: ["/homework-view", "/homework"]
   },
   {
     key: "results",
-    label: "Exams & results",
-    description: "Exam schedules and published results for linked children.",
+    label: "Student examination & results",
+    description: "Exam schedules and published results for linked students.",
     routePrefixes: ["/exams"]
   },
   {
     key: "timetable",
-    label: "Timetable",
-    description: "Class / batch weekly timetable.",
+    label: "Student timetable",
+    description: "Class / batch weekly timetable for linked students.",
     routePrefixes: ["/timetable"]
   },
   {
     key: "field-attendance",
-    label: "Field attendance",
+    label: "Student field attendance",
     description: "Field posting and field attendance for linked students.",
     routePrefixes: ["/field-management"]
   },
   {
+    key: "library",
+    label: "Student library",
+    description: "Library borrowing for linked students (when available).",
+    routePrefixes: ["/my-library"]
+  },
+  {
     key: "notices",
-    label: "Notices",
-    description: "College notice board visible to parents.",
+    label: "School notices",
+    description: "College notices related to students and school activities.",
     routePrefixes: ["/notices"]
   },
   {
     key: "notifications",
-    label: "Notifications",
-    description: "In-app notification center alerts for the parent account.",
+    label: "Student alerts",
+    description:
+      "In-app alerts about linked students (fees, homework, attendance, etc.).",
     routePrefixes: ["/notifications"]
-  },
-  {
-    key: "complaints",
-    label: "Complaints",
-    description: "Allow parents to view/submit complaints.",
-    routePrefixes: ["/complains", "/complaints"]
-  },
-  {
-    key: "library",
-    label: "Library",
-    description: "Library borrowing information for linked children (when available).",
-    routePrefixes: ["/my-library"]
   }
 ];
 
-/** All modules enabled — backward-compatible default. */
+/** All student-related modules enabled — backward-compatible default. */
 export const defaultParentPortalAccess = (): ParentPortalAccessMap => {
   const map = {} as ParentPortalAccessMap;
   for (const key of PARENT_PORTAL_MODULE_KEYS) {

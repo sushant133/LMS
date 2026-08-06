@@ -26,8 +26,10 @@ import { useReadOnlyAccess } from "hooks/useNormalizedRole";
 const defaultSettingsValue: SettingsInput = {
   schoolName: "",
   schoolNameNp: "",
+  schoolAddressNp: "",
   academicYearBs: "2083/2084",
   principalName: "",
+  programName: "",
   contactEmail: "",
   contactPhone: "",
   address: {
@@ -78,8 +80,10 @@ export const SettingsManager = () => {
     setForm({
       schoolName: settingsQuery.data.schoolName,
       schoolNameNp: settingsQuery.data.schoolNameNp,
+      schoolAddressNp: settingsQuery.data.schoolAddressNp ?? "",
       academicYearBs: settingsQuery.data.academicYearBs,
       principalName: settingsQuery.data.principalName,
+      programName: settingsQuery.data.programName ?? "",
       contactEmail: settingsQuery.data.contactEmail,
       contactPhone: settingsQuery.data.contactPhone,
       address: settingsQuery.data.address,
@@ -158,7 +162,9 @@ export const SettingsManager = () => {
               </FormField>
               <FormField label="College Name (Nepali)">
                 <Input
+                  lang="ne"
                   value={form.schoolNameNp}
+                  placeholder="पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी"
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
@@ -166,6 +172,27 @@ export const SettingsManager = () => {
                     }))
                   }
                 />
+                <p className="text-xs text-slate-500">
+                  Printed under नेपाल सरकार as “{form.schoolNameNp || "…"} कार्यालय”
+                  on government-format documents (Journal Voucher / गोश्वारा भौचर).
+                </p>
+              </FormField>
+              <FormField label="College Address (Nepali)">
+                <Input
+                  lang="ne"
+                  value={form.schoolAddressNp ?? ""}
+                  placeholder="वडा नं. ३, धनगढीमाई नगरपालिका, सिराहा, मधेश प्रदेश"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      schoolAddressNp: event.target.value,
+                    }))
+                  }
+                />
+                <p className="text-xs text-slate-500">
+                  Address line printed directly below the college name on
+                  government-format documents.
+                </p>
               </FormField>
               <FormField label="Academic Year (BS)">
                 <Input
@@ -188,6 +215,21 @@ export const SettingsManager = () => {
                     }))
                   }
                 />
+              </FormField>
+              <FormField label="Program / Course">
+                <Input
+                  value={form.programName ?? ""}
+                  placeholder="e.g. Health Assistant (HA)"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      programName: event.target.value,
+                    }))
+                  }
+                />
+                <p className="text-xs text-slate-500">
+                  Shown on Passed-Out Students and printed on character certificates.
+                </p>
               </FormField>
             </div>
           </CardContent>

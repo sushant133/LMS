@@ -13,6 +13,7 @@ import { FeeStructure } from "../models/FeeStructure.js";
 import { Student } from "../models/Student.js";
 import { Year } from "../models/Year.js";
 import { ApiError } from "./apiError.js";
+import { getTodayBs } from "./nepaliDate.js";
 import { getSessionOption, withTransaction } from "./transaction.js";
 
 type ObjectIdLike = Types.ObjectId | string;
@@ -513,6 +514,11 @@ export const executePromotion = async (
       session
     );
 
+    // Graduation date stamped here so Passed-Out Students can show it without
+    // walking the promotion history for every row.
+    const passedOutAt = new Date();
+    const passedOutAtBs = getTodayBs();
+
     const bulkOps = fullPreviewSource.groups.flatMap((group) =>
       group.students.map((student) => {
         if (student.outcome === "PASSED_OUT") {
@@ -521,7 +527,9 @@ export const executePromotion = async (
               filter: { _id: student.studentId, schoolId: options.schoolId },
               update: {
                 $set: {
-                  academicStatus: "PASSED_OUT" as StudentAcademicStatus
+                  academicStatus: "PASSED_OUT" as StudentAcademicStatus,
+                  passedOutAt,
+                  passedOutAtBs
                 }
               }
             }
@@ -679,19 +687,28 @@ export const rollbackLatestPromotion = async (
   return withTransaction(async (session) => {
     const groups = (latest.toObject().groups ?? []) as unknown as AcademicPromotionGroupSummary[];
     const bulkOps = groups.flatMap((group) =>
-      (group.students ?? []).map((student) => ({
-        updateOne: {
-          filter: { _id: student.studentId, schoolId: options.schoolId },
-          update: {
-            $set: {
-              yearId: student.previousYearId
-                ? (student.previousYearId as unknown as Types.ObjectId)
-                : undefined,
-              academicStatus: (student.previousStatus || "ACTIVE") as StudentAcademicStatus
+      (group.students ?? []).map((student) => {
+        const previousStatus = (student.previousStatus || "ACTIVE") as StudentAcademicStatus;
+        return {
+          updateOne: {
+            filter: { _id: student.studentId, schoolId: options.schoolId },
+            update: {
+              $set: {
+                yearId: student.previousYearId
+                  ? (student.previousYearId as unknown as Types.ObjectId)
+                  : undefined,
+                academicStatus: previousStatus
+              },
+              // Student is active again, so the graduation stamp must go with it.
+              // Any character certificate already issued is deliberately kept —
+              // issued certificates are a permanent record.
+              ...(previousStatus === "PASSED_OUT"
+                ? {}
+                : { $unset: { passedOutAt: "", passedOutAtBs: "" } })
             }
           }
-        }
-      }))
+        };
+      })
     );
 
     if (bulkOps.length > 0) {

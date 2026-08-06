@@ -35,6 +35,7 @@ import { processLibraryIssueReminders, syncSchoolLibraryOverdueStatuses } from "
 import { compareBsDates, getTodayBs } from "../utils/nepaliDate.js";
 import { notifyParentsOfStudent, sendNotification } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
+import { assertStudentLoginActive } from "../utils/studentLoginAccess.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { withTenantScope } from "../utils/tenant.js";
 
@@ -702,6 +703,16 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     if (!student) {
       await LibraryBookCopy.updateOne({ _id: copy._id }, { $set: { status: "AVAILABLE" } });
       throw new ApiError(404, "Student not found");
+    }
+    try {
+      await assertStudentLoginActive(
+        payload.studentId!,
+        schoolId,
+        "issuing library books"
+      );
+    } catch (err) {
+      await LibraryBookCopy.updateOne({ _id: copy._id }, { $set: { status: "AVAILABLE" } });
+      throw err;
     }
   } else {
     const teacher = await Teacher.findOne(withTenantScope(req, { _id: payload.teacherId }));

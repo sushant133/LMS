@@ -14,6 +14,9 @@ import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
 import { Attendance } from "../models/Attendance.js";
+import { DailyAttendance } from "../models/DailyAttendance.js";
+import { StudentEarlyLeave } from "../models/StudentEarlyLeave.js";
+import { Subject } from "../models/Subject.js";
 import { User } from "../models/User.js";
 import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -24,6 +27,7 @@ import {
   resolvePortalPassword
 } from "../utils/credentialEmail.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
+import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import {
   buildSuggestedParentLoginId,
   getParentContactFromStudent,
@@ -37,6 +41,7 @@ import {
   setParentUserPortalAccess,
   toParentPortalAccessResponse
 } from "../utils/parentPortalAccess.js";
+import { recordAudit } from "../utils/audit.js";
 import { sendSuccess } from "../utils/response.js";
 import {
   abortTransaction,
@@ -46,6 +51,7 @@ import {
   getSessionOption
 } from "../utils/transaction.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+import { updatePortalUser } from "../utils/userPassword.js";
 
 const PARENT_FROM_STUDENT_RELATIONSHIPS: ParentFromStudentRelationship[] = ["FATHER", "MOTHER", "GUARDIAN"];
 
@@ -112,10 +118,106 @@ const buildParentCandidates = async (
 };
 
 export const listParentUsers = asyncHandler(async (req: Request, res: Response) => {
-  const parents = await User.find({ schoolId: tenantObjectId(req), role: "PARENT", isActive: true })
+  // Include inactive parents so admin can re-enable / edit / delete accounts
+  const parents = await User.find({ schoolId: tenantObjectId(req), role: "PARENT" })
     .select("-password")
     .sort({ fullName: 1 });
   return sendSuccess(res, "Parent users fetched", parents);
+});
+
+/**
+ * Admin / Super Admin: edit parent account (name, login, phone, password, active).
+ */
+export const updateParentUser = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const parentId = String(req.params.id ?? "").trim();
+  if (!parentId) throw new ApiError(400, "Parent id is required");
+
+  const parent = await User.findOne({ _id: parentId, schoolId, role: "PARENT" });
+  if (!parent) throw new ApiError(404, "Parent account not found");
+
+  const body = req.body as {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+    password?: string;
+    isActive?: boolean;
+  };
+
+  const fullName = (body.fullName ?? parent.fullName).trim();
+  const email = (body.email ?? parent.email).trim().toLowerCase();
+  const phone =
+    body.phone !== undefined ? String(body.phone ?? "").trim() : parent.phone ?? "";
+
+  if (!fullName) throw new ApiError(400, "Full name is required");
+  if (!email) throw new ApiError(400, "Login ID / email is required");
+
+  if (email !== parent.email) {
+    const taken = await User.findOne({
+      email,
+      _id: { $ne: parent._id }
+    })
+      .select("_id")
+      .lean();
+    if (taken) throw new ApiError(409, "That login ID is already in use");
+  }
+
+  const before = {
+    fullName: parent.fullName,
+    email: parent.email,
+    phone: parent.phone,
+    isActive: parent.isActive
+  };
+
+  await updatePortalUser(parent._id, {
+    fullName,
+    email,
+    phone,
+    password: body.password
+  });
+
+  if (typeof body.isActive === "boolean") {
+    await User.findByIdAndUpdate(parent._id, { isActive: body.isActive });
+  }
+
+  const updated = await User.findById(parent._id).select("-password");
+  await recordAudit(req, {
+    action: "parent.user.update",
+    entity: "User",
+    entityId: parentId,
+    before,
+    after: updated
+  });
+
+  return sendSuccess(res, "Parent account updated", updated);
+});
+
+/**
+ * Admin / Super Admin: permanently delete parent login + all child links.
+ */
+export const deleteParentUser = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const parentId = String(req.params.id ?? "").trim();
+  if (!parentId) throw new ApiError(400, "Parent id is required");
+
+  const parent = await User.findOne({ _id: parentId, schoolId, role: "PARENT" });
+  if (!parent) throw new ApiError(404, "Parent account not found");
+
+  const before = parent.toObject();
+
+  await ParentChildLink.deleteMany({ schoolId, parentUserId: parent._id });
+  await Notification.deleteMany({ schoolId, recipientUserId: parent._id }).catch(() => undefined);
+  await User.deleteOne({ _id: parent._id, schoolId, role: "PARENT" });
+
+  await recordAudit(req, {
+    action: "parent.user.delete",
+    entity: "User",
+    entityId: parentId,
+    before,
+    after: { deleted: true }
+  });
+
+  return sendSuccess(res, "Parent account deleted");
 });
 
 export const listParentLinks = asyncHandler(async (req: Request, res: Response) => {
@@ -472,6 +574,244 @@ export const updateParentUserPortalAccess = asyncHandler(async (req: Request, re
     }
     throw error;
   }
+});
+
+/**
+ * Parent: daily + subject-wise attendance for linked children.
+ * Query:
+ *  - dateBs=YYYY-MM-DD (exact day)
+ *  - fromDateBs / toDateBs (range, inclusive)
+ *  - limit (default 100, max 300)
+ */
+export const getParentChildrenAttendance = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user?.role !== "PARENT") {
+    throw new ApiError(403, "Only parents can view children attendance here");
+  }
+
+  const schoolId = tenantObjectId(req);
+  const effective = await getEffectiveParentPortalAccess(
+    String(schoolId),
+    req.user.userId
+  );
+  if (effective.modules.attendance === false) {
+    throw new ApiError(
+      403,
+      "Attendance access is disabled for your parent account. Contact the college administrator."
+    );
+  }
+
+  const studentIds = await getLinkedStudentIds(req);
+  if (studentIds.length === 0) {
+    return sendSuccess(res, "Children attendance fetched", {
+      children: [],
+      daily: [],
+      subject: [],
+      filters: {}
+    });
+  }
+
+  const limitRaw = Number(req.query.limit ?? 100);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(Math.max(Math.floor(limitRaw), 10), 300)
+    : 100;
+
+  // Date filters (BS YYYY-MM-DD)
+  let dateFilter: string | { $gte?: string; $lte?: string } | undefined;
+  let appliedDateBs = "";
+  let appliedFromDateBs = "";
+  let appliedToDateBs = "";
+
+  if (typeof req.query.dateBs === "string" && req.query.dateBs.trim()) {
+    appliedDateBs = ensureValidBsDate(req.query.dateBs.trim());
+    dateFilter = appliedDateBs;
+  } else {
+    const fromRaw =
+      typeof req.query.fromDateBs === "string" ? req.query.fromDateBs.trim() : "";
+    const toRaw =
+      typeof req.query.toDateBs === "string" ? req.query.toDateBs.trim() : "";
+    if (fromRaw || toRaw) {
+      const range: { $gte?: string; $lte?: string } = {};
+      if (fromRaw) {
+        appliedFromDateBs = ensureValidBsDate(fromRaw);
+        range.$gte = appliedFromDateBs;
+      }
+      if (toRaw) {
+        appliedToDateBs = ensureValidBsDate(toRaw);
+        range.$lte = appliedToDateBs;
+      }
+      if (
+        appliedFromDateBs &&
+        appliedToDateBs &&
+        appliedFromDateBs > appliedToDateBs
+      ) {
+        throw new ApiError(400, "From date cannot be after To date");
+      }
+      dateFilter = range;
+    }
+  }
+
+  const students = await Student.find({ schoolId, _id: { $in: studentIds } })
+    .populate("user", "fullName")
+    .lean();
+
+  const childMeta = students.map((s) => ({
+    studentId: s._id.toString(),
+    fullName: (s.user as { fullName?: string } | null)?.fullName ?? "Student",
+    rollNumber: s.rollNumber,
+    admissionNumber: s.admissionNumber
+  }));
+  const nameById = new Map(childMeta.map((c) => [c.studentId, c.fullName]));
+  const idSet = new Set(studentIds.map(String));
+
+  const baseDailyFilter: Record<string, unknown> = {
+    schoolId,
+    status: { $in: ["SUBMITTED", "LOCKED"] },
+    "entries.studentId": { $in: studentIds }
+  };
+  const baseSubjectFilter: Record<string, unknown> = {
+    schoolId,
+    "entries.studentId": { $in: studentIds }
+  };
+  if (dateFilter !== undefined) {
+    baseDailyFilter.dateBs = dateFilter;
+    baseSubjectFilter.dateBs = dateFilter;
+  }
+
+  const earlyLeaveFilter: Record<string, unknown> = {
+    schoolId,
+    studentId: { $in: studentIds },
+    isDeleted: false
+  };
+  if (dateFilter !== undefined) {
+    earlyLeaveFilter.dateBs = dateFilter;
+  }
+
+  const [dailyDocs, subjectDocs, earlyLeaveDocs] = await Promise.all([
+    DailyAttendance.find(baseDailyFilter)
+      .sort({ dateBs: -1, createdAt: -1 })
+      .limit(limit)
+      .lean(),
+    Attendance.find(baseSubjectFilter)
+      .sort({ dateBs: -1, createdAt: -1 })
+      .limit(limit)
+      .lean(),
+    StudentEarlyLeave.find(earlyLeaveFilter)
+      .sort({ dateBs: -1, createdAt: -1 })
+      .limit(limit)
+      .lean()
+  ]);
+
+  const subjectIds = [
+    ...new Set(
+      [...dailyDocs, ...subjectDocs]
+        .map((d) => d.subjectId?.toString())
+        .filter((id): id is string => Boolean(id))
+    )
+  ];
+  const subjects = subjectIds.length
+    ? await Subject.find({ _id: { $in: subjectIds } }).select("name").lean()
+    : [];
+  const subjectNameById = new Map(subjects.map((s) => [s._id.toString(), s.name]));
+
+  type Row = {
+    kind: "DAILY" | "SUBJECT";
+    recordId: string;
+    studentId: string;
+    studentName: string;
+    dateBs: string;
+    status: string;
+    subjectName: string;
+    periodNumber?: number;
+    remarks?: string;
+  };
+
+  const daily: Row[] = [];
+  for (const doc of dailyDocs) {
+    for (const entry of doc.entries ?? []) {
+      const sid = entry.studentId.toString();
+      if (!idSet.has(sid)) continue;
+      daily.push({
+        kind: "DAILY",
+        recordId: doc._id.toString(),
+        studentId: sid,
+        studentName: nameById.get(sid) ?? "Student",
+        dateBs: doc.dateBs,
+        status: entry.status,
+        subjectName: subjectNameById.get(doc.subjectId?.toString() ?? "") ?? "Daily class",
+        periodNumber: doc.periodNumber ?? 1,
+        remarks: entry.remarks || undefined
+      });
+    }
+  }
+
+  const subject: Row[] = [];
+  for (const doc of subjectDocs) {
+    for (const entry of doc.entries ?? []) {
+      const sid = entry.studentId.toString();
+      if (!idSet.has(sid)) continue;
+      subject.push({
+        kind: "SUBJECT",
+        recordId: doc._id.toString(),
+        studentId: sid,
+        studentName: nameById.get(sid) ?? "Student",
+        dateBs: doc.dateBs,
+        status: entry.status,
+        subjectName: subjectNameById.get(doc.subjectId?.toString() ?? "") ?? "Subject"
+      });
+    }
+  }
+
+  const earlyLeave = earlyLeaveDocs.map((doc) => ({
+    kind: "EARLY_LEAVE" as const,
+    recordId: doc._id.toString(),
+    studentId: doc.studentId.toString(),
+    studentName: nameById.get(doc.studentId.toString()) ?? "Student",
+    dateBs: doc.dateBs,
+    status: "EARLY_LEAVE",
+    /** When the student left (period / break label) */
+    subjectName: doc.periodLabel || "Early leave",
+    periodLabel: doc.periodLabel || "Early leave",
+    leftAfterPeriod: doc.leftAfterPeriod ?? undefined,
+    remarks: doc.reason,
+    reason: doc.reason,
+    leftAtTime: doc.leftAtTime || undefined,
+    approvedBy: doc.approvedBy || undefined,
+    extraRemarks: doc.remarks || undefined
+  }));
+
+  // Summary rates per child (subject-wise + daily combined for a simple %)
+  const children = childMeta.map((child) => {
+    const rows = [
+      ...daily.filter((r) => r.studentId === child.studentId),
+      ...subject.filter((r) => r.studentId === child.studentId)
+    ];
+    const total = rows.length;
+    const present = rows.filter(
+      (r) => r.status === "PRESENT" || r.status === "LATE"
+    ).length;
+    const earlyLeaveCount = earlyLeave.filter(
+      (r) => r.studentId === child.studentId
+    ).length;
+    return {
+      ...child,
+      attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
+      totalMarks: total,
+      presentMarks: present,
+      earlyLeaveCount
+    };
+  });
+
+  return sendSuccess(res, "Children attendance fetched", {
+    children,
+    daily: daily.slice(0, limit),
+    subject: subject.slice(0, limit),
+    earlyLeave: earlyLeave.slice(0, limit),
+    filters: {
+      dateBs: appliedDateBs || undefined,
+      fromDateBs: appliedFromDateBs || undefined,
+      toDateBs: appliedToDateBs || undefined
+    }
+  });
 });
 
 export const getParentPortal = asyncHandler(async (req: Request, res: Response) => {

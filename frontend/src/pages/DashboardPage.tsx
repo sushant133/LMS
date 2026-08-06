@@ -1577,8 +1577,9 @@ export const DashboardPage = () => {
         <QuickActions
           actions={[
             { label: "Parent Portal", href: "/parent-portal" },
-            { label: "Assignments", href: "/homework-view" },
-            { label: "Exams", href: "/exams" },
+            { label: "Student attendance", href: "/attendance" },
+            { label: "Homework", href: "/homework-view" },
+            { label: "Examination", href: "/exams" },
             { label: "Notices", href: "/notices" }
           ]}
         />
@@ -1668,6 +1669,7 @@ export const DashboardPage = () => {
           actions={[
             { label: "Students", href: "/students" },
             { label: "Attendance", href: "/attendance-view" },
+            { label: "Early Leave", href: "/attendance-view?tab=early-leave" },
             { label: "Accounting", href: "/accounting" },
             { label: "Finance Management", href: "/finance" },
             { label: "Exams & Results", href: "/exams-view" },

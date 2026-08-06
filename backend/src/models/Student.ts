@@ -59,6 +59,13 @@ const studentSchema = new Schema(
       index: true
     },
     admissionDateBs: { type: String, default: "" },
+    /**
+     * When the student was marked PASSED_OUT. Set by the promotion service on
+     * final-year promotion; for students who passed out before this field
+     * existed it is derived from the AcademicPromotion history on read.
+     */
+    passedOutAt: { type: Date },
+    passedOutAtBs: { type: String, default: "" },
     dateOfBirthBs: { type: String, default: "" },
     gender: { type: String, default: "" },
     bloodGroup: { type: String, enum: BLOOD_GROUPS },

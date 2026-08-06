@@ -45,6 +45,7 @@ import {
   downloadRecordsExcel,
 } from "./accountingUtils";
 import { invalidateAccountingQueries } from "./invalidateAccountingQueries";
+import { printHtmlViaIframe } from "./voucherPrint";
 
 type PanelTab = "receipts" | "students" | "record";
 
@@ -163,8 +164,11 @@ export const SecurityDepositRecordsPanel = () => {
   });
 
   const studentsQuery = useQuery({
-    queryKey: ["students", "deposit-desk"],
-    queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    queryKey: ["students", "deposit-desk", "login-active"],
+    queryFn: () =>
+      unwrap<StudentRecord[]>(
+        api.get("/students", { params: { loginActive: "1" } }),
+      ),
   });
 
   const invalidate = async () => {
@@ -588,14 +592,15 @@ export const SecurityDepositRecordsPanel = () => {
 </body>
 </html>`;
 
-    const w = window.open("", "_blank", "noopener,noreferrer,width=1100,height=800");
-    if (!w) {
-      toast.error("Popup blocked — allow popups to print the table");
-      return;
+    try {
+      // Hidden iframe — avoids popup blockers and Chrome `noopener` null-window bug
+      printHtmlViaIframe(html);
+      toast.success("Print dialog opening…");
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not open print preview",
+      );
     }
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
   };
 
   const exportReceipts = () => {

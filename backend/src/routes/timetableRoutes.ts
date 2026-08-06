@@ -1,6 +1,12 @@
 import { Router } from "express";
-import { createTimetableSlot, deleteTimetableSlot, listTimetable, updateTimetableSlot } from "../controllers/timetableController.js";
-import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
+import {
+  bulkUpdatePeriodTimes,
+  createTimetableSlot,
+  deleteTimetableSlot,
+  listTimetable,
+  updateTimetableSlot
+} from "../controllers/timetableController.js";
+import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
@@ -24,6 +30,12 @@ router.get(
   listTimetable
 );
 router.post("/", authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER"), createTimetableSlot);
+/** Bulk change period column times (all weekdays) — before /:id */
+router.put(
+  "/period-times",
+  authorize("COLLEGE_ADMIN", "SUPER_ADMIN"),
+  bulkUpdatePeriodTimes
+);
 router.put("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN", "TEACHER"), updateTimetableSlot);
 // Admin may delete any slot; teachers delete only own (enforced in controller)
 router.delete(

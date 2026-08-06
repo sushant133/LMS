@@ -17,11 +17,17 @@
 const RELOAD_GUARD_KEY = "phit:stale-chunk-reload-at";
 const RELOAD_COOLDOWN_MS = 30_000;
 
-const reloadOnce = (): void => {
+/**
+ * Reload the tab at most once per cooldown window.
+ *
+ * Returns false when the guard suppressed the reload — the caller is then responsible
+ * for rendering something the user can act on, because no reload is coming.
+ */
+export const reloadOnce = (): boolean => {
   try {
     const last = Number(window.sessionStorage.getItem(RELOAD_GUARD_KEY) ?? "0");
     if (Date.now() - last < RELOAD_COOLDOWN_MS) {
-      return;
+      return false;
     }
     window.sessionStorage.setItem(RELOAD_GUARD_KEY, String(Date.now()));
   } catch {
@@ -29,18 +35,41 @@ const reloadOnce = (): void => {
   }
 
   window.location.reload();
+  return true;
 };
 
-const isStaleChunkError = (message: string): boolean =>
-  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|expected a javascript(-or-wasm)? module script/i.test(
-    message
-  );
+const STALE_CHUNK_PATTERN =
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|expected a javascript(-or-wasm)? module script|ChunkLoadError|Loading chunk \d+ failed|dynamically imported module/i;
+
+const isStaleChunkError = (message: string): boolean => STALE_CHUNK_PATTERN.test(message);
+
+/**
+ * True when a thrown value is a failed code-split import rather than an app bug.
+ *
+ * React.lazy swallows the import rejection and re-throws it during render, so a stale
+ * chunk reaches an error boundary as a normal render error. The boundary needs this to
+ * tell "the deploy moved out from under us" (reload fixes it) apart from a real crash
+ * (reloading would just crash again).
+ */
+export const isChunkLoadError = (error: unknown): boolean => {
+  if (!error) return false;
+  const candidate = error as { message?: unknown; name?: unknown };
+  const message = typeof candidate.message === "string" ? candidate.message : String(error);
+  const name = typeof candidate.name === "string" ? candidate.name : "";
+  return isStaleChunkError(message) || isStaleChunkError(name);
+};
 
 export const installStaleChunkRecovery = (): void => {
-  // Vite fires this when a lazy route's chunk (or its preload) cannot be loaded
+  // Vite fires this when a lazy route's chunk (or its preload) cannot be loaded.
+  // preventDefault() makes Vite resolve the import with `undefined` instead of rejecting,
+  // which only helps if a reload is actually coming — otherwise React renders `undefined`
+  // as a component and dies with an unrelated "element type is invalid" message. So we
+  // suppress the throw only when reloadOnce() really reloads; when the cooldown blocks it,
+  // we let the rejection through so the error boundary can name the problem correctly.
   window.addEventListener("vite:preloadError", (event) => {
-    event.preventDefault();
-    reloadOnce();
+    if (reloadOnce()) {
+      event.preventDefault();
+    }
   });
 
   window.addEventListener("error", (event) => {

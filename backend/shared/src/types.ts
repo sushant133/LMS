@@ -73,9 +73,21 @@ export type FeeType =
   | "ANNUAL"
   | "SECURITY_DEPOSIT";
 
-export type AttendanceStatus = "PRESENT" | "ABSENT" | "LEAVE" | "LATE" | "MEDICAL_LEAVE";
+export type AttendanceStatus =
+  | "PRESENT"
+  | "ABSENT"
+  | "LEAVE"
+  | "LATE"
+  | "MEDICAL_LEAVE"
+  | "EARLY_LEAVE";
 
-export type DailyAttendanceStatus = "PRESENT" | "ABSENT" | "LEAVE" | "LATE" | "MEDICAL_LEAVE";
+export type DailyAttendanceStatus =
+  | "PRESENT"
+  | "ABSENT"
+  | "LEAVE"
+  | "LATE"
+  | "MEDICAL_LEAVE"
+  | "EARLY_LEAVE";
 
 export type DailyAttendanceRecordStatus = "DRAFT" | "SUBMITTED" | "LOCKED";
 
@@ -313,6 +325,8 @@ export interface StudentRecord {
     | "CANCELLED"
     | "SUSPENDED";
   admissionDateBs: string;
+  /** Set when the student was marked PASSED_OUT (BS). */
+  passedOutAtBs?: string;
   dateOfBirthBs: string;
   gender: string;
   bloodGroup?: BloodGroup;
@@ -1087,8 +1101,12 @@ export interface SchoolSettingsRecord {
   schoolId: string;
   schoolName: string;
   schoolNameNp: string;
+  /** Nepali address line used on Nepal Government format documents (Goshwara voucher etc.). */
+  schoolAddressNp?: string;
   academicYearBs: string;
   principalName: string;
+  /** Academic programme name shown as Program/Course and printed on certificates. */
+  programName?: string;
   contactEmail: string;
   contactPhone: string;
   address: AddressSelection;
@@ -1104,6 +1122,7 @@ export interface SchoolSettingsRecord {
    * Which parent-facing portal sections are enabled for this school.
    * Managed under Parent Management by Admin.
    */
+  /** Student-account-related parent portal sections only (no staff ERP modules). */
   parentPortalAccess?: Partial<
     Record<
       | "overview"
@@ -1113,10 +1132,9 @@ export interface SchoolSettingsRecord {
       | "results"
       | "timetable"
       | "field-attendance"
+      | "library"
       | "notices"
-      | "notifications"
-      | "complaints"
-      | "library",
+      | "notifications",
       boolean
     >
   >;

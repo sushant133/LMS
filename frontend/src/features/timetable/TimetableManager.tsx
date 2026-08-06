@@ -36,7 +36,11 @@ import {
   formatPrintAddress,
   getPrintInstitutionBranding,
 } from "lib/printBranding";
-import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
+import {
+  downloadImageFromElementById,
+  downloadPdfFromElementById,
+  printElementById,
+} from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import {
   filterSectionsByClass,
@@ -54,9 +58,21 @@ import {
   idOf,
   nameOf,
   uniqueRooms,
+  type PeriodColumn,
   type TimetableSlotRow,
 } from "./timetableMatrixUtils";
 import { WeeklyTimetableGrid } from "./WeeklyTimetableGrid";
+
+type PeriodTimeEdit = {
+  period: PeriodColumn;
+  /** Academic group this table belongs to */
+  batchId?: string;
+  yearId?: string;
+  classId?: string;
+  sectionId?: string;
+  academicYearBs: string;
+  tableTitle: string;
+};
 
 type ViewMode = "group" | "mine" | "teacher" | "room" | "lab";
 
@@ -110,6 +126,12 @@ export const TimetableManager = () => {
   );
   const [filterTeacherId, setFilterTeacherId] = useState("");
   const [filterRoom, setFilterRoom] = useState("");
+  /** Change period column time (all days) */
+  const [periodTimeEdit, setPeriodTimeEdit] = useState<PeriodTimeEdit | null>(
+    null,
+  );
+  const [periodNewStart, setPeriodNewStart] = useState("");
+  const [periodNewEnd, setPeriodNewEnd] = useState("");
   const [saturdayIsHoliday, setSaturdayIsHoliday] = useState(() => {
     try {
       const v = localStorage.getItem(SATURDAY_KEY);
@@ -419,6 +441,101 @@ export const TimetableManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const periodTimeMutation = useMutation({
+    mutationFn: (payload: {
+      academicYearBs: string;
+      batchId?: string;
+      yearId?: string;
+      classId?: string;
+      sectionId?: string;
+      oldStartTime: string;
+      oldEndTime: string;
+      newStartTime: string;
+      newEndTime: string;
+    }) =>
+      unwrap<{
+        updatedCount: number;
+        daysUpdated: number;
+        newStartTime: string;
+        newEndTime: string;
+      }>(api.put("/timetable/period-times", payload)),
+    onSuccess: async (data) => {
+      toast.success(
+        `Period time updated for ${data.updatedCount} slot(s) across ${data.daysUpdated} day(s) → ${data.newStartTime}–${data.newEndTime}`,
+      );
+      setPeriodTimeEdit(null);
+      await queryClient.invalidateQueries({ queryKey: ["timetable"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const openPeriodTimeEdit = (
+    period: PeriodColumn,
+    scope: {
+      batchId?: string;
+      yearId?: string;
+      classId?: string;
+      sectionId?: string;
+      academicYearBs: string;
+      tableTitle: string;
+    },
+  ) => {
+    setPeriodTimeEdit({
+      period,
+      ...scope,
+    });
+    setPeriodNewStart(period.startTime);
+    setPeriodNewEnd(period.endTime);
+  };
+
+  const submitPeriodTimeEdit = () => {
+    if (!periodTimeEdit) return;
+    const start = periodNewStart.trim();
+    const end = periodNewEnd.trim();
+    if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
+      toast.error("Times must be HH:MM (24-hour), e.g. 10:00 and 10:30");
+      return;
+    }
+    const toMin = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+    if (toMin(start) >= toMin(end)) {
+      toast.error("End time must be after start time");
+      return;
+    }
+    if (
+      start === periodTimeEdit.period.startTime &&
+      end === periodTimeEdit.period.endTime
+    ) {
+      toast.error("Change the start or end time first");
+      return;
+    }
+    const label =
+      periodTimeEdit.period.periodNumber >= 1 &&
+      periodTimeEdit.period.periodNumber <= 12
+        ? `P${periodTimeEdit.period.periodNumber}`
+        : "this break/period";
+    if (
+      !window.confirm(
+        `Change ${label} from ${periodTimeEdit.period.startTime}–${periodTimeEdit.period.endTime} to ${start}–${end} for ALL days in ${periodTimeEdit.tableTitle}?\n\nEvery cell in that column will use the new time.`,
+      )
+    ) {
+      return;
+    }
+    periodTimeMutation.mutate({
+      academicYearBs: periodTimeEdit.academicYearBs,
+      batchId: periodTimeEdit.batchId || undefined,
+      yearId: periodTimeEdit.yearId || undefined,
+      classId: periodTimeEdit.classId || undefined,
+      sectionId: periodTimeEdit.sectionId || undefined,
+      oldStartTime: periodTimeEdit.period.startTime,
+      oldEndTime: periodTimeEdit.period.endTime,
+      newStartTime: start,
+      newEndTime: end,
+    });
+  };
+
   const isBreak = form.sessionType === "BREAK" || form.sessionType === "HOLIDAY";
   /** Sports = play period: only session type, day, period, and times required */
   const isSports = form.sessionType === "SPORTS";
@@ -582,34 +699,27 @@ export const TimetableManager = () => {
 
   const handlePdf = async (printId: string, title: string) => {
     try {
+      toast.message("Generating PDF…");
       await downloadPdfFromElementById(printId, `${title}.pdf`);
       toast.success("PDF downloaded");
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toast.error(
+        parseErrorMessage(error) ||
+          "Could not download PDF. Try Print → Save as PDF.",
+      );
     }
   };
 
   const handleImage = async (printId: string, filename: string) => {
     try {
-      const el = document.getElementById(printId);
-      if (!el) {
-        toast.error("Print view not ready");
-        return;
-      }
-      // Temporary unhide for capture
-      const prev = el.className;
-      el.className = el.className.replace("hidden", "").replace("print:block", "");
-      el.classList.add("block");
-      const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(el, { scale: 2, useCORS: true });
-      el.className = prev;
-      const link = document.createElement("a");
-      link.download = `${filename}.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
+      toast.message("Generating image…");
+      await downloadImageFromElementById(printId, `${filename}.png`);
       toast.success("Image downloaded");
     } catch (error) {
-      toast.error(parseErrorMessage(error));
+      toast.error(
+        parseErrorMessage(error) ||
+          "Could not download image. Try Print → Save as PDF.",
+      );
     }
   };
 
@@ -1183,6 +1293,27 @@ export const TimetableManager = () => {
                       matrix={matrix}
                       onEditSlot={canWrite ? startEdit : undefined}
                       onDeleteSlot={canWrite ? handleDeleteSlot : undefined}
+                      onChangePeriodTime={
+                        isAdmin && viewMode === "group"
+                          ? (period) =>
+                              openPeriodTimeEdit(period, {
+                                batchId: isCollege
+                                  ? form.batchId || table.batchId
+                                  : undefined,
+                                yearId: isCollege
+                                  ? table.yearId
+                                  : undefined,
+                                classId: !isCollege
+                                  ? form.classId
+                                  : undefined,
+                                sectionId: !isCollege
+                                  ? form.sectionId
+                                  : undefined,
+                                academicYearBs: form.academicYearBs,
+                                tableTitle: viewTitle,
+                              })
+                          : undefined
+                      }
                     />
                   )}
                   <TimetablePrintView
@@ -1230,6 +1361,76 @@ export const TimetableManager = () => {
           })}
         </div>
       )}
+
+      {/* Change period column time (all days of the week) */}
+      {periodTimeEdit ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="period-time-edit-title"
+        >
+          <Card className="w-full max-w-md shadow-xl">
+            <CardHeader>
+              <CardTitle id="period-time-edit-title" className="text-lg">
+                Change period time (all days)
+              </CardTitle>
+              <p className="text-sm text-slate-500">
+                {periodTimeEdit.tableTitle}
+                {" · "}
+                {periodTimeEdit.period.periodNumber >= 1 &&
+                periodTimeEdit.period.periodNumber <= 12
+                  ? `P${periodTimeEdit.period.periodNumber}`
+                  : "Break / interval"}
+                {" · "}
+                Current: {periodTimeEdit.period.startTime}–
+                {periodTimeEdit.period.endTime}
+              </p>
+              <p className="text-xs text-slate-500">
+                This updates every weekday that uses this period column so the
+                full week stays aligned.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="New start (HH:MM)">
+                  <Input
+                    type="time"
+                    value={periodNewStart}
+                    onChange={(e) => setPeriodNewStart(e.target.value)}
+                  />
+                </FormField>
+                <FormField label="New end (HH:MM)">
+                  <Input
+                    type="time"
+                    value={periodNewEnd}
+                    onChange={(e) => setPeriodNewEnd(e.target.value)}
+                  />
+                </FormField>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPeriodTimeEdit(null)}
+                  disabled={periodTimeMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={submitPeriodTimeEdit}
+                  disabled={periodTimeMutation.isPending}
+                >
+                  {periodTimeMutation.isPending
+                    ? "Updating…"
+                    : "Update all days"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 };

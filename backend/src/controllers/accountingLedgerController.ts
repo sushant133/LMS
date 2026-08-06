@@ -30,7 +30,7 @@ import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
-import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import { compareBsDates, ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { getDefaultFiscalYearDates, getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
 import { filterOutOpeningTuitionCharges } from "../utils/accountingCalculations.js";
@@ -40,17 +40,23 @@ import {
   postJournalEntry,
   reverseJournalEntryById
 } from "../utils/journalPosting.js";
-import { generateRefundNumber } from "../utils/receiptVerification.js";
+import { assertStudentLoginActive } from "../utils/studentLoginAccess.js";
+import { nextVoucherNumberForDate } from "../utils/voucherNumbering.js";
 import {
   aggregateJournalBalances,
   buildAccountLedger,
   buildBalanceSheet,
+  buildCashFlowStatement,
   buildIncomeExpenditure,
-  buildTrialBalance
+  buildTrialBalanceReport,
+  flattenBalanceSheet,
+  flattenCashFlow,
+  flattenIncomeExpenditure
 } from "../utils/accountingReports.js";
 import { recordCashEntry } from "../utils/accountingCashBook.js";
 import { formatAddressLine } from "../utils/formatAddress.js";
 import { collegeLogoExists, getCollegeLogoPath } from "../utils/collegeLogo.js";
+import { resolveGovernmentDocumentHeader } from "../utils/schoolBranding.js";
 import { withTransaction } from "../utils/transaction.js";
 import {
   buildExactGoshwaraVoucherHtml,
@@ -106,9 +112,33 @@ export const listJournalEntries = asyncHandler(async (req: Request, res: Respons
     filter.dateBs = { ...existing, $lte: req.query.toDateBs };
   }
 
-  // Higher limit so Ledger / Reports stay in sync with posted history
-  const entries = await JournalEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).limit(3000);
-  return sendSuccess(res, "Journal entries fetched", entries);
+  // The list used to hard-stop at 3000 with no signal that anything was missing, so a
+  // school past that point silently lost its oldest vouchers from view. Paging is opt-in:
+  // callers that send no page/limit keep the previous behaviour exactly, and the total is
+  // always reported so truncation is visible rather than silent.
+  const DEFAULT_LIMIT = 3000;
+  const MAX_LIMIT = 5000;
+
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(1, Math.trunc(requestedLimit)), MAX_LIMIT)
+    : DEFAULT_LIMIT;
+
+  const requestedPage = Number(req.query.page);
+  const page = Number.isFinite(requestedPage) ? Math.max(1, Math.trunc(requestedPage)) : 1;
+  const skip = (page - 1) * limit;
+
+  const [entries, total] = await Promise.all([
+    JournalEntry.find(filter).sort({ dateBs: -1, createdAt: -1 }).skip(skip).limit(limit),
+    JournalEntry.countDocuments(filter)
+  ]);
+
+  return sendSuccess(res, "Journal entries fetched", entries, 200, {
+    page,
+    limit,
+    total,
+    hasMore: skip + entries.length < total
+  });
 });
 
 export const createJournalEntry = asyncHandler(async (req: Request, res: Response) => {
@@ -187,7 +217,10 @@ export const reverseJournalEntryHandler = asyncHandler(async (req: Request, res:
 });
 
 const resolveOfficeName = async (schoolId: import("mongoose").Types.ObjectId): Promise<{
-  officeName: string;
+  /** College Name (Nepali) — Nepal Government header line, printed as "{name} कार्यालय" */
+  collegeNameNp: string;
+  /** College Address (Nepali) — Nepal Government header line under the college name */
+  collegeAddressNp: string;
   schoolName: string;
   schoolNameNp?: string;
   principalName?: string;
@@ -200,10 +233,14 @@ const resolveOfficeName = async (schoolId: import("mongoose").Types.ObjectId): P
   ]);
   if (!school) throw new ApiError(404, "School not found");
 
-  // Prefer Nepali full institute name, then English — never leave blank.
-  const officeName =
-    (settings?.schoolNameNp || school.nameNp || settings?.schoolName || school.name || "").trim() ||
-    "पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी";
+  /*
+   * Nepal Government format documents carry Nepali text only — the English
+   * name/address is never substituted here. Both values come from Institution
+   * Settings (College Name (Nepali) / College Address (Nepali)); when unset the
+   * voucher prints the paper form's blank dots instead.
+   */
+  const collegeNameNp = (settings?.schoolNameNp || school.nameNp || "").trim();
+  const collegeAddressNp = (settings?.schoolAddressNp || "").trim();
 
   let logoDataUri = "";
   if (collegeLogoExists()) {
@@ -216,7 +253,8 @@ const resolveOfficeName = async (schoolId: import("mongoose").Types.ObjectId): P
   }
 
   return {
-    officeName,
+    collegeNameNp,
+    collegeAddressNp,
     schoolName: settings?.schoolName ?? school.name,
     schoolNameNp: settings?.schoolNameNp ?? school.nameNp,
     principalName: settings?.principalName ?? school.principalName,
@@ -294,10 +332,14 @@ export const downloadGoshwaraVoucher = asyncHandler(async (req: Request, res: Re
           voucherNo: linkedVoucher.voucherNo,
           dateBs: linkedVoucher.dateBs,
           particulars: linkedVoucher.particulars,
-          govOfficeName: linkedVoucher.govOfficeName,
-          instituteName: linkedVoucher.instituteName,
-          addressLine: linkedVoucher.addressLine,
-          officeName: linkedVoucher.officeName,
+          // Nepal Government header — always the current Institution Settings values;
+          // the voucher's stored header is only a fallback for older records.
+          govOfficeName:
+            branding.collegeNameNp ||
+            linkedVoucher.govOfficeName ||
+            linkedVoucher.instituteName ||
+            "",
+          addressLine: branding.collegeAddressNp || linkedVoucher.addressLine || "",
           printLines: linkedVoucher.printLines,
           lines: linkedVoucher.lines.map((l) => ({
             accountCode: l.accountCode,
@@ -335,10 +377,10 @@ export const downloadGoshwaraVoucher = asyncHandler(async (req: Request, res: Re
             totalDebitNpr: entry.totalDebitNpr,
             totalCreditNpr: entry.totalCreditNpr
           },
-          // Header blank unless user later edits — do not inject school name
-          govOfficeName: "",
-          instituteName: "",
-          addressLine: ""
+          // Nepal Government header from Institution Settings (Nepali only).
+          // Only the printed copy is filled in — nothing is written back to the record.
+          govOfficeName: branding.collegeNameNp,
+          addressLine: branding.collegeAddressNp
         });
 
   const schoolInfo = {
@@ -373,7 +415,9 @@ export const downloadBlankGoshwaraForm = asyncHandler(async (_req: Request, res:
 
 /**
  * Create Goshwara voucher + balanced journal entry (atomic when replica set available).
- * All header fields are user-supplied — nothing is force-filled from school settings.
+ * Every field is user-supplied except the Nepal Government document header
+ * (नेपाल सरकार / College Name (Nepali) कार्यालय / College Address (Nepali)),
+ * which always comes from Institution Settings.
  */
 export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Response) => {
   const payload = goshwaraVoucherSchema.parse(req.body);
@@ -385,9 +429,17 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
   await assertFiscalPeriodOpen(schoolId, payload.dateBs);
   await ensureDefaultChartOfAccounts(schoolId);
 
-  const govOfficeName = (payload.govOfficeName || "").trim();
-  const instituteName = (payload.instituteName || "").trim();
-  const addressLine = (payload.addressLine || "").trim();
+  /*
+   * Nepal Government header is never typed per voucher — it is the institution's
+   * Nepali identity. Stored on the record so the list view and any reprint show
+   * the same header, with the submitted values kept only as a fallback.
+   */
+  const govHeader = await resolveGovernmentDocumentHeader(schoolId);
+  const govOfficeName =
+    govHeader.collegeNameNp ||
+    (payload.govOfficeName || "").trim() ||
+    (payload.instituteName || "").trim();
+  const addressLine = govHeader.collegeAddressNp || (payload.addressLine || "").trim();
   const manualVoucherNo = (payload.voucherNo || "").trim();
 
   // Resolve account names from COA when missing
@@ -466,9 +518,8 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
             fiscalYearBs,
             particulars: payload.particulars,
             govOfficeName,
-            instituteName,
             addressLine,
-            officeName: instituteName || govOfficeName,
+            officeName: govOfficeName,
             printLines,
             receiptNo: (payload.receiptNo || "").trim(),
             receivedAmount: (payload.receivedAmount || "").trim(),
@@ -522,6 +573,48 @@ export const createGoshwaraVoucher = asyncHandler(async (req: Request, res: Resp
   }
 });
 
+/**
+ * Delete (soft) a Goshwara voucher and reverse its linked journal entry.
+ * Super Admin / College Admin only (route uses admins + reverse_transaction).
+ */
+export const deleteGoshwaraVoucher = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  const voucher = await GoshwaraVoucher.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
+  if (!voucher) throw new ApiError(404, "Goshwara voucher not found");
+
+  const before = voucher.toObject();
+  const journal = await JournalEntry.findOne({
+    _id: voucher.journalEntryId,
+    schoolId,
+    isDeleted: false
+  });
+
+  if (journal && !journal.isReversal && !journal.isReversed) {
+    const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
+    await assertFiscalPeriodOpen(schoolId, journal.dateBs);
+    await reverseJournalEntryById(schoolId, userId, journal._id);
+  }
+
+  voucher.isDeleted = true;
+  await voucher.save();
+
+  await recordAudit(req, {
+    action: "accounting.goshwara.delete",
+    entity: "GoshwaraVoucher",
+    entityId: voucher._id.toString(),
+    before,
+    after: { isDeleted: true, journalEntryId: voucher.journalEntryId?.toString() }
+  });
+
+  return sendSuccess(res, "Goshwara voucher deleted");
+});
+
 /** Print Goshwara voucher PDF by voucher id */
 export const downloadGoshwaraVoucherById = asyncHandler(async (req: Request, res: Response) => {
   const schoolId = tenantObjectId(req);
@@ -541,10 +634,11 @@ export const downloadGoshwaraVoucherById = asyncHandler(async (req: Request, res
         voucherNo: voucher.voucherNo,
         dateBs: voucher.dateBs,
         particulars: voucher.particulars,
-        govOfficeName: voucher.govOfficeName,
-        instituteName: voucher.instituteName,
-        addressLine: voucher.addressLine,
-        officeName: voucher.officeName,
+        // Nepal Government header — always the current Institution Settings values;
+        // the voucher's stored header is only a fallback for older records.
+        govOfficeName:
+          branding.collegeNameNp || voucher.govOfficeName || voucher.instituteName || "",
+        addressLine: branding.collegeAddressNp || voucher.addressLine || "",
         printLines: voucher.printLines,
         lines: voucher.lines.map((l) => ({
           accountCode: l.accountCode,
@@ -623,6 +717,7 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
 
   const student = await Student.findOne({ _id: payload.studentId, schoolId });
   if (!student) throw new ApiError(404, "Student not found");
+  await assertStudentLoginActive(payload.studentId, schoolId, "recording fee refunds");
 
   const refundType = payload.refundType ?? "OTHER";
   const amountNpr = payload.amountNpr;
@@ -664,8 +759,13 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
     await student.save();
   }
 
-  const refundCount = await FeeRefund.countDocuments({ schoolId });
-  const refundNumber = generateRefundNumber("RFND", refundCount + 1);
+  // Gap-free per-fiscal-year series. Counting existing refunds handed the same number to
+  // two concurrent approvers and stamped the AD year onto a BS ledger.
+  const refundNumber = await nextVoucherNumberForDate({
+    schoolId,
+    prefix: "RFND",
+    dateBs: payload.dateBs
+  });
 
   const refund = await FeeRefund.create({
     schoolId,
@@ -755,14 +855,48 @@ export const closeFiscalYear = asyncHandler(async (req: Request, res: Response) 
   if (year.isClosed) throw new ApiError(400, "Fiscal year is already closed");
 
   const before = year.toObject();
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  // Post the closing voucher BEFORE the audit lock lands on this year's end date —
+  // afterwards nothing can be posted into the period any more.
+  const { postYearEndClosingEntry } = await import("../utils/fiscalYearClosing.js");
+  const closing = await postYearEndClosingEntry({
+    schoolId,
+    userId,
+    fiscalYearBs: year.yearBs,
+    dateBs: year.endDateBs
+  });
+
   year.isClosed = true;
   year.closedAt = new Date();
-  year.closedBy = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+  year.closedBy = userId;
+  if (closing.journalEntryId) year.closingEntryId = closing.journalEntryId;
+  if (closing.posted) year.closingSurplusNpr = closing.netSurplusNpr;
   await year.save();
 
-  await AccountingSettings.findOneAndUpdate({ schoolId }, { auditLockDateBs: year.endDateBs });
-  await recordAudit(req, { action: "accounting.fiscal.close", entity: "FiscalYear", entityId: year._id.toString(), before, after: year });
-  return sendSuccess(res, "Fiscal year closed and audit lock applied", year);
+  // Only ever advance the audit lock. Closing an older year after a newer one used to move
+  // the lock backwards, silently reopening a period that had already been locked down.
+  const settings = await AccountingSettings.findOne({ schoolId }).lean();
+  const currentLock = settings?.auditLockDateBs;
+  if (!currentLock || compareBsDates(year.endDateBs, currentLock) > 0) {
+    await AccountingSettings.findOneAndUpdate({ schoolId }, { auditLockDateBs: year.endDateBs }, { upsert: true });
+  }
+
+  await recordAudit(req, {
+    action: "accounting.fiscal.close",
+    entity: "FiscalYear",
+    entityId: year._id.toString(),
+    before,
+    after: { ...year.toObject(), closingEntryPosted: closing.posted, netSurplusNpr: closing.netSurplusNpr }
+  });
+
+  return sendSuccess(
+    res,
+    closing.posted
+      ? `Fiscal year closed. Surplus/(deficit) of NPR ${closing.netSurplusNpr.toFixed(2)} transferred to Accumulated Fund and audit lock applied.`
+      : `Fiscal year closed and audit lock applied. ${closing.reason ?? ""}`.trim(),
+    { ...year.toObject(), closing }
+  );
 });
 
 export const verifyReceipt = asyncHandler(async (req: Request, res: Response) => {
@@ -800,16 +934,62 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
 
   switch (reportType) {
     case "trial-balance": {
-      const balances = await aggregateJournalBalances(schoolId, { fiscalYearBs, fromDateBs, toDateBs });
-      return sendSuccess(res, "Trial balance generated", { reportType, data: buildTrialBalance(balances) });
+      // Pre-closing trial balance: closing vouchers would zero the income/expense columns.
+      const balances = await aggregateJournalBalances(schoolId, {
+        fiscalYearBs,
+        fromDateBs,
+        toDateBs,
+        excludeClosingEntries: true
+      });
+      const trialBalance = buildTrialBalanceReport(balances);
+      return sendSuccess(res, "Trial balance generated", {
+        reportType,
+        data: trialBalance.rows,
+        summary: {
+          totalDebitNpr: trialBalance.totalDebitNpr,
+          totalCreditNpr: trialBalance.totalCreditNpr,
+          differenceNpr: trialBalance.differenceNpr,
+          isBalanced: trialBalance.isBalanced
+        }
+      });
     }
     case "balance-sheet": {
-      const balances = await aggregateJournalBalances(schoolId, { fiscalYearBs, toDateBs });
-      return sendSuccess(res, "Balance sheet generated", { reportType, data: buildBalanceSheet(balances) });
+      // A balance sheet is a position *as at* a date, so it is cumulative over all history
+      // up to `toDateBs`. Scoping it to one fiscal year would drop every prior year's
+      // assets and liabilities and could never balance. Closing vouchers are included so
+      // closed years report their surplus inside Accumulated Fund instead of twice.
+      const balances = await aggregateJournalBalances(schoolId, { toDateBs });
+      const sheet = buildBalanceSheet(balances);
+      return sendSuccess(res, "Balance sheet generated", {
+        reportType,
+        data: flattenBalanceSheet(sheet),
+        summary: {
+          totalAssetsNpr: sheet.totalAssetsNpr,
+          totalLiabilitiesNpr: sheet.totalLiabilitiesNpr,
+          totalEquityNpr: sheet.totalEquityNpr,
+          netSurplusNpr: sheet.netSurplusNpr,
+          differenceNpr: sheet.differenceNpr,
+          isBalanced: sheet.isBalanced
+        }
+      });
     }
     case "income-expenditure": {
-      const balances = await aggregateJournalBalances(schoolId, { fiscalYearBs, fromDateBs, toDateBs });
-      return sendSuccess(res, "Income & expenditure generated", { reportType, data: buildIncomeExpenditure(balances) });
+      const balances = await aggregateJournalBalances(schoolId, {
+        fiscalYearBs,
+        fromDateBs,
+        toDateBs,
+        excludeClosingEntries: true
+      });
+      const statement = buildIncomeExpenditure(balances);
+      return sendSuccess(res, "Income & expenditure generated", {
+        reportType,
+        data: flattenIncomeExpenditure(statement),
+        summary: {
+          totalIncomeNpr: statement.totalIncomeNpr,
+          totalExpenseNpr: statement.totalExpenseNpr,
+          netSurplusNpr: statement.netSurplusNpr
+        }
+      });
     }
     case "bank-book": {
       const data = await buildAccountLedger(schoolId, "1101", { fromDateBs, toDateBs });
@@ -941,16 +1121,27 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
       ]);
       return sendSuccess(res, "Vendor ledger generated", { reportType, data: { expenses, purchases } });
     }
+    case "receivables-aging": {
+      const { buildReceivablesAging, flattenReceivablesAging } = await import("../utils/receivablesAging.js");
+      const aging = await buildReceivablesAging(schoolId, { asOfDateBs: toDateBs, batchId });
+      return sendSuccess(res, "Receivables aging generated", {
+        reportType,
+        data: flattenReceivablesAging(aging),
+        summary: aging.totals
+      });
+    }
     case "cash-flow": {
-      const balances = await aggregateJournalBalances(schoolId, { fiscalYearBs, fromDateBs, toDateBs });
-      const cash = balances.find((b) => b.accountCode === "1001");
-      const bank = balances.find((b) => b.accountCode === "1101");
+      const statement = await buildCashFlowStatement(schoolId, { fromDateBs, toDateBs });
       return sendSuccess(res, "Cash flow generated", {
         reportType,
-        data: {
-          cashInflowNpr: (cash?.debitNpr ?? 0) + (bank?.debitNpr ?? 0),
-          cashOutflowNpr: (cash?.creditNpr ?? 0) + (bank?.creditNpr ?? 0),
-          netCashFlowNpr: (cash?.debitNpr ?? 0) + (bank?.debitNpr ?? 0) - (cash?.creditNpr ?? 0) - (bank?.creditNpr ?? 0)
+        data: flattenCashFlow(statement),
+        summary: {
+          netOperatingNpr: statement.netOperatingNpr,
+          netInvestingNpr: statement.netInvestingNpr,
+          netFinancingNpr: statement.netFinancingNpr,
+          netChangeNpr: statement.netChangeNpr,
+          openingCashNpr: statement.openingCashNpr,
+          closingCashNpr: statement.closingCashNpr
         }
       });
     }

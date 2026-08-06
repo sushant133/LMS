@@ -3,7 +3,11 @@
  * Form: म.ले.प.फा.नं. १०
  *
  * Layout matched to the printed paper form (journal.jpeg):
- *  - Header: नेपाल सरकार / dotted office lines / form nos top-right
+ *  - Header (official Nepal Government format, Nepali only — no English):
+ *      नेपाल सरकार            (bold, centered)
+ *      {College Name (Nepali)} कार्यालय
+ *      {College Address (Nepali)}
+ *    Both college values come from Institution Settings (never hardcoded).
  *  - Title: गोश्वारा भौचर + मिति
  *  - Table: one tall open writing area (NO dense horizontal row lines)
  *    Columns 1–3 (सि.नं., विवरण, खाता) span full body height
@@ -19,11 +23,14 @@ import {
 import { convertHtmlToPdf } from "../convertHtmlToPdf.js";
 
 export interface ExactGoshwaraVoucherPdfData {
-  /** Under नेपाल सरकार — printed as "{name}कार्यालय" or dots + कार्यालय */
+  /**
+   * College Name (Nepali) from Institution Settings.
+   * Printed under नेपाल सरकार as "{name} कार्यालय" (dots + कार्यालय when unset).
+   */
   govOfficeName?: string;
-  /** Second dotted line under office (institute) */
+  /** @deprecated Legacy institute line — now only a fallback for `govOfficeName` */
   instituteName?: string;
-  /** Third dotted line (address / ward) */
+  /** College Address (Nepali) from Institution Settings — printed under the college name */
   addressLine?: string;
   /** @deprecated */
   officeName?: string;
@@ -103,28 +110,31 @@ export const buildExactGoshwaraVoucherHtml = (
 ): string => {
   const blank = Boolean(data.blankForm);
 
-  const govOffice = blank ? "" : (data.govOfficeName ?? "").trim();
-  const institute = blank ? "" : (data.instituteName ?? data.officeName ?? "").trim();
-  const address = blank ? "" : (data.addressLine ?? data.officeAddress ?? "").trim();
+  /*
+   * Official Nepal Government header — Nepali only, exactly three centered lines:
+   *   नेपाल सरकार
+   *   {College Name (Nepali)} कार्यालय
+   *   {College Address (Nepali)}
+   * `instituteName` is only a fallback so vouchers saved before this format
+   * (which stored the Nepali college name on the institute line) still print.
+   */
+  const collegeNameNp = blank
+    ? ""
+    : (data.govOfficeName || data.instituteName || data.officeName || "").trim();
+  const collegeAddressNp = blank ? "" : (data.addressLine || data.officeAddress || "").trim();
 
   /*
-   * Line 1 under नेपाल सरकार (paper form):
-   *   ....................कार्यालय
-   * Dots are only the blank to WRITE the office name — NOT under "कार्यालय".
-   * When filled: "जिल्ला शिक्षा कार्यालय" with no dotted underline under कार्यालय.
+   * Office line (paper form): ....................कार्यालय
+   * Dots are only the blank to WRITE the college name — NOT under "कार्यालय".
    */
-  const lineOfficeHtml = govOffice
-    ? `<div class="hl-wrap office-line"><span class="office-name">${escapeHtml(govOffice)}</span><span class="office-suffix">&nbsp;कार्यालय</span></div>`
+  const lineOfficeHtml = collegeNameNp
+    ? `<div class="hl-wrap office-line"><span class="office-name">${escapeHtml(collegeNameNp)}</span><span class="office-suffix">&nbsp;कार्यालय</span></div>`
     : `<div class="hl-wrap office-line"><span class="office-dots">${DOTS_BLANK}</span><span class="office-suffix">कार्यालय</span></div>`;
 
-  // Institute & address: when filled, plain centered text (no extra dots under the name)
-  // When empty, short blank dots only (writing space on blank form)
-  const lineInstituteHtml = institute
-    ? `<div class="hl-wrap"><span class="hl-plain">${escapeHtml(institute)}</span></div>`
+  // Address: plain centered text when filled; blank dots (writing space) on an empty form
+  const lineAddressHtml = collegeAddressNp
+    ? `<div class="hl-wrap"><span class="hl-plain">${escapeHtml(collegeAddressNp)}</span></div>`
     : `<div class="hl-wrap"><span class="hl-blank">${DOTS_BLANK}</span></div>`;
-  const lineAddressHtml = address
-    ? `<div class="hl-wrap"><span class="hl-plain">${escapeHtml(address)}</span></div>`
-    : `<div class="hl-wrap"><span class="hl-blank">${DOTS_SHORT}</span></div>`;
 
   // Convert numeric voucher/date digits to Nepali when purely numeric parts present
   const voucherNo = blank ? "" : toNepaliDigits((data.voucherNo ?? "").trim());
@@ -177,10 +187,13 @@ export const buildExactGoshwaraVoucherHtml = (
 <html lang="ne">
 <head>
   <meta charset="UTF-8"/>
-  <title>गोश्वारा भौचर</title>
+  <!-- Empty title so browser print header does not show "गोश्वारा भौचर" + date -->
+  <title>&#8203;</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&display=swap');
-
+    /*
+     * Fonts: convertHtmlToPdf injects local Noto Sans Devanagari as base64
+     * (no Google Fonts network dependency). System fonts cover browser HTML print.
+     */
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -188,8 +201,10 @@ export const buildExactGoshwaraVoucherHtml = (
       color: #000;
       font-size: 13px;
       line-height: 1.35;
-      /* Equal L/R so centered header is true page center */
-      margin: 8mm 0 8mm 0;
+      /* Equal L/R so centered header is true page center.
+         Margins live on body (not @page) so Chromium does not paint
+         browser print chrome (date / document title) in the page margin. */
+      margin: 10mm 10mm;
       padding: 0 2mm;
     }
 
@@ -433,7 +448,16 @@ export const buildExactGoshwaraVoucherHtml = (
 
     @page {
       size: A4;
-      margin: 10mm 10mm;
+      /* Zero @page margin suppresses browser header/footer band (date + title) */
+      margin: 0;
+    }
+
+    @media print {
+      html, body {
+        margin: 10mm 10mm;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
     }
   </style>
 </head>
@@ -448,7 +472,6 @@ export const buildExactGoshwaraVoucherHtml = (
     <div class="center-head">
       <div class="gov">नेपाल सरकार</div>
       ${lineOfficeHtml}
-      ${lineInstituteHtml}
       ${lineAddressHtml}
     </div>
   </div>
@@ -652,8 +675,9 @@ export const buildPdfDataFromVoucherRecord = (voucher: {
           }));
 
   return {
-    govOfficeName: voucher.govOfficeName || "",
-    instituteName: voucher.instituteName || voucher.officeName || "",
+    // Nepal Government header: College Name (Nepali) + College Address (Nepali).
+    // Legacy institute/office fields only fill in for records saved before this format.
+    govOfficeName: voucher.govOfficeName || voucher.instituteName || voucher.officeName || "",
     addressLine: voucher.addressLine || "",
     voucherNo: voucher.voucherNo,
     dateBs: voucher.dateBs,
@@ -703,8 +727,8 @@ export const buildExactPdfDataFromJournal = (params: {
 
   const { entry } = params;
   return {
-    govOfficeName: params.govOfficeName || "",
-    instituteName: params.instituteName || params.officeName || "",
+    // Nepal Government header: College Name (Nepali) + College Address (Nepali).
+    govOfficeName: params.govOfficeName || params.instituteName || params.officeName || "",
     addressLine: params.addressLine || params.officeAddress || "",
     voucherNo: entry.voucherNumber,
     dateBs: entry.dateBs,

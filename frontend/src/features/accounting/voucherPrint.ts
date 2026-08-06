@@ -18,7 +18,11 @@ const escapeHtml = (value: string): string =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-const printHtmlViaIframe = (html: string): void => {
+/**
+ * Print a full HTML document string via hidden iframe.
+ * Prefer this over `window.open(..., "noopener")` + document.write (returns null in Chrome).
+ */
+export const printHtmlViaIframe = (html: string): void => {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
   iframe.style.position = "fixed";
@@ -38,11 +42,21 @@ const printHtmlViaIframe = (html: string): void => {
     throw new Error("Could not open print preview");
   }
 
+  // Blank title so browser print header does not show page title / date labels
+  const htmlForPrint = html.replace(
+    /<title>[\s\S]*?<\/title>/i,
+    "<title>\u200B</title>",
+  );
+
   doc.open();
-  doc.write(html);
+  doc.write(htmlForPrint);
   doc.close();
 
+  const previousTitle = document.title;
+  document.title = "\u200B";
+
   const cleanup = () => {
+    document.title = previousTitle;
     try {
       iframe.remove();
     } catch {
@@ -52,6 +66,8 @@ const printHtmlViaIframe = (html: string): void => {
 
   window.setTimeout(() => {
     try {
+      doc.title = "\u200B";
+      win.document.title = "\u200B";
       win.focus();
       win.print();
     } catch {
@@ -59,6 +75,7 @@ const printHtmlViaIframe = (html: string): void => {
       throw new Error("Print failed");
     }
     // Keep iframe alive until the print dialog is done
+    win.addEventListener("afterprint", cleanup, { once: true });
     window.setTimeout(cleanup, 60_000);
   }, 350);
 };

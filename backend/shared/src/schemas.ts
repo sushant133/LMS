@@ -464,7 +464,14 @@ export const attendanceSchema = z.object({
   entries: z.array(
     z.object({
       studentId: objectIdSchema,
-      status: z.enum(["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"])
+      status: z.enum([
+        "PRESENT",
+        "ABSENT",
+        "LEAVE",
+        "LATE",
+        "MEDICAL_LEAVE",
+        "EARLY_LEAVE"
+      ])
     })
   ),
   confirmSyncOverride: z.boolean().optional()
@@ -496,7 +503,14 @@ export const dailyAttendanceSubmitSchema = z
       .array(
         z.object({
           studentId: objectIdSchema,
-          status: z.enum(["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"]),
+          status: z.enum([
+        "PRESENT",
+        "ABSENT",
+        "LEAVE",
+        "LATE",
+        "MEDICAL_LEAVE",
+        "EARLY_LEAVE"
+      ]),
           remarks: z.string().max(500).optional()
         })
       )
@@ -534,7 +548,14 @@ export const dailyAttendanceUpdateSchema = z.object({
     .array(
       z.object({
         studentId: objectIdSchema,
-        status: z.enum(["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"]),
+        status: z.enum([
+        "PRESENT",
+        "ABSENT",
+        "LEAVE",
+        "LATE",
+        "MEDICAL_LEAVE",
+        "EARLY_LEAVE"
+      ]),
         remarks: z.string().max(500).optional()
       })
     )
@@ -827,11 +848,19 @@ export const adminPasswordResetSchema = z.object({
 export const settingsSchema = z.object({
   schoolName: z.string().min(2),
   schoolNameNp: z.string().min(2),
+  /**
+   * Nepali (Devanagari) address printed on Nepal Government format documents
+   * e.g. "वडा नं. ३, धनगढीमाई नगरपालिका, सिराहा, मधेश प्रदेश".
+   * Kept separate from `address` (structured, English) which drives IEMIS reporting.
+   */
+  schoolAddressNp: z.string().trim().max(200).optional().or(z.literal("")),
   academicYearBs: academicYearSchema,
   principalName: z.string().min(2),
   contactEmail: z.email(),
   contactPhone: z.string().min(7),
   address: settingsAddressSchema,
+  /** Academic programme name printed on character certificates (e.g. "Health Assistant (HA)"). */
+  programName: z.string().trim().max(160).optional().or(z.literal("")),
   holidays: z.array(
     z.object({
       title: z.string().min(1),

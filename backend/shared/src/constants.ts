@@ -788,7 +788,14 @@ export const TIMETABLE_BREAK_LABELS = [
   "Custom"
 ] as const;
 
-export const DAILY_ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"] as const;
+export const DAILY_ATTENDANCE_STATUSES = [
+  "PRESENT",
+  "ABSENT",
+  "LEAVE",
+  "LATE",
+  "MEDICAL_LEAVE",
+  "EARLY_LEAVE"
+] as const;
 
 export const DAILY_ATTENDANCE_RECORD_STATUSES = ["DRAFT", "SUBMITTED", "LOCKED"] as const;
 

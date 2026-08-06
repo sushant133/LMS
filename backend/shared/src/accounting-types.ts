@@ -36,6 +36,7 @@ export type AccountingReportType =
   | "balance-sheet"
   | "income-expenditure"
   | "cash-flow"
+  | "receivables-aging"
   | "student-ledger"
   | "student-due"
   | "bank-book"

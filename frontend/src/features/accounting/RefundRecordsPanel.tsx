@@ -45,6 +45,7 @@ import {
 import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
+import { printHtmlViaIframe } from "./voucherPrint";
 
 /** Super Admin / College Admin (primary or secondary role) — print + sensitive actions. */
 const useCanAdminPrintRefunds = (): boolean => {
@@ -63,21 +64,17 @@ const escapeHtml = (value: string) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-const openPrintWindow = (html: string, title: string): boolean => {
-  const w = window.open(
-    "",
-    "_blank",
-    "noopener,noreferrer,width=1000,height=800",
-  );
-  if (!w) {
-    toast.error("Popup blocked — allow popups to print");
+const openPrintWindow = (html: string, _title: string): boolean => {
+  try {
+    // Hidden iframe — avoids popup blockers and the Chrome `noopener` null-window bug
+    printHtmlViaIframe(html);
+    return true;
+  } catch (e) {
+    toast.error(
+      e instanceof Error ? e.message : "Could not open print preview",
+    );
     return false;
   }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-  w.document.title = title;
-  return true;
 };
 
 type PanelTab = "register" | "process";
@@ -194,8 +191,11 @@ export const RefundRecordsPanel = () => {
   });
 
   const studentsQuery = useQuery({
-    queryKey: ["students", "refund-picker"],
-    queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    queryKey: ["students", "refund-picker", "login-active"],
+    queryFn: () =>
+      unwrap<StudentRecord[]>(
+        api.get("/students", { params: { loginActive: "1" } }),
+      ),
   });
 
   const batchesQuery = useQuery({

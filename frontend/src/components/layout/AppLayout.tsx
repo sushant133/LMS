@@ -18,7 +18,8 @@ import {
   type SchoolSettingsRecord,
   type UserRole,
 } from "@phit-erp/shared";
-import { LoadingState } from "components/shared/LoadingState";
+import { ErrorBoundary } from "components/shared/ErrorBoundary";
+import { LoadingState, PageLoadingState } from "components/shared/LoadingState";
 import { ReadOnlyBanner } from "components/shared/ReadOnlyBanner";
 import { useTranslation } from "react-i18next";
 import { CollegeLogo } from "components/shared/CollegeLogo";
@@ -217,6 +218,12 @@ const navItems: NavItem[] = [
     labelKey: "myAttendance",
     path: "/attendance",
     roles: ["TEACHER"],
+    section: "myWork",
+  },
+  {
+    labelKey: "parentAttendance",
+    path: "/attendance",
+    roles: ["PARENT"],
     section: "myWork",
   },
   {
@@ -546,8 +553,10 @@ export const AppLayout = () => {
     }
   };
 
+  // Returning null here painted a fully blank page whenever the session briefly read as
+  // empty (ProtectedRoute is already redirecting by then) — show the shell loader instead.
   if (!user) {
-    return null;
+    return <PageLoadingState />;
   }
 
   const normalizedRole = normalizeUserRole(user.role);
@@ -904,6 +913,21 @@ export const AppLayout = () => {
     </p>
   );
 
+  /**
+   * Parents see "Homework" / "Examination" (not "My Homework" / "My Examinations")
+   * — labels refer to their children's schoolwork, not personal "my" items.
+   */
+  const resolveNavLabel = (labelKey: string): string => {
+    if (normalizedRole === "PARENT") {
+      if (labelKey === "myHomework") return t("parentHomework");
+      if (labelKey === "myExaminations") return t("parentExaminations");
+      if (labelKey === "parentAttendance" || labelKey === "myAttendance") {
+        return t("parentAttendance");
+      }
+    }
+    return t(labelKey);
+  };
+
   const navTree = (
     <>
       {/* General */}
@@ -912,7 +936,7 @@ export const AppLayout = () => {
           {generalItems.map((item) =>
             renderNavLink(
               item,
-              t(item.labelKey),
+              resolveNavLabel(item.labelKey),
               closeMobile,
               navLinkUsesEnd(item.path),
               unreadCount,
@@ -928,7 +952,7 @@ export const AppLayout = () => {
           {myWorkItems.map((item) =>
             renderNavLink(
               item,
-              t(item.labelKey),
+              resolveNavLabel(item.labelKey),
               closeMobile,
               navLinkUsesEnd(item.path),
               unreadCount,
@@ -1176,6 +1200,9 @@ export const AppLayout = () => {
           <main className="min-w-0 flex-1 overflow-x-auto px-4 py-6 sm:px-6 lg:px-8">
             <div className="app-shell-main-inner min-w-0">
               <ReadOnlyBanner />
+              {/* Keyed on the path so leaving a broken section clears the error by itself.
+                  Outside Suspense so it also catches lazy-chunk load failures. */}
+              <ErrorBoundary resetKey={location.pathname}>
               <Suspense fallback={<LoadingState />}>
                 {(() => {
                   // Super Admin unrestricted; Administrators honor module matrix when configured
@@ -1231,6 +1258,7 @@ export const AppLayout = () => {
                   return <Outlet />;
                 })()}
               </Suspense>
+              </ErrorBoundary>
             </div>
           </main>
         </div>

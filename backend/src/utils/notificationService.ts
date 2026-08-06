@@ -129,6 +129,8 @@ export const notifyParentsOfStudent = async (
     })
   ).lean();
 
+  if (links.length === 0) return;
+
   await Promise.all(
     links.map((link) =>
       sendNotification({
@@ -138,10 +140,24 @@ export const notifyParentsOfStudent = async (
         message,
         type,
         channel,
-        metadata: { studentId }
+        metadata: { studentId },
+        // Avoid flooding parents when the same day is re-saved
+        dedupeHours: type === "ATTENDANCE" ? 12 : undefined
       })
     )
   );
+};
+
+/** Resolve student display name for parent-facing attendance messages. */
+export const getStudentDisplayName = async (studentId: string): Promise<string> => {
+  try {
+    const { Student } = await import("../models/Student.js");
+    const student = await Student.findById(studentId).populate("user", "fullName").lean();
+    const name = (student?.user as { fullName?: string } | null | undefined)?.fullName?.trim();
+    return name || "Your child";
+  } catch {
+    return "Your child";
+  }
 };
 
 export const getSchoolIdFromRequest = (req: Request): string => {

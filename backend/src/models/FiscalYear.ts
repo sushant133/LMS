@@ -9,7 +9,11 @@ const fiscalYearSchema = new Schema(
     isCurrent: { type: Boolean, default: false },
     isClosed: { type: Boolean, default: false },
     closedAt: { type: Date },
-    closedBy: { type: Schema.Types.ObjectId, ref: "User" }
+    closedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    /** Journal voucher that transferred this year's surplus to Accumulated Fund. */
+    closingEntryId: { type: Schema.Types.ObjectId, ref: "JournalEntry" },
+    /** Surplus (+) or deficit (−) transferred to Accumulated Fund at close. */
+    closingSurplusNpr: { type: Number }
   },
   { timestamps: true }
 );

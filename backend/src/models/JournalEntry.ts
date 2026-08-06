@@ -43,6 +43,13 @@ const journalEntrySchema = new Schema(
     referenceId: { type: Schema.Types.ObjectId },
     studentId: { type: Schema.Types.ObjectId, ref: "Student" },
     bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount" },
+    /**
+     * Year-end closing voucher (income/expense transferred to Accumulated Fund).
+     * Period statements exclude these so the year's income does not net to zero;
+     * the balance sheet includes them. Absent on all pre-existing entries, which
+     * read as false — exactly the old behaviour.
+     */
+    isClosingEntry: { type: Boolean, default: false },
     isReversal: { type: Boolean, default: false },
     /** True when a reversal entry has been posted against this original. */
     isReversed: { type: Boolean, default: false },

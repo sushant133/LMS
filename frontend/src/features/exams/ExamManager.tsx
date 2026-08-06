@@ -1,11 +1,11 @@
 import { parseBsDate } from "@munatech/nepali-datepicker";
 import {
   Suspense,
-  lazy,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { lazyWithRetry as lazy } from "lib/lazyWithRetry";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ClassRecord,
@@ -58,6 +58,11 @@ const TeacherRoutineList = lazy(() =>
 const PrintResultsPanel = lazy(() =>
   import("features/exams/PrintResultsPanel").then((module) => ({
     default: module.PrintResultsPanel,
+  })),
+);
+const PassedOutStudentsPanel = lazy(() =>
+  import("features/exams/PassedOutStudentsPanel").then((module) => ({
+    default: module.PassedOutStudentsPanel,
   })),
 );
 const ResultReviewPanel = lazy(() =>
@@ -430,7 +435,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   } | null>(null);
   const [selectedExamId, setSelectedExamId] = useState("");
   const [adminSection, setAdminSection] = useState<
-    "manage" | "print-results" | "enter-marks"
+    "manage" | "print-results" | "enter-marks" | "passed-out"
   >("manage");
   const [adminTab, setAdminTab] = useState<
     "routine" | "analytics" | "review" | "results"
@@ -1243,7 +1248,34 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                 Enter Marks
               </Button>
             ) : null}
+            {/* Character certificates are Admin / Super Admin only, matching the
+                /character-certificates route guard. */}
+            {canManage && isCollege ? (
+              <Button
+                size="sm"
+                variant={adminSection === "passed-out" ? "default" : "outline"}
+                onClick={() => setAdminSection("passed-out")}
+              >
+                Passed-Out Students
+              </Button>
+            ) : null}
           </div>
+
+          {adminSection === "passed-out" && canManage && isCollege ? (
+            <Suspense fallback={<LoadingState />}>
+              <PassedOutStudentsPanel
+                batches={(batchesQuery.data ?? []).map((batch) => ({
+                  ...batch,
+                  _id: String(batch._id),
+                }))}
+                years={(yearsQuery.data ?? []).map((year) => ({
+                  ...year,
+                  _id: String(year._id),
+                  batchId: year.batchId ? String(year.batchId) : undefined,
+                }))}
+              />
+            </Suspense>
+          ) : null}
 
           {adminSection === "enter-marks" && canManage ? (
             <Card>

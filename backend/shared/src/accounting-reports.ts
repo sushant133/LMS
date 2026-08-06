@@ -165,9 +165,20 @@ export const REPORT_COLUMNS: Record<AccountingReportType, ReportColumn[]> = {
     { key: "amountNpr", label: "Amount", format: "currency" }
   ],
   "cash-flow": [
-    { key: "cashInflowNpr", label: "Cash Inflow", format: "currency" },
-    { key: "cashOutflowNpr", label: "Cash Outflow", format: "currency" },
-    { key: "netCashFlowNpr", label: "Net Cash Flow", format: "currency" }
+    { key: "particulars", label: "Particulars" },
+    { key: "amountNpr", label: "Amount", format: "currency" }
+  ],
+  "receivables-aging": [
+    { key: "studentName", label: "Student" },
+    { key: "admissionNumber", label: "Admission No." },
+    { key: "phone", label: "Phone" },
+    { key: "lastPaymentDateBs", label: "Last Paid (BS)" },
+    { key: "daysOutstanding", label: "Days" },
+    { key: "current", label: "0–30", format: "currency" },
+    { key: "days31to60", label: "31–60", format: "currency" },
+    { key: "days61to90", label: "61–90", format: "currency" },
+    { key: "over90", label: "90+", format: "currency" },
+    { key: "outstandingNpr", label: "Total Due", format: "currency" }
   ],
   "student-ledger": [
     { key: "admissionNumber", label: "Admission No." },

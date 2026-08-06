@@ -158,16 +158,16 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
   {
     key: "attendance",
     label: "Attendance",
-    description: "Period / subject attendance marking",
-    apiPrefixes: ["/attendance"],
+    description: "Period / subject attendance marking and student early leave",
+    apiPrefixes: ["/attendance", "/student-early-leave"],
     routePrefixes: ["/attendance", "/attendance-view", "/attendance-register"],
     availableActions: ["view", "create", "edit", "approve", "export"]
   },
   {
     key: "daily-attendance",
     label: "Daily Attendance",
-    description: "Daily class attendance",
-    apiPrefixes: ["/daily-attendance", "/attendance-register"],
+    description: "Daily class attendance and student early leave",
+    apiPrefixes: ["/daily-attendance", "/attendance-register", "/student-early-leave"],
     routePrefixes: ["/daily-attendance", "/attendance", "/attendance-register"],
     availableActions: ["view", "create", "edit", "approve", "export"]
   },

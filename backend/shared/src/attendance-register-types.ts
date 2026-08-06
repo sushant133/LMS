@@ -10,6 +10,7 @@ export const ATTENDANCE_REGISTER_CODE_MAP: Record<string, string> = {
   LEAVE: "L",
   LATE: "Late",
   MEDICAL_LEAVE: "L",
+  EARLY_LEAVE: "EL",
   HALF_DAY: "HD",
   OFFICIAL_DUTY: "OD",
   HOLIDAY: "H",
@@ -19,7 +20,8 @@ export const ATTENDANCE_REGISTER_CODE_MAP: Record<string, string> = {
   MORNING_DUTY: "M",
   EMERGENCY_DUTY: "F",
   HD: "HD",
-  OD: "OD"
+  OD: "OD",
+  EL: "EL"
 };
 
 export type AttendanceRegisterTab = "STUDENT" | "TEACHER" | "STAFF";
@@ -147,6 +149,7 @@ export const ATTENDANCE_REGISTER_STATUS_LABELS: Record<string, string> = {
   LEAVE: "Leave",
   LATE: "Late",
   MEDICAL_LEAVE: "Medical Leave",
+  EARLY_LEAVE: "Early Leave",
   HALF_DAY: "Half Day",
   OFFICIAL_DUTY: "Official Duty",
   HOLIDAY: "Holiday",

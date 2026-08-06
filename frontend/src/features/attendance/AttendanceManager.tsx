@@ -42,14 +42,16 @@ const statuses: AttendanceStatus[] = [
   "LEAVE",
   "LATE",
   "MEDICAL_LEAVE",
+  "EARLY_LEAVE",
 ];
 
-const statusBadgeStyles: Record<AttendanceStatus, string> = {
+const statusBadgeStyles: Record<string, string> = {
   PRESENT: "bg-brand-100 text-brand-800",
   ABSENT: "bg-rose-100 text-rose-800",
   LATE: "bg-amber-100 text-amber-800",
   LEAVE: "bg-sky-100 text-sky-800",
   MEDICAL_LEAVE: "bg-violet-100 text-violet-800",
+  EARLY_LEAVE: "bg-orange-100 text-orange-900",
 };
 
 const StatusBadge = ({

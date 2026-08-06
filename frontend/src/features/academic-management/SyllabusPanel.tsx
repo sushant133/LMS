@@ -42,6 +42,7 @@ import {
   nepaliStructuralLabels,
   nepaliTextClass,
 } from "lib/nepaliSubject";
+import { openAuthenticatedAttachment } from "lib/attachments";
 import { printElementById } from "lib/printUtils";
 import { cn, parseErrorMessage } from "lib/utils";
 import {
@@ -1523,14 +1524,24 @@ export const SyllabusPanel = ({
             </p>
           ) : null}
           {plan.attachmentUrl ? (
-            <a
-              href={plan.attachmentUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
               className="text-sm text-brand-700 hover:underline no-print"
+              onClick={() => {
+                void openAuthenticatedAttachment(
+                  plan.attachmentUrl!,
+                  "syllabus-attachment",
+                ).catch((e) =>
+                  toast.error(
+                    e instanceof Error
+                      ? e.message
+                      : "Could not open attachment",
+                  ),
+                );
+              }}
             >
               View attachment
-            </a>
+            </button>
           ) : null}
           <div className="no-print">
             <AcademicCommentsPanel

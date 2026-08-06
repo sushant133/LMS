@@ -118,9 +118,23 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
     filter.academicStatus = "ACTIVE";
   }
 
+  /**
+   * Library / Accounting pickers pass loginActive=1 (or true) so disabled
+   * portal accounts never appear for book issue or fee collection.
+   * Student list admin UI does NOT pass this — admins still see disabled students.
+   */
+  const loginActiveOnly = ["1", "true", "yes"].includes(
+    String(req.query.loginActive ?? req.query.excludeInactiveLogin ?? "")
+      .trim()
+      .toLowerCase()
+  );
+
   // Always populate academic group labels for roster filters (library issue, etc.)
   const students = await Student.find(filter)
-    .populate("user", limitedView ? "fullName role" : "-password")
+    .populate(
+      "user",
+      limitedView ? "fullName role isActive" : "-password"
+    )
     .populate("batchId", "name")
     .populate("yearId", "name level batchId")
     .populate("classId", "name")
@@ -128,7 +142,14 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
     .sort(isTeacher ? { rollNumber: 1, createdAt: -1 } : { createdAt: -1 });
 
   // Drop orphaned rows where the linked User was deleted (populate returns null)
-  const linked = students.filter((student) => Boolean(student.user));
+  let linked = students.filter((student) => Boolean(student.user));
+
+  if (loginActiveOnly) {
+    linked = linked.filter((student) => {
+      const u = student.user as { isActive?: boolean } | null | undefined;
+      return u != null && u.isActive !== false;
+    });
+  }
 
   if (limitedView) {
     return sendSuccess(

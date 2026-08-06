@@ -7,6 +7,7 @@ import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Badge } from "components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { FieldDutyPortalPanel } from "features/attendance/FieldDutyPortalPanel";
+import { ParentAttendancePanel } from "features/parent/ParentAttendancePanel";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useParentPortalAccess } from "hooks/useParentPortalAccess";
 import { api, unwrap } from "lib/api";
@@ -62,7 +63,13 @@ export const ParentPortal = () => {
     );
   }
 
-  if (!showOverview && !showHomework && !showNotifications && !showField) {
+  if (
+    !showOverview &&
+    !showAttendance &&
+    !showHomework &&
+    !showNotifications &&
+    !showField
+  ) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -206,6 +213,8 @@ export const ParentPortal = () => {
           </div>
         )
       ) : null}
+
+      {showAttendance ? <ParentAttendancePanel embedded /> : null}
 
       {showField
         ? children.map((child) => (

@@ -21,6 +21,8 @@ export type TimetableConflictInput = {
   yearId?: string;
   /** Exclude self on update (required for edits) */
   excludeId?: string;
+  /** Exclude multiple slots (bulk period time change across days) */
+  excludeIds?: string[];
 };
 
 /** Exam / break / holiday may overlay regular teaching slots. */
@@ -124,12 +126,15 @@ export const assertNoTimetableConflicts = async (
     .populate("subjectId", "name")
     .lean();
 
-  const exclude =
-    input.excludeId && mongoose.Types.ObjectId.isValid(input.excludeId)
-      ? String(input.excludeId)
-      : input.excludeId
-        ? String(input.excludeId)
-        : "";
+  const excludeSet = new Set<string>();
+  if (input.excludeId) {
+    excludeSet.add(String(input.excludeId));
+  }
+  if (input.excludeIds?.length) {
+    for (const id of input.excludeIds) {
+      if (id) excludeSet.add(String(id));
+    }
+  }
 
   const inputType = (input.sessionType ?? "THEORY").toUpperCase();
   const inputIsTeaching = isTeachingSession(inputType);
@@ -142,8 +147,8 @@ export const assertNoTimetableConflicts = async (
   const inputTeacher = String(input.teacherId ?? "").trim();
 
   for (const other of candidates) {
-    // Always skip the slot being edited
-    if (exclude && String(other._id) === exclude) {
+    // Always skip the slot(s) being edited
+    if (excludeSet.has(String(other._id))) {
       continue;
     }
 

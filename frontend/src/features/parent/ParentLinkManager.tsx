@@ -51,6 +51,15 @@ type ParentLinkRecord = {
   createdAt?: string;
 };
 
+type ParentUserRecord = {
+  _id: string;
+  fullName: string;
+  email: string;
+  phone?: string;
+  isActive?: boolean;
+  createdAt?: string;
+};
+
 type PendingRegistrationRecord = ParentLinkRecord;
 
 const relationshipLabels: Record<ParentFromStudentRelationship, string> = {
@@ -91,10 +100,17 @@ export const ParentLinkManager = () => {
 
   const parentsQuery = useQuery({
     queryKey: ["parent-users"],
-    queryFn: () =>
-      unwrap<Array<{ _id: string; fullName: string; email: string }>>(
-        api.get("/parent/users"),
-      ),
+    queryFn: () => unwrap<ParentUserRecord[]>(api.get("/parent/users")),
+  });
+
+  const [editingParentId, setEditingParentId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+    password: "",
+    confirmPassword: "",
+    isActive: true,
   });
   const studentsQuery = useQuery({
     queryKey: ["students"],
@@ -286,6 +302,83 @@ export const ParentLinkManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const updateParent = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: {
+        fullName: string;
+        email: string;
+        phone?: string;
+        password?: string;
+        isActive: boolean;
+      };
+    }) => unwrap<ParentUserRecord>(api.put(`/parent/users/${id}`, payload)),
+    onSuccess: async () => {
+      toast.success("Parent account updated");
+      setEditingParentId(null);
+      await invalidateParentData();
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const deleteParent = useMutation({
+    mutationFn: (id: string) => unwrap(api.delete(`/parent/users/${id}`)),
+    onSuccess: async (_data, id) => {
+      toast.success("Parent account deleted");
+      if (editingParentId === id) setEditingParentId(null);
+      if (accessParentId === id) setAccessParentId("");
+      await invalidateParentData();
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const startEditParent = (parent: ParentUserRecord) => {
+    setEditingParentId(parent._id);
+    setEditForm({
+      fullName: parent.fullName ?? "",
+      email: parent.email ?? "",
+      phone: parent.phone ?? "",
+      password: "",
+      confirmPassword: "",
+      isActive: parent.isActive !== false,
+    });
+  };
+
+  const submitEditParent = () => {
+    if (!editingParentId) return;
+    if (!editForm.fullName.trim()) {
+      toast.error("Full name is required");
+      return;
+    }
+    if (!editForm.email.trim()) {
+      toast.error("Login ID is required");
+      return;
+    }
+    if (editForm.password.trim()) {
+      const passwordError = validatePortalPassword(
+        editForm.password,
+        editForm.confirmPassword,
+      );
+      if (passwordError) {
+        toast.error(passwordError);
+        return;
+      }
+    }
+    updateParent.mutate({
+      id: editingParentId,
+      payload: {
+        fullName: editForm.fullName.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim() || undefined,
+        password: editForm.password.trim() || undefined,
+        isActive: editForm.isActive,
+      },
+    });
+  };
+
   const selectedStudent = useMemo(
     () =>
       (studentsQuery.data ?? []).find(
@@ -337,18 +430,200 @@ export const ParentLinkManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Parent Management"
-        description="Link parent accounts to students, approve registrations, and choose which portal sections parents can use."
+        description="Manage parent accounts, student-related module access, student links, and registrations (College Admin & Super Admin)."
       />
 
       {canManage ? (
         <Card>
           <CardHeader>
-            <CardTitle>Parent portal module access</CardTitle>
+            <CardTitle>Parent accounts</CardTitle>
             <p className="mt-1 text-sm text-slate-500">
-              Set which portal sections each parent can use (homework, results,
-              fees, notices, and more). You can give different parents different
-              access. School defaults apply when a parent has no personal
-              settings.
+              Edit or delete parent login accounts. Use{" "}
+              <strong>Modules</strong> for student-account access only
+              (attendance, fees, homework, examination, etc.).
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(parentsQuery.data ?? []).length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No parent accounts yet. Create one from student details or
+                approve a self-registration.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHead>
+                    <tr>
+                      <Th>Name</Th>
+                      <Th>Login ID</Th>
+                      <Th>Phone</Th>
+                      <Th>Status</Th>
+                      <Th className="text-right">Actions</Th>
+                    </tr>
+                  </TableHead>
+                  <TableBody>
+                    {(parentsQuery.data ?? []).map((parent) => {
+                      const active = parent.isActive !== false;
+                      return (
+                        <tr key={parent._id}>
+                          <Td className="font-medium text-slate-900">
+                            {parent.fullName}
+                          </Td>
+                          <Td className="font-mono text-sm">{parent.email}</Td>
+                          <Td>{parent.phone || "—"}</Td>
+                          <Td>
+                            <Badge
+                              className={
+                                active
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-rose-100 text-rose-800"
+                              }
+                            >
+                              {active ? "Active" : "Disabled"}
+                            </Badge>
+                          </Td>
+                          <Td>
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setAccessParentId(parent._id);
+                                  document
+                                    .getElementById("parent-module-access")
+                                    ?.scrollIntoView({ behavior: "smooth" });
+                                }}
+                              >
+                                Modules
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => startEditParent(parent)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={deleteParent.isPending}
+                                onClick={() => {
+                                  if (
+                                    !window.confirm(
+                                      `Permanently delete parent account "${parent.fullName}" (${parent.email})?\n\nThis removes their login and all student links. This cannot be undone.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  deleteParent.mutate(parent._id);
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {editingParentId ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  Edit parent account
+                </p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Full name">
+                    <Input
+                      value={editForm.fullName}
+                      onChange={(e) =>
+                        setEditForm((c) => ({ ...c, fullName: e.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Login ID">
+                    <Input
+                      value={editForm.email}
+                      onChange={(e) =>
+                        setEditForm((c) => ({ ...c, email: e.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Phone">
+                    <Input
+                      value={editForm.phone}
+                      onChange={(e) =>
+                        setEditForm((c) => ({ ...c, phone: e.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Account status">
+                    <Select
+                      value={editForm.isActive ? "ACTIVE" : "DISABLED"}
+                      onChange={(e) =>
+                        setEditForm((c) => ({
+                          ...c,
+                          isActive: e.target.value === "ACTIVE",
+                        }))
+                      }
+                    >
+                      <option value="ACTIVE">Active (can log in)</option>
+                      <option value="DISABLED">Disabled (cannot log in)</option>
+                    </Select>
+                  </FormField>
+                </div>
+                <PortalLoginFields
+                  email={editForm.email}
+                  password={editForm.password}
+                  confirmPassword={editForm.confirmPassword}
+                  onPasswordChange={(value) =>
+                    setEditForm((c) => ({ ...c, password: value }))
+                  }
+                  onConfirmPasswordChange={(value) =>
+                    setEditForm((c) => ({ ...c, confirmPassword: value }))
+                  }
+                  showReset={false}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={updateParent.isPending}
+                    onClick={submitEditParent}
+                  >
+                    {updateParent.isPending ? "Saving…" : "Save changes"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditingParentId(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {canManage ? (
+        <Card id="parent-module-access">
+          <CardHeader>
+            <CardTitle>Parent module access (student accounts only)</CardTitle>
+            <p className="mt-1 text-sm text-slate-500">
+              Parents only get access to their linked children&apos;s student
+              account data — attendance, fees, homework, examination, timetable,
+              library, and related alerts. Staff ERP modules are never included.
+              Super Admin and College Admin can set school defaults or custom
+              access per parent.
             </p>
           </CardHeader>
           <CardContent className="space-y-5">

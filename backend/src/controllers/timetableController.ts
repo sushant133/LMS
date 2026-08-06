@@ -390,3 +390,158 @@ export const deleteTimetableSlot = asyncHandler(async (req: Request, res: Respon
   if (!slot) throw new ApiError(404, "Timetable slot not found");
   return sendSuccess(res, "Timetable slot deleted");
 });
+
+/**
+ * Change start/end time for a full period column across all weekdays
+ * in one academic group (batch+year or class+section).
+ *
+ * Matches slots by the column's current startTime+endTime (what the grid shows).
+ */
+export const bulkUpdatePeriodTimes = asyncHandler(async (req: Request, res: Response) => {
+  if (req.user?.role === "TEACHER") {
+    // Teachers may not bulk-edit the full week column (admin/college admin only)
+    throw new ApiError(403, "Only college admin can change period times for the full week");
+  }
+
+  const body = req.body as {
+    academicYearBs?: string;
+    batchId?: string;
+    yearId?: string;
+    classId?: string;
+    sectionId?: string;
+    oldStartTime?: string;
+    oldEndTime?: string;
+    newStartTime?: string;
+    newEndTime?: string;
+  };
+
+  const academicYearBs = String(body.academicYearBs ?? "").trim();
+  const oldStartTime = String(body.oldStartTime ?? "").trim();
+  const oldEndTime = String(body.oldEndTime ?? "").trim();
+  const newStartTime = String(body.newStartTime ?? "").trim();
+  const newEndTime = String(body.newEndTime ?? "").trim();
+  const batchId = String(body.batchId ?? "").trim();
+  const yearId = String(body.yearId ?? "").trim();
+  const classId = String(body.classId ?? "").trim();
+  const sectionId = String(body.sectionId ?? "").trim();
+
+  const timeRe = /^\d{2}:\d{2}$/;
+  if (!academicYearBs) throw new ApiError(400, "Academic year is required");
+  if (!timeRe.test(oldStartTime) || !timeRe.test(oldEndTime)) {
+    throw new ApiError(400, "Current period times are invalid");
+  }
+  if (!timeRe.test(newStartTime) || !timeRe.test(newEndTime)) {
+    throw new ApiError(400, "New times must be HH:MM (24-hour)");
+  }
+  const toMin = (t: string) => {
+    const [h, m] = t.split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  if (toMin(newStartTime) >= toMin(newEndTime)) {
+    throw new ApiError(400, "End time must be after start time");
+  }
+  if (oldStartTime === newStartTime && oldEndTime === newEndTime) {
+    throw new ApiError(400, "New times are the same as the current times");
+  }
+
+  const institutionType = await getInstitutionType(req);
+  const college = isCollege(institutionType);
+  validateTimetableScope(institutionType, {
+    batchId: batchId || undefined,
+    yearId: yearId || undefined,
+    classId: classId || undefined,
+    sectionId: sectionId || undefined
+  });
+
+  const schoolId = tenantObjectId(req);
+  const filter: Record<string, unknown> = {
+    schoolId,
+    academicYearBs,
+    startTime: oldStartTime,
+    endTime: oldEndTime
+  };
+  if (college) {
+    if (!batchId || !yearId) {
+      throw new ApiError(400, "Batch and year are required to change period times");
+    }
+    filter.batchId = batchId;
+    filter.yearId = yearId;
+  } else {
+    if (!classId || !sectionId) {
+      throw new ApiError(400, "Class and section are required to change period times");
+    }
+    filter.classId = classId;
+    filter.sectionId = sectionId;
+  }
+
+  const slots = await TimetableSlot.find(filter).lean();
+  if (slots.length === 0) {
+    throw new ApiError(
+      404,
+      `No timetable slots found for ${oldStartTime}–${oldEndTime} in this group`
+    );
+  }
+
+  const excludeIds = slots.map((s) => s._id.toString());
+
+  // Conflict-check each day with the new times (skip the whole column being moved)
+  for (const slot of slots) {
+    const sessionType =
+      (slot as { sessionType?: string }).sessionType ?? "THEORY";
+    const soft = isSoftSession(sessionType);
+    const nextPeriod = soft
+      ? periodNumberFromStartTime(newStartTime)
+      : slot.periodNumber;
+
+    await assertNoTimetableConflicts({
+      schoolId,
+      academicYearBs,
+      dayOfWeek: slot.dayOfWeek,
+      periodNumber: nextPeriod,
+      startTime: newStartTime,
+      endTime: newEndTime,
+      teacherId: slot.teacherId?.toString() ?? "",
+      subjectId: slot.subjectId?.toString(),
+      room: slot.room ?? undefined,
+      roomKind: (slot as { roomKind?: string }).roomKind,
+      sessionType,
+      classId: slot.classId?.toString(),
+      sectionId: slot.sectionId?.toString(),
+      batchId: slot.batchId?.toString(),
+      yearId: slot.yearId?.toString(),
+      excludeIds
+    });
+  }
+
+  // Apply updates one-by-one so BREAK/HOLIDAY get synthetic period numbers
+  let updatedCount = 0;
+  for (const slot of slots) {
+    const sessionType =
+      (slot as { sessionType?: string }).sessionType ?? "THEORY";
+    const soft = isSoftSession(sessionType);
+    const nextPeriod = soft
+      ? periodNumberFromStartTime(newStartTime)
+      : slot.periodNumber;
+
+    await TimetableSlot.updateOne(
+      { _id: slot._id, schoolId },
+      {
+        $set: {
+          startTime: newStartTime,
+          endTime: newEndTime,
+          periodNumber: nextPeriod
+        }
+      }
+    );
+    updatedCount += 1;
+  }
+
+  return sendSuccess(res, "Period times updated for the full week", {
+    updatedCount,
+    oldStartTime,
+    oldEndTime,
+    newStartTime,
+    newEndTime,
+    daysUpdated: [...new Set(slots.map((s) => s.dayOfWeek))].length
+  });
+});

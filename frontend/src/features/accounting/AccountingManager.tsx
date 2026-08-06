@@ -55,6 +55,7 @@ import {
   Banknote,
   BarChart3,
   BookMarked,
+  Building2,
   FileText,
   Landmark,
   LayoutDashboard,
@@ -63,9 +64,11 @@ import {
   Receipt,
   Shield,
   ShoppingCart,
+  Target,
   Trash2,
   TrendingDown,
   TrendingUp,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
@@ -96,7 +99,10 @@ import {
   emptyIdsToUndefined,
   getSalaryEmployeeLabel,
 } from "./accountingFormUtils";
+import { BankReconciliationPanel } from "./BankReconciliationPanel";
+import { BudgetPanel } from "./BudgetPanel";
 import { ChartOfAccountsPanel } from "./ChartOfAccountsPanel";
+import { FixedAssetsPanel } from "./FixedAssetsPanel";
 import { JournalEntriesPanel } from "./JournalEntriesPanel";
 import { LedgerPanel } from "./LedgerPanel";
 import { StudentFeeRecordsPanel } from "./StudentFeeRecordsPanel";
@@ -130,6 +136,9 @@ type Tab =
   | "income"
   | "ledger"
   | "chart-of-accounts"
+  | "fixed-assets"
+  | "bank-reconciliation"
+  | "budget"
   | "journal-entries"
   | "reports";
 
@@ -144,6 +153,9 @@ const accountingTabs: Tab[] = [
   "income",
   "ledger",
   "chart-of-accounts",
+  "fixed-assets",
+  "bank-reconciliation",
+  "budget",
   "journal-entries",
   "reports",
 ];
@@ -164,6 +176,9 @@ const tabs: Array<{
   { id: "income", label: "Income", icon: TrendingUp },
   { id: "ledger", label: "Ledger", icon: BookMarked },
   { id: "chart-of-accounts", label: "Chart of Accounts", icon: Landmark },
+  { id: "fixed-assets", label: "Fixed Assets & Depreciation", icon: Building2 },
+  { id: "bank-reconciliation", label: "Bank Reconciliation", icon: Wallet },
+  { id: "budget", label: "Budget vs Actual", icon: Target },
   {
     id: "journal-entries",
     label: "Journal Entries (गोश्वारा भौचर)",
@@ -175,6 +190,12 @@ const tabs: Array<{
 /** Practical college reports — one Reports module (filters + export) */
 const reportTypes = [
   { id: "ledger", label: "Ledger Report" },
+  // Statutory statements — served by /accounting/ledger-reports/:reportType
+  { id: "trial-balance", label: "Trial Balance", ledger: true },
+  { id: "balance-sheet", label: "Balance Sheet", ledger: true },
+  { id: "income-expenditure", label: "Income & Expenditure", ledger: true },
+  { id: "cash-flow", label: "Cash Flow Statement", ledger: true },
+  { id: "receivables-aging", label: "Receivables Aging", ledger: true },
   { id: "daily-fee-collection", label: "Student Fee Report (Daily)" },
   { id: "monthly-fee-collection", label: "Student Fee Report (Monthly)" },
   { id: "salary-payments", label: "Salary Report" },
@@ -484,8 +505,12 @@ export const AccountingManager = () => {
   });
 
   const studentsQuery = useQuery({
-    queryKey: ["students"],
-    queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    // Exclude disabled login accounts from fee collection pickers
+    queryKey: ["students", "login-active"],
+    queryFn: () =>
+      unwrap<StudentRecord[]>(
+        api.get("/students", { params: { loginActive: "1" } }),
+      ),
     enabled: false,
   });
 
@@ -3581,6 +3606,13 @@ export const AccountingManager = () => {
       {tab === "chart-of-accounts" ? (
         <ChartOfAccountsPanel isAdmin={isAdmin} />
       ) : null}
+      {tab === "fixed-assets" ? (
+        <FixedAssetsPanel canWrite={canWrite && !isCashier} isAdmin={isAdmin} />
+      ) : null}
+      {tab === "bank-reconciliation" ? (
+        <BankReconciliationPanel canWrite={canWrite && !isCashier} />
+      ) : null}
+      {tab === "budget" ? <BudgetPanel isAdmin={isAdmin} /> : null}
       {tab === "journal-entries" ? (
         <JournalEntriesPanel
           canWrite={canWrite && !isCashier}

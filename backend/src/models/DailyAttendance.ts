@@ -5,7 +5,7 @@ const dailyAttendanceEntrySchema = new Schema(
     studentId: { type: Schema.Types.ObjectId, ref: "Student", required: true },
     status: {
       type: String,
-      enum: ["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE"],
+      enum: ["PRESENT", "ABSENT", "LEAVE", "LATE", "MEDICAL_LEAVE", "EARLY_LEAVE"],
       required: true
     },
     remarks: { type: String, default: "" }

@@ -43,6 +43,10 @@ import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
 import {
+  assertStudentLoginActive,
+  filterLoginActiveStudents
+} from "../utils/studentLoginAccess.js";
+import {
   applyScholarshipAwardToYearCollections,
   buildProgramYearFeeSummary,
   calculateFeeTotals,
@@ -52,7 +56,6 @@ import {
   defaultCoversYearFromTopped,
   ensureActiveScholarshipAwardsApplied,
   filterOutOpeningTuitionCharges,
-  generateReceiptNumber,
   PROGRAM_YEAR_LABELS,
   recalculateStudentFeesDue,
   reverseScholarshipAwardFromCollections
@@ -60,6 +63,7 @@ import {
 import { getLatestCashBalance, recordCashEntry, reverseCashEntry } from "../utils/accountingCashBook.js";
 import { getFiscalYearFromBsDate } from "../utils/fiscalYear.js";
 import { generateReceiptVerificationCode } from "../utils/receiptVerification.js";
+import { nextVoucherNumber, nextVoucherNumberForDate } from "../utils/voucherNumbering.js";
 import {
   postExpenseJournal,
   postFeeCollectionJournal,
@@ -484,12 +488,15 @@ export const listStudentAccounts = asyncHandler(async (req: Request, res: Respon
   const institutionType = await getInstitutionType(req);
   const college = isCollege(institutionType);
 
-  const [students, primaryGroups, secondaryGroups, collections] = await Promise.all([
+  const [studentsRaw, primaryGroups, secondaryGroups, collections] = await Promise.all([
     Student.find({ schoolId }).populate("user", "-password").sort({ rollNumber: 1 }).lean(),
     college ? Batch.find({ schoolId }).lean() : SchoolClass.find({ schoolId }).lean(),
     college ? Year.find({ schoolId }).lean() : Section.find({ schoolId }).lean(),
     FeeCollection.find({ schoolId, isDeleted: false }).lean()
   ]);
+
+  // Hide students whose portal login is disabled (User.isActive === false)
+  const students = filterLoginActiveStudents(studentsRaw);
 
   const primaryMap = new Map(primaryGroups.map((item) => [item._id.toString(), item.name]));
   const secondaryMap = new Map(secondaryGroups.map((item) => [item._id.toString(), item.name]));
@@ -800,6 +807,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
   const settings = await getOrCreateSettings(schoolId);
   const studentExists = await Student.findOne({ _id: payload.studentId, schoolId }).select("_id").lean();
   if (!studentExists) throw new ApiError(404, "Student not found");
+  await assertStudentLoginActive(payload.studentId, schoolId, "recording fee payments");
 
   let structure = null;
   if (payload.feeStructureId) {
@@ -904,15 +912,17 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       lateFeeNpr
     });
 
-    const receiptCountQuery = FeeCollection.countDocuments({ schoolId });
-    if (session) receiptCountQuery.session(session);
-    const receiptCount = await receiptCountQuery;
-    // Random suffix reduces duplicate receipt numbers under concurrent cashiers
+    // Gap-free per-fiscal-year series from VoucherCounter. The old number came from
+    // countDocuments() plus a random suffix, which skipped numbers (voided receipts were
+    // still counted) and raced between concurrent cashiers.
     const receiptNumber =
       payload.receiptNumber?.trim() ||
-      (settings.autoReceiptNumber
-        ? `${generateReceiptNumber(settings.receiptPrefix, receiptCount + 1)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
-        : `RCPT-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`);
+      (await nextVoucherNumber({
+        schoolId,
+        prefix: settings.receiptPrefix,
+        fiscalYearBs,
+        session
+      }));
 
     const verificationCode = generateReceiptVerificationCode(
       schoolId.toString(),
@@ -1073,6 +1083,7 @@ export const createStudentScholarshipAward = asyncHandler(async (req: Request, r
   const schoolId = tenantObjectId(req);
   const student = await Student.findOne({ _id: payload.studentId, schoolId }).select("_id").lean();
   if (!student) throw new ApiError(404, "Student not found");
+  await assertStudentLoginActive(payload.studentId, schoolId, "recording scholarships");
 
   const coversProgramYear =
     payload.coversProgramYear ?? defaultCoversYearFromTopped(payload.toppedProgramYear);
@@ -1204,6 +1215,7 @@ export const updateStudentScholarshipAward = asyncHandler(async (req: Request, r
   if (payload.studentId) {
     const student = await Student.findOne({ _id: payload.studentId, schoolId }).select("_id").lean();
     if (!student) throw new ApiError(404, "Student not found");
+    await assertStudentLoginActive(payload.studentId, schoolId, "recording scholarships");
     award.studentId = student._id as typeof award.studentId;
   }
 
@@ -1888,15 +1900,20 @@ export const listExpenses = asyncHandler(async (req: Request, res: Response) => 
   return sendSuccess(res, "Expenses fetched", expenses);
 });
 
+/**
+ * Voucher number for the expense / purchase / income registers.
+ *
+ * These used to count the register's own documents and append random characters, so the
+ * series was neither sequential nor gap-free and two users saving at once could collide.
+ * Each prefix now owns an independent per-fiscal-year counter — which also fixes income
+ * records, where `INC` and `RCPT` were both derived from the same document count and so
+ * always moved in lockstep.
+ */
 const nextRegisterVoucher = async (
-  model: { countDocuments: (filter: Record<string, unknown>) => Promise<number> },
   schoolId: import("mongoose").Types.ObjectId,
-  prefix: string
-): Promise<string> => {
-  const count = await model.countDocuments({ schoolId });
-  const suffix = Math.random().toString(36).slice(2, 5).toUpperCase();
-  return `${prefix}-${String(count + 1).padStart(5, "0")}-${suffix}`;
-};
+  prefix: string,
+  dateBs: string
+): Promise<string> => nextVoucherNumberForDate({ schoolId, prefix, dateBs });
 
 export const createExpense = asyncHandler(async (req: Request, res: Response) => {
   const payload = accountingExpenseSchema.parse(req.body);
@@ -1906,7 +1923,7 @@ export const createExpense = asyncHandler(async (req: Request, res: Response) =>
   await assertFiscalPeriodOpen(schoolId, payload.dateBs);
   const voucherNumber =
     payload.voucherNumber?.trim() ||
-    (await nextRegisterVoucher(AccountingExpense, schoolId, "EXP"));
+    (await nextRegisterVoucher(schoolId, "EXP", payload.dateBs));
   const expense = await AccountingExpense.create({
     ...payload,
     vendor: payload.vendor?.trim() || "",
@@ -2019,7 +2036,7 @@ export const createPurchase = asyncHandler(async (req: Request, res: Response) =
   const totalAmountNpr = payload.quantity * payload.unitPriceNpr;
   const voucherNumber =
     payload.voucherNumber?.trim() ||
-    (await nextRegisterVoucher(AccountingPurchase, schoolId, "PUR"));
+    (await nextRegisterVoucher(schoolId, "PUR", payload.purchaseDateBs));
   const purchase = await AccountingPurchase.create({
     ...payload,
     totalAmountNpr,
@@ -2181,10 +2198,13 @@ export const createIncome = asyncHandler(async (req: Request, res: Response) => 
   await assertFiscalPeriodOpen(schoolId, payload.dateBs);
   const voucherNumber =
     payload.voucherNumber?.trim() ||
-    (await nextRegisterVoucher(AccountingIncome, schoolId, "INC"));
+    (await nextRegisterVoucher(schoolId, "INC", payload.dateBs));
+  // Non-fee income shares the fee receipt series, so every rupee received across the
+  // institution is covered by one continuous, gap-free receipt book.
+  const settings = await getOrCreateSettings(schoolId);
   const receiptNumber =
     payload.receiptNumber?.trim() ||
-    (await nextRegisterVoucher(AccountingIncome, schoolId, "RCPT"));
+    (await nextRegisterVoucher(schoolId, settings.receiptPrefix, payload.dateBs));
   const income = await AccountingIncome.create({
     ...payload,
     voucherNumber,
@@ -2575,6 +2595,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
           salaryId: existing._id,
           dateBs: payload.paidDateBs,
           amountNpr: calc.netSalaryNpr,
+          taxNpr: calc.tax1PercentNpr,
           paymentMethod: payload.paymentMethod,
           monthBs: payload.monthBs
         });
@@ -2604,6 +2625,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
           salaryId: created._id,
           dateBs: payload.paidDateBs,
           amountNpr: calc.netSalaryNpr,
+          taxNpr: calc.tax1PercentNpr,
           paymentMethod: payload.paymentMethod,
           monthBs: payload.monthBs
         });
@@ -2706,6 +2728,7 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
       salaryId: salary._id,
       dateBs: payload.paidDateBs,
       amountNpr: netSalaryNpr,
+      taxNpr: amounts.taxNpr,
       paymentMethod: payload.paymentMethod,
       monthBs: payload.monthBs
     });
@@ -2780,6 +2803,7 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
       salaryId: salary._id,
       dateBs: paidDateBs,
       amountNpr: netSalaryNpr,
+      taxNpr: amounts.taxNpr,
       paymentMethod: salary.paymentMethod,
       monthBs: salary.monthBs
     });

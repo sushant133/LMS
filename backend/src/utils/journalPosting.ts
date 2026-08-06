@@ -14,6 +14,7 @@ import { ChartOfAccount } from "../models/ChartOfAccount.js";
 import { JournalEntry } from "../models/JournalEntry.js";
 import { AccountingSettings } from "../models/AccountingSettings.js";
 import { getFiscalYearFromBsDate } from "./fiscalYear.js";
+import { nextVoucherNumber } from "./voucherNumbering.js";
 
 interface JournalLineInput {
   accountCode: string;
@@ -37,6 +38,8 @@ interface PostJournalParams {
   studentId?: Types.ObjectId | string;
   bankAccountId?: Types.ObjectId | string;
   isReversal?: boolean;
+  /** Year-end closing voucher — excluded from period statements, included in the balance sheet. */
+  isClosingEntry?: boolean;
   reversedEntryId?: Types.ObjectId | string;
   session?: ClientSession | null;
 }
@@ -58,48 +61,80 @@ const getPaymentAccountCode = (paymentMethod: string): string => {
 };
 
 /**
- * Seed missing system accounts without wiping custom ledgers.
- * Safe to call on every journal post (upsert by code).
+ * Schools whose default accounts have been seeded during this process.
+ *
+ * Seeding used to run on every single journal post — around forty upserts per receipt,
+ * all of them no-ops after the first time. The default chart only changes when the code
+ * changes, so seeding once per school per process is enough; a deploy that adds accounts
+ * seeds them on the first post after restart.
  */
-export const ensureDefaultChartOfAccounts = async (schoolId: Types.ObjectId): Promise<void> => {
-  for (const account of DEFAULT_CHART_OF_ACCOUNTS) {
-    await ChartOfAccount.updateOne(
-      { schoolId, code: account.code },
-      {
-        $setOnInsert: {
-          schoolId,
-          code: account.code,
-          name: account.name,
-          nameNp: account.nameNp,
-          accountType: account.accountType,
-          parentCode: account.parentCode,
-          isSystem: account.isSystem,
-          isActive: true
-        }
-      },
-      { upsert: true }
-    );
-  }
-};
+const seededSchools = new Set<string>();
 
-const getAccountName = async (schoolId: Types.ObjectId, code: string): Promise<string> => {
-  const account = await ChartOfAccount.findOne({ schoolId, code }).lean();
-  return account?.name ?? code;
-};
-
-const generateVoucherNumber = async (
+/**
+ * Seed missing system accounts without wiping custom ledgers.
+ * Idempotent: uses $setOnInsert so existing accounts are never overwritten.
+ */
+export const ensureDefaultChartOfAccounts = async (
   schoolId: Types.ObjectId,
-  prefix: string,
-  session?: ClientSession | null
-): Promise<string> => {
-  const countQuery = JournalEntry.countDocuments({ schoolId });
-  if (session) countQuery.session(session);
-  const count = await countQuery;
-  const year = new Date().getFullYear();
-  // Suffix reduces collision under concurrent cashiers even if count races
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `${prefix}-${year}-${String(count + 1).padStart(5, "0")}-${suffix}`;
+  options?: { force?: boolean }
+): Promise<void> => {
+  const key = schoolId.toString();
+  if (!options?.force && seededSchools.has(key)) return;
+
+  await ChartOfAccount.bulkWrite(
+    DEFAULT_CHART_OF_ACCOUNTS.map((account) => ({
+      updateOne: {
+        filter: { schoolId, code: account.code },
+        update: {
+          $setOnInsert: {
+            schoolId,
+            code: account.code,
+            name: account.name,
+            nameNp: account.nameNp,
+            accountType: account.accountType,
+            parentCode: account.parentCode,
+            isSystem: account.isSystem,
+            isActive: true
+          }
+        },
+        upsert: true
+      }
+    })),
+    { ordered: false }
+  );
+
+  seededSchools.add(key);
 };
+
+/**
+ * Resolve display names for many account codes in one query.
+ *
+ * Replaces a per-line `findOne`, which meant a fee receipt with five breakdown lines cost
+ * five extra round trips before the voucher could even be written.
+ */
+const resolveAccountNames = async (
+  schoolId: Types.ObjectId,
+  codes: string[],
+  session?: ClientSession | null
+): Promise<Map<string, string>> => {
+  const unique = Array.from(new Set(codes.filter(Boolean)));
+  if (unique.length === 0) return new Map();
+
+  const query = ChartOfAccount.find({ schoolId, code: { $in: unique } }).select("code name");
+  if (session) query.session(session);
+  const accounts = await query.lean();
+
+  return new Map(accounts.map((account) => [account.code, account.name]));
+};
+
+/**
+ * Marker for "let postJournalEntry look this name up".
+ *
+ * Every posting helper below used to fetch its own account names before building the
+ * voucher, which cost one query per line. Names are now resolved in a single batched
+ * lookup inside postJournalEntry, so helpers leave the field blank.
+ */
+const RESOLVE_NAME = "";
 
 export const postJournalEntry = async (params: PostJournalParams): Promise<typeof JournalEntry.prototype> => {
   await ensureDefaultChartOfAccounts(params.schoolId);
@@ -109,12 +144,14 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
   const settings = await settingsQuery.lean();
   const fiscalYearBs = getFiscalYearFromBsDate(params.dateBs, settings?.currentFiscalYearBs);
 
-  const resolvedLines = await Promise.all(
-    params.lines.map(async (line) => ({
-      ...line,
-      accountName: line.accountName || (await getAccountName(params.schoolId, line.accountCode))
-    }))
-  );
+  // Single lookup for every line that still needs a name, rather than one query per line.
+  const namesNeeded = params.lines.filter((line) => !line.accountName).map((line) => line.accountCode);
+  const nameMap = await resolveAccountNames(params.schoolId, namesNeeded, params.session);
+
+  const resolvedLines = params.lines.map((line) => ({
+    ...line,
+    accountName: line.accountName || nameMap.get(line.accountCode) || line.accountCode
+  }));
 
   const totalDebitNpr = resolvedLines.reduce((sum, line) => sum + line.debitNpr, 0);
   const totalCreditNpr = resolvedLines.reduce((sum, line) => sum + line.creditNpr, 0);
@@ -126,7 +163,13 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
   const voucherPrefix = settings?.voucherPrefix ?? "JV";
   const manualNo = params.voucherNumber?.trim();
   const voucherNumber =
-    manualNo || (await generateVoucherNumber(params.schoolId, voucherPrefix, params.session));
+    manualNo ||
+    (await nextVoucherNumber({
+      schoolId: params.schoolId,
+      prefix: voucherPrefix,
+      fiscalYearBs,
+      session: params.session
+    }));
 
   if (manualNo) {
     const existingQuery = JournalEntry.findOne({ schoolId: params.schoolId, voucherNumber: manualNo });
@@ -154,6 +197,7 @@ export const postJournalEntry = async (params: PostJournalParams): Promise<typeo
         studentId: params.studentId,
         bankAccountId: params.bankAccountId,
         isReversal: params.isReversal ?? false,
+        isClosingEntry: params.isClosingEntry ?? false,
         reversedEntryId: params.reversedEntryId,
         isPosted: true,
         createdBy: params.userId
@@ -306,7 +350,7 @@ export const postFeeCollectionJournal = async (params: {
   session?: ClientSession | null;
 }): Promise<void> => {
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
-  const paymentName = await getAccountName(params.schoolId, paymentAccount);
+  const paymentName = RESOLVE_NAME;
 
   const discountNpr = Math.max(0, params.discountNpr);
   const scholarshipNpr = Math.max(0, params.scholarshipNpr);
@@ -398,11 +442,6 @@ export const postFeeCollectionJournal = async (params: {
     });
   }
 
-  // Resolve account names
-  for (const line of incomeLines) {
-    line.accountName = await getAccountName(params.schoolId, line.accountCode);
-  }
-
   // Skip empty journal (e.g. pure scholarship with 0 cash and 0 deposit)
   if (cashDebit <= 0 && incomeLines.every((l) => l.debitNpr <= 0 && l.creditNpr <= 0)) {
     return;
@@ -465,14 +504,11 @@ export const postFeeRefundJournal = async (params: {
   isDepositRefund?: boolean;
 }): Promise<void> => {
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
-  const paymentName = await getAccountName(params.schoolId, paymentAccount);
+  const paymentName = RESOLVE_NAME;
 
   if (params.isDepositRefund) {
     // Dr Security deposit liability · Cr Cash/Bank
-    const liabilityName = await getAccountName(
-      params.schoolId,
-      SYSTEM_ACCOUNT_CODES.SECURITY_DEPOSIT_LIABILITY
-    );
+    const liabilityName = RESOLVE_NAME;
     await postJournalEntry({
       schoolId: params.schoolId,
       userId: params.userId,
@@ -504,10 +540,7 @@ export const postFeeRefundJournal = async (params: {
   }
 
   // Spec: Debit Refund Expense · Credit Cash/Bank
-  const refundExpenseName = await getAccountName(
-    params.schoolId,
-    SYSTEM_ACCOUNT_CODES.REFUND_EXPENSE
-  );
+  const refundExpenseName = RESOLVE_NAME;
 
   await postJournalEntry({
     schoolId: params.schoolId,
@@ -559,14 +592,14 @@ export const postExpenseJournal = async (params: {
     lines: [
       {
         accountCode: expenseCode,
-        accountName: await getAccountName(params.schoolId, expenseCode),
+        accountName: "",
         debitNpr: params.amountNpr,
         creditNpr: 0,
         description: params.category
       },
       {
         accountCode: paymentAccount,
-        accountName: await getAccountName(params.schoolId, paymentAccount),
+        accountName: "",
         debitNpr: 0,
         creditNpr: params.amountNpr,
         description: "Payment"
@@ -599,14 +632,14 @@ export const postIncomeJournal = async (params: {
     lines: [
       {
         accountCode: paymentAccount,
-        accountName: await getAccountName(params.schoolId, paymentAccount),
+        accountName: "",
         debitNpr: params.amountNpr,
         creditNpr: 0,
         description: "Receipt"
       },
       {
         accountCode: incomeCode,
-        accountName: await getAccountName(params.schoolId, incomeCode),
+        accountName: "",
         debitNpr: 0,
         creditNpr: params.amountNpr,
         description: params.category
@@ -637,14 +670,14 @@ export const postPurchaseJournal = async (params: {
   const creditLine: JournalLineInput = isPaid
     ? {
         accountCode: getPaymentAccountCode(params.paymentMethod),
-        accountName: await getAccountName(params.schoolId, getPaymentAccountCode(params.paymentMethod)),
+        accountName: "",
         debitNpr: 0,
         creditNpr: params.amountNpr,
         description: "Payment"
       }
     : {
         accountCode: SYSTEM_ACCOUNT_CODES.ACCOUNTS_PAYABLE,
-        accountName: await getAccountName(params.schoolId, SYSTEM_ACCOUNT_CODES.ACCOUNTS_PAYABLE),
+        accountName: "",
         debitNpr: 0,
         creditNpr: params.amountNpr,
         description: `Payable — ${params.vendor}`
@@ -658,7 +691,7 @@ export const postPurchaseJournal = async (params: {
     lines: [
       {
         accountCode: expenseCode,
-        accountName: await getAccountName(params.schoolId, expenseCode),
+        accountName: "",
         debitNpr: params.amountNpr,
         creditNpr: 0,
         description: params.category
@@ -696,14 +729,14 @@ export const postPurchasePaymentJournal = async (params: {
     lines: [
       {
         accountCode: apCode,
-        accountName: await getAccountName(params.schoolId, apCode),
+        accountName: "",
         debitNpr: params.amountNpr,
         creditNpr: 0,
         description: `Settle payable — ${params.vendor}`
       },
       {
         accountCode: paymentAccount,
-        accountName: await getAccountName(params.schoolId, paymentAccount),
+        accountName: "",
         debitNpr: 0,
         creditNpr: params.amountNpr,
         description: "Payment"
@@ -715,38 +748,71 @@ export const postPurchasePaymentJournal = async (params: {
   });
 };
 
+/**
+ * Salary payment journal.
+ *
+ * `amountNpr` is the NET paid to the employee and `taxNpr` the 1% tax withheld from them.
+ * Salary expense must be recognised GROSS (net + tax) with the withheld amount sitting in
+ * TDS Payable until it is deposited with the IRD — previously the whole voucher was posted
+ * at net, so salary expense was understated and the tax the institution had collected but
+ * not yet remitted appeared nowhere on the balance sheet.
+ *
+ * Cash/bank is still credited with the net amount only, so the cash book is unchanged.
+ * When `taxNpr` is zero or omitted the voucher is identical to the previous behaviour.
+ */
 export const postSalaryJournal = async (params: {
   schoolId: Types.ObjectId;
   userId: Types.ObjectId;
   salaryId: Types.ObjectId | string;
   dateBs: string;
+  /** Net salary actually paid out. */
   amountNpr: number;
+  /** Tax withheld from the employee (SalaryPayment.taxNpr). */
+  taxNpr?: number;
   paymentMethod: string;
   monthBs: string;
 }): Promise<void> => {
   const paymentAccount = getPaymentAccountCode(params.paymentMethod);
+  const netNpr = Math.max(0, params.amountNpr);
+  const taxNpr = Math.max(0, params.taxNpr ?? 0);
+  const grossNpr = Number((netNpr + taxNpr).toFixed(2));
+
+  const lines: JournalLineInput[] = [
+    {
+      accountCode: SYSTEM_ACCOUNT_CODES.SALARY_EXPENSE,
+      accountName: "",
+      debitNpr: grossNpr,
+      creditNpr: 0,
+      description: "Salary"
+    }
+  ];
+
+  if (taxNpr > 0) {
+    lines.push({
+      accountCode: SYSTEM_ACCOUNT_CODES.TDS_PAYABLE,
+      accountName: "",
+      debitNpr: 0,
+      creditNpr: taxNpr,
+      description: `Tax withheld — ${params.monthBs}`
+    });
+  }
+
+  if (netNpr > 0) {
+    lines.push({
+      accountCode: paymentAccount,
+      accountName: "",
+      debitNpr: 0,
+      creditNpr: netNpr,
+      description: "Payment"
+    });
+  }
 
   await postJournalEntry({
     schoolId: params.schoolId,
     userId: params.userId,
     dateBs: params.dateBs,
     narration: `Salary payment — ${params.monthBs}`,
-    lines: [
-      {
-        accountCode: SYSTEM_ACCOUNT_CODES.SALARY_EXPENSE,
-        accountName: await getAccountName(params.schoolId, SYSTEM_ACCOUNT_CODES.SALARY_EXPENSE),
-        debitNpr: params.amountNpr,
-        creditNpr: 0,
-        description: "Salary"
-      },
-      {
-        accountCode: paymentAccount,
-        accountName: await getAccountName(params.schoolId, paymentAccount),
-        debitNpr: 0,
-        creditNpr: params.amountNpr,
-        description: "Payment"
-      }
-    ],
+    lines,
     voucherType: "PAYMENT",
     referenceType: "SalaryPayment",
     referenceId: params.salaryId

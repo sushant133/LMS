@@ -5,15 +5,32 @@ type PageFormat = "a4-portrait" | "a4-landscape";
 
 const PRINT_CLEANUP_MS = 60_000;
 
+/** Safe class string — SVG nodes expose SVGAnimatedString, not string. */
+const getClassString = (el: Element): string => {
+  try {
+    return el.getAttribute("class") ?? "";
+  } catch {
+    return "";
+  }
+};
+
+const setClassString = (el: Element, next: string): void => {
+  if (next.trim()) el.setAttribute("class", next);
+  else el.removeAttribute("class");
+};
+
 const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.querySelectorAll(".no-print").forEach((node) => node.remove());
   // Drop utility classes that force non-layout (Tailwind `hidden` etc.)
   clone.classList.remove("hidden");
-  clone.className = clone.className
-    .split(/\s+/)
-    .filter((c) => c && c !== "hidden" && !c.startsWith("print:"))
-    .join(" ");
+  setClassString(
+    clone,
+    getClassString(clone)
+      .split(/\s+/)
+      .filter((c) => c && c !== "hidden" && !c.startsWith("print:"))
+      .join(" "),
+  );
   // Force a printable layout even when the source node is hidden/off-screen
   // (e.g. `hidden`, `fixed left-[-10000px]`, zero size).
   clone.style.setProperty("display", "block", "important");
@@ -32,7 +49,163 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   clone.style.overflow = "visible";
   clone.style.pointerEvents = "auto";
   clone.removeAttribute("aria-hidden");
+
+  // Sticky/fixed headers break html2canvas + print (ghost/faint top rows).
+  // Flatten positioning so thead paints solid and once (no media-query needed).
+  clone.querySelectorAll("*").forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const cls = getClassString(node);
+    if (/\bsticky\b|\bfixed\b/.test(cls)) {
+      setClassString(
+        node,
+        cls
+          .split(/\s+/)
+          .filter(
+            (c) =>
+              c &&
+              c !== "sticky" &&
+              c !== "fixed" &&
+              c !== "top-0" &&
+              c !== "left-0" &&
+              c !== "right-0" &&
+              c !== "bottom-0" &&
+              !/^z-\d+$/.test(c) &&
+              !c.startsWith("print:"),
+          )
+          .join(" "),
+      );
+      node.style.setProperty("position", "static", "important");
+      node.style.setProperty("top", "auto", "important");
+      node.style.setProperty("left", "auto", "important");
+      node.style.setProperty("z-index", "auto", "important");
+    }
+    // Ensure backgrounds/colors survive print & PDF rasterization
+    node.style.setProperty("-webkit-print-color-adjust", "exact", "important");
+    node.style.setProperty("print-color-adjust", "exact", "important");
+  });
+
+  // Timetable period header row: force solid dark fill + white text
+  // (browsers strip Tailwind bg unless color-adjust + inline colors).
+  clone.querySelectorAll<HTMLElement>("thead th, .tt-print-th").forEach((th) => {
+    const cls = getClassString(th);
+    const isBreak = cls.includes("amber") || /break/i.test(th.textContent ?? "");
+    const bg = isBreak ? "#92400e" : "#0f172a";
+    th.style.setProperty("background-color", bg, "important");
+    th.style.setProperty("color", "#ffffff", "important");
+    th.style.setProperty("border-color", "#000000", "important");
+    th.style.setProperty("-webkit-print-color-adjust", "exact", "important");
+    th.style.setProperty("print-color-adjust", "exact", "important");
+    th.querySelectorAll<HTMLElement>("*").forEach((child) => {
+      child.style.setProperty("color", "#ffffff", "important");
+    });
+  });
+
+  clone.querySelectorAll<HTMLElement>("tbody th.tt-print-day, tbody th").forEach((th) => {
+    const isSat = /saturday/i.test(th.textContent ?? "");
+    th.style.setProperty("background-color", isSat ? "#ffe4e6" : "#f1f5f9", "important");
+    th.style.setProperty("color", isSat ? "#4c0519" : "#0f172a", "important");
+    th.style.setProperty("border-color", "#000000", "important");
+    th.style.setProperty("-webkit-print-color-adjust", "exact", "important");
+    th.style.setProperty("print-color-adjust", "exact", "important");
+  });
+
   return clone;
+};
+
+/**
+ * Copy computed styles onto inline styles (browser resolves oklch → rgb).
+ * Required for html2canvas under Tailwind v4, which emits oklch() CSS that
+ * html2canvas cannot parse and throws on — breaking PDF/image export.
+ */
+const inlineComputedStylesForCanvas = (root: HTMLElement): void => {
+  const props = [
+    "display",
+    "position",
+    "box-sizing",
+    "width",
+    "min-width",
+    "max-width",
+    "height",
+    "min-height",
+    "max-height",
+    "margin",
+    "padding",
+    "border",
+    "border-collapse",
+    "border-spacing",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-color",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "border-width",
+    "border-style",
+    "border-radius",
+    "color",
+    "background-color",
+    "background",
+    "background-image",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "line-height",
+    "letter-spacing",
+    "text-align",
+    "text-transform",
+    "text-decoration",
+    "white-space",
+    "word-break",
+    "vertical-align",
+    "overflow",
+    "opacity",
+    "flex-direction",
+    "flex-wrap",
+    "justify-content",
+    "align-items",
+    "align-content",
+    "gap",
+    "row-gap",
+    "column-gap",
+    "grid-template-columns",
+    "table-layout",
+  ] as const;
+
+  const nodes: HTMLElement[] = [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
+  for (const el of nodes) {
+    const cs = window.getComputedStyle(el);
+    for (const prop of props) {
+      try {
+        const value = cs.getPropertyValue(prop);
+        if (!value) continue;
+        // Skip unresolved modern color functions if any remain
+        if (/oklch|oklab|color-mix|lab\(|lch\(/i.test(value)) continue;
+        el.style.setProperty(prop, value);
+      } catch {
+        /* ignore invalid props on this node */
+      }
+    }
+    el.style.setProperty("-webkit-print-color-adjust", "exact");
+    el.style.setProperty("print-color-adjust", "exact");
+  }
+};
+
+/** Strip stylesheets that crash html2canvas (Tailwind v4 oklch). Inline styles remain. */
+const stripModernColorStylesheets = (doc: Document): void => {
+  doc.querySelectorAll("style").forEach((styleEl) => {
+    const text = styleEl.textContent ?? "";
+    if (/oklch|oklab|color-mix\(/i.test(text)) {
+      styleEl.remove();
+    }
+  });
+  // External Tailwind bundles almost always contain oklch in v4
+  doc.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+    link.remove();
+  });
 };
 
 const yieldToUi = (): Promise<void> =>
@@ -108,6 +281,50 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         background: #ffffff;
         color: #000000;
         font-family: "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", "Mangal", sans-serif;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      *, *::before, *::after {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      /* Timetable: high-contrast period header (never wash out to white-on-white) */
+      .timetable-print-sheet,
+      .tt-print-grid {
+        color: #000000 !important;
+        background: #ffffff !important;
+      }
+      .tt-print-table {
+        border-collapse: collapse !important;
+        width: 100% !important;
+      }
+      .tt-print-table thead th,
+      .tt-print-th {
+        background-color: #0f172a !important;
+        color: #ffffff !important;
+        border: 1px solid #000000 !important;
+        font-weight: 700 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .tt-print-table thead th *,
+      .tt-print-th * {
+        color: #ffffff !important;
+      }
+      .tt-print-table tbody th,
+      .tt-print-day {
+        background-color: #f1f5f9 !important;
+        color: #0f172a !important;
+        border: 1px solid #000000 !important;
+        font-weight: 700 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .tt-print-table td {
+        border: 1px solid #000000 !important;
+      }
+      .sticky {
+        position: static !important;
       }
       @page {
         size: A4 ${isLandscape ? "landscape" : "portrait"};
@@ -380,13 +597,22 @@ const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
   clone.style.padding = isLandscape ? "10mm 12mm" : "12mm 14mm";
   clone.style.background = "#ffffff";
   clone.style.color = "#000000";
+  clone.style.boxSizing = "border-box";
 
   const wrapper = document.createElement("div");
+  // Keep on-screen but invisible so layout/fonts compute correctly (off-screen
+  // left:-10000px can yield 0×0 captures in some browsers).
   wrapper.style.position = "fixed";
-  wrapper.style.left = "-10000px";
+  wrapper.style.left = "0";
   wrapper.style.top = "0";
   wrapper.style.width = isLandscape ? "297mm" : "210mm";
+  wrapper.style.maxWidth = "100vw";
   wrapper.style.background = "#ffffff";
+  wrapper.style.opacity = "0";
+  wrapper.style.pointerEvents = "none";
+  wrapper.style.zIndex = "-1";
+  wrapper.style.overflow = "visible";
+  wrapper.setAttribute("aria-hidden", "true");
   wrapper.appendChild(clone);
   document.body.appendChild(wrapper);
 
@@ -397,6 +623,46 @@ type PdfExportOptions = {
   pageFormat?: PageFormat;
   /** Tight margins + avoid page breaks for single-page marksheets */
   singlePage?: boolean;
+};
+
+const html2canvasOptions = (clone: HTMLElement, scale: number) => ({
+  scale,
+  useCORS: true,
+  // Logos from other origins must not abort the whole export
+  allowTaint: true,
+  backgroundColor: "#ffffff",
+  logging: false,
+  scrollX: 0,
+  scrollY: 0,
+  windowWidth: Math.max(clone.scrollWidth, clone.offsetWidth, 800),
+  windowHeight: Math.max(clone.scrollHeight, clone.offsetHeight, 600),
+  onclone: (clonedDoc: Document) => {
+    stripModernColorStylesheets(clonedDoc);
+  },
+});
+
+/** Rasterize a prepared on-DOM clone to canvas (shared by PDF + image). */
+const rasterizeCloneToCanvas = async (
+  clone: HTMLElement,
+  scale = 2,
+): Promise<HTMLCanvasElement> => {
+  await waitForImages(clone);
+  await yieldToUi();
+  // Resolve Tailwind oklch → rgb and bake into inline styles before capture
+  inlineComputedStylesForCanvas(clone);
+  await yieldToUi();
+
+  const html2canvas = (await import("html2canvas")).default;
+  try {
+    return await html2canvas(clone, html2canvasOptions(clone, scale));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      message.includes("oklch") || message.includes("color")
+        ? "Could not render timetable for export (color styles). Try Print → Save as PDF instead."
+        : `Could not render export: ${message}`,
+    );
+  }
 };
 
 const createPdfBlobFromElement = async (
@@ -419,41 +685,44 @@ const createPdfBlobFromElement = async (
   }
 
   try {
-    await waitForImages(clone);
-    const { default: html2pdf } = await import("html2pdf.js");
-    // html2pdf option typings omit pagebreak / windowWidth — cast for single-page export
-    const pdfOptions = {
-      margin: singlePage
-        ? ([5, 6, 5, 6] as [number, number, number, number])
-        : isLandscape
-          ? ([10, 12, 10, 12] as [number, number, number, number])
-          : ([12, 14, 12, 14] as [number, number, number, number]),
-      image: { type: "jpeg" as const, quality: 0.98 },
-      html2canvas: {
-        scale: singlePage ? 2.2 : 2,
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: "#ffffff",
-        logging: false,
-        ...(singlePage ? { windowWidth: 794 } : {})
-      },
-      jsPDF: {
-        unit: "mm" as const,
-        format: "a4" as const,
-        orientation: (isLandscape ? "landscape" : "portrait") as
-          | "portrait"
-          | "landscape"
-      },
-      pagebreak: singlePage
-        ? { mode: ["avoid-all", "css", "legacy"] as string[] }
-        : { mode: ["css", "legacy"] as string[] }
-    };
-    return html2pdf()
-      .set(pdfOptions as never)
-      .from(clone)
-      .outputPdf("blob");
+    // Prefer direct canvas + jsPDF — more reliable than html2pdf with Tailwind v4
+    const canvas = await rasterizeCloneToCanvas(clone, singlePage ? 2.2 : 2);
+    if (!canvas.width || !canvas.height) {
+      throw new Error("Export produced an empty image — print view may be empty");
+    }
+
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({
+      unit: "mm",
+      format: "a4",
+      orientation: isLandscape ? "landscape" : "portrait",
+      compress: true,
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = singlePage ? 5 : isLandscape ? 8 : 10;
+    const usableWidth = pageWidth - margin * 2;
+    const imgHeight = (canvas.height * usableWidth) / canvas.width;
+    const imgData = canvas.toDataURL("image/jpeg", 0.92);
+
+    let heightLeft = imgHeight;
+    let y = margin;
+    pdf.addImage(imgData, "JPEG", margin, y, usableWidth, imgHeight);
+    heightLeft -= pageHeight - margin * 2;
+
+    while (heightLeft > 1) {
+      y = margin - (imgHeight - heightLeft);
+      pdf.addPage();
+      pdf.addImage(imgData, "JPEG", margin, y, usableWidth, imgHeight);
+      heightLeft -= pageHeight - margin * 2;
+    }
+
+    return pdf.output("blob");
   } finally {
-    document.body.removeChild(wrapper);
+    if (wrapper.parentNode) {
+      wrapper.parentNode.removeChild(wrapper);
+    }
   }
 };
 
@@ -474,19 +743,55 @@ export const printElementById = async (elementId: string, _title?: string): Prom
 export const downloadPdfFromElementById = async (elementId: string, filename: string): Promise<void> => {
   const element = document.getElementById(elementId);
   if (!element) {
-    throw new Error("Report is not ready to export");
+    throw new Error("Timetable print view is not ready. Refresh the page and try again.");
   }
 
   await yieldToUi();
   const blob = await createPdfBlobFromElement(element, "a4-landscape");
+  if (!blob || blob.size < 100) {
+    throw new Error("PDF export failed (empty file). Try Print → Save as PDF.");
+  }
+  const safeName = filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = safeName;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+};
+
+/** PNG download of a hidden print root (timetable, etc.). */
+export const downloadImageFromElementById = async (
+  elementId: string,
+  filename: string,
+): Promise<void> => {
+  const element = document.getElementById(elementId);
+  if (!element) {
+    throw new Error("Timetable print view is not ready. Refresh the page and try again.");
+  }
+
+  await yieldToUi();
+  const { clone, wrapper } = mountPrintableClone(element, "a4-landscape");
+  try {
+    const canvas = await rasterizeCloneToCanvas(clone, 2);
+    if (!canvas.width || !canvas.height) {
+      throw new Error("Image export failed (empty capture)");
+    }
+    const safeName = filename.toLowerCase().endsWith(".png") ? filename : `${filename}.png`;
+    const url = canvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = safeName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    if (wrapper.parentNode) {
+      wrapper.parentNode.removeChild(wrapper);
+    }
+  }
 };
 
 export const printMarksheetElement = async (element: HTMLElement | null): Promise<void> => {

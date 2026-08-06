@@ -26,6 +26,7 @@ import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
 import { isNepaliSubject } from "lib/nepaliSubject";
+import { openAuthenticatedAttachment } from "lib/attachments";
 import { parseErrorMessage } from "lib/utils";
 import {
   academicListApiParams,
@@ -899,14 +900,22 @@ export const SessionPlanPanel = ({
           </div>
         ) : null}
         {plan.attachmentUrl ? (
-          <a
-            href={plan.attachmentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
             className="text-sm text-brand-700 hover:underline no-print"
+            onClick={() => {
+              void openAuthenticatedAttachment(
+                plan.attachmentUrl!,
+                "session-plan-attachment",
+              ).catch((e) =>
+                toast.error(
+                  e instanceof Error ? e.message : "Could not open attachment",
+                ),
+              );
+            }}
           >
             View attachment
-          </a>
+          </button>
         ) : null}
         <div className="no-print">
           <AcademicCommentsPanel

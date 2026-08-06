@@ -65,6 +65,7 @@ import {
   createGoshwaraVoucher,
   createJournalEntry,
   createVendor,
+  deleteGoshwaraVoucher,
   downloadBlankGoshwaraForm,
   downloadGoshwaraVoucher,
   downloadGoshwaraVoucherById,
@@ -83,6 +84,23 @@ import {
 } from "../controllers/accountingLedgerController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { requireAccountingPermission } from "../middleware/accountingAuth.js";
+import {
+  createFixedAsset,
+  disposeFixedAsset,
+  getAssetRegister,
+  getBudgetVariance,
+  listBankReconciliations,
+  listBudgets,
+  listDepreciationPools,
+  listDepreciationRuns,
+  listFixedAssets,
+  previewBankReconciliation,
+  previewDepreciation,
+  runDepreciation,
+  saveBankReconciliation,
+  updateFixedAsset,
+  upsertBudget
+} from "../controllers/accountingAssetController.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
 const router = Router();
@@ -249,6 +267,12 @@ router.post(
   requireAccountingPermission("manage_journal"),
   createGoshwaraVoucher
 );
+router.delete(
+  "/goshwara-vouchers/:id",
+  admins,
+  requireAccountingPermission("reverse_transaction"),
+  deleteGoshwaraVoucher
+);
 router.get(
   "/goshwara-vouchers/:id/pdf",
   readers,
@@ -265,6 +289,27 @@ router.put("/vendors/:id", managers, requireAccountingPermission("manage_purchas
 router.get("/fiscal-years", readers, requireAccountingPermission("read"), listFiscalYears);
 router.post("/fiscal-years", admins, requireAccountingPermission("manage_settings"), createFiscalYear);
 router.post("/fiscal-years/:id/close", admins, requireAccountingPermission("manage_settings"), closeFiscalYear);
+
+// Fixed assets & depreciation
+router.get("/depreciation-pools", readers, requireAccountingPermission("read"), listDepreciationPools);
+router.get("/assets", readers, requireAccountingPermission("read"), listFixedAssets);
+router.get("/assets/register", readers, requireAccountingPermission("read"), getAssetRegister);
+router.post("/assets", managers, requireAccountingPermission("manage_purchases"), createFixedAsset);
+router.put("/assets/:id", managers, requireAccountingPermission("manage_purchases"), updateFixedAsset);
+router.post("/assets/:id/dispose", admins, requireAccountingPermission("manage_settings"), disposeFixedAsset);
+router.get("/depreciation/preview", readers, requireAccountingPermission("read"), previewDepreciation);
+router.get("/depreciation/runs", readers, requireAccountingPermission("read"), listDepreciationRuns);
+router.post("/depreciation/run", admins, requireAccountingPermission("manage_settings"), runDepreciation);
+
+// Bank reconciliation
+router.get("/reconciliations", readers, requireAccountingPermission("read"), listBankReconciliations);
+router.get("/reconciliations/preview", readers, requireAccountingPermission("read"), previewBankReconciliation);
+router.post("/reconciliations", managers, requireAccountingPermission("manage_settings"), saveBankReconciliation);
+
+// Budget
+router.get("/budgets", readers, requireAccountingPermission("read"), listBudgets);
+router.post("/budgets", admins, requireAccountingPermission("manage_settings"), upsertBudget);
+router.get("/budgets/variance", readers, requireAccountingPermission("read"), getBudgetVariance);
 
 // Reports
 router.get("/reports/:reportType", readers, requireAccountingPermission("read"), generateAccountingReport);

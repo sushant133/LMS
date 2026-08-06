@@ -45,8 +45,11 @@ export const FeeRefundsPanel = ({ canWrite }: { canWrite: boolean }) => {
   });
 
   const studentsQuery = useQuery({
-    queryKey: ["students"],
-    queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    queryKey: ["students", "login-active"],
+    queryFn: () =>
+      unwrap<StudentRecord[]>(
+        api.get("/students", { params: { loginActive: "1" } }),
+      ),
   });
 
   const create = useMutation({

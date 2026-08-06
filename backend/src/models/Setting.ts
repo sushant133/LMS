@@ -91,11 +91,22 @@ const settingSchema = new Schema(
     schoolId: { type: Schema.Types.ObjectId, ref: "School", required: true, unique: true, index: true },
     schoolName: { type: String, required: true },
     schoolNameNp: { type: String, required: true },
+    /**
+     * Nepali address line for Nepal Government format documents (Goshwara voucher etc.)
+     * e.g. "वडा नं. ३, धनगढीमाई नगरपालिका, सिराहा, मधेश प्रदेश".
+     */
+    schoolAddressNp: { type: String, trim: true, default: "" },
     academicYearBs: { type: String, required: true },
     principalName: { type: String, required: true },
     contactEmail: { type: String, required: true },
     contactPhone: { type: String, required: true },
     address: { type: addressSchema, required: true },
+    /**
+     * Academic programme this institution runs (e.g. "Health Assistant (HA)").
+     * Shown as the Program/Course column on Passed-Out Students and printed on
+     * character certificates.
+     */
+    programName: { type: String, trim: true, default: "" },
     holidays: { type: [holidaySchema], default: [] },
     infrastructure: { type: infrastructureSchema, default: () => ({}) },
     dailyAttendance: { type: dailyAttendanceConfigSchema, default: () => ({}) },

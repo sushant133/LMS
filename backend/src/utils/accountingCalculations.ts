@@ -55,11 +55,6 @@ export const calculateNetSalary = (input: {
   return Math.max(0, gross - deductions);
 };
 
-export const generateReceiptNumber = (prefix: string, sequence: number): string => {
-  const year = new Date().getFullYear();
-  return `${prefix}-${year}-${String(sequence).padStart(5, "0")}`;
-};
-
 export const calculateSuggestedLateFee = (
   outstandingDueNpr: number,
   lateFinePercent: number

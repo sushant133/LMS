@@ -8,6 +8,7 @@ import {
   type GoshwaraVoucherRecord,
   type JournalEntryRecord,
   type JournalLineInput,
+  type SchoolSettingsRecord,
   type VoucherType,
 } from "@phit-erp/shared";
 import { getTodayBs } from "@munatech/nepali-datepicker";
@@ -40,29 +41,38 @@ import { formatDualDateCell } from "./accountingUtils";
 type JournalPanelTab = "ledger" | "create" | "vouchers";
 
 /**
- * Open a protected accounting PDF/HTML via authenticated axios (session cookie).
- * window.open(apiUrl) often fails (no credentials / error body as broken tab).
+ * Ensure the API path requests printable HTML (not PDF download).
  */
-const openAuthenticatedDocument = async (
-  apiPath: string,
-  filenameBase: string,
-): Promise<void> => {
-  const response = await api.get(apiPath, {
+const withHtmlFormat = (apiPath: string): string => {
+  const [pathPart, query = ""] = apiPath.split("?");
+  const params = new URLSearchParams(query);
+  params.set("format", "html");
+  const qs = params.toString();
+  return qs ? `${pathPart}?${qs}` : `${pathPart}?format=html`;
+};
+
+/**
+ * Print a protected Goshwara voucher via authenticated fetch + hidden iframe.
+ * Uses HTML (not PDF download) so the browser print dialog opens directly —
+ * same pattern as purchase/expense voucher print.
+ */
+const printAuthenticatedDocument = async (apiPath: string): Promise<void> => {
+  const htmlPath = withHtmlFormat(apiPath);
+  const response = await api.get(htmlPath, {
     responseType: "blob",
-    headers: { Accept: "application/pdf, text/html;q=0.9, */*;q=0.8" },
-    // Puppeteer first launch can be slow
+    headers: { Accept: "text/html, application/pdf;q=0.5, */*;q=0.1" },
+    // Puppeteer first launch can be slow when server still builds PDF fallback
     timeout: 120_000,
   });
 
   const raw = response.data as Blob;
   const headerType = String(response.headers["content-type"] ?? "");
-  const blobType = raw.type || "";
-  const contentType = `${headerType} ${blobType}`.toLowerCase();
+  const contentType = `${headerType} ${raw.type || ""}`.toLowerCase();
 
   // API errors often arrive as JSON with responseType: blob
   if (contentType.includes("json") || contentType.includes("application/problem")) {
     const text = await raw.text();
-    let message = "Could not open PDF";
+    let message = "Could not open voucher for print";
     try {
       const parsed = JSON.parse(text) as { message?: string; error?: string };
       message = parsed.message || parsed.error || message;
@@ -72,41 +82,153 @@ const openAuthenticatedDocument = async (
     throw new Error(message);
   }
 
-  const isHtml = contentType.includes("text/html") || contentType.includes("html");
-  const blob = isHtml
-    ? raw.type.includes("html")
-      ? raw
-      : new Blob([raw], { type: "text/html;charset=utf-8" })
-    : blobType === "application/pdf" || contentType.includes("pdf")
+  // Clone so we can inspect text without consuming the blob for a rare PDF fallback
+  const sample = await raw.slice(0, 64).text();
+  const trimmed = sample.trimStart().toLowerCase();
+  const looksLikeHtml =
+    contentType.includes("html") ||
+    contentType.includes("text/plain") ||
+    trimmed.startsWith("<!doctype") ||
+    trimmed.startsWith("<html");
+
+  if (looksLikeHtml) {
+    const html = await raw.text();
+    if (!html.trim()) throw new Error("Empty voucher document");
+    printHtmlDocument(html);
+    toast.success("Print dialog opening…");
+    return;
+  }
+
+  // PDF fallback: iframe print only — never force a file download
+  const pdfBlob =
+    contentType.includes("pdf") || raw.type === "application/pdf"
       ? raw
       : new Blob([raw], { type: "application/pdf" });
+  if (!pdfBlob.size) throw new Error("Empty voucher PDF");
 
-  const safeBase = filenameBase.replace(/[^\w.-]+/g, "_") || "document";
-  const filename = isHtml
-    ? `${safeBase}.html`
-    : safeBase.toLowerCase().endsWith(".pdf")
-      ? safeBase
-      : `${safeBase}.pdf`;
-
-  const url = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(pdfBlob);
   try {
-    const opened = window.open(url, "_blank", "noopener,noreferrer");
-    if (!opened) {
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      toast.success("PDF downloaded (popup blocked — file saved)");
-    } else {
-      toast.success("PDF opened — use browser Print if needed");
-    }
+    await printPdfBlobUrl(url);
+    toast.success("Print dialog opening…");
   } finally {
     window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
   }
 };
+
+/**
+ * Hidden iframe HTML print — avoids popup blockers and download prompts.
+ * Clears document titles so the browser does not print header chrome like
+ * "8/6/26, 11:04 PM" and "गोश्वारा भौचर".
+ */
+const printHtmlDocument = (html: string): void => {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  const win = iframe.contentWindow;
+  if (!doc || !win) {
+    iframe.remove();
+    throw new Error("Could not open print preview");
+  }
+
+  // Strip <title> so browser print header has no voucher name
+  const htmlForPrint = html.replace(
+    /<title>[\s\S]*?<\/title>/i,
+    "<title>\u200B</title>",
+  );
+
+  doc.open();
+  doc.write(htmlForPrint);
+  doc.close();
+
+  // Browser print headers show date + document title — blank both parent & iframe
+  const previousTitle = document.title;
+  document.title = "\u200B";
+
+  const cleanup = () => {
+    document.title = previousTitle;
+    try {
+      iframe.remove();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  window.setTimeout(() => {
+    try {
+      doc.title = "\u200B";
+      win.document.title = "\u200B";
+      win.focus();
+      win.print();
+    } catch {
+      cleanup();
+      throw new Error("Print failed");
+    }
+    win.addEventListener("afterprint", cleanup, { once: true });
+    window.setTimeout(cleanup, 60_000);
+  }, 350);
+};
+
+/** PDF blob URL → iframe print (no <a download>). */
+const printPdfBlobUrl = (url: string): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
+    document.body.appendChild(iframe);
+
+    const cleanup = () => {
+      try {
+        iframe.remove();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("PDF print timed out"));
+    }, 30_000);
+
+    iframe.onload = () => {
+      window.clearTimeout(timeout);
+      window.setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          window.setTimeout(cleanup, 60_000);
+          resolve();
+        } catch (e) {
+          cleanup();
+          reject(e instanceof Error ? e : new Error("PDF print failed"));
+        }
+      }, 400);
+    };
+
+    iframe.onerror = () => {
+      window.clearTimeout(timeout);
+      cleanup();
+      reject(new Error("Could not load PDF for print"));
+    };
+
+    iframe.src = url;
+  });
 
 const messageFromPdfError = async (error: unknown): Promise<string> => {
   if (typeof error === "object" && error && "response" in error) {
@@ -158,9 +280,6 @@ const emptyPrintLine = (): PrintLine => ({
   credit: 0,
 });
 
-/** Suggested defaults — user can clear or change freely (not forced on save/print) */
-const SUGGESTED_INSTITUTE = "पब्लिक हिमाल इन्स्टिच्युट अफ टेक्नोलोजी";
-const SUGGESTED_ADDRESS = "धनगढीमाई वडा नं. ३";
 // Journal Entries tab = गोश्वारा भौचर (manual + auto-posted from fees/salary/refunds)
 
 /** Voucher type labels in Nepali for the form */
@@ -197,9 +316,6 @@ export const JournalEntriesPanel = ({
 
   // —— Manual header fields (printed as written) ——
   const [voucherNo, setVoucherNo] = useState("");
-  const [govOfficeName, setGovOfficeName] = useState("");
-  const [instituteName, setInstituteName] = useState(SUGGESTED_INSTITUTE);
-  const [addressLine, setAddressLine] = useState(SUGGESTED_ADDRESS);
   const [voucherType, setVoucherType] = useState<VoucherType>("JOURNAL");
   const [dateBs, setDateBs] = useState(formatTodayBs);
   const [particulars, setParticulars] = useState("");
@@ -237,6 +353,17 @@ export const JournalEntriesPanel = ({
       unwrap<GoshwaraVoucherRecord[]>(api.get("/accounting/goshwara-vouchers")),
   });
 
+  /**
+   * Nepal Government document header (नेपाल सरकार / {college} कार्यालय / address).
+   * Both Nepali values come from Institution Settings — never hardcoded here.
+   */
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
+  });
+  const collegeNameNp = settingsQuery.data?.schoolNameNp?.trim() ?? "";
+  const collegeAddressNp = settingsQuery.data?.schoolAddressNp?.trim() ?? "";
+
   const accountsQuery = useQuery({
     queryKey: ["chart-of-accounts"],
     queryFn: () =>
@@ -265,9 +392,6 @@ export const JournalEntriesPanel = ({
 
   const resetForm = () => {
     setVoucherNo("");
-    setGovOfficeName("");
-    setInstituteName(SUGGESTED_INSTITUTE);
-    setAddressLine(SUGGESTED_ADDRESS);
     setVoucherType("JOURNAL");
     setDateBs(formatTodayBs());
     setParticulars("");
@@ -298,6 +422,19 @@ export const JournalEntriesPanel = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  const deleteGoshwara = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/accounting/goshwara-vouchers/${id}`)),
+    onSuccess: async () => {
+      toast.success("Goshwara voucher deleted (journal reversed)");
+      const { invalidateAccountingQueries } = await import(
+        "./invalidateAccountingQueries"
+      );
+      await invalidateAccountingQueries();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   const confirmDeleteJournal = (entry: JournalEntryRecord) => {
     if (
       !window.confirm(
@@ -307,6 +444,17 @@ export const JournalEntriesPanel = ({
       return;
     }
     reverse.mutate(entry._id);
+  };
+
+  const confirmDeleteGoshwara = (voucher: GoshwaraVoucherRecord) => {
+    if (
+      !window.confirm(
+        `Delete Goshwara voucher ${voucher.voucherNo}?\n\nThis soft-deletes the voucher and posts a reversing journal entry so the ledger stays correct.`,
+      )
+    ) {
+      return;
+    }
+    deleteGoshwara.mutate(voucher._id);
   };
 
   const createVoucher = useMutation({
@@ -320,13 +468,12 @@ export const JournalEntriesPanel = ({
         "./invalidateAccountingQueries"
       );
       await invalidateAccountingQueries();
-      // Open PDF with session auth so line-level particulars are visible on print
+      // Open browser print dialog (HTML form — not a file download)
       const key = `voucher:${data.voucher._id}`;
       setPrintingKey(key);
       try {
-        await openAuthenticatedDocument(
+        await printAuthenticatedDocument(
           `/accounting/goshwara-vouchers/${data.voucher._id}/pdf`,
-          `goshwara-${data.voucher.voucherNo || data.voucher._id}`,
         );
       } catch (e) {
         toast.error(await messageFromPdfError(e));
@@ -339,18 +486,16 @@ export const JournalEntriesPanel = ({
 
   const openJournalGoshwara = async (
     journalId: string,
-    opts?: { format?: "pdf" | "html"; blank?: boolean },
+    opts?: { blank?: boolean },
   ) => {
     const params = new URLSearchParams();
-    if (opts?.format === "html") params.set("format", "html");
     if (opts?.blank) params.set("blank", "1");
     const qs = params.toString() ? `?${params}` : "";
     const key = `journal:${journalId}:${opts?.blank ? "blank" : "print"}`;
     setPrintingKey(key);
     try {
-      await openAuthenticatedDocument(
+      await printAuthenticatedDocument(
         `/accounting/journal-entries/${journalId}/goshwara-voucher${qs}`,
-        `goshwara-journal-${journalId}${opts?.blank ? "-blank" : ""}`,
       );
     } catch (e) {
       toast.error(await messageFromPdfError(e));
@@ -364,9 +509,8 @@ export const JournalEntriesPanel = ({
     const key = `voucher:${voucherId}:${blank ? "blank" : "print"}`;
     setPrintingKey(key);
     try {
-      await openAuthenticatedDocument(
+      await printAuthenticatedDocument(
         `/accounting/goshwara-vouchers/${voucherId}/pdf${qs}`,
-        `goshwara-${voucherId}${blank ? "-blank" : ""}`,
       );
     } catch (e) {
       toast.error(await messageFromPdfError(e));
@@ -379,10 +523,7 @@ export const JournalEntriesPanel = ({
     const key = "blank-form";
     setPrintingKey(key);
     try {
-      await openAuthenticatedDocument(
-        "/accounting/goshwara-vouchers/blank-form",
-        "goshwara-blank",
-      );
+      await printAuthenticatedDocument("/accounting/goshwara-vouchers/blank-form");
     } catch (e) {
       toast.error(await messageFromPdfError(e));
     } finally {
@@ -519,9 +660,9 @@ export const JournalEntriesPanel = ({
       voucherType,
       dateBs,
       voucherNo: voucherNo.trim() || undefined,
-      govOfficeName: govOfficeName.trim() || undefined,
-      instituteName: instituteName.trim() || undefined,
-      addressLine: addressLine.trim() || undefined,
+      // Government header comes from Institution Settings (server re-resolves it too)
+      govOfficeName: collegeNameNp || undefined,
+      addressLine: collegeAddressNp || undefined,
       particulars: particulars.trim(),
       receiptNo: receiptNo.trim() || undefined,
       receivedAmount: receivedAmount.trim() || undefined,
@@ -729,9 +870,7 @@ export const JournalEntriesPanel = ({
                                 onClick={() =>
                                   void (linked
                                     ? openVoucherPdf(linked._id)
-                                    : openJournalGoshwara(entry._id, {
-                                        format: "pdf",
-                                      }))
+                                    : openJournalGoshwara(entry._id))
                                 }
                               >
                                 <Printer className="mr-1 h-3.5 w-3.5" />
@@ -793,40 +932,26 @@ export const JournalEntriesPanel = ({
               lang="ne"
               onSubmit={submitVoucher}
             >
-              {/* Header identity */}
-              <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <p className="text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  नेपाल सरकार · Office header
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <FormField label="Gov. office name">
-                    <Input
-                      lang="ne"
-                      className={npInputClass}
-                      value={govOfficeName}
-                      onChange={(e) => setGovOfficeName(e.target.value)}
-                      placeholder="…कार्यालय"
-                    />
-                  </FormField>
-                  <FormField label="Institute name">
-                    <Input
-                      lang="ne"
-                      className={npInputClass}
-                      value={instituteName}
-                      onChange={(e) => setInstituteName(e.target.value)}
-                      placeholder={SUGGESTED_INSTITUTE}
-                    />
-                  </FormField>
-                  <FormField label="Address">
-                    <Input
-                      lang="ne"
-                      className={npInputClass}
-                      value={addressLine}
-                      onChange={(e) => setAddressLine(e.target.value)}
-                      placeholder={SUGGESTED_ADDRESS}
-                    />
-                  </FormField>
+              {/*
+                Header identity — official Nepal Government format, read-only.
+                Both Nepali lines are pulled from Institution Settings so every
+                government-format document prints the same header.
+              */}
+              <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className={cn(npInputClass, "text-center leading-relaxed")}>
+                  <p className="text-[15px] font-bold text-slate-900">नेपाल सरकार</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-800">
+                    {collegeNameNp ? `${collegeNameNp} कार्यालय` : "…………………… कार्यालय"}
+                  </p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    {collegeAddressNp || "……………………"}
+                  </p>
                 </div>
+                <p className="text-center text-xs text-slate-500">
+                  {collegeNameNp && collegeAddressNp
+                    ? "From Institution Settings → College Name (Nepali) / College Address (Nepali)."
+                    : "Set College Name (Nepali) and College Address (Nepali) under Institution Settings to complete this header."}
+                </p>
               </section>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1338,8 +1463,9 @@ export const JournalEntriesPanel = ({
                             ) : null}
                           </Td>
                           <Td className="max-w-[160px] truncate text-sm">
-                            {v.instituteName ||
+                            {collegeNameNp ||
                               v.govOfficeName ||
+                              v.instituteName ||
                               v.officeName ||
                               "—"}
                           </Td>
@@ -1401,6 +1527,21 @@ export const JournalEntriesPanel = ({
                                   ? "…"
                                   : "Blank"}
                               </Button>
+                              {canDelete ? (
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  title="Delete voucher — Super Admin / College Admin only"
+                                  disabled={
+                                    deleteGoshwara.isPending ||
+                                    printingKey !== null
+                                  }
+                                  onClick={() => confirmDeleteGoshwara(v)}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  {deleteGoshwara.isPending ? "…" : "Delete"}
+                                </Button>
+                              ) : null}
                             </div>
                           </Td>
                         </tr>

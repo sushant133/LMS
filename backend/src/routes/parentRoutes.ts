@@ -3,6 +3,8 @@ import {
   createParentFromStudent,
   createParentLink,
   deleteParentLink,
+  deleteParentUser,
+  getParentChildrenAttendance,
   getParentPortal,
   getParentPortalAccess,
   getParentUserPortalAccess,
@@ -10,6 +12,7 @@ import {
   listParentLinks,
   listParentUsers,
   updateParentPortalAccess,
+  updateParentUser,
   updateParentUserPortalAccess
 } from "../controllers/parentController.js";
 import {
@@ -24,6 +27,8 @@ const router = Router();
 
 router.use(protect, tenantGuard);
 router.get("/portal", getParentPortal);
+/** Parent: daily + subject attendance for linked children */
+router.get("/attendance", getParentChildrenAttendance);
 /** Parents: own effective access. Admins: school defaults. */
 router.get("/portal-access", getParentPortalAccess);
 /** School-wide defaults (used when a parent has no personal override). */
@@ -43,10 +48,12 @@ router.put(
   authorizeInstitutionAdmin,
   updateParentUserPortalAccess
 );
-router.get("/users", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listParentUsers);
-router.get("/students/:studentId/candidates", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), getStudentParentCandidates);
-router.get("/links", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listParentLinks);
-router.get("/registrations/pending", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), listPendingParentRegistrations);
+router.get("/users", authorizeInstitutionAdmin, listParentUsers);
+router.put("/users/:id", authorizeInstitutionAdmin, updateParentUser);
+router.delete("/users/:id", authorizeInstitutionAdmin, deleteParentUser);
+router.get("/students/:studentId/candidates", authorizeInstitutionAdmin, getStudentParentCandidates);
+router.get("/links", authorizeInstitutionAdmin, listParentLinks);
+router.get("/registrations/pending", authorizeInstitutionAdmin, listPendingParentRegistrations);
 router.post("/registrations/:id/approve", authorizeInstitutionAdmin, approveParentRegistration);
 router.post("/registrations/:id/reject", authorizeInstitutionAdmin, rejectParentRegistration);
 router.post("/profiles/from-student", authorizeInstitutionAdmin, createParentFromStudent);

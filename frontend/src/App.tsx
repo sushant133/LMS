@@ -1,10 +1,12 @@
-import { Suspense, lazy, type ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Suspense, type ReactNode } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "components/layout/AppLayout";
 import { AuthLayout } from "components/layout/AuthLayout";
+import { ErrorBoundary } from "components/shared/ErrorBoundary";
 import { OfflineLoginOnly } from "components/shared/OfflineLoginOnly";
 import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
+import { lazyWithRetry as lazy } from "lib/lazyWithRetry";
 import { LoginPage } from "pages/LoginPage";
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const PrivacyPolicyPage = lazy(() =>
@@ -80,9 +82,14 @@ const RootRedirect = () => {
   return <Navigate to="/login" replace />;
 };
 
-const LazyRoute = ({ children }: { children: ReactNode }) => (
-  <Suspense fallback={<PageLoadingState />}>{children}</Suspense>
-);
+const LazyRoute = ({ children }: { children: ReactNode }) => {
+  const location = useLocation();
+  return (
+    <ErrorBoundary resetKey={location.pathname}>
+      <Suspense fallback={<PageLoadingState />}>{children}</Suspense>
+    </ErrorBoundary>
+  );
+};
 
 export default function App() {
   return (
@@ -241,12 +248,13 @@ export default function App() {
               <Route path="/students/:studentId/profile" element={<LazyRoute><StudentProfilePage /></LazyRoute>} />
             </Route>
 
-            {/* Teachers: My Attendance. Staff with Module Access (teacher/staff attendance) also allowed. */}
+            {/* Teachers: My Attendance. Parents: children daily + subject attendance. Staff with module access also allowed. */}
             <Route
               element={
                 <ProtectedRoute
                   roles={[
                     "TEACHER",
+                    "PARENT",
                     "SUPER_ADMIN",
                     "COLLEGE_ADMIN",
                     "COLLEGE_VIEWER",

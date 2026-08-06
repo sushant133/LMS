@@ -125,16 +125,7 @@ export async function exportRowsToExcel(rows: Record<string, unknown>[], filenam
 }
 
 export async function exportElementToPdf(elementId: string, filename: string) {
-  const element = document.getElementById(elementId);
-  if (!element) throw new Error("Report preview not found");
-  const html2pdf = (await import("html2pdf.js")).default;
-  await html2pdf()
-    .set({
-      margin: 10,
-      filename: filename.endsWith(".pdf") ? filename : `${filename}.pdf`,
-      html2canvas: { scale: 2 },
-      jsPDF: { unit: "mm", format: "a4", orientation: "landscape" },
-    })
-    .from(element)
-    .save();
+  // Use hardened printUtils (oklch-safe) — raw html2pdf throws on Tailwind v4 colors
+  const { downloadPdfFromElementById } = await import("lib/printUtils");
+  await downloadPdfFromElementById(elementId, filename);
 }

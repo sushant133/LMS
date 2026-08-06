@@ -70,7 +70,7 @@ type IssueStudentRow = {
   className?: string;
   sectionId?: string;
   sectionName?: string;
-  user?: { fullName?: string } | null;
+  user?: { fullName?: string; isActive?: boolean } | null;
 };
 
 type IssueTeacherRow = {
@@ -245,8 +245,12 @@ export const LibraryManager = () => {
   const libraryReadOnly = !libraryModuleWrite;
 
   const studentsQuery = useQuery({
-    queryKey: ["students", "library-issue"],
-    queryFn: () => unwrap<IssueStudentRow[]>(api.get("/students")),
+    // Only login-active students (disabled accounts cannot borrow)
+    queryKey: ["students", "library-issue", "login-active"],
+    queryFn: () =>
+      unwrap<IssueStudentRow[]>(
+        api.get("/students", { params: { loginActive: "1" } }),
+      ),
     enabled: tab === "issue",
     retry: 1,
   });
@@ -322,7 +326,10 @@ export const LibraryManager = () => {
   }, [studentsQuery.data, issueClassId]);
 
   const filteredIssueStudents = useMemo(() => {
-    let list = studentsQuery.data ?? [];
+    // Extra client guard: never show disabled portal accounts for issue
+    let list = (studentsQuery.data ?? []).filter(
+      (s) => s.user?.isActive !== false,
+    );
     if (isCollege) {
       if (issueBatchId) {
         list = list.filter((s) => s.batchId === issueBatchId);

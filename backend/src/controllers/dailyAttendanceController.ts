@@ -20,7 +20,10 @@ import { recordAudit } from "../utils/audit.js";
 import { validateAttendanceScope } from "../utils/academicValidation.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import { ensureValidBsDate, getTodayBs } from "../utils/nepaliDate.js";
-import { notifyParentsOfStudent } from "../utils/notificationService.js";
+import {
+  getStudentDisplayName,
+  notifyParentsOfStudent
+} from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId } from "../utils/tenant.js";
 import { getTeacherScope } from "../utils/teacherScope.js";
@@ -882,19 +885,24 @@ export const submitDailyAttendance = asyncHandler(async (req: Request, res: Resp
     after: record.toObject()
   });
 
-  const absentEntries = payload.entries.filter((entry) => entry.status === "ABSENT");
-  await Promise.all(
-    absentEntries.map((entry) =>
-      notifyParentsOfStudent(
-        schoolId.toString(),
-        entry.studentId,
-        "Daily attendance alert",
-        `Your child was marked absent on ${payload.dateBs}.`,
-        "ATTENDANCE",
-        "BOTH"
-      )
-    )
-  );
+  // Notify parents about non-present daily attendance (linked children only)
+  const alertEntries = payload.entries.filter((entry) => entry.status !== "PRESENT");
+  if (alertEntries.length > 0) {
+    await Promise.all(
+      alertEntries.map(async (entry) => {
+        const childName = await getStudentDisplayName(entry.studentId);
+        const statusLabel = String(entry.status).replace(/_/g, " ").toLowerCase();
+        return notifyParentsOfStudent(
+          schoolId.toString(),
+          entry.studentId,
+          "Daily attendance",
+          `${childName} was marked ${statusLabel} for daily attendance on ${payload.dateBs}.`,
+          "ATTENDANCE",
+          "BOTH"
+        );
+      })
+    );
+  }
 
   return sendSuccess(res, "Daily attendance submitted and synchronized", record);
 });
@@ -1013,6 +1021,24 @@ export const updateDailyAttendance = asyncHandler(async (req: Request, res: Resp
     entityId: refreshed._id.toString(),
     after: refreshed.toObject()
   });
+
+  const alertEntries = payload.entries.filter((entry) => entry.status !== "PRESENT");
+  if (alertEntries.length > 0) {
+    await Promise.all(
+      alertEntries.map(async (entry) => {
+        const childName = await getStudentDisplayName(entry.studentId);
+        const statusLabel = String(entry.status).replace(/_/g, " ").toLowerCase();
+        return notifyParentsOfStudent(
+          schoolId.toString(),
+          entry.studentId,
+          "Daily attendance",
+          `${childName} was marked ${statusLabel} for daily attendance on ${payload.dateBs}.`,
+          "ATTENDANCE",
+          "BOTH"
+        );
+      })
+    );
+  }
 
   return sendSuccess(res, "Daily attendance updated and synchronized", refreshed);
 });
