@@ -26,8 +26,8 @@ interface TimetablePrintViewProps {
 }
 
 /**
- * Hidden print/PDF root: compact A4 landscape layout so the full weekly grid
- * (header + table + signatures) fits on a single page without overflow.
+ * Hidden print/PDF root for weekly timetable.
+ * Compact layout; printUtils scales + centers onto one A4 landscape page.
  */
 export const TimetablePrintView = ({
   matrix,
@@ -50,18 +50,23 @@ export const TimetablePrintView = ({
         color: "#000000",
         backgroundColor: "#ffffff",
         boxSizing: "border-box",
-        width: "100%",
-        maxWidth: "287mm",
-        padding: "3mm 4mm 2.5mm",
+        display: "flex",
+        flexDirection: "column",
+        gap: "1.5mm",
+        width: "max-content",
+        minWidth: "240mm",
+        maxWidth: "289mm",
+        padding: "2mm 2.5mm 1.5mm",
         fontFamily:
           '"IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif',
       }}
     >
       <header
-        className="tt-print-header border-b border-black text-center text-black"
+        className="tt-print-header text-center text-black"
         style={{
-          paddingBottom: "2mm",
-          marginBottom: "2mm",
+          borderBottom: "1px solid #000",
+          paddingBottom: "1.5mm",
+          flexShrink: 0,
         }}
       >
         <div
@@ -69,7 +74,7 @@ export const TimetablePrintView = ({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: "3mm",
+            gap: "2.5mm",
           }}
         >
           {meta.logoUrl ? (
@@ -77,8 +82,8 @@ export const TimetablePrintView = ({
               src={meta.logoUrl}
               alt=""
               style={{
-                height: "9mm",
-                width: "9mm",
+                height: "8mm",
+                width: "8mm",
                 objectFit: "contain",
                 flexShrink: 0,
               }}
@@ -88,11 +93,11 @@ export const TimetablePrintView = ({
             <h1
               style={{
                 margin: 0,
-                fontSize: "12px",
+                fontSize: "11px",
                 fontWeight: 700,
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
-                lineHeight: 1.15,
+                lineHeight: 1.12,
                 color: "#000",
               }}
             >
@@ -102,9 +107,9 @@ export const TimetablePrintView = ({
               <p
                 style={{
                   margin: "1px 0 0",
-                  fontSize: "9px",
+                  fontSize: "8.5px",
                   fontWeight: 600,
-                  lineHeight: 1.15,
+                  lineHeight: 1.12,
                   color: "#000",
                 }}
               >
@@ -115,9 +120,9 @@ export const TimetablePrintView = ({
               <p
                 style={{
                   margin: "1px 0 0",
-                  fontSize: "8px",
+                  fontSize: "7.5px",
                   fontWeight: 500,
-                  lineHeight: 1.2,
+                  lineHeight: 1.15,
                   color: "#1e293b",
                 }}
               >
@@ -128,10 +133,10 @@ export const TimetablePrintView = ({
         </div>
         <p
           style={{
-            margin: "2mm 0 0",
-            fontSize: "11px",
+            margin: "1.5mm 0 0",
+            fontSize: "10px",
             fontWeight: 700,
-            lineHeight: 1.15,
+            lineHeight: 1.12,
             color: "#000",
           }}
         >
@@ -139,10 +144,10 @@ export const TimetablePrintView = ({
         </p>
         <p
           style={{
-            margin: "0.5mm 0 0",
-            fontSize: "9px",
+            margin: "0.4mm 0 0",
+            fontSize: "8.5px",
             fontWeight: 600,
-            lineHeight: 1.15,
+            lineHeight: 1.12,
             color: "#0f172a",
           }}
         >
@@ -150,14 +155,14 @@ export const TimetablePrintView = ({
         </p>
         <div
           style={{
-            marginTop: "1.5mm",
+            marginTop: "1mm",
             display: "flex",
             flexWrap: "wrap",
             justifyContent: "center",
-            gap: "1mm 3mm",
-            fontSize: "7.5px",
+            gap: "0.6mm 2.5mm",
+            fontSize: "7px",
             fontWeight: 600,
-            lineHeight: 1.2,
+            lineHeight: 1.15,
             color: "#000",
           }}
         >
@@ -172,28 +177,30 @@ export const TimetablePrintView = ({
         </div>
       </header>
 
-      <WeeklyTimetableGrid matrix={matrix} density={density} />
+      <div style={{ flex: "1 1 auto", minHeight: 0, width: "100%" }}>
+        <WeeklyTimetableGrid matrix={matrix} density={density} />
+      </div>
 
       <footer
         className="tt-print-footer"
         style={{
-          marginTop: "3mm",
-          paddingTop: "1.5mm",
+          flexShrink: 0,
+          paddingTop: "1mm",
           borderTop: "1px solid #94a3b8",
           display: "grid",
           gridTemplateColumns: "1fr 1fr 1fr",
-          gap: "4mm",
+          gap: "3mm",
           textAlign: "center",
-          fontSize: "7.5px",
+          fontSize: "7px",
           color: "#000",
         }}
       >
         <div>
           <div
             style={{
-              margin: "0 auto 1.5mm",
-              height: "7mm",
-              width: "80%",
+              margin: "0 auto 1mm",
+              height: "5mm",
+              width: "70%",
               borderBottom: "1px solid #000",
             }}
           />
@@ -203,8 +210,8 @@ export const TimetablePrintView = ({
         <div>
           <div
             style={{
-              margin: "0 auto 1.5mm",
-              height: "7mm",
+              margin: "0 auto 1mm",
+              height: "5mm",
               display: "flex",
               alignItems: "flex-end",
               justifyContent: "center",
@@ -214,8 +221,8 @@ export const TimetablePrintView = ({
               style={{
                 border: "1px dashed #64748b",
                 borderRadius: "999px",
-                padding: "1px 6px",
-                fontSize: "6.5px",
+                padding: "0 5px",
+                fontSize: "6px",
                 fontWeight: 500,
                 color: "#334155",
               }}
@@ -228,9 +235,9 @@ export const TimetablePrintView = ({
         <div>
           <div
             style={{
-              margin: "0 auto 1.5mm",
-              height: "7mm",
-              width: "80%",
+              margin: "0 auto 1mm",
+              height: "5mm",
+              width: "70%",
               borderBottom: "1px solid #000",
             }}
           />

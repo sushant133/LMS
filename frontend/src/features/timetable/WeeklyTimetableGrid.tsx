@@ -91,6 +91,7 @@ export const WeeklyTimetableGrid = ({
   const density: TimetableDensity =
     densityProp ?? (compact ? densityForPeriodCount(periods.length) : "screen");
   const isPrint = density !== "screen";
+  const periodCount = periods.length;
 
   if (periods.length === 0) {
     return (
@@ -146,6 +147,15 @@ export const WeeklyTimetableGrid = ({
               ? "table-fixed text-[9px]"
               : "min-w-[720px] text-sm",
           )}
+          style={
+            isPrint
+              ? {
+                  width: "100%",
+                  minWidth: periodCount >= 10 ? "260mm" : "230mm",
+                  tableLayout: "fixed",
+                }
+              : undefined
+          }
         >
           <colgroup>
             {/* Day column — fixed narrow strip */}

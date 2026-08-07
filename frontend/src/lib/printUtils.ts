@@ -33,7 +33,17 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   );
   // Force a printable layout even when the source node is hidden/off-screen
   // (e.g. `hidden`, `fixed left-[-10000px]`, zero size).
-  clone.style.setProperty("display", "block", "important");
+  const isTimetableSheet =
+    clone.getAttribute("data-print-fit") === "timetable" ||
+    clone.classList.contains("timetable-print-sheet");
+  clone.style.setProperty(
+    "display",
+    isTimetableSheet ? "flex" : "block",
+    "important",
+  );
+  if (isTimetableSheet) {
+    clone.style.setProperty("flex-direction", "column", "important");
+  }
   clone.style.setProperty("visibility", "visible", "important");
   clone.style.position = "static";
   clone.style.left = "auto";
@@ -42,8 +52,15 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   clone.style.bottom = "auto";
   clone.style.transform = "none";
   clone.style.opacity = "1";
-  clone.style.width = "100%";
-  clone.style.maxWidth = "100%";
+  // Timetable uses natural/max-content width so scale-to-fit measures true size
+  if (isTimetableSheet) {
+    clone.style.width = "max-content";
+    clone.style.maxWidth = "289mm";
+    clone.style.minWidth = "240mm";
+  } else {
+    clone.style.width = "100%";
+    clone.style.maxWidth = "100%";
+  }
   clone.style.height = "auto";
   clone.style.maxHeight = "none";
   clone.style.overflow = "visible";
@@ -258,9 +275,98 @@ const collectDocumentStyles = (): string => {
   return `${links}${inlineStyles}`;
 };
 
+const isTimetableElement = (element: HTMLElement | null | undefined): boolean => {
+  if (!element) return false;
+  return (
+    element.getAttribute("data-print-fit") === "timetable" ||
+    element.classList.contains("timetable-print-sheet") ||
+    Boolean(element.querySelector?.("[data-print-fit='timetable']"))
+  );
+};
+
+/** mm → CSS px at 96dpi */
+const MM_TO_PX = 96 / 25.4;
+
+/**
+ * Scale a timetable sheet to fill (and never exceed) one page, centered.
+ * Uses a fixed layout box so the browser does not invent a second page.
+ */
+const fitTimetableSheetToPage = (
+  doc: Document,
+  pageFormat: PageFormat,
+): void => {
+  const sheet = doc.querySelector<HTMLElement>(
+    "[data-print-fit='timetable'], .timetable-print-sheet",
+  );
+  if (!sheet) return;
+
+  const isLandscape = pageFormat === "a4-landscape";
+  // Match @page size / margins (A4 landscape 297×210, margin 4mm)
+  const pageWmm = isLandscape ? 297 : 210;
+  const pageHmm = isLandscape ? 210 : 297;
+  const marginMm = 4;
+  const usableWmm = pageWmm - marginMm * 2;
+  const usableHmm = pageHmm - marginMm * 2;
+  const maxW = usableWmm * MM_TO_PX;
+  const maxH = usableHmm * MM_TO_PX;
+
+  const body = doc.body;
+  body.style.margin = "0";
+  body.style.padding = "0";
+  body.style.width = `${pageWmm}mm`;
+  body.style.height = `${pageHmm}mm`;
+  body.style.overflow = "hidden";
+  body.style.background = "#ffffff";
+  body.style.display = "flex";
+  body.style.alignItems = "center";
+  body.style.justifyContent = "center";
+
+  // Natural size without transform
+  sheet.style.transform = "none";
+  sheet.style.transformOrigin = "top left";
+  sheet.style.margin = "0";
+  sheet.style.maxWidth = "none";
+  sheet.style.width = "auto";
+  sheet.style.boxSizing = "border-box";
+  void sheet.offsetHeight;
+
+  const naturalW = Math.max(sheet.scrollWidth, sheet.offsetWidth, 1);
+  const naturalH = Math.max(sheet.scrollHeight, sheet.offsetHeight, 1);
+
+  // Fit exactly to page — scale up OR down so content uses the page without overflow
+  const scale = Math.min(maxW / naturalW, maxH / naturalH);
+  // Keep a tiny safety margin so subpixel rounding never triggers page 2
+  const safeScale = Math.max(0.35, Math.min(scale * 0.995, 1.35));
+
+  // Outer clip box = scaled visual size (this is what the print engine lays out)
+  let stage = sheet.parentElement;
+  if (!stage || !stage.classList.contains("tt-print-stage")) {
+    stage = doc.createElement("div");
+    stage.className = "tt-print-stage";
+    sheet.parentNode?.insertBefore(stage, sheet);
+    stage.appendChild(sheet);
+  }
+
+  stage.style.width = `${naturalW * safeScale}px`;
+  stage.style.height = `${naturalH * safeScale}px`;
+  stage.style.overflow = "hidden";
+  stage.style.position = "relative";
+  stage.style.flexShrink = "0";
+  stage.style.pageBreakInside = "avoid";
+  stage.style.breakInside = "avoid";
+
+  sheet.style.width = `${naturalW}px`;
+  sheet.style.transform = `scale(${safeScale})`;
+  sheet.style.transformOrigin = "top left";
+  sheet.style.position = "absolute";
+  sheet.style.left = "0";
+  sheet.style.top = "0";
+};
+
 const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): string => {
   const clone = clonePrintableElement(element);
   const isLandscape = pageFormat === "a4-landscape";
+  const isTimetable = isTimetableElement(clone);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -296,11 +402,17 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       .timetable-print-sheet[data-print-fit="timetable"] {
         box-sizing: border-box !important;
-        width: 100% !important;
-        max-width: 100% !important;
+        width: auto !important;
+        max-width: none !important;
         margin: 0 !important;
-        padding: 2.5mm 3.5mm 2mm !important;
-        overflow: hidden !important;
+        padding: 2mm 2.5mm 1.5mm !important;
+        overflow: visible !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        page-break-after: avoid !important;
+        page-break-before: avoid !important;
+      }
+      .tt-print-stage {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
         page-break-after: avoid !important;
@@ -321,6 +433,12 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         page-break-inside: avoid !important;
         break-inside: avoid !important;
       }
+      .tt-print-table thead,
+      .tt-print-table tbody,
+      .tt-print-table tr {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
       .tt-print-table thead th,
       .tt-print-th {
         background-color: #0f172a !important;
@@ -330,7 +448,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
         padding: 2px 3px !important;
-        line-height: 1.15 !important;
+        line-height: 1.12 !important;
         vertical-align: middle !important;
         word-break: break-word !important;
       }
@@ -347,7 +465,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
         padding: 2px 3px !important;
-        line-height: 1.15 !important;
+        line-height: 1.12 !important;
         vertical-align: middle !important;
       }
       .tt-print-table td {
@@ -377,17 +495,20 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       @page {
         size: A4 ${isLandscape ? "landscape" : "portrait"};
-        margin: ${isLandscape ? "5mm 4mm" : "5mm 4mm"};
+        margin: ${isTimetable ? "4mm" : isLandscape ? "5mm 4mm" : "5mm 4mm"};
       }
       @media print {
         html, body {
-          width: 100% !important;
-          height: auto !important;
+          width: ${isLandscape ? "297mm" : "210mm"} !important;
+          height: ${isLandscape ? "210mm" : "297mm"} !important;
           overflow: hidden !important;
+          margin: 0 !important;
+          padding: 0 !important;
         }
-        .timetable-print-sheet[data-print-fit="timetable"] {
-          /* Prefer single sheet; browser may still clip if content is huge */
-          max-height: 100vh !important;
+        body {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
         }
       }
       .font-nepali,
@@ -580,14 +701,21 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
 
 const printViaIframe = (element: HTMLElement, pageFormat: PageFormat): Promise<void> =>
   new Promise((resolve, reject) => {
+    const isLandscape = pageFormat === "a4-landscape";
+    const isTimetable = isTimetableElement(element);
+
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
     iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
+    iframe.style.left = "0";
+    iframe.style.top = "0";
+    // Full page size (not 0×0) so layout/measurement matches print engine
+    iframe.style.width = isLandscape ? "297mm" : "210mm";
+    iframe.style.height = isLandscape ? "210mm" : "297mm";
     iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
+    iframe.style.zIndex = "-1";
     document.body.appendChild(iframe);
 
     const doc = iframe.contentDocument;
@@ -637,44 +765,24 @@ const printViaIframe = (element: HTMLElement, pageFormat: PageFormat): Promise<v
           cleanup();
           reject(error);
         }
-      }, 250);
+      }, 280);
     };
 
     doc.open();
     doc.write(buildPrintableHtml(element, pageFormat));
     doc.close();
 
-    void waitForImages(doc.body).then(() => {
-      // Timetable: if still taller/wider than one landscape page, scale down
-      // so browser print does not spill onto a blank second page.
-      try {
-        const sheet = doc.querySelector<HTMLElement>(
-          '[data-print-fit="timetable"], .timetable-print-sheet',
-        );
-        if (sheet) {
-          const isLandscapePage = pageFormat === "a4-landscape";
-          // Usable area at ~96dpi for A4 with ~5mm margins
-          const maxW = isLandscapePage ? 1080 : 740; // px
-          const maxH = isLandscapePage ? 720 : 1040;
-          // Force layout
-          void sheet.offsetHeight;
-          const w = Math.max(sheet.scrollWidth, sheet.offsetWidth, 1);
-          const h = Math.max(sheet.scrollHeight, sheet.offsetHeight, 1);
-          const scale = Math.min(1, maxW / w, maxH / h);
-          if (scale < 0.995) {
-            sheet.style.setProperty("transform", `scale(${scale})`, "important");
-            sheet.style.setProperty("transform-origin", "top left", "important");
-            // Shrink layout box so residual blank page is not reserved
-            const parent = sheet.parentElement;
-            if (parent) {
-              parent.style.width = `${w * scale}px`;
-              parent.style.height = `${h * scale}px`;
-              parent.style.overflow = "hidden";
-            }
-          }
+    void waitForImages(doc.body).then(async () => {
+      await yieldToUi();
+      if (isTimetable) {
+        try {
+          fitTimetableSheetToPage(doc, pageFormat);
+          await yieldToUi();
+          // Second pass after fonts/images settle — tighter fit
+          fitTimetableSheetToPage(doc, pageFormat);
+        } catch {
+          // non-fatal — print with default layout
         }
-      } catch {
-        // non-fatal — print with default layout
       }
       startPrint();
     });
@@ -683,30 +791,26 @@ const printViaIframe = (element: HTMLElement, pageFormat: PageFormat): Promise<v
 const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
   const isLandscape = pageFormat === "a4-landscape";
   const clone = clonePrintableElement(element);
-  const isTimetable =
-    clone.getAttribute("data-print-fit") === "timetable" ||
-    Boolean(clone.querySelector?.("[data-print-fit='timetable']")) ||
-    clone.classList.contains("timetable-print-sheet");
+  const isTimetable = isTimetableElement(clone);
 
-  clone.style.maxWidth = isLandscape ? "297mm" : "210mm";
-  clone.style.width = isLandscape ? "297mm" : "210mm";
-  clone.style.margin = "0";
-  // Timetable already carries tight padding in the component — avoid double padding
-  clone.style.padding = isTimetable
-    ? isLandscape
-      ? "3mm 4mm 2.5mm"
-      : "4mm 5mm"
-    : isLandscape
-      ? "10mm 12mm"
-      : "12mm 14mm";
+  // Timetable: natural content width for accurate scale-to-page capture
+  if (isTimetable) {
+    clone.style.maxWidth = "none";
+    clone.style.width = "auto";
+    clone.style.margin = "0";
+    clone.style.padding = "2mm 2.5mm 1.5mm";
+    clone.style.overflow = "visible";
+    clone.style.height = "auto";
+    clone.style.maxHeight = "none";
+  } else {
+    clone.style.maxWidth = isLandscape ? "297mm" : "210mm";
+    clone.style.width = isLandscape ? "297mm" : "210mm";
+    clone.style.margin = "0";
+    clone.style.padding = isLandscape ? "10mm 12mm" : "12mm 14mm";
+  }
   clone.style.background = "#ffffff";
   clone.style.color = "#000000";
   clone.style.boxSizing = "border-box";
-  if (isTimetable) {
-    clone.style.overflow = "hidden";
-    clone.style.height = "auto";
-    clone.style.maxHeight = "none";
-  }
 
   const wrapper = document.createElement("div");
   // Keep on-screen but invisible so layout/fonts compute correctly (off-screen
@@ -801,7 +905,7 @@ const createPdfBlobFromElement = async (
 
   try {
     // Prefer direct canvas + jsPDF — more reliable than html2pdf with Tailwind v4
-    const canvas = await rasterizeCloneToCanvas(clone, fitOnePage ? 2.2 : 2);
+    const canvas = await rasterizeCloneToCanvas(clone, fitOnePage ? 2.4 : 2);
     if (!canvas.width || !canvas.height) {
       throw new Error("Export produced an empty image — print view may be empty");
     }
@@ -816,27 +920,24 @@ const createPdfBlobFromElement = async (
 
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = fitOnePage
-      ? isLandscape
-        ? 4
-        : 5
-      : isLandscape
-        ? 8
-        : 10;
+    // Timetable: tight 4mm margins, centered, single page only
+    const margin = isTimetable ? 4 : fitOnePage ? (isLandscape ? 4 : 5) : isLandscape ? 8 : 10;
     const usableWidth = pageWidth - margin * 2;
     const usableHeight = pageHeight - margin * 2;
-    const imgData = canvas.toDataURL("image/jpeg", 0.93);
+    const imgData = canvas.toDataURL("image/jpeg", 0.94);
 
     if (fitOnePage) {
-      // Scale to fit both width and height on a single page (no second blank/page)
+      // Fit image into usable box (scale up or down), center H+V — never add page 2
       const widthScale = usableWidth / canvas.width;
       const heightScale = usableHeight / canvas.height;
-      const scale = Math.min(widthScale, heightScale);
+      let scale = Math.min(widthScale, heightScale);
+      // Use nearly full page; tiny safety factor avoids edge clipping
+      scale *= isTimetable ? 0.998 : 1;
       const drawWidth = canvas.width * scale;
       const drawHeight = canvas.height * scale;
       const x = margin + (usableWidth - drawWidth) / 2;
       const y = margin + (usableHeight - drawHeight) / 2;
-      pdf.addImage(imgData, "JPEG", x, y, drawWidth, drawHeight);
+      pdf.addImage(imgData, "JPEG", x, y, drawWidth, drawHeight, undefined, "FAST");
       return pdf.output("blob");
     }
 
