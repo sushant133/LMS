@@ -54,4 +54,11 @@ location /api/ {
 # SPA routes only
 location / {
     try_files $uri $uri/ /index.html;
+
+    # Production CSP (Vite production builds do NOT need 'unsafe-eval').
+    # Do not use this header on the Vite dev server (localhost:5173) — HMR
+    # uses dynamic evaluation and will break without 'unsafe-eval'.
+    #
+    # Adjust connect-src if the API is on another host.
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https:; worker-src 'self' blob:; manifest-src 'self'" always;
 }

@@ -38,6 +38,7 @@ import { sendSuccess } from "../utils/response.js";
 import { assertStudentLoginActive } from "../utils/studentLoginAccess.js";
 import { getStudentProfile } from "../utils/studentScope.js";
 import { withTenantScope } from "../utils/tenant.js";
+import { resolveStudentBorrowStatus } from "../utils/libraryIssueLimits.js";
 
 /** Nested populate so borrower fullName and issuer are available on issue lists. */
 const issueBorrowerPopulate: Array<{
@@ -658,6 +659,40 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(400, "Due date cannot be before the issue date");
   }
 
+  // Enforce student issue limits before claiming a physical copy
+  if (payload.borrowerType === "STUDENT" && payload.studentId) {
+    const student = await Student.findOne(
+      withTenantScope(req, { _id: payload.studentId })
+    );
+    if (!student) {
+      throw new ApiError(404, "Student not found");
+    }
+    await assertStudentLoginActive(
+      payload.studentId,
+      schoolId,
+      "issuing library books"
+    );
+
+    const borrowStatus = await resolveStudentBorrowStatus({
+      schoolId: schoolId.toString(),
+      studentId: payload.studentId
+    });
+    if (!borrowStatus.canIssue) {
+      throw new ApiError(
+        400,
+        borrowStatus.message ||
+          `Book issue limit reached. Maximum allowed is ${borrowStatus.maxAllowed} book(s).`
+      );
+    }
+  } else if (payload.borrowerType === "TEACHER" && payload.teacherId) {
+    const teacher = await Teacher.findOne(
+      withTenantScope(req, { _id: payload.teacherId })
+    );
+    if (!teacher) {
+      throw new ApiError(404, "Teacher not found");
+    }
+  }
+
   const book = await LibraryBook.findOne(withTenantScope(req, { _id: payload.bookId }));
   if (!book) {
     throw new ApiError(404, "Book not found");
@@ -696,30 +731,6 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
 
   if (!claimed) {
     throw new ApiError(400, `Copy ${copy.bookCode} was just issued to someone else`);
-  }
-
-  if (payload.borrowerType === "STUDENT") {
-    const student = await Student.findOne(withTenantScope(req, { _id: payload.studentId }));
-    if (!student) {
-      await LibraryBookCopy.updateOne({ _id: copy._id }, { $set: { status: "AVAILABLE" } });
-      throw new ApiError(404, "Student not found");
-    }
-    try {
-      await assertStudentLoginActive(
-        payload.studentId!,
-        schoolId,
-        "issuing library books"
-      );
-    } catch (err) {
-      await LibraryBookCopy.updateOne({ _id: copy._id }, { $set: { status: "AVAILABLE" } });
-      throw err;
-    }
-  } else {
-    const teacher = await Teacher.findOne(withTenantScope(req, { _id: payload.teacherId }));
-    if (!teacher) {
-      await LibraryBookCopy.updateOne({ _id: copy._id }, { $set: { status: "AVAILABLE" } });
-      throw new ApiError(404, "Teacher not found");
-    }
   }
 
   const issue = await LibraryIssue.create({

@@ -44,5 +44,7 @@ export * from "./subject-assignment-schemas.js";
 export * from "./character-certificate-constants.js";
 export * from "./character-certificate-types.js";
 export * from "./character-certificate-schemas.js";
+export * from "./library-issue-limits-types.js";
+export * from "./library-issue-limits-schemas.js";
 export * from "./schemas.js";
 export * from "./types.js";

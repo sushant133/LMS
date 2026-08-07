@@ -59,7 +59,35 @@ export const isChunkLoadError = (error: unknown): boolean => {
   return isStaleChunkError(message) || isStaleChunkError(name);
 };
 
+/**
+ * During `vite` dev, drop any leftover production/dev service workers.
+ * A stale SW can keep controlling localhost and surface Chrome Issues like
+ * "CSP blocks eval" or serve outdated shells after config changes.
+ */
+const unregisterServiceWorkersInDev = (): void => {
+  if (!import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+
+  void navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (const registration of registrations) {
+      void registration.unregister();
+    }
+  });
+
+  if ("caches" in window) {
+    void caches.keys().then((keys) => {
+      for (const key of keys) {
+        // Only clear workbox / vite-plugin-pwa caches, not unrelated origin caches
+        if (/workbox|precache|runtime|pwa|vite/i.test(key)) {
+          void caches.delete(key);
+        }
+      }
+    });
+  }
+};
+
 export const installStaleChunkRecovery = (): void => {
+  unregisterServiceWorkersInDev();
+
   // Vite fires this when a lazy route's chunk (or its preload) cannot be loaded.
   // preventDefault() makes Vite resolve the import with `undefined` instead of rejecting,
   // which only helps if a reload is actually coming — otherwise React renders `undefined`
@@ -91,7 +119,8 @@ export const installStaleChunkRecovery = (): void => {
   // A new service worker took over this tab: its precache no longer holds our chunks.
   // Only an *update* matters — the first install of a worker claims an uncontrolled page
   // whose assets are still being served normally, so reloading there would be noise.
-  if ("serviceWorker" in navigator) {
+  // Skip in dev — we intentionally keep no SW there.
+  if ("serviceWorker" in navigator && !import.meta.env.DEV) {
     const hadController = Boolean(navigator.serviceWorker.controller);
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (hadController) {

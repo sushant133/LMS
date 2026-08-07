@@ -29,6 +29,7 @@ import {
   Package,
   Printer,
   RotateCcw,
+  Shield,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,6 +41,10 @@ import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { LibraryIssuedBooksPanel } from "features/library/LibraryIssuedBooksPanel";
+import {
+  LibraryIssueLimitsPanel,
+  StudentBorrowStatusBanner,
+} from "features/library/LibraryIssueLimitsPanel";
 import { LibraryPrintBooksPanel } from "features/library/LibraryPrintBooksPanel";
 import { LibraryReturnsPanel } from "features/library/LibraryReturnsPanel";
 import { formatIssuedByLabel } from "features/library/libraryUtils";
@@ -85,6 +90,7 @@ type Tab =
   | "issue"
   | "issued"
   | "returns"
+  | "issue-limits"
   | "staff";
 
 type CopyDraft = {
@@ -173,6 +179,8 @@ const tabs: Array<{
   label: string;
   icon: typeof LayoutDashboard;
   adminOnly?: boolean;
+  /** Visible to library staff (read-only) and admins (full). */
+  staffVisible?: boolean;
 }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "inventory", label: "Inventory", icon: Package },
@@ -180,6 +188,12 @@ const tabs: Array<{
   { id: "issue", label: "Issue Books", icon: BookOpen },
   { id: "issued", label: "Issued Books", icon: BookMarked },
   { id: "returns", label: "Returns", icon: RotateCcw },
+  {
+    id: "issue-limits",
+    label: "Issue Limits",
+    icon: Shield,
+    staffVisible: true,
+  },
   { id: "staff", label: "Staff", icon: Users, adminOnly: true },
 ];
 
@@ -615,13 +629,19 @@ export const LibraryManager = () => {
   const issueBook = useMutation({
     mutationFn: (payload: LibraryIssueInput) =>
       unwrap(api.post("/library/issues", payload)),
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
       toast.success("Book issued by copy code");
+      const studentId = variables.studentId;
       setIssueForm(defaultIssue);
       setIssueStudentSearch("");
       setIssueTeacherSearch("");
       setIssueBookSearch("");
       await invalidateLibrary();
+      if (studentId) {
+        await queryClient.invalidateQueries({
+          queryKey: ["library-borrow-status", studentId],
+        });
+      }
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
@@ -645,7 +665,12 @@ export const LibraryManager = () => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
-  const visibleTabs = tabs.filter((item) => !item.adminOnly || isAdmin);
+  const visibleTabs = tabs.filter((item) => {
+    if (item.adminOnly && !isAdmin) return false;
+    // Issue Limits: admin (edit) + library staff (view)
+    if (item.id === "issue-limits") return true;
+    return true;
+  });
 
   const submitBook = () => {
     if (editingBookId) {
@@ -1455,43 +1480,43 @@ export const LibraryManager = () => {
                         key={book._id}
                         className="rounded-lg border border-slate-200"
                       >
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2 px-3 py-3 text-left hover:bg-slate-50"
-                          onClick={() =>
-                            setExpandedBookId(expanded ? null : book._id)
-                          }
-                        >
-                          <span className="w-8 shrink-0 text-center text-sm tabular-nums text-slate-500">
-                            {bookIndex + 1}
-                          </span>
-                          {expanded ? (
-                            <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium text-slate-900">
-                                {book.title}
+                        <div className="flex w-full items-center gap-2 px-3 py-3">
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left hover:opacity-90"
+                            onClick={() =>
+                              setExpandedBookId(expanded ? null : book._id)
+                            }
+                            aria-expanded={expanded}
+                          >
+                            <span className="w-8 shrink-0 text-center text-sm tabular-nums text-slate-500">
+                              {bookIndex + 1}
+                            </span>
+                            {expanded ? (
+                              <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-medium text-slate-900">
+                                  {book.title}
+                                </p>
+                                <Badge className="bg-indigo-100 text-indigo-800">
+                                  {book.yearLevel ?? "All Years"}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-slate-500">
+                                {book.author} · {book.category} ·{" "}
+                                {book.totalCopies} copies ·{" "}
+                                {book.availableCopies} available ·{" "}
+                                {book.issuedCopies} issued
                               </p>
-                              <Badge className="bg-indigo-100 text-indigo-800">
-                                {book.yearLevel ?? "All Years"}
-                              </Badge>
                             </div>
-                            <p className="text-xs text-slate-500">
-                              {book.author} · {book.category} ·{" "}
-                              {book.totalCopies} copies ·{" "}
-                              {book.availableCopies} available ·{" "}
-                              {book.issuedCopies} issued
-                            </p>
-                          </div>
-                          <StockStatusBadge status={book.status} />
+                            <StockStatusBadge status={book.status} />
+                          </button>
                           {canManageInventory ? (
-                            <div
-                              className="flex gap-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
+                            <div className="flex shrink-0 gap-1">
                               <Button
                                 size="sm"
                                 variant="secondary"
@@ -1529,7 +1554,7 @@ export const LibraryManager = () => {
                               </Button>
                             </div>
                           ) : null}
-                        </button>
+                        </div>
                         {expanded ? (
                           <div className="border-t border-slate-100 px-3 py-2">
                             {copies.length === 0 ? (
@@ -2056,15 +2081,20 @@ export const LibraryManager = () => {
                       </p>
                     ) : null}
                     {selectedStudent ? (
-                      <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
-                        Borrower:{" "}
-                        <strong>
-                          {selectedStudent.user?.fullName ?? "Student"}
-                        </strong>
-                        {selectedStudent.rollNumber != null
-                          ? ` · Roll ${selectedStudent.rollNumber}`
-                          : ""}
-                      </p>
+                      <div className="space-y-2">
+                        <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
+                          Borrower:{" "}
+                          <strong>
+                            {selectedStudent.user?.fullName ?? "Student"}
+                          </strong>
+                          {selectedStudent.rollNumber != null
+                            ? ` · Roll ${selectedStudent.rollNumber}`
+                            : ""}
+                        </p>
+                        <StudentBorrowStatusBanner
+                          studentId={selectedStudent._id}
+                        />
+                      </div>
                     ) : null}
                   </>
                 ) : (
@@ -2328,6 +2358,10 @@ export const LibraryManager = () => {
           key={returnsFocusHistory ? "returns-history" : "returns"}
           focusReturnHistory={returnsFocusHistory}
         />
+      )}
+
+      {tab === "issue-limits" && (
+        <LibraryIssueLimitsPanel canManage={isAdmin} />
       )}
 
       {tab === "staff" && isAdmin && (

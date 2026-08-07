@@ -22,54 +22,61 @@ export default defineConfig(({ mode }) => {
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: "autoUpdate",
+        /**
+         * Keep the service worker OFF during `vite` dev.
+         * Dev SW + Vite HMR both use dynamic evaluation; together they produce
+         * Chrome "CSP blocks eval" Issues noise and stale-cache confusion.
+         * Production builds still register the PWA normally.
+         */
         devOptions: {
-          enabled: true,
+          enabled: false,
         },
-        includeAssets: ['favicon.ico', 'logo.png'],
+        // Do not inject a register script during `vite` — only on production builds.
+        injectRegister: mode === "development" ? null : "auto",
+        includeAssets: ["favicon.ico", "logo.png"],
         manifest: {
-          name: 'LMS - PHIT',
-          short_name: 'LMS',
-          description: 'Learning Management System - PHIT',
-          theme_color: '#1976d2',
-          background_color: '#ffffff',
-          display: 'standalone',
-          start_url: '/',
-          scope: '/',
+          name: "LMS - PHIT",
+          short_name: "LMS",
+          description: "Learning Management System - PHIT",
+          theme_color: "#1976d2",
+          background_color: "#ffffff",
+          display: "standalone",
+          start_url: "/",
+          scope: "/",
           icons: [
             {
-              src: '/pwa-192x192.png',
-              sizes: '192x192',
-              type: 'image/png',
+              src: "/pwa-192x192.png",
+              sizes: "192x192",
+              type: "image/png",
             },
             {
-              src: '/pwa-512x512.png',
-              sizes: '512x512',
-              type: 'image/png',
-              purpose: 'any maskable',
-            }
+              src: "/pwa-512x512.png",
+              sizes: "512x512",
+              type: "image/png",
+              purpose: "any maskable",
+            },
           ],
         },
         workbox: {
-          navigateFallback: '/index.html',     // This ensures login page shows even offline on first open
+          navigateFallback: "/index.html",
           // Never answer API/upload navigations from the app shell — without this the
           // service worker returns index.html for links like
           // /api/exams/results/:examId/:studentId/marksheet/pdf and the tab renders the
           // SPA "Page not found" screen instead of the file.
           navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
-          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
           runtimeCaching: [
-            // Only cache static images - nothing else
             {
               urlPattern: /^https?:\/\/.*\.(?:png|jpg|jpeg|svg|gif|ico)$/i,
-              handler: 'CacheFirst',
+              handler: "CacheFirst",
               options: {
-                cacheName: 'images-cache',
-              }
-            }
-          ]
-        }
-      })
+                cacheName: "images-cache",
+              },
+            },
+          ],
+        },
+      }),
     ],
     resolve: {
       alias: {
@@ -79,22 +86,26 @@ export default defineConfig(({ mode }) => {
         hooks: path.resolve(__dirname, "./src/hooks"),
         i18n: path.resolve(__dirname, "./src/i18n"),
         lib: path.resolve(__dirname, "./src/lib"),
-        pages: path.resolve(__dirname, "./src/pages")
+        pages: path.resolve(__dirname, "./src/pages"),
       },
-      extensions: [".tsx", ".ts", ".jsx", ".js", ".json"]
+      extensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
     },
     build: {
+      // External .map files — never inline eval-style sourcemaps in production
       sourcemap: mode !== "production",
       minify: "esbuild",
       target: "es2020",
       chunkSizeWarningLimit: 1200,
-      emptyOutDir: true
+      emptyOutDir: true,
     },
     esbuild: mode === "production" ? { drop: ["console", "debugger"] } : undefined,
     server: {
       port: 5173,
       strictPort: true,
       host: true,
+      // No Content-Security-Policy in Vite dev. Vite HMR / React Refresh use
+      // dynamic evaluation; a strict CSP causes Chrome "script-src blocked eval"
+      // Issues. Production CSP belongs on nginx (scripts/nginx-frontend.conf.example).
       proxy: {
         "/api": {
           target: proxyTarget,
@@ -102,26 +113,34 @@ export default defineConfig(({ mode }) => {
           secure: false,
           configure: (proxy) => {
             proxy.on("error", (_error, _request, response) => {
-              if (response && "writeHead" in response && typeof response.writeHead === "function" && !response.headersSent) {
+              if (
+                response &&
+                "writeHead" in response &&
+                typeof response.writeHead === "function" &&
+                !response.headersSent
+              ) {
                 response.writeHead(503, { "Content-Type": "application/json" });
-                response.end(JSON.stringify({
-                  success: false,
-                  message: "Backend API is not running. Start it with: npm run dev --prefix ../backend"
-                }));
+                response.end(
+                  JSON.stringify({
+                    success: false,
+                    message:
+                      "Backend API is not running. Start it with: npm run dev --prefix ../backend",
+                  }),
+                );
               }
             });
-          }
+          },
         },
         "/uploads": {
           target: proxyTarget,
           changeOrigin: true,
-          secure: false
-        }
-      }
+          secure: false,
+        },
+      },
     },
     preview: {
       port: 4173,
-      strictPort: true
-    }
+      strictPort: true,
+    },
   };
 });

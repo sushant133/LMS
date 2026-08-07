@@ -20,6 +20,15 @@ import {
   updateIssue,
   updateLibraryStaff
 } from "../controllers/libraryController.js";
+import {
+  createIssueLimitException,
+  getIssueLimits,
+  getStudentBorrowStatus,
+  listIssueLimitExceptions,
+  revokeIssueLimitException,
+  updateIssueLimitException,
+  updateIssueLimits
+} from "../controllers/libraryIssueLimitsController.js";
 import { authorize, authorizeInstitutionAdmin, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
 
@@ -32,6 +41,39 @@ router.get("/my-books", authorize("STUDENT", "TEACHER"), listMyBooks);
 
 router.get("/inventory-access", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), getInventoryAccess);
 router.put("/inventory-access", authorizeInstitutionAdmin, setInventoryAccess);
+
+/** Year-wise book issue limits — staff can view; only institution admin can edit. */
+router.get(
+  "/issue-limits",
+  authorize("COLLEGE_ADMIN", "LIBRARY_STAFF", "SUPER_ADMIN"),
+  getIssueLimits
+);
+router.put("/issue-limits", authorizeInstitutionAdmin, updateIssueLimits);
+
+/** Student-specific exceptions — admin only to manage; staff can list when needed. */
+router.get(
+  "/issue-limit-exceptions",
+  authorize("COLLEGE_ADMIN", "LIBRARY_STAFF", "SUPER_ADMIN"),
+  listIssueLimitExceptions
+);
+router.post("/issue-limit-exceptions", authorizeInstitutionAdmin, createIssueLimitException);
+router.put(
+  "/issue-limit-exceptions/:id",
+  authorizeInstitutionAdmin,
+  updateIssueLimitException
+);
+router.delete(
+  "/issue-limit-exceptions/:id",
+  authorizeInstitutionAdmin,
+  revokeIssueLimitException
+);
+
+/** Current issued / max for a student (issue screen + enforcement preview). */
+router.get(
+  "/students/:studentId/borrow-status",
+  authorize("COLLEGE_ADMIN", "LIBRARY_STAFF", "SUPER_ADMIN"),
+  getStudentBorrowStatus
+);
 
 router.get("/books", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), listBooks);
 router.post("/books", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), createBook);

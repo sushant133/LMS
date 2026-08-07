@@ -21,7 +21,8 @@ export const securityHeaders = (_req: Request, res: Response, next: NextFunction
 
   if (env.NODE_ENV === "production") {
     res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-    // Relaxed CSP for API JSON only — frontend hosts its own CSP if needed
+    // API returns JSON only — do not set a browser script CSP here.
+    // Frontend / reverse proxy owns HTML CSP (see scripts/nginx-frontend.conf.example).
     res.setHeader("Cross-Origin-Resource-Policy", "same-site");
   }
 
