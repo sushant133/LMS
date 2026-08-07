@@ -457,7 +457,7 @@ export const STUDENT_ACADEMIC_STATUSES = [
 
 export const STUDENT_ACADEMIC_STATUS_LABELS: Record<(typeof STUDENT_ACADEMIC_STATUSES)[number], string> = {
   ACTIVE: "Active",
-  PENDING_NOT_PASSED: "Pending / Not Passed",
+  PENDING_NOT_PASSED: "Back",
   PASSED_OUT: "Passed Out",
   ALUMNI: "Alumni",
   WITHDRAWN: "Dropped Out",

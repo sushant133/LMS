@@ -16,8 +16,15 @@ export const EARLY_LEAVE_REASON_SUGGESTIONS = [
   "Family emergency",
   "Personal reason",
   "Medical appointment",
+  "Application Leave",
   "Other"
 ] as const;
+
+/** How leave dates are entered when reason is Application Leave. */
+export const APPLICATION_LEAVE_DATE_MODES = ["EXACT", "RANGE"] as const;
+export type ApplicationLeaveDateMode = (typeof APPLICATION_LEAVE_DATE_MODES)[number];
+
+export const APPLICATION_LEAVE_REASON = "Application Leave" as const;
 
 export interface StudentEarlyLeaveRecord {
   _id: string;
@@ -43,6 +50,20 @@ export interface StudentEarlyLeaveRecord {
   /** Free-text period label, e.g. "after 2nd period", "during tiffin break" */
   periodLabel: string;
   reason: string;
+  /**
+   * Optional free-text details when reason is Application Leave
+   * (what the leave application is for).
+   */
+  applicationReason?: string;
+  /**
+   * Application Leave date entry mode (stored for display).
+   * EXACT = single day on dateBs; RANGE = leaveFromDateBs–leaveToDateBs.
+   */
+  leaveDateMode?: ApplicationLeaveDateMode;
+  /** Inclusive range start (BS) when Application Leave spans multiple days. */
+  leaveFromDateBs?: string;
+  /** Inclusive range end (BS) when Application Leave spans multiple days. */
+  leaveToDateBs?: string;
   approvedBy?: string;
   remarks?: string;
   /** HH:MM when recorded (optional wall-clock leave time) */

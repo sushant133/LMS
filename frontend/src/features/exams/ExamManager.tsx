@@ -65,6 +65,11 @@ const PassedOutStudentsPanel = lazy(() =>
     default: module.PassedOutStudentsPanel,
   })),
 );
+const BackStudentsPanel = lazy(() =>
+  import("features/exams/BackStudentsPanel").then((module) => ({
+    default: module.BackStudentsPanel ?? module.default,
+  })),
+);
 const ResultReviewPanel = lazy(() =>
   import("features/exams/ResultReviewPanel").then((module) => ({
     default: module.ResultReviewPanel,
@@ -435,7 +440,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   } | null>(null);
   const [selectedExamId, setSelectedExamId] = useState("");
   const [adminSection, setAdminSection] = useState<
-    "manage" | "print-results" | "enter-marks" | "passed-out"
+    "manage" | "print-results" | "enter-marks" | "passed-out" | "back-students"
   >("manage");
   const [adminTab, setAdminTab] = useState<
     "routine" | "analytics" | "review" | "results"
@@ -1259,6 +1264,15 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                 Passed-Out Students
               </Button>
             ) : null}
+            {isAdmin && isCollege ? (
+              <Button
+                size="sm"
+                variant={adminSection === "back-students" ? "default" : "outline"}
+                onClick={() => setAdminSection("back-students")}
+              >
+                Back Students
+              </Button>
+            ) : null}
           </div>
 
           {adminSection === "passed-out" && canManage && isCollege ? (
@@ -1273,6 +1287,34 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
                   _id: String(year._id),
                   batchId: year.batchId ? String(year.batchId) : undefined,
                 }))}
+              />
+            </Suspense>
+          ) : null}
+
+          {adminSection === "back-students" && isAdmin && isCollege ? (
+            <Suspense fallback={<LoadingState />}>
+              <BackStudentsPanel
+                batches={(batchesQuery.data ?? []).map((batch) => ({
+                  _id: String(batch._id),
+                  name: String(batch.name ?? ""),
+                }))}
+                years={(yearsQuery.data ?? []).map((year) => {
+                  const rawBatchId = year.batchId as
+                    | string
+                    | { _id?: string }
+                    | undefined;
+                  const batchId =
+                    rawBatchId == null
+                      ? undefined
+                      : typeof rawBatchId === "object"
+                        ? String(rawBatchId._id ?? "")
+                        : String(rawBatchId);
+                  return {
+                    _id: String(year._id),
+                    name: String(year.name ?? ""),
+                    batchId: batchId || undefined,
+                  };
+                })}
               />
             </Suspense>
           ) : null}

@@ -14,6 +14,14 @@ const studentEarlyLeaveSchema = new Schema(
     leftAfterPeriod: { type: Number, min: 1, max: 12, default: null },
     periodLabel: { type: String, required: true, trim: true },
     reason: { type: String, required: true, trim: true },
+    /** Optional details for Application Leave (what the leave is for). */
+    applicationReason: { type: String, default: "", trim: true },
+    /** EXACT | RANGE — how leave dates were entered for Application Leave. */
+    leaveDateMode: { type: String, enum: ["EXACT", "RANGE", ""], default: "" },
+    /** Inclusive range start (BS) when Application Leave spans days. */
+    leaveFromDateBs: { type: String, default: "", trim: true },
+    /** Inclusive range end (BS) when Application Leave spans days. */
+    leaveToDateBs: { type: String, default: "", trim: true },
     approvedBy: { type: String, default: "", trim: true },
     remarks: { type: String, default: "", trim: true },
     leftAtTime: { type: String, default: "" },

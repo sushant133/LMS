@@ -63,7 +63,7 @@ export const NepaliDateField = ({
   minDate,
   maxDate,
 }: NepaliDateFieldProps) => (
-  <div className="relative z-0 rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-brand-500 focus-within:z-10 [&_select]:min-w-[4.5rem] [&_select]:cursor-pointer [&_select]:rounded-md [&_select]:border-slate-300 [&_select]:bg-white [&_select]:px-2 [&_select]:py-1 [&_select]:text-sm [&_select]:text-slate-900">
+  <div className="relative z-0 min-w-0 overflow-hidden rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:z-10 focus-within:border-brand-500 [&_select]:min-w-[4.5rem] [&_select]:cursor-pointer [&_select]:rounded-md [&_select]:border-slate-300 [&_select]:bg-white [&_select]:px-2 [&_select]:py-1 [&_select]:text-sm [&_select]:text-slate-900">
     <Picker
       language="en"
       captionLayout={captionLayout}
@@ -115,8 +115,8 @@ export const DualBsAdDateField = ({
   const valueAd = valueBs ? bsDateToAdString(valueBs) : "";
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="min-w-0 space-y-1.5">
+    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+      <div className="min-w-0 space-y-1.5 overflow-hidden">
         <p className="text-xs font-medium text-slate-500">BS (Bikram Sambat)</p>
         <NepaliDateField
           value={valueBs}
@@ -126,7 +126,7 @@ export const DualBsAdDateField = ({
           maxDate={maxDate}
         />
       </div>
-      <div className="min-w-0 space-y-1.5">
+      <div className="min-w-0 space-y-1.5 overflow-hidden">
         <p className="text-xs font-medium text-slate-500">AD (Gregorian)</p>
         <Input
           type="date"
@@ -144,10 +144,10 @@ export const DualBsAdDateField = ({
             // Prefer converted BS so both stay in sync; clear when conversion fails.
             onChangeBs(bs);
           }}
-          className="h-[2.625rem] rounded-xl border-slate-300"
+          className="h-[2.625rem] w-full min-w-0 rounded-xl border-slate-300"
         />
         {valueBs && valueAd ? (
-          <p className="text-[11px] text-slate-400">
+          <p className="truncate text-[11px] text-slate-400">
             BS {valueBs} · AD {valueAd}
           </p>
         ) : null}

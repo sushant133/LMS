@@ -1,10 +1,21 @@
 import { z } from "zod";
 import { academicYearSchema, objectIdSchema, optionalObjectIdSchema } from "./schemas.js";
-import { EARLY_LEAVE_PERIOD_KINDS } from "./early-leave-types.js";
+import {
+  APPLICATION_LEAVE_DATE_MODES,
+  APPLICATION_LEAVE_REASON,
+  EARLY_LEAVE_PERIOD_KINDS
+} from "./early-leave-types.js";
 
 const timeHm = z
   .string()
   .regex(/^\d{2}:\d{2}$/, "Time must be HH:MM")
+  .optional()
+  .or(z.literal(""));
+
+const optionalBsDate = z
+  .string()
+  .trim()
+  .min(8)
   .optional()
   .or(z.literal(""));
 
@@ -16,6 +27,11 @@ export const studentEarlyLeaveSchema = z
     leftAfterPeriod: z.coerce.number().int().min(1).max(12).optional().nullable(),
     periodLabel: z.string().trim().min(1, "Period / leave point is required").max(120),
     reason: z.string().trim().min(1, "Reason is required").max(300),
+    /** Optional details when reason is Application Leave. */
+    applicationReason: z.string().trim().max(500).optional().or(z.literal("")),
+    leaveDateMode: z.enum(APPLICATION_LEAVE_DATE_MODES).optional(),
+    /** Inclusive range end when Application Leave uses a date range (dateBs = start). */
+    leaveToDateBs: optionalBsDate,
     approvedBy: z.string().trim().max(120).optional().or(z.literal("")),
     remarks: z.string().trim().max(500).optional().or(z.literal("")),
     leftAtTime: timeHm,
@@ -26,6 +42,22 @@ export const studentEarlyLeaveSchema = z
     academicYearBs: academicYearSchema.optional().or(z.literal(""))
   })
   .superRefine((data, ctx) => {
+    const isApplicationLeave =
+      data.reason.trim().toLowerCase() === APPLICATION_LEAVE_REASON.toLowerCase();
+
+    if (isApplicationLeave) {
+      if (data.leaveDateMode === "RANGE") {
+        if (!data.leaveToDateBs || !String(data.leaveToDateBs).trim()) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Select the leave end date",
+            path: ["leaveToDateBs"]
+          });
+        }
+      }
+      return;
+    }
+
     if (data.periodKind === "AFTER_PERIOD") {
       if (data.leftAfterPeriod == null || data.leftAfterPeriod < 1) {
         ctx.addIssue({

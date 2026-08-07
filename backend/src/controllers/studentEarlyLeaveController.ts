@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  APPLICATION_LEAVE_REASON,
   canManageInstitution,
   canAccessModule,
   hasInstitutionAccess,
@@ -20,7 +21,12 @@ import { Setting } from "../models/Setting.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
-import { ensureValidBsDate } from "../utils/nepaliDate.js";
+import {
+  compareBsDates,
+  countInclusiveBsDays,
+  ensureValidBsDate,
+  getOffsetFromBsDate
+} from "../utils/nepaliDate.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
 import {
   getStudentDisplayName,
@@ -28,7 +34,35 @@ import {
 } from "../utils/notificationService.js";
 import { getUserModuleAccessMap } from "../utils/moduleAccessService.js";
 import { sendSuccess } from "../utils/response.js";
-import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
+import { tenantObjectId } from "../utils/tenant.js";
+
+const MAX_APPLICATION_LEAVE_DAYS = 60;
+
+const isApplicationLeaveReason = (reason: string): boolean =>
+  reason.trim().toLowerCase() === APPLICATION_LEAVE_REASON.toLowerCase();
+
+/** Inclusive list of BS dates from start to end (max MAX_APPLICATION_LEAVE_DAYS). */
+const listInclusiveBsDates = (startBs: string, endBs: string): string[] => {
+  const start = ensureValidBsDate(startBs);
+  const end = ensureValidBsDate(endBs);
+  if (compareBsDates(end, start) < 0) {
+    throw new ApiError(400, "Leave end date must be on or after the start date");
+  }
+  const days = countInclusiveBsDays(start, end);
+  if (days > MAX_APPLICATION_LEAVE_DAYS) {
+    throw new ApiError(
+      400,
+      `Application leave range cannot exceed ${MAX_APPLICATION_LEAVE_DAYS} days`
+    );
+  }
+  const dates: string[] = [];
+  let current = start;
+  for (let i = 0; i < days; i += 1) {
+    dates.push(current);
+    if (i < days - 1) current = getOffsetFromBsDate(current, 1);
+  }
+  return dates;
+};
 
 const assertEarlyLeaveAccess = async (
   req: Request,
@@ -240,60 +274,106 @@ export const createStudentEarlyLeave = asyncHandler(async (req: Request, res: Re
     .lean();
   if (!student) throw new ApiError(404, "Student not found");
 
-  const existing = await StudentEarlyLeave.findOne({
+  const reason = payload.reason.trim();
+  const isAppLeave = isApplicationLeaveReason(reason);
+  const applicationReason = (payload.applicationReason ?? "").trim();
+  const leaveToRaw = (payload.leaveToDateBs ?? "").trim();
+  const leaveDateMode =
+    payload.leaveDateMode ??
+    (isAppLeave && leaveToRaw && leaveToRaw !== payload.dateBs ? "RANGE" : "EXACT");
+
+  const dates =
+    isAppLeave && leaveDateMode === "RANGE" && leaveToRaw
+      ? listInclusiveBsDates(payload.dateBs, leaveToRaw)
+      : [ensureValidBsDate(payload.dateBs)];
+
+  const leaveFromDateBs = dates[0] ?? payload.dateBs;
+  const leaveToDateBs = dates[dates.length - 1] ?? payload.dateBs;
+
+  // Reject if any day in the range already has an early-leave record
+  const existingOnDates = await StudentEarlyLeave.find({
     schoolId,
     studentId: payload.studentId,
-    dateBs: payload.dateBs,
+    dateBs: { $in: dates },
     isDeleted: false
-  }).lean();
-  if (existing) {
+  })
+    .select("dateBs")
+    .lean();
+  if (existingOnDates.length > 0) {
+    const conflict = existingOnDates.map((r) => r.dateBs).join(", ");
     throw new ApiError(
       409,
-      "An early leave record already exists for this student on this date. Edit or delete it first."
+      `An early leave record already exists for this student on: ${conflict}. Edit or delete those first.`
     );
   }
 
-  const periodLabel = buildPeriodLabel({
-    periodKind: payload.periodKind,
-    leftAfterPeriod: payload.leftAfterPeriod,
-    periodLabel: payload.periodLabel
-  });
+  const periodLabel = isAppLeave
+    ? buildPeriodLabel({
+        periodKind: "OTHER",
+        leftAfterPeriod: null,
+        periodLabel: payload.periodLabel?.trim() || "Application leave"
+      })
+    : buildPeriodLabel({
+        periodKind: payload.periodKind,
+        leftAfterPeriod: payload.leftAfterPeriod,
+        periodLabel: payload.periodLabel
+      });
+
+  const periodKind = isAppLeave ? "OTHER" : payload.periodKind;
+  const leftAfterPeriod = isAppLeave ? null : (payload.leftAfterPeriod ?? null);
 
   const batchId = payload.batchId || student.batchId?.toString() || undefined;
   const yearId = payload.yearId || student.yearId?.toString() || undefined;
   const classId = payload.classId || student.classId?.toString() || undefined;
   const sectionId = payload.sectionId || student.sectionId?.toString() || undefined;
 
-  const dailyAttendanceId = await applyEarlyLeaveToAttendance({
-    schoolId: schoolId.toString(),
-    studentId: payload.studentId,
-    dateBs: payload.dateBs,
-    leftAfterPeriod: payload.leftAfterPeriod,
-    periodLabel,
-    reason: payload.reason
-  });
+  const remarksBase = (payload.remarks ?? "").trim();
+  const remarksParts = [
+    remarksBase,
+    applicationReason ? `Application: ${applicationReason}` : ""
+  ].filter(Boolean);
+  const remarks = remarksParts.join(" · ").slice(0, 500);
 
-  const created = await StudentEarlyLeave.create({
-    schoolId,
-    studentId: payload.studentId,
-    dateBs: payload.dateBs,
-    periodKind: payload.periodKind,
-    leftAfterPeriod: payload.leftAfterPeriod ?? null,
-    periodLabel,
-    reason: payload.reason.trim(),
-    approvedBy: (payload.approvedBy ?? "").trim(),
-    remarks: (payload.remarks ?? "").trim(),
-    leftAtTime: (payload.leftAtTime ?? "").trim(),
-    batchId: college ? batchId : undefined,
-    yearId: college ? yearId : undefined,
-    classId: !college ? classId : undefined,
-    sectionId: !college ? sectionId : undefined,
-    academicYearBs: (payload.academicYearBs ?? "").trim(),
-    dailyAttendanceId: dailyAttendanceId || undefined,
-    createdBy: req.user!.userId
-  });
+  const createdDocs = [];
+  for (const dateBs of dates) {
+    const dailyAttendanceId = await applyEarlyLeaveToAttendance({
+      schoolId: schoolId.toString(),
+      studentId: payload.studentId,
+      dateBs,
+      leftAfterPeriod,
+      periodLabel,
+      reason: applicationReason
+        ? `${reason} (${applicationReason})`
+        : reason
+    });
 
-  // Parent notification
+    const created = await StudentEarlyLeave.create({
+      schoolId,
+      studentId: payload.studentId,
+      dateBs,
+      periodKind,
+      leftAfterPeriod,
+      periodLabel,
+      reason,
+      applicationReason,
+      leaveDateMode: isAppLeave ? leaveDateMode : "",
+      leaveFromDateBs: isAppLeave ? leaveFromDateBs : "",
+      leaveToDateBs: isAppLeave ? leaveToDateBs : "",
+      approvedBy: (payload.approvedBy ?? "").trim(),
+      remarks,
+      leftAtTime: isAppLeave ? "" : (payload.leftAtTime ?? "").trim(),
+      batchId: college ? batchId : undefined,
+      yearId: college ? yearId : undefined,
+      classId: !college ? classId : undefined,
+      sectionId: !college ? sectionId : undefined,
+      academicYearBs: (payload.academicYearBs ?? "").trim(),
+      dailyAttendanceId: dailyAttendanceId || undefined,
+      createdBy: req.user!.userId
+    });
+    createdDocs.push(created);
+  }
+
+  // Parent notification (one message covering the whole application)
   const studentName =
     (student.user as { fullName?: string } | null)?.fullName?.trim() ||
     (await getStudentDisplayName(payload.studentId));
@@ -305,37 +385,54 @@ export const createStudentEarlyLeave = asyncHandler(async (req: Request, res: Re
     (school as { name?: string } | null)?.name ||
     "School";
 
-  const timePart = payload.leftAtTime
-    ? ` at ${payload.leftAtTime}`
-    : "";
-  const message = [
-    `${studentName} left campus early on ${payload.dateBs}${timePart}.`,
-    `Left: ${periodLabel}.`,
-    `Reason: ${payload.reason.trim()}.`,
-    `${schoolName}.`
-  ].join(" ");
+  const datePart =
+    dates.length > 1
+      ? `from ${leaveFromDateBs} to ${leaveToDateBs} (${dates.length} days)`
+      : `on ${leaveFromDateBs}`;
+  const timePart =
+    !isAppLeave && payload.leftAtTime ? ` at ${payload.leftAtTime}` : "";
+  const appDetail = applicationReason ? ` Details: ${applicationReason}.` : "";
+  const message = isAppLeave
+    ? [
+        `${studentName} has application leave ${datePart}.`,
+        `Reason: ${reason}.${appDetail}`,
+        `${schoolName}.`
+      ].join(" ")
+    : [
+        `${studentName} left campus early on ${payload.dateBs}${timePart}.`,
+        `Left: ${periodLabel}.`,
+        `Reason: ${reason}.`,
+        `${schoolName}.`
+      ].join(" ");
 
   await notifyParentsOfStudent(
     schoolId.toString(),
     payload.studentId,
-    "Student early leave",
+    isAppLeave ? "Student application leave" : "Student early leave",
     message,
     "ATTENDANCE",
     "BOTH"
   );
 
-  await recordAudit(req, {
-    action: "student.early_leave.create",
-    entity: "StudentEarlyLeave",
-    entityId: created._id.toString(),
-    after: created.toObject()
-  });
+  for (const created of createdDocs) {
+    await recordAudit(req, {
+      action: "student.early_leave.create",
+      entity: "StudentEarlyLeave",
+      entityId: created._id.toString(),
+      after: created.toObject()
+    });
+  }
 
+  const first = createdDocs[0]!;
   const enriched = await enrichRecord(
     schoolId,
-    created.toObject() as Record<string, unknown>
+    first.toObject() as Record<string, unknown>
   );
-  return sendSuccess(res, "Early leave recorded — parents notified", enriched, 201);
+  const msg =
+    createdDocs.length > 1
+      ? `Application leave recorded for ${createdDocs.length} days — parents notified`
+      : "Early leave recorded — parents notified";
+  return sendSuccess(res, msg, enriched, 201);
 });
 
 export const updateStudentEarlyLeave = asyncHandler(async (req: Request, res: Response) => {

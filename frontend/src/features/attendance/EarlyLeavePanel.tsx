@@ -9,8 +9,11 @@ const EARLY_LEAVE_REASON_SUGGESTIONS = [
   "Family emergency",
   "Personal reason",
   "Medical appointment",
+  "Application Leave",
   "Other",
 ] as const;
+
+const APPLICATION_LEAVE_REASON = "Application Leave";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 import { LogOut, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -52,6 +55,10 @@ type EarlyLeaveRecord = {
   leftAfterPeriod?: number | null;
   periodLabel: string;
   reason: string;
+  applicationReason?: string;
+  leaveDateMode?: "EXACT" | "RANGE" | "";
+  leaveFromDateBs?: string;
+  leaveToDateBs?: string;
   approvedBy?: string;
   remarks?: string;
   leftAtTime?: string;
@@ -88,6 +95,12 @@ const emptyForm = () => ({
   periodLabel: "",
   reason: "",
   reasonCustom: "",
+  /** Optional details when reason is Application Leave. */
+  applicationReason: "",
+  /** EXACT = single leave date; RANGE = from–to. */
+  leaveDateMode: "EXACT" as "EXACT" | "RANGE",
+  leaveFromDateBs: formatTodayBs(),
+  leaveToDateBs: formatTodayBs(),
   approvedBy: "",
   remarks: "",
   leftAtTime: "",
@@ -247,8 +260,22 @@ export const EarlyLeavePanel = () => {
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       unwrap(api.post("/student-early-leave", payload)),
-    onSuccess: async () => {
-      toast.success("Early leave recorded — parents notified");
+    onSuccess: async (_data, variables) => {
+      const isApp =
+        String(variables.reason ?? "")
+          .toLowerCase() === APPLICATION_LEAVE_REASON.toLowerCase();
+      const range =
+        isApp &&
+        variables.leaveDateMode === "RANGE" &&
+        variables.leaveToDateBs &&
+        variables.leaveToDateBs !== variables.dateBs;
+      toast.success(
+        range
+          ? "Application leave recorded for the date range — parents notified"
+          : isApp
+            ? "Application leave recorded — parents notified"
+            : "Early leave recorded — parents notified",
+      );
       setForm(emptyForm());
       setShowForm(false);
       await queryClient.invalidateQueries({ queryKey: ["student-early-leave"] });
@@ -276,13 +303,17 @@ export const EarlyLeavePanel = () => {
     return "Early leave";
   };
 
+  const resolvedReason =
+    form.reason === "__custom__"
+      ? form.reasonCustom.trim()
+      : form.reason.trim();
+  const isApplicationLeave =
+    resolvedReason.toLowerCase() === APPLICATION_LEAVE_REASON.toLowerCase() ||
+    form.reason === APPLICATION_LEAVE_REASON;
+
   const submit = () => {
     if (!form.studentId) {
       toast.error("Select a student");
-      return;
-    }
-    if (!form.dateBs) {
-      toast.error("Select a date");
       return;
     }
     const reason =
@@ -293,22 +324,68 @@ export const EarlyLeavePanel = () => {
       toast.error("Enter a reason for leaving");
       return;
     }
-    if (form.periodKind === "AFTER_PERIOD" && !form.leftAfterPeriod) {
-      toast.error("Select the period after which the student left");
+
+    const applicationLeave =
+      reason.toLowerCase() === APPLICATION_LEAVE_REASON.toLowerCase();
+
+    let dateBs = form.dateBs;
+    let leaveToDateBs: string | undefined;
+    let leaveDateMode: "EXACT" | "RANGE" | undefined;
+
+    if (applicationLeave) {
+      leaveDateMode = form.leaveDateMode;
+      if (form.leaveDateMode === "RANGE") {
+        dateBs = form.leaveFromDateBs;
+        leaveToDateBs = form.leaveToDateBs;
+        if (!dateBs || !leaveToDateBs) {
+          toast.error("Select leave from and to dates");
+          return;
+        }
+      } else {
+        dateBs = form.leaveFromDateBs || form.dateBs;
+        if (!dateBs) {
+          toast.error("Select the leave date");
+          return;
+        }
+      }
+    } else if (!form.dateBs) {
+      toast.error("Select a date");
       return;
+    }
+
+    if (!applicationLeave) {
+      if (form.periodKind === "AFTER_PERIOD" && !form.leftAfterPeriod) {
+        toast.error("Select the period after which the student left");
+        return;
+      }
     }
 
     createMutation.mutate({
       studentId: form.studentId,
-      dateBs: form.dateBs,
-      periodKind: form.periodKind,
-      leftAfterPeriod:
-        form.periodKind === "AFTER_PERIOD" ? form.leftAfterPeriod : null,
-      periodLabel: buildPeriodLabel(),
+      dateBs,
+      periodKind: applicationLeave ? "OTHER" : form.periodKind,
+      leftAfterPeriod: applicationLeave
+        ? null
+        : form.periodKind === "AFTER_PERIOD"
+          ? form.leftAfterPeriod
+          : null,
+      periodLabel: applicationLeave
+        ? form.periodLabel.trim() || "Application leave"
+        : buildPeriodLabel(),
       reason,
+      applicationReason: applicationLeave
+        ? form.applicationReason.trim() || undefined
+        : undefined,
+      leaveDateMode: applicationLeave ? leaveDateMode : undefined,
+      leaveToDateBs:
+        applicationLeave && leaveDateMode === "RANGE"
+          ? leaveToDateBs
+          : undefined,
       approvedBy: form.approvedBy.trim() || undefined,
       remarks: form.remarks.trim() || undefined,
-      leftAtTime: form.leftAtTime.trim() || undefined,
+      leftAtTime: applicationLeave
+        ? undefined
+        : form.leftAtTime.trim() || undefined,
       batchId: form.batchId || undefined,
       yearId: form.yearId || undefined,
       classId: form.classId || undefined,
@@ -365,15 +442,19 @@ export const EarlyLeavePanel = () => {
           <CardHeader>
             <CardTitle className="text-base">New early leave record</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            <div className="md:col-span-2 lg:col-span-3">
-              <FormField label="Date *">
-                <DualBsAdDateField
-                  valueBs={form.dateBs}
-                  onChangeBs={(v) => setForm((c) => ({ ...c, dateBs: v }))}
-                />
-              </FormField>
-            </div>
+          <CardContent className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {!isApplicationLeave ? (
+              <div className="min-w-0 md:col-span-2 lg:col-span-3">
+                <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+                  <FormField label="Date *">
+                    <DualBsAdDateField
+                      valueBs={form.dateBs}
+                      onChangeBs={(v) => setForm((c) => ({ ...c, dateBs: v }))}
+                    />
+                  </FormField>
+                </div>
+              </div>
+            ) : null}
             {isCollege ? (
               <>
                 <FormField label={`${labels.primary} *`}>
@@ -508,69 +589,25 @@ export const EarlyLeavePanel = () => {
                 ))}
               </Select>
             </FormField>
-            <FormField label="Leave point *">
-              <Select
-                value={form.periodKind}
-                onChange={(e) =>
-                  setForm((c) => ({
-                    ...c,
-                    periodKind: e.target.value as typeof form.periodKind,
-                  }))
-                }
-              >
-                <option value="AFTER_PERIOD">After a teaching period</option>
-                <option value="DURING_BREAK">During break</option>
-                <option value="OTHER">Other</option>
-              </Select>
-            </FormField>
-            {form.periodKind === "AFTER_PERIOD" ? (
-              <FormField label="Left after period *">
-                <Select
-                  value={String(form.leftAfterPeriod)}
-                  onChange={(e) =>
-                    setForm((c) => ({
-                      ...c,
-                      leftAfterPeriod: Number(e.target.value),
-                      periodLabel: c.periodLabel || `After period ${e.target.value}`,
-                    }))
-                  }
-                >
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      After period {n} (P{n})
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-            ) : null}
-            <FormField label="Period description">
-              <Input
-                value={form.periodLabel}
-                onChange={(e) =>
-                  setForm((c) => ({ ...c, periodLabel: e.target.value }))
-                }
-                placeholder={
-                  form.periodKind === "DURING_BREAK"
-                    ? "e.g. During tiffin break"
-                    : "e.g. After 2nd period"
-                }
-              />
-            </FormField>
-            <FormField label="Leave time (optional)">
-              <Input
-                type="time"
-                value={form.leftAtTime}
-                onChange={(e) =>
-                  setForm((c) => ({ ...c, leftAtTime: e.target.value }))
-                }
-              />
-            </FormField>
             <FormField label="Reason *">
               <Select
                 value={form.reason}
-                onChange={(e) =>
-                  setForm((c) => ({ ...c, reason: e.target.value }))
-                }
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((c) => ({
+                    ...c,
+                    reason: next,
+                    // Seed leave dates from the main date when switching to application leave
+                    leaveFromDateBs:
+                      next === APPLICATION_LEAVE_REASON
+                        ? c.leaveFromDateBs || c.dateBs || formatTodayBs()
+                        : c.leaveFromDateBs,
+                    leaveToDateBs:
+                      next === APPLICATION_LEAVE_REASON
+                        ? c.leaveToDateBs || c.dateBs || formatTodayBs()
+                        : c.leaveToDateBs,
+                  }));
+                }}
               >
                 <option value="">Select reason…</option>
                 {EARLY_LEAVE_REASON_SUGGESTIONS.map((r) => (
@@ -592,6 +629,150 @@ export const EarlyLeavePanel = () => {
                 />
               </FormField>
             ) : null}
+
+            {isApplicationLeave ? (
+              <div className="min-w-0 space-y-4 md:col-span-2 lg:col-span-3">
+                <FormField label="Leave application reason (optional)">
+                  <Textarea
+                    value={form.applicationReason}
+                    onChange={(e) =>
+                      setForm((c) => ({
+                        ...c,
+                        applicationReason: e.target.value,
+                      }))
+                    }
+                    rows={2}
+                    placeholder="Briefly describe what the leave application is for…"
+                  />
+                </FormField>
+
+                <div className="max-w-sm">
+                  <FormField label="Leave dates *">
+                    <Select
+                      value={form.leaveDateMode}
+                      onChange={(e) =>
+                        setForm((c) => ({
+                          ...c,
+                          leaveDateMode: e.target.value as "EXACT" | "RANGE",
+                        }))
+                      }
+                    >
+                      <option value="EXACT">Exact date</option>
+                      <option value="RANGE">From date – To date</option>
+                    </Select>
+                  </FormField>
+                </div>
+
+                {form.leaveDateMode === "EXACT" ? (
+                  <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+                    <FormField label="Leave date *">
+                      <DualBsAdDateField
+                        valueBs={form.leaveFromDateBs}
+                        onChangeBs={(v) =>
+                          setForm((c) => ({
+                            ...c,
+                            leaveFromDateBs: v,
+                            leaveToDateBs: v,
+                            dateBs: v,
+                          }))
+                        }
+                      />
+                    </FormField>
+                  </div>
+                ) : (
+                  <div className="min-w-0 space-y-4">
+                    <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+                      <FormField label="From date *">
+                        <DualBsAdDateField
+                          valueBs={form.leaveFromDateBs}
+                          onChangeBs={(v) =>
+                            setForm((c) => ({
+                              ...c,
+                              leaveFromDateBs: v,
+                              dateBs: v,
+                            }))
+                          }
+                        />
+                      </FormField>
+                    </div>
+                    <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+                      <FormField label="To date *">
+                        <DualBsAdDateField
+                          valueBs={form.leaveToDateBs}
+                          onChangeBs={(v) =>
+                            setForm((c) => ({
+                              ...c,
+                              leaveToDateBs: v,
+                            }))
+                          }
+                        />
+                      </FormField>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <FormField label="Leave point *">
+                  <Select
+                    value={form.periodKind}
+                    onChange={(e) =>
+                      setForm((c) => ({
+                        ...c,
+                        periodKind: e.target.value as typeof form.periodKind,
+                      }))
+                    }
+                  >
+                    <option value="AFTER_PERIOD">After a teaching period</option>
+                    <option value="DURING_BREAK">During break</option>
+                    <option value="OTHER">Other</option>
+                  </Select>
+                </FormField>
+                {form.periodKind === "AFTER_PERIOD" ? (
+                  <FormField label="Left after period *">
+                    <Select
+                      value={String(form.leftAfterPeriod)}
+                      onChange={(e) =>
+                        setForm((c) => ({
+                          ...c,
+                          leftAfterPeriod: Number(e.target.value),
+                          periodLabel:
+                            c.periodLabel || `After period ${e.target.value}`,
+                        }))
+                      }
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                        <option key={n} value={n}>
+                          After period {n} (P{n})
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                ) : null}
+                <FormField label="Period description">
+                  <Input
+                    value={form.periodLabel}
+                    onChange={(e) =>
+                      setForm((c) => ({ ...c, periodLabel: e.target.value }))
+                    }
+                    placeholder={
+                      form.periodKind === "DURING_BREAK"
+                        ? "e.g. During tiffin break"
+                        : "e.g. After 2nd period"
+                    }
+                  />
+                </FormField>
+                <FormField label="Leave time (optional)">
+                  <Input
+                    type="time"
+                    value={form.leftAtTime}
+                    onChange={(e) =>
+                      setForm((c) => ({ ...c, leftAtTime: e.target.value }))
+                    }
+                  />
+                </FormField>
+              </>
+            )}
             <FormField label="Approved by (optional)">
               <Input
                 value={form.approvedBy}
@@ -645,42 +826,48 @@ export const EarlyLeavePanel = () => {
             rows from other batches).
           </p>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="sm:col-span-2 lg:col-span-3">
-            <FormField label="Exact date (BS / AD)">
-              <DualBsAdDateField
-                valueBs={filterDate}
-                onChangeBs={(v) => {
-                  setFilterDate(v);
-                  if (v) {
-                    setFilterFrom("");
-                    setFilterTo("");
-                  }
-                }}
-              />
-            </FormField>
+        <CardContent className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+            <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+              <FormField label="Exact date (BS / AD)">
+                <DualBsAdDateField
+                  valueBs={filterDate}
+                  onChangeBs={(v) => {
+                    setFilterDate(v);
+                    if (v) {
+                      setFilterFrom("");
+                      setFilterTo("");
+                    }
+                  }}
+                />
+              </FormField>
+            </div>
           </div>
-          <div className="sm:col-span-2 lg:col-span-3">
-            <FormField label="From date (BS / AD)">
-              <DualBsAdDateField
-                valueBs={filterFrom}
-                onChangeBs={(v) => {
-                  setFilterFrom(v);
-                  if (v) setFilterDate("");
-                }}
-              />
-            </FormField>
+          <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+            <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+              <FormField label="From date (BS / AD)">
+                <DualBsAdDateField
+                  valueBs={filterFrom}
+                  onChangeBs={(v) => {
+                    setFilterFrom(v);
+                    if (v) setFilterDate("");
+                  }}
+                />
+              </FormField>
+            </div>
           </div>
-          <div className="sm:col-span-2 lg:col-span-3">
-            <FormField label="To date (BS / AD)">
-              <DualBsAdDateField
-                valueBs={filterTo}
-                onChangeBs={(v) => {
-                  setFilterTo(v);
-                  if (v) setFilterDate("");
-                }}
-              />
-            </FormField>
+          <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+            <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+              <FormField label="To date (BS / AD)">
+                <DualBsAdDateField
+                  valueBs={filterTo}
+                  onChangeBs={(v) => {
+                    setFilterTo(v);
+                    if (v) setFilterDate("");
+                  }}
+                />
+              </FormField>
+            </div>
           </div>
           {isCollege ? (
             <>
@@ -863,6 +1050,14 @@ export const EarlyLeavePanel = () => {
                       <tr key={row._id}>
                         <Td className="whitespace-nowrap font-medium">
                           {row.dateBs}
+                          {row.leaveDateMode === "RANGE" &&
+                          row.leaveFromDateBs &&
+                          row.leaveToDateBs &&
+                          row.leaveFromDateBs !== row.leaveToDateBs ? (
+                            <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                              Leave: {row.leaveFromDateBs} → {row.leaveToDateBs}
+                            </span>
+                          ) : null}
                           {row.leftAtTime ? (
                             <span className="block text-xs text-slate-500">
                               {row.leftAtTime}
@@ -886,7 +1081,14 @@ export const EarlyLeavePanel = () => {
                         </Td>
                         <Td className="max-w-[14rem]">
                           <span className="font-medium">{row.reason}</span>
-                          {row.remarks ? (
+                          {row.applicationReason ? (
+                            <span className="mt-0.5 block text-xs text-slate-600">
+                              {row.applicationReason}
+                            </span>
+                          ) : null}
+                          {row.remarks &&
+                          (!row.applicationReason ||
+                            !row.remarks.includes(row.applicationReason)) ? (
                             <span className="mt-0.5 block text-xs text-slate-500">
                               {row.remarks}
                             </span>
