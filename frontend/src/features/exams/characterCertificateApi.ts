@@ -1,4 +1,5 @@
 import type {
+  CharacterCertificateDetails,
   CharacterCertificateRecord,
   CharacterCertificateTemplateRecord,
   PassedOutStudentRecord,
@@ -57,42 +58,32 @@ export interface CertificatePreviewResponse {
   programName: string;
   headingText: string;
   signatoryLabel: string;
+  affiliationText: string;
   bodyTemplate: string;
   resolvedBody: string;
   certificateNumber: string | null;
 }
 
-export const previewCertificate = (payload: {
-  studentId: string;
-  templateId?: string;
-  bodyTemplate?: string;
-  conduct?: string;
-  purpose?: string;
-  remarks?: string;
-  issueDateBs?: string;
-}) =>
-  unwrap<CertificatePreviewResponse>(api.post(`${CERTIFICATE_API_BASE}/preview`, payload));
+export const previewCertificate = (
+  payload: {
+    studentId: string;
+    templateId?: string;
+    bodyTemplate?: string;
+    conduct?: string;
+    purpose?: string;
+    remarks?: string;
+    issueDateBs?: string;
+  } & CharacterCertificateDetails,
+) => unwrap<CertificatePreviewResponse>(api.post(`${CERTIFICATE_API_BASE}/preview`, payload));
 
-/**
- * Fetch one issuance as a PDF blob. Read-only on the server — reprinting an
- * existing issuance never touches the record, so this is safe to call freely.
- */
-const fetchCertificateBlob = async (
-  certificateId: string,
-  issueNumber?: number,
-): Promise<Blob> => {
-  const response = await api.get(`${CERTIFICATE_API_BASE}/${certificateId}/pdf`, {
-    params: issueNumber ? { issueNumber } : undefined,
-    responseType: "blob",
-    // Puppeteer's first launch can be slow on a cold server.
-    timeout: 120_000,
-  });
+type BlobResponse = { data: unknown; headers: Record<string, unknown> };
 
+/** Errors come back as JSON even when responseType is blob, so unwrap by type. */
+const toPdfBlob = async (response: BlobResponse): Promise<Blob> => {
   const raw = response.data as Blob;
   const contentType = `${String(response.headers["content-type"] ?? "")} ${raw.type || ""}`
     .toLowerCase();
 
-  // Errors come back as JSON even when responseType is blob.
   if (contentType.includes("json")) {
     const text = await raw.text();
     let message = "Could not open the certificate";
@@ -110,6 +101,47 @@ const fetchCertificateBlob = async (
   if (!pdfBlob.size) throw new Error("The certificate PDF came back empty");
   return pdfBlob;
 };
+
+/**
+ * Fetch one issuance as a PDF blob. Read-only on the server — reprinting an
+ * existing issuance never touches the record, so this is safe to call freely.
+ */
+const fetchCertificateBlob = async (
+  certificateId: string,
+  issueNumber?: number,
+): Promise<Blob> =>
+  toPdfBlob(
+    await api.get(`${CERTIFICATE_API_BASE}/${certificateId}/pdf`, {
+      params: issueNumber ? { issueNumber } : undefined,
+      responseType: "blob",
+      // Puppeteer's first launch can be slow on a cold server.
+      timeout: 120_000,
+    }),
+  );
+
+export type CertificateDraftPayload = CharacterCertificateDetails & {
+  studentId: string;
+  resolvedBody: string;
+  headingText?: string;
+  signatoryLabel?: string;
+  affiliationText?: string;
+  conduct?: string;
+  issueDateBs?: string;
+  isDuplicate?: boolean;
+};
+
+/**
+ * Render the certificate exactly as it would print, from values that have not
+ * been saved. Nothing is written, so the admin can check the sheet before a
+ * certificate number is committed.
+ */
+const fetchCertificateDraftBlob = async (payload: CertificateDraftPayload): Promise<Blob> =>
+  toPdfBlob(
+    await api.post(`${CERTIFICATE_API_BASE}/preview/pdf`, payload, {
+      responseType: "blob",
+      timeout: 120_000,
+    }),
+  );
 
 /**
  * Hidden-iframe print. A `window.open` after an await gets caught by popup
@@ -180,13 +212,7 @@ export const printCertificatePdf = async (
   }
 };
 
-/** Save an issuance as a PDF file. */
-export const downloadCertificatePdf = async (
-  certificateId: string,
-  fileName: string,
-  issueNumber?: number,
-): Promise<void> => {
-  const blob = await fetchCertificateBlob(certificateId, issueNumber);
+const saveBlob = (blob: Blob, fileName: string): void => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -195,4 +221,33 @@ export const downloadCertificatePdf = async (
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+};
+
+/** Save an issuance as a PDF file. */
+export const downloadCertificatePdf = async (
+  certificateId: string,
+  fileName: string,
+  issueNumber?: number,
+): Promise<void> => {
+  saveBlob(await fetchCertificateBlob(certificateId, issueNumber), fileName);
+};
+
+/** Open a draft of the unsaved edits in a new tab. */
+export const openCertificateDraft = async (payload: CertificateDraftPayload): Promise<void> => {
+  const blob = await fetchCertificateDraftBlob(payload);
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, "_blank");
+  if (!opened) {
+    // Popup blocked — fall back to a download so the draft is never lost.
+    saveBlob(blob, "character-certificate-draft");
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+};
+
+/** Save a draft of the unsaved edits as a PDF file. */
+export const downloadCertificateDraft = async (
+  payload: CertificateDraftPayload,
+  fileName: string,
+): Promise<void> => {
+  saveBlob(await fetchCertificateDraftBlob(payload), fileName);
 };

@@ -31,6 +31,7 @@ interface TemplateForm {
   headingText: string;
   bodyTemplate: string;
   signatoryLabel: string;
+  affiliationText: string;
   isDefault: boolean;
   isActive: boolean;
 }
@@ -40,6 +41,7 @@ const emptyForm = (): TemplateForm => ({
   headingText: DEFAULT_CHARACTER_CERTIFICATE_HEADING,
   bodyTemplate: DEFAULT_CHARACTER_CERTIFICATE_BODY,
   signatoryLabel: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
+  affiliationText: "",
   isDefault: false,
   isActive: true,
 });
@@ -72,6 +74,7 @@ export const CertificateTemplatesPanel = () => {
         headingText: form.headingText.trim() || DEFAULT_CHARACTER_CERTIFICATE_HEADING,
         bodyTemplate: form.bodyTemplate.trim(),
         signatoryLabel: form.signatoryLabel.trim() || DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
+        affiliationText: form.affiliationText.trim(),
         isDefault: form.isDefault,
         isActive: form.isActive,
       };
@@ -105,6 +108,7 @@ export const CertificateTemplatesPanel = () => {
       headingText: template.headingText || DEFAULT_CHARACTER_CERTIFICATE_HEADING,
       bodyTemplate: template.bodyTemplate,
       signatoryLabel: template.signatoryLabel || DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
+      affiliationText: template.affiliationText ?? "",
       isDefault: template.isDefault,
       isActive: template.isActive,
     });
@@ -177,6 +181,15 @@ export const CertificateTemplatesPanel = () => {
                   onChange={(event) =>
                     setForm((current) => ({ ...current, signatoryLabel: event.target.value }))
                   }
+                />
+              </FormField>
+              <FormField label="Affiliation line (optional)">
+                <Input
+                  value={form.affiliationText}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, affiliationText: event.target.value }))
+                  }
+                  placeholder="e.g. (Affiliated To CTEVT)"
                 />
               </FormField>
               <div className="flex items-end gap-5 pb-2">

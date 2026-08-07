@@ -1,21 +1,33 @@
 /**
- * Character Certificate — server-rendered HTML converted to PDF via Puppeteer
- * (see convertHtmlToPdf.ts). Visual language is deliberately kept in the same
- * family as marksheetTemplate.ts (same ink/accent palette, header band, and
- * footer signature blocks) so both documents read as one institution.
+ * Character Certificate — a faithful rebuild of the institution's printed
+ * certificate, rendered as HTML and converted to PDF via Puppeteer.
  *
- * A DUPLICATE issuance prints an extra watermark plus a banner under the title;
+ * The page is A4 *landscape* and every element is absolutely positioned in
+ * points taken off the original document, so the output lines up with the
+ * pre-existing paper stock: ornamental leaf border, tiled house watermark,
+ * seal on the left, photo box on the right, then heading, justified body and
+ * the four signature blocks along the bottom.
+ *
+ * Sizes are in `pt` throughout — mixing px in here silently rescales the whole
+ * layout because the PDF is produced at 72dpi.
+ *
+ * A DUPLICATE issuance adds a diagonal watermark plus a line under the heading;
  * the certificate number itself is unchanged by design.
  */
 import { convertHtmlToPdf } from "../convertHtmlToPdf.js";
+import { certificateBorderDataUri, certificateFontFaceCss } from "./certificateAssets.js";
 
 export interface CharacterCertificateTemplateData {
   collegeName: string;
   collegeNameNp?: string;
   collegeAddress?: string;
   collegeLogoDataUri?: string;
+  /** Small print above the college name, e.g. "(Affiliated To CTEVT)". */
+  affiliationText?: string;
   headingText: string;
   certificateNumber: string;
+  /** Institution's own register number printed top-left, e.g. "GM - 076/77 - 001". */
+  issueNo?: string;
   /** Body with placeholders already resolved; blank lines separate paragraphs. */
   body: string;
   studentName: string;
@@ -35,7 +47,19 @@ export interface CharacterCertificateTemplateData {
   /** 1-based issuance number; printed on duplicates only. */
   issueNumber: number;
   printedDateBs?: string;
+  /** Repeated across the page as the house watermark; defaults to an acronym. */
+  watermarkText?: string;
 }
+
+/* ------------------------------------------------------------------ *
+ * Page geometry (pt) — measured off the institution's own certificate
+ * ------------------------------------------------------------------ */
+
+const PAGE = { width: 841.89, height: 595.28 };
+/** Inner edge of the ornamental border band. */
+const FRAME_INSET = 48;
+/** Body band: from its top (242.5pt) down to the issue date line (457.5pt). */
+const BODY_MAX_HEIGHT = 205;
 
 const escapeHtml = (value: unknown): string =>
   String(value ?? "")
@@ -45,36 +69,75 @@ const escapeHtml = (value: unknown): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const infoRow = (label: string, value?: string): string =>
-  value
-    ? `<div class="cc-info-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`
-    : "";
+/** Dotted leader the printed form uses wherever a value is left blank. */
+const LEADER = "…………………………";
 
-/** Blank-line-separated blocks become paragraphs; single newlines stay as breaks. */
+/**
+ * Body markup: `**bold**` for the emphasised runs (programme name, conduct),
+ * and any placeholder still unresolved becomes a dotted blank so the sheet can
+ * be completed by hand rather than printing a stray `{{token}}`.
+ */
+const renderBodyText = (raw: string): string =>
+  escapeHtml(raw)
+    .replace(/\{\{\s*[a-zA-Z0-9_]+\s*\}\}/g, `<span class="cc-blank">${LEADER}</span>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br/>");
+
 const renderBody = (body: string): string =>
   String(body ?? "")
     .split(/\n\s*\n/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
-    .map(
-      (paragraph) =>
-        `<p class="cc-body-para">${escapeHtml(paragraph).replace(/\n/g, "<br/>")}</p>`
-    )
+    .map((paragraph) => `<p class="cc-para">${renderBodyText(paragraph)}</p>`)
     .join("");
+
+/** "Public Himal Institute of Technology" -> "PHIT". */
+const watermarkFor = (data: CharacterCertificateTemplateData): string => {
+  const explicit = data.watermarkText?.trim();
+  if (explicit) return explicit;
+  const skip = new Set(["of", "the", "and", "for", "pvt", "ltd", "pvt.", "ltd."]);
+  const initials = data.collegeName
+    .replace(/[^\p{L}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 1 && !skip.has(word.toLowerCase()))
+    .map((word) => word[0]?.toUpperCase() ?? "")
+    .join("");
+  return initials.length >= 2 ? initials.slice(0, 6) : data.collegeName.slice(0, 4).toUpperCase();
+};
+
+/** Enough repetitions to tile the whole frame at any sensible acronym length. */
+const watermarkRows = (label: string): string => {
+  const safe = escapeHtml(label);
+  const perRow = Math.max(12, Math.ceil(700 / Math.max(1, safe.length * 6)));
+  const row = Array.from({ length: perRow }, () => safe).join(" ");
+  return Array.from({ length: 56 }, () => `<div>${row}</div>`).join("");
+};
+
+/** The four signature blocks, centred on the columns used by the original. */
+const SIGNATURE_COLUMNS: Array<{ center: number; lineWidth: number; label: string }> = [
+  { center: 145, lineWidth: 100, label: "Prepared by" },
+  { center: 308, lineWidth: 108, label: "Checked by" },
+  { center: 481, lineWidth: 72, label: "Office Stamp" },
+  { center: 667, lineWidth: 132, label: "" } // filled with the signatory label
+];
+
+/** A header line squeezed into a fixed-width band, Word-Art style. */
+const fitLine = (className: string, targetWidth: number, text: string): string =>
+  `<div class="cc-fitline ${className}"><span class="cc-fitbox" style="width:${targetWidth}pt;"><span data-fit-width="${targetWidth}">${escapeHtml(text)}</span></span></div>`;
 
 export const buildCharacterCertificateHtml = (
   data: CharacterCertificateTemplateData
 ): string => {
-  const detailRows = [
-    infoRow("Registration No.", data.registrationNumber),
-    infoRow("Admission No.", data.admissionNumber),
-    infoRow("Programme", data.programName),
-    infoRow("Batch", data.batchName),
-    infoRow("Passed Out", data.passedOutDateBs ? `${data.passedOutDateBs} B.S.` : undefined),
-    infoRow("Conduct", data.conduct)
-  ]
-    .filter(Boolean)
-    .join("");
+  const borderUri = certificateBorderDataUri();
+  const watermark = watermarkFor(data);
+
+  const signatureBlocks = SIGNATURE_COLUMNS.map((column, index) => {
+    const label = index === SIGNATURE_COLUMNS.length - 1 ? data.signatoryLabel : column.label;
+    return `<div class="cc-sign" style="left:${column.center - column.lineWidth / 2}pt;width:${column.lineWidth}pt;">
+      <div class="cc-sign-line">${LEADER}</div>
+      <div class="cc-sign-label">${escapeHtml(label)}</div>
+    </div>`;
+  }).join("");
 
   return `<!doctype html>
 <html lang="en">
@@ -82,150 +145,237 @@ export const buildCharacterCertificateHtml = (
 <meta charset="utf-8"/>
 <title>Character Certificate — ${escapeHtml(data.studentName)}</title>
 <style>
-  @page { size: A4 portrait; margin: 12mm; }
-  :root {
-    --cc-ink: #14213d;
-    --cc-accent: #b8860b;
-    --cc-muted: #55607a;
-    --cc-line: #c8cfdd;
-    --cc-white: #ffffff;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: 'Noto Sans', 'Noto Sans Devanagari', system-ui, -apple-system, sans-serif;
-    color: var(--cc-ink);
-    background: var(--cc-white);
-  }
+${certificateFontFaceCss()}
 
-  .character-certificate {
-    position: relative;
-    min-height: 267mm;
-    padding: 10mm 11mm 8mm;
-    border: 2.5px solid var(--cc-ink);
-    box-shadow: inset 0 0 0 1.5px var(--cc-white), inset 0 0 0 3.5px var(--cc-accent);
-    display: flex;
-    flex-direction: column;
+  @page { size: A4 landscape; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: ${PAGE.width}pt;
+    height: ${PAGE.height}pt;
+    background: #ffffff;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
-  .cc-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; overflow: hidden; }
-  .cc-watermark span {
-    font-size: 3.4rem; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase;
-    color: rgba(20, 33, 61, 0.045); transform: rotate(-28deg); user-select: none; white-space: nowrap;
+  .cc-page {
+    position: relative;
+    width: ${PAGE.width}pt;
+    height: ${PAGE.height}pt;
+    overflow: hidden;
   }
-  .cc-watermark.cc-watermark-duplicate span {
-    font-size: 4.6rem; color: rgba(178, 34, 34, 0.10); letter-spacing: 0.22em;
+
+  /* Ornamental border, drawn edge-to-edge behind everything else. */
+  .cc-border {
+    position: absolute; inset: 0;
+    background-image: url("${borderUri}");
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
   }
-  .character-certificate > *:not(.cc-watermark) { position: relative; z-index: 1; }
 
-  .cc-header-band { display: flex; align-items: center; gap: 12px; padding-bottom: 8px; border-bottom: 2px solid var(--cc-ink); }
-  .cc-logo { width: 58px; height: 58px; flex: 0 0 58px; display: flex; align-items: center; justify-content: center; border: 1.25px solid var(--cc-line); overflow: hidden; }
-  .cc-logo img { width: 100%; height: 100%; object-fit: contain; }
-  .cc-logo-fallback { font-size: 22pt; font-weight: 700; color: var(--cc-ink); }
-  .cc-header-text { flex: 1; text-align: center; }
-  .cc-college-name { margin: 0; font-size: 17pt; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; }
-  .cc-college-name-np { margin: 1px 0 0; font-size: 10.5pt; font-weight: 600; color: var(--cc-muted); }
-  .cc-college-address { margin: 2px 0 0; font-size: 8.5pt; color: var(--cc-muted); }
-
-  .cc-title-block { text-align: center; margin-top: 14px; }
-  .cc-doc-title {
-    margin: 0; display: inline-block; padding: 5px 26px;
-    font-size: 15pt; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
-    color: var(--cc-white); background: var(--cc-ink);
-    box-shadow: inset 0 0 0 1.5px var(--cc-white), inset 0 0 0 2.5px var(--cc-accent);
+  /* Tiled house watermark, clipped to the area inside the border. */
+  .cc-watermark {
+    position: absolute;
+    left: ${FRAME_INSET}pt; right: ${FRAME_INSET}pt;
+    top: ${FRAME_INSET}pt; bottom: ${FRAME_INSET}pt;
+    overflow: hidden;
+    color: #dcdcdc;
+    font-family: 'Calibri', 'CC Sans', sans-serif;
+    font-size: 8pt;
+    line-height: 9.6pt;
+    letter-spacing: 0.4pt;
+    word-spacing: 3.5pt;
+    white-space: nowrap;
+    user-select: none;
   }
-  .cc-duplicate-banner {
-    margin: 8px auto 0; display: inline-block; padding: 3px 16px;
-    font-size: 9pt; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
-    color: #b22222; border: 1.5px dashed #b22222;
+
+  .cc-layer { position: absolute; inset: 0; }
+
+  /* --- header ------------------------------------------------------ */
+
+  .cc-issue-no {
+    position: absolute; left: 57.5pt; top: 52.5pt;
+    font-family: 'Calibri', 'CC Sans', sans-serif;
+    font-size: 11pt; color: #000000; white-space: nowrap;
   }
-  .cc-cert-no { margin: 9px 0 0; font-size: 9pt; font-weight: 700; letter-spacing: 0.06em; }
-  .cc-cert-no span { color: var(--cc-accent); }
 
-  .cc-info-panel { margin-top: 14px; border: 1px solid var(--cc-line); padding: 8px 12px; }
-  .cc-info-list { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 22px; }
-  .cc-info-row { display: flex; gap: 6px; font-size: 9pt; padding: 1.5px 0; border-bottom: 1px dotted var(--cc-line); }
-  .cc-info-row dt { margin: 0; min-width: 96px; font-weight: 600; color: var(--cc-muted); }
-  .cc-info-row dd { margin: 0; font-weight: 600; }
+  /*
+   * Word Art squeezes each header line into a fixed-width band. The outer box
+   * carries that fixed width so centring is stable, and the inner span — which
+   * may start out much wider — is scaled down into it from its left edge.
+   */
+  .cc-fitline { position: absolute; left: 0; width: ${PAGE.width}pt; text-align: center; }
+  .cc-fitbox { display: inline-block; vertical-align: top; }
+  .cc-fitbox > span { display: inline-block; white-space: nowrap; transform-origin: left center; }
 
-  .cc-body { margin-top: 16px; flex: 1; }
-  .cc-body-para { margin: 0 0 11px; font-size: 11pt; line-height: 1.95; text-align: justify; text-justify: inter-word; }
-  .cc-body-para:first-child { text-indent: 26px; }
+  .cc-college {
+    top: 68pt;
+    font-family: 'Arial Black', 'CC Display', 'Arial', sans-serif;
+    font-size: 44pt; line-height: 46pt; color: #0070c0;
+    text-shadow: 2.6pt 2.6pt 0 #a6a6a6;
+  }
+  .cc-address {
+    top: 115.5pt;
+    font-family: 'Times New Roman', 'CC Serif', serif;
+    font-weight: 700; font-size: 27pt; line-height: 29pt; color: #000000;
+  }
+  .cc-affiliation {
+    top: 147pt;
+    font-family: 'Times New Roman', 'CC Serif', serif;
+    font-weight: 700; font-size: 13pt; line-height: 14pt; color: #000000;
+  }
 
-  .cc-extra { margin-top: 6px; border-top: 1px solid var(--cc-line); padding-top: 7px; }
-  .cc-extra p { margin: 0 0 3px; font-size: 9pt; }
-  .cc-extra strong { color: var(--cc-muted); font-weight: 600; }
+  .cc-seal {
+    position: absolute; left: 73.5pt; top: 143.5pt; width: 80.5pt; height: 71pt;
+  }
+  .cc-seal img { width: 100%; height: 100%; object-fit: contain; }
 
-  .cc-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 26px; }
-  .cc-footer-block { text-align: center; min-height: 52px; padding: 0 6px; }
-  .cc-footer-line { margin-top: 40px; border-top: 1.25px solid var(--cc-ink); padding-top: 3px; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cc-muted); }
+  .cc-photo-box {
+    position: absolute; left: 668pt; top: 143pt; width: 76pt; height: 73pt;
+    border: 0.75pt solid #000000;
+  }
 
-  .cc-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-top: 14px; padding-top: 5px; border-top: 1px solid var(--cc-ink); font-size: 6.5pt; color: var(--cc-muted); }
-  .cc-meta-lines p { margin: 0 0 1px; }
-  .cc-meta-note { margin: 0; max-width: 54%; text-align: right; font-size: 6pt; line-height: 1.35; font-style: italic; }
+  .cc-heading {
+    top: 197.5pt;
+    font-family: 'Algerian', 'CC Heading', 'Cinzel', serif;
+    font-size: 28pt; line-height: 30pt; color: #ff0000;
+    font-style: italic;
+    text-shadow: 1.2pt 1.2pt 0 rgba(120, 120, 120, 0.35);
+  }
+
+  .cc-duplicate-note {
+    position: absolute; left: 0; width: ${PAGE.width}pt; top: 231pt;
+    text-align: center;
+    font-family: 'Calibri', 'CC Sans', sans-serif;
+    font-size: 10pt; font-weight: 700; letter-spacing: 0.12em; color: #b22222;
+  }
+
+  /* --- body -------------------------------------------------------- */
+
+  .cc-body {
+    position: absolute;
+    left: 62.6pt; top: 242.5pt; width: 721.4pt;
+    font-family: 'Lucida Calligraphy', 'CC Script', cursive;
+    font-size: 14pt; line-height: 22pt; color: #000000;
+  }
+  .cc-para { margin: 0 0 10pt; text-align: justify; text-justify: inter-word; }
+  .cc-para:last-child { margin-bottom: 0; }
+  .cc-blank { letter-spacing: 0.6pt; }
+
+  .cc-issue-date {
+    position: absolute; left: 85pt; top: 457.5pt;
+    font-family: 'Lucida Calligraphy', 'CC Script', cursive;
+    font-size: 14pt; color: #000000; white-space: nowrap;
+  }
+
+  /* --- signature row ----------------------------------------------- */
+
+  .cc-sign {
+    position: absolute; top: 508pt; text-align: center;
+    font-family: 'Lucida Calligraphy', 'CC Script', cursive;
+    font-size: 12pt; color: #000000;
+  }
+  .cc-sign-line { line-height: 14pt; white-space: nowrap; overflow: hidden; }
+  .cc-sign-label { line-height: 16pt; white-space: nowrap; }
+
+  /* --- duplicate marking ------------------------------------------- */
+
+  .cc-duplicate-stamp {
+    position: absolute; left: 0; top: 250pt; width: ${PAGE.width}pt;
+    text-align: center;
+    font-family: 'Arial Black', 'CC Display', sans-serif;
+    font-size: 96pt; letter-spacing: 0.12em;
+    color: rgba(178, 34, 34, 0.10);
+    transform: rotate(-18deg);
+  }
 </style>
 </head>
 <body>
-<article class="character-certificate">
-  <div class="cc-watermark${data.isDuplicate ? " cc-watermark-duplicate" : ""}" aria-hidden="true">
-    <span>${data.isDuplicate ? "DUPLICATE" : "OFFICIAL"}</span>
-  </div>
+<div class="cc-page">
+  <div class="cc-border"></div>
+  <div class="cc-watermark" aria-hidden="true">${watermarkRows(watermark)}</div>
 
-  <header class="cc-header-band">
-    <div class="cc-logo">
-      ${
-        data.collegeLogoDataUri
-          ? `<img src="${data.collegeLogoDataUri}" alt="${escapeHtml(data.collegeName)} logo"/>`
-          : `<span class="cc-logo-fallback">${escapeHtml(data.collegeName.slice(0, 1).toUpperCase())}</span>`
-      }
-    </div>
-    <div class="cc-header-text">
-      <h1 class="cc-college-name">${escapeHtml(data.collegeName)}</h1>
-      ${data.collegeNameNp ? `<p class="cc-college-name-np">${escapeHtml(data.collegeNameNp)}</p>` : ""}
-      ${data.collegeAddress ? `<p class="cc-college-address">${escapeHtml(data.collegeAddress)}</p>` : ""}
-    </div>
-    <div class="cc-logo" style="visibility:hidden"></div>
-  </header>
+  ${data.isDuplicate ? `<div class="cc-duplicate-stamp" aria-hidden="true">DUPLICATE</div>` : ""}
 
-  <div class="cc-title-block">
-    <p class="cc-doc-title">${escapeHtml(data.headingText)}</p>
+  <div class="cc-layer">
+    <div class="cc-issue-no">Issue No. : ${escapeHtml(data.issueNo || data.certificateNumber)}</div>
+
     ${
-      data.isDuplicate
-        ? `<div><span class="cc-duplicate-banner">Duplicate copy — issue no. ${escapeHtml(data.issueNumber)}</span></div>`
+      data.collegeLogoDataUri
+        ? `<div class="cc-seal"><img src="${data.collegeLogoDataUri}" alt=""/></div>`
         : ""
     }
-    <p class="cc-cert-no">Certificate No.: <span>${escapeHtml(data.certificateNumber)}</span></p>
+    <div class="cc-photo-box"></div>
+
+    ${fitLine("cc-college", 624, data.collegeName)}
+    ${data.collegeAddress ? fitLine("cc-address", 242, data.collegeAddress) : ""}
+    ${data.affiliationText ? fitLine("cc-affiliation", 104, data.affiliationText) : ""}
+
+    ${fitLine("cc-heading", 345, data.headingText)}
+    ${
+      data.isDuplicate
+        ? `<div class="cc-duplicate-note">DUPLICATE COPY — ISSUE NO. ${escapeHtml(data.issueNumber)}</div>`
+        : ""
+    }
+
+    <div class="cc-body">${renderBody(data.body)}</div>
+
+    <div class="cc-issue-date">Issue Date: ${escapeHtml(data.issueDateBs)}${
+      data.issueDateBs ? " B.S." : ""
+    }</div>
+
+    ${signatureBlocks}
   </div>
+</div>
 
-  ${detailRows ? `<section class="cc-info-panel"><dl class="cc-info-list">${detailRows}</dl></section>` : ""}
+<script>
+  /*
+   * The original certificate sets its heading lines with Word Art, which
+   * squeezes each line to a fixed width. Reproduce that by scaling every
+   * .cc-fitline horizontally to its measured target width, so a longer or
+   * shorter institution name still fills the same band instead of wrapping.
+   */
+  (function () {
+    var PT = 96 / 72;
+    function fit() {
+      var spans = document.querySelectorAll(".cc-fitbox > span[data-fit-width]");
+      for (var i = 0; i < spans.length; i++) {
+        var span = spans[i];
+        var target = parseFloat(span.getAttribute("data-fit-width")) * PT;
+        span.style.transform = "none";
+        var natural = span.offsetWidth;
+        if (!natural || !target) continue;
+        var scale = target / natural;
+        if (scale > 1.25) scale = 1.25;
+        if (scale < 0.3) scale = 0.3;
+        span.style.transform = "scaleX(" + scale.toFixed(4) + ")";
+      }
+    }
+    /*
+     * The body sits in a fixed band between the heading and the issue date.
+     * A wordier certificate is stepped down a point at a time rather than
+     * allowed to run over the signature row.
+     */
+    function shrinkBody() {
+      var body = document.querySelector(".cc-body");
+      if (!body) return;
+      var limit = ${BODY_MAX_HEIGHT} * PT;
+      for (var size = 14; size >= 9 && body.scrollHeight > limit; size -= 0.5) {
+        body.style.fontSize = size + "pt";
+        body.style.lineHeight = (size * ${(22 / 14).toFixed(4)}) + "pt";
+      }
+    }
 
-  <section class="cc-body">${renderBody(data.body)}</section>
+    function layout() {
+      fit();
+      shrinkBody();
+    }
 
-  ${
-    data.purpose || data.remarks
-      ? `<section class="cc-extra">
-          ${data.purpose ? `<p><strong>Purpose:</strong> ${escapeHtml(data.purpose)}</p>` : ""}
-          ${data.remarks ? `<p><strong>Remarks:</strong> ${escapeHtml(data.remarks)}</p>` : ""}
-        </section>`
-      : ""
-  }
-
-  <footer class="cc-footer">
-    <div class="cc-footer-block"><div class="cc-footer-line">Date: ${escapeHtml(data.issueDateBs)} B.S.</div></div>
-    <div class="cc-footer-block"><div class="cc-footer-line">${escapeHtml(data.signatoryLabel)}</div></div>
-  </footer>
-
-  <div class="cc-meta">
-    <div class="cc-meta-lines">
-      <p>Certificate No.: ${escapeHtml(data.certificateNumber)}</p>
-      <p>Issued on: ${escapeHtml(data.issueDateBs)} B.S.${data.issuedByName ? ` &middot; Issued by: ${escapeHtml(data.issuedByName)}` : ""}</p>
-      ${data.printedDateBs ? `<p>Printed on: ${escapeHtml(data.printedDateBs)} B.S.</p>` : ""}
-      ${data.isDuplicate ? `<p>Issue type: DUPLICATE (issue no. ${escapeHtml(data.issueNumber)})</p>` : "<p>Issue type: ORIGINAL</p>"}
-    </div>
-    <p class="cc-meta-note">This is a computer-generated character certificate. Verify authenticity with the institution using the certificate number above.</p>
-  </div>
-</article>
+    layout();
+    // Measuring before the embedded fonts land gives fallback metrics, which
+    // would leave the name several times too wide once the real font swaps in.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
+  })();
+</script>
 </body>
 </html>`;
 };
@@ -234,5 +384,12 @@ export const generateCharacterCertificatePdf = async (
   data: CharacterCertificateTemplateData
 ): Promise<Buffer> => {
   const html = buildCharacterCertificateHtml(data);
-  return await convertHtmlToPdf(html, { preferCSSPageSize: true, margin: undefined });
+  return await convertHtmlToPdf(html, {
+    preferCSSPageSize: true,
+    landscape: true,
+    margin: undefined,
+    // The certificate ships its own fonts; the global Noto override would
+    // otherwise replace every one of them.
+    keepDocumentFonts: true
+  });
 };

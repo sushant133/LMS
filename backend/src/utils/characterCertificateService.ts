@@ -127,22 +127,50 @@ export const derivePassedOutDates = async (
 };
 
 /**
+ * The wording seeded before the template was rebuilt to match the institution's
+ * own printed certificate. A template still carrying it verbatim was never
+ * edited by an admin, so it is safe to move onto the new default.
+ */
+const LEGACY_DEFAULT_BODY = `This is to certify that {{studentName}}, {{genderPossessive}} father Mr. {{fatherName}} and mother Mrs. {{motherName}}, was a bona fide student of this institution in the {{program}} programme under batch {{batch}}.
+
+{{genderPronoun}} bears registration number {{registrationNumber}} and successfully completed all academic requirements of the programme on {{passedOutDateBs}} B.S.
+
+To the best of our knowledge, {{genderPossessive}} conduct and moral character during the entire period of study in this institution were found to be {{conduct}}.
+
+We wish {{genderPossessive}} every success in future endeavours.`;
+
+/**
  * The school's templates, seeding a default on first use so the issue form is
  * never empty for an institution that has not configured anything yet.
+ *
+ * Also refreshes an untouched seeded template to the current default wording —
+ * matched on the exact legacy body, so anything an admin has edited is left
+ * alone.
  */
 export const ensureDefaultCertificateTemplate = async (
   schoolId: Types.ObjectId
 ): Promise<void> => {
   const count = await CharacterCertificateTemplate.countDocuments({ schoolId });
-  if (count > 0) return;
+  if (count === 0) {
+    await CharacterCertificateTemplate.create({
+      schoolId,
+      name: DEFAULT_CHARACTER_CERTIFICATE_TEMPLATE_NAME,
+      headingText: DEFAULT_CHARACTER_CERTIFICATE_HEADING,
+      bodyTemplate: DEFAULT_CHARACTER_CERTIFICATE_BODY,
+      signatoryLabel: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
+      isDefault: true,
+      isActive: true
+    });
+    return;
+  }
 
-  await CharacterCertificateTemplate.create({
-    schoolId,
-    name: DEFAULT_CHARACTER_CERTIFICATE_TEMPLATE_NAME,
-    headingText: DEFAULT_CHARACTER_CERTIFICATE_HEADING,
-    bodyTemplate: DEFAULT_CHARACTER_CERTIFICATE_BODY,
-    signatoryLabel: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
-    isDefault: true,
-    isActive: true
-  });
+  await CharacterCertificateTemplate.updateMany(
+    { schoolId, bodyTemplate: LEGACY_DEFAULT_BODY },
+    {
+      $set: {
+        bodyTemplate: DEFAULT_CHARACTER_CERTIFICATE_BODY,
+        signatoryLabel: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY
+      }
+    }
+  );
 };

@@ -20,6 +20,28 @@ const certificateIssuanceSchema = new Schema(
     resolvedBody: { type: String, required: true },
     headingText: { type: String, default: "" },
     signatoryLabel: { type: String, default: "" },
+    affiliationText: { type: String, default: "" },
+    /**
+     * The blanks the printed form leaves for the office — register number,
+     * course duration, study period, exam year, division. Stored per issuance
+     * so a reprint reproduces the sheet exactly as handed over.
+     */
+    details: {
+      type: new Schema(
+        {
+          issueNo: { type: String, default: "" },
+          courseDuration: { type: String, default: "" },
+          programName: { type: String, default: "" },
+          studyFromBs: { type: String, default: "" },
+          studyFromAd: { type: String, default: "" },
+          examYearBs: { type: String, default: "" },
+          examYearAd: { type: String, default: "" },
+          division: { type: String, default: "" }
+        },
+        { _id: false }
+      ),
+      default: () => ({})
+    },
     /** Reference only — the template may later be renamed or deactivated. */
     templateId: { type: Schema.Types.ObjectId, ref: "CharacterCertificateTemplate" },
     templateName: { type: String, default: "" }

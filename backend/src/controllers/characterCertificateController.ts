@@ -8,8 +8,10 @@ import {
   DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
   characterCertificateDuplicateSchema,
   characterCertificateIssueSchema,
+  characterCertificatePreviewPdfSchema,
   characterCertificatePreviewSchema,
   characterCertificateTemplateSchema,
+  type CharacterCertificateDetailsInput,
   type CharacterCertificateTokenMap
 } from "@phit-erp/shared";
 import { Batch } from "../models/Batch.js";
@@ -137,9 +139,11 @@ const buildTokens = (
     collegeName: string;
     collegeAddress: string;
     principalName: string;
+    details?: CharacterCertificateDetailsInput;
   }
 ): CharacterCertificateTokenMap => {
   const { pronoun, possessive } = genderPronouns(student.gender);
+  const details = context.details ?? {};
   return {
     studentName: student.studentName,
     fatherName: student.fatherName,
@@ -149,22 +153,69 @@ const buildTokens = (
     rollNumber: student.rollNumber ? String(student.rollNumber) : "",
     batch: student.batchName,
     year: student.yearName,
-    program: context.programName,
+    // A certificate may name a different course than the institution default.
+    program: details.programName?.trim() || context.programName,
     gender: student.gender,
     genderPronoun: pronoun,
+    genderPronounLower: pronoun.toLowerCase(),
     genderPossessive: possessive,
     dateOfBirthBs: student.dateOfBirthBs,
     address: student.address,
     passedOutDateBs: student.passedOutDateBs,
     certificateNumber: context.certificateNumber,
+    issueNo: details.issueNo ?? "",
     issueDateBs: context.issueDateBs,
     conduct: context.conduct,
+    courseDuration: details.courseDuration ?? "",
+    studyFromBs: details.studyFromBs ?? "",
+    studyFromAd: details.studyFromAd ?? "",
+    examYearBs: details.examYearBs ?? "",
+    examYearAd: details.examYearAd ?? "",
+    division: details.division ?? "",
     purpose: context.purpose,
     remarks: context.remarks,
     collegeName: context.collegeName,
     collegeAddress: context.collegeAddress,
     principalName: context.principalName
   };
+};
+
+/** Only the printable blanks, so the issue/duplicate payloads stay explicit. */
+const pickDetails = (payload: CharacterCertificateDetailsInput): CharacterCertificateDetailsInput => ({
+  issueNo: payload.issueNo ?? "",
+  courseDuration: payload.courseDuration ?? "",
+  programName: payload.programName ?? "",
+  studyFromBs: payload.studyFromBs ?? "",
+  studyFromAd: payload.studyFromAd ?? "",
+  examYearBs: payload.examYearBs ?? "",
+  examYearAd: payload.examYearAd ?? "",
+  division: payload.division ?? ""
+});
+
+/**
+ * Reissue keeps the blanks from the previous sheet unless this issuance
+ * actually supplies a replacement — an omitted field must not blank the value
+ * the original certificate was printed with.
+ */
+const mergeDetails = (
+  previous: CharacterCertificateDetailsInput | null | undefined,
+  payload: CharacterCertificateDetailsInput
+): CharacterCertificateDetailsInput => {
+  const merged = { ...pickDetails(previous ?? {}) };
+  for (const [key, value] of Object.entries(pickDetails(payload))) {
+    if (value) merged[key as keyof CharacterCertificateDetailsInput] = value;
+  }
+  return merged;
+};
+
+/** The institution logo, inlined for Puppeteer (which has no base URL). */
+const readCollegeLogoDataUri = (): string | undefined => {
+  if (!collegeLogoExists()) return undefined;
+  try {
+    return `data:image/png;base64,${fs.readFileSync(getCollegeLogoPath()).toString("base64")}`;
+  } catch {
+    return undefined;
+  }
 };
 
 /* ------------------------------------------------------------------ *
@@ -380,14 +431,18 @@ export const previewCertificate = asyncHandler(async (req: Request, res: Respons
   let bodyTemplate = payload.bodyTemplate?.trim() ?? "";
   let headingText = DEFAULT_CHARACTER_CERTIFICATE_HEADING;
   let signatoryLabel = DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY;
+  let affiliationText = "";
 
+  // The heading/signatory/affiliation come from the template even when the body
+  // was typed by hand, so the form can still show what will be printed.
+  const template = payload.templateId
+    ? await CharacterCertificateTemplate.findOne({ _id: payload.templateId, schoolId }).lean()
+    : await CharacterCertificateTemplate.findOne({ schoolId, isDefault: true }).lean();
+  headingText = template?.headingText || headingText;
+  signatoryLabel = template?.signatoryLabel || signatoryLabel;
+  affiliationText = template?.affiliationText || "";
   if (!bodyTemplate) {
-    const template = payload.templateId
-      ? await CharacterCertificateTemplate.findOne({ _id: payload.templateId, schoolId }).lean()
-      : await CharacterCertificateTemplate.findOne({ schoolId, isDefault: true }).lean();
     bodyTemplate = template?.bodyTemplate ?? DEFAULT_CHARACTER_CERTIFICATE_BODY;
-    headingText = template?.headingText || headingText;
-    signatoryLabel = template?.signatoryLabel || signatoryLabel;
   }
 
   // Existing certificate reuses its number in the preview so the admin sees the
@@ -408,7 +463,8 @@ export const previewCertificate = asyncHandler(async (req: Request, res: Respons
     remarks: payload.remarks ?? "",
     collegeName: branding.collegeName,
     collegeAddress: branding.collegeAddress ?? "",
-    principalName: branding.principalName ?? ""
+    principalName: branding.principalName ?? "",
+    details: pickDetails(payload)
   });
 
   return sendSuccess(res, "Certificate preview generated", {
@@ -416,11 +472,75 @@ export const previewCertificate = asyncHandler(async (req: Request, res: Respons
     programName,
     headingText,
     signatoryLabel,
+    affiliationText,
     bodyTemplate,
     resolvedBody: resolveCertificateTokens(bodyTemplate, tokens),
     certificateNumber: existing?.certificateNumber ?? null,
     tokens
   });
+});
+
+/**
+ * Render the certificate PDF from values that have not been saved, so the admin
+ * can check (or hand over) the sheet before a certificate number is committed
+ * to the register. Writes nothing.
+ */
+export const previewCertificatePdf = asyncHandler(async (req: Request, res: Response) => {
+  await requireCollegeInstitution(req);
+  const schoolId = tenantObjectId(req);
+  const payload = characterCertificatePreviewPdfSchema.parse(req.body);
+
+  const [students, programName, branding] = await Promise.all([
+    loadPassedOutStudents(schoolId, { _id: payload.studentId }),
+    resolveProgramName(schoolId),
+    resolveSchoolBranding(schoolId)
+  ]);
+
+  const student = students[0];
+  if (!student) {
+    throw new ApiError(404, "Passed-out student not found");
+  }
+
+  const existing = await CharacterCertificate.findOne({
+    schoolId,
+    "student.studentId": payload.studentId
+  })
+    .select("certificateNumber issueCount")
+    .lean();
+
+  const details = pickDetails(payload);
+  const pdfBuffer = await generateCharacterCertificatePdf({
+    collegeName: branding.collegeName,
+    collegeNameNp: branding.collegeNameNp,
+    collegeAddress: branding.collegeAddress,
+    collegeLogoDataUri: readCollegeLogoDataUri(),
+    affiliationText: payload.affiliationText || undefined,
+    headingText: payload.headingText || DEFAULT_CHARACTER_CERTIFICATE_HEADING,
+    certificateNumber: existing?.certificateNumber ?? "(assigned on issue)",
+    issueNo: details.issueNo || undefined,
+    body: payload.resolvedBody,
+    studentName: student.studentName,
+    registrationNumber: student.registrationNumber || undefined,
+    admissionNumber: student.admissionNumber,
+    batchName: student.batchName || undefined,
+    yearName: student.yearName || undefined,
+    programName: details.programName || programName || undefined,
+    passedOutDateBs: student.passedOutDateBs || undefined,
+    conduct: payload.conduct || undefined,
+    issueDateBs: payload.issueDateBs || getTodayBs(),
+    signatoryLabel: payload.signatoryLabel || DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
+    isDuplicate: payload.isDuplicate === true,
+    issueNumber: (existing?.issueCount ?? 0) + 1,
+    printedDateBs: getTodayBs()
+  });
+
+  const safeName = student.studentName.replace(/\s+/g, "-");
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="character-certificate-preview-${safeName}.pdf"`
+  );
+  return res.send(pdfBuffer);
 });
 
 export const issueCertificate = asyncHandler(async (req: Request, res: Response) => {
@@ -493,6 +613,8 @@ export const issueCertificate = asyncHandler(async (req: Request, res: Response)
         headingText: payload.headingText || template?.headingText || DEFAULT_CHARACTER_CERTIFICATE_HEADING,
         signatoryLabel:
           payload.signatoryLabel || template?.signatoryLabel || DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
+        affiliationText: payload.affiliationText || template?.affiliationText || "",
+        details: pickDetails(payload),
         templateId: template?._id,
         templateName: template?.name ?? ""
       }
@@ -559,6 +681,9 @@ export const issueDuplicateCertificate = asyncHandler(async (req: Request, res: 
           resolvedBody: payload.resolvedBody?.trim() || latest.resolvedBody,
           headingText: payload.headingText?.trim() || latest.headingText || "",
           signatoryLabel: payload.signatoryLabel?.trim() || latest.signatoryLabel || "",
+          affiliationText: payload.affiliationText?.trim() || latest.affiliationText || "",
+          // Blanks default to whatever the previous sheet carried.
+          details: mergeDetails(latest.details, payload),
           templateId: latest.templateId,
           templateName: latest.templateName ?? ""
         }
@@ -678,29 +803,22 @@ export const downloadCertificatePdf = asyncHandler(async (req: Request, res: Res
     throw new ApiError(404, "Requested issuance not found for this certificate");
   }
 
-  let collegeLogoDataUri: string | undefined;
-  if (collegeLogoExists()) {
-    try {
-      collegeLogoDataUri = `data:image/png;base64,${fs.readFileSync(getCollegeLogoPath()).toString("base64")}`;
-    } catch {
-      collegeLogoDataUri = undefined;
-    }
-  }
-
   const pdfBuffer = await generateCharacterCertificatePdf({
     collegeName: branding.collegeName,
     collegeNameNp: branding.collegeNameNp,
     collegeAddress: branding.collegeAddress,
-    collegeLogoDataUri,
+    collegeLogoDataUri: readCollegeLogoDataUri(),
+    affiliationText: issuance.affiliationText || undefined,
     headingText: issuance.headingText || DEFAULT_CHARACTER_CERTIFICATE_HEADING,
     certificateNumber: certificate.certificateNumber,
+    issueNo: issuance.details?.issueNo || undefined,
     body: issuance.resolvedBody,
     studentName: certificate.student.studentName,
     registrationNumber: certificate.student.registrationNumber || undefined,
     admissionNumber: certificate.student.admissionNumber,
     batchName: certificate.student.batchName || undefined,
     yearName: certificate.student.yearName || undefined,
-    programName: certificate.student.programName || undefined,
+    programName: issuance.details?.programName || certificate.student.programName || undefined,
     passedOutDateBs: certificate.student.passedOutDateBs || undefined,
     conduct: certificate.conduct || undefined,
     purpose: issuance.purpose || undefined,

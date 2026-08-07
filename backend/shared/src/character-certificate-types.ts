@@ -6,6 +6,21 @@ import type {
 export type CharacterCertificateIssueType = (typeof CHARACTER_CERTIFICATE_ISSUE_TYPES)[number];
 export type CharacterCertificatePlaceholder = (typeof CHARACTER_CERTIFICATE_PLACEHOLDERS)[number];
 
+/**
+ * Values the printed form leaves blank for the office to complete. Stored per
+ * issuance so a reprint reproduces the sheet that was handed over.
+ */
+export interface CharacterCertificateDetails {
+  issueNo?: string;
+  courseDuration?: string;
+  programName?: string;
+  studyFromBs?: string;
+  studyFromAd?: string;
+  examYearBs?: string;
+  examYearAd?: string;
+  division?: string;
+}
+
 /** An institution-defined template body with {{token}} placeholders. */
 export interface CharacterCertificateTemplateRecord {
   _id: string;
@@ -14,6 +29,8 @@ export interface CharacterCertificateTemplateRecord {
   headingText: string;
   bodyTemplate: string;
   signatoryLabel: string;
+  /** Small print above the heading, e.g. "(Affiliated To CTEVT)". */
+  affiliationText?: string;
   /** Used when the issue form does not pick a template explicitly. */
   isDefault: boolean;
   isActive: boolean;
@@ -41,6 +58,9 @@ export interface CharacterCertificateIssuanceRecord {
   resolvedBody: string;
   headingText: string;
   signatoryLabel: string;
+  affiliationText?: string;
+  /** The blanks the office filled in for this issuance. */
+  details?: CharacterCertificateDetails;
   templateId?: string;
   templateName?: string;
 }

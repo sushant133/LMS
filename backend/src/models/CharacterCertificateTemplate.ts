@@ -24,6 +24,8 @@ const characterCertificateTemplateSchema = new Schema(
       trim: true,
       default: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY
     },
+    /** Small print above the heading, e.g. "(Affiliated To CTEVT)". */
+    affiliationText: { type: String, trim: true, default: "" },
     /** Pre-selected on the issue form. Only one per school; enforced in the controller. */
     isDefault: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true, index: true },

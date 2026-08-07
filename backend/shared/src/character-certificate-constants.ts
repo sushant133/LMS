@@ -45,13 +45,21 @@ export const CHARACTER_CERTIFICATE_PLACEHOLDERS = [
   "program",
   "gender",
   "genderPronoun",
+  "genderPronounLower",
   "genderPossessive",
   "dateOfBirthBs",
   "address",
   "passedOutDateBs",
   "certificateNumber",
+  "issueNo",
   "issueDateBs",
   "conduct",
+  "courseDuration",
+  "studyFromBs",
+  "studyFromAd",
+  "examYearBs",
+  "examYearAd",
+  "division",
   "purpose",
   "remarks",
   "collegeName",
@@ -73,14 +81,22 @@ export const CHARACTER_CERTIFICATE_PLACEHOLDER_LABELS: Record<
   year: "Year",
   program: "Program / course",
   gender: "Gender",
-  genderPronoun: "he / she / they",
+  genderPronoun: "He / She / They",
+  genderPronounLower: "he / she / they",
   genderPossessive: "his / her / their",
   dateOfBirthBs: "Date of birth (BS)",
   address: "Address",
   passedOutDateBs: "Passed-out date (BS)",
   certificateNumber: "Certificate number",
+  issueNo: "Issue no. (register)",
   issueDateBs: "Issue date (BS)",
   conduct: "Conduct",
+  courseDuration: "Course duration",
+  studyFromBs: "Studied from (BS)",
+  studyFromAd: "Studied from (AD)",
+  examYearBs: "Final exam year (BS)",
+  examYearAd: "Final exam year (AD)",
+  division: "Division",
   purpose: "Purpose",
   remarks: "Remarks",
   collegeName: "Institution name",
@@ -93,12 +109,21 @@ export const DEFAULT_CHARACTER_CERTIFICATE_TEMPLATE_NAME = "Default Character Ce
 
 export const DEFAULT_CHARACTER_CERTIFICATE_HEADING = "CHARACTER CERTIFICATE";
 
-export const DEFAULT_CHARACTER_CERTIFICATE_BODY = `This is to certify that {{studentName}}, {{genderPossessive}} father Mr. {{fatherName}} and mother Mrs. {{motherName}}, was a bona fide student of this institution in the {{program}} programme under batch {{batch}}.
+/**
+ * Wording of the institution's printed certificate. `**…**` marks the runs the
+ * paper form sets in bold; a placeholder with nothing to fill it prints as a
+ * dotted blank so the sheet can still be completed by hand.
+ */
+export const DEFAULT_CHARACTER_CERTIFICATE_BODY = `This is to certify that Mr./Mrs. {{studentName}} Son/Daughter of Mr./Mrs. {{fatherName}} Was a regular student of the {{courseDuration}} **{{program}}** of this technical institute from {{studyFromBs}} B.S. ({{studyFromAd}} A.D.). {{genderPronoun}} appeared in the final examination held in {{examYearBs}} B.S. ({{examYearAd}} A.D.) and was placed in {{division}} Division. According to the institute record {{genderPossessive}} Registration number is {{registrationNumber}} and date of birth is {{dateOfBirthBs}} B.S.
 
-{{genderPronoun}} bears registration number {{registrationNumber}} and successfully completed all academic requirements of the programme on {{passedOutDateBs}} B.S.
+To the best of my knowledge and belief {{genderPronounLower}} bears a **{{conduct}}** moral character. I wish every success in {{genderPossessive}} future.`;
 
-To the best of our knowledge, {{genderPossessive}} conduct and moral character during the entire period of study in this institution were found to be {{conduct}}.
+/** Printed under the right-hand signature block. */
+export const DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY = "Director/Chairperson";
 
-We wish {{genderPossessive}} every success in future endeavours.`;
-
-export const DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY = "Principal";
+/** Fixed labels under the first three signature blocks of the printed form. */
+export const CHARACTER_CERTIFICATE_SIGNATURE_LABELS = [
+  "Prepared by",
+  "Checked by",
+  "Office Stamp"
+] as const;

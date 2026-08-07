@@ -10,6 +10,7 @@ import {
   listCertificateTemplates,
   listPassedOutStudents,
   previewCertificate,
+  previewCertificatePdf,
   updateCertificateTemplate
 } from "../controllers/characterCertificateController.js";
 import { authorize, protect } from "../middleware/auth.js";
@@ -33,6 +34,8 @@ router.put("/templates/:templateId", updateCertificateTemplate);
 router.delete("/templates/:templateId", deleteCertificateTemplate);
 
 router.post("/preview", previewCertificate);
+// Draft print of unsaved edits — writes nothing, so it stays a POST for the body.
+router.post("/preview/pdf", previewCertificatePdf);
 router.post("/issue", issueCertificate);
 
 router.get("/", listCertificateRecords);

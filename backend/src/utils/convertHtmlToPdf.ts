@@ -39,7 +39,7 @@ const LATIN_FONT = (): string | null =>
  * (network blocks/timeouts used to force the PDFKit fallback, which then crashed
  * on Devanagari layout for words like अक्षरेपी).
  */
-const injectLocalFonts = (html: string): string => {
+const injectLocalFonts = (html: string, keepDocumentFonts = false): string => {
   const faces: string[] = [];
 
   const devPath = DEVANAGARI_FONT();
@@ -70,12 +70,18 @@ const injectLocalFonts = (html: string): string => {
     `);
   }
 
-  if (faces.length === 0) return html;
+  if (faces.length === 0 && !keepDocumentFonts) return html;
 
+  // A document that ships its own @font-face rules (the character certificate)
+  // still wants Noto available for Devanagari, but must keep its own families.
   const styleBlock = `<style data-local-pdf-fonts="1">
     ${faces.join("\n")}
-    body, body * {
+    ${
+      keepDocumentFonts
+        ? ""
+        : `body, body * {
       font-family: 'Noto Sans Devanagari', 'Noto Sans', 'Nirmala UI', Mangal, sans-serif !important;
+    }`
     }
   </style>`;
 
@@ -99,8 +105,14 @@ const injectLocalFonts = (html: string): string => {
  * `pdfOptions` overrides the default page.pdf() options — e.g. a template that
  * defines its own `@page` margin should pass `{ preferCSSPageSize: true, margin: undefined }`
  * so Puppeteer honors the CSS instead of the default fixed margins.
+ *
+ * `keepDocumentFonts` leaves the document's own font-family declarations alone;
+ * without it every element is forced onto Noto Sans.
  */
-export async function convertHtmlToPdf(html: string, pdfOptions?: Partial<PDFOptions>): Promise<Buffer> {
+export async function convertHtmlToPdf(
+  html: string,
+  pdfOptions?: Partial<PDFOptions> & { keepDocumentFonts?: boolean }
+): Promise<Buffer> {
   try {
     return await convertWithPuppeteer(html, pdfOptions);
   } catch (error) {
@@ -112,10 +124,14 @@ export async function convertHtmlToPdf(html: string, pdfOptions?: Partial<PDFOpt
   }
 }
 
-async function convertWithPuppeteer(html: string, pdfOptions?: Partial<PDFOptions>): Promise<Buffer> {
+async function convertWithPuppeteer(
+  html: string,
+  pdfOptions?: Partial<PDFOptions> & { keepDocumentFonts?: boolean }
+): Promise<Buffer> {
   // Dynamic import so the app still boots if puppeteer is not installed.
   const puppeteer = await import("puppeteer");
-  const preparedHtml = injectLocalFonts(html);
+  const { keepDocumentFonts, ...pageOptions } = pdfOptions ?? {};
+  const preparedHtml = injectLocalFonts(html, keepDocumentFonts);
 
   const browser = await puppeteer.default.launch({
     headless: true,
@@ -150,7 +166,7 @@ async function convertWithPuppeteer(html: string, pdfOptions?: Partial<PDFOption
       // Symmetric margins so header text centers on the page
       margin: { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" },
       preferCSSPageSize: false,
-      ...pdfOptions
+      ...pageOptions
     });
 
     return Buffer.from(pdf);
