@@ -1,6 +1,10 @@
 import type { Request, Response } from "express";
 import type mongoose from "mongoose";
-import { ensurePendingRequiredDocuments, studentSchema } from "@phit-erp/shared";
+import {
+  ensurePendingRequiredDocuments,
+  studentBackCountSchema,
+  studentSchema
+} from "@phit-erp/shared";
 import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -342,6 +346,10 @@ export const createStudent = asyncHandler(async (req: Request, res: Response) =>
                 ...(payload.sectionId ? { sectionId: payload.sectionId } : {})
               }),
           academicStatus: payload.academicStatus ?? "ACTIVE",
+          backCount:
+            (payload.academicStatus ?? "ACTIVE") === "PENDING_NOT_PASSED"
+              ? Math.max(1, Math.min(50, Math.floor(Number(payload.backCount) || 1)))
+              : 0,
           admissionDateBs: payload.admissionDateBs || "",
           dateOfBirthBs: payload.dateOfBirthBs || "",
           gender: payload.gender || "",
@@ -632,6 +640,16 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     hasScholarship,
     remarks: payload.remarks,
     academicStatus: payload.academicStatus ?? student.academicStatus ?? "ACTIVE",
+    backCount: (() => {
+      const status =
+        payload.academicStatus ?? student.academicStatus ?? "ACTIVE";
+      if (status !== "PENDING_NOT_PASSED") return 0;
+      const n = Math.floor(Number(payload.backCount));
+      if (Number.isFinite(n) && n >= 1) return Math.min(50, n);
+      // Keep existing count if payload omitted a valid number while still Back
+      const existing = Math.floor(Number(student.backCount) || 0);
+      return existing >= 1 ? Math.min(50, existing) : 1;
+    })(),
     photoUrl: nextPhotoUrl,
     documents: nextDocuments
   });
@@ -747,6 +765,45 @@ export const updateStudent = asyncHandler(async (req: Request, res: Response) =>
     passwordChanged: false,
     loginIdAlreadySet
   });
+});
+
+/**
+ * Examination Management → Back Students: update number of remaining backs only.
+ * Student must already have academicStatus PENDING_NOT_PASSED ("Back").
+ */
+export const updateStudentBackCount = asyncHandler(async (req: Request, res: Response) => {
+  const payload = studentBackCountSchema.parse(req.body);
+  const student = await Student.findOne(withTenantScope(req, { _id: req.params.id }));
+  if (!student) {
+    throw new ApiError(404, "Student not found");
+  }
+
+  if ((student.academicStatus ?? "ACTIVE") !== "PENDING_NOT_PASSED") {
+    throw new ApiError(
+      400,
+      "Number of backs can only be set for students with academic status Back"
+    );
+  }
+
+  const before = student.backCount ?? 0;
+  student.backCount = payload.backCount;
+  await student.save();
+
+  await recordAudit(req, {
+    action: "student.back_count_update",
+    entity: "Student",
+    entityId: student._id.toString(),
+    before: { backCount: before, academicStatus: student.academicStatus },
+    after: { backCount: student.backCount, academicStatus: student.academicStatus }
+  });
+
+  const populated = await Student.findById(student._id)
+    .populate("user", "-password")
+    .populate("batchId", "name")
+    .populate("yearId", "name level batchId")
+    .lean();
+
+  return sendSuccess(res, "Number of backs updated", populated ?? student);
 });
 
 type CtevtFeeKind = "registration" | "exam";

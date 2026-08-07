@@ -92,7 +92,11 @@ export const optionalAuth = (req: Request, _res: Response, next: NextFunction): 
 /**
  * Role gate supporting multi-responsibility accounts.
  * User matches if primary role OR any secondaryRoles is allowed.
- * SUPER_ADMIN always passes. COLLEGE_VIEWER may GET as COLLEGE_ADMIN.
+ * SUPER_ADMIN always passes.
+ * COLLEGE_VIEWER (College Administrator):
+ * - GET on COLLEGE_ADMIN routes always allowed (institution-wide read)
+ * - writes only when Module Access grants WRITE for the request module
+ *   (same path as staff module grants below)
  */
 export const authorize =
   (...roles: UserRole[]) =>
@@ -113,6 +117,7 @@ export const authorize =
       if (readMethod) {
         return next();
       }
+      // Write: fall through to secondary roles / Module Access grant checks
     }
 
     if (roles.includes(normalizedRole)) {
@@ -129,7 +134,7 @@ export const authorize =
         }
 
         /**
-         * Module Access grants: staff/teachers assigned a department may use its APIs
+         * Module Access grants: staff/teachers/college admins assigned a department may use its APIs
          * even when their primary role is not in the route's role list.
          * READ_ONLY → GET only; WRITE → full methods (moduleAccessGuard still enforces).
          */

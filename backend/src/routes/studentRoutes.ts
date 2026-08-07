@@ -13,7 +13,8 @@ import {
   setStudentLoginAccess,
   updateCtevtExamFee,
   updateCtevtRegistrationFee,
-  updateStudent
+  updateStudent,
+  updateStudentBackCount
 } from "../controllers/studentController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
@@ -75,6 +76,12 @@ router.put(
   "/:id/login-access",
   authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
   setStudentLoginAccess
+);
+/** Examination → Back Students: quick edit remaining back papers */
+router.patch(
+  "/:id/back-count",
+  authorize("SUPER_ADMIN", "COLLEGE_ADMIN"),
+  updateStudentBackCount
 );
 router.post("/", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), createStudent);
 router.put("/:id", authorize("COLLEGE_ADMIN", "SUPER_ADMIN"), updateStudent);

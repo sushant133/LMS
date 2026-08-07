@@ -324,6 +324,11 @@ export interface StudentRecord {
     | "WITHDRAWN"
     | "CANCELLED"
     | "SUSPENDED";
+  /**
+   * Papers/subjects still pending when status is Back (PENDING_NOT_PASSED).
+   * 0 when not a back student.
+   */
+  backCount?: number;
   admissionDateBs: string;
   /** Set when the student was marked PASSED_OUT (BS). */
   passedOutAtBs?: string;

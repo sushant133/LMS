@@ -31,6 +31,7 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { useAuth } from "features/auth/AuthProvider";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
@@ -167,6 +168,8 @@ const employeeKeyOf = (r: {
     : `STAFF:${r.staffId ?? ""}`;
 
 export const SalaryPaymentRecordsPanel = () => {
+  const { user } = useAuth();
+  const currentUserName = user?.fullName?.trim() || "";
   const canManualAttendance = useIsTenantAdmin();
   const [monthBs, setMonthBs] = useState(currentBsMonth);
   /** Sheet filter (table view only) */
@@ -179,13 +182,20 @@ export const SalaryPaymentRecordsPanel = () => {
   const [paidDateBs, setPaidDateBs] = useState("");
   const [paymentMethod, setPaymentMethod] =
     useState<(typeof PAYMENT_METHODS)[number]>("BANK_TRANSFER");
-  /** Signatories for print / Excel (avoid window.prompt — it breaks pop-up print) */
-  const [accountantName, setAccountantName] = useState("");
+  /** Signatories for print / Excel — default first signature to the logged-in staff name */
+  const [accountantName, setAccountantName] = useState(currentUserName);
   const [directorName, setDirectorName] = useState("");
   const [chairmanName, setChairmanName] = useState("");
   /** One-by-one entry form */
   const [entry, setEntry] = useState(emptyEntryForm);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+
+  // Keep signature name in sync when session user loads after mount
+  useEffect(() => {
+    if (currentUserName && !accountantName.trim()) {
+      setAccountantName(currentUserName);
+    }
+  }, [currentUserName, accountantName]);
 
   /** Full employee catalog + attendance for the month (picker source — not the table) */
   const sheetQuery = useQuery({

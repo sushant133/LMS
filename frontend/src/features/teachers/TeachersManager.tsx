@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_TEACHER_DESIGNATION,
@@ -6,21 +6,30 @@ import {
   type TeacherInput,
   type TeacherRecord,
 } from "@phit-erp/shared";
+import { Printer } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
 import { Badge } from "components/ui/badge";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
+import { CollegeLogo } from "components/shared/CollegeLogo";
 import { EmptyState } from "components/shared/EmptyState";
 import { LoadingState } from "components/shared/LoadingState";
 import { PageHeader } from "components/shared/PageHeader";
 import { PhoneLink } from "components/shared/PhoneLink";
+import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
+import { getCollegeDisplayName } from "lib/auth";
 import {
   toastCredentialCreateResult,
   type CredentialsEmailResult,
 } from "lib/credentialsEmail";
+import {
+  formatPrintAddress,
+  getPrintInstitutionBranding,
+} from "lib/printBranding";
+import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsCollege } from "hooks/useInstitutionType";
@@ -28,6 +37,27 @@ import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import { TeacherAssignmentsPanel } from "./TeacherAssignmentsPanel";
 import { TeacherForm } from "./TeacherForm";
+
+const TEACHERS_PRINT_AREA_ID = "teachers-list-print-area";
+
+const printTh: CSSProperties = {
+  border: "1px solid #94a3b8",
+  background: "#f1f5f9",
+  padding: "5px 4px",
+  fontSize: 10,
+  fontWeight: 700,
+  textAlign: "left",
+  color: "#0f172a",
+  whiteSpace: "nowrap",
+};
+
+const printTd: CSSProperties = {
+  border: "1px solid #cbd5e1",
+  padding: "4px 4px",
+  fontSize: 10,
+  color: "#0f172a",
+  verticalAlign: "top",
+};
 
 const migrationBadgeClass = (status: string): string => {
   switch (status) {
@@ -89,6 +119,15 @@ interface TeachersManagerProps {
 export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const canManage = useIsTenantAdmin();
   const isCollege = useIsCollege();
+  const { user, availableSchools } = useAuth();
+  const institutionName = getCollegeDisplayName(availableSchools, user);
+  const printBranding = getPrintInstitutionBranding();
+  const institutionAddress =
+    printBranding.address?.trim() ||
+    formatPrintAddress(
+      availableSchools[0]?.address ?? user?.school?.address,
+    );
+  const [printing, setPrinting] = useState(false);
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const [editDocuments, setEditDocuments] = useState<HrDocument[]>([]);
   const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
@@ -160,6 +199,30 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const teachers = (teachersQuery.data ?? []).filter(
     (teacher) => Boolean(teacher.user),
   );
+
+  const handlePrintList = async () => {
+    if (teachers.length === 0) {
+      toast.error("No teachers to print");
+      return;
+    }
+    setPrinting(true);
+    try {
+      const el = document.getElementById(TEACHERS_PRINT_AREA_ID);
+      if (!el?.textContent?.trim()) {
+        throw new Error("Print content is empty — try again");
+      }
+      await printElementById(TEACHERS_PRINT_AREA_ID, "teachers-list-print");
+      toast.success(
+        `Print dialog opened — ${teachers.length} teacher${
+          teachers.length === 1 ? "" : "s"
+        }`,
+      );
+    } catch (e) {
+      toast.error(parseErrorMessage(e));
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const content = (
     <>
@@ -250,8 +313,22 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       ) : null}
 
       <Card>
-        <CardHeader>
-          <CardTitle>Teachers</CardTitle>
+        <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <CardTitle>Teachers</CardTitle>
+            <p className="mt-1 text-sm text-slate-500">
+              Showing {teachers.length} teacher{teachers.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            className="w-full shrink-0 sm:w-auto"
+            disabled={teachers.length === 0 || printing}
+            onClick={() => void handlePrintList()}
+          >
+            <Printer className="mr-2 h-4 w-4" />
+            {printing ? "Preparing…" : "Print list"}
+          </Button>
         </CardHeader>
         <CardContent>
           {teachers.length === 0 ? (
@@ -443,6 +520,163 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
             </div>
           )}
         </CardContent>
+
+        {/* Hidden print layout — college header + teachers table */}
+        <div
+          id={TEACHERS_PRINT_AREA_ID}
+          className="hidden print:block"
+          aria-hidden="true"
+          style={{
+            background: "#ffffff",
+            color: "#0f172a",
+            padding: 16,
+            fontFamily:
+              '"IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif',
+          }}
+        >
+          <header
+            style={{
+              marginBottom: 12,
+              paddingBottom: 10,
+              borderBottom: "1px solid #94a3b8",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <CollegeLogo className="h-12 w-12 shrink-0" />
+              <div style={{ minWidth: 0 }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: "#0f172a",
+                  }}
+                >
+                  {institutionName || printBranding.name || "Institution"}
+                </p>
+                {institutionAddress ? (
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      fontSize: 11,
+                      color: "#475569",
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    {institutionAddress}
+                  </p>
+                ) : null}
+                <p
+                  style={{
+                    margin: "2px 0 0",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#1e293b",
+                  }}
+                >
+                  Teachers list
+                </p>
+                <p
+                  style={{
+                    margin: "2px 0 0",
+                    fontSize: 10,
+                    color: "#64748b",
+                  }}
+                >
+                  {teachers.length} teacher
+                  {teachers.length === 1 ? "" : "s"}
+                </p>
+              </div>
+            </div>
+          </header>
+
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              tableLayout: "auto",
+            }}
+          >
+            <thead>
+              <tr>
+                <th style={{ ...printTh, textAlign: "center", width: 36 }}>
+                  S.N.
+                </th>
+                <th style={printTh}>Name</th>
+                <th style={printTh}>Phone</th>
+                <th style={printTh}>Designation</th>
+                <th style={printTh}>Qualification</th>
+                <th style={printTh}>Code</th>
+                <th style={printTh}>Status</th>
+                <th style={printTh}>Teaching load</th>
+                {canManage ? (
+                  <th style={{ ...printTh, textAlign: "right" }}>Salary</th>
+                ) : null}
+              </tr>
+            </thead>
+            <tbody>
+              {teachers.map((teacher, index) => {
+                const designation =
+                  teacher.user?.designation?.trim() ||
+                  DEFAULT_TEACHER_DESIGNATION;
+                const isActive =
+                  teacher.status !== "INACTIVE" &&
+                  teacher.user?.isActive !== false;
+                return (
+                  <tr
+                    key={teacher._id}
+                    style={{
+                      background: index % 2 === 1 ? "#f8fafc" : "#ffffff",
+                    }}
+                  >
+                    <td style={{ ...printTd, textAlign: "center" }}>
+                      {index + 1}
+                    </td>
+                    <td style={printTd}>
+                      <div style={{ fontWeight: 600 }}>
+                        {teacher.user?.fullName ?? "—"}
+                      </div>
+                      {teacher.user?.email ? (
+                        <div style={{ fontSize: 9, color: "#64748b" }}>
+                          {teacher.user.email}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td style={printTd}>{teacher.user?.phone?.trim() || "—"}</td>
+                    <td style={printTd}>{designation}</td>
+                    <td style={printTd}>
+                      {teacher.qualification?.trim() || "—"}
+                    </td>
+                    <td style={printTd}>{teacher.teacherCode || "—"}</td>
+                    <td style={printTd}>{isActive ? "Active" : "Inactive"}</td>
+                    <td style={printTd}>
+                      {legacyLoadSummary(teacher, isCollege)}
+                    </td>
+                    {canManage ? (
+                      <td style={{ ...printTd, textAlign: "right" }}>
+                        {formatCurrencyNpr(teacher.basicSalaryNpr)}
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <footer
+            style={{
+              marginTop: 12,
+              paddingTop: 8,
+              borderTop: "1px solid #cbd5e1",
+              fontSize: 9,
+              color: "#64748b",
+            }}
+          >
+            <p style={{ margin: 0 }}>
+              Teachers list · Confidential institutional record
+            </p>
+          </footer>
+        </div>
       </Card>
     </>
   );

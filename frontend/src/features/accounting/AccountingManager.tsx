@@ -119,7 +119,7 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
-import { useCanAccessModule } from "hooks/useModuleAccess";
+import { useCanAccessModule, useCanWriteModule } from "hooks/useModuleAccess";
 
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
@@ -351,9 +351,12 @@ const defaultAccountant: AccountantInput = {
 
 export const AccountingManager = () => {
   const { user } = useAuth();
+  /** Logged-in name for expense “Approved by” and other actor labels */
+  const currentUserName = user?.fullName?.trim() || "";
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const canAccessAccounts = useCanAccessModule("accounts");
+  const canWriteAccounts = useCanWriteModule("accounts");
   const secondaryRoles = (user?.secondaryRoles ?? []).map((r) =>
     normalizeUserRole(r),
   );
@@ -369,7 +372,7 @@ export const AccountingManager = () => {
       ACCOUNTING_ACCESS_ROLES.includes(r),
     );
     if (secondaryFinance) return secondaryFinance;
-    // Module-only staff with Accounts WRITE act as accountant for UI caps
+    // Module-only staff / College Administrator with Accounts access act as accountant for UI caps
     if (canAccessAccounts) return "ACCOUNTANT" as const;
     return primary;
   })();
@@ -392,11 +395,18 @@ export const AccountingManager = () => {
   const isPrincipal =
     normalizedRole === "PRINCIPAL" || allRoles.includes("PRINCIPAL");
   const isCashier = normalizedRole === "CASHIER" && !allRoles.includes("ACCOUNTANT");
+  /**
+   * College Administrator (COLLEGE_VIEWER) write rights come from Module Access → Accounts WRITE.
+   * Global role-based read-only is no longer applied.
+   */
   const isReadOnlyCollegeAdmin =
     !isAdmin &&
-    (normalizedRole === "COLLEGE_VIEWER" || primaryRole === "COLLEGE_VIEWER");
+    primaryRole === "COLLEGE_VIEWER" &&
+    !canWriteAccounts;
   const canWrite =
-    isAdmin || (!isAuditor && !isPrincipal && !isReadOnlyCollegeAdmin);
+    isAdmin ||
+    canWriteAccounts ||
+    (!isAuditor && !isPrincipal && !isReadOnlyCollegeAdmin);
   /**
    * Delete / reverse of posted accounting records:
    * Super Admin + College Admin only (not Accountant / Cashier / others).
@@ -418,7 +428,13 @@ export const AccountingManager = () => {
   const [accountantPassword, setAccountantPassword] = useState("");
   const [structureForm, setStructureForm] = useState(defaultStructure);
   const [collectionForm, setCollectionForm] = useState(defaultCollection);
-  const [expenseForm, setExpenseForm] = useState(defaultExpense);
+  const freshExpenseForm = (): AccountingExpenseInput => ({
+    ...defaultExpense,
+    approvedBy: currentUserName,
+  });
+  const [expenseForm, setExpenseForm] = useState<AccountingExpenseInput>(
+    freshExpenseForm,
+  );
   const [purchaseForm, setPurchaseForm] = useState(defaultPurchase);
   const [incomeForm, setIncomeForm] = useState(defaultIncome);
   const [salaryForm, setSalaryForm] = useState(defaultSalary);
@@ -745,7 +761,7 @@ export const AccountingManager = () => {
       unwrap(api.post("/accounting/expenses", payload)),
     onSuccess: async () => {
       toast.success("Expense recorded");
-      setExpenseForm(defaultExpense);
+      setExpenseForm(freshExpenseForm());
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -921,7 +937,7 @@ export const AccountingManager = () => {
     onSuccess: async () => {
       toast.success("Expense updated");
       setEditingExpense(null);
-      setExpenseForm(defaultExpense);
+      setExpenseForm(freshExpenseForm());
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -2341,13 +2357,15 @@ export const AccountingManager = () => {
               </FormField>
               <FormField label="Approved By">
                 <Input
-                  value={expenseForm.approvedBy ?? ""}
+                  value={expenseForm.approvedBy || currentUserName}
                   onChange={(e) =>
                     setExpenseForm((c) => ({
                       ...c,
                       approvedBy: e.target.value,
                     }))
                   }
+                  placeholder="Your account name"
+                  title="Defaults to the person entering this expense"
                 />
               </FormField>
               <FormField label="Vendor (optional)">
@@ -2398,7 +2416,7 @@ export const AccountingManager = () => {
                     variant="outline"
                     onClick={() => {
                       setEditingExpense(null);
-                      setExpenseForm(defaultExpense);
+                      setExpenseForm(freshExpenseForm());
                     }}
                   >
                     Cancel
@@ -2406,8 +2424,11 @@ export const AccountingManager = () => {
                 ) : null}
                 <Button
                   onClick={() => {
-                    const parsed =
-                      accountingExpenseSchema.safeParse(expenseForm);
+                    const parsed = accountingExpenseSchema.safeParse({
+                      ...expenseForm,
+                      approvedBy:
+                        expenseForm.approvedBy?.trim() || currentUserName,
+                    });
                     if (!parsed.success)
                       return toast.error(
                         parsed.error.issues[0]?.message ?? "Invalid expense",
@@ -3765,11 +3786,25 @@ export const AccountingManager = () => {
                 <TableBody>
                   {(auditLogsQuery.data ?? []).map((log) => {
                     const actor = log.actorUserId as
-                      { fullName?: string } | string | undefined;
+                      | { fullName?: string; email?: string }
+                      | string
+                      | undefined;
+                    const roleLabel =
+                      log.actorRole === "COLLEGE_VIEWER"
+                        ? "College Administrator"
+                        : log.actorRole === "COLLEGE_ADMIN"
+                          ? "Administrator"
+                          : log.actorRole === "SUPER_ADMIN"
+                            ? "System Administrator"
+                            : log.actorRole === "ACCOUNTANT"
+                              ? "Accountant"
+                              : log.actorRole;
                     const actorName =
-                      typeof actor === "object"
-                        ? (actor?.fullName ?? log.actorRole)
-                        : log.actorRole;
+                      typeof actor === "object" && actor
+                        ? actor.fullName?.trim() ||
+                          actor.email?.trim() ||
+                          roleLabel
+                        : roleLabel;
                     const hasChange = log.before != null || log.after != null;
                     return (
                       <tr key={log._id}>
@@ -3778,7 +3813,18 @@ export const AccountingManager = () => {
                             ? new Date(log.createdAt).toLocaleString()
                             : "—"}
                         </Td>
-                        <Td>{actorName}</Td>
+                        <Td>
+                          <div className="font-medium text-slate-900">
+                            {actorName}
+                          </div>
+                          {typeof actor === "object" &&
+                          actor?.fullName?.trim() &&
+                          roleLabel ? (
+                            <div className="text-xs text-slate-500">
+                              {roleLabel}
+                            </div>
+                          ) : null}
+                        </Td>
                         <Td>{log.action.replace(/\./g, " · ")}</Td>
                         <Td>{log.entity}</Td>
                         <Td className="font-mono text-xs">

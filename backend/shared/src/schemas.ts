@@ -242,6 +242,11 @@ export const studentSchema = z.object({
   hasScholarship: z.boolean().optional().default(false),
   remarks: z.string().optional().or(z.literal("")).default(""),
   academicStatus: z.enum(STUDENT_ACADEMIC_STATUSES).optional().default("ACTIVE"),
+  /**
+   * Number of paper/subject backs when academicStatus is PENDING_NOT_PASSED ("Back").
+   * Cleared to 0 when status is not Back. Required (≥ 1) while status is Back.
+   */
+  backCount: z.coerce.number().int().min(0).max(50).optional().default(0),
   // Phase 0 foundation fields (optional for backward compatibility)
   photoUrl: z.string().optional().or(z.literal("")),
   documents: z
@@ -264,6 +269,17 @@ export const studentSchema = z.object({
     )
     .optional()
 }).superRefine((data, ctx) => {
+  if (data.academicStatus === "PENDING_NOT_PASSED") {
+    const n = Number(data.backCount);
+    if (!Number.isFinite(n) || n < 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Enter the number of backs (at least 1)",
+        path: ["backCount"]
+      });
+    }
+  }
+
   const caste = (data.caste ?? "").trim();
   if (!caste) return;
   if (!data.religion) {
@@ -886,6 +902,12 @@ export type SchoolInput = z.infer<typeof schoolSchema>;
 export type CreateSchoolInput = z.infer<typeof createSchoolSchema>;
 export type UpdateSchoolInput = z.infer<typeof updateSchoolSchema>;
 export type StudentInput = z.infer<typeof studentSchema>;
+
+/** Quick update of back paper count for Examination → Back Students. */
+export const studentBackCountSchema = z.object({
+  backCount: z.coerce.number().int().min(1).max(50)
+});
+export type StudentBackCountInput = z.infer<typeof studentBackCountSchema>;
 export type TeacherInput = z.infer<typeof teacherSchema>;
 export type CollegeStaffInput = z.infer<typeof collegeStaffSchema>;
 export type CollegeStaffPasswordResetInput = z.infer<typeof collegeStaffPasswordResetSchema>;

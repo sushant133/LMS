@@ -18,7 +18,7 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { LoadingState } from "components/shared/LoadingState";
-import { useReadOnlyAccess } from "hooks/useNormalizedRole";
+
 import {
   accountingFeeCollectionUrl,
   accountingStudentAccountsUrl,
@@ -67,7 +67,6 @@ export const FeeDuesPanel = ({
   const { user } = useAuth();
   const canAccessAccounting = hasAccountingPermission(user?.role ?? "", "read");
   const canSendReminder = user ? canManageInstitution(user.role) : false;
-  const { isReadOnly, readOnlyMessage } = useReadOnlyAccess();
 
   const feeDuesQuery = useQuery({
     queryKey: ["dashboard-fee-dues"],
@@ -257,8 +256,7 @@ export const FeeDuesPanel = ({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={sendReminder.isPending || isReadOnly}
-                        title={isReadOnly ? readOnlyMessage : undefined}
+                        disabled={sendReminder.isPending}
                         onClick={() => sendReminder.mutate(student.studentId)}
                       >
                         <Bell className="mr-2 h-4 w-4" />

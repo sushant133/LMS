@@ -21,7 +21,7 @@ import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { useAuth } from "features/auth/AuthProvider";
-import { useReadOnlyAccess } from "hooks/useNormalizedRole";
+import { useCanWriteModule } from "hooks/useModuleAccess";
 
 const defaultSettingsValue: SettingsInput = {
   schoolName: "",
@@ -65,7 +65,12 @@ const defaultSettingsValue: SettingsInput = {
 
 export const SettingsManager = () => {
   const { user, availableSchools } = useAuth();
-  const { isReadOnly, readOnlyMessage } = useReadOnlyAccess();
+  /** Module Access → Settings WRITE (College Administrators included when granted). */
+  const canWriteSettings = useCanWriteModule("settings");
+  const isReadOnly = !canWriteSettings;
+  const readOnlyMessage = isReadOnly
+    ? "Settings can only be changed when Module Access grants Manage on Settings."
+    : "";
   const [form, setForm] = useState<SettingsInput>(defaultSettingsValue);
   const settingsQuery = useQuery({
     queryKey: ["settings"],

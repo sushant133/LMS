@@ -58,6 +58,11 @@ const studentSchema = new Schema(
       default: "ACTIVE",
       index: true
     },
+    /**
+     * Number of back papers/subjects while academicStatus is PENDING_NOT_PASSED.
+     * Stored as 0 for non-back students.
+     */
+    backCount: { type: Number, default: 0, min: 0, max: 50 },
     admissionDateBs: { type: String, default: "" },
     /**
      * When the student was marked PASSED_OUT. Set by the promotion service on

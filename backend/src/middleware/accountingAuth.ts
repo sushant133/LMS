@@ -45,16 +45,18 @@ export const requireAccountingPermission =
           return next();
         }
 
-        // COLLEGE_VIEWER alone is read-only; fall through only if secondary/module grant exists
+        // COLLEGE_VIEWER (College Administrator): role matrix is read-only by default.
+        // Module Access Accounts WRITE elevates them to operational accountant rights below.
         if (role === "COLLEGE_VIEWER") {
           const readOnlyAllowed = permissions.every(isReadOnlyAccountingPermission);
           if (readOnlyAllowed && roleHasAnyPermission(role, permissions)) {
             return next();
           }
-          // Continue to module-grant check below (e.g. secondary ACCOUNTANT)
+          // Continue to module-grant check (Accounts WRITE)
         }
 
         // Module Access Control: Accounts grant unlocks operational finance APIs
+        // (accountants, cashiers, college admins, and other staff with the grant)
         const accessMap = await getUserModuleAccessMap(req.user!.userId);
         if (!canAccessModule(accessMap, "accounts")) {
           return next(new ApiError(403, "You do not have permission to perform this accounting action"));

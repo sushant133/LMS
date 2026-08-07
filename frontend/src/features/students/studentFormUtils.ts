@@ -38,6 +38,10 @@ export const mapStudentToInput = (student: StudentRecord): StudentInput => ({
   hasScholarship: Boolean(student.hasScholarship),
   remarks: student.remarks ?? "",
   academicStatus: student.academicStatus ?? "ACTIVE",
+  backCount:
+    (student.academicStatus ?? "ACTIVE") === "PENDING_NOT_PASSED"
+      ? Math.max(1, Number(student.backCount) || 1)
+      : 0,
   photoUrl: student.photoUrl ?? "",
   documents: student.documents ?? [],
 });

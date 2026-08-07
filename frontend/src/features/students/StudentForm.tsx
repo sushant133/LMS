@@ -86,6 +86,7 @@ const createDefaultValue = (isCollege: boolean): StudentInput => ({
   hasScholarship: false,
   remarks: "",
   academicStatus: "ACTIVE",
+  backCount: 0,
 });
 
 interface StudentFormProps {
@@ -156,11 +157,19 @@ export const StudentForm = ({
     const year2 = hasScholarship ? 0 : Number(form.year2FeeNpr) || 0;
     const year3 = hasScholarship ? 0 : Number(form.year3FeeNpr) || 0;
     const yearTotal = year1 + year2 + year3;
+    const academicStatus = form.academicStatus ?? "ACTIVE";
+    const backCount =
+      academicStatus === "PENDING_NOT_PASSED"
+        ? Math.max(1, Math.min(50, Math.floor(Number(form.backCount) || 1)))
+        : 0;
+
     const parsed = studentSchema.safeParse({
       ...form,
       email: (form.email ?? "").trim(),
       password: password.trim() || undefined,
       registrationNumber: (form.registrationNumber ?? "").trim(),
+      academicStatus,
+      backCount,
       hasScholarship,
       securityDepositWaived,
       year1FeeNpr: year1,
@@ -671,13 +680,19 @@ export const StudentForm = ({
         <FormField label="Academic Status">
           <Select
             value={form.academicStatus ?? "ACTIVE"}
-            onChange={(event) =>
+            onChange={(event) => {
+              const next = event.target
+                .value as StudentInput["academicStatus"];
               setForm((current) => ({
                 ...current,
-                academicStatus: event.target
-                  .value as StudentInput["academicStatus"],
-              }))
-            }
+                academicStatus: next,
+                // Show/require backs only for Back status; clear otherwise
+                backCount:
+                  next === "PENDING_NOT_PASSED"
+                    ? Math.max(1, Number(current.backCount) || 1)
+                    : 0,
+              }));
+            }}
           >
             {STUDENT_ACADEMIC_STATUSES.map((status) => (
               <option key={status} value={status}>
@@ -686,6 +701,25 @@ export const StudentForm = ({
             ))}
           </Select>
         </FormField>
+        {(form.academicStatus ?? "ACTIVE") === "PENDING_NOT_PASSED" ? (
+          <FormField label="Number of backs *">
+            <NumberInput
+              min={1}
+              max={50}
+              step={1}
+              value={form.backCount ?? 1}
+              onValueChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  backCount: Math.max(
+                    1,
+                    Math.min(50, Math.floor(value ?? 1)),
+                  ),
+                }))
+              }
+            />
+          </FormField>
+        ) : null}
       </div>
 
       <AddressFields

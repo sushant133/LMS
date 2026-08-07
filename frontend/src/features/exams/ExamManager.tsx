@@ -67,7 +67,7 @@ const PassedOutStudentsPanel = lazy(() =>
 );
 const BackStudentsPanel = lazy(() =>
   import("features/exams/BackStudentsPanel").then((module) => ({
-    default: module.BackStudentsPanel ?? module.default,
+    default: module.BackStudentsPanel,
   })),
 );
 const ResultReviewPanel = lazy(() =>

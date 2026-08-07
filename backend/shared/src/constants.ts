@@ -75,11 +75,19 @@ export const canManageInstitution = (role: string): boolean => isInstitutionAdmi
 
 export const isSystemAdministrator = (role: string): boolean => normalizeUserRole(role) === "SUPER_ADMIN";
 
-export const READ_ONLY_ACCESS_MESSAGE = "You have read-only access.";
+/**
+ * @deprecated Global College Administrator ban was removed.
+ * Writes are controlled by Module Access (NONE / READ_ONLY / WRITE per module).
+ * Kept for older clients that still display this string on 403.
+ */
+export const READ_ONLY_ACCESS_MESSAGE =
+  "This action is not allowed for your Module Access. Ask an administrator to grant Manage on the module.";
 
 export const getInstitutionPermissions = (role: string) => {
   const normalized = normalizeUserRole(role);
 
+  // College Administrator: institution-wide read; writes come from Module Access matrix.
+  // canWrite here is legacy (auth payload only) — clients must use moduleAccess, not this flag.
   if (normalized === "COLLEGE_VIEWER") {
     return {
       canRead: true,

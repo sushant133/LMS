@@ -1,10 +1,10 @@
 import { useMemo, useState, type CSSProperties } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   STUDENT_ACADEMIC_STATUS_LABELS,
   type StudentRecord,
 } from "@phit-erp/shared";
-import { Printer, Search } from "lucide-react";
+import { Check, Pencil, Printer, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { EmptyState } from "components/shared/EmptyState";
@@ -13,6 +13,7 @@ import { StudentNameLink } from "components/shared/StudentNameLink";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { useAuth } from "features/auth/AuthProvider";
@@ -62,19 +63,30 @@ const resolveStudentUser = (student: StudentRecord) => {
   return null;
 };
 
+const resolveBackCount = (student: StudentRecord): number => {
+  const n = Number(student.backCount);
+  if (Number.isFinite(n) && n >= 1) return Math.min(50, Math.floor(n));
+  return 1;
+};
+
 /**
  * College Examination Management → Back Students.
  * Lists students with academic status Back (PENDING_NOT_PASSED).
+ * Number of backs is set on student create/edit and can be updated here.
  */
 export const BackStudentsPanel = ({
   batches = [],
   years = [],
 }: BackStudentsPanelProps) => {
+  const queryClient = useQueryClient();
   const { user, availableSchools } = useAuth();
   const [batchFilter, setBatchFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("");
   const [search, setSearch] = useState("");
   const [printing, setPrinting] = useState(false);
+  /** studentId currently being edited for back count */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState(1);
 
   const printBranding = useMemo(() => getPrintInstitutionBranding(), []);
   const institutionName = getCollegeDisplayName(availableSchools, user);
@@ -87,6 +99,19 @@ export const BackStudentsPanel = ({
   const studentsQuery = useQuery({
     queryKey: ["students", "back-students"],
     queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+  });
+
+  const updateBackCount = useMutation({
+    mutationFn: ({ id, backCount }: { id: string; backCount: number }) =>
+      unwrap(api.patch(`/students/${id}/back-count`, { backCount })),
+    onSuccess: async () => {
+      toast.success("Number of backs updated");
+      setEditingId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["students"] }),
+      ]);
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const batchNameById = useMemo(() => {
@@ -165,11 +190,11 @@ export const BackStudentsPanel = ({
 
         if (yearFilter) {
           if (batchFilter) {
-            // Year option values are year document ids for a selected batch.
             if (studentYearId !== yearFilter) return false;
           } else {
-            // Year option values are display names when all batches are selected.
-            if (resolveYearName(student).toLowerCase() !== yearNeedle) return false;
+            if (resolveYearName(student).toLowerCase() !== yearNeedle) {
+              return false;
+            }
           }
         }
 
@@ -218,6 +243,24 @@ export const BackStudentsPanel = ({
     return lines;
   }, [batchFilter, yearFilter, search, batchNameById, yearNameById]);
 
+  const startEditBacks = (student: StudentRecord) => {
+    setEditingId(asText(student._id));
+    setEditValue(resolveBackCount(student));
+  };
+
+  const cancelEditBacks = () => {
+    setEditingId(null);
+  };
+
+  const saveEditBacks = (studentId: string) => {
+    const n = Math.floor(Number(editValue));
+    if (!Number.isFinite(n) || n < 1 || n > 50) {
+      toast.error("Number of backs must be between 1 and 50");
+      return;
+    }
+    updateBackCount.mutate({ id: studentId, backCount: n });
+  };
+
   const handlePrintList = async () => {
     if (backStudents.length === 0) {
       toast.error("No back students to print");
@@ -248,15 +291,18 @@ export const BackStudentsPanel = ({
         <div className="min-w-0 flex-1">
           <CardTitle>Back Students</CardTitle>
           <p className="mt-1 text-sm text-slate-500">
-            Students marked with academic status Back. Filter by batch, year, or
-            search by name, number, or email.
+            Students marked with academic status Back. Set number of backs when
+            creating/editing a student, or update it here when they clear papers
+            (e.g. 2 → 1).
           </p>
         </div>
         <Button
           type="button"
           variant="outline"
           className="w-full shrink-0 sm:w-auto"
-          disabled={backStudents.length === 0 || printing || studentsQuery.isLoading}
+          disabled={
+            backStudents.length === 0 || printing || studentsQuery.isLoading
+          }
           onClick={() => void handlePrintList()}
         >
           <Printer className="mr-2 h-4 w-4" />
@@ -311,7 +357,7 @@ export const BackStudentsPanel = ({
         ) : backStudents.length === 0 ? (
           <EmptyState
             title="No back students"
-            description="Students with academic status Back will appear here. You can set this status when creating or editing a student."
+            description="Students with academic status Back will appear here. Set status to Back and enter number of backs when creating or editing a student."
           />
         ) : (
           <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -320,6 +366,7 @@ export const BackStudentsPanel = ({
                 <tr>
                   <Th>Student Name</Th>
                   <Th>Academic Status</Th>
+                  <Th className="whitespace-nowrap">No. of backs</Th>
                   <Th>Number</Th>
                   <Th>Email</Th>
                   <Th>Batch / Year</Th>
@@ -334,11 +381,15 @@ export const BackStudentsPanel = ({
                     ] ?? "Back";
                   const userRow = resolveStudentUser(student);
                   const phone =
-                    asText(userRow?.phone) || asText(student.guardianPhone) || "";
+                    asText(userRow?.phone) ||
+                    asText(student.guardianPhone) ||
+                    "";
                   const email = asText(userRow?.email);
                   const batchLabel = resolveBatchName(student) || "—";
                   const yearLabel = resolveYearName(student) || "—";
                   const studentId = asText(student._id);
+                  const backs = resolveBackCount(student);
+                  const isEditing = editingId === studentId;
 
                   return (
                     <tr key={studentId || `back-student-${index}`}>
@@ -368,6 +419,71 @@ export const BackStudentsPanel = ({
                           {statusLabel}
                         </span>
                       </Td>
+                      <Td>
+                        {isEditing ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <NumberInput
+                              min={1}
+                              max={50}
+                              step={1}
+                              className="h-9 w-20"
+                              value={editValue}
+                              onValueChange={(value) =>
+                                setEditValue(
+                                  Math.max(
+                                    1,
+                                    Math.min(50, Math.floor(value ?? 1)),
+                                  ),
+                                )
+                              }
+                              disabled={updateBackCount.isPending}
+                              aria-label="Number of backs"
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-9 px-2"
+                              disabled={
+                                updateBackCount.isPending || !studentId
+                              }
+                              title="Save"
+                              onClick={() => saveEditBacks(studentId)}
+                            >
+                              <Check className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-9 px-2"
+                              disabled={updateBackCount.isPending}
+                              title="Cancel"
+                              onClick={cancelEditBacks}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex min-w-[1.75rem] items-center justify-center rounded-lg bg-amber-50 px-2 py-1 text-sm font-bold tabular-nums text-amber-950 ring-1 ring-amber-200">
+                              {backs}
+                            </span>
+                            {studentId ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2"
+                                title="Edit number of backs"
+                                onClick={() => startEditBacks(student)}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                Edit
+                              </Button>
+                            ) : null}
+                          </div>
+                        )}
+                      </Td>
                       <Td className="tabular-nums text-slate-700">
                         {phone || "—"}
                       </Td>
@@ -395,7 +511,7 @@ export const BackStudentsPanel = ({
         ) : null}
       </CardContent>
 
-      {/* Hidden print layout — institution header + filtered back students table */}
+      {/* Hidden print layout */}
       <div
         id={PRINT_AREA_ID}
         className="hidden print:block"
@@ -448,7 +564,7 @@ export const BackStudentsPanel = ({
                   color: "#1e293b",
                 }}
               >
-                Back Students List
+                Back Students list
               </p>
               {printScopeLines.length > 0 ? (
                 <p
@@ -461,17 +577,7 @@ export const BackStudentsPanel = ({
                 >
                   {printScopeLines.join("  ·  ")}
                 </p>
-              ) : (
-                <p
-                  style={{
-                    margin: "4px 0 0",
-                    fontSize: 11,
-                    color: "#64748b",
-                  }}
-                >
-                  All batches / All years
-                </p>
-              )}
+              ) : null}
               <p
                 style={{
                   margin: "2px 0 0",
@@ -495,79 +601,70 @@ export const BackStudentsPanel = ({
         >
           <thead>
             <tr>
-              <th style={{ ...printTh, textAlign: "center", width: 36 }}>S.N.</th>
-              <th style={printTh}>Student Name</th>
-              <th style={printTh}>Academic Status</th>
-              <th style={printTh}>Number</th>
-              <th style={printTh}>Email</th>
+              <th style={{ ...printTh, textAlign: "center", width: 36 }}>
+                S.N.
+              </th>
+              <th style={printTh}>Name</th>
+              <th style={printTh}>No. of backs</th>
+              <th style={printTh}>Admission / Reg.</th>
+              <th style={printTh}>Phone</th>
               <th style={printTh}>Batch</th>
               <th style={printTh}>Year</th>
-              <th style={printTh}>Admission / Reg.</th>
             </tr>
           </thead>
           <tbody>
             {backStudents.map((student, index) => {
-              const status = student.academicStatus ?? "PENDING_NOT_PASSED";
-              const statusLabel =
-                STUDENT_ACADEMIC_STATUS_LABELS[
-                  status as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
-                ] ?? "Back";
               const userRow = resolveStudentUser(student);
-              const phone =
-                asText(userRow?.phone) || asText(student.guardianPhone) || "—";
-              const email = asText(userRow?.email) || "—";
-              const batchLabel = resolveBatchName(student) || "—";
-              const yearLabel = resolveYearName(student) || "—";
-              const name = asText(userRow?.fullName) || "—";
-              const admReg = [
-                asText(student.registrationNumber),
-                asText(student.admissionNumber),
-              ]
-                .filter(Boolean)
-                .join(" / ");
-
               return (
                 <tr
-                  key={asText(student._id) || `print-${index}`}
+                  key={asText(student._id) || index}
                   style={{
                     background: index % 2 === 1 ? "#f8fafc" : "#ffffff",
                   }}
                 >
-                  <td style={{ ...printTd, textAlign: "center" }}>{index + 1}</td>
+                  <td style={{ ...printTd, textAlign: "center" }}>
+                    {index + 1}
+                  </td>
                   <td style={printTd}>
-                    <div style={{ fontWeight: 600 }}>{name}</div>
-                    {student.rollNumber != null ? (
+                    <div style={{ fontWeight: 600 }}>
+                      {asText(userRow?.fullName) || "—"}
+                    </div>
+                    {userRow?.email ? (
                       <div style={{ fontSize: 9, color: "#64748b" }}>
-                        Roll {student.rollNumber}
+                        {userRow.email}
                       </div>
                     ) : null}
                   </td>
-                  <td style={printTd}>{statusLabel}</td>
-                  <td style={printTd}>{phone}</td>
-                  <td style={printTd}>{email}</td>
-                  <td style={printTd}>{batchLabel}</td>
-                  <td style={printTd}>{yearLabel}</td>
-                  <td style={printTd}>{admReg || "—"}</td>
+                  <td
+                    style={{
+                      ...printTd,
+                      textAlign: "center",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {resolveBackCount(student)}
+                  </td>
+                  <td style={printTd}>
+                    {asText(student.admissionNumber) || "—"}
+                    {student.registrationNumber ? (
+                      <div style={{ fontSize: 9, color: "#64748b" }}>
+                        Reg: {asText(student.registrationNumber)}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td style={printTd}>
+                    {asText(userRow?.phone) ||
+                      asText(student.guardianPhone) ||
+                      "—"}
+                  </td>
+                  <td style={printTd}>{resolveBatchName(student) || "—"}</td>
+                  <td style={printTd}>{resolveYearName(student) || "—"}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-
-        <footer
-          style={{
-            marginTop: 12,
-            paddingTop: 8,
-            borderTop: "1px solid #cbd5e1",
-            fontSize: 9,
-            color: "#64748b",
-          }}
-        >
-          Printed from Examination Management · Back Students
-        </footer>
       </div>
     </Card>
   );
 };
-
-export default BackStudentsPanel;

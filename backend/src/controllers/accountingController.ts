@@ -145,10 +145,19 @@ const getOrCreateSettings = async (schoolId: ReturnType<typeof tenantObjectId>) 
   return settings;
 };
 
+/**
+ * Display name of the signed-in user recording the entry.
+ * Used for fee "Received by" / "Collected By" so Super Admin, College Admin,
+ * College Administrator, and Accountant names all appear the same way.
+ */
 const getActorName = async (req: Request): Promise<string> => {
   if (!req.user?.userId) return "System";
-  const user = await User.findById(req.user.userId).select("fullName").lean();
-  return user?.fullName ?? "Accountant";
+  const user = await User.findById(req.user.userId).select("fullName email").lean();
+  const name = user?.fullName?.trim();
+  if (name) return name;
+  const email = user?.email?.trim();
+  if (email) return email;
+  return "Staff";
 };
 
 export const getAccountingDashboard = asyncHandler(async (req: Request, res: Response) => {
@@ -974,8 +983,10 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
           paymentMethod,
           bankAccountId: payload.bankAccountId,
           transactionNumber: payload.transactionNumber,
-          // Always the person recording this payment (accountant / admin / college admin)
-          receivedByName: accountantName,
+          // Always the person recording this payment
+          // (Super Admin / College Admin / College Administrator / Accountant)
+          receivedByName:
+            payload.receivedByName?.trim() || accountantName,
           paidByName: payload.paidByName?.trim() || "",
           verificationCode,
           feeBreakdown: storedBreakdown,

@@ -1,10 +1,8 @@
 import {
   canManageInstitution,
   hasInstitutionAccess,
-  isCollegeViewer,
   isSystemAdministrator,
   normalizeUserRole,
-  READ_ONLY_ACCESS_MESSAGE,
   type UserRole
 } from "@phit-erp/shared";
 import { useAuth } from "features/auth/AuthProvider";
@@ -32,12 +30,14 @@ export const useIsSystemAdministrator = (): boolean => {
   return role ? isSystemAdministrator(role) : false;
 };
 
+/**
+ * @deprecated Global role-based read-only for College Administrators was removed.
+ * Per-module write is controlled by Module Access (`useModuleAccess` / `useCanWriteModule`).
+ * Kept so existing callers still compile; always reports not read-only.
+ */
 export const useReadOnlyAccess = () => {
-  const role = useNormalizedRole();
-  const isReadOnly = role ? isCollegeViewer(role) : false;
-
   return {
-    isReadOnly,
-    readOnlyMessage: READ_ONLY_ACCESS_MESSAGE
+    isReadOnly: false,
+    readOnlyMessage: ""
   };
 };
