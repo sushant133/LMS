@@ -53,9 +53,11 @@ export const TimetablePrintView = ({
         display: "flex",
         flexDirection: "column",
         gap: "1.5mm",
-        width: "max-content",
-        minWidth: "240mm",
-        maxWidth: "289mm",
+        // Width/height are assigned by the print + PDF page-fit pass
+        // (printUtils `fitTimetableSheet`); a fixed width here fights it.
+        width: "100%",
+        minWidth: 0,
+        maxWidth: "none",
         padding: "2mm 2.5mm 1.5mm",
         fontFamily:
           '"IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif',

@@ -91,7 +91,6 @@ export const WeeklyTimetableGrid = ({
   const density: TimetableDensity =
     densityProp ?? (compact ? densityForPeriodCount(periods.length) : "screen");
   const isPrint = density !== "screen";
-  const periodCount = periods.length;
 
   if (periods.length === 0) {
     return (
@@ -150,8 +149,10 @@ export const WeeklyTimetableGrid = ({
           style={
             isPrint
               ? {
+                  // No min-width: the print/PDF fit pass owns the sheet width,
+                  // and anything wider than it gets clipped off the page.
                   width: "100%",
-                  minWidth: periodCount >= 10 ? "260mm" : "230mm",
+                  minWidth: 0,
                   tableLayout: "fixed",
                 }
               : undefined

@@ -148,7 +148,9 @@ const SlotContent = ({
         className={cn(
           "font-semibold leading-tight",
           densitySubject[density],
-          isPrint && "line-clamp-2",
+          // Wrap rather than truncate — the print/PDF pass scales the whole
+          // sheet to fit, so a longer name costs height, not information.
+          isPrint && "break-words hyphens-auto",
         )}
         title={nameOf(slot.subjectId, type === "EXAM" ? "Exam" : "—")}
       >
@@ -159,7 +161,7 @@ const SlotContent = ({
           className={cn(
             "leading-tight text-slate-600",
             densityMeta[density],
-            isPrint && "line-clamp-1",
+            isPrint && "line-clamp-2 break-words",
           )}
           title={nameOf(slot.teacherId)}
         >
@@ -171,7 +173,7 @@ const SlotContent = ({
           className={cn(
             "leading-tight text-slate-500",
             densityMeta[density],
-            isPrint && "line-clamp-1",
+            isPrint && "line-clamp-2 break-words",
           )}
           title={lab ? `Lab: ${slot.room}` : slot.room}
         >

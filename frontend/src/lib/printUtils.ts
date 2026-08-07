@@ -52,11 +52,12 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   clone.style.bottom = "auto";
   clone.style.transform = "none";
   clone.style.opacity = "1";
-  // Timetable uses natural/max-content width so scale-to-fit measures true size
+  // Timetable width is decided later by the page-fit pass (`fitTimetableSheet`);
+  // leave it unconstrained here so nothing squeezes columns before measuring.
   if (isTimetableSheet) {
-    clone.style.width = "max-content";
-    clone.style.maxWidth = "289mm";
-    clone.style.minWidth = "240mm";
+    clone.style.setProperty("width", "auto", "important");
+    clone.style.setProperty("min-width", "0", "important");
+    clone.style.setProperty("max-width", "none", "important");
   } else {
     clone.style.width = "100%";
     clone.style.maxWidth = "100%";
@@ -117,6 +118,14 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
     });
   });
 
+  // The grid ships a print min-width; anything wider than the page-fit layout
+  // width would overflow the clip box and silently cut off the last periods.
+  clone.querySelectorAll<HTMLElement>(".tt-print-table").forEach((table) => {
+    table.style.setProperty("min-width", "0", "important");
+    table.style.setProperty("width", "100%", "important");
+    table.style.setProperty("table-layout", "fixed", "important");
+  });
+
   clone.querySelectorAll<HTMLElement>("tbody th.tt-print-day, tbody th").forEach((th) => {
     const isSat = /saturday/i.test(th.textContent ?? "");
     th.style.setProperty("background-color", isSat ? "#ffe4e6" : "#f1f5f9", "important");
@@ -129,10 +138,113 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
   return clone;
 };
 
+const MODERN_COLOR_TEST = /oklch|oklab|color-mix\(|\blab\(|\blch\(|\bcolor\(/i;
+const MODERN_COLOR_FN =
+  /\b(oklch|oklab|color-mix|lch|lab|color)\(/gi;
+
+const modernColorCache = new Map<string, string>();
+let colorProbeCtx: CanvasRenderingContext2D | null | undefined;
+
+const getColorProbe = (): CanvasRenderingContext2D | null => {
+  if (colorProbeCtx !== undefined) return colorProbeCtx;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    colorProbeCtx = canvas.getContext("2d", { willReadFrequently: true });
+  } catch {
+    colorProbeCtx = null;
+  }
+  return colorProbeCtx;
+};
+
 /**
- * Copy computed styles onto inline styles (browser resolves oklch → rgb).
- * Required for html2canvas under Tailwind v4, which emits oklch() CSS that
- * html2canvas cannot parse and throws on — breaking PDF/image export.
+ * Resolve one modern color function (oklch/lab/color-mix…) to rgb/rgba.
+ *
+ * Canvas parses every CSS color the browser knows, but `fillStyle` serializes
+ * oklch straight back as oklch — so paint one pixel and read it instead.
+ */
+const resolveModernColor = (value: string): string | null => {
+  const cached = modernColorCache.get(value);
+  if (cached !== undefined) return cached || null;
+
+  const ctx = getColorProbe();
+  if (!ctx) return null;
+
+  const paintCurrentFill = (): string => {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillRect(0, 0, 1, 1);
+    return Array.from(ctx.getImageData(0, 0, 1, 1).data).join(",");
+  };
+
+  let resolved: string | null = null;
+  try {
+    // Two sentinels: an unparseable value leaves fillStyle untouched, so
+    // differing results mean "rejected" rather than "really this colour".
+    ctx.fillStyle = "#000000";
+    ctx.fillStyle = value;
+    const fromBlack = paintCurrentFill();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = value;
+    const fromWhite = paintCurrentFill();
+
+    if (fromBlack === fromWhite) {
+      const [r = 0, g = 0, b = 0, a = 255] = fromBlack.split(",").map(Number);
+      resolved =
+        a >= 255
+          ? `rgb(${r}, ${g}, ${b})`
+          : `rgba(${r}, ${g}, ${b}, ${Number((a / 255).toFixed(3))})`;
+    }
+  } catch {
+    resolved = null;
+  }
+
+  modernColorCache.set(value, resolved ?? "");
+  return resolved;
+};
+
+/** Replace every modern color function inside a CSS value (incl. gradients). */
+const resolveModernColorsInValue = (value: string): string => {
+  if (!MODERN_COLOR_TEST.test(value)) return value;
+
+  let out = "";
+  let cursor = 0;
+  MODERN_COLOR_FN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = MODERN_COLOR_FN.exec(value)) !== null) {
+    const start = match.index;
+    if (start < cursor) continue;
+
+    // Walk to the matching close paren (values nest: linear-gradient(oklch(…)))
+    let depth = 0;
+    let end = -1;
+    for (let i = start + match[0].length - 1; i < value.length; i += 1) {
+      const char = value[i];
+      if (char === "(") depth += 1;
+      else if (char === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) break;
+
+    const fnText = value.slice(start, end + 1);
+    out += value.slice(cursor, start) + (resolveModernColor(fnText) ?? fnText);
+    cursor = end + 1;
+    MODERN_COLOR_FN.lastIndex = cursor;
+  }
+
+  return out + value.slice(cursor);
+};
+
+/**
+ * Copy computed styles onto inline styles, converting Tailwind v4 oklch()
+ * colors to rgb. Required for html2canvas, which cannot parse modern color
+ * functions and throws on them — breaking PDF/image export.
  */
 const inlineComputedStylesForCanvas = (root: HTMLElement): void => {
   const props = [
@@ -197,10 +309,11 @@ const inlineComputedStylesForCanvas = (root: HTMLElement): void => {
     const cs = window.getComputedStyle(el);
     for (const prop of props) {
       try {
-        const value = cs.getPropertyValue(prop);
-        if (!value) continue;
-        // Skip unresolved modern color functions if any remain
-        if (/oklch|oklab|color-mix|lab\(|lch\(/i.test(value)) continue;
+        const raw = cs.getPropertyValue(prop);
+        if (!raw) continue;
+        const value = resolveModernColorsInValue(raw);
+        // Anything still unresolved would crash html2canvas — leave it out
+        if (MODERN_COLOR_TEST.test(value)) continue;
         el.style.setProperty(prop, value);
       } catch {
         /* ignore invalid props on this node */
@@ -219,9 +332,13 @@ const stripModernColorStylesheets = (doc: Document): void => {
       styleEl.remove();
     }
   });
-  // External Tailwind bundles almost always contain oklch in v4
+  // External Tailwind bundles almost always contain oklch in v4. Webfont
+  // sheets carry only @font-face, and dropping them breaks Devanagari output.
   doc.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
-    link.remove();
+    const href = link.getAttribute("href") ?? "";
+    if (!/fonts\.googleapis\.com|fonts\.gstatic\.com|fonts?\./i.test(href)) {
+      link.remove();
+    }
   });
 };
 
@@ -259,6 +376,43 @@ const waitForImages = async (root: HTMLElement, timeoutMs = 5_000): Promise<void
   ]);
 };
 
+/**
+ * Wait until the print document's stylesheets and webfonts are usable.
+ * Measuring before Tailwind/Devanagari land yields a layout that is nothing
+ * like the printed one, which is what makes the fitted grid come out clipped.
+ */
+const waitForStylesAndFonts = async (
+  doc: Document,
+  timeoutMs = 4_000,
+): Promise<void> => {
+  const links = Array.from(
+    doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'),
+  );
+
+  const sheetsReady = Promise.all(
+    links.map(
+      (link) =>
+        new Promise<void>((resolve) => {
+          if (link.sheet) {
+            resolve();
+            return;
+          }
+          link.addEventListener("load", () => resolve(), { once: true });
+          link.addEventListener("error", () => resolve(), { once: true });
+        }),
+    ),
+  );
+
+  const fontsReady = doc.fonts?.ready ?? Promise.resolve();
+
+  await Promise.race([
+    Promise.all([sheetsReady, fontsReady]),
+    new Promise<void>((resolve) => {
+      window.setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+};
+
 const collectDocumentStyles = (): string => {
   const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
     .map((node) => {
@@ -287,9 +441,174 @@ const isTimetableElement = (element: HTMLElement | null | undefined): boolean =>
 /** mm → CSS px at 96dpi */
 const MM_TO_PX = 96 / 25.4;
 
+/** Must match the @page margin emitted for timetable sheets. */
+const TIMETABLE_PAGE_MARGIN_MM = 4;
+
+/** Sub-pixel rounding guard so a full-width fit never spills onto page 2. */
+const FIT_SAFETY = 0.997;
+
+type PageBox = {
+  pageWidthMm: number;
+  pageHeightMm: number;
+  usableWidthMm: number;
+  usableHeightMm: number;
+  maxWidth: number;
+  maxHeight: number;
+};
+
+const pageBoxFor = (pageFormat: PageFormat): PageBox => {
+  const isLandscape = pageFormat === "a4-landscape";
+  const pageWidthMm = isLandscape ? 297 : 210;
+  const pageHeightMm = isLandscape ? 210 : 297;
+  const usableWidthMm = pageWidthMm - TIMETABLE_PAGE_MARGIN_MM * 2;
+  const usableHeightMm = pageHeightMm - TIMETABLE_PAGE_MARGIN_MM * 2;
+  return {
+    pageWidthMm,
+    pageHeightMm,
+    usableWidthMm,
+    usableHeightMm,
+    maxWidth: usableWidthMm * MM_TO_PX,
+    maxHeight: usableHeightMm * MM_TO_PX,
+  };
+};
+
+const setImportant = (
+  element: HTMLElement,
+  styles: Record<string, string>,
+): void => {
+  for (const [prop, value] of Object.entries(styles)) {
+    element.style.setProperty(prop, value, "important");
+  }
+};
+
+/**
+ * Make the grid own the sheet's leftover vertical space (or release it again
+ * while measuring). Without this a 7-row week prints as a small band at the
+ * top of an otherwise blank page.
+ */
+const setTimetableStretch = (sheet: HTMLElement, stretch: boolean): void => {
+  const grid = sheet.querySelector<HTMLElement>(".tt-print-grid");
+  const gridHost = grid?.parentElement ?? null;
+  const table = sheet.querySelector<HTMLElement>(".tt-print-table");
+  const tableHost = table?.parentElement ?? null;
+
+  const boxHeight = stretch ? "100%" : "auto";
+
+  if (gridHost && gridHost !== sheet) {
+    setImportant(gridHost, {
+      flex: "1 1 auto",
+      "min-height": "0",
+      display: "block",
+      height: "auto",
+    });
+  }
+  if (grid) setImportant(grid, { height: boxHeight, display: "block" });
+  if (tableHost) setImportant(tableHost, { height: boxHeight });
+  if (table) setImportant(table, { height: boxHeight, width: "100%" });
+
+  // Cell bodies carry the session background, so they must fill their row
+  // (a row is as tall as its tallest cell) — otherwise the colour block stops
+  // short and the rest of the cell prints white. Percentage heights against an
+  // auto-height cell behave as `auto`, so this is safe while measuring too.
+  sheet
+    .querySelectorAll<HTMLElement>(".tt-print-table td > *")
+    .forEach((cellBody) => {
+      setImportant(cellBody, { height: "100%", "box-sizing": "border-box" });
+    });
+};
+
+type TimetableFit = {
+  layoutWidth: number;
+  layoutHeight: number;
+  scale: number;
+};
+
+/** Lay the sheet out at `width` (px) and report its natural height. */
+const measureSheetAtWidth = (sheet: HTMLElement, width: number): number => {
+  setImportant(sheet, {
+    width: `${Math.round(width)}px`,
+    "min-width": "0",
+    "max-width": "none",
+    height: "auto",
+    "max-height": "none",
+  });
+  void sheet.offsetHeight;
+  return Math.max(sheet.scrollHeight, sheet.offsetHeight, 1);
+};
+
+/**
+ * Size a timetable sheet so the whole grid lands on exactly one page.
+ *
+ * The sheet starts at full page width — never at the viewport width, which is
+ * what used to squeeze columns and clip the last periods. If it is still too
+ * tall, we re-lay it out *wider* (rows get shorter) and scale the result down,
+ * which fills far more of the page than shrinking a page-width layout. The
+ * element is left with an explicit px box; the caller applies the transform.
+ */
+const fitTimetableSheet = (
+  sheet: HTMLElement,
+  pageFormat: PageFormat,
+): TimetableFit => {
+  const { maxWidth, maxHeight } = pageBoxFor(pageFormat);
+
+  // Reset whatever an earlier pass (or the source markup) left behind so every
+  // measurement happens in plain, unconstrained block flow.
+  setImportant(sheet, {
+    position: "static",
+    float: "none",
+    margin: "0",
+    transform: "none",
+    "transform-origin": "top left",
+    display: "flex",
+    "flex-direction": "column",
+    "box-sizing": "border-box",
+    overflow: "visible",
+  });
+  setTimetableStretch(sheet, false);
+
+  let layoutWidth = maxWidth;
+  let layoutHeight = measureSheetAtWidth(sheet, layoutWidth);
+  let scale = Math.min(1, maxHeight / layoutHeight);
+
+  for (let pass = 0; pass < 3 && scale < 0.995; pass += 1) {
+    const candidateWidth = Math.min(layoutWidth / scale, maxWidth * 4);
+    if (candidateWidth <= layoutWidth * 1.01) break;
+
+    const candidateHeight = measureSheetAtWidth(sheet, candidateWidth);
+    const candidateScale = Math.min(
+      maxWidth / candidateWidth,
+      maxHeight / candidateHeight,
+    );
+    // Keep whichever layout ends up visually widest on the page
+    if (candidateScale * candidateWidth <= scale * layoutWidth * 1.002) {
+      layoutHeight = measureSheetAtWidth(sheet, layoutWidth);
+      break;
+    }
+    layoutWidth = candidateWidth;
+    layoutHeight = candidateHeight;
+    scale = candidateScale;
+  }
+
+  // Shorter than the page → stretch the grid down so the sheet fills it.
+  if (layoutHeight < maxHeight) {
+    setTimetableStretch(sheet, true);
+    layoutHeight = maxHeight;
+  }
+
+  const safeScale = Math.max(0.2, Math.min(scale, 1) * FIT_SAFETY);
+
+  // Freeze the measured box so applying the transform cannot reflow anything.
+  setImportant(sheet, {
+    width: `${Math.round(layoutWidth)}px`,
+    height: `${Math.round(layoutHeight)}px`,
+  });
+
+  return { layoutWidth, layoutHeight, scale: safeScale };
+};
+
 /**
  * Scale a timetable sheet to fill (and never exceed) one page, centered.
- * Uses a fixed layout box so the browser does not invent a second page.
+ * Uses a fixed clip box so the browser cannot invent a second page.
  */
 const fitTimetableSheetToPage = (
   doc: Document,
@@ -300,45 +619,21 @@ const fitTimetableSheetToPage = (
   );
   if (!sheet) return;
 
-  const isLandscape = pageFormat === "a4-landscape";
-  // Match @page size / margins (A4 landscape 297×210, margin 4mm)
-  const pageWmm = isLandscape ? 297 : 210;
-  const pageHmm = isLandscape ? 210 : 297;
-  const marginMm = 4;
-  const usableWmm = pageWmm - marginMm * 2;
-  const usableHmm = pageHmm - marginMm * 2;
-  const maxW = usableWmm * MM_TO_PX;
-  const maxH = usableHmm * MM_TO_PX;
-
+  const page = pageBoxFor(pageFormat);
   const body = doc.body;
-  body.style.margin = "0";
-  body.style.padding = "0";
-  body.style.width = `${pageWmm}mm`;
-  body.style.height = `${pageHmm}mm`;
-  body.style.overflow = "hidden";
-  body.style.background = "#ffffff";
-  body.style.display = "flex";
-  body.style.alignItems = "center";
-  body.style.justifyContent = "center";
 
-  // Natural size without transform
-  sheet.style.transform = "none";
-  sheet.style.transformOrigin = "top left";
-  sheet.style.margin = "0";
-  sheet.style.maxWidth = "none";
-  sheet.style.width = "auto";
-  sheet.style.boxSizing = "border-box";
-  void sheet.offsetHeight;
+  // A centered flex body shrinks the sheet before it can be measured, so
+  // measure in plain block flow and switch to centering afterwards.
+  setImportant(body, {
+    margin: "0",
+    padding: "0",
+    background: "#ffffff",
+    display: "block",
+    width: `${page.usableWidthMm}mm`,
+    height: "auto",
+    overflow: "visible",
+  });
 
-  const naturalW = Math.max(sheet.scrollWidth, sheet.offsetWidth, 1);
-  const naturalH = Math.max(sheet.scrollHeight, sheet.offsetHeight, 1);
-
-  // Fit exactly to page — scale up OR down so content uses the page without overflow
-  const scale = Math.min(maxW / naturalW, maxH / naturalH);
-  // Keep a tiny safety margin so subpixel rounding never triggers page 2
-  const safeScale = Math.max(0.35, Math.min(scale * 0.995, 1.35));
-
-  // Outer clip box = scaled visual size (this is what the print engine lays out)
   let stage = sheet.parentElement;
   if (!stage || !stage.classList.contains("tt-print-stage")) {
     stage = doc.createElement("div");
@@ -346,27 +641,65 @@ const fitTimetableSheetToPage = (
     sheet.parentNode?.insertBefore(stage, sheet);
     stage.appendChild(sheet);
   }
+  // Neutralize the clip box while measuring — a stage still holding the
+  // previous pass's fixed size is what made re-fits measure a wrong width.
+  setImportant(stage, {
+    position: "static",
+    display: "block",
+    margin: "0",
+    padding: "0",
+    width: "auto",
+    height: "auto",
+    "max-width": "none",
+    overflow: "visible",
+  });
 
-  stage.style.width = `${naturalW * safeScale}px`;
-  stage.style.height = `${naturalH * safeScale}px`;
-  stage.style.overflow = "hidden";
-  stage.style.position = "relative";
-  stage.style.flexShrink = "0";
-  stage.style.pageBreakInside = "avoid";
-  stage.style.breakInside = "avoid";
+  const fit = fitTimetableSheet(sheet, pageFormat);
 
-  sheet.style.width = `${naturalW}px`;
-  sheet.style.transform = `scale(${safeScale})`;
-  sheet.style.transformOrigin = "top left";
-  sheet.style.position = "absolute";
-  sheet.style.left = "0";
-  sheet.style.top = "0";
+  const stageWidth = Math.floor(fit.layoutWidth * fit.scale);
+  const stageHeight = Math.floor(fit.layoutHeight * fit.scale);
+
+  setImportant(stage, {
+    position: "relative",
+    display: "block",
+    width: `${stageWidth}px`,
+    height: `${stageHeight}px`,
+    overflow: "hidden",
+    "flex-shrink": "0",
+    "page-break-inside": "avoid",
+    "break-inside": "avoid",
+    "page-break-after": "avoid",
+  });
+
+  setImportant(sheet, {
+    position: "absolute",
+    left: "0",
+    top: "0",
+    transform: `scale(${fit.scale})`,
+    "transform-origin": "top left",
+  });
+
+  // Final page box: exactly the printable area, so nothing can overflow it.
+  setImportant(body, {
+    width: `${page.usableWidthMm}mm`,
+    height: `${page.usableHeightMm}mm`,
+    overflow: "hidden",
+    display: "flex",
+    "align-items": "center",
+    "justify-content": "center",
+  });
 };
 
 const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): string => {
   const clone = clonePrintableElement(element);
   const isLandscape = pageFormat === "a4-landscape";
   const isTimetable = isTimetableElement(clone);
+  const page = pageBoxFor(pageFormat);
+  // Only the timetable is a strict one-page fit; other sheets keep the
+  // existing full-page box so their pagination is untouched.
+  const printBox = isTimetable
+    ? page
+    : { usableWidthMm: page.pageWidthMm, usableHeightMm: page.pageHeightMm };
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -402,8 +735,9 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       .timetable-print-sheet[data-print-fit="timetable"] {
         box-sizing: border-box !important;
-        width: auto !important;
+        /* width/height are owned by the page-fit pass (inline !important) */
         max-width: none !important;
+        min-width: 0 !important;
         margin: 0 !important;
         padding: 2mm 2.5mm 1.5mm !important;
         overflow: visible !important;
@@ -429,6 +763,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .tt-print-table {
         border-collapse: collapse !important;
         width: 100% !important;
+        min-width: 0 !important;
         table-layout: fixed !important;
         page-break-inside: avoid !important;
         break-inside: avoid !important;
@@ -472,10 +807,18 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         border: 1px solid #000000 !important;
         padding: 0 !important;
         vertical-align: top !important;
-        overflow: hidden !important;
+        /* overflow:hidden used to slice subject/teacher names in half — let the
+           row grow instead; the page-fit pass scales the sheet to fit. */
+        overflow: visible !important;
+      }
+      .tt-print-table td,
+      .tt-print-table th {
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
       }
       .tt-print-table td > * {
         min-height: 0 !important;
+        height: 100% !important;
       }
       /* Density-aware print type scale (set via data-tt-density on sheet/grid) */
       .timetable-print-sheet[data-tt-density="compact"] .tt-print-table,
@@ -495,12 +838,14 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       @page {
         size: A4 ${isLandscape ? "landscape" : "portrait"};
-        margin: ${isTimetable ? "4mm" : isLandscape ? "5mm 4mm" : "5mm 4mm"};
+        margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "5mm 4mm"};
       }
       @media print {
         html, body {
-          width: ${isLandscape ? "297mm" : "210mm"} !important;
-          height: ${isLandscape ? "210mm" : "297mm"} !important;
+          /* Printable area, i.e. page size minus the @page margin. Using the
+             full page size here overflows it and spawns a blank second page. */
+          width: ${printBox.usableWidthMm}mm !important;
+          height: ${printBox.usableHeightMm}mm !important;
           overflow: hidden !important;
           margin: 0 !important;
           padding: 0 !important;
@@ -772,20 +1117,24 @@ const printViaIframe = (element: HTMLElement, pageFormat: PageFormat): Promise<v
     doc.write(buildPrintableHtml(element, pageFormat));
     doc.close();
 
-    void waitForImages(doc.body).then(async () => {
+    void (async () => {
+      // Measuring before the app CSS + Devanagari webfont land produces a
+      // layout that does not match the printed one → clipped / half-empty page.
+      await waitForStylesAndFonts(doc);
+      await waitForImages(doc.body);
       await yieldToUi();
       if (isTimetable) {
         try {
           fitTimetableSheetToPage(doc, pageFormat);
           await yieldToUi();
-          // Second pass after fonts/images settle — tighter fit
+          // Second pass once layout has fully settled (fit is idempotent)
           fitTimetableSheetToPage(doc, pageFormat);
         } catch {
           // non-fatal — print with default layout
         }
       }
       startPrint();
-    });
+    })();
   });
 
 const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
@@ -793,15 +1142,10 @@ const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
   const clone = clonePrintableElement(element);
   const isTimetable = isTimetableElement(clone);
 
-  // Timetable: natural content width for accurate scale-to-page capture
   if (isTimetable) {
-    clone.style.maxWidth = "none";
-    clone.style.width = "auto";
     clone.style.margin = "0";
     clone.style.padding = "2mm 2.5mm 1.5mm";
     clone.style.overflow = "visible";
-    clone.style.height = "auto";
-    clone.style.maxHeight = "none";
   } else {
     clone.style.maxWidth = isLandscape ? "297mm" : "210mm";
     clone.style.width = isLandscape ? "297mm" : "210mm";
@@ -818,8 +1162,6 @@ const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
   wrapper.style.position = "fixed";
   wrapper.style.left = "0";
   wrapper.style.top = "0";
-  wrapper.style.width = isLandscape ? "297mm" : "210mm";
-  wrapper.style.maxWidth = "100vw";
   wrapper.style.background = "#ffffff";
   wrapper.style.opacity = "0";
   wrapper.style.pointerEvents = "none";
@@ -829,7 +1171,32 @@ const mountPrintableClone = (element: HTMLElement, pageFormat: PageFormat) => {
   wrapper.appendChild(clone);
   document.body.appendChild(wrapper);
 
+  if (isTimetable) {
+    // The sheet gets its own layout context sized to the page — clamping it to
+    // the viewport (the old `max-width: 100vw`) squeezed the period columns and
+    // clipped cell text out of the capture on anything but a wide screen.
+    wrapper.style.width = "max-content";
+    wrapper.style.maxWidth = "none";
+  } else {
+    wrapper.style.width = isLandscape ? "297mm" : "210mm";
+    wrapper.style.maxWidth = "100vw";
+  }
+
   return { clone, wrapper, isLandscape, isTimetable };
+};
+
+/** Re-run the page fit for an on-DOM timetable clone (PDF / PNG capture). */
+const layoutTimetableCloneForCapture = (
+  clone: HTMLElement,
+  wrapper: HTMLElement,
+  pageFormat: PageFormat,
+): TimetableFit => {
+  const fit = fitTimetableSheet(clone, pageFormat);
+  // Capture at layout size — jsPDF scales the bitmap onto the page, which is
+  // sharper than rasterizing an already CSS-transformed element.
+  wrapper.style.width = `${Math.ceil(fit.layoutWidth)}px`;
+  wrapper.style.height = `${Math.ceil(fit.layoutHeight)}px`;
+  return fit;
 };
 
 type PdfExportOptions = {
@@ -904,6 +1271,15 @@ const createPdfBlobFromElement = async (
   }
 
   try {
+    if (isTimetable) {
+      // Fit after fonts/logo settle so the measured box matches what renders
+      await waitForImages(clone);
+      await yieldToUi();
+      layoutTimetableCloneForCapture(clone, wrapper, pageFormat);
+      await yieldToUi();
+      layoutTimetableCloneForCapture(clone, wrapper, pageFormat);
+    }
+
     // Prefer direct canvas + jsPDF — more reliable than html2pdf with Tailwind v4
     const canvas = await rasterizeCloneToCanvas(clone, fitOnePage ? 2.4 : 2);
     if (!canvas.width || !canvas.height) {
@@ -1018,8 +1394,18 @@ export const downloadImageFromElementById = async (
   }
 
   await yieldToUi();
-  const { clone, wrapper } = mountPrintableClone(element, "a4-landscape");
+  const { clone, wrapper, isTimetable } = mountPrintableClone(
+    element,
+    "a4-landscape",
+  );
   try {
+    if (isTimetable) {
+      await waitForImages(clone);
+      await yieldToUi();
+      layoutTimetableCloneForCapture(clone, wrapper, "a4-landscape");
+      await yieldToUi();
+      layoutTimetableCloneForCapture(clone, wrapper, "a4-landscape");
+    }
     const canvas = await rasterizeCloneToCanvas(clone, 2);
     if (!canvas.width || !canvas.height) {
       throw new Error("Image export failed (empty capture)");
