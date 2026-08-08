@@ -525,10 +525,16 @@ export const AppLayout = () => {
   /**
    * While the access probe is loading, keep the menu item visible for staff so it
    * does not flash away; after load, hide if neither assignment nor module grant.
+   * Module Access "field-duty" (Field Management) is also checked once user map loads.
    */
   const staffMaySeeFieldManagement =
     hasFieldCoordinatorAccess ||
-    (isStaffUser && fieldCoordAccessQuery.isLoading);
+    (isStaffUser && fieldCoordAccessQuery.isLoading) ||
+    (isStaffUser &&
+      canAccessModule(
+        (user?.moduleAccess ?? {}) as ModuleAccessMap,
+        "field-duty",
+      ));
   /** School-level parent portal section switches (Admin → Parent Management). */
   const parentPortalAccess = useParentPortalAccess();
 

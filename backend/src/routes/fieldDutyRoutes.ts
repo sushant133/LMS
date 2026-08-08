@@ -49,7 +49,12 @@ const FIELD_WRITE_ATTENDANCE = [
   "COLLEGE_STAFF"
 ] as const;
 
-const FIELD_ADMIN = ["SUPER_ADMIN", "COLLEGE_ADMIN"] as const;
+/**
+ * Full Field Management mutations (postings, unlock, assign).
+ * COLLEGE_STAFF allowed at route level; controller + module guard require
+ * Field Management → Manage (WRITE) or institution admin.
+ */
+const FIELD_ADMIN = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_STAFF"] as const;
 
 // Student / parent portals
 router.get("/portal/me", authorize("STUDENT"), getMyFieldDutyAttendance);
@@ -68,7 +73,11 @@ router.get(
 
 // Dashboard & monitoring
 router.get("/dashboard", authorize(...FIELD_READ), getFieldDutyDashboard);
-router.get("/monitoring", authorize(...FIELD_ADMIN, "COLLEGE_VIEWER"), getFieldDutyMonitoring);
+router.get(
+  "/monitoring",
+  authorize(...FIELD_READ),
+  getFieldDutyMonitoring
+);
 router.get("/today", authorize(...FIELD_WRITE_ATTENDANCE, "COLLEGE_VIEWER"), getTodayFieldDutyContext);
 router.get("/reports", authorize(...FIELD_READ), getFieldDutyReports);
 

@@ -337,8 +337,9 @@ export const AttendanceRegisterManager = ({
               Attendance Register
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              Traditional monthly register — read-only view of existing attendance
-              (does not change marking).
+              Traditional monthly register — read-only view of classroom daily
+              attendance and field/hospital duty marks (date-wise). Does not change
+              marking.
             </p>
           </div>
           {exportActions}
@@ -346,7 +347,7 @@ export const AttendanceRegisterManager = ({
       ) : (
         <PageHeader
           title="Attendance Register"
-          description="Traditional monthly attendance register. Read-only view of existing student, teacher, and staff attendance — does not change marking."
+          description="Traditional monthly attendance register. Read-only view of student daily + field/hospital duty, teacher, and staff attendance — does not change marking."
           action={exportActions}
         />
       )}
@@ -569,7 +570,7 @@ export const AttendanceRegisterManager = ({
       ) : !data || data.rows.length === 0 ? (
         <EmptyState
           title="No rows for this filter"
-          description="Adjust batch/year or month. Register only shows people with existing profiles; attendance codes come from existing daily sheets."
+          description="Adjust batch/year or month. Register shows people with profiles; codes come from daily class sheets and Field Management attendance (roster + marks)."
         />
       ) : (
         <>

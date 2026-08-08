@@ -24,6 +24,7 @@ import { Batch } from "../models/Batch.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { DailyAttendance } from "../models/DailyAttendance.js";
 import { EmployeeAttendance } from "../models/EmployeeAttendance.js";
+import { FieldDutyAttendance } from "../models/FieldDutyAttendance.js";
 import { SchoolClass } from "../models/SchoolClass.js";
 import { Section } from "../models/Section.js";
 import { Student } from "../models/Student.js";
@@ -199,6 +200,7 @@ const resolveAccess = async (req: Request): Promise<AccessCtx> => {
     adminLike ||
     canAccessModule(moduleAccess, "daily-attendance") ||
     canAccessModule(moduleAccess, "attendance") ||
+    canAccessModule(moduleAccess, "field-duty") ||
     role === "TEACHER" ||
     role === "STUDENT";
 
@@ -417,6 +419,76 @@ export const getStudentAttendanceRegister = asyncHandler(
           status: entry.status,
           code: toAttendanceRegisterCode(entry.status),
           remarks: entry.remarks || undefined,
+          source: "DAILY_ATTENDANCE",
+          attendanceDocId: sheet._id.toString()
+        });
+      }
+    }
+
+    /**
+     * Merge Field Management attendance (roster + date-wise marks).
+     * Classroom daily sheet wins when already present; otherwise field marks fill the cell.
+     * Present / emergency on field → FIELD_DUTY (F) so register distinguishes field duty days.
+     */
+    const fieldFilter: Record<string, unknown> = {
+      schoolId,
+      dateBs: { $gte: `${monthBs}-01`, $lt: `${monthBs}-32` },
+      status: { $in: ["SUBMITTED", "LOCKED"] },
+      isDeleted: { $ne: true }
+    };
+    if (college) {
+      if (batchId) fieldFilter.batchId = batchId;
+      if (yearId) fieldFilter.yearId = yearId;
+    }
+    const fieldSheets = await FieldDutyAttendance.find(fieldFilter)
+      .select("dateBs shift siteName hospitalName entries status")
+      .lean();
+
+    const mapFieldStatus = (raw: string): string => {
+      const st = (raw || "").toUpperCase();
+      if (st === "PRESENT" || st === "EMERGENCY_DUTY") return "FIELD_DUTY";
+      if (st === "LATE") return "LATE";
+      if (st === "LEAVE") return "LEAVE";
+      if (st === "ABSENT") return "ABSENT";
+      return st || "FIELD_DUTY";
+    };
+
+    // Prefer present-like field marks when multiple shifts same day
+    const fieldRank = (status: string): number => {
+      const s = status.toUpperCase();
+      if (s === "FIELD_DUTY" || s === "PRESENT" || s === "EMERGENCY_DUTY") return 4;
+      if (s === "LATE") return 3;
+      if (s === "LEAVE") return 2;
+      if (s === "ABSENT") return 1;
+      return 0;
+    };
+
+    for (const sheet of fieldSheets) {
+      const dateBs = sheet.dateBs;
+      const site =
+        (sheet.siteName || sheet.hospitalName || "Field").toString().trim() || "Field";
+      const shift = (sheet.shift || "DAY").toString();
+      for (const entry of sheet.entries ?? []) {
+        const sid = entry.studentId?.toString();
+        if (!sid) continue;
+        if (!byPerson.has(sid)) byPerson.set(sid, new Map());
+        const dayMap = byPerson.get(sid)!;
+        const existing = dayMap.get(dateBs);
+        // Never overwrite classroom daily attendance
+        if (existing && existing.source === "DAILY_ATTENDANCE" && existing.status) {
+          continue;
+        }
+        const mapped = mapFieldStatus(entry.status);
+        if (existing?.source === "FIELD_DUTY" && existing.status) {
+          if (fieldRank(mapped) <= fieldRank(existing.status)) continue;
+        }
+        dayMap.set(dateBs, {
+          dateBs,
+          status: mapped,
+          code: toAttendanceRegisterCode(mapped),
+          remarks: entry.remarks || undefined,
+          source: "FIELD_DUTY",
+          locationLabel: `${site} · ${shift.replace(/_/g, " ")}`,
           attendanceDocId: sheet._id.toString()
         });
       }
@@ -484,7 +556,12 @@ export const getStudentAttendanceRegister = asyncHandler(
         "LEAVE",
         "LATE",
         "MEDICAL_LEAVE",
-        "HOLIDAY"
+        "HOLIDAY",
+        "FIELD_DUTY",
+        "EMERGENCY_DUTY",
+        "NIGHT_DUTY",
+        "EVENING_DUTY",
+        "MORNING_DUTY"
       ]),
       filtersEcho: {
         monthBs,
@@ -737,6 +814,12 @@ export const getAttendanceRegisterCellDetail = asyncHandler(
     }
 
     if (tab === "STUDENT") {
+      const student = await Student.findById(personId)
+        .populate("user", "fullName")
+        .lean();
+      const personName =
+        (student?.user as { fullName?: string } | null)?.fullName ?? "Student";
+
       const sheet = await DailyAttendance.findOne({
         schoolId,
         dateBs,
@@ -747,19 +830,66 @@ export const getAttendanceRegisterCellDetail = asyncHandler(
       const entry = sheet?.entries?.find(
         (e) => e.studentId?.toString() === personId
       );
-      const student = await Student.findById(personId)
-        .populate("user", "fullName")
+      if (entry) {
+        return sendSuccess(res, "Cell detail", {
+          personId,
+          personName,
+          dateBs,
+          status: entry.status ?? null,
+          code: toAttendanceRegisterCode(entry.status),
+          remarks: entry.remarks,
+          markedByName: (sheet?.createdBy as { fullName?: string } | null)
+            ?.fullName,
+          source: "DAILY_ATTENDANCE",
+          batchName: undefined,
+          yearName: undefined
+        });
+      }
+
+      // Fall back to Field Management attendance (roster / date-wise marks)
+      const fieldSheet = await FieldDutyAttendance.findOne({
+        schoolId,
+        dateBs,
+        isDeleted: { $ne: true },
+        status: { $in: ["SUBMITTED", "LOCKED"] },
+        "entries.studentId": personId
+      })
+        .populate("createdBy", "fullName")
+        .sort({ updatedAt: -1 })
         .lean();
+      const fieldEntry = fieldSheet?.entries?.find(
+        (e) => e.studentId?.toString() === personId
+      );
+      if (fieldEntry) {
+        const raw = (fieldEntry.status || "").toUpperCase();
+        const mapped =
+          raw === "PRESENT" || raw === "EMERGENCY_DUTY" ? "FIELD_DUTY" : raw;
+        const site = (fieldSheet?.siteName || fieldSheet?.hospitalName || "Field")
+          .toString()
+          .trim();
+        const shift = (fieldSheet?.shift || "DAY").toString().replace(/_/g, " ");
+        return sendSuccess(res, "Cell detail", {
+          personId,
+          personName,
+          dateBs,
+          status: mapped || null,
+          code: toAttendanceRegisterCode(mapped),
+          remarks: fieldEntry.remarks,
+          markedByName: (fieldSheet?.createdBy as { fullName?: string } | null)
+            ?.fullName,
+          source: "FIELD_DUTY",
+          locationLabel: `${site} · ${shift}`,
+          batchName: undefined,
+          yearName: undefined
+        });
+      }
+
       return sendSuccess(res, "Cell detail", {
         personId,
-        personName:
-          (student?.user as { fullName?: string } | null)?.fullName ?? "Student",
+        personName,
         dateBs,
-        status: entry?.status ?? null,
-        code: toAttendanceRegisterCode(entry?.status),
-        remarks: entry?.remarks,
-        markedByName: (sheet?.createdBy as { fullName?: string } | null)
-          ?.fullName,
+        status: null,
+        code: null,
         batchName: undefined,
         yearName: undefined
       });

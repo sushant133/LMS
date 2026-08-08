@@ -8,7 +8,13 @@ import type {
   FieldDutyStudentStatus,
   FieldPostingSection
 } from "@phit-erp/shared";
-import { hasInstitutionAccess, postingTypeToSection } from "@phit-erp/shared";
+import {
+  canAccessModule,
+  canManageInstitution,
+  canWriteModule,
+  hasInstitutionAccess,
+  postingTypeToSection
+} from "@phit-erp/shared";
 import { Batch } from "../models/Batch.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { FieldDutyAttendance } from "../models/FieldDutyAttendance.js";
@@ -17,9 +23,47 @@ import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
 import { Year } from "../models/Year.js";
 import { ApiError } from "./apiError.js";
+import { getUserModuleAccessMap } from "./moduleAccessService.js";
 import { compareBsDates, ensureValidBsDate, getTodayBs } from "./nepaliDate.js";
 import { sendNotification } from "./notificationService.js";
 import { tenantObjectId } from "./tenant.js";
+
+/**
+ * True when admin granted Field Management (field-duty) in Module Access.
+ * Used so staff with the department grant can open all postings/registers,
+ * not only those where they are listed as coordinator.
+ */
+export const hasFieldDutyModuleAccess = async (req: Request): Promise<boolean> => {
+  if (!req.user?.userId) return false;
+  if (hasInstitutionAccess(req.user.role ?? "")) return true;
+  const map = await getUserModuleAccessMap(req.user.userId);
+  return canAccessModule(map, "field-duty");
+};
+
+/**
+ * Full Field Management (admin-equivalent for this module):
+ * - Institution admin (SUPER_ADMIN / COLLEGE_ADMIN), or
+ * - Module Access "field-duty" set to Manage (WRITE)
+ *
+ * Unlocks: create/edit postings, hospital rosters, master data (hospitals,
+ * departments, shifts, codes), unlock attendance, assign students, monitoring admin tools.
+ * Assigned coordinators without WRITE only take/view attendance on their postings.
+ */
+export const canManageFieldDuty = async (req: Request): Promise<boolean> => {
+  if (!req.user?.userId) return false;
+  if (canManageInstitution(req.user.role ?? "")) return true;
+  const map = await getUserModuleAccessMap(req.user.userId);
+  return canWriteModule(map, "field-duty");
+};
+
+/** Throw 403 unless institution admin or Field Management Manage grant. */
+export const assertCanManageFieldDuty = async (req: Request): Promise<void> => {
+  if (await canManageFieldDuty(req)) return;
+  throw new ApiError(
+    403,
+    "Field Management full access required. Ask an administrator to set Field Management to Manage under Module Access for your account."
+  );
+};
 
 /** Resolve college staff record linked to the logged-in user (field coordinator). */
 export const getFieldSupervisorStaffScope = async (
@@ -371,17 +415,20 @@ export const assertScheduleAccess = async (
 ) => {
   // Institution admins + read-only viewers may open any posting
   if (hasInstitutionAccess(req.user?.role ?? "")) return;
+  // Admin-granted Field Management module → full posting access (same as department staff)
+  if (await hasFieldDutyModuleAccess(req)) return;
   const staffScope = await getFieldSupervisorStaffScope(req);
   if (staffScope && isCoordinatorOfSchedule(staffScope.staffId, schedule)) return;
   throw new ApiError(
     403,
-    "Only an assigned field coordinator (staff) or an administrator can access this posting"
+    "Only an assigned field coordinator (staff), Field Management access grant, or an administrator can access this posting"
   );
 };
 
 /**
  * Mongo filter for schedules visible to the current user.
  * - Institution access (admin + viewer): all postings
+ * - Module Access "field-duty" grant: all postings
  * - Linked CollegeStaff: only postings where they are primary or assistant coordinator
  */
 export const scheduleAccessFilter = async (
@@ -390,11 +437,12 @@ export const scheduleAccessFilter = async (
 ): Promise<Record<string, unknown>> => {
   const filter = { ...base };
   if (hasInstitutionAccess(req.user?.role ?? "")) return filter;
+  if (await hasFieldDutyModuleAccess(req)) return filter;
   const staffScope = await getFieldSupervisorStaffScope(req);
   if (!staffScope) {
     throw new ApiError(
       403,
-      "No active staff profile is linked to your login. Ask admin to link your College Staff record (user account) so field coordinator access can apply."
+      "No active staff profile is linked to your login. Ask admin to grant Field Management module access or link your College Staff record as a field coordinator."
     );
   }
   // Explicit ObjectId so primary + assistant array membership always match

@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
 import {
-  canManageInstitution,
   fieldDutyAssignCoordinatorsSchema,
   fieldDutyAssignStudentsSchema,
   fieldDutyAttendanceSubmitSchema,
@@ -24,6 +23,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { recordAudit } from "../utils/audit.js";
 import {
+  assertCanManageFieldDuty,
   assertScheduleAccess,
   buildFieldDutyDashboard,
   buildFieldDutyMonitoring,
@@ -32,6 +32,7 @@ import {
   getEligibleStudentsForDuty,
   getFieldCoordinatorAccessSummary,
   getFieldSupervisorStaffScope,
+  hasFieldDutyModuleAccess,
   isDateWithinDuty,
   notifyFieldDutyAttendance,
   resolvePostingType,
@@ -131,9 +132,7 @@ export const listFieldDutySchedules = asyncHandler(async (req: Request, res: Res
 });
 
 export const createFieldDutySchedule = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can create field postings");
-  }
+  await assertCanManageFieldDuty(req);
   const payload = fieldDutyScheduleSchema.parse(req.body);
   ensureValidBsDate(payload.startDateBs);
   ensureValidBsDate(payload.endDateBs);
@@ -230,9 +229,7 @@ export const createFieldDutySchedule = asyncHandler(async (req: Request, res: Re
 });
 
 export const updateFieldDutySchedule = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can update field postings");
-  }
+  await assertCanManageFieldDuty(req);
   const payload = fieldDutyScheduleUpdateSchema.parse(req.body);
   const existing = await FieldDutySchedule.findOne({
     _id: req.params.id,
@@ -356,9 +353,7 @@ export const updateFieldDutySchedule = asyncHandler(async (req: Request, res: Re
 });
 
 export const deleteFieldDutySchedule = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can delete field postings");
-  }
+  await assertCanManageFieldDuty(req);
   const existing = await FieldDutySchedule.findOne({
     _id: req.params.id,
     schoolId: tenantObjectId(req),
@@ -373,9 +368,7 @@ export const deleteFieldDutySchedule = asyncHandler(async (req: Request, res: Re
 
 /** Assign / reassign primary + assistant coordinators from existing staff. */
 export const assignFieldCoordinators = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can assign field coordinators");
-  }
+  await assertCanManageFieldDuty(req);
   const payload = fieldDutyAssignCoordinatorsSchema.parse(req.body);
   const existing = await FieldDutySchedule.findOne({
     _id: req.params.id,
@@ -414,9 +407,7 @@ export const assignFieldCoordinators = asyncHandler(async (req: Request, res: Re
 
 /** Assign students by manual list or switch to auto batch/year roster. */
 export const assignFieldStudents = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can assign students to field postings");
-  }
+  await assertCanManageFieldDuty(req);
   const payload = fieldDutyAssignStudentsSchema.parse(req.body);
   const existing = await FieldDutySchedule.findOne({
     _id: req.params.id,
@@ -706,24 +697,28 @@ export const getFieldDutyRegister = asyncHandler(async (req: Request, res: Respo
   }
 
   if (!hasInstitutionAccess(req.user?.role ?? "")) {
-    const staffScope = await getFieldSupervisorStaffScope(req);
-    if (!staffScope) throw new ApiError(403, "Not allowed");
-    const mySchedules = await FieldDutySchedule.find({
-      schoolId,
-      isDeleted: false,
-      $or: [
-        { supervisorStaffId: staffScope.staffId },
-        { assistantCoordinatorStaffIds: staffScope.staffId }
-      ]
-    })
-      .select("_id")
-      .lean();
-    const allowed = mySchedules.map((s) => s._id.toString());
-    if (filter.scheduleId && !allowed.includes(String(filter.scheduleId))) {
-      throw new ApiError(403, "Not allowed");
-    }
-    if (!filter.scheduleId) {
-      filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
+    // Field Management module grant → all registers; else only assigned postings
+    const moduleOk = await hasFieldDutyModuleAccess(req);
+    if (!moduleOk) {
+      const staffScope = await getFieldSupervisorStaffScope(req);
+      if (!staffScope) throw new ApiError(403, "Not allowed");
+      const mySchedules = await FieldDutySchedule.find({
+        schoolId,
+        isDeleted: false,
+        $or: [
+          { supervisorStaffId: staffScope.staffId },
+          { assistantCoordinatorStaffIds: staffScope.staffId }
+        ]
+      })
+        .select("_id")
+        .lean();
+      const allowed = mySchedules.map((s) => s._id.toString());
+      if (filter.scheduleId && !allowed.includes(String(filter.scheduleId))) {
+        throw new ApiError(403, "Not allowed");
+      }
+      if (!filter.scheduleId) {
+        filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
+      }
     }
   }
 
@@ -849,9 +844,7 @@ export const getFieldDutyRegister = asyncHandler(async (req: Request, res: Respo
  * Admin only.
  */
 export const listAssignableStudents = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can list assignable students");
-  }
+  await assertCanManageFieldDuty(req);
   const schoolId = tenantObjectId(req);
   const filter: Record<string, unknown> = {
     schoolId,
@@ -903,31 +896,34 @@ export const listFieldDutyAttendance = asyncHandler(async (req: Request, res: Re
   }
 
   if (!hasInstitutionAccess(req.user?.role ?? "")) {
-    const staffScope = await getFieldSupervisorStaffScope(req);
-    if (!staffScope) throw new ApiError(403, "Not allowed");
-    // Scope to postings where this staff is coordinator
-    const mySchedules = await FieldDutySchedule.find({
-      schoolId,
-      isDeleted: false,
-      $or: [
-        { supervisorStaffId: staffScope.staffId },
-        { assistantCoordinatorStaffIds: staffScope.staffId }
-      ]
-    })
-      .select("_id")
-      .lean();
-    const allowedIds = mySchedules.map((s) => s._id.toString());
-    const requested =
-      typeof req.query.scheduleId === "string" && req.query.scheduleId
-        ? req.query.scheduleId
-        : null;
-    if (requested) {
-      if (!allowedIds.includes(requested)) {
-        throw new ApiError(403, "Not allowed to view this posting attendance");
+    const moduleOk = await hasFieldDutyModuleAccess(req);
+    if (!moduleOk) {
+      const staffScope = await getFieldSupervisorStaffScope(req);
+      if (!staffScope) throw new ApiError(403, "Not allowed");
+      // Scope to postings where this staff is coordinator
+      const mySchedules = await FieldDutySchedule.find({
+        schoolId,
+        isDeleted: false,
+        $or: [
+          { supervisorStaffId: staffScope.staffId },
+          { assistantCoordinatorStaffIds: staffScope.staffId }
+        ]
+      })
+        .select("_id")
+        .lean();
+      const allowedIds = mySchedules.map((s) => s._id.toString());
+      const requested =
+        typeof req.query.scheduleId === "string" && req.query.scheduleId
+          ? req.query.scheduleId
+          : null;
+      if (requested) {
+        if (!allowedIds.includes(requested)) {
+          throw new ApiError(403, "Not allowed to view this posting attendance");
+        }
+        filter.scheduleId = requested;
+      } else {
+        filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
       }
-      filter.scheduleId = requested;
-    } else {
-      filter.scheduleId = { $in: mySchedules.map((s) => s._id) };
     }
   } else if (typeof req.query.supervisorStaffId === "string" && req.query.supervisorStaffId) {
     filter.supervisorStaffId = req.query.supervisorStaffId;
@@ -1177,9 +1173,7 @@ export const submitFieldDutyAttendance = asyncHandler(async (req: Request, res: 
 });
 
 export const updateFieldDutyAttendance = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can edit field attendance after submission");
-  }
+  await assertCanManageFieldDuty(req);
   const payload = fieldDutyAttendanceUpdateSchema.parse(req.body);
   const existing = await FieldDutyAttendance.findOne({
     _id: req.params.id,
@@ -1207,9 +1201,7 @@ export const updateFieldDutyAttendance = asyncHandler(async (req: Request, res: 
 });
 
 export const unlockFieldDutyAttendance = asyncHandler(async (req: Request, res: Response) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can unlock field attendance");
-  }
+  await assertCanManageFieldDuty(req);
   const { reason } = fieldDutyUnlockSchema.parse(req.body);
   const existing = await FieldDutyAttendance.findOne({
     _id: req.params.id,
@@ -1281,9 +1273,7 @@ export const requestFieldAttendanceEdit = asyncHandler(async (req: Request, res:
 /** Admin approves or rejects coordinator edit requests. */
 export const reviewFieldAttendanceEditRequest = asyncHandler(
   async (req: Request, res: Response) => {
-    if (!canManageInstitution(req.user?.role ?? "")) {
-      throw new ApiError(403, "Only administrators can approve attendance edit requests");
-    }
+    await assertCanManageFieldDuty(req);
     const payload = fieldDutyEditRequestReviewSchema.parse(req.body);
     const existing = await FieldDutyAttendance.findOne({
       _id: req.params.id,
@@ -1332,8 +1322,14 @@ export const getFieldDutyDashboard = asyncHandler(async (req: Request, res: Resp
 });
 
 export const getFieldDutyMonitoring = asyncHandler(async (req: Request, res: Response) => {
-  if (!hasInstitutionAccess(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can view field monitoring");
+  if (
+    !hasInstitutionAccess(req.user?.role ?? "") &&
+    !(await hasFieldDutyModuleAccess(req))
+  ) {
+    throw new ApiError(
+      403,
+      "Only administrators or staff with Field Management access can view field monitoring"
+    );
   }
   const data = await buildFieldDutyMonitoring(req, {
     dateFrom: typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined,

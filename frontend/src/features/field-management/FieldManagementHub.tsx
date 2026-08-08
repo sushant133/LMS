@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import {
   canManageInstitution,
+  hasInstitutionAccess,
   type FieldDutyDashboard,
   type FieldDutyPortalSummary,
   type FieldPostingSection,
@@ -18,6 +19,8 @@ import { LoadingState } from "components/shared/LoadingState";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { useAuth } from "features/auth/AuthProvider";
+import { useFieldCoordinatorAccess } from "hooks/useFieldCoordinatorAccess";
+import { useModuleAccess } from "hooks/useModuleAccess";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "lib/api";
 import { FieldPostingSectionPanel } from "./FieldPostingSectionPanel";
@@ -35,15 +38,62 @@ type TopTab =
 export const FieldManagementHub = () => {
   const { user } = useAuth();
   const isAdmin = canManageInstitution(user?.role ?? "");
+  const isInstitutionViewer = hasInstitutionAccess(user?.role ?? "");
   const isViewer = user?.role === "COLLEGE_VIEWER";
   const isStudent = user?.role === "STUDENT";
   /** Field coordinators log in as College Staff (not teachers). */
-  const isCoordinator = user?.role === "COLLEGE_STAFF";
-  const canWriteAttendance = isAdmin || isCoordinator;
+  const isStaff =
+    user?.role === "COLLEGE_STAFF" ||
+    (user?.secondaryRoles ?? []).includes("COLLEGE_STAFF");
+
+  /**
+   * Module Access matrix: admin grants "Field Management" (field-duty) to staff.
+   * Assigned coordinators also get access even without the matrix grant.
+   */
+  const fieldModule = useModuleAccess("field-duty");
+  const coordAccessQuery = useFieldCoordinatorAccess(isStaff && !isAdmin);
+  const isAssignedCoordinator =
+    coordAccessQuery.data?.hasCoordinatorAccess === true;
+
+  /** Can open Field Management (beyond pure student portal). */
+  const hasFieldDeptAccess =
+    isAdmin ||
+    isInstitutionViewer ||
+    fieldModule.canAccess ||
+    isAssignedCoordinator;
+
+  /**
+   * Write attendance / roster marks:
+   * - Institution admin
+   * - Module grant Manage (WRITE)
+   * - Assigned primary/assistant coordinator (even if module is View-only)
+   */
+  const canWriteAttendance =
+    isAdmin || fieldModule.canWrite || isAssignedCoordinator;
+
+  /**
+   * Full Field Management (admin-equivalent for this module):
+   * create/edit postings, hospital rosters, unlock, assign students, master data.
+   * Granted via Module Access → Field Management → Manage.
+   */
+  const canManagePostings = isAdmin || fieldModule.canWrite;
+  const canViewMonitoring =
+    isAdmin ||
+    isViewer ||
+    isInstitutionViewer ||
+    fieldModule.canAccess ||
+    canManagePostings;
+
+  /** Staff who only coordinate (no full Manage grant) get a duties-first layout. */
+  const isCoordinatorOnly =
+    isStaff &&
+    !isAdmin &&
+    isAssignedCoordinator &&
+    !fieldModule.canWrite;
 
   const defaultTab: TopTab = isStudent
     ? "my-attendance"
-    : isCoordinator && !isAdmin
+    : isCoordinatorOnly
       ? "my-duties"
       : "community";
 
@@ -52,7 +102,7 @@ export const FieldManagementHub = () => {
   const dashboardQuery = useQuery({
     queryKey: ["field-duty", "dashboard"],
     queryFn: () => unwrap<FieldDutyDashboard>(api.get("/field-duty/dashboard")),
-    enabled: !isStudent,
+    enabled: !isStudent && hasFieldDeptAccess,
   });
 
   const studentPortalQuery = useQuery({
@@ -65,50 +115,49 @@ export const FieldManagementHub = () => {
     if (isStudent) {
       return [{ id: "my-attendance" as const, label: "Field Attendance", icon: ClipboardCheck }];
     }
-    if (isCoordinator && !isAdmin) {
-      return [
-        { id: "my-duties" as const, label: "My Field Duties", icon: MapPin },
-        { id: "community" as const, label: "Community / PHC", icon: Building2 },
-        { id: "hospital" as const, label: "Hospital", icon: Hospital },
-        {
-          id: "hospital-roster" as const,
-          label: "Hospital Roster",
-          icon: CalendarDays,
-        },
-      ];
+
+    const list: Array<{ id: TopTab; label: string; icon: typeof MapPin }> = [];
+
+    if (isCoordinatorOnly || isAssignedCoordinator) {
+      list.push({ id: "my-duties", label: "My Field Duties", icon: MapPin });
     }
-    return [
-      { id: "community" as const, label: "Community / PHC Posting", icon: Building2 },
-      { id: "hospital" as const, label: "Hospital Posting", icon: Hospital },
-      {
-        id: "hospital-roster" as const,
-        label: "Hospital Roster",
-        icon: CalendarDays,
-      },
-      ...(isAdmin || isViewer
-        ? [{ id: "monitoring" as const, label: "Admin Monitoring", icon: Users }]
-        : []),
-      ...(isCoordinator
-        ? [{ id: "my-duties" as const, label: "My Field Duties", icon: MapPin }]
-        : []),
-    ];
-  }, [isAdmin, isViewer, isStudent, isCoordinator]);
+
+    list.push(
+      { id: "community", label: "Community / PHC Posting", icon: Building2 },
+      { id: "hospital", label: "Hospital Posting", icon: Hospital },
+      { id: "hospital-roster", label: "Hospital Roster", icon: CalendarDays },
+    );
+
+    if (canViewMonitoring) {
+      list.push({ id: "monitoring", label: "Admin Monitoring", icon: Users });
+    }
+
+    return list;
+  }, [
+    isStudent,
+    isCoordinatorOnly,
+    isAssignedCoordinator,
+    canViewMonitoring,
+  ]);
 
   const section: FieldPostingSection | null =
     topTab === "community" ? "COMMUNITY_PHC" : topTab === "hospital" ? "HOSPITAL" : null;
 
   const dash = dashboardQuery.data;
 
+  const description = isStudent
+    ? "Your field posting attendance (read-only)."
+    : canManagePostings && !isAdmin
+      ? "Full Field Management access (granted by admin): create postings & hospital rosters, take/view attendance, unlock registers, and monitoring."
+      : isCoordinatorOnly
+        ? "Your assigned Community/PHC and Hospital postings. Take attendance for posted students (today or previous dates within the posting period)."
+        : fieldModule.canAccess && !isAdmin
+          ? "Field Management view access — open postings, rosters, and registers (read-only unless you are an assigned coordinator)."
+          : "Manage Community/PHC and Hospital postings — assignment, coordinator attendance, and monitoring. Independent from classroom and laboratory attendance.";
+
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Field Management"
-        description={
-          isCoordinator && !isAdmin
-            ? "Your assigned Community/PHC and Hospital postings. Take attendance for posted students (today or previous dates within the posting period)."
-            : "Manage Community/PHC and Hospital postings — assignment, coordinator attendance, and monitoring. Independent from classroom and laboratory attendance."
-        }
-      />
+      <PageHeader title="Field Management" description={description} />
 
       <div className="flex flex-wrap gap-2">
         {tabs.map((tab) => {
@@ -148,17 +197,19 @@ export const FieldManagementHub = () => {
       {!isStudent && section ? (
         <FieldPostingSectionPanel
           section={section}
-          isAdmin={isAdmin}
+          isAdmin={canManagePostings}
           canWrite={canWriteAttendance}
-          isCoordinatorView={isCoordinator && !isAdmin}
+          isCoordinatorView={
+            (isStaff || isAssignedCoordinator) && !canManagePostings
+          }
         />
       ) : null}
 
       {!isStudent && topTab === "hospital-roster" ? (
-        <HospitalRosterPanel isAdmin={isAdmin} />
+        <HospitalRosterPanel isAdmin={canManagePostings} />
       ) : null}
 
-      {!isStudent && topTab === "monitoring" && (isAdmin || isViewer) ? (
+      {!isStudent && topTab === "monitoring" && canViewMonitoring ? (
         <AdminMonitoringPanel />
       ) : null}
     </div>
@@ -328,7 +379,7 @@ const AdminMonitoringPanel = () => {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {[
           { label: "Overall attendance %", value: `${m.overallAttendancePercent}%` },
           { label: "Pending today", value: m.pendingAttendance },
@@ -377,7 +428,7 @@ const AdminMonitoringPanel = () => {
         />
         <MonitorTable
           title="Date-wise"
-          rows={m.byDate.slice(0, 14).map((r) => ({
+          rows={m.byDate.slice(0, 31).map((r) => ({
             label: r.dateBs,
             meta: `P ${r.present} · A ${r.absent} · ${r.percent}%`,
           }))}

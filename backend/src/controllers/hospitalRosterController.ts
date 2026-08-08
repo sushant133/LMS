@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
 import {
-  canManageInstitution,
   DEFAULT_DUTY_SHIFTS,
   DEFAULT_HOSPITAL_DEPARTMENTS,
   DEFAULT_ROSTER_FREE_CODES,
@@ -31,6 +30,7 @@ import { Student } from "../models/Student.js";
 import { Year } from "../models/Year.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { assertCanManageFieldDuty } from "../utils/fieldDutyService.js";
 import {
   compareBsDates,
   countInclusiveBsDays,
@@ -47,14 +47,13 @@ const tenantId = (req: Request) => {
   return id;
 };
 
-const assertAdmin = (req: Request) => {
-  if (!canManageInstitution(req.user?.role ?? "")) {
-    throw new ApiError(403, "Only administrators can manage hospital rosters");
-  }
+/** Institution admin or staff with Field Management → Manage (WRITE). */
+const assertAdmin = async (req: Request) => {
+  await assertCanManageFieldDuty(req);
 };
 
-const assertCanWriteRoster = (req: Request) => {
-  assertAdmin(req);
+const assertCanWriteRoster = async (req: Request) => {
+  await assertAdmin(req);
 };
 
 const staffName = async (staffId?: string | null): Promise<string | undefined> => {
@@ -325,7 +324,7 @@ export const listHospitals = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const createHospital = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const payload = fieldHospitalSchema.parse(req.body);
   const doc = await FieldHospital.create({
@@ -347,7 +346,7 @@ export const createHospital = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const updateHospital = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const payload = fieldHospitalUpdateSchema.parse(req.body);
   const $set: Record<string, unknown> = {};
@@ -379,7 +378,7 @@ export const updateHospital = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const deleteHospital = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const inUse = await HospitalRoster.countDocuments({
     schoolId,
@@ -422,7 +421,7 @@ export const listDepartments = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const createDepartment = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   await ensureDefaultDepartments(schoolId);
   const payload = hospitalDepartmentSchema.parse(req.body);
@@ -448,7 +447,7 @@ export const createDepartment = asyncHandler(async (req: Request, res: Response)
 });
 
 export const updateDepartment = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const payload = hospitalDepartmentUpdateSchema.parse(req.body);
   const doc = await HospitalDepartment.findOneAndUpdate(
@@ -469,7 +468,7 @@ export const updateDepartment = asyncHandler(async (req: Request, res: Response)
 });
 
 export const deleteDepartment = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const existing = await HospitalDepartment.findOne({
     _id: req.params.id,
@@ -513,7 +512,7 @@ export const listShifts = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createShift = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   await ensureDefaultShifts(schoolId);
   const payload = dutyShiftSchema.parse(req.body);
@@ -543,7 +542,7 @@ export const createShift = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateShift = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const payload = dutyShiftUpdateSchema.parse(req.body);
   const doc = await DutyShift.findOneAndUpdate(
@@ -568,7 +567,7 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const existing = await DutyShift.findOne({
     _id: req.params.id,
@@ -599,7 +598,7 @@ export const listDutyCodes = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const createDutyCode = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   await ensureDefaultDutyCodes(schoolId);
   const payload = rosterDutyCodeSchema.parse(req.body);
@@ -621,7 +620,7 @@ export const createDutyCode = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const updateDutyCode = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const payload = rosterDutyCodeUpdateSchema.parse(req.body);
   const doc = await RosterDutyCode.findOneAndUpdate(
@@ -634,7 +633,7 @@ export const updateDutyCode = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const deleteDutyCode = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const existing = await RosterDutyCode.findOne({
     _id: req.params.id,
@@ -771,7 +770,7 @@ export const getHospitalRoster = asyncHandler(async (req: Request, res: Response
 });
 
 export const createHospitalRoster = asyncHandler(async (req: Request, res: Response) => {
-  assertCanWriteRoster(req);
+  await assertCanWriteRoster(req);
   const schoolId = tenantId(req);
   const payload = hospitalRosterSchema.parse(req.body);
 
@@ -839,7 +838,7 @@ export const createHospitalRoster = asyncHandler(async (req: Request, res: Respo
 });
 
 export const updateHospitalRoster = asyncHandler(async (req: Request, res: Response) => {
-  assertCanWriteRoster(req);
+  await assertCanWriteRoster(req);
   const schoolId = tenantId(req);
   const payload = hospitalRosterUpdateSchema.parse(req.body);
   const existing = await HospitalRoster.findOne({
@@ -924,7 +923,7 @@ export const updateHospitalRoster = asyncHandler(async (req: Request, res: Respo
 
 export const updateHospitalRosterStudents = asyncHandler(
   async (req: Request, res: Response) => {
-    assertCanWriteRoster(req);
+    await assertCanWriteRoster(req);
     const schoolId = tenantId(req);
     const payload = hospitalRosterStudentsUpdateSchema.parse(req.body);
     const roster = await HospitalRoster.findOne({
@@ -961,7 +960,7 @@ export const updateHospitalRosterStudents = asyncHandler(
 );
 
 export const updateHospitalRosterCells = asyncHandler(async (req: Request, res: Response) => {
-  assertCanWriteRoster(req);
+  await assertCanWriteRoster(req);
   const schoolId = tenantId(req);
   const payload = hospitalRosterCellsUpdateSchema.parse(req.body);
   const roster = await HospitalRoster.findOne({
@@ -1035,7 +1034,7 @@ export const updateHospitalRosterCells = asyncHandler(async (req: Request, res: 
 });
 
 export const lockHospitalRoster = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const roster = await HospitalRoster.findOne({
     _id: req.params.id,
@@ -1079,7 +1078,7 @@ export const lockHospitalRoster = asyncHandler(async (req: Request, res: Respons
 });
 
 export const unlockHospitalRoster = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const roster = await HospitalRoster.findOne({
     _id: req.params.id,
@@ -1099,7 +1098,7 @@ export const unlockHospitalRoster = asyncHandler(async (req: Request, res: Respo
 });
 
 export const deleteHospitalRoster = asyncHandler(async (req: Request, res: Response) => {
-  assertAdmin(req);
+  await assertAdmin(req);
   const schoolId = tenantId(req);
   const roster = await HospitalRoster.findOne({
     _id: req.params.id,

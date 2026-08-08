@@ -193,7 +193,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     key: "field-duty",
     label: "Field Management",
     description:
-      "Community/PHC and Hospital field postings — assignment, coordinator attendance, monitoring",
+      "Manage = full access (create postings & hospital rosters, assign coordinators/students, take & unlock attendance, master data, monitoring). View = read-only. Assigned coordinators can take attendance on their postings without this grant.",
     apiPrefixes: ["/field-duty"],
     routePrefixes: ["/field-management", "/attendance"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
@@ -719,7 +719,8 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
   {
     id: "attendance",
     title: "Attendance & field",
-    description: "Daily / subject attendance and field postings",
+    description:
+      "Daily / subject attendance and Field Management. Set Field Management to Manage for full staff control of postings, rosters, and attendance.",
     keys: [
       "attendance",
       "daily-attendance",

@@ -12,7 +12,11 @@ import {
   type FieldPostingSection,
   type YearRecord,
 } from "@phit-erp/shared";
-import { formatBsDate, getTodayBs } from "@munatech/nepali-datepicker";
+import {
+  formatBsDate,
+  getDaysInBsMonth,
+  getTodayBs,
+} from "@munatech/nepali-datepicker";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -302,6 +306,33 @@ export const FieldPostingSectionPanel = ({
       (form.rosterMode === "MANUAL" || form.rosterMode === "MULTI_SHIFT") &&
       !!form.batchId &&
       !!form.yearId,
+  });
+
+  /**
+   * Full student pool for the selected posting — used so Attendance Register
+   * lists everyone on the roster (not only those already marked).
+   */
+  const registerRosterQuery = useQuery({
+    queryKey: [
+      "field-duty",
+      "register-roster",
+      registerScheduleId,
+      registerShiftFilter,
+    ],
+    queryFn: () =>
+      unwrap<{
+        pool?: FieldDutyRosterStudent[];
+        students?: FieldDutyRosterStudent[];
+      }>(
+        api.get(`/field-duty/schedules/${registerScheduleId}/roster`, {
+          params: {
+            shift: registerShiftFilter || undefined,
+          },
+        }),
+      ),
+    enabled:
+      Boolean(registerScheduleId) &&
+      (tab === "history" || tab === "reports"),
   });
 
   const multiShiftCounts = useMemo(() => {
@@ -834,7 +865,7 @@ export const FieldPostingSectionPanel = ({
     },
     ...(canWrite ? [{ id: "mark" as const, label: "Daily Attendance" }] : []),
     { id: "history", label: "Attendance Register" },
-    { id: "reports", label: "Reports" },
+    { id: "reports", label: "Day-wise & Reports" },
   ];
 
   const typeOptions = postingTypeOptionsForSection(section);
@@ -921,15 +952,22 @@ export const FieldPostingSectionPanel = ({
   /**
    * Traditional monthly register matrix: students × day-of-month cells.
    * Built client-side from register API rows for the selected BS month.
+   * Always shows full BS month columns; includes every student who has any
+   * mark (and all roster students when a posting is selected).
    */
   const monthlyRegister = useMemo(() => {
     const month = registerMonthBs || monthBsFromDate(todayBsString());
     const allRows = registerQuery.data?.rows ?? [];
-    const siteFilterName = (() => {
-      if (!registerScheduleId) return "";
-      const sch = schedules.find((s) => s._id === registerScheduleId);
-      return (sch?.siteName || sch?.hospitalName || "").trim().toLowerCase();
-    })();
+    const selectedSch = registerScheduleId
+      ? schedules.find((s) => s._id === registerScheduleId)
+      : null;
+    const siteFilterName = (
+      selectedSch?.siteName ||
+      selectedSch?.hospitalName ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
 
     const rows = allRows.filter((r) => {
       if (month && !String(r.dateBs).startsWith(month)) return false;
@@ -945,16 +983,19 @@ export const FieldPostingSectionPanel = ({
       return true;
     });
 
-    const daySet = new Set<number>();
-    for (const r of rows) {
-      const day = Number(String(r.dateBs).split("-")[2]);
-      if (Number.isFinite(day) && day >= 1) daySet.add(day);
+    // Full BS month columns (date-wise register)
+    let daysInMonth = 32;
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [y, m] = month.split("-").map(Number);
+      if (y && m) {
+        try {
+          daysInMonth = getDaysInBsMonth(y, m);
+        } catch {
+          daysInMonth = 32;
+        }
+      }
     }
-    // Always show 1–daysInMonth style grid when empty month of data
-    const maxDay = daySet.size
-      ? Math.max(...daySet)
-      : 32;
-    const days = Array.from({ length: maxDay }, (_, i) => i + 1);
+    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
     type StudentAgg = {
       studentId: string;
@@ -963,7 +1004,10 @@ export const FieldPostingSectionPanel = ({
       admissionNumber?: string;
       batchName?: string;
       yearName?: string;
-      cells: Record<number, { code: string; status: string; shift: string; siteName: string }>;
+      cells: Record<
+        number,
+        { code: string; status: string; shift: string; siteName: string }
+      >;
       present: number;
       absent: number;
       late: number;
@@ -972,18 +1016,26 @@ export const FieldPostingSectionPanel = ({
     };
 
     const byStudent = new Map<string, StudentAgg>();
-    for (const r of rows) {
-      const day = Number(String(r.dateBs).split("-")[2]);
-      if (!Number.isFinite(day)) continue;
-      let row = byStudent.get(r.studentId);
+
+    const ensureStudent = (
+      studentId: string,
+      meta?: {
+        fullName?: string;
+        rollNumber?: number;
+        admissionNumber?: string;
+        batchName?: string;
+        yearName?: string;
+      },
+    ) => {
+      let row = byStudent.get(studentId);
       if (!row) {
         row = {
-          studentId: r.studentId,
-          fullName: r.fullName ?? "Student",
-          rollNumber: r.rollNumber,
-          admissionNumber: r.admissionNumber,
-          batchName: r.batchName,
-          yearName: r.yearName,
+          studentId,
+          fullName: meta?.fullName ?? "Student",
+          rollNumber: meta?.rollNumber,
+          admissionNumber: meta?.admissionNumber,
+          batchName: meta?.batchName,
+          yearName: meta?.yearName,
           cells: {},
           present: 0,
           absent: 0,
@@ -991,11 +1043,71 @@ export const FieldPostingSectionPanel = ({
           leave: 0,
           emergency: 0,
         };
-        byStudent.set(r.studentId, row);
+        byStudent.set(studentId, row);
+      } else {
+        if (meta?.fullName && row.fullName === "Student") row.fullName = meta.fullName;
+        if (meta?.rollNumber != null && row.rollNumber == null) {
+          row.rollNumber = meta.rollNumber;
+        }
+        if (meta?.admissionNumber && !row.admissionNumber) {
+          row.admissionNumber = meta.admissionNumber;
+        }
       }
-      // Prefer first mark of the day; if multi-shift same day, keep latest by overwriting when same day
+      return row;
+    };
+
+    // Seed roster pool when a posting is selected so every student appears (check-all / full list)
+    if (selectedSch) {
+      const pool =
+        registerRosterQuery.data?.pool ??
+        registerRosterQuery.data?.students ??
+        [];
+      for (const s of pool) {
+        ensureStudent(s._id, {
+          fullName: s.fullName,
+          rollNumber: s.rollNumber,
+          admissionNumber: s.admissionNumber,
+          batchName: selectedSch.batch?.name,
+          yearName: selectedSch.year?.name,
+        });
+      }
+      for (const id of selectedSch.assignedStudentIds ?? []) {
+        ensureStudent(id, {
+          batchName: selectedSch.batch?.name,
+          yearName: selectedSch.year?.name,
+        });
+      }
+      for (const sh of selectedSch.studentShifts ?? []) {
+        ensureStudent(sh.studentId, {
+          batchName: selectedSch.batch?.name,
+          yearName: selectedSch.year?.name,
+        });
+      }
+    }
+
+    for (const r of rows) {
+      const day = Number(String(r.dateBs).split("-")[2]);
+      if (!Number.isFinite(day)) continue;
+      const row = ensureStudent(r.studentId, {
+        fullName: r.fullName,
+        rollNumber: r.rollNumber,
+        admissionNumber: r.admissionNumber,
+        batchName: r.batchName,
+        yearName: r.yearName,
+      });
+      // Multi-shift same day: prefer present-like over absent when overwriting
+      const prev = row.cells[day];
+      const nextCode = fieldStatusToCode(r.status);
+      const rank = (st: string) => {
+        if (st === "PRESENT" || st === "EMERGENCY_DUTY") return 4;
+        if (st === "LATE") return 3;
+        if (st === "LEAVE") return 2;
+        if (st === "ABSENT") return 1;
+        return 0;
+      };
+      if (prev && rank(r.status) < rank(prev.status)) continue;
       row.cells[day] = {
-        code: fieldStatusToCode(r.status),
+        code: nextCode,
         status: r.status,
         shift: r.shift,
         siteName: r.siteName,
@@ -1032,6 +1144,7 @@ export const FieldPostingSectionPanel = ({
     registerScheduleId,
     registerShiftFilter,
     schedules,
+    registerRosterQuery.data,
   ]);
 
   const canLoadSheet =
@@ -2358,12 +2471,13 @@ export const FieldPostingSectionPanel = ({
               <div>
                 <CardTitle className="text-base">
                   {tab === "reports"
-                    ? "Reports"
+                    ? `Day-wise sheets & reports — ${sectionLabel(section)}`
                     : `Attendance Register — ${sectionLabel(section)}`}
                 </CardTitle>
                 <p className="mt-1 text-sm text-slate-500">
-                  Traditional monthly register (students × days), similar to Attendance
-                  Management. Read from saved daily sheets.
+                  {tab === "reports"
+                    ? "Date-wise saved attendance sheets from roster marking. Open a day to review or re-mark when unlocked."
+                    : "Traditional monthly register (students × full BS month days). Built from roster and attendance taken — every marked student and full roster when a posting is selected."}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2479,215 +2593,237 @@ export const FieldPostingSectionPanel = ({
             <span className="ml-auto text-slate-500">
               {monthlyRegister.students.length} students · {monthlyRegister.totalMarks}{" "}
               marks · {monthlyRegister.month || "—"}
+              {monthlyRegister.days.length
+                ? ` · ${monthlyRegister.days.length} days`
+                : ""}
             </span>
           </div>
 
-          {registerQuery.isLoading ? (
-            <LoadingState />
-          ) : monthlyRegister.students.length === 0 ? (
-            <EmptyState
-              title="No register entries this month"
-              description="Save daily attendance sheets first — they appear here as a traditional monthly grid."
-            />
-          ) : (
-            <Card className="overflow-hidden">
-              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-sm font-semibold text-slate-900">
-                  Monthly attendance register · BS {monthlyRegister.month}
-                  {registerShiftFilter
-                    ? ` · ${shiftLabel(registerShiftFilter)}`
-                    : " · all shifts"}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Columns = day of month · Codes match traditional school/hospital registers
-                </p>
-              </div>
-              <CardContent className="p-0">
-                <div className="max-h-[min(75vh,820px)] overflow-auto">
-                  <table className="w-full min-w-[900px] border-collapse text-xs">
-                    <thead className="sticky top-0 z-10 bg-slate-100">
-                      <tr>
-                        <th className="sticky left-0 z-20 border border-slate-300 bg-slate-100 px-2 py-2 text-left font-semibold">
-                          S.N.
-                        </th>
-                        <th className="sticky left-8 z-20 min-w-[140px] border border-slate-300 bg-slate-100 px-2 py-2 text-left font-semibold">
-                          Student
-                        </th>
-                        <th className="border border-slate-300 px-1 py-2 font-semibold">
-                          Roll
-                        </th>
-                        {monthlyRegister.days.map((d) => (
-                          <th
-                            key={d}
-                            className="border border-slate-300 px-0.5 py-2 text-center font-semibold tabular-nums text-slate-600"
-                          >
-                            {d}
-                          </th>
-                        ))}
-                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-emerald-800">
-                          P
-                        </th>
-                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-rose-800">
-                          A
-                        </th>
-                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-amber-800">
-                          L
-                        </th>
-                        <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-sky-800">
-                          Lv
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monthlyRegister.students.map((st, idx) => (
-                        <tr key={st.studentId} className="hover:bg-slate-50/80">
-                          <td className="sticky left-0 z-10 border border-slate-200 bg-white px-2 py-1 text-center tabular-nums text-slate-500">
-                            {idx + 1}
-                          </td>
-                          <td className="sticky left-8 z-10 max-w-[160px] border border-slate-200 bg-white px-2 py-1 font-medium text-slate-900">
-                            <div className="truncate" title={st.fullName}>
-                              {st.fullName}
-                            </div>
-                            <div className="truncate text-[10px] font-normal text-slate-400">
-                              {st.admissionNumber || "—"}
-                            </div>
-                          </td>
-                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
-                            {st.rollNumber ?? "—"}
-                          </td>
-                          {monthlyRegister.days.map((d) => {
-                            const cell = st.cells[d];
-                            const code = cell?.code || "";
-                            return (
-                              <td
-                                key={d}
-                                className={`border border-slate-200 px-0.5 py-1 text-center ${fieldCodeClass(code)}`}
-                                title={
-                                  cell
-                                    ? `${cell.status} · ${shiftLabel(cell.shift)} · ${cell.siteName}`
-                                    : undefined
-                                }
-                              >
-                                {code || "·"}
-                              </td>
-                            );
-                          })}
-                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums font-medium">
-                            {st.present}
-                          </td>
-                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
-                            {st.absent}
-                          </td>
-                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
-                            {st.late}
-                          </td>
-                          <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
-                            {st.leave}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          {/* Attendance Register tab: full month grid */}
+          {tab === "history" ? (
+            registerQuery.isLoading || registerRosterQuery.isLoading ? (
+              <LoadingState />
+            ) : monthlyRegister.students.length === 0 ? (
+              <EmptyState
+                title="No register entries this month"
+                description="Save daily attendance sheets first (Mark all / individual marks). They appear here date-wise for the full BS month. Select a posting to list the full roster."
+              />
+            ) : (
+              <Card className="overflow-hidden">
+                <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-slate-900">
+                    Monthly attendance register · BS {monthlyRegister.month}
+                    {registerShiftFilter
+                      ? ` · ${shiftLabel(registerShiftFilter)}`
+                      : " · all shifts"}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Columns = full BS month days · Codes from roster attendance taken
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+                <CardContent className="p-0">
+                  <div className="max-h-[min(75vh,820px)] overflow-auto">
+                    <table className="w-full min-w-[900px] border-collapse text-xs">
+                      <thead className="sticky top-0 z-10 bg-slate-100">
+                        <tr>
+                          <th className="sticky left-0 z-20 border border-slate-300 bg-slate-100 px-2 py-2 text-left font-semibold">
+                            S.N.
+                          </th>
+                          <th className="sticky left-8 z-20 min-w-[140px] border border-slate-300 bg-slate-100 px-2 py-2 text-left font-semibold">
+                            Student
+                          </th>
+                          <th className="border border-slate-300 px-1 py-2 font-semibold">
+                            Roll
+                          </th>
+                          {monthlyRegister.days.map((d) => (
+                            <th
+                              key={d}
+                              className="border border-slate-300 px-0.5 py-2 text-center font-semibold tabular-nums text-slate-600"
+                            >
+                              {d}
+                            </th>
+                          ))}
+                          <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-emerald-800">
+                            P
+                          </th>
+                          <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-rose-800">
+                            A
+                          </th>
+                          <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-amber-800">
+                            L
+                          </th>
+                          <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-sky-800">
+                            Lv
+                          </th>
+                          <th className="border border-slate-300 px-1 py-2 text-center font-semibold text-violet-800">
+                            E
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthlyRegister.students.map((st, idx) => (
+                          <tr key={st.studentId} className="hover:bg-slate-50/80">
+                            <td className="sticky left-0 z-10 border border-slate-200 bg-white px-2 py-1 text-center tabular-nums text-slate-500">
+                              {idx + 1}
+                            </td>
+                            <td className="sticky left-8 z-10 max-w-[160px] border border-slate-200 bg-white px-2 py-1 font-medium text-slate-900">
+                              <div className="truncate" title={st.fullName}>
+                                {st.fullName}
+                              </div>
+                              <div className="truncate text-[10px] font-normal text-slate-400">
+                                {st.admissionNumber || "—"}
+                              </div>
+                            </td>
+                            <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                              {st.rollNumber ?? "—"}
+                            </td>
+                            {monthlyRegister.days.map((d) => {
+                              const cell = st.cells[d];
+                              const code = cell?.code || "";
+                              return (
+                                <td
+                                  key={d}
+                                  className={`border border-slate-200 px-0.5 py-1 text-center ${fieldCodeClass(code)}`}
+                                  title={
+                                    cell
+                                      ? `${cell.status} · ${shiftLabel(cell.shift)} · ${cell.siteName}`
+                                      : undefined
+                                  }
+                                >
+                                  {code || "·"}
+                                </td>
+                              );
+                            })}
+                            <td className="border border-slate-200 px-1 py-1 text-center tabular-nums font-medium">
+                              {st.present}
+                            </td>
+                            <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                              {st.absent}
+                            </td>
+                            <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                              {st.late}
+                            </td>
+                            <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                              {st.leave}
+                            </td>
+                            <td className="border border-slate-200 px-1 py-1 text-center tabular-nums">
+                              {st.emergency}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          ) : null}
 
-          {/* Day-wise sheets + admin unlock (secondary) */}
-          {(registerQuery.data?.byDate ?? []).length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Day-wise sheets</CardTitle>
-                <p className="text-sm font-normal text-slate-500">
-                  Open a saved day to re-mark (if unlocked) or review details.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {(registerQuery.data?.byDate ?? [])
-                  .filter((day) =>
-                    !registerMonthBs
-                      ? true
-                      : String(day.dateBs).startsWith(registerMonthBs),
-                  )
-                  .map((day) => (
-                    <div key={day.dateBs} className="space-y-2">
-                      <h3 className="text-sm font-semibold text-slate-800">
-                        Date (BS): {day.dateBs}
-                      </h3>
-                      {day.shifts.map((block) => (
-                        <div
-                          key={block.attendanceId}
-                          className="overflow-hidden rounded-xl border border-slate-200"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm">
-                            <div>
-                              <span className="font-medium">{block.siteName}</span>
-                              <Badge className="ml-2 bg-indigo-100 text-indigo-800">
-                                {shiftLabel(block.shift)}
-                              </Badge>
-                              <Badge
-                                className={`ml-1 ${statusClass(block.recordStatus)}`}
-                              >
-                                {block.recordStatus}
-                              </Badge>
+          {/* Day-wise sheets — primary content of Reports tab */}
+          {tab === "reports" ? (
+            registerQuery.isLoading ? (
+              <LoadingState />
+            ) : (registerQuery.data?.byDate ?? []).length === 0 ? (
+              <EmptyState
+                title="No day-wise sheets this month"
+                description="Take daily attendance (with All on duty / Mark all Present if needed). Saved sheets appear here date-wise."
+              />
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Day-wise sheets</CardTitle>
+                  <p className="text-sm font-normal text-slate-500">
+                    Open a saved day to re-mark (if unlocked) or review details. Matches
+                    roster attendance taken by date and shift.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {(registerQuery.data?.byDate ?? [])
+                    .filter((day) =>
+                      !registerMonthBs
+                        ? true
+                        : String(day.dateBs).startsWith(registerMonthBs),
+                    )
+                    .map((day) => (
+                      <div key={day.dateBs} className="space-y-2">
+                        <h3 className="text-sm font-semibold text-slate-800">
+                          Date (BS): {day.dateBs}
+                        </h3>
+                        {day.shifts.map((block) => (
+                          <div
+                            key={block.attendanceId}
+                            className="overflow-hidden rounded-xl border border-slate-200"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                              <div>
+                                <span className="font-medium">{block.siteName}</span>
+                                <Badge className="ml-2 bg-indigo-100 text-indigo-800">
+                                  {shiftLabel(block.shift)}
+                                </Badge>
+                                <Badge
+                                  className={`ml-1 ${statusClass(block.recordStatus)}`}
+                                >
+                                  {block.recordStatus}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-slate-600">
+                                P {block.summary.present} · A {block.summary.absent} · Late{" "}
+                                {block.summary.late} · Leave {block.summary.leave} · Total{" "}
+                                {block.summary.total}
+                              </p>
                             </div>
-                            <p className="text-xs text-slate-600">
-                              P {block.summary.present} · A {block.summary.absent} · Late{" "}
-                              {block.summary.late} · Leave {block.summary.leave} · Total{" "}
-                              {block.summary.total}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-1 px-3 py-2">
-                            {canWrite ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setTab("mark");
-                                  const sch = schedules.find(
-                                    (s) => s._id === block.scheduleId,
-                                  );
-                                  if (sch) {
-                                    selectPostingForMark(
-                                      sch,
+                            <div className="flex flex-wrap gap-1 px-3 py-2">
+                              {canWrite ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setTab("mark");
+                                    const sch = schedules.find(
+                                      (s) => s._id === block.scheduleId,
+                                    );
+                                    if (sch) {
+                                      selectPostingForMark(
+                                        sch,
+                                        block.shift as FieldDutyShift,
+                                      );
+                                    } else {
+                                      setSelectedScheduleId(block.scheduleId);
+                                      setMarkShift(block.shift as FieldDutyShift);
+                                    }
+                                    setMarkDateBs(day.dateBs);
+                                    void loadRosterForMarking(
+                                      block.scheduleId,
+                                      day.dateBs,
+                                      null,
                                       block.shift as FieldDutyShift,
                                     );
-                                  } else {
-                                    setSelectedScheduleId(block.scheduleId);
-                                    setMarkShift(block.shift as FieldDutyShift);
+                                  }}
+                                >
+                                  Open day sheet
+                                </Button>
+                              ) : null}
+                              {isAdmin &&
+                              (block.recordStatus === "LOCKED" ||
+                                block.recordStatus === "SUBMITTED") ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    unlockAttendance.mutate(block.attendanceId)
                                   }
-                                  setMarkDateBs(day.dateBs);
-                                  void loadRosterForMarking(
-                                    block.scheduleId,
-                                    day.dateBs,
-                                    null,
-                                    block.shift as FieldDutyShift,
-                                  );
-                                }}
-                              >
-                                Open day sheet
-                              </Button>
-                            ) : null}
-                            {isAdmin &&
-                            (block.recordStatus === "LOCKED" ||
-                              block.recordStatus === "SUBMITTED") ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  unlockAttendance.mutate(block.attendanceId)
-                                }
-                              >
-                                Unlock
-                              </Button>
-                            ) : null}
+                                >
+                                  Unlock
+                                </Button>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-              </CardContent>
-            </Card>
+                        ))}
+                      </div>
+                    ))}
+                </CardContent>
+              </Card>
+            )
           ) : null}
 
           {/* Edit requests */}

@@ -419,55 +419,79 @@ export const ModuleAccessControlPanel = ({
               <ul className="divide-y divide-slate-100">
                 {group.keys.map((key) => {
                   const mode = (draftAccess[key] ?? "NONE") as ModuleAccessMode;
+                  const isFieldDuty = key === "field-duty";
                   return (
                     <li
                       key={key}
-                      className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      className="flex flex-col gap-2 px-4 py-3"
                     >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-900">
-                          {moduleLabel(key)}
-                        </p>
-                        {!compact ? (
-                          <p className="text-xs text-slate-500 line-clamp-1">
-                            {moduleDescription(key)}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900">
+                            {moduleLabel(key)}
                           </p>
-                        ) : null}
-                      </div>
-                      <div
-                        className="inline-flex shrink-0 rounded-xl border border-slate-200 bg-white p-0.5"
-                        role="group"
-                        aria-label={`${moduleLabel(key)} access level`}
-                      >
-                        {MODE_OPTIONS.map((opt) => {
-                          const active = mode === opt.value;
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              disabled={readOnly}
-                              onClick={() => setMode(key, opt.value)}
+                          {!compact ? (
+                            <p
                               className={cn(
-                                "rounded-lg px-3 py-1.5 text-xs font-medium transition",
-                                active &&
-                                  opt.value === "NONE" &&
-                                  "bg-slate-800 text-white shadow-sm",
-                                active &&
-                                  opt.value === "READ_ONLY" &&
-                                  "bg-amber-500 text-white shadow-sm",
-                                active &&
-                                  opt.value === "WRITE" &&
-                                  "bg-emerald-600 text-white shadow-sm",
-                                !active &&
-                                  "text-slate-600 hover:bg-slate-50",
-                                readOnly && "cursor-default opacity-80",
+                                "text-xs text-slate-500",
+                                isFieldDuty ? "" : "line-clamp-1",
                               )}
                             >
-                              {opt.short}
-                            </button>
-                          );
-                        })}
+                              {moduleDescription(key)}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div
+                          className="inline-flex shrink-0 rounded-xl border border-slate-200 bg-white p-0.5"
+                          role="group"
+                          aria-label={`${moduleLabel(key)} access level`}
+                        >
+                          {MODE_OPTIONS.map((opt) => {
+                            const active = mode === opt.value;
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                disabled={readOnly}
+                                onClick={() => setMode(key, opt.value)}
+                                className={cn(
+                                  "rounded-lg px-3 py-1.5 text-xs font-medium transition",
+                                  active &&
+                                    opt.value === "NONE" &&
+                                    "bg-slate-800 text-white shadow-sm",
+                                  active &&
+                                    opt.value === "READ_ONLY" &&
+                                    "bg-amber-500 text-white shadow-sm",
+                                  active &&
+                                    opt.value === "WRITE" &&
+                                    "bg-emerald-600 text-white shadow-sm",
+                                  !active &&
+                                    "text-slate-600 hover:bg-slate-50",
+                                  readOnly && "cursor-default opacity-80",
+                                )}
+                              >
+                                {opt.short}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
+                      {isFieldDuty && mode === "WRITE" && !readOnly ? (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
+                          <strong>Full Field Management</strong> — this person can
+                          create postings &amp; hospital rosters, assign
+                          coordinators/students, take &amp; unlock attendance, manage
+                          hospitals/departments/shifts, and open monitoring. Same
+                          tools as admin for Field Management only.
+                        </div>
+                      ) : null}
+                      {isFieldDuty && mode === "READ_ONLY" && !readOnly ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                          View only — they can open Field Management menus and
+                          registers but cannot create rosters or mark attendance
+                          (unless assigned as a field coordinator on a posting).
+                        </div>
+                      ) : null}
                     </li>
                   );
                 })}

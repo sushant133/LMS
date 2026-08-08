@@ -42,7 +42,11 @@ const FIELD_READ = [
   "COLLEGE_STAFF",
 ] as const;
 
-const FIELD_ADMIN = ["SUPER_ADMIN", "COLLEGE_ADMIN"] as const;
+/**
+ * Roster / hospital master mutations.
+ * COLLEGE_STAFF allowed at route level; controller requires Field Management Manage.
+ */
+const FIELD_ADMIN = ["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_STAFF"] as const;
 
 // Hospitals (multi-hospital registry — does not alter FieldDutySchedule)
 router.get("/hospitals", authorize(...FIELD_READ), listHospitals);
