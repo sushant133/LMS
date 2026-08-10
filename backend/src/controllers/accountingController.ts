@@ -53,6 +53,7 @@ import {
   calculateNetSalary,
   capProgramYearChargesNpr,
   computeBalanceAfterEntry,
+  computeYearScopedDueSnapshots,
   defaultCoversYearFromTopped,
   ensureActiveScholarshipAwardsApplied,
   filterOutOpeningTuitionCharges,
@@ -782,6 +783,7 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
 });
 
 export const listFeeReceipts = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
   const collections = await FeeCollection.find(withTenantScope(req, { isDeleted: false }))
     .populate({
       path: "studentId",
@@ -795,9 +797,70 @@ export const listFeeReceipts = asyncHandler(async (req: Request, res: Response) 
     })
     .sort({ paidDateBs: -1 })
     .lean();
+
+  // Overlay year-scoped remaining (Y1 receipt → Y1 remaining only, not all years).
+  // Group all ledger rows (incl. OPEN plan charges) per student, then recompute.
+  const awards = await StudentScholarshipAward.find({
+    schoolId,
+    isDeleted: false,
+    status: { $in: ["ACTIVE", "APPLIED"] }
+  }).lean();
+
+  const byStudent = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of collections) {
+    const sid =
+      row.studentId && typeof row.studentId === "object" && "_id" in row.studentId
+        ? String((row.studentId as { _id: unknown })._id)
+        : String(row.studentId ?? "");
+    if (!sid) continue;
+    const list = byStudent.get(sid) ?? [];
+    list.push(row as unknown as Record<string, unknown>);
+    byStudent.set(sid, list);
+  }
+
+  const remainingById = new Map<
+    string,
+    { previousDueNpr: number; remainingDueNpr: number }
+  >();
+  for (const [sid, rows] of byStudent) {
+    const studentDoc = rows[0]?.studentId as
+      | {
+          year1FeeNpr?: number;
+          year2FeeNpr?: number;
+          year3FeeNpr?: number;
+        }
+      | undefined;
+    const planned = {
+      1: Math.max(0, Number(studentDoc?.year1FeeNpr) || 0),
+      2: Math.max(0, Number(studentDoc?.year2FeeNpr) || 0),
+      3: Math.max(0, Number(studentDoc?.year3FeeNpr) || 0)
+    };
+    const studentAwards = awards.filter(
+      (a) => a.studentId != null && String(a.studentId) === sid
+    );
+    const snaps = computeYearScopedDueSnapshots(
+      rows,
+      studentAwards as unknown as Array<Record<string, unknown>>,
+      planned
+    );
+    for (const [id, snap] of snaps) {
+      remainingById.set(id, snap);
+    }
+  }
+
+  const withYearRemaining = collections.map((row) => {
+    const snap = remainingById.get(String(row._id));
+    if (!snap) return row;
+    return {
+      ...row,
+      previousDueNpr: snap.previousDueNpr,
+      remainingDueNpr: snap.remainingDueNpr
+    };
+  });
+
   // Hide system OPEN- year-plan rows (fee structure at admission, not payments)
   const paymentsOnly = filterOutOpeningTuitionCharges(
-    collections as unknown as Array<Record<string, unknown>>
+    withYearRemaining as unknown as Array<Record<string, unknown>>
   );
   return sendSuccess(res, "Fee receipts fetched", paymentsOnly);
 });
@@ -1021,6 +1084,7 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
     }
 
     // Replay all collections for authoritative outstanding balance (handles concurrent cashiers better)
+    // and rewrite remainingDueNpr on each receipt to that program year's balance only.
     await recalculateStudentFeesDue(payload.studentId, schoolId, session);
 
     if (cashReceivedNpr > 0) {
@@ -1068,7 +1132,11 @@ export const collectAccountingFee = asyncHandler(async (req: Request, res: Respo
       session
     });
 
-    return created;
+    // Re-read so remainingDueNpr is the year-scoped value written by recalculate
+    const refreshedQuery = FeeCollection.findById(created._id);
+    if (session) refreshedQuery.session(session);
+    const refreshed = await refreshedQuery;
+    return refreshed ?? created;
   });
 
   await recordAudit(req, {
@@ -1704,7 +1772,11 @@ export const updateAccountingFeeCollection = asyncHandler(async (req: Request, r
     }
 
     await recalculateStudentFeesDue(existing.studentId, schoolId, session);
-    return existing;
+    // Re-read year-scoped remaining after snapshot sync
+    const refreshedQuery = FeeCollection.findById(existing._id);
+    if (session) refreshedQuery.session(session);
+    const refreshed = await refreshedQuery;
+    return refreshed ?? existing;
   });
 
   await recordAudit(req, {
@@ -1835,12 +1907,40 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
 
   if (!student || !school) throw new ApiError(404, "Receipt data incomplete");
 
-  const [classDoc, sectionDoc] = await Promise.all([
+  const [classDoc, sectionDoc, studentCollections, studentAwards] = await Promise.all([
     college
       ? Batch.findById(student.batchId).lean()
       : SchoolClass.findById(student.classId).lean(),
-    college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean()
+    college ? Year.findById(student.yearId).lean() : Section.findById(student.sectionId).lean(),
+    FeeCollection.find({
+      schoolId,
+      studentId: collection.studentId,
+      isDeleted: false
+    })
+      .sort({ createdAt: 1 })
+      .lean(),
+    StudentScholarshipAward.find({
+      schoolId,
+      studentId: collection.studentId,
+      isDeleted: false,
+      status: { $in: ["ACTIVE", "APPLIED"] }
+    }).lean()
   ]);
+
+  // Remaining on PDF must match this receipt's program year, not all-years total
+  const plannedFees = {
+    1: Math.max(0, Number((student as { year1FeeNpr?: number }).year1FeeNpr) || 0),
+    2: Math.max(0, Number((student as { year2FeeNpr?: number }).year2FeeNpr) || 0),
+    3: Math.max(0, Number((student as { year3FeeNpr?: number }).year3FeeNpr) || 0)
+  };
+  const yearSnaps = computeYearScopedDueSnapshots(
+    studentCollections as unknown as Array<Record<string, unknown>>,
+    studentAwards as unknown as Array<Record<string, unknown>>,
+    plannedFees
+  );
+  const yearRemaining =
+    yearSnaps.get(String(collection._id))?.remainingDueNpr ??
+    Number(collection.remainingDueNpr ?? 0);
 
   const depositPaid = Math.max(
     0,
@@ -1858,6 +1958,12 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
   collection.printCount = (collection.printCount ?? 0) + 1;
   collection.lastPrintedAt = new Date();
   collection.lastPrintedBy = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+  // Heal stored remaining if it still holds all-years total
+  if (Number(collection.remainingDueNpr ?? 0) !== yearRemaining) {
+    collection.remainingDueNpr = yearRemaining;
+    const prevSnap = yearSnaps.get(String(collection._id));
+    if (prevSnap) collection.previousDueNpr = prevSnap.previousDueNpr;
+  }
   await collection.save();
 
   await recordAudit(req, {
@@ -1893,7 +1999,7 @@ export const downloadFeeReceipt = asyncHandler(async (req: Request, res: Respons
       lateFeeNpr: collection.lateFeeNpr ?? 0,
       totalPaid: cashTotal,
       scholarshipNpr: collection.scholarshipNpr ?? 0,
-      remainingDueNpr: collection.remainingDueNpr ?? 0,
+      remainingDueNpr: yearRemaining,
       paymentMethod: collection.paymentMethod ?? "CASH",
       accountantName: collection.accountantName ?? "",
       rollNumber: student.rollNumber,

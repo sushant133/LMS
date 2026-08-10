@@ -265,9 +265,24 @@ export const FieldPostingSectionPanel = ({
     ],
     queryFn: () => {
       const month = registerMonthBs || monthBsFromDate(todayBsString());
-      const fromDateBs = month ? `${month}-01` : undefined;
-      // Fetch full month window (BS months up to 32 days)
-      const toDateBs = month ? `${month}-32` : undefined;
+      // Full BS month window — day count varies (29–32); never hardcode -32
+      // (invalid days like 2083-04-32 return 400 from ensureValidBsDate).
+      let fromDateBs: string | undefined;
+      let toDateBs: string | undefined;
+      if (month && /^\d{4}-\d{2}$/.test(month)) {
+        const [y, m] = month.split("-").map(Number);
+        if (y && m >= 1 && m <= 12) {
+          let daysInMonth = 30;
+          try {
+            daysInMonth = getDaysInBsMonth(y, m);
+          } catch {
+            daysInMonth = 30;
+          }
+          const last = Math.min(32, Math.max(28, daysInMonth));
+          fromDateBs = `${month}-01`;
+          toDateBs = `${month}-${String(last).padStart(2, "0")}`;
+        }
+      }
       return unwrap<FieldDutyRegisterBook>(
         api.get("/field-duty/register", {
           params: {

@@ -54,6 +54,11 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { useAuth } from "features/auth/AuthProvider";
 import { api, resolveApiUrl, unwrap } from "lib/api";
+import {
+  buildPrintInstitutionHeaderHtml,
+  getPrintInstitutionBranding,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import {
@@ -62,6 +67,7 @@ import {
   downloadRecordsExcel,
   formatDualDateCell,
 } from "./accountingUtils";
+import { printHtmlViaIframe } from "./voucherPrint";
 
 type PanelTab = "ledger" | "record" | "scholarship" | "receipts";
 
@@ -412,6 +418,8 @@ export const StudentFeeRecordsPanel = () => {
   const [receiptToBs, setReceiptToBs] = useState("");
   const [receiptToAd, setReceiptToAd] = useState("");
   const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(null);
+  /** Bulk table print of All receipts (not individual PDFs). */
+  const [printingBulkList, setPrintingBulkList] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
   const [attachments, setAttachments] = useState<FeeAttachment[]>([]);
@@ -1094,8 +1102,11 @@ export const StudentFeeRecordsPanel = () => {
     }
   };
 
-  /** Super Admin / College Admin only — print all currently filtered receipts. */
-  const printAllFilteredReceipts = async () => {
+  /**
+   * Bulk print of All receipts as one landscape table (not individual PDFs).
+   * Use each row’s Print button for a single official receipt PDF.
+   */
+  const printAllFilteredReceipts = () => {
     if (!canAdminEdit) {
       toast.error("Only college admin or super admin can print receipts");
       return;
@@ -1104,28 +1115,288 @@ export const StudentFeeRecordsPanel = () => {
       toast.error("No receipts to print");
       return;
     }
-    if (filteredReceipts.length > 15) {
-      if (
-        !window.confirm(
-          `Download ${filteredReceipts.length} receipt PDFs? Files will download one by one.`,
-        )
-      ) {
-        return;
+
+    setPrintingBulkList(true);
+    try {
+      const escapeHtml = (value: string) =>
+        value
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+
+      /** Compact money for narrow print columns (header already says NPR). */
+      const money = (amount: number): string =>
+        new Intl.NumberFormat("en-NP", {
+          maximumFractionDigits: 2,
+          minimumFractionDigits: 2,
+        }).format(amount);
+
+      const batchName =
+        batches.find((b) => b._id === receiptBatchId)?.name?.trim() || "";
+      const yearName =
+        years.find((y) => y._id === receiptYearId)?.name?.trim() || "";
+
+      const filterBits: string[] = [];
+      if (batchName) filterBits.push(`Batch: ${batchName}`);
+      if (yearName) filterBits.push(`Year: ${yearName}`);
+      if (method) filterBits.push(`Method: ${paymentMethodLabel(method)}`);
+      if (receiptSearch.trim()) {
+        filterBits.push(`Search: “${receiptSearch.trim()}”`);
       }
+      if (receiptFromBs || receiptToBs) {
+        filterBits.push(
+          `Date: ${receiptFromBs || "…"} → ${receiptToBs || "…"}`,
+        );
+      }
+
+      let totalFeePaid = 0;
+      let totalDeposit = 0;
+      let totalScholarship = 0;
+      let totalRemaining = 0;
+
+      const rowsHtml = filteredReceipts
+        .map((row, index) => {
+          const st = resolveStudent(row);
+          const dual = formatDualDateCell({
+            dateBs: row.paidDateBs,
+            dateAd: row.paidDateAd,
+          });
+          const programYearLabel = row.programYear
+            ? (PROGRAM_YEARS.find((y) => y.value === row.programYear)?.label ??
+              `Year ${row.programYear}`)
+            : "";
+          const hasProgramYear =
+            row.programYear === 1 ||
+            row.programYear === 2 ||
+            row.programYear === 3;
+          const feePaid = Number(row.amountPaidNpr) || 0;
+          const deposit = Number(row.securityDepositPaidNpr) || 0;
+          const scholarship = Number(row.scholarshipNpr) || 0;
+          const remaining = Number(row.remainingDueNpr) || 0;
+          totalFeePaid += feePaid;
+          totalDeposit += deposit;
+          totalScholarship += scholarship;
+          // Only sum year-scoped remaining when a program year is set
+          if (hasProgramYear) totalRemaining += remaining;
+
+          const dateHtml = dual.secondary
+            ? `<div class="date-bs">${escapeHtml(dual.primary)}</div><div class="date-ad">${escapeHtml(dual.secondary)}</div>`
+            : `<div class="date-bs">${escapeHtml(dual.primary)}</div>`;
+
+          // Remaining always names which program year the balance belongs to
+          const remainingHtml = hasProgramYear
+            ? `<div class="due-year">${escapeHtml(programYearLabel)} due</div><div class="due-amt">${escapeHtml(money(remaining))}</div>`
+            : `<div class="due-year muted">No program year</div><div class="due-amt">—</div>`;
+
+          const batchYear = [
+            st.batch !== "—" ? st.batch : "",
+            st.year !== "—" ? st.year : "",
+          ]
+            .filter(Boolean)
+            .join(" / ");
+
+          return `<tr>
+            <td class="c">${index + 1}</td>
+            <td class="mono">${escapeHtml(row.receiptNumber ?? "")}</td>
+            <td class="student"><div class="name">${escapeHtml(st.name)}</div><div class="muted">${escapeHtml(st.admission)}</div></td>
+            <td>${escapeHtml(batchYear || "—")}</td>
+            <td class="c">${escapeHtml(programYearLabel || "—")}</td>
+            <td>${escapeHtml(feeCategory(row))}</td>
+            <td class="num">${escapeHtml(money(feePaid))}</td>
+            <td class="num">${deposit > 0 ? escapeHtml(money(deposit)) : "—"}</td>
+            <td class="num">${scholarship > 0 ? escapeHtml(money(scholarship)) : "—"}</td>
+            <td class="remaining">${remainingHtml}</td>
+            <td>${escapeHtml(paymentMethodLabel(row.paymentMethod))}</td>
+            <td class="date">${dateHtml}</td>
+            <td class="people"><div>${escapeHtml(row.receivedByName?.trim() || "—")}</div><div class="muted">${escapeHtml(row.paidByName?.trim() || "—")}</div></td>
+          </tr>`;
+        })
+        .join("");
+
+      const printedAt = new Date().toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const branding = getPrintInstitutionBranding();
+      const institutionHeader = buildPrintInstitutionHeaderHtml({ branding });
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fee Receipts List</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: "IBM Plex Sans", "Noto Sans Devanagari", system-ui, sans-serif;
+      margin: 10px 12px;
+      color: #0f172a;
+      background: #fff;
     }
-    toast.message(`Preparing ${filteredReceipts.length} receipt PDF(s)…`);
-    let ok = 0;
-    for (const row of filteredReceipts) {
-      // Sequential to avoid browser / connection storms
-      // eslint-disable-next-line no-await-in-loop
-      await downloadReceiptPdf(row._id, row.receiptNumber, { silent: true });
-      ok += 1;
+    h1 { font-size: 13px; margin: 4px 0 2px; font-weight: 700; }
+    .meta { font-size: 9px; color: #475569; margin-bottom: 8px; line-height: 1.4; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 8.5px;
+      table-layout: fixed;
+      line-height: 1.3;
     }
-    toast.success(
-      ok === 1
-        ? "1 receipt PDF downloaded"
-        : `${ok} receipt PDFs downloaded`,
-    );
+    th, td {
+      border: 1px solid #64748b;
+      padding: 3px 4px;
+      text-align: left;
+      vertical-align: top;
+      overflow: hidden;
+    }
+    th {
+      background: #e2e8f0;
+      font-weight: 700;
+      white-space: normal;
+      line-height: 1.2;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    tbody tr:nth-child(even) td { background: #f8fafc; }
+    .num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .c { text-align: center; }
+    .mono {
+      font-family: ui-monospace, Consolas, "Courier New", monospace;
+      font-size: 7.5px;
+      word-break: break-all;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+    .name { font-weight: 600; }
+    .muted { color: #64748b; font-size: 7.5px; line-height: 1.25; }
+    .date { white-space: normal; }
+    .date-bs {
+      font-weight: 600;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .date-ad {
+      display: block;
+      margin-top: 2px;
+      color: #475569;
+      font-size: 7.5px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .remaining { text-align: right; white-space: normal; }
+    .due-year {
+      font-size: 7.5px;
+      font-weight: 700;
+      color: #0c2d6b;
+      line-height: 1.2;
+      margin-bottom: 1px;
+    }
+    .due-amt {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .student .muted, .people .muted { margin-top: 1px; }
+    tfoot td {
+      font-weight: 700;
+      background: #f1f5f9;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    tr { page-break-inside: avoid; break-inside: avoid; }
+    @page { size: A4 landscape; margin: 7mm 5mm; }
+    @media print {
+      body { margin: 0; }
+    }
+    ${PRINT_INSTITUTION_HEADER_CSS}
+  </style>
+</head>
+<body>
+  ${institutionHeader}
+  <h1>All Fee Receipts</h1>
+  <div class="meta">
+    ${filteredReceipts.length} receipt${filteredReceipts.length === 1 ? "" : "s"}
+    · Amounts in NPR
+    · Total fee paid ${escapeHtml(money(totalFeePaid))}
+    ${totalDeposit > 0 ? ` · Deposit ${escapeHtml(money(totalDeposit))}` : ""}
+    · Printed ${escapeHtml(printedAt)}
+    ${filterBits.length > 0 ? `<br/>Filters: ${escapeHtml(filterBits.join(" · "))}` : ""}
+  </div>
+  <table>
+    <colgroup>
+      <col style="width: 2.5%" />
+      <col style="width: 9%" />
+      <col style="width: 11%" />
+      <col style="width: 9%" />
+      <col style="width: 5.5%" />
+      <col style="width: 9%" />
+      <col style="width: 7%" />
+      <col style="width: 6.5%" />
+      <col style="width: 6.5%" />
+      <col style="width: 9%" />
+      <col style="width: 6%" />
+      <col style="width: 9%" />
+      <col style="width: 10%" />
+    </colgroup>
+    <thead>
+      <tr>
+        <th class="c">#</th>
+        <th>Receipt</th>
+        <th>Student</th>
+        <th>Batch / Year</th>
+        <th class="c">Program year</th>
+        <th>Category</th>
+        <th class="num">Fee paid</th>
+        <th class="num">Deposit</th>
+        <th class="num">Scholarship</th>
+        <th class="num">Remaining<br/>(by program year)</th>
+        <th>Method</th>
+        <th>Date<br/>(BS / AD)</th>
+        <th>Received by<br/><span style="font-weight:500">Paid by</span></th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="6">Totals (${filteredReceipts.length} receipt${filteredReceipts.length === 1 ? "" : "s"})</td>
+        <td class="num">${escapeHtml(money(totalFeePaid))}</td>
+        <td class="num">${totalDeposit > 0 ? escapeHtml(money(totalDeposit)) : "—"}</td>
+        <td class="num">${totalScholarship > 0 ? escapeHtml(money(totalScholarship)) : "—"}</td>
+        <td class="num remaining"><div class="due-year">Program years</div><div class="due-amt">${escapeHtml(money(totalRemaining))}</div></td>
+        <td colspan="3"></td>
+      </tr>
+    </tfoot>
+  </table>
+  <p class="meta" style="margin-top:6px">
+    Date shows BS on the first line and AD on the second.
+    Remaining lists the program year (1st / 2nd / 3rd) and that year’s balance only — not all-years total.
+  </p>
+</body>
+</html>`;
+
+      printHtmlViaIframe(html);
+      toast.success(
+        `Print dialog opened — ${filteredReceipts.length} receipt${
+          filteredReceipts.length === 1 ? "" : "s"
+        } in one table`,
+      );
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not open print preview",
+      );
+    } finally {
+      setPrintingBulkList(false);
+    }
   };
 
   const exportExcel = () => {
@@ -2531,7 +2802,7 @@ export const StudentFeeRecordsPanel = () => {
               <p className="mt-1 text-xs text-slate-500">
                 Filter by batch, year, student search, and date range (BS or AD).
                 {canAdminEdit
-                  ? " Print PDF, edit, or delete payments (Super Admin / College Admin only)."
+                  ? " Print PDF prints the filtered list as one table; each row’s Print opens a single receipt. Super Admin / College Admin can also edit or delete."
                   : ""}
               </p>
             </div>
@@ -2542,12 +2813,15 @@ export const StudentFeeRecordsPanel = () => {
                   variant="outline"
                   size="sm"
                   disabled={
-                    filteredReceipts.length === 0 || Boolean(printingReceiptId)
+                    filteredReceipts.length === 0 ||
+                    printingBulkList ||
+                    Boolean(printingReceiptId)
                   }
-                  onClick={() => void printAllFilteredReceipts()}
+                  onClick={() => printAllFilteredReceipts()}
+                  title="Print all filtered receipts as one table (Save as PDF from the print dialog)"
                 >
                   <Printer className="mr-1 h-4 w-4" />
-                  {printingReceiptId ? "Printing…" : "Print PDF"}
+                  {printingBulkList ? "Preparing…" : "Print PDF"}
                 </Button>
               ) : null}
               <Button type="button" variant="outline" size="sm" onClick={exportExcel}>
@@ -2712,7 +2986,12 @@ export const StudentFeeRecordsPanel = () => {
                       <Th className="whitespace-nowrap">Fee paid</Th>
                       <Th className="whitespace-nowrap">Deposit</Th>
                       <Th className="whitespace-nowrap">Scholarship</Th>
-                      <Th className="whitespace-nowrap">Remaining</Th>
+                      <Th
+                        className="whitespace-nowrap"
+                        title="Remaining balance for this receipt’s program year only (not all years)"
+                      >
+                        Remaining (year)
+                      </Th>
                       <Th className="whitespace-nowrap">Method</Th>
                       <Th className="whitespace-nowrap">Received by</Th>
                       <Th className="whitespace-nowrap">Paid by</Th>

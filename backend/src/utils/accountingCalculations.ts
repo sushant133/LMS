@@ -484,8 +484,137 @@ export const capProgramYearChargesNpr = (params: {
 };
 
 /**
+ * Per-receipt year balance for multi-year programs (HA).
+ *
+ * For program year 1–3 rows, `remainingDueNpr` must be that year's remaining
+ * after the receipt (not the student's all-years outstanding). Otherwise the
+ * All Receipts table confuses fee paid for Y1 with remaining of Y1+Y2+Y3.
+ *
+ * Walk collections in chronological order and snapshot previous/remaining for
+ * each program-year receipt against the year ledger up to that point.
+ */
+export const computeYearScopedDueSnapshots = (
+  collections: Array<Record<string, unknown>>,
+  awards: Array<Record<string, unknown>> = [],
+  plannedFees: PlannedYearFees = {}
+): Map<string, { previousDueNpr: number; remainingDueNpr: number }> => {
+  const sorted = [...collections].sort((a, b) => {
+    const ta = new Date(String(a.createdAt ?? 0)).getTime();
+    const tb = new Date(String(b.createdAt ?? 0)).getTime();
+    if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+    // Stable fallback: paid date then id
+    const da = String(a.paidDateBs ?? "");
+    const db = String(b.paidDateBs ?? "");
+    if (da !== db) return da.localeCompare(db);
+    return String(a._id ?? "").localeCompare(String(b._id ?? ""));
+  });
+
+  const out = new Map<string, { previousDueNpr: number; remainingDueNpr: number }>();
+
+  // Unscoped / legacy rows: chronological total remaining (no program year)
+  let otherDue = 0;
+
+  for (let i = 0; i < sorted.length; i += 1) {
+    const row = sorted[i];
+    if (!row) continue;
+    const id = String(row._id ?? "");
+    if (!id) continue;
+    const py = Number(row.programYear);
+
+    if (py === 1 || py === 2 || py === 3) {
+      const before = buildProgramYearFeeSummary(
+        sorted.slice(0, i),
+        awards,
+        plannedFees
+      );
+      const after = buildProgramYearFeeSummary(
+        sorted.slice(0, i + 1),
+        awards,
+        plannedFees
+      );
+      out.set(id, {
+        previousDueNpr:
+          before.find((y) => y.programYear === py)?.remainingNpr ?? 0,
+        remainingDueNpr:
+          after.find((y) => y.programYear === py)?.remainingNpr ?? 0
+      });
+      continue;
+    }
+
+    const totals = calculateFeeTotals({
+      previousDueNpr: otherDue,
+      currentChargesNpr: Number(row.currentChargesNpr ?? 0),
+      amountPaidNpr: Number(row.amountPaidNpr ?? 0),
+      discountNpr: Number(row.discountNpr ?? 0),
+      scholarshipNpr: Number(row.scholarshipNpr ?? 0),
+      lateFeeNpr: 0
+    });
+    out.set(id, {
+      previousDueNpr: otherDue,
+      remainingDueNpr: totals.remainingDueNpr
+    });
+    otherDue = totals.remainingDueNpr;
+  }
+
+  return out;
+};
+
+/**
+ * Persist year-scoped previousDue / remainingDue on each fee collection row.
+ * Safe to call repeatedly (no-op when values already match).
+ */
+export const syncCollectionYearDueSnapshots = async (
+  collections: Array<Record<string, unknown>>,
+  awards: Array<Record<string, unknown>>,
+  plannedFees: PlannedYearFees,
+  session?: import("mongoose").ClientSession | null
+): Promise<void> => {
+  if (collections.length === 0) return;
+  const { FeeCollection } = await import("../models/FeeCollection.js");
+  const snapshots = computeYearScopedDueSnapshots(
+    collections,
+    awards,
+    plannedFees
+  );
+  const ops: Array<{
+    updateOne: {
+      filter: { _id: unknown };
+      update: { $set: { previousDueNpr: number; remainingDueNpr: number } };
+    };
+  }> = [];
+
+  for (const row of collections) {
+    const id = String(row._id ?? "");
+    const snap = snapshots.get(id);
+    if (!snap) continue;
+    const prev = Number(row.previousDueNpr ?? 0);
+    const rem = Number(row.remainingDueNpr ?? 0);
+    if (prev === snap.previousDueNpr && rem === snap.remainingDueNpr) continue;
+    ops.push({
+      updateOne: {
+        filter: { _id: row._id },
+        update: {
+          $set: {
+            previousDueNpr: snap.previousDueNpr,
+            remainingDueNpr: snap.remainingDueNpr
+          }
+        }
+      }
+    });
+  }
+
+  if (ops.length === 0) return;
+  await FeeCollection.bulkWrite(ops, {
+    ordered: false,
+    ...(session ? { session } : {})
+  });
+};
+
+/**
  * Derive outstanding tuition due from year-wise plan + payments (HA).
  * Falls back to chronological replay for non–program-year / legacy rows.
+ * Also rewrites each receipt's remainingDueNpr to that program year's balance
+ * (so All Receipts / PDFs match the filtered year, not all-years total).
  */
 export const recalculateStudentFeesDue = async (
   studentId: import("mongoose").Types.ObjectId | string,
@@ -552,6 +681,14 @@ export const recalculateStudentFeesDue = async (
     }
     runningDue += otherDue;
   }
+
+  // Keep receipt "Remaining" aligned with the payment's program year
+  await syncCollectionYearDueSnapshots(
+    collections as unknown as Array<Record<string, unknown>>,
+    awards as unknown as Array<Record<string, unknown>>,
+    planned,
+    session ?? null
+  );
 
   const updateQuery = Student.findByIdAndUpdate(
     studentId,
