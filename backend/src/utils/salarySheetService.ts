@@ -199,10 +199,17 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     remarks: string;
     attendanceIncomplete: boolean;
     attendanceManualOverride: boolean;
+    valuesManualOverride: boolean;
     attendanceDaysRecorded: number;
     salaryPaymentId?: string;
     status?: string;
     extraAmountOverrideNpr?: number;
+    /** Saved money when valuesManualOverride is true */
+    savedAbsentDeductionNpr?: number;
+    savedExtraAmountNpr?: number;
+    savedSalaryAmountNpr?: number;
+    savedTax1PercentNpr?: number;
+    savedNetSalaryNpr?: number;
   };
 
   const drafts: DraftRow[] = [];
@@ -230,6 +237,10 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       const saved = salaryByTeacher.get(id);
       const incomplete = !att || att.daysRecorded === 0;
       const manual = Boolean(saved?.attendanceManualOverride);
+      const valuesManual = Boolean(
+        (saved as { valuesManualOverride?: boolean } | undefined)
+          ?.valuesManualOverride
+      );
       drafts.push({
         employeeType: "TEACHER",
         teacherId: id,
@@ -251,16 +262,33 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         remarks: String(saved?.notes ?? ""),
         attendanceIncomplete: incomplete && !manual,
         attendanceManualOverride: manual,
+        valuesManualOverride: valuesManual,
         attendanceDaysRecorded: att?.daysRecorded ?? 0,
         salaryPaymentId: saved ? String(saved._id) : undefined,
         status: saved?.status,
         extraAmountOverrideNpr:
+          !valuesManual &&
           saved?.extraAmountNpr !== undefined &&
           saved?.extraDuty !== undefined &&
           Number(saved.extraDuty) === 0 &&
           Number(saved.extraAmountNpr) > 0
             ? Number(saved.extraAmountNpr)
-            : undefined
+            : undefined,
+        savedAbsentDeductionNpr: valuesManual
+          ? Number(saved?.absentDeductionNpr ?? 0)
+          : undefined,
+        savedExtraAmountNpr: valuesManual
+          ? Number(saved?.extraAmountNpr ?? 0)
+          : undefined,
+        savedSalaryAmountNpr: valuesManual
+          ? Number(saved?.salaryAmountNpr ?? 0)
+          : undefined,
+        savedTax1PercentNpr: valuesManual
+          ? Number(saved?.taxNpr ?? 0)
+          : undefined,
+        savedNetSalaryNpr: valuesManual
+          ? Number(saved?.netSalaryNpr ?? 0)
+          : undefined
       });
     }
   }
@@ -285,6 +313,10 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       const saved = salaryByStaff.get(id);
       const incomplete = !att || att.daysRecorded === 0;
       const manual = Boolean(saved?.attendanceManualOverride);
+      const valuesManual = Boolean(
+        (saved as { valuesManualOverride?: boolean } | undefined)
+          ?.valuesManualOverride
+      );
       drafts.push({
         employeeType: "STAFF",
         staffId: id,
@@ -306,15 +338,32 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         remarks: String(saved?.notes ?? ""),
         attendanceIncomplete: incomplete && !manual,
         attendanceManualOverride: manual,
+        valuesManualOverride: valuesManual,
         attendanceDaysRecorded: att?.daysRecorded ?? 0,
         salaryPaymentId: saved ? String(saved._id) : undefined,
         status: saved?.status,
         extraAmountOverrideNpr:
+          !valuesManual &&
           saved?.extraAmountNpr !== undefined &&
           Number(saved.extraDuty) === 0 &&
           Number(saved.extraAmountNpr) > 0
             ? Number(saved.extraAmountNpr)
-            : undefined
+            : undefined,
+        savedAbsentDeductionNpr: valuesManual
+          ? Number(saved?.absentDeductionNpr ?? 0)
+          : undefined,
+        savedExtraAmountNpr: valuesManual
+          ? Number(saved?.extraAmountNpr ?? 0)
+          : undefined,
+        savedSalaryAmountNpr: valuesManual
+          ? Number(saved?.salaryAmountNpr ?? 0)
+          : undefined,
+        savedTax1PercentNpr: valuesManual
+          ? Number(saved?.taxNpr ?? 0)
+          : undefined,
+        savedNetSalaryNpr: valuesManual
+          ? Number(saved?.netSalaryNpr ?? 0)
+          : undefined
       });
     }
   }
@@ -331,6 +380,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       workingDaysInMonth,
       extraAmountOverrideNpr: d.extraAmountOverrideNpr
     });
+    const useManualMoney = Boolean(d.valuesManualOverride);
     return {
       sn: index + 1,
       employeeType: d.employeeType,
@@ -343,14 +393,25 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       presentDays: d.presentDays,
       absentDays: d.absentDays,
       extraDuty: d.extraDuty,
-      absentDeductionNpr: calc.absentDeductionNpr,
-      extraAmountNpr: calc.extraAmountNpr,
-      salaryAmountNpr: calc.salaryAmountNpr,
-      tax1PercentNpr: calc.tax1PercentNpr,
-      netSalaryNpr: calc.netSalaryNpr,
+      absentDeductionNpr: useManualMoney
+        ? Number(d.savedAbsentDeductionNpr ?? 0)
+        : calc.absentDeductionNpr,
+      extraAmountNpr: useManualMoney
+        ? Number(d.savedExtraAmountNpr ?? 0)
+        : calc.extraAmountNpr,
+      salaryAmountNpr: useManualMoney
+        ? Number(d.savedSalaryAmountNpr ?? 0)
+        : calc.salaryAmountNpr,
+      tax1PercentNpr: useManualMoney
+        ? Number(d.savedTax1PercentNpr ?? 0)
+        : calc.tax1PercentNpr,
+      netSalaryNpr: useManualMoney
+        ? Number(d.savedNetSalaryNpr ?? 0)
+        : calc.netSalaryNpr,
       remarks: d.remarks,
       attendanceIncomplete: d.attendanceIncomplete,
       attendanceManualOverride: d.attendanceManualOverride,
+      valuesManualOverride: useManualMoney,
       attendanceDaysRecorded: d.attendanceDaysRecorded,
       workingDaysInMonth,
       salaryPaymentId: d.salaryPaymentId,

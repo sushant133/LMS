@@ -306,6 +306,7 @@ const defaultSalary: SalaryPaymentInput = {
   salaryAmountNpr: 0,
   attendanceIncomplete: false,
   attendanceManualOverride: false,
+  valuesManualOverride: false,
   status: "DRAFT",
   paidDateBs: "",
   paymentMethod: "BANK_TRANSFER",
@@ -2224,6 +2225,8 @@ export const AccountingManager = () => {
                                   row.attendanceIncomplete ?? false,
                                 attendanceManualOverride:
                                   row.attendanceManualOverride ?? false,
+                                valuesManualOverride:
+                                  row.valuesManualOverride ?? false,
                                 status: row.status,
                                 paidDateBs: row.paidDateBs ?? "",
                                 paymentMethod: row.paymentMethod,

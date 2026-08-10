@@ -252,6 +252,8 @@ export interface SalaryPaymentRecord {
   salaryAmountNpr?: number;
   attendanceIncomplete?: boolean;
   attendanceManualOverride?: boolean;
+  /** Admin entered money totals manually (skip auto calc on load/save). */
+  valuesManualOverride?: boolean;
   netSalaryNpr: number;
   status: SalaryPaymentStatus;
   paidDateBs?: string;
@@ -294,6 +296,8 @@ export interface SalarySheetRow {
   remarks: string;
   attendanceIncomplete: boolean;
   attendanceManualOverride: boolean;
+  /** Super Admin / College Admin fully overrode money columns. */
+  valuesManualOverride?: boolean;
   attendanceDaysRecorded: number;
   workingDaysInMonth: number;
   salaryPaymentId?: string;

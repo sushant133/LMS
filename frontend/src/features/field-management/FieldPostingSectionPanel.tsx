@@ -270,8 +270,15 @@ export const FieldPostingSectionPanel = ({
       let fromDateBs: string | undefined;
       let toDateBs: string | undefined;
       if (month && /^\d{4}-\d{2}$/.test(month)) {
-        const [y, m] = month.split("-").map(Number);
-        if (y && m >= 1 && m <= 12) {
+        const parts = month.split("-");
+        const y = Number(parts[0]);
+        const m = Number(parts[1]);
+        if (
+          Number.isFinite(y) &&
+          Number.isFinite(m) &&
+          m >= 1 &&
+          m <= 12
+        ) {
           let daysInMonth = 30;
           try {
             daysInMonth = getDaysInBsMonth(y, m);

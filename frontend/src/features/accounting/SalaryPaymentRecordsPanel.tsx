@@ -9,6 +9,8 @@ import { getTodayBs } from "@munatech/nepali-datepicker";
 import {
   AlertTriangle,
   Banknote,
+  ChevronDown,
+  ChevronUp,
   FileDown,
   Pencil,
   Plus,
@@ -32,16 +34,36 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useAuth } from "features/auth/AuthProvider";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { api, unwrap } from "lib/api";
-import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { canManageInstitution, normalizeUserRole } from "lib/roles";
+import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
 import { fetchSalarySheet, saveSalarySheetClient } from "./salarySheetClient";
+import { printHtmlViaIframe } from "./voucherPrint";
 
 type EditableRow = SalarySheetRow & {
   /** local edits */
   dirty?: boolean;
+  /** Admin typed money columns by hand (skip auto re-calc until Recalculate) */
+  valuesManualOverride?: boolean;
 };
+
+/** One signature block: custom position + name (only shown when both filled). */
+type SheetSignatory = {
+  id: string;
+  position: string;
+  name: string;
+};
+
+const newSignatoryId = () =>
+  `sig-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+/** Default slots — user can change labels (e.g. Prepared by / Checked by). */
+const defaultSignatories = (): SheetSignatory[] => [
+  { id: newSignatoryId(), position: "Prepared by", name: "" },
+  { id: newSignatoryId(), position: "Checked by", name: "" },
+  { id: newSignatoryId(), position: "Approved by", name: "" },
+];
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -169,8 +191,18 @@ const employeeKeyOf = (r: {
 
 export const SalaryPaymentRecordsPanel = () => {
   const { user } = useAuth();
-  const currentUserName = user?.fullName?.trim() || "";
-  const canManualAttendance = useIsTenantAdmin();
+  /**
+   * Super Admin / College Admin (primary or secondary role): full table edit
+   * including present/absent and all money columns. Accountants get auto-calc only.
+   */
+  const canEditSheet = useMemo(() => {
+    if (!user) return false;
+    const roles = [user.role, ...(user.secondaryRoles ?? [])].filter(Boolean);
+    return roles.some((role) =>
+      canManageInstitution(normalizeUserRole(String(role))),
+    );
+  }, [user]);
+  const canManualAttendance = canEditSheet;
   const [monthBs, setMonthBs] = useState(currentBsMonth);
   /** Sheet filter (table view only) */
   const [listSearch, setListSearch] = useState("");
@@ -182,20 +214,18 @@ export const SalaryPaymentRecordsPanel = () => {
   const [paidDateBs, setPaidDateBs] = useState("");
   const [paymentMethod, setPaymentMethod] =
     useState<(typeof PAYMENT_METHODS)[number]>("BANK_TRANSFER");
-  /** Signatories for print / Excel — default first signature to the logged-in staff name */
-  const [accountantName, setAccountantName] = useState(currentUserName);
-  const [directorName, setDirectorName] = useState("");
-  const [chairmanName, setChairmanName] = useState("");
+  /**
+   * Signatories for print / PDF / Excel — position + name both manual.
+   * Only slots with both fields filled appear under the table (1–4 blocks).
+   */
+  const [signatories, setSignatories] =
+    useState<SheetSignatory[]>(defaultSignatories);
   /** One-by-one entry form */
   const [entry, setEntry] = useState(emptyEntryForm);
   const [editingKey, setEditingKey] = useState<string | null>(null);
-
-  // Keep signature name in sync when session user loads after mount
-  useEffect(() => {
-    if (currentUserName && !accountantName.trim()) {
-      setAccountantName(currentUserName);
-    }
-  }, [currentUserName, accountantName]);
+  /** UI sections (layout only — does not change payroll logic) */
+  const [addSectionOpen, setAddSectionOpen] = useState(true);
+  const [signSectionOpen, setSignSectionOpen] = useState(true);
 
   /** Full employee catalog + attendance for the month (picker source — not the table) */
   const sheetQuery = useQuery({
@@ -227,7 +257,13 @@ export const SalaryPaymentRecordsPanel = () => {
     // Only pre-load employees already saved for this month — not the full staff list
     const saved = sheetQuery.data.rows
       .filter((r) => Boolean(r.salaryPaymentId))
-      .map((r, i) => ({ ...r, sn: i + 1 }));
+      .map((r, i) => ({
+        ...r,
+        sn: i + 1,
+        valuesManualOverride: Boolean(
+          (r as EditableRow).valuesManualOverride,
+        ),
+      }));
     setRows(saved);
     setEditingKey(null);
     setEntry(emptyEntryForm());
@@ -249,8 +285,13 @@ export const SalaryPaymentRecordsPanel = () => {
         absentDays: number;
         extraDuty: number;
         extraAmountNpr?: number;
+        absentDeductionNpr?: number;
+        salaryAmountNpr?: number;
+        tax1PercentNpr?: number;
+        netSalaryNpr?: number;
         remarks?: string;
         attendanceManualOverride?: boolean;
+        valuesManualOverride?: boolean;
         salaryPaymentId?: string;
       }>;
     }) => saveSalarySheetClient(body),
@@ -408,6 +449,7 @@ export const SalaryPaymentRecordsPanel = () => {
   const startEditRow = (row: EditableRow) => {
     const key = employeeKeyOf(row);
     setEditingKey(key);
+    setAddSectionOpen(true);
     setEntry({
       employeeType: row.employeeType,
       employeeKey: key,
@@ -418,7 +460,7 @@ export const SalaryPaymentRecordsPanel = () => {
       remarks: row.remarks ?? "",
       attendanceManualOverride: Boolean(row.attendanceManualOverride),
     });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Do not scroll the page — stays on the table row the user was editing
   };
 
   const removeRow = (row: EditableRow) => {
@@ -435,6 +477,84 @@ export const SalaryPaymentRecordsPanel = () => {
       setEditingKey(null);
       setEntry(emptyEntryForm());
     }
+  };
+
+  /**
+   * Super Admin / College Admin: edit a cell on the generated sheet.
+   * - Days / monthly salary → re-calc money unless valuesManualOverride
+   * - Money columns → mark valuesManualOverride (keep typed amounts)
+   */
+  const patchRow = (
+    rowKey: string,
+    patch: Partial<EditableRow>,
+    mode: "days" | "money" | "meta" = "meta",
+  ) => {
+    if (!canEditSheet) return;
+    setRows((prev) =>
+      renumber(
+        prev.map((r) => {
+          if (employeeKeyOf(r) !== rowKey) return r;
+          const next: EditableRow = {
+            ...r,
+            ...patch,
+            dirty: true,
+          };
+          if (mode === "days") {
+            next.attendanceManualOverride = true;
+            next.attendanceIncomplete = false;
+            if (!next.valuesManualOverride) {
+              Object.assign(
+                next,
+                calcLine({
+                  monthlySalaryNpr: next.monthlySalaryNpr,
+                  presentDays: next.presentDays,
+                  absentDays: next.absentDays,
+                  extraDuty: next.extraDuty,
+                  workingDaysInMonth:
+                    next.workingDaysInMonth || workingDaysInMonth,
+                  extraAmountNpr: next.extraAmountNpr,
+                }),
+              );
+            }
+          } else if (mode === "money") {
+            next.valuesManualOverride = true;
+            next.attendanceManualOverride = true;
+            next.attendanceIncomplete = false;
+          }
+          return next;
+        }),
+      ),
+    );
+  };
+
+  /** Admin: clear money override and recompute from days + monthly salary */
+  const recalculateRowFromDays = (row: EditableRow) => {
+    if (!canEditSheet) return;
+    const key = employeeKeyOf(row);
+    setRows((prev) =>
+      renumber(
+        prev.map((r) => {
+          if (employeeKeyOf(r) !== key) return r;
+          const calc = calcLine({
+            monthlySalaryNpr: r.monthlySalaryNpr,
+            presentDays: r.presentDays,
+            absentDays: r.absentDays,
+            extraDuty: r.extraDuty,
+            workingDaysInMonth: r.workingDaysInMonth || workingDaysInMonth,
+            extraAmountNpr: 0,
+          });
+          return {
+            ...r,
+            ...calc,
+            valuesManualOverride: false,
+            attendanceManualOverride: true,
+            attendanceIncomplete: false,
+            dirty: true,
+          };
+        }),
+      ),
+    );
+    toast.success(`Recalculated ${row.employeeName} from days`);
   };
 
   const cancelEntry = () => {
@@ -488,36 +608,70 @@ export const SalaryPaymentRecordsPanel = () => {
     };
   }, [rows]);
 
-  const getSignatories = (): {
-    accountantName: string;
-    directorName: string;
-    chairmanName: string;
-  } | null => {
-    if (!accountantName.trim() || !directorName.trim() || !chairmanName.trim()) {
+  /** Active signatories = both position and name filled (order preserved). */
+  const filledSignatories = useMemo(
+    () =>
+      signatories
+        .map((s) => ({
+          position: s.position.trim(),
+          name: s.name.trim(),
+        }))
+        .filter((s) => s.position && s.name),
+    [signatories],
+  );
+
+  const getSignatories = (): Array<{
+    position: string;
+    name: string;
+  }> | null => {
+    if (filledSignatories.length === 0) {
       toast.error(
-        "Enter Accountant, Director, and Chairman names in the signature section before printing or exporting.",
+        "Enter at least one signature with both Position and Name before printing or exporting.",
       );
       return null;
     }
-    return {
-      accountantName: accountantName.trim(),
-      directorName: directorName.trim(),
-      chairmanName: chairmanName.trim(),
-    };
+    return filledSignatories;
+  };
+
+  const updateSignatory = (
+    id: string,
+    field: "position" | "name",
+    value: string,
+  ) => {
+    setSignatories((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, [field]: value } : s)),
+    );
+  };
+
+  const addSignatorySlot = () => {
+    if (signatories.length >= 4) {
+      toast.error("Maximum 4 signature blocks");
+      return;
+    }
+    setSignatories((prev) => [
+      ...prev,
+      { id: newSignatoryId(), position: "", name: "" },
+    ]);
+  };
+
+  const removeSignatorySlot = (id: string) => {
+    if (signatories.length <= 1) {
+      toast.error("Keep at least one signature slot");
+      return;
+    }
+    setSignatories((prev) => prev.filter((s) => s.id !== id));
   };
 
   /** Sheet body only — used with html2pdf (no browser date/title headers). */
-  const buildSheetBodyHtml = (sign: {
-    accountantName: string;
-    directorName: string;
-    chairmanName: string;
-  }) => {
+  const buildSheetBodyHtml = (
+    signs: Array<{ position: string; name: string }>,
+  ) => {
     const bodyRows = rows
       .map(
         (r) => `
       <tr>
         <td class="c">${r.sn}</td>
-        <td>${escapeHtml(r.employeeName)}</td>
+        <td class="name-cell">${escapeHtml(r.employeeName)}</td>
         <td class="n">${formatCurrencyNpr(r.monthlySalaryNpr)}</td>
         <td class="c">${r.presentDays}</td>
         <td class="c">${r.absentDays}</td>
@@ -528,31 +682,159 @@ export const SalaryPaymentRecordsPanel = () => {
         <td class="n">${formatCurrencyNpr(r.tax1PercentNpr)}</td>
         <td class="n"><strong>${formatCurrencyNpr(r.netSalaryNpr)}</strong></td>
         <td></td>
-        <td>${escapeHtml(r.remarks || "")}</td>
+        <td class="name-cell">${escapeHtml(r.remarks || "")}</td>
       </tr>`,
       )
       .join("");
 
+    // Signatures use a plain TABLE (not flex) — html2canvas often garbles
+    // text inside flex children. Only filled position+name slots are rendered.
+    const signCount = Math.max(1, signs.length);
+    const colPct = (100 / signCount).toFixed(2);
+    const signCell = (position: string, name: string) => `
+      <td class="sign-cell" style="width:${colPct}%">
+        <div class="sign-line-wrap"><div class="sign-line"></div></div>
+        <div class="sign-role">${escapeHtml(position)}</div>
+        <div class="sign-name">${escapeHtml(name)}</div>
+      </td>`;
+
     return `
-<div class="salary-sheet-pdf" style="font-family: 'Times New Roman', Georgia, serif; font-size: 11px; color: #111; background: #fff; width: 100%; box-sizing: border-box;">
+<div class="salary-sheet-pdf">
   <style>
-    .salary-sheet-pdf .sheet-header { text-align: center; margin-bottom: 14px; border-bottom: 2px solid #111; padding-bottom: 10px; }
-    .salary-sheet-pdf .sheet-header .college-name { font-size: 18px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; margin: 0 0 4px; }
-    .salary-sheet-pdf .sheet-header .college-name-np { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
-    .salary-sheet-pdf .sheet-header .college-address { font-size: 11px; margin: 0 0 8px; color: #222; }
-    .salary-sheet-pdf .sheet-header .sheet-title { font-size: 14px; font-weight: 700; margin: 0; text-transform: uppercase; letter-spacing: 0.04em; }
-    .salary-sheet-pdf table { width: 100%; border-collapse: collapse; }
-    .salary-sheet-pdf th, .salary-sheet-pdf td { border: 1px solid #222; padding: 4px 5px; vertical-align: middle; }
-    .salary-sheet-pdf th { background: #f3f4f6; font-size: 10px; text-align: center; }
+    .salary-sheet-pdf {
+      font-family: Arial, Helvetica, "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+      font-size: 11px;
+      color: #000000;
+      background: #ffffff;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 4px;
+    }
+    .salary-sheet-pdf * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .salary-sheet-pdf .sheet-header {
+      text-align: center;
+      margin-bottom: 12px;
+      border-bottom: 2px solid #000;
+      padding-bottom: 8px;
+    }
+    .salary-sheet-pdf .sheet-header .college-name {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      margin: 0 0 3px;
+      color: #000;
+    }
+    .salary-sheet-pdf .sheet-header .college-name-np {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 0 0 3px;
+      color: #000;
+      font-family: "Noto Sans Devanagari", "Nirmala UI", "Mangal", Arial, sans-serif;
+    }
+    .salary-sheet-pdf .sheet-header .college-address {
+      font-size: 10px;
+      margin: 0 0 6px;
+      color: #222;
+    }
+    .salary-sheet-pdf .sheet-header .sheet-title {
+      font-size: 13px;
+      font-weight: 700;
+      margin: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: #000;
+    }
+    .salary-sheet-pdf table.data {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .salary-sheet-pdf table.data th,
+    .salary-sheet-pdf table.data td {
+      border: 1px solid #000;
+      padding: 4px 4px;
+      vertical-align: middle;
+      color: #000;
+    }
+    .salary-sheet-pdf table.data th {
+      background: #e8e8e8;
+      font-size: 9px;
+      text-align: center;
+      font-weight: 700;
+    }
     .salary-sheet-pdf td.c { text-align: center; }
-    .salary-sheet-pdf td.n { text-align: right; white-space: nowrap; }
-    .salary-sheet-pdf tfoot td { font-weight: 700; background: #fafafa; }
-    .salary-sheet-pdf .words { margin-top: 10px; font-size: 12px; }
-    .salary-sheet-pdf .sign-row { display: flex; justify-content: space-between; margin-top: 36px; gap: 24px; }
-    .salary-sheet-pdf .sign { flex: 1; text-align: center; }
-    .salary-sheet-pdf .sign .line { border-top: 1px solid #222; margin: 40px 12px 6px; }
-    .salary-sheet-pdf .sign .role { font-weight: 700; font-size: 11px; }
-    .salary-sheet-pdf .sign .name { font-size: 11px; margin-top: 2px; }
+    .salary-sheet-pdf td.n {
+      text-align: right;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .salary-sheet-pdf td.name-cell {
+      text-align: left;
+      font-weight: 600;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      white-space: normal;
+      line-height: 1.25;
+    }
+    .salary-sheet-pdf tfoot td {
+      font-weight: 700;
+      background: #f3f3f3;
+    }
+    .salary-sheet-pdf .words {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #000;
+      line-height: 1.4;
+    }
+    /* Compact signature block — short line; only filled slots rendered */
+    .salary-sheet-pdf table.sign-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 22px;
+      table-layout: fixed;
+    }
+    .salary-sheet-pdf table.sign-table td.sign-cell {
+      border: none !important;
+      text-align: center;
+      vertical-align: top;
+      padding: 0 10px;
+      color: #000;
+    }
+    .salary-sheet-pdf .sign-line-wrap {
+      padding-top: 18px;
+      margin-bottom: 5px;
+    }
+    .salary-sheet-pdf .sign-line {
+      border: none;
+      border-top: 1px solid #000;
+      height: 0;
+      width: 52%;
+      max-width: 120px;
+      margin: 0 auto;
+      padding: 0;
+    }
+    .salary-sheet-pdf .sign-role {
+      font-weight: 700;
+      font-size: 10px;
+      color: #000;
+      margin: 0 0 2px;
+      line-height: 1.25;
+    }
+    .salary-sheet-pdf .sign-name {
+      font-size: 11px;
+      font-weight: 600;
+      color: #000;
+      margin: 0;
+      line-height: 1.3;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
   </style>
   <div class="sheet-header">
     <p class="college-name">${escapeHtml(collegeName)}</p>
@@ -568,7 +850,22 @@ export const SalaryPaymentRecordsPanel = () => {
     }
     <p class="sheet-title">Salary Sheet of ${escapeHtml(monthLabel)}</p>
   </div>
-  <table>
+  <table class="data">
+    <colgroup>
+      <col style="width:4%" />
+      <col style="width:14%" />
+      <col style="width:9%" />
+      <col style="width:6%" />
+      <col style="width:6%" />
+      <col style="width:6%" />
+      <col style="width:9%" />
+      <col style="width:8%" />
+      <col style="width:9%" />
+      <col style="width:7%" />
+      <col style="width:9%" />
+      <col style="width:6%" />
+      <col style="width:7%" />
+    </colgroup>
     <thead>
       <tr>
         <th>S.N.</th>
@@ -603,23 +900,11 @@ export const SalaryPaymentRecordsPanel = () => {
   </table>
   <p class="words"><strong>Total Net Salary:</strong> ${formatCurrencyNpr(totals.totalNetSalaryNpr)}
     <br/><strong>In words:</strong> ${escapeHtml(totals.totalNetSalaryInWords)}</p>
-  <div class="sign-row">
-    <div class="sign">
-      <div class="line"></div>
-      <div class="role">Accountant</div>
-      <div class="name">${escapeHtml(sign.accountantName)}</div>
-    </div>
-    <div class="sign">
-      <div class="line"></div>
-      <div class="role">Director</div>
-      <div class="name">${escapeHtml(sign.directorName)}</div>
-    </div>
-    <div class="sign">
-      <div class="line"></div>
-      <div class="role">Chairman</div>
-      <div class="name">${escapeHtml(sign.chairmanName)}</div>
-    </div>
-  </div>
+  <table class="sign-table">
+    <tr>
+      ${signs.map((s) => signCell(s.position, s.name)).join("")}
+    </tr>
+  </table>
 </div>`;
   };
 
@@ -631,12 +916,17 @@ export const SalaryPaymentRecordsPanel = () => {
     const sign = getSignatories();
     if (!sign) return;
 
+    // Keep on-screen (opacity 0) so fonts layout correctly; off-screen
+    // left:-12000px can yield broken / empty text in html2canvas.
     const host = document.createElement("div");
+    host.setAttribute("aria-hidden", "true");
     host.style.position = "fixed";
-    host.style.left = "-12000px";
+    host.style.left = "0";
     host.style.top = "0";
     host.style.width = "1100px";
     host.style.background = "#ffffff";
+    host.style.opacity = "0";
+    host.style.pointerEvents = "none";
     host.style.zIndex = "-1";
     host.innerHTML = buildSheetBodyHtml(sign);
     document.body.appendChild(host);
@@ -650,6 +940,19 @@ export const SalaryPaymentRecordsPanel = () => {
 
     try {
       toast.message("Generating PDF…");
+      // Wait a frame so fonts + table layout settle before rasterize
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      });
+      if (document.fonts?.ready) {
+        await Promise.race([
+          document.fonts.ready,
+          new Promise<void>((r) => window.setTimeout(r, 1500)),
+        ]);
+      }
+
       const { default: html2pdf } = await import("html2pdf.js");
       const filename = `Salary_Sheet_${monthBs || "payroll"}.pdf`;
       const blob = (await html2pdf()
@@ -660,10 +963,12 @@ export const SalaryPaymentRecordsPanel = () => {
           html2canvas: {
             scale: 2,
             useCORS: true,
-            allowTaint: false,
+            allowTaint: true,
             backgroundColor: "#ffffff",
             logging: false,
             windowWidth: 1100,
+            scrollX: 0,
+            scrollY: 0,
           },
           jsPDF: {
             unit: "mm",
@@ -675,6 +980,10 @@ export const SalaryPaymentRecordsPanel = () => {
         .from(target)
         .outputPdf("blob")) as Blob;
 
+      if (!blob || blob.size < 100) {
+        throw new Error("PDF was empty — try again");
+      }
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -683,11 +992,54 @@ export const SalaryPaymentRecordsPanel = () => {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-      toast.success("PDF downloaded (no browser date header)");
+      toast.success("PDF downloaded");
     } catch (e) {
       toast.error(parseErrorMessage(e) || "PDF generation failed");
     } finally {
       if (host.parentNode) host.parentNode.removeChild(host);
+    }
+  };
+
+  /** Open browser print dialog for the salary sheet (Save as PDF also available there). */
+  const printSheet = () => {
+    if (rows.length === 0) {
+      toast.error("No salary rows to print — add at least one employee first");
+      return;
+    }
+    const sign = getSignatories();
+    if (!sign) return;
+
+    try {
+      const body = buildSheetBodyHtml(sign);
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>&#8203;</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #000;
+    }
+    body { padding: 8mm 6mm; }
+    @page { size: A4 landscape; margin: 8mm 6mm; }
+    @media print {
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  ${body}
+</body>
+</html>`;
+      printHtmlViaIframe(html);
+      toast.success("Print dialog opened");
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not open print preview",
+      );
     }
   };
 
@@ -744,10 +1096,10 @@ export const SalaryPaymentRecordsPanel = () => {
         Signature: "",
         Remarks: "",
       },
-      {
+      ...sign.map((s) => ({
         "S.N.": "",
-        "Employee Name": "Accountant",
-        "Monthly Salary": sign.accountantName,
+        "Employee Name": s.position,
+        "Monthly Salary": s.name,
         "Present Days": "",
         "Absent Days": "",
         "Extra Duty": "",
@@ -758,37 +1110,7 @@ export const SalaryPaymentRecordsPanel = () => {
         "Net Salary": "",
         Signature: "",
         Remarks: "",
-      },
-      {
-        "S.N.": "",
-        "Employee Name": "Director",
-        "Monthly Salary": sign.directorName,
-        "Present Days": "",
-        "Absent Days": "",
-        "Extra Duty": "",
-        "Absent Deduction": "",
-        "Extra Amount": "",
-        "Salary Amount": "",
-        "1% Tax": "",
-        "Net Salary": "",
-        Signature: "",
-        Remarks: "",
-      },
-      {
-        "S.N.": "",
-        "Employee Name": "Chairman",
-        "Monthly Salary": sign.chairmanName,
-        "Present Days": "",
-        "Absent Days": "",
-        "Extra Duty": "",
-        "Absent Deduction": "",
-        "Extra Amount": "",
-        "Salary Amount": "",
-        "1% Tax": "",
-        "Net Salary": "",
-        Signature: "",
-        Remarks: "",
-      },
+      })),
     ]);
     toast.success("Excel salary sheet exported");
   };
@@ -821,8 +1143,13 @@ export const SalaryPaymentRecordsPanel = () => {
         absentDays: r.absentDays,
         extraDuty: r.extraDuty,
         extraAmountNpr: r.extraAmountNpr,
+        absentDeductionNpr: r.absentDeductionNpr,
+        salaryAmountNpr: r.salaryAmountNpr,
+        tax1PercentNpr: r.tax1PercentNpr,
+        netSalaryNpr: r.netSalaryNpr,
         remarks: r.remarks,
         attendanceManualOverride: r.attendanceManualOverride,
+        valuesManualOverride: Boolean(r.valuesManualOverride),
         salaryPaymentId: r.salaryPaymentId,
       })),
     });
@@ -848,57 +1175,78 @@ export const SalaryPaymentRecordsPanel = () => {
     );
   }
 
+  const exportDisabled = rows.length === 0;
+  const toolbarActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={printSheet}
+        disabled={exportDisabled}
+        title="Print salary sheet (or Save as PDF from the print dialog)"
+      >
+        <Printer className="mr-1 h-4 w-4" />
+        Print
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => void exportPdf()}
+        disabled={exportDisabled}
+      >
+        <FileDown className="mr-1 h-4 w-4" />
+        PDF
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={exportExcel}
+        disabled={exportDisabled}
+      >
+        <FileDown className="mr-1 h-4 w-4" />
+        Excel
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        disabled={saveMutation.isPending || exportDisabled}
+        onClick={saveSheet}
+      >
+        <Save className="mr-1 h-4 w-4" />
+        {saveMutation.isPending ? "Saving…" : "Save payroll"}
+      </Button>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Banknote className="h-5 w-5 text-brand-600" />
-              Salary Sheet / Payroll
-            </CardTitle>
-            <p className="mt-1 text-sm text-slate-500">
-              Add employees <strong>one by one</strong>. Present/absent days load from
-              attendance for the payroll month. The table only shows people you have
-              already added — not the full staff list for mass entry.
-            </p>
+      {/* ─── 1. Header + payroll controls ─── */}
+      <Card className="overflow-hidden border-slate-200 shadow-sm">
+        <div className="border-b border-slate-100 bg-gradient-to-r from-brand-50/80 to-white px-4 py-4 sm:px-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
+                  <Banknote className="h-5 w-5" />
+                </span>
+                Salary Sheet / Payroll
+              </CardTitle>
+              <p className="mt-1.5 max-w-2xl text-sm text-slate-500">
+                Build the month sheet employee by employee. Attendance fills present /
+                absent automatically. Admins can edit cells in the table; others see
+                auto-calculated amounts only.
+              </p>
+            </div>
+            {toolbarActions}
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={exportPdf}
-              disabled={rows.length === 0}
-            >
-              <Printer className="mr-1 h-4 w-4" />
-              Download PDF
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={exportExcel}
-              disabled={rows.length === 0}
-            >
-              <FileDown className="mr-1 h-4 w-4" />
-              Excel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={saveMutation.isPending || rows.length === 0}
-              onClick={saveSheet}
-            >
-              <Save className="mr-1 h-4 w-4" />
-              {saveMutation.isPending ? "Saving…" : "Save payroll"}
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
-
-      <Card>
+        </div>
         <CardContent className="space-y-3 pt-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            1 · Period &amp; status
+          </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <FormField label="Payroll month (BS) *">
               <Input
@@ -941,14 +1289,32 @@ export const SalaryPaymentRecordsPanel = () => {
               </FormField>
             ) : null}
           </div>
-          <p className="text-xs text-slate-500">
-            Working days in month (BS): <strong>{workingDaysInMonth}</strong>
-            {sheetQuery.data
-              ? ` · Attendance days on register: ${sheetQuery.data.attendanceCoverageDays}`
-              : ""}
-            {" · "}
-            {rows.length} on sheet · {availableCatalog.length} not yet added
-          </p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+            <span>
+              Working days:{" "}
+              <strong className="text-slate-900">{workingDaysInMonth}</strong>
+            </span>
+            {sheetQuery.data ? (
+              <span>
+                Attendance days:{" "}
+                <strong className="text-slate-900">
+                  {sheetQuery.data.attendanceCoverageDays}
+                </strong>
+              </span>
+            ) : null}
+            <span>
+              On sheet:{" "}
+              <strong className="text-slate-900">{rows.length}</strong>
+            </span>
+            <span>
+              Not yet added:{" "}
+              <strong className="text-slate-900">{availableCatalog.length}</strong>
+            </span>
+            <span>
+              Month:{" "}
+              <strong className="text-slate-900">{monthLabel}</strong>
+            </span>
+          </div>
         </CardContent>
       </Card>
 
@@ -958,29 +1324,57 @@ export const SalaryPaymentRecordsPanel = () => {
           <div>
             <p className="font-medium">Attendance notice</p>
             <p className="text-amber-900/90">{sheetQuery.data.attendanceWarning}</p>
-            {canManualAttendance ? (
+            {canEditSheet ? (
               <p className="mt-1 text-xs">
-                As Super Admin / College Admin you may correct Present/Absent days when
-                adding an employee.
+                Super Admin / College Admin can edit days and amounts in the sheet
+                table below.
               </p>
-            ) : null}
+            ) : (
+              <p className="mt-1 text-xs">
+                Amounts are automatic. Ask Super Admin or College Admin to correct
+                them if needed.
+              </p>
+            )}
           </div>
         </div>
       ) : null}
 
-      {/* ─── One-by-one entry ─── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <UserPlus className="h-4 w-4 text-brand-600" />
-            {editingKey ? "Edit employee on sheet" : "Add employee (one by one)"}
-          </CardTitle>
+      {/* ─── 2. Add / edit employee ─── */}
+      <Card className="overflow-hidden border-slate-200 shadow-sm">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/50 px-4 py-3 text-left transition hover:bg-slate-50 sm:px-5"
+          onClick={() => setAddSectionOpen((o) => !o)}
+          aria-expanded={addSectionOpen}
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <UserPlus className="h-4 w-4 shrink-0 text-brand-600" />
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                2 · Add employees
+              </p>
+              <p className="text-sm font-semibold text-slate-900">
+                {editingKey
+                  ? "Edit employee on sheet"
+                  : "Add employee (one by one)"}
+              </p>
+            </div>
+            {editingKey ? (
+              <Badge className="bg-sky-100 text-sky-900">Editing</Badge>
+            ) : null}
+          </div>
+          {addSectionOpen ? (
+            <ChevronUp className="h-4 w-4 shrink-0 text-slate-500" />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+          )}
+        </button>
+        {addSectionOpen ? (
+        <CardContent className="space-y-4 pt-4">
           <p className="text-sm text-slate-500">
             Select one employee, review auto-filled attendance, adjust if needed, then
             add them to the salary sheet below.
           </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <FormField label="Employee type *">
               <Select
@@ -1126,7 +1520,7 @@ export const SalaryPaymentRecordsPanel = () => {
             </div>
           ) : null}
 
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
             {editingKey ? (
               <Button type="button" variant="outline" onClick={cancelEntry}>
                 Cancel edit
@@ -1147,18 +1541,48 @@ export const SalaryPaymentRecordsPanel = () => {
             </Button>
           </div>
         </CardContent>
+        ) : null}
       </Card>
 
-      <Card>
-        <CardHeader className="space-y-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Wallet className="h-4 w-4 text-brand-600" />
-            Salary sheet — {monthBs}
-          </CardTitle>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <FormField label="Filter sheet by name">
+      {/* ─── 3. Sheet table ─── */}
+      <Card className="overflow-hidden border-slate-200 shadow-sm">
+        <CardHeader className="space-y-3 border-b border-slate-100 bg-slate-50/40 pb-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                3 · Salary sheet
+              </p>
+              <CardTitle className="mt-0.5 flex items-center gap-2 text-base">
+                <Wallet className="h-4 w-4 text-brand-600" />
+                {monthLabel}
+                <span className="font-normal text-slate-400">·</span>
+                <span className="font-mono text-sm font-normal text-slate-500">
+                  {monthBs}
+                </span>
+              </CardTitle>
+              <p className="mt-1 text-xs text-slate-500">
+                {canEditSheet
+                  ? "Admin: edit cells in the table (Backspace to clear). Recalc restores auto amounts from days."
+                  : "Amounts follow attendance and salary rules (read-only for non-admins)."}
+              </p>
+            </div>
+            <Badge
+              className={cn(
+                "w-fit shrink-0",
+                status === "PAID"
+                  ? "bg-emerald-100 text-emerald-900"
+                  : status === "PROCESSED"
+                    ? "bg-sky-100 text-sky-900"
+                    : "bg-slate-100 text-slate-700",
+              )}
+            >
+              {status}
+            </Badge>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <FormField label="Search on sheet">
               <Input
-                placeholder="Search added employees…"
+                placeholder="Name, department…"
                 value={listSearch}
                 onChange={(e) => setListSearch(e.target.value)}
               />
@@ -1182,21 +1606,21 @@ export const SalaryPaymentRecordsPanel = () => {
             </FormField>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           {/* On-screen header matching PDF */}
-          <div className="mb-4 border-b-2 border-slate-800 pb-3 text-center">
-            <p className="text-lg font-bold uppercase tracking-wide text-slate-900">
+          <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3 text-center">
+            <p className="text-base font-bold uppercase tracking-wide text-slate-900">
               {collegeName}
             </p>
             {collegeNameNp ? (
-              <p className="text-base font-semibold text-slate-800">
+              <p className="text-sm font-semibold text-slate-800">
                 {collegeNameNp}
               </p>
             ) : null}
             {collegeAddress ? (
-              <p className="mt-1 text-sm text-slate-600">{collegeAddress}</p>
+              <p className="mt-0.5 text-xs text-slate-600">{collegeAddress}</p>
             ) : null}
-            <p className="mt-2 text-base font-bold uppercase tracking-wide text-slate-900">
+            <p className="mt-2 text-sm font-bold uppercase tracking-wide text-slate-800">
               Salary Sheet of {monthLabel}
             </p>
           </div>
@@ -1233,12 +1657,18 @@ export const SalaryPaymentRecordsPanel = () => {
                   </tr>
                 </TableHead>
                 <TableBody>
-                  {displayedRows.map((row) => (
+                  {displayedRows.map((row) => {
+                    const rowKey = employeeKeyOf(row);
+                    const cellInput =
+                      "h-8 min-w-[4.5rem] border-slate-200 bg-white px-1.5 text-right text-xs tabular-nums";
+                    return (
                     <tr
                       key={`${row.employeeType}-${row.teacherId || row.staffId}`}
-                      className={
-                        row.attendanceIncomplete ? "bg-amber-50/40" : undefined
-                      }
+                      className={cn(
+                        row.attendanceIncomplete && "bg-amber-50/40",
+                        row.valuesManualOverride && "bg-violet-50/30",
+                        row.dirty && "ring-1 ring-inset ring-brand-200",
+                      )}
                     >
                       <Td className="text-center tabular-nums text-slate-500">
                         {row.sn}
@@ -1258,37 +1688,223 @@ export const SalaryPaymentRecordsPanel = () => {
                         ) : null}
                         {row.attendanceManualOverride ? (
                           <Badge className="mt-1 bg-sky-100 text-sky-900">
-                            Manual attendance
+                            Manual days
+                          </Badge>
+                        ) : null}
+                        {row.valuesManualOverride ? (
+                          <Badge className="mt-1 bg-violet-100 text-violet-900">
+                            Manual amounts
                           </Badge>
                         ) : null}
                       </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatCurrencyNpr(row.monthlySalaryNpr)}
+                      <Td className="text-right">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            className={cellInput}
+                            value={row.monthlySalaryNpr}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { monthlySalaryNpr: v ?? 0 },
+                                "days",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">
+                            {formatCurrencyNpr(row.monthlySalaryNpr)}
+                          </span>
+                        )}
                       </Td>
-                      <Td className="text-center tabular-nums">{row.presentDays}</Td>
-                      <Td className="text-center tabular-nums">{row.absentDays}</Td>
-                      <Td className="text-center tabular-nums">{row.extraDuty}</Td>
-                      <Td className="text-right tabular-nums text-rose-700">
-                        {formatCurrencyNpr(row.absentDeductionNpr)}
+                      <Td className="text-center">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            step={0.5}
+                            className={cn(cellInput, "text-center")}
+                            value={row.presentDays}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { presentDays: v ?? 0 },
+                                "days",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">{row.presentDays}</span>
+                        )}
                       </Td>
-                      <Td className="text-right tabular-nums text-emerald-700">
-                        {formatCurrencyNpr(row.extraAmountNpr)}
+                      <Td className="text-center">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            step={0.5}
+                            className={cn(cellInput, "text-center")}
+                            value={row.absentDays}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { absentDays: v ?? 0 },
+                                "days",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">{row.absentDays}</span>
+                        )}
                       </Td>
-                      <Td className="text-right tabular-nums font-medium">
-                        {formatCurrencyNpr(row.salaryAmountNpr)}
+                      <Td className="text-center">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            step={0.5}
+                            className={cn(cellInput, "text-center")}
+                            value={row.extraDuty}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { extraDuty: v ?? 0 },
+                                "days",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">{row.extraDuty}</span>
+                        )}
                       </Td>
-                      <Td className="text-right tabular-nums">
-                        {formatCurrencyNpr(row.tax1PercentNpr)}
+                      <Td className="text-right text-rose-700">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            className={cn(cellInput, "text-rose-800")}
+                            value={row.absentDeductionNpr}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { absentDeductionNpr: v ?? 0 },
+                                "money",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">
+                            {formatCurrencyNpr(row.absentDeductionNpr)}
+                          </span>
+                        )}
                       </Td>
-                      <Td className="text-right tabular-nums font-semibold text-slate-900">
-                        {formatCurrencyNpr(row.netSalaryNpr)}
+                      <Td className="text-right text-emerald-700">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            className={cn(cellInput, "text-emerald-800")}
+                            value={row.extraAmountNpr}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { extraAmountNpr: v ?? 0 },
+                                "money",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">
+                            {formatCurrencyNpr(row.extraAmountNpr)}
+                          </span>
+                        )}
+                      </Td>
+                      <Td className="text-right font-medium">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            className={cellInput}
+                            value={row.salaryAmountNpr}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { salaryAmountNpr: v ?? 0 },
+                                "money",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">
+                            {formatCurrencyNpr(row.salaryAmountNpr)}
+                          </span>
+                        )}
+                      </Td>
+                      <Td className="text-right">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            className={cellInput}
+                            value={row.tax1PercentNpr}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { tax1PercentNpr: v ?? 0 },
+                                "money",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">
+                            {formatCurrencyNpr(row.tax1PercentNpr)}
+                          </span>
+                        )}
+                      </Td>
+                      <Td className="text-right font-semibold text-slate-900">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            className={cn(cellInput, "font-semibold")}
+                            value={row.netSalaryNpr}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { netSalaryNpr: v ?? 0 },
+                                "money",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">
+                            {formatCurrencyNpr(row.netSalaryNpr)}
+                          </span>
+                        )}
                       </Td>
                       <Td className="min-w-[4rem] border-b border-dashed border-slate-300" />
-                      <Td className="max-w-[10rem] truncate text-sm text-slate-600">
-                        {row.remarks || "—"}
+                      <Td className="max-w-[10rem] text-sm text-slate-600">
+                        {canEditSheet ? (
+                          <Input
+                            className="h-8 min-w-[6rem] text-xs"
+                            value={row.remarks || ""}
+                            onChange={(e) =>
+                              patchRow(
+                                rowKey,
+                                { remarks: e.target.value },
+                                "meta",
+                              )
+                            }
+                            placeholder="—"
+                          />
+                        ) : (
+                          <span className="truncate">{row.remarks || "—"}</span>
+                        )}
                       </Td>
                       <Td>
                         <div className="flex flex-wrap gap-1">
+                          {canEditSheet && row.valuesManualOverride ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="Recalculate money from days and monthly salary"
+                              onClick={() => recalculateRowFromDays(row)}
+                            >
+                              Recalc
+                            </Button>
+                          ) : null}
                           <Button
                             size="sm"
                             variant="outline"
@@ -1308,7 +1924,8 @@ export const SalaryPaymentRecordsPanel = () => {
                         </div>
                       </Td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   <tr className="bg-slate-100 font-semibold">
                     <Td colSpan={2} className="text-center">
                       TOTAL ({rows.length})
@@ -1338,9 +1955,19 @@ export const SalaryPaymentRecordsPanel = () => {
               </Table>
             </div>
           )}
+        </CardContent>
+      </Card>
 
-          {/* Summary */}
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* ─── 4. Totals ─── */}
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader className="border-b border-slate-100 pb-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            4 · Totals
+          </p>
+          <CardTitle className="text-base">Payroll summary</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
               {
                 label: "Total Monthly Salary",
@@ -1370,25 +1997,26 @@ export const SalaryPaymentRecordsPanel = () => {
             ].map((item) => (
               <div
                 key={item.label}
-                className={`rounded-xl border px-4 py-3 ${
+                className={cn(
+                  "rounded-xl border px-4 py-3",
                   item.emphasize
                     ? "border-brand-200 bg-brand-50"
-                    : "border-slate-200 bg-white"
-                }`}
+                    : "border-slate-200 bg-white",
+                )}
               >
                 <p className="text-xs text-slate-500">{item.label}</p>
                 <p
-                  className={`text-lg font-semibold ${
-                    item.emphasize ? "text-brand-900" : "text-slate-900"
-                  }`}
+                  className={cn(
+                    "text-lg font-semibold",
+                    item.emphasize ? "text-brand-900" : "text-slate-900",
+                  )}
                 >
                   {item.value}
                 </p>
               </div>
             ))}
           </div>
-
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
             <p>
               <span className="font-medium text-slate-700">
                 Total Net Salary (figures):
@@ -1400,75 +2028,146 @@ export const SalaryPaymentRecordsPanel = () => {
               {totals.totalNetSalaryInWords}
             </p>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Signature names — required before Print/PDF or Excel */}
-          <div className="mt-8 rounded-xl border border-slate-200 bg-white p-4">
-            <p className="mb-3 text-sm font-medium text-slate-800">
-              Signature names (required for PDF and Excel)
+      {/* ─── 5. Signatures + export ─── */}
+      <Card className="overflow-hidden border-slate-200 shadow-sm">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/50 px-4 py-3 text-left transition hover:bg-slate-50 sm:px-5"
+          onClick={() => setSignSectionOpen((o) => !o)}
+          aria-expanded={signSectionOpen}
+        >
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              5 · Signatures &amp; export
             </p>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <FormField label="Accountant *">
-                <Input
-                  value={accountantName}
-                  onChange={(e) => setAccountantName(e.target.value)}
-                  placeholder="Full name"
-                />
-              </FormField>
-              <FormField label="Director *">
-                <Input
-                  value={directorName}
-                  onChange={(e) => setDirectorName(e.target.value)}
-                  placeholder="Full name"
-                />
-              </FormField>
-              <FormField label="Chairman *">
-                <Input
-                  value={chairmanName}
-                  onChange={(e) => setChairmanName(e.target.value)}
-                  placeholder="Full name"
-                />
-              </FormField>
-            </div>
-            <div className="mt-6 grid gap-6 sm:grid-cols-3">
-              {(
-                [
-                  ["Accountant", accountantName],
-                  ["Director", directorName],
-                  ["Chairman", chairmanName],
-                ] as const
-              ).map(([role, name]) => (
-                <div key={role} className="text-center">
-                  <div className="mx-8 mb-2 border-t border-slate-400 pt-2" />
-                  <p className="text-sm font-semibold text-slate-800">{role}</p>
-                  <p className="text-xs text-slate-600">
-                    {name.trim() || "—"}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={exportPdf}
-                disabled={rows.length === 0}
-              >
-                <Printer className="mr-1 h-4 w-4" />
-                Download PDF
-              </Button>
+            <p className="text-sm font-semibold text-slate-900">
+              Position &amp; name for print / PDF / Excel
+              {filledSignatories.length > 0
+                ? ` · ${filledSignatories.length} ready`
+                : ""}
+            </p>
+          </div>
+          {signSectionOpen ? (
+            <ChevronUp className="h-4 w-4 shrink-0 text-slate-500" />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+          )}
+        </button>
+        {signSectionOpen ? (
+          <CardContent className="space-y-4 pt-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <p className="max-w-xl text-xs text-slate-500">
+                Enter <strong>Position</strong> (Prepared by, Checked by, …) and{" "}
+                <strong>Name</strong>. Only slots with both filled appear under the
+                printed sheet.
+              </p>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={exportExcel}
-                disabled={rows.length === 0}
+                disabled={signatories.length >= 4}
+                onClick={addSignatorySlot}
               >
-                <FileDown className="mr-1 h-4 w-4" />
-                Excel
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Add signature
               </Button>
             </div>
-          </div>
-        </CardContent>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {signatories.map((s, index) => (
+                <div
+                  key={s.id}
+                  className="rounded-lg border border-slate-200 bg-slate-50/80 p-3"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Signature {index + 1}
+                    </p>
+                    {signatories.length > 1 ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs text-rose-600 hover:text-rose-700"
+                        onClick={() => removeSignatorySlot(s.id)}
+                      >
+                        Remove
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <FormField label="Position">
+                      <Input
+                        value={s.position}
+                        onChange={(e) =>
+                          updateSignatory(s.id, "position", e.target.value)
+                        }
+                        placeholder="e.g. Prepared by, Checked by"
+                        autoComplete="off"
+                        list="salary-sign-positions"
+                      />
+                    </FormField>
+                    <FormField label="Name">
+                      <Input
+                        value={s.name}
+                        onChange={(e) =>
+                          updateSignatory(s.id, "name", e.target.value)
+                        }
+                        placeholder="Full name"
+                        autoComplete="off"
+                      />
+                    </FormField>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <datalist id="salary-sign-positions">
+              <option value="Prepared by" />
+              <option value="Checked by" />
+              <option value="Approved by" />
+              <option value="Accountant" />
+              <option value="Director" />
+              <option value="Chairman" />
+              <option value="Principal" />
+              <option value="Campus Chief" />
+            </datalist>
+
+            <div
+              className={cn(
+                "rounded-lg border border-dashed border-slate-200 bg-white px-3 py-4",
+                "grid gap-4",
+                filledSignatories.length <= 1 && "sm:grid-cols-1",
+                filledSignatories.length === 2 && "sm:grid-cols-2",
+                filledSignatories.length >= 3 && "sm:grid-cols-3",
+              )}
+            >
+              {filledSignatories.length === 0 ? (
+                <p className="text-center text-xs text-slate-400">
+                  Preview appears when you fill a position and name.
+                </p>
+              ) : (
+                filledSignatories.map((s) => (
+                  <div key={`${s.position}-${s.name}`} className="text-center">
+                    <div className="mx-auto mb-2 w-[52%] max-w-[7.5rem] border-t border-slate-500 pt-2" />
+                    <p className="text-sm font-semibold text-slate-800">
+                      {s.position}
+                    </p>
+                    <p className="text-xs text-slate-600">{s.name}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+              <p className="text-xs text-slate-500">
+                Save payroll first if you changed the sheet, then export.
+              </p>
+              {toolbarActions}
+            </div>
+          </CardContent>
+        ) : null}
       </Card>
     </div>
   );

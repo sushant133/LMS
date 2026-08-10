@@ -30,6 +30,11 @@ const salaryPaymentSchema = new Schema(
     attendanceIncomplete: { type: Boolean, default: false },
     /** Present/absent overridden manually by authorized user */
     attendanceManualOverride: { type: Boolean, default: false },
+    /**
+     * Super Admin / College Admin entered money fields manually
+     * (absent deduction, extra amount, salary amount, tax, net) — do not auto-recalc.
+     */
+    valuesManualOverride: { type: Boolean, default: false },
     netSalaryNpr: { type: Number, required: true },
     status: { type: String, enum: ["DRAFT", "PROCESSED", "PAID"], default: "DRAFT" },
     paidDateBs: { type: String },

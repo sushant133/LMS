@@ -197,6 +197,7 @@ export const salaryPaymentSchema = z
     salaryAmountNpr: moneySchema.optional().default(0),
     attendanceIncomplete: z.boolean().optional().default(false),
     attendanceManualOverride: z.boolean().optional().default(false),
+    valuesManualOverride: z.boolean().optional().default(false),
     status: z.enum(["DRAFT", "PROCESSED", "PAID"]).default("DRAFT"),
     paidDateBs: bsDateSchema.optional().or(z.literal("")),
     paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),
@@ -320,8 +321,14 @@ export const salarySheetSaveSchema = z.object({
         absentDays: z.coerce.number().min(0).default(0),
         extraDuty: z.coerce.number().min(0).default(0),
         extraAmountNpr: moneySchema.optional(),
+        absentDeductionNpr: moneySchema.optional(),
+        salaryAmountNpr: moneySchema.optional(),
+        tax1PercentNpr: moneySchema.optional(),
+        netSalaryNpr: moneySchema.optional(),
         remarks: z.string().optional().or(z.literal("")),
         attendanceManualOverride: z.boolean().optional().default(false),
+        /** Super Admin / College Admin only — keep client money fields as entered */
+        valuesManualOverride: z.boolean().optional().default(false),
         salaryPaymentId: optionalObjectIdSchema
       })
     )

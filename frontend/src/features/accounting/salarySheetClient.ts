@@ -217,6 +217,10 @@ export const fetchSalarySheetClientFallback = async (
       remarks: String(saved?.notes ?? ""),
       attendanceIncomplete: incomplete && !manual,
       attendanceManualOverride: manual,
+      valuesManualOverride: Boolean(
+        (saved as { valuesManualOverride?: boolean } | undefined)
+          ?.valuesManualOverride,
+      ),
       attendanceDaysRecorded: att?.recorded ?? 0,
       workingDaysInMonth,
       salaryPaymentId: saved?._id,
@@ -259,6 +263,10 @@ export const fetchSalarySheetClientFallback = async (
       remarks: String(saved?.notes ?? ""),
       attendanceIncomplete: incomplete && !manual,
       attendanceManualOverride: manual,
+      valuesManualOverride: Boolean(
+        (saved as { valuesManualOverride?: boolean } | undefined)
+          ?.valuesManualOverride,
+      ),
       attendanceDaysRecorded: att?.recorded ?? 0,
       workingDaysInMonth,
       salaryPaymentId: saved?._id,
@@ -349,8 +357,13 @@ type SaveRow = {
   absentDays: number;
   extraDuty: number;
   extraAmountNpr?: number;
+  absentDeductionNpr?: number;
+  salaryAmountNpr?: number;
+  tax1PercentNpr?: number;
+  netSalaryNpr?: number;
   remarks?: string;
   attendanceManualOverride?: boolean;
+  valuesManualOverride?: boolean;
   salaryPaymentId?: string;
 };
 
@@ -398,8 +411,11 @@ export const saveSalarySheetClient = async (payload: {
       absentDays: row.absentDays,
       extraDuty: row.extraDuty,
       extraAmountNpr: row.extraAmountNpr ?? 0,
-      taxNpr: 0, // server may recompute when sheet fields supported
+      absentDeductionNpr: row.absentDeductionNpr ?? 0,
+      salaryAmountNpr: row.salaryAmountNpr ?? 0,
+      taxNpr: 0, // may recompute below
       attendanceManualOverride: Boolean(row.attendanceManualOverride),
+      valuesManualOverride: Boolean(row.valuesManualOverride),
       notes: row.remarks ?? "",
       status: payload.status,
       paidDateBs: payload.paidDateBs || undefined,
@@ -408,12 +424,20 @@ export const saveSalarySheetClient = async (payload: {
 
     // Recompute tax/net client-side for older API that uses calculateNetSalary
     const workingDays = daysInBsMonthApprox(payload.monthBs);
-    const calc = calcLine(
-      row.monthlySalaryNpr,
-      row.absentDays,
-      row.extraDuty,
-      workingDays,
-    );
+    const calc = row.valuesManualOverride
+      ? {
+          absentDeductionNpr: Number(row.absentDeductionNpr ?? 0),
+          extraAmountNpr: Number(row.extraAmountNpr ?? 0),
+          salaryAmountNpr: Number(row.salaryAmountNpr ?? 0),
+          tax1PercentNpr: Number(row.tax1PercentNpr ?? 0),
+          netSalaryNpr: Number(row.netSalaryNpr ?? 0),
+        }
+      : calcLine(
+          row.monthlySalaryNpr,
+          row.absentDays,
+          row.extraDuty,
+          workingDays,
+        );
     // Map sheet formula into fields the old endpoint understands
     (body as { taxNpr: number }).taxNpr = calc.tax1PercentNpr;
     // Put net into bonus=0 and use tax only; old net = basic + allow + bonus - advance - loan - tax - other

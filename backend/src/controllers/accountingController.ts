@@ -2613,6 +2613,16 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId;
 
+  // Super Admin / College Admin may save fully manual money columns
+  const primaryRole = normalizeUserRole(req.user?.role ?? "");
+  let canManualValues = isInstitutionAdmin(primaryRole);
+  if (!canManualValues) {
+    const secondary = await getUserSecondaryRoles(req.user!.userId);
+    canManualValues = secondary.some((r) =>
+      isInstitutionAdmin(normalizeUserRole(r))
+    );
+  }
+
   // Derive working days from BS calendar for consistent per-day rates
   const [y, m] = payload.monthBs.split("-").map(Number);
   const { getDaysInBsMonth } = await import("../utils/nepaliDate.js");
@@ -2639,6 +2649,32 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
           : undefined
     });
 
+    // Only Super Admin / College Admin may persist manual money overrides
+    const useManualValues =
+      canManualValues && Boolean(row.valuesManualOverride);
+    if (Boolean(row.valuesManualOverride) && !canManualValues) {
+      throw new ApiError(
+        403,
+        "Only Super Admin or College Admin can save manually edited salary amounts"
+      );
+    }
+
+    const money = useManualValues
+      ? {
+          absentDeductionNpr: Math.max(0, Number(row.absentDeductionNpr ?? 0)),
+          extraAmountNpr: Math.max(0, Number(row.extraAmountNpr ?? 0)),
+          salaryAmountNpr: Math.max(0, Number(row.salaryAmountNpr ?? 0)),
+          taxNpr: Math.max(0, Number(row.tax1PercentNpr ?? 0)),
+          netSalaryNpr: Math.max(0, Number(row.netSalaryNpr ?? calc.netSalaryNpr))
+        }
+      : {
+          absentDeductionNpr: calc.absentDeductionNpr,
+          extraAmountNpr: calc.extraAmountNpr,
+          salaryAmountNpr: calc.salaryAmountNpr,
+          taxNpr: calc.tax1PercentNpr,
+          netSalaryNpr: calc.netSalaryNpr
+        };
+
     const docFields = {
       employeeType: row.employeeType,
       teacherId: row.employeeType === "TEACHER" ? row.teacherId : undefined,
@@ -2654,12 +2690,13 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       presentDays: row.presentDays,
       absentDays: row.absentDays,
       extraDuty: row.extraDuty,
-      absentDeductionNpr: calc.absentDeductionNpr,
-      extraAmountNpr: calc.extraAmountNpr,
-      salaryAmountNpr: calc.salaryAmountNpr,
-      taxNpr: calc.tax1PercentNpr,
-      netSalaryNpr: calc.netSalaryNpr,
+      absentDeductionNpr: money.absentDeductionNpr,
+      extraAmountNpr: money.extraAmountNpr,
+      salaryAmountNpr: money.salaryAmountNpr,
+      taxNpr: money.taxNpr,
+      netSalaryNpr: money.netSalaryNpr,
       attendanceManualOverride: Boolean(row.attendanceManualOverride),
+      valuesManualOverride: useManualValues,
       attendanceIncomplete: false,
       notes: row.remarks ?? "",
       status: payload.status,
@@ -2701,7 +2738,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
           entryType: "DEBIT",
           category: "Salary",
           description: `Salary payment ${payload.monthBs} — ${row.employeeName || ""}`,
-          amountNpr: calc.netSalaryNpr,
+          amountNpr: money.netSalaryNpr,
           paymentMethod: payload.paymentMethod,
           referenceType: "SalaryPayment",
           referenceId: existing._id.toString()
@@ -2711,8 +2748,8 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
           userId: userId as unknown as import("mongoose").Types.ObjectId,
           salaryId: existing._id,
           dateBs: payload.paidDateBs,
-          amountNpr: calc.netSalaryNpr,
-          taxNpr: calc.tax1PercentNpr,
+          amountNpr: money.netSalaryNpr,
+          taxNpr: money.taxNpr,
           paymentMethod: payload.paymentMethod,
           monthBs: payload.monthBs
         });
@@ -2731,7 +2768,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
           entryType: "DEBIT",
           category: "Salary",
           description: `Salary payment ${payload.monthBs} — ${row.employeeName || ""}`,
-          amountNpr: calc.netSalaryNpr,
+          amountNpr: money.netSalaryNpr,
           paymentMethod: payload.paymentMethod,
           referenceType: "SalaryPayment",
           referenceId: created._id.toString()
@@ -2741,8 +2778,8 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
           userId: userId as unknown as import("mongoose").Types.ObjectId,
           salaryId: created._id,
           dateBs: payload.paidDateBs,
-          amountNpr: calc.netSalaryNpr,
-          taxNpr: calc.tax1PercentNpr,
+          amountNpr: money.netSalaryNpr,
+          taxNpr: money.taxNpr,
           paymentMethod: payload.paymentMethod,
           monthBs: payload.monthBs
         });
