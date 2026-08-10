@@ -155,6 +155,18 @@ export type BuildSalarySheetOptions = {
   search?: string;
 };
 
+/** Normalize ObjectId / populated ref / string for map keys. */
+const idKey = (value: unknown): string => {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object" && value !== null) {
+    if ("_id" in value && (value as { _id?: unknown })._id != null) {
+      return String((value as { _id: unknown })._id);
+    }
+  }
+  return String(value);
+};
+
 export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   const { schoolId, monthBs } = options;
   const dept = options.department?.trim().toLowerCase() || "";
@@ -162,27 +174,39 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   const employeeType = options.employeeType || "";
   const employeeId = options.employeeId?.trim() || "";
 
-  const [attendance, teachers, staff, existingSalaries] = await Promise.all([
+  // Include inactive roster members so existing payroll rows still surface
+  const [attendance, teachers, staff, existingSalariesRaw] = await Promise.all([
     aggregateEmployeeAttendanceForMonth(schoolId, monthBs),
-    Teacher.find({ schoolId, status: { $ne: "INACTIVE" } })
+    Teacher.find({ schoolId })
       .select("teacherCode basicSalaryNpr user status")
       .populate({ path: "user", select: "fullName designation isActive" })
       .lean(),
-    CollegeStaff.find({ schoolId, status: { $ne: "INACTIVE" } })
+    CollegeStaff.find({ schoolId })
       .select("fullName staffId department designation basicSalaryNpr status")
       .lean(),
-    SalaryPayment.find({ schoolId, monthBs, isDeleted: false }).lean()
+    // Exact month + loose prefix (legacy "2083-4" style) so saved rows always load
+    SalaryPayment.find({
+      schoolId,
+      isDeleted: false,
+      $or: [{ monthBs }, { monthBs: { $regex: `^${monthBs}` } }]
+    }).lean()
   ]);
+
+  // Prefer exact monthBs match when both exact and prefix hits exist
+  const existingSalaries = existingSalariesRaw.filter((s) => {
+    const m = String(s.monthBs || "").trim();
+    return m === monthBs || m.startsWith(`${monthBs}`);
+  });
 
   const salaryByTeacher = new Map(
     existingSalaries
       .filter((s) => s.teacherId)
-      .map((s) => [String(s.teacherId), s] as const)
+      .map((s) => [idKey(s.teacherId), s] as const)
   );
   const salaryByStaff = new Map(
     existingSalaries
       .filter((s) => s.staffId)
-      .map((s) => [String(s.staffId), s] as const)
+      .map((s) => [idKey(s.staffId), s] as const)
   );
 
   type DraftRow = {
@@ -220,8 +244,16 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         | { fullName?: string; designation?: string; isActive?: boolean }
         | null
         | undefined;
-      if (user?.isActive === false) continue;
-      const id = String(t._id);
+      const id = idKey(t._id);
+      const saved = salaryByTeacher.get(id);
+      // Skip inactive teachers only when they have no payroll row for this month
+      if (
+        !saved &&
+        (String(t.status || "").toUpperCase() === "INACTIVE" ||
+          user?.isActive === false)
+      ) {
+        continue;
+      }
       if (employeeId && employeeId !== id) continue;
       const name = user?.fullName?.trim() || "—";
       const designation = user?.designation?.trim() || "";
@@ -229,12 +261,17 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         continue;
       }
       // Teachers: department filter only applies if they match "Teaching" / empty dept
-      if (dept && dept !== "teaching" && dept !== "teacher" && dept !== "teachers") {
-        // skip teachers when filtering a staff department
+      // Always keep teachers who already have a saved payroll row for this month.
+      if (
+        !saved &&
+        dept &&
+        dept !== "teaching" &&
+        dept !== "teacher" &&
+        dept !== "teachers"
+      ) {
         continue;
       }
       const att = attendance.byTeacherId.get(id);
-      const saved = salaryByTeacher.get(id);
       const incomplete = !att || att.daysRecorded === 0;
       const manual = Boolean(saved?.attendanceManualOverride);
       const valuesManual = Boolean(
@@ -295,13 +332,19 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
 
   if (!employeeType || employeeType === "STAFF") {
     for (const s of staff) {
-      const id = String(s._id);
+      const id = idKey(s._id);
+      const saved = salaryByStaff.get(id);
+      // Skip inactive staff only when they have no payroll row for this month
+      if (!saved && String(s.status || "").toUpperCase() === "INACTIVE") {
+        continue;
+      }
       if (employeeId && employeeId !== id) continue;
       const name = s.fullName?.trim() || "—";
       const department = s.department?.trim() || "";
       const designation = s.designation?.trim() || "";
-      if (dept && department.toLowerCase() !== dept) continue;
+      if (!saved && dept && department.toLowerCase() !== dept) continue;
       if (
+        !saved &&
         search &&
         !name.toLowerCase().includes(search) &&
         !department.toLowerCase().includes(search) &&
@@ -310,7 +353,6 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         continue;
       }
       const att = attendance.byStaffId.get(id);
-      const saved = salaryByStaff.get(id);
       const incomplete = !att || att.daysRecorded === 0;
       const manual = Boolean(saved?.attendanceManualOverride);
       const valuesManual = Boolean(
@@ -365,6 +407,99 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
           ? Number(saved?.netSalaryNpr ?? 0)
           : undefined
       });
+    }
+  }
+
+  // Orphan payroll rows: saved payments whose employee is missing from roster queries
+  // (deleted profile, broken link, etc.) — still show so "already entered" data is visible
+  const coveredTeachers = new Set(
+    drafts.filter((d) => d.teacherId).map((d) => String(d.teacherId))
+  );
+  const coveredStaff = new Set(
+    drafts.filter((d) => d.staffId).map((d) => String(d.staffId))
+  );
+
+  for (const s of existingSalaries) {
+    const tid = idKey(s.teacherId);
+    const sid = idKey(s.staffId);
+    const valuesManual = Boolean(
+      (s as { valuesManualOverride?: boolean }).valuesManualOverride
+    );
+    const manual = Boolean(s.attendanceManualOverride);
+
+    if (tid && !coveredTeachers.has(tid)) {
+      if (employeeType && employeeType !== "TEACHER") continue;
+      if (employeeId && employeeId !== tid) continue;
+      const name =
+        String(s.staffName || "").trim() ||
+        "Teacher (saved payroll)";
+      drafts.push({
+        employeeType: "TEACHER",
+        teacherId: tid,
+        employeeName: name,
+        department: "Teaching",
+        designation: "",
+        monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
+        presentDays: Number(s.presentDays ?? 0),
+        absentDays: Number(s.absentDays ?? 0),
+        extraDuty: Number(s.extraDuty ?? 0),
+        remarks: String(s.notes ?? ""),
+        attendanceIncomplete: false,
+        attendanceManualOverride: manual,
+        valuesManualOverride: valuesManual,
+        attendanceDaysRecorded: 0,
+        salaryPaymentId: String(s._id),
+        status: s.status,
+        extraAmountOverrideNpr: undefined,
+        savedAbsentDeductionNpr: Number(s.absentDeductionNpr ?? 0),
+        savedExtraAmountNpr: Number(s.extraAmountNpr ?? 0),
+        savedSalaryAmountNpr: Number(s.salaryAmountNpr ?? 0),
+        savedTax1PercentNpr: Number(s.taxNpr ?? 0),
+        savedNetSalaryNpr: Number(s.netSalaryNpr ?? 0)
+      });
+      // Prefer saved money when reconstructing orphans
+      if (!valuesManual) {
+        const last = drafts[drafts.length - 1];
+        if (last) {
+          last.valuesManualOverride = true;
+          last.savedAbsentDeductionNpr = Number(s.absentDeductionNpr ?? 0);
+          last.savedExtraAmountNpr = Number(s.extraAmountNpr ?? 0);
+          last.savedSalaryAmountNpr = Number(s.salaryAmountNpr ?? 0);
+          last.savedTax1PercentNpr = Number(s.taxNpr ?? 0);
+          last.savedNetSalaryNpr = Number(s.netSalaryNpr ?? 0);
+        }
+      }
+      coveredTeachers.add(tid);
+    }
+
+    if (sid && !coveredStaff.has(sid)) {
+      if (employeeType && employeeType !== "STAFF") continue;
+      if (employeeId && employeeId !== sid) continue;
+      drafts.push({
+        employeeType: "STAFF",
+        staffId: sid,
+        employeeName: String(s.staffName || "").trim() || "Staff (saved payroll)",
+        department: "",
+        designation: "",
+        monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
+        presentDays: Number(s.presentDays ?? 0),
+        absentDays: Number(s.absentDays ?? 0),
+        extraDuty: Number(s.extraDuty ?? 0),
+        remarks: String(s.notes ?? ""),
+        attendanceIncomplete: false,
+        attendanceManualOverride: manual,
+        valuesManualOverride: true,
+        attendanceDaysRecorded: 0,
+        salaryPaymentId: String(s._id),
+        status: s.status,
+        extraAmountOverrideNpr: undefined,
+        savedAbsentDeductionNpr: Number(s.absentDeductionNpr ?? 0),
+        savedExtraAmountNpr: Number(s.extraAmountNpr ?? 0),
+        savedSalaryAmountNpr: Number(s.salaryAmountNpr ?? 0),
+        savedTax1PercentNpr: Number(s.taxNpr ?? 0),
+        savedNetSalaryNpr: Number(s.netSalaryNpr ?? 0)
+      });
+      coveredStaff.add(sid);
     }
   }
 

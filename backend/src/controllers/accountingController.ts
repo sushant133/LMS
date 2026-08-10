@@ -117,8 +117,8 @@ const emptyToUndef = (value?: string | null): string | undefined => {
 };
 
 /**
- * Super Admin / College Admin only may edit/delete fee payments
- * (reverse journal + restore student balance).
+ * Super Admin / College Admin only may edit/delete sensitive accounting records
+ * (fee payments, salary sheet / payroll, voids that reverse books).
  */
 const assertCanEditOrDeleteFeePayment = async (req: {
   user?: { userId: string; role: string };
@@ -129,7 +129,7 @@ const assertCanEditOrDeleteFeePayment = async (req: {
   if (secondary.some((r) => isInstitutionAdmin(normalizeUserRole(r)))) return;
   throw new ApiError(
     403,
-    "Only Super Admin or College Admin can edit or delete fee payment transactions"
+    "Only Super Admin or College Admin can edit or delete this accounting record"
   );
 };
 import { formatAddressLine } from "../utils/formatAddress.js";
@@ -1903,6 +1903,219 @@ export const reverseFeeCollection = asyncHandler(async (req: Request, res: Respo
   );
 });
 
+/**
+ * Super Admin / College Admin — edit a student's security deposit *plan*
+ * (admission expected amount / waived). Does not change held cash from receipts.
+ */
+export const updateStudentSecurityDepositPlan = asyncHandler(
+  async (req: Request, res: Response) => {
+    await assertCanEditOrDeleteFeePayment(req);
+
+    const schema = z.object({
+      securityDepositExpectedNpr: z.number().min(0).optional(),
+      securityDepositWaived: z.boolean().optional()
+    });
+    const payload = schema.parse(req.body ?? {});
+    if (
+      payload.securityDepositExpectedNpr === undefined &&
+      payload.securityDepositWaived === undefined
+    ) {
+      throw new ApiError(
+        400,
+        "Provide securityDepositExpectedNpr and/or securityDepositWaived"
+      );
+    }
+
+    const schoolId = tenantObjectId(req);
+    const student = await Student.findOne(
+      withTenantScope(req, { _id: req.params.studentId })
+    );
+    if (!student) throw new ApiError(404, "Student not found");
+
+    try {
+      const { syncStudentSecurityDepositHeldFromLedger } = await import(
+        "../utils/studentSecurityDeposit.js"
+      );
+      await syncStudentSecurityDepositHeldFromLedger(student._id, schoolId);
+      const latest = await Student.findById(student._id).select(
+        "securityDepositNpr securityDepositRefundedNpr securityDepositExpectedNpr securityDepositWaived"
+      );
+      if (latest) {
+        student.securityDepositNpr = latest.securityDepositNpr;
+        student.securityDepositRefundedNpr = latest.securityDepositRefundedNpr;
+        student.securityDepositExpectedNpr = latest.securityDepositExpectedNpr;
+        student.securityDepositWaived = latest.securityDepositWaived;
+      }
+    } catch {
+      // use in-memory student fields
+    }
+
+    const before = {
+      securityDepositExpectedNpr: Number(student.securityDepositExpectedNpr) || 0,
+      securityDepositNpr: Number(student.securityDepositNpr) || 0,
+      securityDepositRefundedNpr: Number(student.securityDepositRefundedNpr) || 0,
+      securityDepositWaived: Boolean(student.securityDepositWaived)
+    };
+
+    const held = Math.max(0, Number(student.securityDepositNpr) || 0);
+    const refunded = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
+    const remainingHeld = Math.max(0, held - refunded);
+
+    const nextWaived =
+      payload.securityDepositWaived !== undefined
+        ? Boolean(payload.securityDepositWaived)
+        : Boolean(student.securityDepositWaived);
+
+    if (nextWaived && remainingHeld > 0.001) {
+      throw new ApiError(
+        400,
+        `Cannot mark deposit as not taken while ${remainingHeld} NPR is still held. Delete deposit receipts or refund first.`
+      );
+    }
+
+    let nextExpected = nextWaived
+      ? 0
+      : payload.securityDepositExpectedNpr !== undefined
+        ? Math.max(0, Number(payload.securityDepositExpectedNpr) || 0)
+        : Math.max(0, Number(student.securityDepositExpectedNpr) || 0);
+
+    // If plan is cleared but money is still held, keep expected at least held so status stays coherent
+    if (!nextWaived && nextExpected < remainingHeld - 0.001) {
+      // Allow plan lower than held only when explicitly set — still due becomes 0 (overpaid plan)
+      // Leave as user requested; stillDue = max(0, expected - held) already handles overpay.
+    }
+
+    student.securityDepositWaived = nextWaived;
+    student.securityDepositExpectedNpr = nextExpected;
+    await student.save();
+
+    const after = {
+      securityDepositExpectedNpr: nextExpected,
+      securityDepositNpr: held,
+      securityDepositRefundedNpr: refunded,
+      securityDepositWaived: nextWaived
+    };
+
+    await recordAudit(req, {
+      action: "accounting.security_deposit.plan_update",
+      entity: "Student",
+      entityId: String(student._id),
+      before,
+      after
+    });
+
+    return sendSuccess(res, "Student security deposit plan updated", {
+      studentId: String(student._id),
+      ...after
+    });
+  }
+);
+
+/**
+ * Super Admin / College Admin — clear a student's deposit plan from Student status.
+ * Held amounts from receipts are never deleted here (use deposit receipt Delete).
+ * - If nothing held: zeros plan + clears waived flag
+ * - If money held: zeros plan only (held stays); refuse if trying to wipe with held and waived
+ */
+export const clearStudentSecurityDepositPlan = asyncHandler(
+  async (req: Request, res: Response) => {
+    await assertCanEditOrDeleteFeePayment(req);
+
+    const payload = reverseReasonSchema.parse(
+      req.body ?? { reason: "Deposit plan cleared by administrator" }
+    );
+
+    const schoolId = tenantObjectId(req);
+    const student = await Student.findOne(
+      withTenantScope(req, { _id: req.params.studentId })
+    );
+    if (!student) throw new ApiError(404, "Student not found");
+
+    try {
+      const { syncStudentSecurityDepositHeldFromLedger } = await import(
+        "../utils/studentSecurityDeposit.js"
+      );
+      await syncStudentSecurityDepositHeldFromLedger(student._id, schoolId);
+      const latest = await Student.findById(student._id).select(
+        "securityDepositNpr securityDepositRefundedNpr securityDepositExpectedNpr securityDepositWaived"
+      );
+      if (latest) {
+        student.securityDepositNpr = latest.securityDepositNpr;
+        student.securityDepositRefundedNpr = latest.securityDepositRefundedNpr;
+        student.securityDepositExpectedNpr = latest.securityDepositExpectedNpr;
+        student.securityDepositWaived = latest.securityDepositWaived;
+      }
+    } catch {
+      // continue
+    }
+
+    const before = {
+      securityDepositExpectedNpr: Number(student.securityDepositExpectedNpr) || 0,
+      securityDepositNpr: Number(student.securityDepositNpr) || 0,
+      securityDepositRefundedNpr: Number(student.securityDepositRefundedNpr) || 0,
+      securityDepositWaived: Boolean(student.securityDepositWaived)
+    };
+
+    const held = Math.max(0, Number(student.securityDepositNpr) || 0);
+    const refunded = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
+    const remainingHeld = Math.max(0, held - refunded);
+    const hadPlan =
+      before.securityDepositExpectedNpr > 0.001 || before.securityDepositWaived;
+
+    if (!hadPlan && remainingHeld <= 0.001) {
+      throw new ApiError(400, "No security deposit plan to clear for this student");
+    }
+
+    // Clear plan only — never zero held from ledger here
+    if (remainingHeld <= 0.001) {
+      // No money held: remove plan entirely
+      student.securityDepositExpectedNpr = 0;
+      student.securityDepositWaived = false;
+    } else if (
+      before.securityDepositWaived ||
+      before.securityDepositExpectedNpr > remainingHeld + 0.001
+    ) {
+      // Drop waived flag / unpaid plan remainder; align plan with held → status PAID
+      student.securityDepositExpectedNpr = remainingHeld;
+      student.securityDepositWaived = false;
+    } else {
+      throw new ApiError(
+        400,
+        `This student has ${remainingHeld} NPR held from deposit receipts and no extra plan to clear. Delete deposit receipts under Deposit receipts to reverse money.`
+      );
+    }
+
+    await student.save();
+
+    const after = {
+      securityDepositExpectedNpr: Number(student.securityDepositExpectedNpr) || 0,
+      securityDepositNpr: held,
+      securityDepositRefundedNpr: refunded,
+      securityDepositWaived: Boolean(student.securityDepositWaived),
+      reason: payload.reason
+    };
+
+    await recordAudit(req, {
+      action: "accounting.security_deposit.plan_clear",
+      entity: "Student",
+      entityId: String(student._id),
+      before,
+      after
+    });
+
+    return sendSuccess(
+      res,
+      remainingHeld > 0.001
+        ? "Deposit plan cleared — held amount from receipts is unchanged (delete deposit receipts to reverse money)"
+        : "Student security deposit plan cleared",
+      {
+        studentId: String(student._id),
+        ...after
+      }
+    );
+  }
+);
+
 /** Ensure fiscal period is open for a BS date (lazy import to avoid circular deps). */
 const assertFiscalPeriodOpenIfNeeded = async (
   schoolId: import("mongoose").Types.ObjectId,
@@ -2639,19 +2852,15 @@ export const getSalarySheet = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) => {
+  // Entire salary sheet write path is Super Admin / College Admin only
+  await assertCanEditOrDeleteFeePayment(req);
+
   const payload = salarySheetSaveSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId;
 
-  // Super Admin / College Admin may save fully manual money columns
-  const primaryRole = normalizeUserRole(req.user?.role ?? "");
-  let canManualValues = isInstitutionAdmin(primaryRole);
-  if (!canManualValues) {
-    const secondary = await getUserSecondaryRoles(req.user!.userId);
-    canManualValues = secondary.some((r) =>
-      isInstitutionAdmin(normalizeUserRole(r))
-    );
-  }
+  // Admins may save fully manual money columns
+  const canManualValues = true;
 
   // Derive working days from BS calendar for consistent per-day rates
   const [y, m] = payload.monthBs.split("-").map(Number);
@@ -2833,6 +3042,9 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const createSalary = asyncHandler(async (req: Request, res: Response) => {
+  // Super Admin / College Admin only — no accountant / other staff writes
+  await assertCanEditOrDeleteFeePayment(req);
+
   const payload = salaryPaymentSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
   const amounts = resolvePayrollAmounts(payload);
@@ -2928,6 +3140,9 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const updateSalary = asyncHandler(async (req: Request, res: Response) => {
+  // Super Admin / College Admin only — no accountant / other staff writes
+  await assertCanEditOrDeleteFeePayment(req);
+
   const payload = salaryPaymentSchema.partial().parse(req.body);
   const existing = await SalaryPayment.findOne(
     withTenantScope(req, { _id: req.params.id, isDeleted: false })
@@ -2996,6 +3211,262 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
   await recordAudit(req, { action: "accounting.salary.update", entity: "SalaryPayment", entityId: String(req.params.id), before, after: salary });
   return sendSuccess(res, "Salary payment updated", salary);
 });
+
+/**
+ * Super Admin / College Admin only — soft-delete a salary payroll row.
+ * If the slip was PAID, reverse journal + cash book entries for audit integrity.
+ */
+export const deleteSalary = asyncHandler(async (req: Request, res: Response) => {
+  await assertCanEditOrDeleteFeePayment(req);
+
+  const payload = reverseReasonSchema.parse(
+    req.body ?? { reason: "Deleted by administrator from salary dashboard" }
+  );
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+  const salary = await SalaryPayment.findOne(
+    withTenantScope(req, { _id: req.params.id, isDeleted: false })
+  );
+  if (!salary) throw new ApiError(404, "Salary payment not found");
+
+  const before = salary.toObject();
+  const wasPaid = salary.status === "PAID";
+  const reverseDateBs =
+    salary.paidDateBs ||
+    (typeof salary.monthBs === "string" && /^\d{4}-\d{2}$/.test(salary.monthBs)
+      ? `${salary.monthBs}-01`
+      : getTodayBs());
+
+  await withFinancialTransaction(async (session) => {
+    if (wasPaid) {
+      await voidWithJournalReversal(
+        req,
+        salary,
+        schoolId,
+        userId,
+        "SalaryPayment",
+        payload.reason,
+        reverseDateBs,
+        session
+      );
+    } else {
+      salary.isDeleted = true;
+      (salary as { deletedAt?: Date }).deletedAt = new Date();
+      (salary as { deletedBy?: import("mongoose").Types.ObjectId }).deletedBy =
+        userId;
+      (salary as { voidReason?: string }).voidReason = payload.reason;
+      await salary.save(session ? { session } : undefined);
+    }
+  });
+
+  await recordAudit(req, {
+    action: "accounting.salary.delete",
+    entity: "SalaryPayment",
+    entityId: String(req.params.id),
+    before,
+    after: { isDeleted: true, voidReason: payload.reason }
+  });
+
+  return sendSuccess(
+    res,
+    wasPaid
+      ? "Salary payment deleted — journal and cash book reversed"
+      : "Salary payment deleted"
+  );
+});
+
+/**
+ * Archive list: months that already have saved salary sheet / payroll rows.
+ * Used by Salary Sheet → Saved months history.
+ */
+export const listSalarySheetMonths = asyncHandler(
+  async (req: Request, res: Response) => {
+    const schoolId = tenantObjectId(req);
+    const grouped = await SalaryPayment.aggregate<{
+      _id: string;
+      employeeCount: number;
+      totalNetSalaryNpr: number;
+      totalSalaryAmountNpr: number;
+      draftCount: number;
+      processedCount: number;
+      paidCount: number;
+      paidDates: Array<string | null | undefined>;
+      paymentMethods: Array<string | null | undefined>;
+      updatedAt: Date | null;
+    }>([
+      {
+        $match: {
+          schoolId,
+          isDeleted: false,
+          monthBs: { $type: "string", $ne: "" }
+        }
+      },
+      {
+        $group: {
+          _id: "$monthBs",
+          employeeCount: { $sum: 1 },
+          totalNetSalaryNpr: { $sum: { $ifNull: ["$netSalaryNpr", 0] } },
+          totalSalaryAmountNpr: {
+            $sum: { $ifNull: ["$salaryAmountNpr", 0] }
+          },
+          draftCount: {
+            $sum: { $cond: [{ $eq: ["$status", "DRAFT"] }, 1, 0] }
+          },
+          processedCount: {
+            $sum: { $cond: [{ $eq: ["$status", "PROCESSED"] }, 1, 0] }
+          },
+          paidCount: {
+            $sum: { $cond: [{ $eq: ["$status", "PAID"] }, 1, 0] }
+          },
+          paidDates: { $push: "$paidDateBs" },
+          paymentMethods: { $push: "$paymentMethod" },
+          updatedAt: { $max: "$updatedAt" }
+        }
+      },
+      { $sort: { _id: -1 } }
+    ]);
+
+    const months = grouped.map((g) => {
+      const monthBs = String(g._id || "").trim();
+      const draftCount = Number(g.draftCount || 0);
+      const processedCount = Number(g.processedCount || 0);
+      const paidCount = Number(g.paidCount || 0);
+      const distinctStatuses = [
+        draftCount > 0 ? "DRAFT" : null,
+        processedCount > 0 ? "PROCESSED" : null,
+        paidCount > 0 ? "PAID" : null
+      ].filter(Boolean) as Array<"DRAFT" | "PROCESSED" | "PAID">;
+      const status =
+        distinctStatuses.length === 1
+          ? distinctStatuses[0]!
+          : distinctStatuses.length > 1
+            ? ("MIXED" as const)
+            : ("DRAFT" as const);
+
+      const paidDateBs =
+        (g.paidDates || [])
+          .map((d) => (typeof d === "string" ? d.trim() : ""))
+          .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+          .sort()
+          .at(-1) || undefined;
+
+      const methods = (g.paymentMethods || [])
+        .map((m) => (typeof m === "string" ? m.trim() : ""))
+        .filter(Boolean);
+      const paymentMethod = methods[0] || undefined;
+
+      return {
+        monthBs,
+        employeeCount: Number(g.employeeCount || 0),
+        totalNetSalaryNpr: Math.round(Number(g.totalNetSalaryNpr || 0) * 100) / 100,
+        totalSalaryAmountNpr:
+          Math.round(Number(g.totalSalaryAmountNpr || 0) * 100) / 100,
+        status,
+        draftCount,
+        processedCount,
+        paidCount,
+        paidDateBs,
+        paymentMethod,
+        updatedAt: g.updatedAt ? new Date(g.updatedAt).toISOString() : undefined
+      };
+    });
+
+    return sendSuccess(res, "Salary sheet months fetched", months);
+  }
+);
+
+/**
+ * Super Admin / College Admin — delete an entire payroll month (all employees).
+ * Paid rows reverse journal + cash book; drafts are soft-deleted.
+ */
+export const deleteSalarySheetMonth = asyncHandler(
+  async (req: Request, res: Response) => {
+    await assertCanEditOrDeleteFeePayment(req);
+
+    const monthBs = String(req.params.monthBs || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(monthBs)) {
+      throw new ApiError(400, "monthBs must be YYYY-MM (BS)");
+    }
+
+    const payload = reverseReasonSchema.parse(
+      req.body ?? {
+        reason: `Deleted entire salary sheet for ${monthBs} by administrator`
+      }
+    );
+    const schoolId = tenantObjectId(req);
+    const userId = req.user!.userId as unknown as import("mongoose").Types.ObjectId;
+
+    const salaries = await SalaryPayment.find(
+      withTenantScope(req, { monthBs, isDeleted: false })
+    );
+    if (salaries.length === 0) {
+      throw new ApiError(404, `No salary sheet found for ${monthBs}`);
+    }
+
+    let paidReversed = 0;
+    let softDeleted = 0;
+
+    await withFinancialTransaction(async (session) => {
+      for (const salary of salaries) {
+        const wasPaid = salary.status === "PAID";
+        const reverseDateBs =
+          salary.paidDateBs ||
+          (typeof salary.monthBs === "string" &&
+          /^\d{4}-\d{2}$/.test(salary.monthBs)
+            ? `${salary.monthBs}-01`
+            : getTodayBs());
+
+        if (wasPaid) {
+          await voidWithJournalReversal(
+            req,
+            salary,
+            schoolId,
+            userId,
+            "SalaryPayment",
+            payload.reason,
+            reverseDateBs,
+            session
+          );
+          paidReversed += 1;
+        } else {
+          salary.isDeleted = true;
+          (salary as { deletedAt?: Date }).deletedAt = new Date();
+          (salary as { deletedBy?: import("mongoose").Types.ObjectId }).deletedBy =
+            userId;
+          (salary as { voidReason?: string }).voidReason = payload.reason;
+          await salary.save(session ? { session } : undefined);
+          softDeleted += 1;
+        }
+      }
+    });
+
+    await recordAudit(req, {
+      action: "accounting.salary.month_delete",
+      entity: "SalaryPayment",
+      entityId: monthBs,
+      before: {
+        monthBs,
+        count: salaries.length,
+        ids: salaries.map((s) => String(s._id))
+      },
+      after: {
+        isDeleted: true,
+        voidReason: payload.reason,
+        paidReversed,
+        softDeleted
+      }
+    });
+
+    return sendSuccess(
+      res,
+      paidReversed > 0
+        ? `Salary sheet for ${monthBs} deleted — ${paidReversed} paid row(s) reversed, ${softDeleted} draft/processed removed`
+        : `Salary sheet for ${monthBs} deleted (${softDeleted} employee row(s))`,
+      { monthBs, paidReversed, softDeleted, total: salaries.length }
+    );
+  }
+);
 
 export const listBankAccounts = asyncHandler(async (req: Request, res: Response) => {
   const accounts = await BankAccount.find(withTenantScope(req)).sort({ createdAt: -1 });

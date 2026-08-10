@@ -1,5 +1,4 @@
 import { Capacitor } from "@capacitor/core";
-import { PushNotifications } from "@capacitor/push-notifications";
 import { api } from "lib/api";
 
 const STORAGE_KEY = "phit_fcm_device_token";
@@ -9,12 +8,59 @@ let listenersAttached = false;
 let initInFlight: Promise<void> | null = null;
 let lastRegisteredUserId: string | null = null;
 
+/** Minimal surface we use from @capacitor/push-notifications (avoids hard static import for Vite web). */
+type PushNotificationsPlugin = {
+  addListener: (
+    eventName: string,
+    listenerFunc: (event: {
+      value?: string;
+      notification?: { data?: Record<string, unknown> };
+    }) => void,
+  ) => Promise<unknown> | void;
+  requestPermissions: () => Promise<{ receive?: string }>;
+  register: () => Promise<void>;
+  createChannel?: (options: {
+    id: string;
+    name: string;
+    description?: string;
+    importance?: number;
+    visibility?: number;
+    sound?: string;
+    vibration?: boolean;
+  }) => Promise<void>;
+};
+
+let cachedPlugin: PushNotificationsPlugin | null | undefined;
+
 const isNativeMobile = (): boolean => {
   try {
     return Capacitor.isNativePlatform();
   } catch {
     return false;
   }
+};
+
+/**
+ * Load the Capacitor push plugin only on native apps.
+ * Uses @vite-ignore so browser/dev does not fail when the optional native
+ * package is not installed or not pre-bundled yet.
+ */
+const getPushPlugin = async (): Promise<PushNotificationsPlugin | null> => {
+  if (!isNativeMobile()) return null;
+  if (cachedPlugin !== undefined) return cachedPlugin;
+
+  try {
+    // Dynamic + vite-ignore: web builds never hard-depend on this package path
+    const mod = (await import(
+      /* @vite-ignore */
+      "@capacitor/push-notifications"
+    )) as { PushNotifications?: PushNotificationsPlugin };
+    cachedPlugin = mod.PushNotifications ?? null;
+  } catch (error) {
+    console.warn("[push] @capacitor/push-notifications not available", error);
+    cachedPlugin = null;
+  }
+  return cachedPlugin;
 };
 
 const persistLocalToken = (token: string | null): void => {
@@ -53,23 +99,13 @@ const deleteDeviceToken = async (token: string): Promise<void> => {
   });
 };
 
-const ensureAndroidChannel = async (): Promise<void> => {
+const ensureAndroidChannel = async (
+  PushNotifications: PushNotificationsPlugin,
+): Promise<void> => {
   if (Capacitor.getPlatform() !== "android") return;
   try {
-    // Capacitor 8 PushNotifications.createChannel (Android only)
-    const push = PushNotifications as typeof PushNotifications & {
-      createChannel?: (options: {
-        id: string;
-        name: string;
-        description?: string;
-        importance?: number;
-        visibility?: number;
-        sound?: string;
-        vibration?: boolean;
-      }) => Promise<void>;
-    };
-    if (typeof push.createChannel === "function") {
-      await push.createChannel({
+    if (typeof PushNotifications.createChannel === "function") {
+      await PushNotifications.createChannel({
         id: ANDROID_CHANNEL_ID,
         name: "PHIT LMS Alerts",
         description: "Personal notifications for your PHIT COLLEGE account",
@@ -91,13 +127,12 @@ const navigateFromPushData = (data: Record<string, unknown> | undefined): void =
     typeof rawPath === "string" && rawPath.startsWith("/") && !rawPath.startsWith("//")
       ? rawPath
       : "/notifications";
-  // Full navigation works inside Capacitor WebView without coupling to router internals
   if (window.location.pathname !== path) {
     window.location.assign(path);
   }
 };
 
-const attachListenersOnce = (): void => {
+const attachListenersOnce = (PushNotifications: PushNotificationsPlugin): void => {
   if (listenersAttached) return;
   listenersAttached = true;
 
@@ -116,7 +151,6 @@ const attachListenersOnce = (): void => {
 
   void PushNotifications.addListener("pushNotificationReceived", (_notification) => {
     // App is in foreground: in-app Notification Center / badge still apply.
-    // System may or may not show a heads-up depending on Android settings.
   });
 
   void PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
@@ -136,13 +170,15 @@ export const initPushNotifications = async (userId: string): Promise<void> => {
 
   if (initInFlight) {
     await initInFlight;
-    // If same user already registered this session, still re-post token after re-login
   }
 
   initInFlight = (async () => {
     try {
-      attachListenersOnce();
-      await ensureAndroidChannel();
+      const PushNotifications = await getPushPlugin();
+      if (!PushNotifications) return;
+
+      attachListenersOnce(PushNotifications);
+      await ensureAndroidChannel(PushNotifications);
 
       const permission = await PushNotifications.requestPermissions();
       if (permission.receive !== "granted") {
@@ -153,7 +189,6 @@ export const initPushNotifications = async (userId: string): Promise<void> => {
       await PushNotifications.register();
       lastRegisteredUserId = uid;
 
-      // Re-bind a previously stored token immediately (registration event may not re-fire)
       const existing = readLocalToken();
       if (existing) {
         try {
@@ -190,7 +225,6 @@ export const unregisterPushNotifications = async (): Promise<void> => {
   } catch {
     // Best-effort — session may already be cleared
   } finally {
-    // Keep local token so the next login can re-bind the same device quickly
     lastRegisteredUserId = null;
   }
 };

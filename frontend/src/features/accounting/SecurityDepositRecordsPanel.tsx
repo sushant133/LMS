@@ -156,6 +156,10 @@ export const SecurityDepositRecordsPanel = () => {
   const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(
     null,
   );
+  /** Admin: edit student deposit plan (Student deposit status tab) */
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [editPlanExpected, setEditPlanExpected] = useState("");
+  const [editPlanWaived, setEditPlanWaived] = useState(false);
 
   const receiptsQuery = useQuery({
     queryKey: ["accounting-fee-records"],
@@ -314,6 +318,47 @@ export const SecurityDepositRecordsPanel = () => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  const updateStudentPlanMutation = useMutation({
+    mutationFn: ({
+      studentId,
+      body,
+    }: {
+      studentId: string;
+      body: {
+        securityDepositExpectedNpr?: number;
+        securityDepositWaived?: boolean;
+      };
+    }) =>
+      unwrap(api.put(`/accounting/security-deposits/students/${studentId}`, body)),
+    onSuccess: async () => {
+      toast.success("Student deposit plan updated");
+      setEditingStudentId(null);
+      await invalidate();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const clearStudentPlanMutation = useMutation({
+    mutationFn: ({
+      studentId,
+      reason,
+    }: {
+      studentId: string;
+      reason: string;
+    }) =>
+      unwrap(
+        api.delete(`/accounting/security-deposits/students/${studentId}`, {
+          data: { reason },
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success("Student deposit plan cleared");
+      if (editingStudentId) setEditingStudentId(null);
+      await invalidate();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   const startEdit = (row: EnhancedFeeCollectionRecord) => {
     setEditingRow(row);
     setEditDeposit(String(row.securityDepositPaidNpr ?? 0));
@@ -370,6 +415,68 @@ export const SecurityDepositRecordsPanel = () => {
       return;
     }
     deleteMutation.mutate({ id: row._id, reason: reason.trim() });
+  };
+
+  const startEditStudentPlan = (row: {
+    student: StudentRecord;
+    expected: number;
+    waived: boolean;
+    held: number;
+  }) => {
+    if (!canAdminEdit) {
+      toast.error("Only Super Admin or College Admin can edit deposit plans");
+      return;
+    }
+    setEditingStudentId(row.student._id);
+    setEditPlanExpected(String(row.expected || 0));
+    setEditPlanWaived(Boolean(row.waived));
+  };
+
+  const submitStudentPlanEdit = () => {
+    if (!canAdminEdit || !editingStudentId) return;
+    const expected = Math.max(0, Number(editPlanExpected) || 0);
+    if (!editPlanWaived && expected < 0) {
+      toast.error("Plan amount cannot be negative");
+      return;
+    }
+    updateStudentPlanMutation.mutate({
+      studentId: editingStudentId,
+      body: {
+        securityDepositExpectedNpr: editPlanWaived ? 0 : expected,
+        securityDepositWaived: editPlanWaived,
+      },
+    });
+  };
+
+  const confirmClearStudentPlan = (row: {
+    student: StudentRecord;
+    expected: number;
+    held: number;
+    waived: boolean;
+  }) => {
+    if (!canAdminEdit) {
+      toast.error("Only Super Admin or College Admin can clear deposit plans");
+      return;
+    }
+    const name = row.student.user?.fullName ?? "Student";
+    const admission = row.student.admissionNumber ?? "";
+    const heldNote =
+      row.held > 0
+        ? `\n\nHeld/paid amount ${formatCurrencyNpr(row.held)} stays on file. To reverse money, delete deposit receipts under Deposit receipts.`
+        : "";
+    const reason = window.prompt(
+      `Clear deposit plan for ${name}${admission ? ` (${admission})` : ""}?\n\nPlan: ${formatCurrencyNpr(row.expected)}${row.waived ? " · Waived" : ""}${heldNote}\n\nReason:`,
+      "Deposit plan corrected by administrator",
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      toast.error("Reason must be at least 3 characters");
+      return;
+    }
+    clearStudentPlanMutation.mutate({
+      studentId: row.student._id,
+      reason: reason.trim(),
+    });
   };
 
   const submitRecord = () => {
@@ -594,6 +701,136 @@ export const SecurityDepositRecordsPanel = () => {
 
     try {
       // Hidden iframe — avoids popup blockers and Chrome `noopener` null-window bug
+      printHtmlViaIframe(html);
+      toast.success("Print dialog opening…");
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not open print preview",
+      );
+    }
+  };
+
+  /** Print the current Student deposit status table (respects search + status filter). */
+  const printStudentDepositStatusTable = () => {
+    if (studentDepositRows.length === 0) {
+      toast.error("No student deposit rows to print");
+      return;
+    }
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const statusLabel = (status: string) =>
+      status === "NONE" ? "No plan" : status.replace(/_/g, " ");
+
+    const totals = studentDepositRows.reduce(
+      (acc, row) => {
+        acc.expected += row.expected;
+        acc.held += row.held;
+        acc.stillDue += row.stillDue;
+        acc.refunded += row.refunded;
+        return acc;
+      },
+      { expected: 0, held: 0, stillDue: 0, refunded: 0 },
+    );
+
+    const rowsHtml = studentDepositRows
+      .map((row, index) => {
+        const name = row.student.user?.fullName ?? "—";
+        const admission = row.student.admissionNumber ?? "—";
+        return `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(name)}<br/><span class="muted">${escapeHtml(admission)}</span></td>
+          <td class="num">${escapeHtml(formatCurrencyNpr(row.expected))}</td>
+          <td class="num">${escapeHtml(formatCurrencyNpr(row.held))}</td>
+          <td class="num">${escapeHtml(formatCurrencyNpr(row.stillDue))}</td>
+          <td class="num">${
+            row.refunded > 0
+              ? escapeHtml(formatCurrencyNpr(row.refunded))
+              : "—"
+          }</td>
+          <td>${escapeHtml(statusLabel(row.status))}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const printedAt = new Date().toLocaleString();
+    const branding = getPrintInstitutionBranding();
+    const institutionHeader = buildPrintInstitutionHeaderHtml({ branding });
+    const filterParts = [
+      statusFilter !== "ALL" ? `Status: ${statusFilter}` : "",
+      search.trim() ? `Search: ${search.trim()}` : "",
+    ].filter(Boolean);
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Student Deposit Status</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; color: #0f172a; }
+    h1 { font-size: 16px; margin: 8px 0 4px; }
+    .meta { font-size: 12px; color: #475569; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; font-weight: 600; }
+    .num { text-align: right; white-space: nowrap; }
+    .muted { color: #64748b; font-size: 10px; }
+    tfoot td { font-weight: 600; background: #f8fafc; }
+    @media print {
+      body { margin: 12mm; }
+      @page { size: A4 landscape; margin: 10mm; }
+    }
+    ${PRINT_INSTITUTION_HEADER_CSS}
+  </style>
+</head>
+<body>
+  ${institutionHeader}
+  <h1>Student Deposit Status</h1>
+  <div class="meta">
+    ${studentDepositRows.length} student${studentDepositRows.length === 1 ? "" : "s"}
+    · Printed ${escapeHtml(printedAt)}
+    ${filterParts.length ? ` · ${escapeHtml(filterParts.join(" · "))}` : ""}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Student</th>
+        <th>Plan (to deposit)</th>
+        <th>Paid / held</th>
+        <th>Still due</th>
+        <th>Refunded</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2">Totals</td>
+        <td class="num">${escapeHtml(formatCurrencyNpr(totals.expected))}</td>
+        <td class="num">${escapeHtml(formatCurrencyNpr(totals.held))}</td>
+        <td class="num">${escapeHtml(formatCurrencyNpr(totals.stillDue))}</td>
+        <td class="num">${escapeHtml(formatCurrencyNpr(totals.refunded))}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+  <script>
+    window.onload = function () {
+      window.focus();
+      window.print();
+    };
+  </script>
+</body>
+</html>`;
+
+    try {
       printHtmlViaIframe(html);
       toast.success("Print dialog opening…");
     } catch (e) {
@@ -947,10 +1184,6 @@ export const SecurityDepositRecordsPanel = () => {
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle className="text-base">Student deposit status</CardTitle>
-              <p className="mt-1 text-sm text-slate-500">
-                Plan (admission) vs paid (accounts). Use Record deposit to
-                collect outstanding amounts.
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Select
@@ -974,9 +1207,91 @@ export const SecurityDepositRecordsPanel = () => {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={studentDepositRows.length === 0}
+                onClick={printStudentDepositStatusTable}
+                title="Print the current filtered student deposit status table"
+              >
+                <Printer className="mr-1.5 h-4 w-4" />
+                Print
+              </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            {editingStudentId && canAdminEdit ? (
+              <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-4">
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-slate-900">
+                      Edit deposit plan
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      {(studentsQuery.data ?? []).find(
+                        (s) => s._id === editingStudentId,
+                      )?.user?.fullName ?? "Student"}{" "}
+                      ·{" "}
+                      {(studentsQuery.data ?? []).find(
+                        (s) => s._id === editingStudentId,
+                      )?.admissionNumber ?? "—"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Changes the admission plan only. Paid/held amount is updated
+                      when deposit receipts are recorded or deleted.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditingStudentId(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <FormField label="Plan / to deposit (NPR)">
+                    <NumberInput
+                      min={0}
+                      value={editPlanExpected}
+                      disabled={editPlanWaived}
+                      onChange={(e) => setEditPlanExpected(e.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Status">
+                    <label className="flex h-10 cursor-pointer items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300"
+                        checked={editPlanWaived}
+                        onChange={(e) => {
+                          setEditPlanWaived(e.target.checked);
+                          if (e.target.checked) setEditPlanExpected("0");
+                        }}
+                      />
+                      Not taken / waived
+                    </label>
+                  </FormField>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    onClick={submitStudentPlanEdit}
+                    disabled={updateStudentPlanMutation.isPending}
+                  >
+                    {updateStudentPlanMutation.isPending
+                      ? "Saving…"
+                      : "Save plan"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setEditingStudentId(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             {studentDepositRows.length === 0 ? (
               <EmptyState
                 title="No deposit plans found"
@@ -984,7 +1299,7 @@ export const SecurityDepositRecordsPanel = () => {
               />
             ) : (
               <div className="max-w-full overflow-x-auto">
-                <Table className="min-w-[900px]">
+                <Table className="min-w-[980px]">
                   <TableHead>
                     <tr>
                       <Th>Student</Th>
@@ -993,7 +1308,7 @@ export const SecurityDepositRecordsPanel = () => {
                       <Th className="text-right">Still due</Th>
                       <Th className="text-right">Refunded</Th>
                       <Th>Status</Th>
-                      <Th className="text-right">Action</Th>
+                      <Th className="text-right">Actions</Th>
                     </tr>
                   </TableHead>
                   <TableBody>
@@ -1008,8 +1323,13 @@ export const SecurityDepositRecordsPanel = () => {
                               : row.status === "WAIVED"
                                 ? "bg-slate-100 text-slate-600"
                                 : "bg-slate-50 text-slate-500";
+                      const isEditingThis =
+                        editingStudentId === row.student._id;
                       return (
-                        <tr key={row.student._id}>
+                        <tr
+                          key={row.student._id}
+                          className={cn(isEditingThis && "bg-violet-50/40")}
+                        >
                           <Td>
                             <div className="font-medium">
                               {row.student.user?.fullName ?? "—"}
@@ -1040,29 +1360,70 @@ export const SecurityDepositRecordsPanel = () => {
                             </Badge>
                           </Td>
                           <Td className="text-right">
-                            {row.stillDue > 0 && !row.waived ? (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => {
-                                  setRecordForm((f) => ({
-                                    ...f,
-                                    studentId: row.student._id,
-                                    securityDepositPaidNpr: String(row.stillDue),
-                                  }));
-                                  setStudentPickerSearch(
-                                    row.student.user?.fullName ??
-                                      row.student.admissionNumber ??
-                                      "",
-                                  );
-                                  setTab("record");
-                                }}
-                              >
-                                Record due
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-slate-400">—</span>
-                            )}
+                            <div className="flex flex-wrap justify-end gap-1">
+                              {row.stillDue > 0 && !row.waived ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => {
+                                    setRecordForm((f) => ({
+                                      ...f,
+                                      studentId: row.student._id,
+                                      securityDepositPaidNpr: String(
+                                        row.stillDue,
+                                      ),
+                                    }));
+                                    setStudentPickerSearch(
+                                      row.student.user?.fullName ??
+                                        row.student.admissionNumber ??
+                                        "",
+                                    );
+                                    setTab("record");
+                                  }}
+                                >
+                                  Record due
+                                </Button>
+                              ) : null}
+                              {canAdminEdit ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="default"
+                                    onClick={() => startEditStudentPlan(row)}
+                                  >
+                                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    disabled={
+                                      clearStudentPlanMutation.isPending ||
+                                      (row.expected <= 0 &&
+                                        !row.waived &&
+                                        row.held <= 0)
+                                    }
+                                    title={
+                                      row.held > 0
+                                        ? "Clear plan (held amount from receipts is kept)"
+                                        : "Clear deposit plan"
+                                    }
+                                    onClick={() =>
+                                      confirmClearStudentPlan(row)
+                                    }
+                                  >
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                    Delete
+                                  </Button>
+                                </>
+                              ) : (
+                                !(row.stillDue > 0 && !row.waived) ? (
+                                  <span className="text-xs text-slate-400">
+                                    View only
+                                  </span>
+                                ) : null
+                              )}
+                            </div>
                           </Td>
                         </tr>
                       );

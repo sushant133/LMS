@@ -23,6 +23,7 @@ export const invalidateAccountingQueries = async (): Promise<void> => {
     queryClient.invalidateQueries({ queryKey: ["accounting-salary-records"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-salary-employees"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-salary-sheet"] }),
+    queryClient.invalidateQueries({ queryKey: ["accounting-salary-sheet-months"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-cash-book"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-refund-records"] }),
     queryClient.invalidateQueries({ queryKey: ["fee-refunds"] }),

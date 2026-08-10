@@ -90,6 +90,10 @@ export default defineConfig(({ mode }) => {
       },
       extensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
     },
+    // Pre-bundle Capacitor packages so HMR does not fail if the dep graph is cold
+    optimizeDeps: {
+      include: ["@capacitor/core", "@capacitor/push-notifications"],
+    },
     build: {
       // External .map files — never inline eval-style sourcemaps in production
       sourcemap: mode !== "production",

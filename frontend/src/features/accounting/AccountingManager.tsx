@@ -422,6 +422,12 @@ export const AccountingManager = () => {
   /** Same gate as canDelete — reverse is a form of delete for posted books */
   const canReverse = isAdmin;
   const [tab, setTab] = useState<Tab>("dashboard");
+  /** Hand off payroll month (+ optional employee) when opening Salary Sheet from dashboard */
+  const [salarySheetFocus, setSalarySheetFocus] = useState<{
+    monthBs: string;
+    employeeName?: string;
+    focusKey?: number;
+  } | null>(null);
   const [studentSearch, setStudentSearch] = useState("");
   const [accountSearch, setAccountSearch] = useState("");
   const [editingStructure, setEditingStructure] =
@@ -896,6 +902,21 @@ export const AccountingManager = () => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  /** Super Admin / College Admin — remove a salary sheet entry from recent list */
+  const deleteSalary = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(
+        api.delete(`/accounting/salaries/${id}`, {
+          data: { reason: "Deleted from accounting dashboard" },
+        }),
+      ),
+    onSuccess: async () => {
+      toast.success("Salary entry deleted");
+      await invalidateAccounting();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   /** Delete from Reports: reverse journal (day-book) or reverse fee collection (scholarship). */
   const deleteFromReport = useMutation({
     mutationFn: async ({
@@ -1260,7 +1281,10 @@ export const AccountingManager = () => {
                         size="sm"
                         variant="outline"
                         className="shrink-0"
-                        onClick={() => setTab("salary-records")}
+                        onClick={() => {
+                          setSalarySheetFocus(null);
+                          setTab("salary-records");
+                        }}
                       >
                         Open sheet
                       </Button>
@@ -1281,85 +1305,133 @@ export const AccountingManager = () => {
                           presentDays?: number;
                           absentDays?: number;
                         };
-                        const monthBs =
+                        // Prefer explicit monthBs; fall back to voucher "Payroll 2083-04"
+                        const rawMonth =
                           typeof salaryItem.monthBs === "string"
-                            ? salaryItem.monthBs
+                            ? salaryItem.monthBs.trim()
                             : "";
-                        return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-xl border border-slate-100 bg-white p-3 text-left text-sm transition hover:border-brand-200 hover:bg-brand-50/40"
-                          onClick={() => {
-                            if (isSalary && monthBs && /^\d{4}-\d{2}$/.test(monthBs)) {
-                              try {
-                                sessionStorage.setItem(
-                                  "salary-sheet-monthBs",
-                                  monthBs,
-                                );
-                              } catch {
-                                /* ignore */
-                              }
+                        const fromVoucher = String(item.voucherNo || "").match(
+                          /(\d{4}-\d{2})/,
+                        );
+                        const monthBs =
+                          rawMonth && /^\d{4}-\d{2}$/.test(rawMonth)
+                            ? rawMonth
+                            : fromVoucher?.[1] || "";
+                        const openItem = () => {
+                          if (isSalary) {
+                            if (monthBs && /^\d{4}-\d{2}$/.test(monthBs)) {
+                              setSalarySheetFocus({
+                                monthBs,
+                                employeeName: item.party || undefined,
+                                focusKey: Date.now(),
+                              });
+                            } else {
+                              setSalarySheetFocus(null);
                             }
-                            if (item.linkTab) setTab(item.linkTab as Tab);
-                          }}
+                            setTab("salary-records");
+                            return;
+                          }
+                          if (item.linkTab) setTab(item.linkTab as Tab);
+                        };
+                        return (
+                        <div
+                          key={item.id}
+                          className="flex w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-xl border border-slate-100 bg-white transition hover:border-brand-200 hover:bg-brand-50/40"
                         >
-                          <div className="min-w-0 flex-1 overflow-hidden">
-                            <div className="truncate font-medium text-slate-900">
-                              {item.party}
-                            </div>
-                            {isSalary ? (
-                              <div className="mt-0.5 space-y-0.5 text-xs text-slate-500">
-                                <div className="truncate">
-                                  {item.voucherNo}
-                                  {item.dateBs && item.dateBs !== monthBs ? (
-                                    <span> · Paid {item.dateBs}</span>
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center justify-between gap-3 p-3 text-left text-sm"
+                            onClick={openItem}
+                          >
+                            <div className="min-w-0 flex-1 overflow-hidden">
+                              <div className="truncate font-medium text-slate-900">
+                                {item.party}
+                              </div>
+                              {isSalary ? (
+                                <div className="mt-0.5 space-y-0.5 text-xs text-slate-500">
+                                  <div className="truncate">
+                                    {item.voucherNo}
+                                    {item.dateBs && item.dateBs !== monthBs ? (
+                                      <span> · Paid {item.dateBs}</span>
+                                    ) : null}
+                                  </div>
+                                  {salaryItem.detail ? (
+                                    <div className="truncate text-[11px] text-slate-400">
+                                      {salaryItem.detail}
+                                    </div>
                                   ) : null}
                                 </div>
-                                {salaryItem.detail ? (
-                                  <div className="truncate text-[11px] text-slate-400">
-                                    {salaryItem.detail}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : (
-                              <div className="truncate text-xs text-slate-500">
-                                {item.dateBs} · {item.voucherNo}
-                                {item.status ? (
-                                  <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
-                                    {String(item.status).replace(/_/g, " ")}
-                                  </span>
-                                ) : null}
-                              </div>
-                            )}
-                          </div>
-                          <div
-                            className={cn(
-                              "max-w-[45%] shrink-0 text-right text-sm font-semibold tabular-nums leading-tight",
-                              section.amountClass,
-                              String(item.status).includes("DEPOSIT") &&
-                                "text-violet-700",
-                            )}
-                            title={formatCurrencyNpr(item.amountNpr)}
-                          >
-                            <span className="block break-all">
-                              {formatCurrencyNpr(item.amountNpr)}
-                            </span>
-                            {isSalary ? (
-                              <div className="text-[10px] font-normal text-slate-500">
-                                net salary
-                              </div>
-                            ) : String(item.status) === "DEPOSIT" ? (
-                              <div className="text-[10px] font-normal text-violet-600">
-                                deposit
-                              </div>
-                            ) : String(item.status) === "FEE+DEPOSIT" ? (
-                              <div className="text-[10px] font-normal text-slate-500">
-                                fee + deposit
-                              </div>
-                            ) : null}
-                          </div>
-                        </button>
+                              ) : (
+                                <div className="truncate text-xs text-slate-500">
+                                  {item.dateBs} · {item.voucherNo}
+                                  {item.status ? (
+                                    <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
+                                      {String(item.status).replace(/_/g, " ")}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )}
+                            </div>
+                            <div
+                              className={cn(
+                                "max-w-[45%] shrink-0 text-right text-sm font-semibold tabular-nums leading-tight",
+                                section.amountClass,
+                                String(item.status).includes("DEPOSIT") &&
+                                  "text-violet-700",
+                              )}
+                              title={formatCurrencyNpr(item.amountNpr)}
+                            >
+                              <span className="block break-all">
+                                {formatCurrencyNpr(item.amountNpr)}
+                              </span>
+                              {isSalary ? (
+                                <div className="text-[10px] font-normal text-slate-500">
+                                  net salary
+                                </div>
+                              ) : String(item.status) === "DEPOSIT" ? (
+                                <div className="text-[10px] font-normal text-violet-600">
+                                  deposit
+                                </div>
+                              ) : String(item.status) === "FEE+DEPOSIT" ? (
+                                <div className="text-[10px] font-normal text-slate-500">
+                                  fee + deposit
+                                </div>
+                              ) : null}
+                            </div>
+                          </button>
+                          {isSalary && canDelete ? (
+                            <div className="flex shrink-0 items-center border-l border-slate-100 pr-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                title="Delete this salary entry (Super Admin / College Admin)"
+                                disabled={deleteSalary.isPending}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const label = [
+                                    item.party,
+                                    item.voucherNo,
+                                    formatCurrencyNpr(item.amountNpr),
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ");
+                                  if (
+                                    !window.confirm(
+                                      `Delete salary entry?\n\n${label}\n\nThis removes it from the salary sheet. If it was marked Paid, journal and cash book entries are reversed.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  void deleteSalary.mutateAsync(item.id);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
                         );
                       })
                     )}
@@ -1374,7 +1446,13 @@ export const AccountingManager = () => {
 
       {tab === "fee-records" ? <StudentFeeRecordsPanel /> : null}
       {tab === "deposit-records" ? <SecurityDepositRecordsPanel /> : null}
-      {tab === "salary-records" ? <SalaryPaymentRecordsPanel /> : null}
+      {tab === "salary-records" ? (
+        <SalaryPaymentRecordsPanel
+          focusMonthBs={salarySheetFocus?.monthBs}
+          focusEmployeeName={salarySheetFocus?.employeeName}
+          focusKey={salarySheetFocus?.focusKey}
+        />
+      ) : null}
       {tab === "refund-records" ? <RefundRecordsPanel /> : null}
       {tab === "ledger" ? <LedgerPanel canDelete={canDelete} /> : null}
 

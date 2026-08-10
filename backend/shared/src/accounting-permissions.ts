@@ -27,10 +27,12 @@ const ALL_PERMISSIONS: AccountingPermission[] = [...ACCOUNTING_PERMISSIONS];
  * PHIT finance role matrix:
  * - SUPER_ADMIN: full access
  * - COLLEGE_ADMIN (Finance Administrator): full access
- * - ACCOUNTANT: operational write (no settings/staff/COA admin)
+ * - ACCOUNTANT: operational write (no settings/staff/COA admin; no salary sheet write)
  * - CASHIER: fee collection + receipts only
  * - PRINCIPAL: read + approvals + audit
  * - AUDITOR: read-only + audit
+ *
+ * manage_salaries (edit/save/delete payroll): SUPER_ADMIN + COLLEGE_ADMIN only.
  */
 export const ACCOUNTING_ROLE_PERMISSIONS: Partial<Record<UserRole, AccountingPermission[]>> = {
   SUPER_ADMIN: ALL_PERMISSIONS,
@@ -44,7 +46,7 @@ export const ACCOUNTING_ROLE_PERMISSIONS: Partial<Record<UserRole, AccountingPer
     "manage_expenses",
     "manage_purchases",
     "manage_income",
-    "manage_salaries",
+    // Salary sheet / payroll edit & delete: Super Admin / College Admin only
     "manage_journal",
     "view_audit"
   ],

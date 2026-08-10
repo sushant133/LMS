@@ -5,6 +5,7 @@
  */
 import type {
   SalaryPaymentRecord,
+  SalarySheetMonthSummary,
   SalarySheetResponse,
   SalarySheetRow,
 } from "@phit-erp/shared";
@@ -166,18 +167,26 @@ export const fetchSalarySheetClientFallback = async (
     }
   }
 
-  const monthSalaries = (salaries ?? []).filter(
-    (s) => s.monthBs === monthBs || String(s.monthBs).startsWith(monthBs),
-  );
+  const monthSalaries = (salaries ?? []).filter((s) => {
+    const m = String(s.monthBs || "").trim();
+    return m === monthBs || m.startsWith(monthBs);
+  });
+  const idKey = (v: unknown) => {
+    if (v == null) return "";
+    if (typeof v === "object" && v !== null && "_id" in v) {
+      return String((v as { _id: unknown })._id);
+    }
+    return String(v);
+  };
   const salaryByTeacher = new Map(
     monthSalaries
       .filter((s) => s.teacherId)
-      .map((s) => [String(s.teacherId), s] as const),
+      .map((s) => [idKey(s.teacherId), s] as const),
   );
   const salaryByStaff = new Map(
     monthSalaries
       .filter((s) => s.staffId)
-      .map((s) => [String(s.staffId), s] as const),
+      .map((s) => [idKey(s.staffId), s] as const),
   );
 
   const drafts: Omit<SalarySheetRow, "sn">[] = [];
@@ -223,7 +232,7 @@ export const fetchSalarySheetClientFallback = async (
       ),
       attendanceDaysRecorded: att?.recorded ?? 0,
       workingDaysInMonth,
-      salaryPaymentId: saved?._id,
+      salaryPaymentId: saved?._id ? String(saved._id) : undefined,
       status: saved?.status,
     });
   }
@@ -269,9 +278,87 @@ export const fetchSalarySheetClientFallback = async (
       ),
       attendanceDaysRecorded: att?.recorded ?? 0,
       workingDaysInMonth,
-      salaryPaymentId: saved?._id,
+      salaryPaymentId: saved?._id ? String(saved._id) : undefined,
       status: saved?.status,
     });
+  }
+
+  // Orphan saved payments not on active employee lists
+  const coveredT = new Set(
+    drafts.filter((d) => d.teacherId).map((d) => String(d.teacherId)),
+  );
+  const coveredS = new Set(
+    drafts.filter((d) => d.staffId).map((d) => String(d.staffId)),
+  );
+  for (const s of monthSalaries) {
+    const tid = idKey(s.teacherId);
+    const sid = idKey(s.staffId);
+    if (tid && !coveredT.has(tid)) {
+      const calc = calcLine(
+        Number(s.basicSalaryNpr ?? 0),
+        Number(s.absentDays ?? 0),
+        Number(s.extraDuty ?? 0),
+        workingDaysInMonth,
+      );
+      drafts.push({
+        employeeType: "TEACHER",
+        teacherId: tid,
+        employeeName: String(s.staffName || "").trim() || "Teacher (saved)",
+        department: "Teaching",
+        designation: "",
+        monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
+        presentDays: Number(s.presentDays ?? 0),
+        absentDays: Number(s.absentDays ?? 0),
+        extraDuty: Number(s.extraDuty ?? 0),
+        absentDeductionNpr: Number(s.absentDeductionNpr ?? calc.absentDeductionNpr),
+        extraAmountNpr: Number(s.extraAmountNpr ?? calc.extraAmountNpr),
+        salaryAmountNpr: Number(s.salaryAmountNpr ?? calc.salaryAmountNpr),
+        tax1PercentNpr: Number(s.taxNpr ?? calc.tax1PercentNpr),
+        netSalaryNpr: Number(s.netSalaryNpr ?? calc.netSalaryNpr),
+        remarks: String(s.notes ?? ""),
+        attendanceIncomplete: false,
+        attendanceManualOverride: Boolean(s.attendanceManualOverride),
+        valuesManualOverride: true,
+        attendanceDaysRecorded: 0,
+        workingDaysInMonth,
+        salaryPaymentId: String(s._id),
+        status: s.status,
+      });
+      coveredT.add(tid);
+    }
+    if (sid && !coveredS.has(sid)) {
+      const calc = calcLine(
+        Number(s.basicSalaryNpr ?? 0),
+        Number(s.absentDays ?? 0),
+        Number(s.extraDuty ?? 0),
+        workingDaysInMonth,
+      );
+      drafts.push({
+        employeeType: "STAFF",
+        staffId: sid,
+        employeeName: String(s.staffName || "").trim() || "Staff (saved)",
+        department: "",
+        designation: "",
+        monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
+        presentDays: Number(s.presentDays ?? 0),
+        absentDays: Number(s.absentDays ?? 0),
+        extraDuty: Number(s.extraDuty ?? 0),
+        absentDeductionNpr: Number(s.absentDeductionNpr ?? calc.absentDeductionNpr),
+        extraAmountNpr: Number(s.extraAmountNpr ?? calc.extraAmountNpr),
+        salaryAmountNpr: Number(s.salaryAmountNpr ?? calc.salaryAmountNpr),
+        tax1PercentNpr: Number(s.taxNpr ?? calc.tax1PercentNpr),
+        netSalaryNpr: Number(s.netSalaryNpr ?? calc.netSalaryNpr),
+        remarks: String(s.notes ?? ""),
+        attendanceIncomplete: false,
+        attendanceManualOverride: Boolean(s.attendanceManualOverride),
+        valuesManualOverride: true,
+        attendanceDaysRecorded: 0,
+        workingDaysInMonth,
+        salaryPaymentId: String(s._id),
+        status: s.status,
+      });
+      coveredS.add(sid);
+    }
   }
 
   drafts.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
@@ -344,6 +431,164 @@ export const fetchSalarySheet = async (
       return { ...fallback, usedFallback: true };
     }
     throw error;
+  }
+};
+
+const httpStatus = (error: unknown): number => {
+  if (
+    error &&
+    typeof error === "object" &&
+    "response" in error &&
+    error.response &&
+    typeof error.response === "object" &&
+    "status" in error.response
+  ) {
+    return Number((error.response as { status: number }).status);
+  }
+  return 0;
+};
+
+/** Build month archive from full salaries list (when months endpoint is 404). */
+const buildSalarySheetMonthsFromSalaries = (
+  salaries: SalaryPaymentRecord[],
+): SalarySheetMonthSummary[] => {
+  const byMonth = new Map<
+    string,
+    {
+      employeeCount: number;
+      totalNetSalaryNpr: number;
+      totalSalaryAmountNpr: number;
+      draftCount: number;
+      processedCount: number;
+      paidCount: number;
+      paidDates: string[];
+      paymentMethod?: string;
+      updatedAt?: string;
+    }
+  >();
+
+  for (const s of salaries ?? []) {
+    const monthBs = String(s.monthBs || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(monthBs)) continue;
+    const bucket = byMonth.get(monthBs) ?? {
+      employeeCount: 0,
+      totalNetSalaryNpr: 0,
+      totalSalaryAmountNpr: 0,
+      draftCount: 0,
+      processedCount: 0,
+      paidCount: 0,
+      paidDates: [] as string[],
+      paymentMethod: undefined as string | undefined,
+      updatedAt: undefined as string | undefined,
+    };
+    bucket.employeeCount += 1;
+    bucket.totalNetSalaryNpr += Number(s.netSalaryNpr ?? 0);
+    bucket.totalSalaryAmountNpr += Number(s.salaryAmountNpr ?? 0);
+    if (s.status === "PAID") bucket.paidCount += 1;
+    else if (s.status === "PROCESSED") bucket.processedCount += 1;
+    else bucket.draftCount += 1;
+    const pd = String(s.paidDateBs || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(pd)) bucket.paidDates.push(pd);
+    if (!bucket.paymentMethod && s.paymentMethod) {
+      bucket.paymentMethod = String(s.paymentMethod);
+    }
+    const updated = s.updatedAt ? String(s.updatedAt) : undefined;
+    if (
+      updated &&
+      (!bucket.updatedAt || updated > bucket.updatedAt)
+    ) {
+      bucket.updatedAt = updated;
+    }
+    byMonth.set(monthBs, bucket);
+  }
+
+  const round2Local = (n: number) => Math.round(n * 100) / 100;
+
+  return [...byMonth.entries()]
+    .map(([monthBs, g]) => {
+      const distinct = [
+        g.draftCount > 0 ? "DRAFT" : null,
+        g.processedCount > 0 ? "PROCESSED" : null,
+        g.paidCount > 0 ? "PAID" : null,
+      ].filter(Boolean) as Array<"DRAFT" | "PROCESSED" | "PAID">;
+      const status =
+        distinct.length === 1
+          ? distinct[0]!
+          : distinct.length > 1
+            ? ("MIXED" as const)
+            : ("DRAFT" as const);
+      const paidDateBs = g.paidDates.sort().at(-1);
+      return {
+        monthBs,
+        employeeCount: g.employeeCount,
+        totalNetSalaryNpr: round2Local(g.totalNetSalaryNpr),
+        totalSalaryAmountNpr: round2Local(g.totalSalaryAmountNpr),
+        status,
+        draftCount: g.draftCount,
+        processedCount: g.processedCount,
+        paidCount: g.paidCount,
+        paidDateBs,
+        paymentMethod: g.paymentMethod as SalarySheetMonthSummary["paymentMethod"],
+        updatedAt: g.updatedAt,
+      } satisfies SalarySheetMonthSummary;
+    })
+    .sort((a, b) => b.monthBs.localeCompare(a.monthBs));
+};
+
+/**
+ * List months that already have saved payroll rows.
+ * Falls back to aggregating GET /salaries when the months endpoint is missing.
+ */
+export const fetchSalarySheetMonths = async (): Promise<
+  SalarySheetMonthSummary[]
+> => {
+  try {
+    return await unwrap<SalarySheetMonthSummary[]>(
+      api.get("/accounting/salary-sheet/months"),
+    );
+  } catch (error: unknown) {
+    if (httpStatus(error) !== 404) throw error;
+    const salaries = await unwrap<SalaryPaymentRecord[]>(
+      api.get("/accounting/salaries"),
+    );
+    return buildSalarySheetMonthsFromSalaries(salaries ?? []);
+  }
+};
+
+/**
+ * Delete an entire payroll month (admin only).
+ * Falls back to deleting each salary row when the bulk endpoint is missing.
+ */
+export const deleteSalarySheetMonthClient = async (
+  monthBs: string,
+  reason = `Deleted entire salary sheet for ${monthBs} by administrator`,
+): Promise<void> => {
+  try {
+    await unwrap(
+      api.delete(`/accounting/salary-sheet/months/${monthBs}`, {
+        data: { reason },
+      }),
+    );
+    return;
+  } catch (error: unknown) {
+    if (httpStatus(error) !== 404) throw error;
+  }
+
+  const salaries = await unwrap<SalaryPaymentRecord[]>(
+    api.get("/accounting/salaries"),
+  );
+  const monthRows = (salaries ?? []).filter(
+    (s) => String(s.monthBs || "").trim() === monthBs,
+  );
+  if (monthRows.length === 0) {
+    throw new Error(`No salary sheet found for ${monthBs}`);
+  }
+  for (const row of monthRows) {
+    await unwrap(
+      api.delete(`/accounting/salaries/${row._id}`, {
+        data: { reason },
+      }),
+    );
   }
 };
 

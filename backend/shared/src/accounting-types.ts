@@ -324,6 +324,26 @@ export interface SalarySheetResponse {
   totals: SalarySheetTotals;
 }
 
+/**
+ * One month already saved in payroll (archive / history list).
+ * Aggregated from SalaryPayment rows for that BS month.
+ */
+export interface SalarySheetMonthSummary {
+  monthBs: string;
+  employeeCount: number;
+  totalNetSalaryNpr: number;
+  totalSalaryAmountNpr: number;
+  /** Single status when all rows match; MIXED when statuses differ */
+  status: SalaryPaymentStatus | "MIXED";
+  draftCount: number;
+  processedCount: number;
+  paidCount: number;
+  /** Latest non-empty paid date among rows, if any */
+  paidDateBs?: string;
+  paymentMethod?: PaymentMethod;
+  updatedAt?: string;
+}
+
 export interface BankAccountRecord {
   _id: string;
   schoolId: string;

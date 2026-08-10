@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronUp,
   FileDown,
+  History,
   Pencil,
   Plus,
   Printer,
@@ -38,7 +39,12 @@ import { api, unwrap } from "lib/api";
 import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
-import { fetchSalarySheet, saveSalarySheetClient } from "./salarySheetClient";
+import {
+  deleteSalarySheetMonthClient,
+  fetchSalarySheet,
+  fetchSalarySheetMonths,
+  saveSalarySheetClient,
+} from "./salarySheetClient";
 import { printHtmlViaIframe } from "./voucherPrint";
 
 type EditableRow = SalarySheetRow & {
@@ -189,11 +195,25 @@ const employeeKeyOf = (r: {
     ? `TEACHER:${r.teacherId ?? ""}`
     : `STAFF:${r.staffId ?? ""}`;
 
-export const SalaryPaymentRecordsPanel = () => {
+type SalaryPaymentRecordsPanelProps = {
+  /** From Accounting dashboard — open this payroll month (BS YYYY-MM) */
+  focusMonthBs?: string;
+  /** Optional employee name filter when opening from a recent entry */
+  focusEmployeeName?: string;
+  /** Changes every click so the same month can be re-opened */
+  focusKey?: number;
+};
+
+export const SalaryPaymentRecordsPanel = ({
+  focusMonthBs,
+  focusEmployeeName,
+  focusKey,
+}: SalaryPaymentRecordsPanelProps = {}) => {
   const { user } = useAuth();
   /**
-   * Super Admin / College Admin (primary or secondary role): full table edit
-   * including present/absent and all money columns. Accountants get auto-calc only.
+   * Super Admin / College Admin only (primary or secondary role):
+   * all salary sheet edit, save, add, remove, and delete.
+   * Accountant / Cashier / Principal / others: view + print/export only.
    */
   const canEditSheet = useMemo(() => {
     if (!user) return false;
@@ -202,18 +222,16 @@ export const SalaryPaymentRecordsPanel = () => {
       canManageInstitution(normalizeUserRole(String(role))),
     );
   }, [user]);
+  /** Same gate — delete saved months / rows */
+  const canDeleteMonth = canEditSheet;
   const canManualAttendance = canEditSheet;
+  /** Alias for save / period status / add-remove actions */
+  const canWritePayroll = canEditSheet;
+  /** prepare = working sheet; history = saved months archive */
+  const [viewMode, setViewMode] = useState<"prepare" | "history">("prepare");
   const [monthBs, setMonthBs] = useState(() => {
-    // Dashboard "Recent Salary Sheet Entries" can hand off a payroll month
-    try {
-      const fromDash = sessionStorage.getItem("salary-sheet-monthBs")?.trim();
-      if (fromDash && /^\d{4}-\d{2}$/.test(fromDash)) {
-        sessionStorage.removeItem("salary-sheet-monthBs");
-        return fromDash;
-      }
-    } catch {
-      /* ignore */
-    }
+    const m = focusMonthBs?.trim();
+    if (m && /^\d{4}-\d{2}$/.test(m)) return m;
     return currentBsMonth();
   });
   /** Sheet filter (table view only) */
@@ -238,27 +256,43 @@ export const SalaryPaymentRecordsPanel = () => {
   /** UI sections (layout only — does not change payroll logic) */
   const [addSectionOpen, setAddSectionOpen] = useState(true);
   const [signSectionOpen, setSignSectionOpen] = useState(true);
+  const [highlightEmployee, setHighlightEmployee] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
 
-  // When user clicks a recent salary from the accounting dashboard while this
-  // panel is already mounted, pick up the requested payroll month.
+  // Open the payroll month (and focus employee) when arriving from dashboard
   useEffect(() => {
-    try {
-      const fromDash = sessionStorage.getItem("salary-sheet-monthBs")?.trim();
-      if (fromDash && /^\d{4}-\d{2}$/.test(fromDash)) {
-        sessionStorage.removeItem("salary-sheet-monthBs");
-        setMonthBs(fromDash);
-      }
-    } catch {
-      /* ignore */
+    const m = focusMonthBs?.trim();
+    if (m && /^\d{4}-\d{2}$/.test(m)) {
+      setMonthBs(m);
+      setViewMode("prepare");
+      setAddSectionOpen(false);
+      setSignSectionOpen(false);
     }
-  }, []);
+    const name = focusEmployeeName?.trim() ?? "";
+    if (name) {
+      setListSearch(name);
+      setHighlightEmployee(name);
+    } else {
+      setHighlightEmployee("");
+    }
+  }, [focusMonthBs, focusEmployeeName, focusKey]);
 
   /** Full employee catalog + attendance for the month (picker source — not the table) */
   const sheetQuery = useQuery({
     queryKey: ["accounting-salary-sheet", monthBs],
     queryFn: () => fetchSalarySheet(monthBs),
-    enabled: Boolean(monthBs && /^\d{4}-\d{2}$/.test(monthBs)),
+    enabled:
+      viewMode === "prepare" &&
+      Boolean(monthBs && /^\d{4}-\d{2}$/.test(monthBs)),
     retry: 1,
+  });
+
+  /** Saved payroll months archive */
+  const monthsQuery = useQuery({
+    queryKey: ["accounting-salary-sheet-months"],
+    queryFn: () => fetchSalarySheetMonths(),
+    enabled: viewMode === "history",
+    staleTime: 30_000,
   });
 
   const settingsQuery = useQuery({
@@ -280,12 +314,15 @@ export const SalaryPaymentRecordsPanel = () => {
 
   useEffect(() => {
     if (!sheetQuery.data?.rows) return;
-    // Only pre-load employees already saved for this month — not the full staff list
+    // Pre-load every employee who already has a payroll record for this month
     const saved = sheetQuery.data.rows
       .filter((r) => Boolean(r.salaryPaymentId))
       .map((r, i) => ({
         ...r,
         sn: i + 1,
+        salaryPaymentId: r.salaryPaymentId
+          ? String(r.salaryPaymentId)
+          : undefined,
         valuesManualOverride: Boolean(
           (r as EditableRow).valuesManualOverride,
         ),
@@ -293,6 +330,16 @@ export const SalaryPaymentRecordsPanel = () => {
     setRows(saved);
     setEditingKey(null);
     setEntry(emptyEntryForm());
+
+    // Align sheet status with saved payroll rows for this month
+    if (saved.length > 0) {
+      const statuses = saved.map((r) => r.status).filter(Boolean) as Array<
+        "DRAFT" | "PROCESSED" | "PAID"
+      >;
+      if (statuses.includes("PAID")) setStatus("PAID");
+      else if (statuses.includes("PROCESSED")) setStatus("PROCESSED");
+      else setStatus("DRAFT");
+    }
   }, [sheetQuery.data]);
 
   const saveMutation = useMutation({
@@ -324,9 +371,60 @@ export const SalaryPaymentRecordsPanel = () => {
     onSuccess: async () => {
       toast.success("Salary sheet saved — payroll records updated");
       await sheetQuery.refetch();
+      // Keep archive list fresh for next visit
+      void monthsQuery.refetch();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
+
+  const deleteMonthMutation = useMutation({
+    mutationFn: (targetMonth: string) =>
+      deleteSalarySheetMonthClient(
+        targetMonth,
+        `Deleted entire salary sheet for ${targetMonth} by administrator`,
+      ),
+    onSuccess: async (_data, targetMonth) => {
+      toast.success(`Salary sheet for ${targetMonth} deleted`);
+      await monthsQuery.refetch();
+      // If the open working month was deleted, clear local rows after refetch
+      if (targetMonth === monthBs) {
+        await sheetQuery.refetch();
+      }
+      try {
+        const { invalidateAccountingQueries } = await import(
+          "./invalidateAccountingQueries"
+        );
+        await invalidateAccountingQueries();
+      } catch {
+        /* non-fatal */
+      }
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const openSavedMonth = (targetMonth: string) => {
+    setMonthBs(targetMonth);
+    setListSearch("");
+    setHighlightEmployee("");
+    setAddSectionOpen(false);
+    setSignSectionOpen(false);
+    setViewMode("prepare");
+    toast.message(`Opened ${formatPayrollMonthLabel(targetMonth)}`);
+  };
+
+  const filteredHistoryMonths = useMemo(() => {
+    const all = monthsQuery.data ?? [];
+    const q = historySearch.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((m) => {
+      const label = formatPayrollMonthLabel(m.monthBs).toLowerCase();
+      return (
+        m.monthBs.includes(q) ||
+        label.includes(q) ||
+        String(m.status).toLowerCase().includes(q)
+      );
+    });
+  }, [monthsQuery.data, historySearch]);
 
   const departments = useMemo(() => {
     const set = new Set<string>();
@@ -407,6 +505,10 @@ export const SalaryPaymentRecordsPanel = () => {
     list.map((r, i) => ({ ...r, sn: i + 1 }));
 
   const addOrUpdateEntry = () => {
+    if (!canWritePayroll) {
+      toast.error("Only Super Admin or College Admin can edit the salary sheet");
+      return;
+    }
     if (!entry.employeeKey) {
       toast.error("Select an employee");
       return;
@@ -473,6 +575,10 @@ export const SalaryPaymentRecordsPanel = () => {
   };
 
   const startEditRow = (row: EditableRow) => {
+    if (!canWritePayroll) {
+      toast.error("Only Super Admin or College Admin can edit the salary sheet");
+      return;
+    }
     const key = employeeKeyOf(row);
     setEditingKey(key);
     setAddSectionOpen(true);
@@ -490,6 +596,10 @@ export const SalaryPaymentRecordsPanel = () => {
   };
 
   const removeRow = (row: EditableRow) => {
+    if (!canWritePayroll) {
+      toast.error("Only Super Admin or College Admin can remove salary rows");
+      return;
+    }
     const key = employeeKeyOf(row);
     if (
       !window.confirm(
@@ -1142,6 +1252,10 @@ export const SalaryPaymentRecordsPanel = () => {
   };
 
   const saveSheet = () => {
+    if (!canWritePayroll) {
+      toast.error("Only Super Admin or College Admin can save salary payroll");
+      return;
+    }
     if (!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) {
       toast.error("Select payroll month (BS YYYY-MM)");
       return;
@@ -1181,12 +1295,250 @@ export const SalaryPaymentRecordsPanel = () => {
     });
   };
 
+  const viewModeToggle = (
+    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+      <button
+        type="button"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition",
+          viewMode === "prepare"
+            ? "bg-brand-600 text-white shadow-sm"
+            : "text-slate-600 hover:bg-slate-50",
+        )}
+        onClick={() => setViewMode("prepare")}
+      >
+        <Banknote className="h-3.5 w-3.5" />
+        Prepare sheet
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition",
+          viewMode === "history"
+            ? "bg-brand-600 text-white shadow-sm"
+            : "text-slate-600 hover:bg-slate-50",
+        )}
+        onClick={() => setViewMode("history")}
+      >
+        <History className="h-3.5 w-3.5" />
+        Saved months
+      </button>
+    </div>
+  );
+
+  if (viewMode === "history") {
+    return (
+      <div className="space-y-4">
+        <Card className="overflow-hidden border-slate-200 shadow-sm">
+          <div className="border-b border-slate-100 bg-gradient-to-r from-brand-50/80 to-white px-4 py-4 sm:px-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
+                    <History className="h-5 w-5" />
+                  </span>
+                  Saved salary months
+                </CardTitle>
+              </div>
+              {viewModeToggle}
+            </div>
+          </div>
+          <CardContent className="space-y-4 pt-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="max-w-sm flex-1">
+                <FormField label="Search months">
+                  <Input
+                    placeholder="e.g. 2083-04, Shrawan, PAID…"
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                  />
+                </FormField>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void monthsQuery.refetch()}
+                disabled={monthsQuery.isFetching}
+              >
+                {monthsQuery.isFetching ? "Refreshing…" : "Refresh"}
+              </Button>
+            </div>
+
+            {monthsQuery.isLoading ? <LoadingState /> : null}
+
+            {monthsQuery.isError ? (
+              <EmptyState
+                title="Could not load saved months"
+                description={parseErrorMessage(monthsQuery.error)}
+              />
+            ) : null}
+
+            {!monthsQuery.isLoading &&
+            !monthsQuery.isError &&
+            filteredHistoryMonths.length === 0 ? (
+              <EmptyState
+                title={
+                  historySearch.trim()
+                    ? "No months match your search"
+                    : "No saved salary sheets yet"
+                }
+                description={
+                  historySearch.trim()
+                    ? "Try a different month or status."
+                    : "Save a payroll month from Prepare sheet — it will appear here."
+                }
+              />
+            ) : null}
+
+            {!monthsQuery.isLoading &&
+            !monthsQuery.isError &&
+            filteredHistoryMonths.length > 0 ? (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <Table>
+                  <TableHead>
+                    <tr>
+                      <Th>Month (BS)</Th>
+                      <Th className="text-right">Employees</Th>
+                      <Th className="text-right">Total net</Th>
+                      <Th>Status</Th>
+                      <Th>Paid date</Th>
+                      <Th className="text-right">Actions</Th>
+                    </tr>
+                  </TableHead>
+                  <TableBody>
+                    {filteredHistoryMonths.map((m) => {
+                      const isCurrent = m.monthBs === monthBs;
+                      const statusLabel =
+                        m.status === "MIXED"
+                          ? `Mixed (${m.paidCount} paid · ${m.processedCount} proc. · ${m.draftCount} draft)`
+                          : m.status;
+                      const statusClass =
+                        m.status === "PAID"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : m.status === "PROCESSED"
+                            ? "bg-sky-100 text-sky-800"
+                            : m.status === "MIXED"
+                              ? "bg-amber-100 text-amber-900"
+                              : "bg-slate-100 text-slate-700";
+                      return (
+                        <tr
+                          key={m.monthBs}
+                          className={cn(
+                            "border-t border-slate-100",
+                            isCurrent && "bg-brand-50/50",
+                          )}
+                        >
+                          <Td>
+                            <div className="font-medium text-slate-900">
+                              {formatPayrollMonthLabel(m.monthBs)}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {m.monthBs}
+                              {isCurrent ? (
+                                <span className="ml-1.5 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand-800">
+                                  open
+                                </span>
+                              ) : null}
+                            </div>
+                          </Td>
+                          <Td className="text-right tabular-nums">
+                            {m.employeeCount}
+                          </Td>
+                          <Td className="text-right font-semibold tabular-nums text-emerald-800">
+                            {formatCurrencyNpr(m.totalNetSalaryNpr)}
+                          </Td>
+                          <Td>
+                            <span
+                              className={cn(
+                                "inline-flex max-w-[14rem] rounded-full px-2 py-0.5 text-[11px] font-medium",
+                                statusClass,
+                              )}
+                              title={statusLabel}
+                            >
+                              {statusLabel}
+                            </span>
+                          </Td>
+                          <Td className="text-sm text-slate-600">
+                            {m.paidDateBs || "—"}
+                          </Td>
+                          <Td>
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openSavedMonth(m.monthBs)}
+                              >
+                                Open
+                              </Button>
+                              {canDeleteMonth ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                  title="Delete this entire month (Super Admin / College Admin)"
+                                  disabled={deleteMonthMutation.isPending}
+                                  onClick={() => {
+                                    const label = `${formatPayrollMonthLabel(m.monthBs)} (${m.monthBs}) · ${m.employeeCount} employee(s) · ${formatCurrencyNpr(m.totalNetSalaryNpr)}`;
+                                    if (
+                                      !window.confirm(
+                                        `Delete entire salary sheet?\n\n${label}\n\nAll employee rows for this month will be removed. If any were Paid, journal and cash book entries are reversed.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    void deleteMonthMutation.mutateAsync(
+                                      m.monthBs,
+                                    );
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              ) : null}
+                            </div>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+              <span>
+                {(monthsQuery.data ?? []).length} saved month
+                {(monthsQuery.data ?? []).length === 1 ? "" : "s"}
+                {historySearch.trim() && filteredHistoryMonths.length !== (monthsQuery.data ?? []).length
+                  ? ` · showing ${filteredHistoryMonths.length}`
+                  : ""}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setViewMode("prepare")}
+              >
+                Back to prepare sheet
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (!monthBs) {
     return (
-      <EmptyState
-        title="Select payroll month"
-        description="Enter a BS month (YYYY-MM) to load the salary sheet."
-      />
+      <div className="space-y-4">
+        <div className="flex justify-end">{viewModeToggle}</div>
+        <EmptyState
+          title="Select payroll month"
+          description="Enter a BS month (YYYY-MM) to load the salary sheet."
+        />
+      </div>
     );
   }
 
@@ -1194,10 +1546,13 @@ export const SalaryPaymentRecordsPanel = () => {
 
   if (sheetQuery.isError) {
     return (
-      <EmptyState
-        title="Could not load salary sheet"
-        description={parseErrorMessage(sheetQuery.error)}
-      />
+      <div className="space-y-4">
+        <div className="flex justify-end">{viewModeToggle}</div>
+        <EmptyState
+          title="Could not load salary sheet"
+          description={parseErrorMessage(sheetQuery.error)}
+        />
+      </div>
     );
   }
 
@@ -1235,15 +1590,17 @@ export const SalaryPaymentRecordsPanel = () => {
         <FileDown className="mr-1 h-4 w-4" />
         Excel
       </Button>
-      <Button
-        type="button"
-        size="sm"
-        disabled={saveMutation.isPending || exportDisabled}
-        onClick={saveSheet}
-      >
-        <Save className="mr-1 h-4 w-4" />
-        {saveMutation.isPending ? "Saving…" : "Save payroll"}
-      </Button>
+      {canWritePayroll ? (
+        <Button
+          type="button"
+          size="sm"
+          disabled={saveMutation.isPending || exportDisabled}
+          onClick={saveSheet}
+        >
+          <Save className="mr-1 h-4 w-4" />
+          {saveMutation.isPending ? "Saving…" : "Save payroll"}
+        </Button>
+      ) : null}
     </div>
   );
 
@@ -1260,11 +1617,12 @@ export const SalaryPaymentRecordsPanel = () => {
                 </span>
                 Salary Sheet / Payroll
               </CardTitle>
-              <p className="mt-1.5 max-w-2xl text-sm text-slate-500">
-                Build the month sheet employee by employee. Attendance fills present /
-                absent automatically. Admins can edit cells in the table; others see
-                auto-calculated amounts only.
-              </p>
+              {!canWritePayroll ? (
+                <p className="mt-2 inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+                  View only — edit &amp; delete restricted to Super Admin / College Admin
+                </p>
+              ) : null}
+              <div className="mt-3">{viewModeToggle}</div>
             </div>
             {toolbarActions}
           </div>
@@ -1284,6 +1642,7 @@ export const SalaryPaymentRecordsPanel = () => {
             <FormField label="Save status">
               <Select
                 value={status}
+                disabled={!canWritePayroll}
                 onChange={(e) =>
                   setStatus(e.target.value as "DRAFT" | "PROCESSED" | "PAID")
                 }
@@ -1296,6 +1655,7 @@ export const SalaryPaymentRecordsPanel = () => {
             <FormField label="Payment method">
               <Select
                 value={paymentMethod}
+                disabled={!canWritePayroll}
                 onChange={(e) =>
                   setPaymentMethod(
                     e.target.value as (typeof PAYMENT_METHODS)[number],
@@ -1311,7 +1671,11 @@ export const SalaryPaymentRecordsPanel = () => {
             </FormField>
             {status === "PAID" ? (
               <FormField label="Paid date (BS) *">
-                <NepaliDateField value={paidDateBs} onChange={setPaidDateBs} />
+                {canWritePayroll ? (
+                  <NepaliDateField value={paidDateBs} onChange={setPaidDateBs} />
+                ) : (
+                  <Input value={paidDateBs || "—"} disabled readOnly />
+                )}
               </FormField>
             ) : null}
           </div>
@@ -1365,7 +1729,8 @@ export const SalaryPaymentRecordsPanel = () => {
         </div>
       ) : null}
 
-      {/* ─── 2. Add / edit employee ─── */}
+      {/* ─── 2. Add / edit employee (admin only) ─── */}
+      {canWritePayroll ? (
       <Card className="overflow-hidden border-slate-200 shadow-sm">
         <button
           type="button"
@@ -1569,6 +1934,7 @@ export const SalaryPaymentRecordsPanel = () => {
         </CardContent>
         ) : null}
       </Card>
+      ) : null}
 
       {/* ─── 3. Sheet table ─── */}
       <Card className="overflow-hidden border-slate-200 shadow-sm">
@@ -1576,7 +1942,7 @@ export const SalaryPaymentRecordsPanel = () => {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                3 · Salary sheet
+                {canWritePayroll ? "3 · Salary sheet" : "2 · Salary sheet"}
               </p>
               <CardTitle className="mt-0.5 flex items-center gap-2 text-base">
                 <Wallet className="h-4 w-4 text-brand-600" />
@@ -1589,7 +1955,7 @@ export const SalaryPaymentRecordsPanel = () => {
               <p className="mt-1 text-xs text-slate-500">
                 {canEditSheet
                   ? "Admin: edit cells in the table (Backspace to clear). Recalc restores auto amounts from days."
-                  : "Amounts follow attendance and salary rules (read-only for non-admins)."}
+                  : "Read-only view. Only Super Admin or College Admin can edit, save, or remove rows."}
               </p>
             </div>
             <Badge
@@ -1605,12 +1971,15 @@ export const SalaryPaymentRecordsPanel = () => {
               {status}
             </Badge>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
             <FormField label="Search on sheet">
               <Input
                 placeholder="Name, department…"
                 value={listSearch}
-                onChange={(e) => setListSearch(e.target.value)}
+                onChange={(e) => {
+                  setListSearch(e.target.value);
+                  if (!e.target.value.trim()) setHighlightEmployee("");
+                }}
               />
             </FormField>
             <FormField label="Type">
@@ -1630,7 +1999,30 @@ export const SalaryPaymentRecordsPanel = () => {
                 ))}
               </Select>
             </FormField>
+            {(listSearch || listType || listDept) ? (
+              <div className="flex items-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setListSearch("");
+                    setListType("");
+                    setListDept("");
+                    setHighlightEmployee("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            ) : null}
           </div>
+          {rows.length > 0 ? (
+            <p className="text-xs text-slate-500">
+              Showing {displayedRows.length} of {rows.length} saved employee
+              {rows.length === 1 ? "" : "s"} for {monthBs}
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent className="pt-4">
           {/* On-screen header matching PDF */}
@@ -1654,13 +2046,30 @@ export const SalaryPaymentRecordsPanel = () => {
           {rows.length === 0 ? (
             <EmptyState
               title="No employees on the sheet yet"
-              description="Use “Add employee (one by one)” above. The table only lists people you add — not the full staff roster."
+              description="Use “Add employee (one by one)” above. Saved payroll for this month should appear automatically after load — check the payroll month (BS YYYY-MM)."
             />
           ) : displayedRows.length === 0 ? (
-            <EmptyState
-              title="No matches"
-              description="No added employees match the sheet filters."
-            />
+            <div className="space-y-3">
+              <EmptyState
+                title="No matches for current filters"
+                description={`${rows.length} employee(s) are on this month’s sheet, but none match the search / type / department filters.`}
+              />
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setListSearch("");
+                    setListType("");
+                    setListDept("");
+                    setHighlightEmployee("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <Table>
@@ -1679,7 +2088,7 @@ export const SalaryPaymentRecordsPanel = () => {
                     <Th className="text-right">Net Salary</Th>
                     <Th className="text-center">Signature</Th>
                     <Th>Remarks</Th>
-                    <Th>Actions</Th>
+                    {canWritePayroll ? <Th>Actions</Th> : null}
                   </tr>
                 </TableHead>
                 <TableBody>
@@ -1694,6 +2103,11 @@ export const SalaryPaymentRecordsPanel = () => {
                         row.attendanceIncomplete && "bg-amber-50/40",
                         row.valuesManualOverride && "bg-violet-50/30",
                         row.dirty && "ring-1 ring-inset ring-brand-200",
+                        highlightEmployee &&
+                          row.employeeName
+                            .toLowerCase()
+                            .includes(highlightEmployee.toLowerCase()) &&
+                          "bg-brand-50 ring-2 ring-inset ring-brand-400",
                       )}
                     >
                       <Td className="text-center tabular-nums text-slate-500">
@@ -1919,36 +2333,38 @@ export const SalaryPaymentRecordsPanel = () => {
                           <span className="truncate">{row.remarks || "—"}</span>
                         )}
                       </Td>
-                      <Td>
-                        <div className="flex flex-wrap gap-1">
-                          {canEditSheet && row.valuesManualOverride ? (
+                      {canWritePayroll ? (
+                        <Td>
+                          <div className="flex flex-wrap gap-1">
+                            {row.valuesManualOverride ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Recalculate money from days and monthly salary"
+                                onClick={() => recalculateRowFromDays(row)}
+                              >
+                                Recalc
+                              </Button>
+                            ) : null}
                             <Button
                               size="sm"
                               variant="outline"
-                              title="Recalculate money from days and monthly salary"
-                              onClick={() => recalculateRowFromDays(row)}
+                              onClick={() => startEditRow(row)}
                             >
-                              Recalc
+                              <Pencil className="mr-1 h-3.5 w-3.5" />
+                              Edit
                             </Button>
-                          ) : null}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => startEditRow(row)}
-                          >
-                            <Pencil className="mr-1 h-3.5 w-3.5" />
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => removeRow(row)}
-                          >
-                            <Trash2 className="mr-1 h-3.5 w-3.5" />
-                            Remove
-                          </Button>
-                        </div>
-                      </Td>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => removeRow(row)}
+                            >
+                              <Trash2 className="mr-1 h-3.5 w-3.5" />
+                              Remove
+                            </Button>
+                          </div>
+                        </Td>
+                      ) : null}
                     </tr>
                     );
                   })}
@@ -1975,7 +2391,8 @@ export const SalaryPaymentRecordsPanel = () => {
                     <Td className="text-right text-brand-800">
                       {formatCurrencyNpr(totals.totalNetSalaryNpr)}
                     </Td>
-                    <Td colSpan={3} />
+                    {/* Signature + Remarks (+ Actions when admin) */}
+                    <Td colSpan={canWritePayroll ? 3 : 2} />
                   </tr>
                 </TableBody>
               </Table>
