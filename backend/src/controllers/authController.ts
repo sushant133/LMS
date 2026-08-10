@@ -83,7 +83,8 @@ const mapModuleAccess = (raw: unknown): ModuleAccessMap => {
 };
 
 const getSafeUser = async (userId: string) => {
-  const user = await User.findById(userId).select("-password").populate("schoolId").lean();
+  // Never select fcmTokens — device push tokens are server-only
+  const user = await User.findById(userId).select("-password -fcmTokens").populate("schoolId").lean();
 
   if (!user) {
     throw new ApiError(404, "User not found");

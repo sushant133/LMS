@@ -1,15 +1,27 @@
 import type { Request, Response } from "express";
 import { sendNotificationSchema } from "@phit-erp/shared";
+import { z } from "zod";
 import { Notification } from "../models/Notification.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import {
+  registerFcmToken,
+  sanitizeFcmPlatform,
+  sanitizeFcmToken,
+  unregisterFcmToken
+} from "../utils/fcmPushService.js";
 import {
   buildPersonalNotificationFilter,
   sendNotification,
   serializeNotification
 } from "../utils/notificationService.js";
 import { sendSuccess } from "../utils/response.js";
+
+const deviceTokenBodySchema = z.object({
+  token: z.string().min(32).max(4096),
+  platform: z.enum(["android", "ios", "web"]).optional()
+});
 
 export const listNotifications = asyncHandler(async (req: Request, res: Response) => {
   const unreadOnly = req.query.unread === "true" || req.query.unread === "1";
@@ -64,6 +76,44 @@ export const markAllNotificationsRead = asyncHandler(async (req: Request, res: R
     deletedCount: result.deletedCount ?? 0,
     modifiedCount: result.deletedCount ?? 0
   });
+});
+
+/**
+ * Register this device's FCM token for the authenticated user only.
+ * Client-supplied userId is ignored — identity comes from the session cookie.
+ */
+export const registerDeviceToken = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.userId) {
+    throw new ApiError(401, "Authentication required");
+  }
+
+  const payload = deviceTokenBodySchema.parse(req.body);
+  const token = sanitizeFcmToken(payload.token);
+  if (!token) {
+    throw new ApiError(400, "Invalid device token");
+  }
+
+  const platform = sanitizeFcmPlatform(payload.platform);
+  await registerFcmToken(req.user.userId, token, platform);
+  return sendSuccess(res, "Device token registered", { registered: true, platform });
+});
+
+/**
+ * Remove this device's FCM token from the authenticated user (call on logout).
+ */
+export const unregisterDeviceToken = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.userId) {
+    throw new ApiError(401, "Authentication required");
+  }
+
+  const payload = deviceTokenBodySchema.parse(req.body);
+  const token = sanitizeFcmToken(payload.token);
+  if (!token) {
+    throw new ApiError(400, "Invalid device token");
+  }
+
+  await unregisterFcmToken(req.user.userId, token);
+  return sendSuccess(res, "Device token removed", { registered: false });
 });
 
 export const sendManualNotification = asyncHandler(async (req: Request, res: Response) => {

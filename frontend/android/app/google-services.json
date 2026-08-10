@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "671649848269",
+    "project_id": "phit-lms",
+    "storage_bucket": "phit-lms.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:671649848269:android:5d5f96cb86bfdfbc5cc284",
+        "android_client_info": {
+          "package_name": "np.com.phit.lms2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDh8HHV9X5AhjZxArFRt8uhSKzN2_kK2CQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,4 +1,4 @@
-import { Suspense, type ReactNode } from "react";
+import { Suspense, type ReactNode, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "components/layout/AppLayout";
 import { AuthLayout } from "components/layout/AuthLayout";
@@ -8,6 +8,8 @@ import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
 import { lazyWithRetry as lazy } from "lib/lazyWithRetry";
 import { LoginPage } from "pages/LoginPage";
+import SplashScreen from "components/SplashScreen";
+
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const PrivacyPolicyPage = lazy(() =>
   import("pages/PrivacyPolicyPage").then((module) => ({ default: module.PrivacyPolicyPage })),
@@ -92,6 +94,11 @@ const LazyRoute = ({ children }: { children: ReactNode }) => {
 };
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
+
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
   return (
     <OfflineLoginOnly>
     <Routes>

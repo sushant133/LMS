@@ -45,6 +45,15 @@ export interface UserDocument {
    * Default false — staff never see Finance until Admin enables it.
    */
   personalFinanceAccess?: boolean;
+  /**
+   * Mobile device FCM tokens for system push notifications.
+   * Never expose in API user profiles — server-only.
+   */
+  fcmTokens?: Array<{
+    token: string;
+    platform: "android" | "ios" | "web";
+    updatedAt?: Date;
+  }>;
   comparePassword(candidate: string): Promise<boolean>;
 }
 
@@ -88,10 +97,28 @@ const userSchema = new Schema<UserDocument, UserModel>(
       type: Boolean,
       default: false,
       index: true
+    },
+    /** Mobile FCM device tokens (server-only; excluded from auth profile responses) */
+    fcmTokens: {
+      type: [
+        {
+          token: { type: String, required: true, trim: true },
+          platform: {
+            type: String,
+            enum: ["android", "ios", "web"],
+            default: "android"
+          },
+          updatedAt: { type: Date, default: Date.now }
+        }
+      ],
+      default: undefined,
+      select: false
     }
   },
   { timestamps: true }
 );
+
+userSchema.index({ "fcmTokens.token": 1 }, { sparse: true });
 
 userSchema.pre("validate", function validateSchoolMembership(next) {
   const user = this as HydratedDocument<UserDocument>;

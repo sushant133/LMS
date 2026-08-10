@@ -1,5 +1,5 @@
 import type { PropsWithChildren } from "react";
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
@@ -10,6 +10,7 @@ import type {
   UserProfile,
 } from "@phit-erp/shared";
 import { api, unwrap } from "lib/api";
+import { initPushNotifications, unregisterPushNotifications } from "lib/pushNotifications";
 import { queryClient } from "lib/queryClient";
 
 interface AuthContextValue {
@@ -76,6 +77,13 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
+      // Native only: unbind this device so the next account on the same phone
+      // does not receive the previous user's system notifications.
+      try {
+        await unregisterPushNotifications();
+      } catch {
+        // Ignore — logout must still proceed
+      }
       try {
         await api.post("/auth/logout");
       } catch {
@@ -103,6 +111,14 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       });
     },
   });
+
+  const sessionUserId = meQuery.data?.user?._id ?? null;
+
+  // Mobile app only: register FCM after login / restored session. No-op on web.
+  useEffect(() => {
+    if (!sessionUserId) return;
+    void initPushNotifications(sessionUserId);
+  }, [sessionUserId]);
 
   const isBootstrapping = meQuery.isPending && meQuery.data === undefined;
 

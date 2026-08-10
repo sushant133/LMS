@@ -16,3 +16,8 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+
+# Firebase Admin / FCM service account keys — never commit
+backend/secrets/
+**/firebase-service-account.json
+*-firebase-adminsdk-*.json

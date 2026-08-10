@@ -204,7 +204,26 @@ const envSchema = z.object({
   BIOMETRIC_STUDENT_LATE_AFTER: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "BIOMETRIC_STUDENT_LATE_AFTER must be HH:mm")
-    .default("10:00")
+    .default("10:00"),
+  /**
+   * Firebase Admin service account for FCM mobile push (optional).
+   * Prefer a file path on the server; JSON string is also accepted for managed hosts.
+   * When unset, in-app notifications still work; system tray push is skipped.
+   */
+  FIREBASE_SERVICE_ACCOUNT_PATH: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : undefined;
+    }),
+  FIREBASE_SERVICE_ACCOUNT_JSON: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : undefined;
+    })
 });
 
 export const env = envSchema.parse(process.env);

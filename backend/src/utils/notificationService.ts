@@ -2,6 +2,7 @@ import type { Request } from "express";
 import type { NotificationChannel, NotificationType } from "@phit-erp/shared";
 import { Notification } from "../models/Notification.js";
 import { User } from "../models/User.js";
+import { deliverPushToUser } from "./fcmPushService.js";
 import { tenantObjectId } from "./tenant.js";
 
 interface SendNotificationInput {
@@ -99,7 +100,7 @@ export const sendNotification = async (input: SendNotificationInput) => {
     smsStatus = await sendSmsStub(user.phone ?? "", input.message);
   }
 
-  return Notification.create({
+  const created = await Notification.create({
     schoolId: input.schoolId,
     recipientUserId: recipientId,
     recipientPhone: user.phone,
@@ -110,6 +111,19 @@ export const sendNotification = async (input: SendNotificationInput) => {
     smsStatus,
     metadata: input.metadata
   });
+
+  // Mobile system tray push (FCM). Fire-and-forget so in-app delivery is never blocked.
+  // Personal: only this recipientUserId's registered devices receive the banner.
+  void deliverPushToUser({
+    recipientUserId: recipientId,
+    title: input.title,
+    message: input.message,
+    type,
+    notificationId: created._id.toString(),
+    metadata: input.metadata
+  });
+
+  return created;
 };
 
 export const notifyParentsOfStudent = async (
