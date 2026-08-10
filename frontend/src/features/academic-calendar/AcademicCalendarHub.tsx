@@ -34,6 +34,10 @@ import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { AcademicCalendarMonth } from "./AcademicCalendarMonth";
+import {
+  ACADEMIC_CALENDAR_PRINT_ID,
+  AcademicCalendarPrintView,
+} from "./AcademicCalendarPrintView";
 import { EventDetailDialog } from "./EventDetailDialog";
 import { EventFormDialog } from "./EventFormDialog";
 import {
@@ -214,12 +218,56 @@ export const AcademicCalendarHub = () => {
     );
   };
 
-  const handlePrint = () => printElementById("academic-calendar-print");
-  const handleDownloadPdf = () =>
-    downloadPdfFromElementById(
-      "academic-calendar-print",
-      `academic-calendar-${resolvedYear.replace("/", "-")}.pdf`,
-    );
+  const printScopeLines = useMemo(() => {
+    const lines: string[] = [];
+    if (appliedFilters.monthBs) {
+      const match = allMonths.find(
+        (m) => formatMonthKey(m.year, m.month) === appliedFilters.monthBs,
+      );
+      lines.push(`Month: ${match?.name ?? appliedFilters.monthBs}`);
+    }
+    if (appliedFilters.eventType) {
+      lines.push(`Category: ${getEventTypeLabel(appliedFilters.eventType)}`);
+    }
+    if (appliedFilters.keyword?.trim()) {
+      lines.push(`Search: “${appliedFilters.keyword.trim()}”`);
+    }
+    return lines;
+  }, [
+    allMonths,
+    appliedFilters.eventType,
+    appliedFilters.keyword,
+    appliedFilters.monthBs,
+  ]);
+
+  const handlePrint = async () => {
+    try {
+      const el = document.getElementById(ACADEMIC_CALENDAR_PRINT_ID);
+      if (!el?.textContent?.trim()) {
+        throw new Error("Print content is empty — try again");
+      }
+      await printElementById(ACADEMIC_CALENDAR_PRINT_ID, "academic-calendar-print");
+      toast.success("Print dialog opened");
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      const el = document.getElementById(ACADEMIC_CALENDAR_PRINT_ID);
+      if (!el?.textContent?.trim()) {
+        throw new Error("PDF content is empty — try again");
+      }
+      await downloadPdfFromElementById(
+        ACADEMIC_CALENDAR_PRINT_ID,
+        `academic-calendar-${resolvedYear.replace("/", "-")}.pdf`,
+      );
+      toast.success("PDF download started");
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    }
+  };
 
   const handleDelete = (event: AcademicCalendarEventRecord) => {
     if (event.isSystemGenerated) {
@@ -299,11 +347,19 @@ export const AcademicCalendarHub = () => {
                 Add Event
               </Button>
             ) : null}
-            <Button type="button" variant="outline" onClick={handlePrint}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handlePrint()}
+            >
               <Printer className="mr-2 h-4 w-4" />
               Print
             </Button>
-            <Button type="button" variant="outline" onClick={handleDownloadPdf}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleDownloadPdf()}
+            >
               <Download className="mr-2 h-4 w-4" />
               PDF
             </Button>
@@ -407,19 +463,8 @@ export const AcademicCalendarHub = () => {
         </CardContent>
       </Card>
 
-      <div id="academic-calendar-print" className="space-y-6">
-        {/* Included in Print/PDF clone — keep visible (not `hidden`) so export captures branding */}
-        <div className="border-b border-slate-300 pb-3 text-center">
-          <p className="text-base font-bold uppercase tracking-wide text-slate-900">
-            {institutionName}
-          </p>
-          {institutionAddress ? (
-            <p className="mt-1 text-sm text-slate-600">{institutionAddress}</p>
-          ) : null}
-          <p className="mt-2 text-sm font-semibold text-slate-800">
-            Academic Calendar {formatAcademicYearLabel(resolvedYear)}
-          </p>
-        </div>
+      {/* On-screen interactive calendar (not used for Print/PDF) */}
+      <div className="space-y-6">
         {eventsQuery.isPending ? (
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 12 }).map((_, index) => (
@@ -667,6 +712,18 @@ export const AcademicCalendarHub = () => {
           </Card>
         ) : null}
       </div>
+
+      {/* Dedicated print/PDF layout — cloned by print utils (must stay in DOM) */}
+      <AcademicCalendarPrintView
+        institutionName={institutionName}
+        institutionAddress={institutionAddress}
+        academicYearBs={resolvedYear}
+        months={months}
+        eventsByDate={eventsByDate}
+        managedEvents={managedEvents}
+        todayBs={todayBs}
+        scopeLines={printScopeLines}
+      />
 
       <EventDetailDialog
         open={detailOpen}

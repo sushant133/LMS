@@ -55,22 +55,33 @@ import { countPendingRequiredDocuments } from "./studentDocumentUtils";
 const STUDENTS_PRINT_AREA_ID = "students-list-print-area";
 
 const printTh: CSSProperties = {
-  border: "1px solid #94a3b8",
-  background: "#f1f5f9",
-  padding: "5px 4px",
-  fontSize: 10,
+  border: "1px solid #64748b",
+  background: "#e2e8f0",
+  padding: "5px 6px",
+  fontSize: 9,
   fontWeight: 700,
   textAlign: "left",
   color: "#0f172a",
   whiteSpace: "nowrap",
+  verticalAlign: "middle",
 };
 
 const printTd: CSSProperties = {
-  border: "1px solid #cbd5e1",
-  padding: "4px 4px",
-  fontSize: 10,
+  border: "1px solid #94a3b8",
+  padding: "4px 6px",
+  fontSize: 9,
   color: "#0f172a",
   verticalAlign: "top",
+  wordBreak: "break-word",
+  overflowWrap: "anywhere",
+  lineHeight: 1.35,
+};
+
+const printSub: CSSProperties = {
+  fontSize: 8,
+  color: "#475569",
+  lineHeight: 1.3,
+  marginTop: 1,
 };
 
 export const StudentListManager = () => {
@@ -1030,35 +1041,48 @@ export const StudentListManager = () => {
         )}
       </CardContent>
 
-      {/* Hidden print layout — college header + filtered student table */}
+      {/* Hidden print layout — college header + filtered student table.
+          Cloned by printElementById into an iframe; must not be off-screen. */}
       <div
         id={STUDENTS_PRINT_AREA_ID}
         className="hidden print:block"
+        data-print-list="students"
         aria-hidden="true"
         style={{
           background: "#ffffff",
           color: "#0f172a",
-          padding: 16,
+          padding: "8px 4px",
           fontFamily:
             '"IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif',
+          boxSizing: "border-box",
+          width: "100%",
         }}
       >
         <header
           style={{
-            marginBottom: 12,
-            paddingBottom: 10,
-            borderBottom: "1px solid #94a3b8",
+            marginBottom: 10,
+            paddingBottom: 8,
+            borderBottom: "2px solid #0f172a",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+              width: "100%",
+            }}
+          >
             <CollegeLogo className="h-12 w-12 shrink-0" />
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <p
                 style={{
                   margin: 0,
-                  fontSize: 16,
+                  fontSize: 15,
                   fontWeight: 700,
                   color: "#0f172a",
+                  letterSpacing: "0.01em",
+                  textTransform: "uppercase",
                 }}
               >
                 {institutionName || printBranding.name || "Institution"}
@@ -1067,7 +1091,7 @@ export const StudentListManager = () => {
                 <p
                   style={{
                     margin: "2px 0 0",
-                    fontSize: 11,
+                    fontSize: 10,
                     color: "#475569",
                     lineHeight: 1.35,
                   }}
@@ -1075,21 +1099,49 @@ export const StudentListManager = () => {
                   {institutionAddress}
                 </p>
               ) : null}
-              <p
+              <div
                 style={{
-                  margin: "2px 0 0",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#1e293b",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  gap: "4px 16px",
+                  marginTop: 4,
                 }}
               >
-                Students list
-              </p>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "#1e293b",
+                  }}
+                >
+                  Students list
+                </p>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 9,
+                    color: "#64748b",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Printed:{" "}
+                  {new Date().toLocaleString(undefined, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
               {printScopeLines.length > 0 ? (
                 <p
                   style={{
-                    margin: "4px 0 0",
-                    fontSize: 11,
+                    margin: "3px 0 0",
+                    fontSize: 10,
                     color: "#334155",
                     fontWeight: 600,
                   }}
@@ -1099,8 +1151,8 @@ export const StudentListManager = () => {
               ) : (
                 <p
                   style={{
-                    margin: "4px 0 0",
-                    fontSize: 11,
+                    margin: "3px 0 0",
+                    fontSize: 10,
                     color: "#64748b",
                   }}
                 >
@@ -1111,11 +1163,11 @@ export const StudentListManager = () => {
               <p
                 style={{
                   margin: "2px 0 0",
-                  fontSize: 10,
+                  fontSize: 9,
                   color: "#64748b",
                 }}
               >
-                {filteredStudents.length} student
+                Total: {filteredStudents.length} student
                 {filteredStudents.length === 1 ? "" : "s"}
               </p>
             </div>
@@ -1126,23 +1178,36 @@ export const StudentListManager = () => {
           style={{
             width: "100%",
             borderCollapse: "collapse",
-            tableLayout: "auto",
+            tableLayout: "fixed",
+            border: "1px solid #64748b",
           }}
         >
+          <colgroup>
+            {/* S.N. | Name | Mobile | Gender | Roll | Admission | Primary | Secondary | Status? | Guardian | Fee? */}
+            <col style={{ width: "3.5%" }} />
+            <col style={{ width: canManage && isCollege ? "15%" : "16%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "5.5%" }} />
+            <col style={{ width: "5.5%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "8%" }} />
+            {isCollege ? <col style={{ width: "8%" }} /> : null}
+            <col style={{ width: canManage ? "12%" : "14%" }} />
+            {canManage ? <col style={{ width: "9%" }} /> : null}
+          </colgroup>
           <thead>
             <tr>
-              <th style={{ ...printTh, textAlign: "center", width: 36 }}>
-                S.N.
-              </th>
-              <th style={printTh}>Name</th>
+              <th style={{ ...printTh, textAlign: "center" }}>S.N.</th>
+              <th style={printTh}>Name / Email</th>
               <th style={printTh}>Mobile</th>
-              <th style={printTh}>Gender</th>
-              <th style={printTh}>Roll No.</th>
-              <th style={printTh}>Admission No.</th>
+              <th style={{ ...printTh, textAlign: "center" }}>Gender</th>
+              <th style={{ ...printTh, textAlign: "center" }}>Roll No.</th>
+              <th style={printTh}>Admission / Reg. No.</th>
               <th style={printTh}>{labels.primary}</th>
               <th style={printTh}>{labels.secondary}</th>
               {isCollege ? <th style={printTh}>Status</th> : null}
-              <th style={printTh}>Guardian</th>
+              <th style={printTh}>Guardian / Phone</th>
               {canManage ? (
                 <th style={{ ...printTh, textAlign: "right" }}>Total Fee</th>
               ) : null}
@@ -1166,6 +1231,8 @@ export const StudentListManager = () => {
                 STUDENT_ACADEMIC_STATUS_LABELS[
                   academicStatus as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
                 ] ?? academicStatus.replace(/_/g, " ");
+              const guardianName = student.guardianName?.trim() || "—";
+              const guardianPhone = student.guardianPhone?.trim() || "";
 
               return (
                 <tr
@@ -1174,24 +1241,48 @@ export const StudentListManager = () => {
                     background: index % 2 === 1 ? "#f8fafc" : "#ffffff",
                   }}
                 >
-                  <td style={{ ...printTd, textAlign: "center" }}>
+                  <td
+                    style={{
+                      ...printTd,
+                      textAlign: "center",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
                     {index + 1}
                   </td>
                   <td style={printTd}>
                     <div style={{ fontWeight: 600 }}>{displayName}</div>
                     {student.user?.email ? (
-                      <div style={{ fontSize: 9, color: "#64748b" }}>
-                        {student.user.email}
-                      </div>
+                      <div style={printSub}>{student.user.email}</div>
                     ) : null}
                   </td>
-                  <td style={printTd}>{displayPhone}</td>
-                  <td style={printTd}>{student.gender?.trim() || "—"}</td>
-                  <td style={printTd}>{student.rollNumber || "—"}</td>
+                  <td
+                    style={{
+                      ...printTd,
+                      fontVariantNumeric: "tabular-nums",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {displayPhone}
+                  </td>
+                  <td style={{ ...printTd, textAlign: "center" }}>
+                    {student.gender?.trim() || "—"}
+                  </td>
+                  <td
+                    style={{
+                      ...printTd,
+                      textAlign: "center",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {student.rollNumber || "—"}
+                  </td>
                   <td style={printTd}>
-                    {student.admissionNumber || "—"}
+                    <div style={{ fontWeight: 500 }}>
+                      {student.admissionNumber || "—"}
+                    </div>
                     {student.registrationNumber ? (
-                      <div style={{ fontSize: 9, color: "#64748b" }}>
+                      <div style={printSub}>
                         Reg: {student.registrationNumber}
                       </div>
                     ) : null}
@@ -1201,9 +1292,21 @@ export const StudentListManager = () => {
                   {isCollege ? (
                     <td style={printTd}>{statusLabel}</td>
                   ) : null}
-                  <td style={printTd}>{student.guardianName || "—"}</td>
+                  <td style={printTd}>
+                    <div style={{ fontWeight: 500 }}>{guardianName}</div>
+                    {guardianPhone ? (
+                      <div style={printSub}>{guardianPhone}</div>
+                    ) : null}
+                  </td>
                   {canManage ? (
-                    <td style={{ ...printTd, textAlign: "right" }}>
+                    <td
+                      style={{
+                        ...printTd,
+                        textAlign: "right",
+                        fontVariantNumeric: "tabular-nums",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {student.hasScholarship
                         ? "Scholarship"
                         : formatCurrencyNpr(student.feesDueNpr)}
@@ -1217,11 +1320,15 @@ export const StudentListManager = () => {
 
         <footer
           style={{
-            marginTop: 12,
-            paddingTop: 8,
-            borderTop: "1px solid #cbd5e1",
-            fontSize: 9,
+            marginTop: 10,
+            paddingTop: 6,
+            borderTop: "1px solid #94a3b8",
+            fontSize: 8,
             color: "#64748b",
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            gap: "4px 12px",
           }}
         >
           <p style={{ margin: 0 }}>
@@ -1229,6 +1336,10 @@ export const StudentListManager = () => {
             {printScopeLines.length > 0
               ? ` · ${printScopeLines.join(" · ")}`
               : ""}
+          </p>
+          <p style={{ margin: 0 }}>
+            {filteredStudents.length} student
+            {filteredStudents.length === 1 ? "" : "s"}
           </p>
         </footer>
       </div>

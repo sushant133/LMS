@@ -695,8 +695,9 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
   const isLandscape = pageFormat === "a4-landscape";
   const isTimetable = isTimetableElement(clone);
   const page = pageBoxFor(pageFormat);
-  // Only the timetable is a strict one-page fit; other sheets keep the
-  // existing full-page box so their pagination is untouched.
+  // Only the timetable is a strict one-page fit (fixed height + overflow clip +
+  // flex center). Multi-page lists (students, staff, library, …) must paginate
+  // freely — height:one-page + overflow:hidden was clipping rows past page 1.
   const printBox = isTimetable
     ? page
     : { usableWidthMm: page.pageWidthMm, usableHeightMm: page.pageHeightMm };
@@ -726,6 +727,51 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       *, *::before, *::after {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
+      }
+      /* Multi-page list sheets: natural flow, repeat headers, keep rows whole */
+      ${
+        isTimetable
+          ? ""
+          : `
+      body {
+        display: block !important;
+        width: auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      body > * {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: visible !important;
+      }
+      table {
+        width: 100% !important;
+        max-width: 100% !important;
+        border-collapse: collapse !important;
+        page-break-inside: auto !important;
+        break-inside: auto !important;
+      }
+      thead { display: table-header-group !important; }
+      tfoot { display: table-footer-group !important; }
+      tr {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      th, td {
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
+        vertical-align: top !important;
+      }
+      img {
+        max-width: 100% !important;
+        height: auto !important;
+      }
+      `
       }
       /* Timetable: high-contrast period header + single A4 landscape fit */
       .timetable-print-sheet,
@@ -838,9 +884,12 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       @page {
         size: A4 ${isLandscape ? "landscape" : "portrait"};
-        margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "5mm 4mm"};
+        margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "8mm 6mm"};
       }
       @media print {
+        ${
+          isTimetable
+            ? `
         html, body {
           /* Printable area, i.e. page size minus the @page margin. Using the
              full page size here overflows it and spawns a blank second page. */
@@ -854,6 +903,23 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
+        }
+        `
+            : `
+        html, body {
+          /* Multi-page reports (student list, staff, inventory, …): allow
+             height to grow so every row prints across pages. */
+          width: auto !important;
+          height: auto !important;
+          min-height: 0 !important;
+          overflow: visible !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        body {
+          display: block !important;
+        }
+        `
         }
       }
       .font-nepali,
