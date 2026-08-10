@@ -1205,51 +1205,102 @@ export const AccountingManager = () => {
               {(
                 [
                   {
+                    key: "fees",
                     title: "Recent Fee Collections",
                     items: dashboardQuery.data?.recentFees ?? [],
                     amountClass: "text-brand-700",
                   },
                   {
+                    key: "deposits",
                     title: "Recent Security Deposits",
                     items: dashboardQuery.data?.recentDeposits ?? [],
                     amountClass: "text-violet-700",
                   },
                   {
-                    title: "Recent Salary Payments",
+                    key: "salaries",
+                    title: "Recent Salary Sheet Entries",
                     items: dashboardQuery.data?.recentSalaries ?? [],
                     amountClass: "text-emerald-800",
                   },
                   {
+                    key: "purchases",
                     title: "Recent Purchases",
                     items: dashboardQuery.data?.recentPurchases ?? [],
                     amountClass: "text-indigo-800",
                   },
                   {
+                    key: "expenses",
                     title: "Recent Expenses",
                     items: dashboardQuery.data?.recentExpenseItems ?? [],
                     amountClass: "text-rose-700",
                   },
                   {
+                    key: "refunds",
                     title: "Recent Refunds",
                     items: dashboardQuery.data?.recentRefunds ?? [],
                     amountClass: "text-violet-800",
                   },
                 ] as const
-              ).map((section) => (
-                <Card key={section.title}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">{section.title}</CardTitle>
+              ).map((section) => {
+                const isSalary = section.key === "salaries";
+                return (
+                <Card key={section.key}>
+                  <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                    <div>
+                      <CardTitle className="text-base">{section.title}</CardTitle>
+                      {isSalary ? (
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          From Salary Sheet / Payroll (saved employees)
+                        </p>
+                      ) : null}
+                    </div>
+                    {isSalary ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={() => setTab("salary-records")}
+                      >
+                        Open sheet
+                      </Button>
+                    ) : null}
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {section.items.length === 0 ? (
-                      <p className="text-sm text-slate-500">No records yet.</p>
+                      <p className="text-sm text-slate-500">
+                        {isSalary
+                          ? "No salary sheet entries yet. Open Salary Sheet / Payroll and save a month."
+                          : "No records yet."}
+                      </p>
                     ) : (
-                      section.items.map((item) => (
+                      section.items.map((item) => {
+                        const salaryItem = item as typeof item & {
+                          monthBs?: string;
+                          detail?: string;
+                          presentDays?: number;
+                          absentDays?: number;
+                        };
+                        const monthBs =
+                          typeof salaryItem.monthBs === "string"
+                            ? salaryItem.monthBs
+                            : "";
+                        return (
                         <button
                           key={item.id}
                           type="button"
                           className="flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-xl border border-slate-100 bg-white p-3 text-left text-sm transition hover:border-brand-200 hover:bg-brand-50/40"
                           onClick={() => {
+                            if (isSalary && monthBs && /^\d{4}-\d{2}$/.test(monthBs)) {
+                              try {
+                                sessionStorage.setItem(
+                                  "salary-sheet-monthBs",
+                                  monthBs,
+                                );
+                              } catch {
+                                /* ignore */
+                              }
+                            }
                             if (item.linkTab) setTab(item.linkTab as Tab);
                           }}
                         >
@@ -1257,14 +1308,30 @@ export const AccountingManager = () => {
                             <div className="truncate font-medium text-slate-900">
                               {item.party}
                             </div>
-                            <div className="truncate text-xs text-slate-500">
-                              {item.dateBs} · {item.voucherNo}
-                              {item.status ? (
-                                <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
-                                  {String(item.status).replace(/_/g, " ")}
-                                </span>
-                              ) : null}
-                            </div>
+                            {isSalary ? (
+                              <div className="mt-0.5 space-y-0.5 text-xs text-slate-500">
+                                <div className="truncate">
+                                  {item.voucherNo}
+                                  {item.dateBs && item.dateBs !== monthBs ? (
+                                    <span> · Paid {item.dateBs}</span>
+                                  ) : null}
+                                </div>
+                                {salaryItem.detail ? (
+                                  <div className="truncate text-[11px] text-slate-400">
+                                    {salaryItem.detail}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <div className="truncate text-xs text-slate-500">
+                                {item.dateBs} · {item.voucherNo}
+                                {item.status ? (
+                                  <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-600">
+                                    {String(item.status).replace(/_/g, " ")}
+                                  </span>
+                                ) : null}
+                              </div>
+                            )}
                           </div>
                           <div
                             className={cn(
@@ -1278,7 +1345,11 @@ export const AccountingManager = () => {
                             <span className="block break-all">
                               {formatCurrencyNpr(item.amountNpr)}
                             </span>
-                            {String(item.status) === "DEPOSIT" ? (
+                            {isSalary ? (
+                              <div className="text-[10px] font-normal text-slate-500">
+                                net salary
+                              </div>
+                            ) : String(item.status) === "DEPOSIT" ? (
                               <div className="text-[10px] font-normal text-violet-600">
                                 deposit
                               </div>
@@ -1289,11 +1360,13 @@ export const AccountingManager = () => {
                             ) : null}
                           </div>
                         </button>
-                      ))
+                        );
+                      })
                     )}
                   </CardContent>
                 </Card>
-              ))}
+                );
+              })}
             </div>
           </div>
         )

@@ -197,7 +197,7 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     AccountingExpense.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(8).lean(),
     SalaryPayment.find({ schoolId, isDeleted: false })
       .populate({ path: "teacherId", populate: { path: "user", select: "fullName" } })
-      .populate("staffId")
+      .populate("staffId", "fullName staffId department designation")
       .sort({ createdAt: -1 })
       .limit(8)
       .lean(),
@@ -372,15 +372,45 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
         linkTab: depositPaid > 0 && feePaid <= 0 ? "deposit-records" : "fee-records"
       };
     }),
-    recentSalaries: recentSalaries.map((s) => ({
-      id: s._id.toString(),
-      dateBs: s.paidDateBs || s.monthBs,
-      voucherNo: s.monthBs,
-      party: salaryParty(s),
-      amountNpr: s.netSalaryNpr,
-      status: s.status,
-      linkTab: "salary-records"
-    })),
+    // Align with Salary Sheet / Payroll (not the legacy "Pay Salary" form)
+    recentSalaries: recentSalaries.map((s) => {
+      const present = Number(s.presentDays ?? 0);
+      const absent = Number(s.absentDays ?? 0);
+      const salaryAmt = Number(s.salaryAmountNpr ?? 0);
+      const net = Number(s.netSalaryNpr ?? 0);
+      const typeLabel =
+        s.employeeType === "TEACHER"
+          ? "Teacher"
+          : s.employeeType === "STAFF"
+            ? "Staff"
+            : "";
+      const dayBits = [
+        present > 0 || absent > 0 ? `P ${present}` : "",
+        absent > 0 ? `A ${absent}` : ""
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return {
+        id: s._id.toString(),
+        dateBs: s.paidDateBs || s.monthBs,
+        /** Payroll month (BS YYYY-MM) — primary reference for the sheet */
+        voucherNo: `Payroll ${s.monthBs}`,
+        party: salaryParty(s),
+        amountNpr: net > 0 ? net : salaryAmt,
+        status: s.status,
+        linkTab: "salary-records",
+        /** Extra fields for dashboard card (sheet-aligned) */
+        monthBs: s.monthBs,
+        employeeType: s.employeeType,
+        presentDays: present,
+        absentDays: absent,
+        salaryAmountNpr: salaryAmt,
+        netSalaryNpr: net,
+        detail: [typeLabel, dayBits, s.status]
+          .filter(Boolean)
+          .join(" · ")
+      };
+    }),
     recentPurchases: recentPurchases.map((p) => ({
       id: p._id.toString(),
       dateBs: p.purchaseDateBs,

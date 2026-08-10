@@ -203,7 +203,19 @@ export const SalaryPaymentRecordsPanel = () => {
     );
   }, [user]);
   const canManualAttendance = canEditSheet;
-  const [monthBs, setMonthBs] = useState(currentBsMonth);
+  const [monthBs, setMonthBs] = useState(() => {
+    // Dashboard "Recent Salary Sheet Entries" can hand off a payroll month
+    try {
+      const fromDash = sessionStorage.getItem("salary-sheet-monthBs")?.trim();
+      if (fromDash && /^\d{4}-\d{2}$/.test(fromDash)) {
+        sessionStorage.removeItem("salary-sheet-monthBs");
+        return fromDash;
+      }
+    } catch {
+      /* ignore */
+    }
+    return currentBsMonth();
+  });
   /** Sheet filter (table view only) */
   const [listSearch, setListSearch] = useState("");
   const [listDept, setListDept] = useState("");
@@ -226,6 +238,20 @@ export const SalaryPaymentRecordsPanel = () => {
   /** UI sections (layout only — does not change payroll logic) */
   const [addSectionOpen, setAddSectionOpen] = useState(true);
   const [signSectionOpen, setSignSectionOpen] = useState(true);
+
+  // When user clicks a recent salary from the accounting dashboard while this
+  // panel is already mounted, pick up the requested payroll month.
+  useEffect(() => {
+    try {
+      const fromDash = sessionStorage.getItem("salary-sheet-monthBs")?.trim();
+      if (fromDash && /^\d{4}-\d{2}$/.test(fromDash)) {
+        sessionStorage.removeItem("salary-sheet-monthBs");
+        setMonthBs(fromDash);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   /** Full employee catalog + attendance for the month (picker source — not the table) */
   const sheetQuery = useQuery({
