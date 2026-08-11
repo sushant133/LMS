@@ -59,6 +59,17 @@ export const errorHandler = (error: unknown, _req: Request, res: Response, _next
     });
   }
 
+  // BSON ObjectId cast failures (e.g. empty string "") often surface as generic Errors, not CastError
+  if (
+    error instanceof Error &&
+    (/ObjectId/i.test(error.message) || /BSON/i.test(error.name) || error.name === "BSONError")
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid identifier"
+    });
+  }
+
   // Duplicate key (e.g. unique email) — generic message
   if (
     typeof error === "object" &&

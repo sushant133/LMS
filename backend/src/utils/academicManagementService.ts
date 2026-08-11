@@ -510,58 +510,89 @@ export const assertLessonPlanItemsBelongToSessionPlan = async (
 };
 
 /**
- * Prevent the same Session Plan unit from appearing twice in the same month
- * for the same teacher/subject (within this plan or another plan for that month).
+ * Within one daily Lesson Plan, each Session Plan unit may appear only once.
+ * The same unit may be planned on many different teaching days (daily spread).
  */
-export const assertNoDuplicateLessonPlanUnitsInMonth = async (
-  req: Request,
-  params: {
-    sessionPlanId: string;
-    teacherId: string;
-    subjectId: string;
-    month: string;
-    academicYearBs: string;
-    unitIds: string[];
-    excludeLessonPlanId?: string;
-  }
-): Promise<void> => {
+export const assertUniqueUnitsInLessonPlan = (unitIds: string[]): void => {
   const seen = new Set<string>();
-  for (const unitId of params.unitIds) {
+  for (const unitId of unitIds) {
+    if (!unitId) continue;
     if (seen.has(unitId)) {
-      throw new ApiError(400, "Duplicate unit selected in this Lesson Plan. Each unit can only appear once per month.");
+      throw new ApiError(
+        400,
+        "Duplicate unit selected for this teaching day. Each unit can appear only once per daily Lesson Plan."
+      );
     }
     seen.add(unitId);
   }
+};
 
-  const otherPlans = await AcademicLessonPlan.find({
-    schoolId: tenantObjectId(req),
-    sessionPlanId: params.sessionPlanId,
-    teacherId: params.teacherId,
-    subjectId: params.subjectId,
-    month: params.month,
-    academicYearBs: params.academicYearBs,
-    isDeleted: false,
-    ...(params.excludeLessonPlanId ? { _id: { $ne: params.excludeLessonPlanId } } : {})
-  })
-    .select("_id")
-    .lean();
-
-  if (otherPlans.length === 0) return;
-
-  const existingItems = await AcademicLessonPlanItem.find({
-    lessonPlanId: { $in: otherPlans.map((plan) => plan._id) },
-    sessionPlanUnitId: { $in: params.unitIds }
-  })
-    .select("sessionPlanUnitId plannedTopic")
-    .lean();
-
-  if (existingItems.length > 0) {
-    const first = existingItems[0];
-    throw new ApiError(
-      400,
-      `Unit/topic "${first?.plannedTopic ?? "selected"}" is already planned for ${params.month}. Duplicate Lesson Plan entries for the same unit in the same month are not allowed.`
-    );
+/**
+ * Teaching date must fall inside each selected Session Plan unit's start/end window
+ * when those dates are set on the unit.
+ */
+export const assertTeachingDateWithinSessionPlanUnits = async (
+  req: Request,
+  sessionPlanId: string,
+  teachingDateBs: string,
+  unitIds: string[]
+): Promise<void> => {
+  const date = (teachingDateBs || "").trim();
+  if (!BS_DATE_RE.test(date)) {
+    throw new ApiError(400, "Teaching date (BS) is required and must be YYYY-MM-DD.");
   }
+
+  const uniqueIds = [...new Set(unitIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return;
+
+  const units = await AcademicSessionPlanUnit.find({
+    _id: { $in: uniqueIds },
+    schoolId: tenantObjectId(req),
+    sessionPlanId
+  })
+    .select("_id unitNo chapterName startDateBs endDateBs")
+    .lean();
+
+  if (units.length !== uniqueIds.length) {
+    throw new ApiError(400, "One or more selected units do not belong to the Session Plan.");
+  }
+
+  for (const unit of units) {
+    const start = String(unit.startDateBs || "").trim();
+    const end = String(unit.endDateBs || "").trim();
+    if (!start && !end) continue;
+
+    if (start && BS_DATE_RE.test(start) && compareBsDates(date, start) < 0) {
+      throw new ApiError(
+        400,
+        `Unit ${unit.unitNo} (${unit.chapterName || "unit"}) is scheduled from ${start}${
+          end ? ` to ${end}` : ""
+        }. Teaching date ${date} is before the unit start date.`
+      );
+    }
+    if (end && BS_DATE_RE.test(end) && compareBsDates(date, end) > 0) {
+      throw new ApiError(
+        400,
+        `Unit ${unit.unitNo} (${unit.chapterName || "unit"}) is scheduled${
+          start ? ` from ${start}` : ""
+        } to ${end}. Teaching date ${date} is after the unit end date.`
+      );
+    }
+  }
+};
+
+/**
+ * @deprecated Use assertUniqueUnitsInLessonPlan + assertTeachingDateWithinSessionPlanUnits.
+ * Kept as a thin wrapper so any external import still resolves during rebuild.
+ */
+export const assertNoDuplicateLessonPlanUnitsInMonth = async (
+  _req: Request,
+  params: {
+    unitIds: string[];
+    [key: string]: unknown;
+  }
+): Promise<void> => {
+  assertUniqueUnitsInLessonPlan(params.unitIds);
 };
 
 /**
@@ -1116,6 +1147,14 @@ export const serializeLessonPlan = async (planId: string) => {
       serialNo: item.serialNo,
       sessionPlanUnitId: item.sessionPlanUnitId?.toString(),
       subUnitTitle: (item as { subUnitTitle?: string }).subUnitTitle ?? "",
+      subUnitTitles: Array.isArray((item as { subUnitTitles?: string[] }).subUnitTitles)
+        ? ((item as { subUnitTitles?: string[] }).subUnitTitles ?? [])
+            .map((t) => String(t).trim())
+            .filter(Boolean)
+        : String((item as { subUnitTitle?: string }).subUnitTitle || "")
+            .split(/[;\n|]+/)
+            .map((t) => t.trim())
+            .filter(Boolean),
       syllabusId: (item as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
       syllabusChapterId:
         (item as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ?? "",
@@ -1123,6 +1162,21 @@ export const serializeLessonPlan = async (planId: string) => {
         (item as { syllabusUnitId?: { toString(): string } }).syllabusUnitId?.toString?.() ?? "",
       syllabusSubUnitId:
         (item as { syllabusSubUnitId?: { toString(): string } }).syllabusSubUnitId?.toString?.() ?? "",
+      syllabusSubUnitIds: Array.isArray(
+        (item as { syllabusSubUnitIds?: Array<{ toString(): string } | string> }).syllabusSubUnitIds
+      )
+        ? (
+            (item as { syllabusSubUnitIds?: Array<{ toString(): string } | string> })
+              .syllabusSubUnitIds ?? []
+          )
+            .map((id) => (typeof id === "string" ? id : id?.toString?.() ?? ""))
+            .filter(Boolean)
+        : (() => {
+            const one = (
+              item as { syllabusSubUnitId?: { toString(): string } }
+            ).syllabusSubUnitId?.toString?.();
+            return one ? [one] : [];
+          })(),
       subjectLabel: item.subjectLabel,
       plannedTopic: item.plannedTopic,
       description: item.description,

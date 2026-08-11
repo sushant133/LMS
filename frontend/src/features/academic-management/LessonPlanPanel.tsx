@@ -10,7 +10,8 @@ import {
   type SubjectRecord,
   canManageInstitution,
 } from "@phit-erp/shared";
-import { Check, Plus, Search, Send } from "lucide-react";
+import { getTodayBs } from "@munatech/nepali-datepicker";
+import { Check, ChevronDown, ChevronUp, Pencil, Plus, Search, Send } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
@@ -20,7 +21,6 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
-import { Textarea } from "components/ui/textarea";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
@@ -44,7 +44,6 @@ import {
   resolveSubjectSelectValue,
   statusBadgeClass,
 } from "./academicManagementUtils";
-import { SubUnitMultiSelect } from "./SubUnitMultiSelect";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
 import { AcademicCommentsPanel } from "./AcademicCommentsPanel";
 import { AcademicProgressBar } from "./AcademicProgressBar";
@@ -84,6 +83,39 @@ interface LessonPlanPanelProps {
 
 const normText = (value?: string | null) =>
   (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/** BS YYYY-MM-DD strings compare lexicographically. Empty unit window = always allowed. */
+const unitAllowsTeachingDate = (
+  unit: Pick<AcademicSessionPlanUnitRecord, "startDateBs" | "endDateBs">,
+  teachingDateBs?: string | null,
+): boolean => {
+  const date = (teachingDateBs || "").trim();
+  if (!date) return true;
+  const start = (unit.startDateBs || "").trim();
+  const end = (unit.endDateBs || "").trim();
+  if (!start && !end) return true;
+  if (start && date < start) return false;
+  if (end && date > end) return false;
+  return true;
+};
+
+const formatUnitDateWindow = (
+  unit: Pick<AcademicSessionPlanUnitRecord, "startDateBs" | "endDateBs">,
+): string => {
+  const start = (unit.startDateBs || "").trim();
+  const end = (unit.endDateBs || "").trim();
+  if (start && end) return `${start} → ${end}`;
+  if (start) return `from ${start}`;
+  if (end) return `until ${end}`;
+  return "no date limit";
+};
+
+const formatTodayBs = (): string => {
+  const t = getTodayBs();
+  return `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`;
+};
+
+const titleKey = (t: string) => t.trim().toLowerCase();
 
 const emptyItem = (
   serialNo: number,
@@ -187,17 +219,21 @@ export const LessonPlanPanel = ({
   const isAdmin = canManageInstitution(user?.role ?? "");
   const canMutate = writeAccess;
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [unitSearch, setUnitSearch] = useState("");
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
+  /** Expand optional fields per unit row in the simplified form. */
+  const [expandedItemKeys, setExpandedItemKeys] = useState<string[]>([]);
   /** Tracks which session plan already had units auto-selected (so Clear stays cleared). */
   const autoSelectedForPlanRef = useRef<string>("");
+  const formTopRef = useRef<HTMLDivElement | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
     null,
   );
   const [selectedYearKey, setSelectedYearKey] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] =
     useState<HierarchySubjectNode | null>(null);
-  const [form, setForm] = useState<AcademicLessonPlanInput>({
+  const blankForm = (): AcademicLessonPlanInput => ({
     academicYearBs: filters.academicYearBs || "2082/083",
     session: filters.session || filters.academicYearBs || "2082/083",
     faculty: filters.faculty || "",
@@ -216,6 +252,16 @@ export const LessonPlanPanel = ({
     monthlyDescription: "",
     items: [],
   });
+  const [form, setForm] = useState<AcademicLessonPlanInput>(blankForm);
+
+  const resetLessonForm = () => {
+    setEditingId(null);
+    setForm(blankForm());
+    setSelectedUnitIds([]);
+    setUnitSearch("");
+    setExpandedItemKeys([]);
+    autoSelectedForPlanRef.current = "";
+  };
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
@@ -464,7 +510,7 @@ export const LessonPlanPanel = ({
 
   // Auto-select the only usable Session Plan when subject/teacher/year change
   useEffect(() => {
-    if (!showForm) return;
+    if (!showForm || editingId) return;
     if (
       usableSessionPlans.length === 1 &&
       form.sessionPlanId !== usableSessionPlans[0]!._id
@@ -473,34 +519,34 @@ export const LessonPlanPanel = ({
       const starts = plan.units
         .map((u) => u.startDateBs)
         .filter(Boolean) as string[];
-      const ends = plan.units
-        .map((u) => u.endDateBs)
-        .filter(Boolean) as string[];
-      setForm((current) => ({
-        ...current,
-        sessionPlanId: plan._id,
-        academicYearBs: plan.academicYearBs || current.academicYearBs,
-        session: plan.session || current.session,
-        faculty: plan.faculty || current.faculty,
-        semesterBs: plan.semesterBs || current.semesterBs,
-        classId: plan.classId || current.classId,
-        sectionId: plan.sectionId || current.sectionId,
-        batchId: plan.batchId || current.batchId,
-        yearId: plan.yearId || current.yearId,
-        subjectId: plan.subjectId || current.subjectId,
-        teacherId: plan.teacherId || current.teacherId || teacherId || "",
-        startDateBs:
+      setForm((current) => {
+        const defaultTeaching =
+          current.teachingDateBs ||
           current.startDateBs ||
-          (starts.length ? starts.sort()[0]! : current.startDateBs),
-        endDateBs:
-          current.endDateBs ||
-          (ends.length ? ends.sort().at(-1)! : current.endDateBs),
-      }));
-      // Pre-select all units from the session plan so teachers don't re-enter them
+          (starts.length ? [...starts].sort()[0]! : "");
+        return {
+          ...current,
+          sessionPlanId: plan._id,
+          academicYearBs: plan.academicYearBs || current.academicYearBs,
+          session: plan.session || current.session,
+          faculty: plan.faculty || current.faculty,
+          semesterBs: plan.semesterBs || current.semesterBs,
+          classId: plan.classId || current.classId,
+          sectionId: plan.sectionId || current.sectionId,
+          batchId: plan.batchId || current.batchId,
+          yearId: plan.yearId || current.yearId,
+          subjectId: plan.subjectId || current.subjectId,
+          teacherId: plan.teacherId || current.teacherId || teacherId || "",
+          teachingDateBs: defaultTeaching,
+          startDateBs: defaultTeaching,
+          endDateBs: defaultTeaching,
+        };
+      });
+      // Daily plan: do not pre-select all units — teacher picks units for this day
       autoSelectedForPlanRef.current = plan._id;
-      setSelectedUnitIds(plan.units.map((u) => u._id));
+      setSelectedUnitIds([]);
     }
-  }, [usableSessionPlans, form.sessionPlanId, showForm, teacherId]);
+  }, [usableSessionPlans, form.sessionPlanId, showForm, teacherId, editingId]);
 
   const coverageQuery = useQuery({
     queryKey: [
@@ -586,14 +632,13 @@ export const LessonPlanPanel = ({
       ),
   });
 
-  // When units API loads for a newly chosen Session Plan, select all once
+  // Mark session plan as ready once units load
   useEffect(() => {
     if (!form.sessionPlanId || !showForm) return;
     if (autoSelectedForPlanRef.current === form.sessionPlanId) return;
-    const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
-    if (units.length === 0) return;
+    const loaded = unitsQuery.data ?? coverageQuery.data?.units ?? [];
+    if (loaded.length === 0) return;
     autoSelectedForPlanRef.current = form.sessionPlanId;
-    setSelectedUnitIds(units.map((u) => u._id));
   }, [
     form.sessionPlanId,
     showForm,
@@ -601,30 +646,64 @@ export const LessonPlanPanel = ({
     coverageQuery.data?.units,
   ]);
 
+  /**
+   * Future schedule rule: teaching date fixes which Session Plan units apply.
+   * On create (not continue-draft), auto-select every unit open on that date.
+   */
+  useEffect(() => {
+    if (!showForm || editingId) return;
+    const teachingDate = form.teachingDateBs || form.startDateBs || "";
+    if (!teachingDate || !form.sessionPlanId) return;
+    const loaded = unitsQuery.data ?? coverageQuery.data?.units ?? [];
+    if (loaded.length === 0) return;
+    const available = loaded
+      .filter((u) => unitAllowsTeachingDate(u, teachingDate))
+      .map((u) => u._id);
+    setSelectedUnitIds(available);
+  }, [
+    showForm,
+    editingId,
+    form.teachingDateBs,
+    form.startDateBs,
+    form.sessionPlanId,
+    unitsQuery.data,
+    coverageQuery.data?.units,
+  ]);
+
   // Rebuild form items when selected units change — inherit Session Plan + syllabus hierarchy
   useEffect(() => {
     if (!form.sessionPlanId) return;
+    if (selectedUnitIds.length === 0) {
+      setForm((current) =>
+        current.items.length === 0 ? current : { ...current, items: [] },
+      );
+      return;
+    }
     const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
+    // Wait for units to load so Continue-draft does not wipe items
+    if (units.length === 0) return;
     const unitMap = new Map(units.map((unit) => [unit._id, unit]));
     setForm((current) => {
       const nextItems = selectedUnitIds
         .map((unitId, index) => {
           const unit = unitMap.get(unitId);
-          if (!unit) return null;
           const prev = current.items.find(
             (item) => item.sessionPlanUnitId === unitId,
           );
+          // Keep existing draft row if unit metadata is not yet available
+          if (!unit) {
+            return prev
+              ? { ...prev, serialNo: index + 1 }
+              : null;
+          }
           const subUnits = parseSubUnitsFromTopics(unit.topicsCovered);
           const prevTitles = normalizeSubUnitTitles(
             prev?.subUnitTitles,
             prev?.subUnitTitle,
           );
-          const defaultTitles =
-            prevTitles.length > 0
-              ? prevTitles
-              : subUnits.length === 1
-                ? [subUnits[0]!]
-                : [];
+          // New unit row: leave sub-units empty so teacher fixes them to this date
+          // (remaining / already-planned hints are shown in the UI).
+          const defaultTitles = prevTitles.length > 0 ? prevTitles : [];
           const multi = matchMultipleSubUnits(
             matchedSyllabus,
             unit.syllabusChapterId,
@@ -703,25 +782,15 @@ export const LessonPlanPanel = ({
         })
         .filter(Boolean) as AcademicLessonPlanInput["items"];
 
-      const itemStarts = nextItems
-        .map((i) => i.itemStartDateBs)
-        .filter(Boolean) as string[];
-      const itemEnds = nextItems
-        .map((i) => i.itemEndDateBs)
-        .filter(Boolean) as string[];
-
+      // Daily plan: keep a single teaching day (do not expand to unit date ranges)
+      const teaching =
+        current.teachingDateBs || current.startDateBs || current.endDateBs || "";
       return {
         ...current,
         items: nextItems,
-        // Plan dates follow selected units when not set manually
-        startDateBs:
-          current.startDateBs ||
-          (itemStarts.length ? [...itemStarts].sort()[0]! : current.startDateBs),
-        endDateBs:
-          current.endDateBs ||
-          (itemEnds.length
-            ? [...itemEnds].sort().at(-1)!
-            : current.endDateBs),
+        teachingDateBs: teaching,
+        startDateBs: teaching,
+        endDateBs: teaching,
       };
     });
   }, [
@@ -736,15 +805,164 @@ export const LessonPlanPanel = ({
     mutationFn: (payload: AcademicLessonPlanInput) =>
       unwrap(api.post("/academic-management/lesson-plans", payload)),
     onSuccess: () => {
-      toast.success("Lesson plan saved");
+      toast.success("Lesson plan saved as draft");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       setShowForm(false);
-      autoSelectedForPlanRef.current = "";
-      setSelectedUnitIds([]);
-      setUnitSearch("");
+      resetLessonForm();
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: AcademicLessonPlanInput;
+    }) => unwrap(api.put(`/academic-management/lesson-plans/${id}`, payload)),
+    onSuccess: () => {
+      toast.success("Draft lesson plan updated");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+      setShowForm(false);
+      resetLessonForm();
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const openContinueDraft = (plan: AcademicLessonPlanRecord) => {
+    const teaching =
+      plan.teachingDateBs || plan.startDateBs || plan.endDateBs || "";
+    const unitIds = plan.items
+      .map((item) => item.sessionPlanUnitId)
+      .filter((id): id is string => Boolean(id));
+    autoSelectedForPlanRef.current = plan.sessionPlanId || "";
+    setEditingId(plan._id);
+    setSelectedUnitIds(unitIds);
+    setExpandedItemKeys([]);
+    setUnitSearch("");
+    setForm({
+      academicYearBs: plan.academicYearBs || filters.academicYearBs || "",
+      session: plan.session || plan.academicYearBs || "",
+      faculty: plan.faculty || "",
+      semesterBs: plan.semesterBs || "",
+      classId: plan.classId,
+      sectionId: plan.sectionId,
+      batchId: plan.batchId,
+      yearId: plan.yearId,
+      subjectId: plan.subjectId,
+      teacherId: plan.teacherId || teacherId || "",
+      month: plan.month || "",
+      teachingDateBs: teaching,
+      startDateBs: teaching,
+      endDateBs: teaching,
+      sessionPlanId: plan.sessionPlanId || "",
+      monthlyDescription: plan.monthlyDescription || "",
+      items: plan.items.map((item, index) => {
+        const titles = normalizeSubUnitTitles(
+          item.subUnitTitles,
+          item.subUnitTitle,
+        );
+        return {
+          serialNo: item.serialNo || index + 1,
+          sessionPlanUnitId: item.sessionPlanUnitId || "",
+          subUnitTitle: joinSubUnitTitles(titles) || item.subUnitTitle || "",
+          subUnitTitles: titles,
+          syllabusId: item.syllabusId || item.unit?.syllabusId || "",
+          syllabusChapterId:
+            item.syllabusChapterId || item.unit?.syllabusChapterId || "",
+          syllabusUnitId: item.syllabusUnitId || item.unit?.syllabusUnitId || "",
+          syllabusSubUnitId: item.syllabusSubUnitId || "",
+          syllabusSubUnitIds: item.syllabusSubUnitIds ?? [],
+          subjectLabel:
+            item.subjectLabel ||
+            (item.unit ? `Unit ${item.unit.unitNo}` : ""),
+          plannedTopic: item.plannedTopic || "",
+          description: item.description || "",
+          learningObjectives: item.learningObjectives || "",
+          teachingMethod: item.teachingMethod || "",
+          teachingAids: item.teachingAids || "",
+          assessmentMethod: item.assessmentMethod || "",
+          deadline: item.deadline || "",
+          itemStartDateBs:
+            item.itemStartDateBs || item.unit?.startDateBs || "",
+          itemEndDateBs: item.itemEndDateBs || item.unit?.endDateBs || "",
+          estimatedClasses: item.estimatedClasses || 1,
+          remarks: item.remarks || "",
+        };
+      }),
+    });
+    setShowForm(true);
+    requestAnimationFrame(() => {
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    toast.message("Continue editing this draft");
+  };
+
+  const saveLessonPlan = () => {
+    const resolvedTeacherId = teacherId || form.teacherId;
+    if (!form.sessionPlanId || form.items.length === 0) {
+      toast.error("Select a Session Plan and at least one unit before saving");
+      return;
+    }
+    const teachingDate = form.teachingDateBs || form.startDateBs || "";
+    if (!teachingDate) {
+      toast.error("Select the teaching date (BS)");
+      return;
+    }
+    if (!resolvedTeacherId) {
+      toast.error("Teacher profile is required to save a lesson plan");
+      return;
+    }
+    const outOfWindow = form.items
+      .map((item) => units.find((u) => u._id === item.sessionPlanUnitId))
+      .filter(
+        (unit): unit is AcademicSessionPlanUnitRecord =>
+          Boolean(unit) && !unitAllowsTeachingDate(unit!, teachingDate),
+      );
+    if (outOfWindow.length > 0) {
+      const u = outOfWindow[0]!;
+      toast.error(
+        `Unit ${u.unitNo} (${u.chapterName}) is scheduled ${formatUnitDateWindow(u)}. Teaching date ${teachingDate} is outside that range.`,
+      );
+      return;
+    }
+    const missingSubs = form.items.filter((item) => {
+      const unit = units.find((u) => u._id === item.sessionPlanUnitId);
+      const available = parseSubUnitsFromTopics(unit?.topicsCovered);
+      if (available.length === 0) return false;
+      const selected = normalizeSubUnitTitles(
+        item.subUnitTitles,
+        item.subUnitTitle,
+      );
+      return selected.length === 0;
+    });
+    if (missingSubs.length > 0) {
+      toast.error(
+        "Assign at least one sub-unit to each selected unit for this teaching date.",
+      );
+      return;
+    }
+    if (teachingDate < formatTodayBs()) {
+      toast.message(
+        "Note: this teaching date is in the past. Prefer future dates for scheduling.",
+      );
+    }
+    const payload: AcademicLessonPlanInput = {
+      ...form,
+      teachingDateBs: teachingDate,
+      startDateBs: teachingDate,
+      endDateBs: teachingDate,
+      teacherId: resolvedTeacherId,
+      session: form.session || form.academicYearBs,
+      month: form.month || "",
+    };
+    if (editingId) {
+      updateMutation.mutate({ id: editingId, payload });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
 
   const submitMutation = useMutation({
     mutationFn: (id: string) =>
@@ -931,27 +1149,107 @@ export const LessonPlanPanel = ({
   }, [selectedSubject, selectedPlans, filteredPlans]);
 
   const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
+  const teachingDateForForm =
+    form.teachingDateBs || form.startDateBs || "";
+  const todayBs = useMemo(() => formatTodayBs(), []);
+  const teachingDateIsPast =
+    Boolean(teachingDateForForm) && teachingDateForForm < todayBs;
+
+  /** Sub-units already fixed on other Lesson Plan dates (same Session Plan). */
+  const plannedSubUnitSchedule = useMemo(() => {
+    const byUnit = new Map<
+      string,
+      Array<{ title: string; dateBs: string; planId: string }>
+    >();
+    for (const plan of plansQuery.data ?? []) {
+      if (editingId && plan._id === editingId) continue;
+      if (
+        form.sessionPlanId &&
+        plan.sessionPlanId &&
+        plan.sessionPlanId !== form.sessionPlanId
+      ) {
+        continue;
+      }
+      if (
+        form.subjectId &&
+        plan.subjectId &&
+        plan.subjectId !== form.subjectId
+      ) {
+        // still allow if same curriculum teacher year — subject filter is soft
+      }
+      const dateBs =
+        plan.teachingDateBs || plan.startDateBs || plan.endDateBs || "";
+      for (const item of plan.items) {
+        const unitId = item.sessionPlanUnitId || "";
+        if (!unitId) continue;
+        const titles = normalizeSubUnitTitles(
+          item.subUnitTitles,
+          item.subUnitTitle,
+        );
+        const rows = byUnit.get(unitId) ?? [];
+        for (const title of titles) {
+          rows.push({ title, dateBs, planId: plan._id });
+        }
+        byUnit.set(unitId, rows);
+      }
+    }
+    return byUnit;
+  }, [
+    plansQuery.data,
+    editingId,
+    form.sessionPlanId,
+    form.subjectId,
+  ]);
+
+  const futureScheduleForSession = useMemo(() => {
+    if (!form.sessionPlanId) return [];
+    return (plansQuery.data ?? [])
+      .filter((p) => p.sessionPlanId === form.sessionPlanId)
+      .map((p) => ({
+        plan: p,
+        dateBs: p.teachingDateBs || p.startDateBs || p.endDateBs || "",
+      }))
+      .sort((a, b) => a.dateBs.localeCompare(b.dateBs));
+  }, [plansQuery.data, form.sessionPlanId]);
+
+  const unitsAvailableToday = useMemo(
+    () =>
+      units.filter((unit) =>
+        unitAllowsTeachingDate(unit, teachingDateForForm),
+      ),
+    [units, teachingDateForForm],
+  );
   const filteredUnits = useMemo(() => {
     const q = unitSearch.toLowerCase().trim();
-    if (!q) return units;
-    return units.filter(
+    const list = teachingDateForForm ? unitsAvailableToday : units;
+    if (!q) return list;
+    return list.filter(
       (unit) =>
         String(unit.unitNo).includes(q) ||
         unit.chapterName.toLowerCase().includes(q) ||
         (unit.topicsCovered || "").toLowerCase().includes(q),
     );
-  }, [unitSearch, units]);
+  }, [unitSearch, units, unitsAvailableToday, teachingDateForForm]);
 
-  const coverage = coverageQuery.data;
-  const plannedThisMonth = useMemo(
-    () =>
-      units.filter((unit) =>
-        (unit.plannedInMonths ?? []).includes(form.month),
-      ),
-    [units, form.month],
-  );
+  const unitsOutOfWindow = useMemo(() => {
+    if (!teachingDateForForm) return [];
+    return units.filter(
+      (unit) => !unitAllowsTeachingDate(unit, teachingDateForForm),
+    );
+  }, [units, teachingDateForForm]);
 
   const toggleUnit = (unitId: string) => {
+    const unit = units.find((u) => u._id === unitId);
+    if (
+      unit &&
+      teachingDateForForm &&
+      !unitAllowsTeachingDate(unit, teachingDateForForm)
+    ) {
+      toast.error(
+        `Unit ${unit.unitNo} is scheduled ${formatUnitDateWindow(unit)}. Teaching date ${teachingDateForForm} is outside that range.`,
+      );
+      return;
+    }
     setSelectedUnitIds((current) =>
       current.includes(unitId)
         ? current.filter((id) => id !== unitId)
@@ -960,12 +1258,19 @@ export const LessonPlanPanel = ({
   };
 
   const selectAllSessionUnits = () => {
-    if (units.length === 0) {
-      toast.message("No units on this Session Plan");
+    const available = teachingDateForForm ? unitsAvailableToday : units;
+    if (available.length === 0) {
+      toast.message(
+        teachingDateForForm
+          ? "No Session Plan units allow this teaching date"
+          : "No units on this Session Plan",
+      );
       return;
     }
-    setSelectedUnitIds(units.map((u) => u._id));
-    toast.success(`Selected all ${units.length} units from Session Plan`);
+    setSelectedUnitIds(available.map((u) => u._id));
+    toast.success(
+      `Selected ${available.length} unit${available.length === 1 ? "" : "s"} available for this day`,
+    );
   };
 
   const updateItemField = <K extends keyof AcademicLessonPlanInput["items"][number]>(
@@ -989,40 +1294,57 @@ export const LessonPlanPanel = ({
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Lesson Plan</h2>
           <p className="text-sm text-slate-600">
-            {isAdmin
-              ? "Lesson plans for all teachers — select date range, Session Plan units and sub-topics."
-              : "Plan from your Session Plan: choose start/end dates, units and sub-units (topics), then save."}
+            Plan teaching <strong>in advance</strong>. Units and sub-units are
+            fixed by the Session Plan date windows — pick a future date, then
+            assign which sub-units fall on that day.
           </p>
         </div>
         {canMutate ? (
           <Button
-            onClick={() =>
-              setShowForm((current) => {
-                if (current) {
-                  autoSelectedForPlanRef.current = "";
-                  setSelectedUnitIds([]);
-                }
-                return !current;
-              })
-            }
+            onClick={() => {
+              if (showForm) {
+                setShowForm(false);
+                resetLessonForm();
+                return;
+              }
+              resetLessonForm();
+              setShowForm(true);
+            }}
           >
             <Plus className="mr-2 h-4 w-4" />
-            New Lesson Plan
+            {showForm ? "Close form" : "Schedule future day"}
           </Button>
         ) : null}
       </div>
 
       {showForm && canMutate ? (
-        <Card className="no-print">
-          <CardHeader>
-            <CardTitle>Create Lesson Plan</CardTitle>
+        <div ref={formTopRef}>
+        <Card className="no-print border-brand-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle>
+              {editingId
+                ? "Continue draft schedule"
+                : "Schedule a future teaching day"}
+            </CardTitle>
             <p className="text-sm text-slate-600">
-              Set the date range, load Session Plan (from Syllabus chapters), then
-              select chapters and sub-units. Sub-units auto-link to the official
-              hierarchical syllabus for progress tracking.
+              <strong>1)</strong> Choose a future teaching date ·{" "}
+              <strong>2)</strong> Units open on that date are fixed from the
+              Session Plan · <strong>3)</strong> Assign sub-units to this date
+              (already scheduled ones are marked). Save draft;{" "}
+              <strong>Continue</strong> next to Submit later.
             </p>
+            {editingId ? (
+              <Badge className="w-fit bg-amber-100 text-amber-900">
+                Editing draft
+              </Badge>
+            ) : null}
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5">
+            {/* Step 1 — day + basics */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Step 1 · Future teaching date
+              </p>
             <div className="grid gap-3 md:grid-cols-4">
               <FormField label="Academic Year (BS)">
                 <Input
@@ -1142,7 +1464,7 @@ export const LessonPlanPanel = ({
                   </Select>
                 </FormField>
               ) : null}
-              <FormField label="Teaching date (BS)">
+              <FormField label="Teaching date (BS) *">
                 <NepaliDateField
                   value={form.teachingDateBs || form.startDateBs || ""}
                   onChange={(value) =>
@@ -1153,20 +1475,18 @@ export const LessonPlanPanel = ({
                       endDateBs: value,
                     }))
                   }
-                  placeholder="Teaching day"
+                  placeholder="Future teaching day"
                 />
-              </FormField>
-              <FormField label="Faculty (optional)">
-                <Input
-                  value={form.faculty ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      faculty: event.target.value,
-                    }))
-                  }
-                  placeholder="Faculty / Program"
-                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Units are fixed by Session Plan start–end for this date. Prefer
+                  a future date (today BS: {todayBs}).
+                </p>
+                {teachingDateIsPast ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    This date is in the past. Lesson plans are meant for future
+                    scheduling.
+                  </p>
+                ) : null}
               </FormField>
             </div>
 
@@ -1181,29 +1501,27 @@ export const LessonPlanPanel = ({
             ) : null}
 
             <div className="grid gap-3 md:grid-cols-2">
-              <FormField label="Session Plan">
+              <FormField label="Session Plan *">
                 <Select
                   value={form.sessionPlanId}
+                  disabled={Boolean(editingId)}
                   onChange={(event) => {
                     const plan = usableSessionPlans.find(
                       (row) => row._id === event.target.value,
                     );
-                    // Pull every unit + date range from the Session Plan automatically
                     const starts = (plan?.units ?? [])
                       .map((u) => u.startDateBs)
                       .filter(Boolean) as string[];
-                    const ends = (plan?.units ?? [])
-                      .map((u) => u.endDateBs)
-                      .filter(Boolean) as string[];
                     autoSelectedForPlanRef.current = event.target.value || "";
-                    setSelectedUnitIds((plan?.units ?? []).map((u) => u._id));
+                    // Daily plan: teacher chooses units for this day (not all units)
+                    setSelectedUnitIds([]);
                     const fromUnits =
                       starts.length ? [...starts].sort()[0]! : "";
                     setForm((current) => {
                       const defaultTeaching =
-                        fromUnits ||
                         current.teachingDateBs ||
                         current.startDateBs ||
+                        fromUnits ||
                         "";
                       return {
                         ...current,
@@ -1221,15 +1539,14 @@ export const LessonPlanPanel = ({
                           current.teacherId ||
                           teacherId ||
                           "",
-                        teachingDateBs:
-                          defaultTeaching || current.teachingDateBs,
-                        startDateBs: defaultTeaching || current.startDateBs,
-                        endDateBs: defaultTeaching || current.endDateBs,
+                        teachingDateBs: defaultTeaching,
+                        startDateBs: defaultTeaching,
+                        endDateBs: defaultTeaching,
                       };
                     });
                     if (plan?.units?.length) {
                       toast.success(
-                        `Loaded ${plan.units.length} units from Session Plan`,
+                        `Session Plan loaded (${plan.units.length} units). Pick units for this teaching day.`,
                       );
                     }
                   }}
@@ -1263,118 +1580,153 @@ export const LessonPlanPanel = ({
                   </p>
                 ) : null}
               </FormField>
+              <FormField label="Day notes (optional)">
+                <Input
+                  value={form.monthlyDescription ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      monthlyDescription: event.target.value,
+                    }))
+                  }
+                  placeholder="Optional short note for this day"
+                />
+              </FormField>
+            </div>
             </div>
 
-            {form.sessionPlanId && coverage ? (
-              <div className="rounded-2xl border border-brand-100 bg-brand-50/50 p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-brand-900">
-                    Yearly syllabus progress
-                  </p>
-                  <span className="text-xs text-slate-600">
-                    {coverage.completedUnits}/{coverage.totalUnits} units
-                    completed · {coverage.remainingUnits} unplanned
-                  </span>
-                </div>
-                <AcademicProgressBar
-                  completedPercent={coverage.completedPercent}
-                  remainingPercent={coverage.remainingPercent}
-                />
-                <div className="grid gap-2 text-xs sm:grid-cols-3">
-                  <div className="rounded-xl bg-white/80 p-2 border border-emerald-100">
-                    <p className="font-medium text-emerald-800">
-                      Planned ({coverage.plannedUnits})
-                    </p>
-                    <p className="text-slate-600 mt-1 line-clamp-3">
-                      {coverage.planned.length
-                        ? coverage.planned
-                            .map((u) => `U${u.unitNo}`)
-                            .join(", ")
-                        : "—"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-white/80 p-2 border border-amber-100">
-                    <p className="font-medium text-amber-800">
-                      Remaining ({coverage.remainingUnits})
-                    </p>
-                    <p className="text-slate-600 mt-1 line-clamp-3">
-                      {coverage.remaining.length
-                        ? coverage.remaining
-                            .map((u) => `U${u.unitNo}`)
-                            .join(", ")
-                        : "—"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-white/80 p-2 border border-slate-100">
-                    <p className="font-medium text-slate-800">
-                      Already in {form.month} ({plannedThisMonth.length})
-                    </p>
-                    <p className="text-slate-600 mt-1 line-clamp-3">
-                      {plannedThisMonth.length
-                        ? plannedThisMonth
-                            .map((u) => `U${u.unitNo}`)
-                            .join(", ")
-                        : "None yet"}
-                    </p>
-                  </div>
+            {form.sessionPlanId && futureScheduleForSession.length > 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Fixed schedule (this Session Plan)
+                </p>
+                <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-100">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left font-medium">Date</th>
+                        <th className="px-2 py-1.5 text-left font-medium">Units / sub-units</th>
+                        <th className="px-2 py-1.5 text-left font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {futureScheduleForSession.map(({ plan, dateBs }) => (
+                        <tr
+                          key={plan._id}
+                          className={
+                            dateBs === teachingDateForForm
+                              ? "bg-brand-50/60"
+                              : "border-t border-slate-100"
+                          }
+                        >
+                          <td className="px-2 py-1.5 whitespace-nowrap font-medium text-slate-800">
+                            {dateBs || "—"}
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-700">
+                            {plan.items
+                              .map((item) => {
+                                const subs = normalizeSubUnitTitles(
+                                  item.subUnitTitles,
+                                  item.subUnitTitle,
+                                );
+                                const unitLabel = item.unit
+                                  ? `U${item.unit.unitNo}`
+                                  : item.subjectLabel || "Unit";
+                                return subs.length > 0
+                                  ? `${unitLabel}: ${subs.join(", ")}`
+                                  : unitLabel;
+                              })
+                              .join(" · ")}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Badge className={statusBadgeClass(plan.status)}>
+                              {plan.status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             ) : null}
 
             {form.sessionPlanId ? (
-              <div className="space-y-3">
-                <FormField label="Units from Session Plan (auto-filled)">
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <div className="relative min-w-[12rem] flex-1">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input
-                        className="pl-9"
-                        value={unitSearch}
-                        onChange={(event) => setUnitSearch(event.target.value)}
-                        placeholder="Search units…"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={selectAllSessionUnits}
-                    >
-                      Select all units
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setSelectedUnitIds([])}
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                  <p className="mb-2 text-xs text-slate-500">
-                    Units, topics, hours, and dates come from the Session Plan.
-                    Toggle units if you only need some for this plan.
+              <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Step 2 · Units fixed for this date
                   </p>
-                  <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y">
-                    {filteredUnits.length === 0 ? (
-                      <p className="p-3 text-sm text-slate-500">
-                        No units found. Ensure the Session Plan has units.
-                      </p>
-                    ) : (
-                      filteredUnits.map((unit) => {
-                        const selected = selectedUnitIds.includes(unit._id);
-                        const alreadyThisMonth = (
-                          unit.plannedInMonths ?? []
-                        ).includes(form.month);
-                        return (
-                          <button
-                            key={unit._id}
-                            type="button"
-                            onClick={() => toggleUnit(unit._id)}
-                            className={`flex w-full items-start gap-3 p-3 text-left text-sm transition hover:bg-slate-50 ${
-                              selected ? "bg-brand-50" : ""
-                            } ${alreadyThisMonth && !selected ? "opacity-60" : ""}`}
-                          >
+                  {teachingDateForForm ? (
+                    <span className="text-xs text-slate-600">
+                      {unitsAvailableToday.length} unit
+                      {unitsAvailableToday.length === 1 ? "" : "s"} open on{" "}
+                      {teachingDateForForm}
+                      {unitsOutOfWindow.length > 0
+                        ? ` · ${unitsOutOfWindow.length} outside window (hidden)`
+                        : ""}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-xs text-slate-500">
+                  Only Session Plan units whose start–end includes this teaching
+                  date appear. They are selected automatically for this day —
+                  uncheck any you will not cover today.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative min-w-[12rem] flex-1">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      className="pl-9"
+                      value={unitSearch}
+                      onChange={(event) => setUnitSearch(event.target.value)}
+                      placeholder="Search unit…"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={selectAllSessionUnits}
+                  >
+                    Select all for date
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSelectedUnitIds([])}
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {filteredUnits.length === 0 ? (
+                    <p className="col-span-full rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                      {teachingDateForForm
+                        ? "No units are scheduled for this date on the Session Plan. Pick a date inside a unit’s start–end window."
+                        : "Pick a future teaching date to load fixed units."}
+                    </p>
+                  ) : (
+                    filteredUnits.map((unit) => {
+                      const selected = selectedUnitIds.includes(unit._id);
+                      const subs = parseSubUnitsFromTopics(unit.topicsCovered);
+                      const scheduled = plannedSubUnitSchedule.get(unit._id) ?? [];
+                      const scheduledCount = new Set(
+                        scheduled.map((s) => titleKey(s.title)),
+                      ).size;
+                      return (
+                        <button
+                          key={unit._id}
+                          type="button"
+                          onClick={() => toggleUnit(unit._id)}
+                          className={`rounded-xl border p-3 text-left transition ${
+                            selected
+                              ? "border-brand-500 bg-brand-50 shadow-sm"
+                              : "border-slate-200 bg-white hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
                             <span
                               className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                                 selected
@@ -1382,181 +1734,290 @@ export const LessonPlanPanel = ({
                                   : "border-slate-300"
                               }`}
                             >
-                              {selected ? (
-                                <Check className="h-3 w-3" />
-                              ) : null}
+                              {selected ? <Check className="h-3 w-3" /> : null}
                             </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="font-medium text-slate-900">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-slate-900 text-sm">
                                 Unit {unit.unitNo}: {unit.chapterName}
-                              </span>
-                              {unit.topicsCovered ? (
-                                <span className="mt-0.5 block text-xs text-slate-600 line-clamp-2">
-                                  {unit.topicsCovered}
-                                </span>
-                              ) : null}
-                              <span className="mt-1 flex flex-wrap gap-1">
-                                {unit.planningStatus ? (
-                                  <Badge
-                                    className={statusBadgeClass(
-                                      unit.planningStatus === "UNPLANNED"
-                                        ? "PENDING"
-                                        : unit.planningStatus,
-                                    )}
-                                  >
-                                    {unit.planningStatus}
-                                  </Badge>
-                                ) : null}
-                                {alreadyThisMonth ? (
-                                  <Badge className="bg-slate-200 text-slate-700">
-                                    In {form.month}
-                                  </Badge>
-                                ) : null}
-                                {(unit.plannedInMonths ?? [])
-                                  .filter((m) => m !== form.month)
-                                  .map((m) => (
-                                    <Badge
-                                      key={m}
-                                      className="bg-slate-100 text-slate-600"
-                                    >
-                                      {m}
-                                    </Badge>
-                                  ))}
-                              </span>
-                            </span>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </FormField>
-
-                <FormField label="Plan description">
-                  <Textarea
-                    value={form.monthlyDescription ?? ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        monthlyDescription: event.target.value,
-                      }))
-                    }
-                    placeholder="Brief teaching focus for this period"
-                  />
-                </FormField>
-
-                {form.items.length > 0 ? (
-                  <div className="space-y-3">
-                    <p className="text-sm font-medium text-slate-800">
-                      Lesson details ({form.items.length} unit
-                      {form.items.length === 1 ? "" : "s"})
-                      {form.teachingDateBs || form.startDateBs
-                        ? ` · Teaching date ${form.teachingDateBs || form.startDateBs}`
-                        : ""}
-                    </p>
-                    {form.items.map((item, index) => {
-                      const unit = units.find(
-                        (u) => u._id === item.sessionPlanUnitId,
-                      );
-                      const subUnits = parseSubUnitsFromTopics(
-                        unit?.topicsCovered,
-                      );
-                      return (
-                        <div
-                          key={item.sessionPlanUnitId || index}
-                          className="grid gap-3 rounded-2xl border border-slate-200 p-4 md:grid-cols-2"
-                        >
-                          <div className="md:col-span-2 rounded-xl bg-slate-50 p-3 text-sm">
-                            <p className="font-medium text-slate-900">
-                              {item.subjectLabel ||
-                                (unit
-                                  ? `Unit ${unit.unitNo}`
-                                  : `Item ${index + 1}`)}
-                              : {unit?.chapterName || item.plannedTopic}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-600">
-                              Session Plan topics:{" "}
-                              {unit?.topicsCovered || item.plannedTopic || "—"}
-                            </p>
+                              </p>
+                              <p className="mt-0.5 text-xs text-slate-600">
+                                Fixed window: {formatUnitDateWindow(unit)}
+                              </p>
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                {subs.length} sub-unit
+                                {subs.length === 1 ? "" : "s"}
+                                {scheduledCount > 0
+                                  ? ` · ${scheduledCount} already dated`
+                                  : " · none dated yet"}
+                              </p>
+                            </div>
                           </div>
-                          <FormField label="Unit (from Session Plan)">
-                            <Input
-                              value={
-                                unit
-                                  ? `Unit ${unit.unitNo}: ${unit.chapterName}`
-                                  : item.subjectLabel
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {form.sessionPlanId && form.items.length > 0 ? (
+              <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Step 3 · Fix sub-units on{" "}
+                  {form.teachingDateBs || form.startDateBs || "this day"}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Sub-units come from the Session Plan. Tick which ones are
+                  taught on this date. Ones already fixed on another day are
+                  marked — leave them for that day or reassign carefully.
+                </p>
+                {form.items.map((item, index) => {
+                  const unit = units.find(
+                    (u) => u._id === item.sessionPlanUnitId,
+                  );
+                  const subUnits = parseSubUnitsFromTopics(unit?.topicsCovered);
+                  const itemKey = item.sessionPlanUnitId || String(index);
+                  const expanded = expandedItemKeys.includes(itemKey);
+                  const selectedTitles = normalizeSubUnitTitles(
+                    item.subUnitTitles,
+                    item.subUnitTitle,
+                  );
+                  const scheduledRows =
+                    plannedSubUnitSchedule.get(item.sessionPlanUnitId || "") ??
+                    [];
+                  const scheduledByTitle = new Map<string, string[]>();
+                  for (const row of scheduledRows) {
+                    const k = titleKey(row.title);
+                    const dates = scheduledByTitle.get(k) ?? [];
+                    if (row.dateBs && !dates.includes(row.dateBs)) {
+                      dates.push(row.dateBs);
+                    }
+                    scheduledByTitle.set(k, dates);
+                  }
+                  const remainingSubs = subUnits.filter(
+                    (t) => !scheduledByTitle.has(titleKey(t)),
+                  );
+                  const applySubUnitTitles = (titles: string[]) => {
+                    const multi = matchMultipleSubUnits(
+                      matchedSyllabus,
+                      unit?.syllabusChapterId || item.syllabusChapterId,
+                      titles,
+                    );
+                    const match = multi.firstMatch;
+                    const joined = joinSubUnitTitles(titles);
+                    setForm((current) => ({
+                      ...current,
+                      items: current.items.map((row, i) =>
+                        i === index
+                          ? {
+                              ...row,
+                              subUnitTitles: titles,
+                              subUnitTitle: joined,
+                              plannedTopic:
+                                joined || unit?.chapterName || row.plannedTopic,
+                              syllabusId:
+                                matchedSyllabus?._id ||
+                                unit?.syllabusId ||
+                                row.syllabusId ||
+                                "",
+                              syllabusChapterId:
+                                match?.syllabusChapterId ||
+                                unit?.syllabusChapterId ||
+                                row.syllabusChapterId ||
+                                "",
+                              syllabusUnitId:
+                                match?.syllabusUnitId ||
+                                row.syllabusUnitId ||
+                                "",
+                              syllabusSubUnitId:
+                                multi.syllabusSubUnitIds[0] || "",
+                              syllabusSubUnitIds: multi.syllabusSubUnitIds,
+                              learningObjectives:
+                                multi.learningOutcomes ||
+                                row.learningObjectives,
+                              description:
+                                multi.description || row.description,
+                            }
+                          : row,
+                      ),
+                    }));
+                  };
+                  return (
+                    <div
+                      key={itemKey}
+                      className="rounded-xl border border-slate-200 bg-white p-3 space-y-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-slate-900 text-sm">
+                            {unit
+                              ? `Unit ${unit.unitNo}: ${unit.chapterName}`
+                              : item.subjectLabel || `Unit ${index + 1}`}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Session window:{" "}
+                            {unit
+                              ? formatUnitDateWindow(unit)
+                              : "—"}{" "}
+                            · Fixed on:{" "}
+                            {form.teachingDateBs || form.startDateBs || "—"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                            Classes
+                            <NumberInput
+                              className="w-16 h-8"
+                              min={1}
+                              value={item.estimatedClasses}
+                              onChange={(event) =>
+                                updateItemField(
+                                  index,
+                                  "estimatedClasses",
+                                  event.target.valueAsNumber || 1,
+                                )
                               }
-                              readOnly
-                              className="bg-slate-50"
                             />
-                          </FormField>
-                          <FormField label="Sub-units (select one or more)">
-                            <SubUnitMultiSelect
-                              options={subUnits}
-                              value={normalizeSubUnitTitles(
-                                item.subUnitTitles,
-                                item.subUnitTitle,
-                              )}
-                              nepali={formNepaliText}
-                              allowCustom
-                              placeholder={
-                                formNepaliText
-                                  ? "नयाँ उप-एकाइ थप्नुहोस्…"
-                                  : "Add custom sub-unit…"
-                              }
-                              hint="Select multiple sub-units planned for this lesson, or add a custom one."
-                              onChange={(titles) => {
-                                const multi = matchMultipleSubUnits(
-                                  matchedSyllabus,
-                                  unit?.syllabusChapterId ||
-                                    item.syllabusChapterId,
-                                  titles,
+                          </label>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              setExpandedItemKeys((current) =>
+                                current.includes(itemKey)
+                                  ? current.filter((k) => k !== itemKey)
+                                  : [...current, itemKey],
+                              )
+                            }
+                          >
+                            {expanded ? (
+                              <>
+                                <ChevronUp className="mr-1 h-3.5 w-3.5" />
+                                Less
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                                More
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <FormField label="Sub-units fixed for this date">
+                        {subUnits.length > 0 ? (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              {subUnits.map((title) => {
+                                const on = selectedTitles.some(
+                                  (t) => titleKey(t) === titleKey(title),
                                 );
-                                const match = multi.firstMatch;
-                                const joined = joinSubUnitTitles(titles);
-                                setForm((current) => ({
-                                  ...current,
-                                  items: current.items.map((row, i) =>
-                                    i === index
-                                      ? {
-                                          ...row,
-                                          subUnitTitles: titles,
-                                          subUnitTitle: joined,
-                                          plannedTopic:
-                                            joined ||
-                                            unit?.chapterName ||
-                                            row.plannedTopic,
-                                          syllabusId:
-                                            matchedSyllabus?._id ||
-                                            unit?.syllabusId ||
-                                            row.syllabusId ||
-                                            "",
-                                          syllabusChapterId:
-                                            match?.syllabusChapterId ||
-                                            unit?.syllabusChapterId ||
-                                            row.syllabusChapterId ||
-                                            "",
-                                          syllabusUnitId:
-                                            match?.syllabusUnitId ||
-                                            row.syllabusUnitId ||
-                                            "",
-                                          syllabusSubUnitId:
-                                            multi.syllabusSubUnitIds[0] || "",
-                                          syllabusSubUnitIds:
-                                            multi.syllabusSubUnitIds,
-                                          learningObjectives:
-                                            multi.learningOutcomes ||
-                                            row.learningObjectives,
-                                          description:
-                                            multi.description ||
-                                            row.description,
+                                const otherDates =
+                                  scheduledByTitle.get(titleKey(title)) ?? [];
+                                return (
+                                  <button
+                                    key={title}
+                                    type="button"
+                                    onClick={() => {
+                                      const titles = on
+                                        ? selectedTitles.filter(
+                                            (t) =>
+                                              titleKey(t) !== titleKey(title),
+                                          )
+                                        : [...selectedTitles, title];
+                                      applySubUnitTitles(titles);
+                                    }}
+                                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                                      on
+                                        ? "border-brand-600 bg-brand-600 text-white"
+                                        : otherDates.length > 0
+                                          ? "border-slate-300 bg-slate-100 text-slate-600"
+                                          : "border-slate-300 bg-white text-slate-700 hover:border-brand-400"
+                                    }`}
+                                    title={
+                                      otherDates.length > 0
+                                        ? `Already planned on: ${otherDates.join(", ")}`
+                                        : "Assign to this teaching date"
+                                    }
+                                  >
+                                    {on ? "✓ " : ""}
+                                    {title}
+                                    {otherDates.length > 0 ? (
+                                      <span
+                                        className={
+                                          on
+                                            ? " opacity-90"
+                                            : " text-slate-500"
                                         }
-                                      : row,
-                                  ),
-                                }));
-                              }}
-                            />
-                          </FormField>
-                          <FormField label="Planned topic">
+                                      >
+                                        {" "}
+                                        · {otherDates[0]}
+                                        {otherDates.length > 1 ? "…" : ""}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {remainingSubs.length > 0 ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 rounded-full text-xs"
+                                  onClick={() =>
+                                    applySubUnitTitles(remainingSubs)
+                                  }
+                                >
+                                  Assign all remaining ({remainingSubs.length})
+                                </Button>
+                              ) : null}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 rounded-full text-xs"
+                                onClick={() => applySubUnitTitles(subUnits)}
+                              >
+                                Assign all sub-units
+                              </Button>
+                              {selectedTitles.length > 0 ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 rounded-full text-xs"
+                                  onClick={() => applySubUnitTitles([])}
+                                >
+                                  Clear
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-amber-700">
+                            No sub-units listed on the Session Plan for this unit.
+                            Add topics on the Session Plan so they can be fixed by
+                            date.
+                          </p>
+                        )}
+                        {selectedTitles.length > 0 ? (
+                          <p className="mt-1 text-xs text-emerald-700">
+                            Fixed on this date: {selectedTitles.join(" · ")}
+                          </p>
+                        ) : subUnits.length > 0 ? (
+                          <p className="mt-1 text-xs text-amber-700">
+                            Select at least one sub-unit to fix on this date.
+                          </p>
+                        ) : null}
+                      </FormField>
+
+                      {expanded ? (
+                        <div className="grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-2">
+                          <FormField label="Planned topic label">
                             <Input
                               value={item.plannedTopic}
                               nepali={formNepaliText}
@@ -1567,28 +2028,11 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder={
-                                formNepaliText
-                                  ? "यस दिनको विषय"
-                                  : "Topic for this period"
-                              }
-                            />
-                          </FormField>
-                          <FormField label="Estimated classes">
-                            <NumberInput
-                              min={1}
-                              value={item.estimatedClasses}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "estimatedClasses",
-                                  event.target.valueAsNumber,
-                                )
-                              }
+                              placeholder="Auto-filled from sub-units"
                             />
                           </FormField>
                           <FormField label="Learning objectives">
-                            <Textarea
+                            <Input
                               value={item.learningObjectives}
                               nepali={formNepaliText}
                               onChange={(event) =>
@@ -1598,29 +2042,7 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder={
-                                formNepaliText
-                                  ? "सिकाइ उद्देश्यहरू…"
-                                  : "Objectives for this lesson block"
-                              }
-                            />
-                          </FormField>
-                          <FormField label="Description">
-                            <Textarea
-                              value={item.description}
-                              nepali={formNepaliText}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "description",
-                                  event.target.value,
-                                )
-                              }
-                              placeholder={
-                                formNepaliText
-                                  ? "पाठको विवरण…"
-                                  : "Lesson description / content outline"
-                              }
+                              placeholder="Optional"
                             />
                           </FormField>
                           <FormField label="Teaching method">
@@ -1634,43 +2056,7 @@ export const LessonPlanPanel = ({
                                   event.target.value,
                                 )
                               }
-                              placeholder={
-                                formNepaliText
-                                  ? "प्रवचन, प्रदर्शन…"
-                                  : "Lecture, demo, group work…"
-                              }
-                            />
-                          </FormField>
-                          <FormField label="Teaching aids">
-                            <Input
-                              value={item.teachingAids}
-                              nepali={formNepaliText}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "teachingAids",
-                                  event.target.value,
-                                )
-                              }
-                              placeholder={
-                                formNepaliText
-                                  ? "पावरपोइन्ट, चार्ट…"
-                                  : "PPT, charts, lab equipment…"
-                              }
-                            />
-                          </FormField>
-                          <FormField label="Assessment method">
-                            <Input
-                              value={item.assessmentMethod}
-                              nepali={formNepaliText}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "assessmentMethod",
-                                  event.target.value,
-                                )
-                              }
-                              placeholder="Quiz, viva, assignment…"
+                              placeholder="Lecture, demo…"
                             />
                           </FormField>
                           <FormField label="Deadline (BS)">
@@ -1679,34 +2065,20 @@ export const LessonPlanPanel = ({
                               onChange={(value) =>
                                 updateItemField(index, "deadline", value)
                               }
-                              placeholder="Select deadline"
+                              placeholder="Optional"
                             />
                           </FormField>
-                          <div className="md:col-span-2">
-                            <FormField label="Remarks">
-                              <Textarea
-                                value={item.remarks}
-                                onChange={(event) =>
-                                  updateItemField(
-                                    index,
-                                    "remarks",
-                                    event.target.value,
-                                  )
-                                }
-                                placeholder="Optional remarks for this unit"
-                              />
-                            </FormField>
-                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-sm text-amber-700">
-                    Select one or more units from the Session Plan above.
-                  </p>
-                )}
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
+            ) : form.sessionPlanId ? (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Step 2: select at least one unit above to plan sub-units for this
+                day.
+              </p>
             ) : form.subjectId ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-1">
                 {sessionPlansQuery.isLoading ? (
@@ -1746,59 +2118,43 @@ export const LessonPlanPanel = ({
               </div>
             ) : null}
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
               <Button
-                onClick={() => {
-                  const resolvedTeacherId = teacherId || form.teacherId;
-                  if (!form.sessionPlanId || form.items.length === 0) {
-                    toast.error(
-                      "Select a Session Plan and at least one unit before saving",
-                    );
-                    return;
-                  }
-                  const teachingDate =
-                    form.teachingDateBs || form.startDateBs || "";
-                  if (!teachingDate) {
-                    toast.error("Select the teaching date (BS)");
-                    return;
-                  }
-                  if (!resolvedTeacherId) {
-                    toast.error("Teacher profile is required to save a lesson plan");
-                    return;
-                  }
-                  createMutation.mutate({
-                    ...form,
-                    teachingDateBs: teachingDate,
-                    startDateBs: teachingDate,
-                    endDateBs: teachingDate,
-                    teacherId: resolvedTeacherId,
-                    session: form.session || form.academicYearBs,
-                    month: form.month || "",
-                  });
-                }}
+                onClick={() => saveLessonPlan()}
                 disabled={
                   !form.sessionPlanId ||
                   form.items.length === 0 ||
                   !form.subjectId ||
                   !(form.teachingDateBs || form.startDateBs) ||
                   !(teacherId || form.teacherId) ||
-                  createMutation.isPending
+                  createMutation.isPending ||
+                  updateMutation.isPending
                 }
               >
-                Save Lesson Plan
+                {createMutation.isPending || updateMutation.isPending
+                  ? "Saving…"
+                  : editingId
+                    ? "Update draft"
+                    : "Save as draft"}
               </Button>
               <Button
                 variant="outline"
                 onClick={() => {
                   setShowForm(false);
-                  setSelectedUnitIds([]);
+                  resetLessonForm();
                 }}
               >
                 Cancel
               </Button>
+              <p className="w-full text-xs text-slate-500">
+                Saved plans stay in <strong>Draft</strong> until you press{" "}
+                <strong>Submit</strong> on the plan card. Use{" "}
+                <strong>Continue</strong> next to Submit to keep editing.
+              </p>
             </div>
           </CardContent>
         </Card>
+        </div>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(260px,320px)_1fr]">
@@ -1830,7 +2186,7 @@ export const LessonPlanPanel = ({
           ) : selectedPlans.length === 0 ? (
             <EmptyState
               title={`No Lesson Plans for ${selectedSubjectMeta.subject.subjectName}`}
-              description="Create a monthly Lesson Plan by selecting units from your Session Plan (draft or approved)."
+              description="Schedule future teaching days: pick a date, units open on that date are fixed from the Session Plan, then assign sub-units to that date."
             />
           ) : (
             <>
@@ -1872,10 +2228,14 @@ export const LessonPlanPanel = ({
                       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                         <div>
                           <CardTitle>
-                            {plan.month} · {plan.academicYearBs}
+                            {(plan.teachingDateBs ||
+                              plan.startDateBs ||
+                              plan.month) ?? "—"}{" "}
+                            · {plan.academicYearBs}
                           </CardTitle>
                           <p className="text-sm text-slate-600">
-                            {plan.teacher?.user?.fullName} · Planned:{" "}
+                            {plan.teacher?.user?.fullName}
+                            {plan.month ? ` · ${plan.month}` : ""} · Topics:{" "}
                             {plan.plannedTopics ?? plan.items.length} ·
                             Completed: {plan.completedTopics ?? 0} · Pending:{" "}
                             {plan.pendingTopics ?? plan.pendingUnits}
@@ -1956,13 +2316,24 @@ export const LessonPlanPanel = ({
                           <div className="flex flex-wrap gap-2 no-print">
                             {plan.status === "DRAFT" ||
                             plan.status === "REJECTED" ? (
-                              <Button
-                                size="sm"
-                                onClick={() => submitMutation.mutate(plan._id)}
-                              >
-                                <Send className="mr-2 h-4 w-4" />
-                                Submit
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openContinueDraft(plan)}
+                                >
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Continue
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => submitMutation.mutate(plan._id)}
+                                  disabled={submitMutation.isPending}
+                                >
+                                  <Send className="mr-2 h-4 w-4" />
+                                  Submit
+                                </Button>
+                              </>
                             ) : null}
                             {isAdmin && plan.status === "PENDING_APPROVAL" ? (
                               <>
@@ -2039,8 +2410,9 @@ export const LessonPlanPanel = ({
             {group.items.map((plan) => (
               <div key={plan._id} className="mb-6">
                 <p className="font-semibold">
-                  {plan.subject?.name} · {plan.month} · {plan.status} ·{" "}
-                  {plan.completedPercent}% complete
+                  {plan.subject?.name} ·{" "}
+                  {plan.teachingDateBs || plan.startDateBs || plan.month} ·{" "}
+                  {plan.status} · {plan.completedPercent}% complete
                 </p>
                 {plan.monthlyDescription ? (
                   <p className="text-sm mb-1">{plan.monthlyDescription}</p>

@@ -102,21 +102,28 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
     node.style.setProperty("print-color-adjust", "exact", "important");
   });
 
-  // Timetable period header row: force solid dark fill + white text
+  // Timetable period header row only: force solid dark fill + white text
   // (browsers strip Tailwind bg unless color-adjust + inline colors).
-  clone.querySelectorAll<HTMLElement>("thead th, .tt-print-th").forEach((th) => {
-    const cls = getClassString(th);
-    const isBreak = cls.includes("amber") || /break/i.test(th.textContent ?? "");
-    const bg = isBreak ? "#92400e" : "#0f172a";
-    th.style.setProperty("background-color", bg, "important");
-    th.style.setProperty("color", "#ffffff", "important");
-    th.style.setProperty("border-color", "#000000", "important");
-    th.style.setProperty("-webkit-print-color-adjust", "exact", "important");
-    th.style.setProperty("print-color-adjust", "exact", "important");
-    th.querySelectorAll<HTMLElement>("*").forEach((child) => {
-      child.style.setProperty("color", "#ffffff", "important");
+  // Do NOT apply to all thead th — Session Plan / Lesson Plan / other reports
+  // keep plain bold headers without black boxes.
+  clone
+    .querySelectorAll<HTMLElement>(
+      ".tt-print-table thead th, .tt-print-th, [data-print-fit='timetable'] thead th, .timetable-print-sheet thead th",
+    )
+    .forEach((th) => {
+      const cls = getClassString(th);
+      const isBreak =
+        cls.includes("amber") || /break/i.test(th.textContent ?? "");
+      const bg = isBreak ? "#92400e" : "#0f172a";
+      th.style.setProperty("background-color", bg, "important");
+      th.style.setProperty("color", "#ffffff", "important");
+      th.style.setProperty("border-color", "#000000", "important");
+      th.style.setProperty("-webkit-print-color-adjust", "exact", "important");
+      th.style.setProperty("print-color-adjust", "exact", "important");
+      th.querySelectorAll<HTMLElement>("*").forEach((child) => {
+        child.style.setProperty("color", "#ffffff", "important");
+      });
     });
-  });
 
   // The grid ships a print min-width; anything wider than the page-fit layout
   // width would overflow the clip box and silently cut off the last periods.
@@ -126,14 +133,26 @@ const clonePrintableElement = (element: HTMLElement): HTMLElement => {
     table.style.setProperty("table-layout", "fixed", "important");
   });
 
-  clone.querySelectorAll<HTMLElement>("tbody th.tt-print-day, tbody th").forEach((th) => {
-    const isSat = /saturday/i.test(th.textContent ?? "");
-    th.style.setProperty("background-color", isSat ? "#ffe4e6" : "#f1f5f9", "important");
-    th.style.setProperty("color", isSat ? "#4c0519" : "#0f172a", "important");
-    th.style.setProperty("border-color", "#000000", "important");
-    th.style.setProperty("-webkit-print-color-adjust", "exact", "important");
-    th.style.setProperty("print-color-adjust", "exact", "important");
-  });
+  clone
+    .querySelectorAll<HTMLElement>(
+      "tbody th.tt-print-day, .tt-print-table tbody th, [data-print-fit='timetable'] tbody th, .timetable-print-sheet tbody th",
+    )
+    .forEach((th) => {
+      const isSat = /saturday/i.test(th.textContent ?? "");
+      th.style.setProperty(
+        "background-color",
+        isSat ? "#ffe4e6" : "#f1f5f9",
+        "important",
+      );
+      th.style.setProperty(
+        "color",
+        isSat ? "#4c0519" : "#0f172a",
+        "important",
+      );
+      th.style.setProperty("border-color", "#000000", "important");
+      th.style.setProperty("-webkit-print-color-adjust", "exact", "important");
+      th.style.setProperty("print-color-adjust", "exact", "important");
+    });
 
   return clone;
 };

@@ -50,7 +50,8 @@ import {
   assertApprovedSessionPlanForLesson,
   assertEditableStatus,
   assertLessonPlanItemsBelongToSessionPlan,
-  assertNoDuplicateLessonPlanUnitsInMonth,
+  assertTeachingDateWithinSessionPlanUnits,
+  assertUniqueUnitsInLessonPlan,
   assertNoDuplicateLogBookForItemDate,
   assertSyllabusAccess,
   assertTeacherOwnership,
@@ -89,6 +90,22 @@ const getActorName = async (userId: string): Promise<string> => {
 };
 
 const actorObjectId = (req: Request): mongoose.Types.ObjectId => new mongoose.Types.ObjectId(req.user!.userId);
+
+/** Drop empty / invalid ObjectId strings so Mongoose never throws BSON cast 500s. */
+const optionalObjectId = (value: unknown): string | undefined => {
+  if (value == null) return undefined;
+  const s = String(value).trim();
+  if (!s) return undefined;
+  if (!mongoose.Types.ObjectId.isValid(s)) return undefined;
+  return s;
+};
+
+const optionalObjectIdList = (values: unknown): string[] => {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((v) => optionalObjectId(v))
+    .filter((v): v is string => Boolean(v));
+};
 
 const parseFilters = (req: Request): AcademicManagementFilters => ({
   academicYearBs: typeof req.query.academicYearBs === "string" ? req.query.academicYearBs : undefined,
@@ -1439,13 +1456,29 @@ export const listLessonPlans = asyncHandler(async (req: Request, res: Response) 
   await applyTeacherScopeToFilter(req, filter);
 
   const plans = await AcademicLessonPlan.find(filter).sort({ updatedAt: -1 }).lean();
-  const serialized = (await Promise.all(plans.map((plan) => serializeLessonPlan(plan._id.toString())))).filter(Boolean);
+  const serialized = (
+    await Promise.all(
+      plans.map(async (plan) => {
+        try {
+          return await serializeLessonPlan(plan._id.toString());
+        } catch (error) {
+          console.error(
+            "[academic-management/lesson-plans] serialize failed",
+            plan._id.toString(),
+            error
+          );
+          return null;
+        }
+      })
+    )
+  ).filter(Boolean);
   const rows = serialized.filter((plan) =>
     matchesKeyword(filters.keyword, [
       plan?.subject?.name,
       plan?.teacher?.user?.fullName,
       plan?.status,
       plan?.month,
+      plan?.teachingDateBs,
       ...(plan?.items ?? []).map((item) => item.plannedTopic)
     ])
   );
@@ -1476,26 +1509,39 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     (payload.teachingDateBs || payload.startDateBs || payload.endDateBs || "").trim();
   const derivedMonth =
     payload.month || getNepaliMonthNameFromBsDate(teachingDateBs) || "";
-  await assertNoDuplicateLessonPlanUnitsInMonth(req, {
-    sessionPlanId: payload.sessionPlanId,
-    teacherId: payload.teacherId,
-    subjectId: payload.subjectId,
-    month: derivedMonth,
-    academicYearBs: payload.academicYearBs,
-    unitIds: payload.items.map((item) => item.sessionPlanUnitId)
-  });
+  const unitIds = payload.items.map((item) => item.sessionPlanUnitId);
+  assertUniqueUnitsInLessonPlan(unitIds);
+  // Same unit may span many teaching days; date must stay inside Session Plan unit window
+  await assertTeachingDateWithinSessionPlanUnits(
+    req,
+    payload.sessionPlanId,
+    teachingDateBs,
+    unitIds
+  );
 
   const result = await withTransaction(async (session) => {
     const sessionOpt = getSessionOption(session);
+    // Never spread raw payload (includes `items` + empty ObjectId strings that can 500).
     const plan = await AcademicLessonPlan.create(
       [
         {
-          ...payload,
+          schoolId: tenantObjectId(req),
+          sessionPlanId: payload.sessionPlanId,
+          academicYearBs: payload.academicYearBs,
+          session: payload.session,
+          faculty: payload.faculty || undefined,
+          semesterBs: payload.semesterBs || undefined,
+          classId: optionalObjectId(payload.classId),
+          sectionId: optionalObjectId(payload.sectionId),
+          batchId: optionalObjectId(payload.batchId),
+          yearId: optionalObjectId(payload.yearId),
+          subjectId: payload.subjectId,
+          teacherId: payload.teacherId,
           teachingDateBs,
           startDateBs: teachingDateBs,
           endDateBs: teachingDateBs,
           month: derivedMonth,
-          schoolId: tenantObjectId(req),
+          monthlyDescription: payload.monthlyDescription || "",
           status: "DRAFT",
           preparedBy: await getActorName(req.user!.userId),
           audit: { createdBy: actorObjectId(req) }
@@ -1508,7 +1554,6 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     if (!createdPlan) throw new ApiError(500, "Failed to create lesson plan");
 
     // Inherit unit title / topics from Session Plan when client omits free text
-    const unitIds = payload.items.map((item) => item.sessionPlanUnitId);
     const unitsQuery = AcademicSessionPlanUnit.find({
       _id: { $in: unitIds },
       sessionPlanId: payload.sessionPlanId
@@ -1531,45 +1576,60 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
               unitNo?: number;
             }
           | undefined;
+        const subUnitTitles = Array.isArray(item.subUnitTitles)
+          ? item.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+          : item.subUnitTitle
+            ? String(item.subUnitTitle)
+                .split(/[;\n|]+/)
+                .map((t) => t.trim())
+                .filter(Boolean)
+            : [];
+        const syllabusSubUnitIds = optionalObjectIdList(
+          Array.isArray(item.syllabusSubUnitIds) && item.syllabusSubUnitIds.length > 0
+            ? item.syllabusSubUnitIds
+            : item.syllabusSubUnitId
+              ? [item.syllabusSubUnitId]
+              : []
+        );
         return {
-          ...item,
+          serialNo: item.serialNo,
+          sessionPlanUnitId: item.sessionPlanUnitId,
           subjectLabel: item.subjectLabel || (unit ? `Unit ${unit.unitNo}` : ""),
           plannedTopic:
             item.plannedTopic ||
             (unit ? unit.topicsCovered || unit.chapterName : item.plannedTopic),
+          description: item.description || "",
           learningObjectives: item.learningObjectives || unit?.learningOutcomes || "",
+          teachingMethod: item.teachingMethod || "",
+          teachingAids: item.teachingAids || "",
+          assessmentMethod: item.assessmentMethod || "",
+          deadline: item.deadline || "",
+          itemStartDateBs: item.itemStartDateBs || unit?.startDateBs || "",
+          itemEndDateBs: item.itemEndDateBs || unit?.endDateBs || "",
           estimatedClasses:
             item.estimatedClasses ||
             Math.max(1, Math.round(unit?.estimatedTeachingHours || 1)),
+          remarks: item.remarks || "",
           // Inherit syllabus unit link from session unit when client omits hierarchy ids
           syllabusId:
-            item.syllabusId?.trim() || unitAny?.syllabusId?.toString?.() || undefined,
+            optionalObjectId(item.syllabusId) ||
+            unitAny?.syllabusId?.toString?.() ||
+            undefined,
           syllabusChapterId:
-            item.syllabusChapterId?.trim() ||
+            optionalObjectId(item.syllabusChapterId) ||
             unitAny?.syllabusChapterId?.toString?.() ||
             undefined,
           syllabusUnitId:
-            item.syllabusUnitId?.trim() ||
+            optionalObjectId(item.syllabusUnitId) ||
             (unitAny as { syllabusUnitId?: { toString(): string } })?.syllabusUnitId?.toString?.() ||
             undefined,
-          syllabusSubUnitId: item.syllabusSubUnitId?.trim() || undefined,
-          subUnitTitles: Array.isArray(item.subUnitTitles)
-            ? item.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
-            : item.subUnitTitle
-              ? String(item.subUnitTitle)
-                  .split(/[;\n|]+/)
-                  .map((t) => t.trim())
-                  .filter(Boolean)
-              : [],
+          syllabusSubUnitId: syllabusSubUnitIds[0] || optionalObjectId(item.syllabusSubUnitId),
+          subUnitTitles,
           subUnitTitle:
-            (Array.isArray(item.subUnitTitles) && item.subUnitTitles.length > 0
-              ? item.subUnitTitles.map((t) => String(t).trim()).filter(Boolean).join("; ")
-              : item.subUnitTitle?.trim()) || "",
-          syllabusSubUnitIds: Array.isArray(item.syllabusSubUnitIds)
-            ? item.syllabusSubUnitIds.map((id) => String(id).trim()).filter(Boolean)
-            : item.syllabusSubUnitId?.trim()
-              ? [item.syllabusSubUnitId.trim()]
-              : [],
+            subUnitTitles.length > 0
+              ? subUnitTitles.join("; ")
+              : item.subUnitTitle?.trim() || "",
+          syllabusSubUnitIds,
           schoolId: tenantObjectId(req),
           lessonPlanId: createdPlan._id
         };
@@ -1628,15 +1688,34 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
 
   if (payload.items) {
     await assertLessonPlanItemsBelongToSessionPlan(req, sessionPlanId, payload.items);
-    await assertNoDuplicateLessonPlanUnitsInMonth(req, {
-      sessionPlanId,
-      teacherId,
-      subjectId,
-      month,
-      academicYearBs,
-      unitIds: payload.items.map((item) => item.sessionPlanUnitId),
-      excludeLessonPlanId: existing._id.toString()
-    });
+    const unitIds = payload.items.map((item) => item.sessionPlanUnitId);
+    assertUniqueUnitsInLessonPlan(unitIds);
+    if (teachingDateBs) {
+      await assertTeachingDateWithinSessionPlanUnits(
+        req,
+        sessionPlanId,
+        teachingDateBs,
+        unitIds
+      );
+    }
+  } else if (teachingDateBs) {
+    // Date changed without re-sending items — still enforce window against existing items
+    const existingItems = await AcademicLessonPlanItem.find({
+      lessonPlanId: existing._id
+    })
+      .select("sessionPlanUnitId")
+      .lean();
+    const unitIds = existingItems
+      .map((item) => item.sessionPlanUnitId?.toString?.() || String(item.sessionPlanUnitId || ""))
+      .filter(Boolean);
+    if (unitIds.length > 0) {
+      await assertTeachingDateWithinSessionPlanUnits(
+        req,
+        sessionPlanId,
+        teachingDateBs,
+        unitIds
+      );
+    }
   }
 
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);

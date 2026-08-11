@@ -17,7 +17,6 @@ import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
-import { Textarea } from "components/ui/textarea";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
@@ -1537,23 +1536,6 @@ export const SessionPlanPanel = ({
                     />
                   ) : null}
                 </FormField>
-                <FormField label="Sub-unit topics (from syllabus, optional)">
-                  <Textarea
-                    value={unit.topicsCovered}
-                    nepali={formNepaliText}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        units: current.units.map((row, rowIndex) =>
-                          rowIndex === index
-                            ? { ...row, topicsCovered: event.target.value }
-                            : row,
-                        ),
-                      }))
-                    }
-                    placeholder="Auto-filled from syllabus for Lesson Plan selection — not shown as Session Plan rows"
-                  />
-                </FormField>
                 <FormField label="Estimated teaching hours">
                   <NumberInput
                     min={0}
@@ -1830,8 +1812,74 @@ export const SessionPlanPanel = ({
         </div>
       </div>
 
-      {/* Dedicated print / PDF area (filtered or selected subject) */}
-      <div id="session-plan-print-area" className="hidden print:block">
+      {/* Dedicated print / PDF area — A4 landscape, continuous multi-page table */}
+      <div
+        id="session-plan-print-area"
+        className="hidden print:block"
+        style={{
+          background: "#ffffff",
+          color: "#0f172a",
+          width: "100%",
+        }}
+      >
+        <style>
+          {`
+            #session-plan-print-area .sp-print-table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: fixed;
+              font-size: 11px;
+              line-height: 1.35;
+              color: #0f172a;
+            }
+            #session-plan-print-area .sp-print-table thead {
+              display: table-header-group;
+            }
+            #session-plan-print-area .sp-print-table tfoot {
+              display: table-footer-group;
+            }
+            #session-plan-print-area .sp-print-table tr {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            #session-plan-print-area .sp-print-table th,
+            #session-plan-print-area .sp-print-table td {
+              border: 1px solid #94a3b8 !important;
+              padding: 5px 6px;
+              vertical-align: top;
+              word-wrap: break-word;
+              overflow-wrap: break-word;
+            }
+            #session-plan-print-area .sp-print-table thead th,
+            #session-plan-print-area .sp-print-table th {
+              background: transparent !important;
+              background-color: transparent !important;
+              color: #0f172a !important;
+              font-weight: 700 !important;
+              text-align: center;
+              white-space: nowrap;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            #session-plan-print-area .sp-print-table td.sp-num {
+              text-align: center;
+              white-space: nowrap;
+            }
+            #session-plan-print-area .sp-print-table td.sp-topic {
+              text-align: left;
+            }
+            #session-plan-print-area .sp-print-meta {
+              margin: 0 0 6px;
+              font-size: 12px;
+              line-height: 1.4;
+            }
+            #session-plan-print-area .sp-print-section {
+              margin-bottom: 14px;
+              page-break-inside: auto;
+              break-inside: auto;
+            }
+          `}
+        </style>
         <AcademicPrintHeader
           institutionName={institutionName}
           title="Session Plan Report"
@@ -1847,40 +1895,62 @@ export const SessionPlanPanel = ({
           <p className="text-sm text-slate-600">No session plans to export.</p>
         ) : (
           groupByTeacher(printPlans).map((group) => (
-            <div key={group.teacherId} className="mb-8 break-inside-avoid">
-              <h3 className="mb-2 text-base font-bold text-slate-900">
+            <div key={group.teacherId} className="sp-print-section">
+              <h3
+                className="sp-print-meta"
+                style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}
+              >
                 Teacher: {group.teacherName}
               </h3>
               {group.items.map((plan) => (
-                <div key={plan._id} className="mb-6">
-                  <p className="font-semibold">
-                    {plan.subject?.name} · {plan.academicYearBs} · {plan.status}
+                <div key={plan._id} className="sp-print-section">
+                  <p className="sp-print-meta" style={{ fontWeight: 600 }}>
+                    Subject: {plan.subject?.name ?? "—"}
+                    {plan.subject?.code ? ` (${plan.subject.code})` : ""} ·
+                    Academic Year: {plan.academicYearBs} · Status: {plan.status}
                   </p>
-                  <p className="text-sm text-slate-600 mb-2">
+                  <p className="sp-print-meta" style={{ color: "#475569" }}>
                     Completion: {plan.completedPercent}% · Units:{" "}
                     {plan.completedUnits}/
                     {plan.completedUnits + plan.remainingUnits}
                   </p>
-                  <table className="w-full border-collapse text-sm">
+                  <table className="sp-print-table">
+                    <colgroup>
+                      <col style={{ width: "5%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "36%" }} />
+                      <col style={{ width: "7%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "17%" }} />
+                    </colgroup>
                     <thead>
                       <tr>
-                        <th className="border p-1 text-left">Unit</th>
-                        <th className="border p-1 text-left">Title</th>
-                        <th className="border p-1 text-left">Topics</th>
-                        <th className="border p-1 text-left">Hours</th>
-                        <th className="border p-1 text-left">Status</th>
+                        <th>SN</th>
+                        <th>Unit No.</th>
+                        <th>Unit Topic</th>
+                        <th>C/Hr</th>
+                        <th>Start Date</th>
+                        <th>End Date</th>
+                        <th>Remarks</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {plan.units.map((unit) => (
-                        <tr key={unit._id}>
-                          <td className="border p-1">{unit.unitNo}</td>
-                          <td className="border p-1">{unit.chapterName}</td>
-                          <td className="border p-1">{unit.topicsCovered}</td>
-                          <td className="border p-1">
-                            {unit.estimatedTeachingHours}
+                      {plan.units.map((unit, unitIndex) => (
+                        <tr key={unit._id || `${plan._id}-${unitIndex}`}>
+                          <td className="sp-num">{unitIndex + 1}</td>
+                          <td className="sp-num">{unit.unitNo}</td>
+                          <td className="sp-topic">{unit.chapterName || "—"}</td>
+                          <td className="sp-num">
+                            {Number.isFinite(unit.estimatedTeachingHours)
+                              ? unit.estimatedTeachingHours
+                              : "—"}
                           </td>
-                          <td className="border p-1">{unit.status}</td>
+                          <td className="sp-num">{unit.startDateBs || "—"}</td>
+                          <td className="sp-num">{unit.endDateBs || "—"}</td>
+                          <td className="sp-topic">
+                            {unit.internalAssessment?.trim() || ""}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

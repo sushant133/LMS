@@ -326,8 +326,10 @@ export const LogBookPanel = ({
 
   const lessonItemOptions = useMemo(() => {
     const plans = lessonPlansQuery.data ?? [];
-    const options = plans.flatMap((plan) =>
-      plan.items.map((item) => {
+    const options = plans.flatMap((plan) => {
+      const teachingDate =
+        (plan.teachingDateBs || plan.startDateBs || "").trim();
+      return plan.items.map((item) => {
         const plannedSubs = normalizeSubUnitTitles(
           item.subUnitTitles,
           item.subUnitTitle,
@@ -335,27 +337,30 @@ export const LogBookPanel = ({
         const plannedIds = (item.syllabusSubUnitIds ?? [])
           .map((id) => String(id))
           .filter(Boolean);
-        if (
-          plannedIds.length === 0 &&
-          item.syllabusSubUnitId
-        ) {
+        if (plannedIds.length === 0 && item.syllabusSubUnitId) {
           plannedIds.push(String(item.syllabusSubUnitId));
         }
         const subLabel =
           plannedSubs.length > 0
             ? plannedSubs.join(", ")
             : item.subUnitTitle || "";
+        const unitLabel = item.unit
+          ? `Unit ${item.unit.unitNo}`
+          : item.subjectLabel || "Unit";
+        const progress = `${item.completedClasses ?? 0}/${item.estimatedClasses ?? 1}`;
         return {
           id: item._id,
           planId: plan._id,
-          month: plan.month || plan.startDateBs || "",
-          label: `${plan.startDateBs || plan.month || "Plan"}${plan.endDateBs ? `→${plan.endDateBs}` : ""} · ${item.unit ? `Ch ${item.unit.unitNo}` : item.subjectLabel || "Chapter"}${subLabel ? ` · ${subLabel}` : ""} · ${item.plannedTopic}`,
+          teachingDateBs: teachingDate,
+          month: plan.month || teachingDate || "",
+          label: `${teachingDate || plan.month || "Plan"} · ${unitLabel}${subLabel ? ` · ${subLabel}` : ""} · ${item.plannedTopic} · ${progress}`,
           topic: item.plannedTopic,
-          subUnitTitle: joinSubUnitTitles(plannedSubs) || item.subUnitTitle || "",
+          subUnitTitle:
+            joinSubUnitTitles(plannedSubs) || item.subUnitTitle || "",
           subUnitTitles: plannedSubs,
           syllabusSubUnitIds: plannedIds,
           unit: item.unit
-            ? `Chapter ${item.unit.unitNo}: ${item.unit.chapterName}`
+            ? `Unit ${item.unit.unitNo}: ${item.unit.chapterName}`
             : item.subjectLabel || "",
           objectives: item.learningObjectives || "",
           teachingMethod: item.teachingMethod || "",
@@ -370,25 +375,55 @@ export const LogBookPanel = ({
           completionStatus: item.completionStatus,
           completedPercent: item.completedPercent,
           remainingPercent: item.remainingPercent,
+          completedClasses: item.completedClasses ?? 0,
+          estimatedClasses: item.estimatedClasses ?? 1,
         };
-      }),
-    );
-    // Incomplete topics first so teachers pick the next class faster
+      });
+    });
     return options.sort((a, b) => {
       const aDone = a.completionStatus === "COMPLETED" ? 1 : 0;
       const bDone = b.completionStatus === "COMPLETED" ? 1 : 0;
-      return aDone - bDone;
+      if (aDone !== bDone) return aDone - bDone;
+      return (b.teachingDateBs || "").localeCompare(a.teachingDateBs || "");
     });
   }, [lessonPlansQuery.data]);
 
+  const logDateBs = (form.dateBs || "").trim();
+
+  /** Topics from the Lesson Plan for the selected log date (primary list). */
+  const plannedForLogDate = useMemo(
+    () =>
+      lessonItemOptions.filter(
+        (row) => logDateBs && row.teachingDateBs === logDateBs,
+      ),
+    [lessonItemOptions, logDateBs],
+  );
+
+  /** Incomplete topics from other days — can be logged as catch-up. */
+  const incompleteCarryOver = useMemo(
+    () =>
+      lessonItemOptions.filter(
+        (row) =>
+          row.completionStatus !== "COMPLETED" &&
+          (!logDateBs || row.teachingDateBs !== logDateBs),
+      ),
+    [lessonItemOptions, logDateBs],
+  );
+
   const selectedLessonPlan = useMemo(() => {
     const plans = lessonPlansQuery.data ?? [];
-    if (plans.length === 1) return plans[0];
     if (form.lessonPlanId) {
       return plans.find((p) => p._id === form.lessonPlanId);
     }
+    if (logDateBs) {
+      const forDate = plans.find(
+        (p) => (p.teachingDateBs || p.startDateBs || "") === logDateBs,
+      );
+      if (forDate) return forDate;
+    }
+    if (plans.length === 1) return plans[0];
     return plans[0];
-  }, [lessonPlansQuery.data, form.lessonPlanId]);
+  }, [lessonPlansQuery.data, form.lessonPlanId, logDateBs]);
 
   const createMutation = useMutation({
     mutationFn: (payload: AcademicLogBookEntryInput) =>
@@ -537,24 +572,36 @@ export const LogBookPanel = ({
     applyLessonItemToForm(itemId, lessonItemOptions, false);
   };
 
-  // Auto-pick next incomplete Lesson Plan topic when opening form / changing subject
+  // Auto-pick: prefer incomplete topic planned for log date, else sole incomplete overall
   useEffect(() => {
     if (!showForm) return;
     if (form.lessonPlanItemId) return;
     if (lessonItemOptions.length === 0) return;
-    const openTopics = lessonItemOptions.filter(
+    const openForDate = plannedForLogDate.filter(
       (row) => row.completionStatus !== "COMPLETED",
     );
     const auto =
-      openTopics.length === 1
-        ? openTopics[0]
-        : lessonItemOptions.length === 1
-          ? lessonItemOptions[0]
-          : null;
+      openForDate.length === 1
+        ? openForDate[0]
+        : plannedForLogDate.length === 1
+          ? plannedForLogDate[0]
+          : incompleteCarryOver.length === 1
+            ? incompleteCarryOver[0]
+            : lessonItemOptions.length === 1
+              ? lessonItemOptions[0]
+              : null;
     if (!auto) return;
     applyLessonItemToForm(auto.id, lessonItemOptions, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when options appear
-  }, [showForm, form.subjectId, lessonItemOptions, form.lessonPlanItemId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when options / date appear
+  }, [
+    showForm,
+    form.subjectId,
+    form.dateBs,
+    lessonItemOptions,
+    plannedForLogDate,
+    incompleteCarryOver,
+    form.lessonPlanItemId,
+  ]);
 
   const selectSessionUnit = (unitId: string) => {
     const unit = sessionUnits.find((row) => row._id === unitId);
@@ -783,8 +830,8 @@ export const LogBookPanel = ({
           <h2 className="text-lg font-semibold text-slate-900">Log Book</h2>
           <p className="text-sm text-slate-600">
             {isAdmin
-              ? "Centralized daily teaching records for all teachers, by year and subject."
-              : "Daily teaching record linked to your monthly Lesson Plan — unit and topic are selected, not retyped."}
+              ? "Daily teaching records for all teachers. Entries pull from daily Lesson Plans; progress is calculated from the Log Book only."
+              : "Record what you taught: pick the Lesson Plan topic for this date (or an incomplete carry-over). Progress comes only from Log Book entries."}
           </p>
         </div>
         {canMutate ? (
@@ -814,7 +861,11 @@ export const LogBookPanel = ({
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-slate-500">Selected month plan progress</p>
+            <p className="text-xs text-slate-500">
+              {selectedLessonPlan
+                ? `Plan ${selectedLessonPlan.teachingDateBs || selectedLessonPlan.startDateBs || selectedLessonPlan.month || ""}`
+                : "Lesson plan progress"}
+            </p>
             {selectedLessonPlan ? (
               <div className="mt-1">
                 <p className="text-sm font-medium text-slate-800">
@@ -828,7 +879,11 @@ export const LogBookPanel = ({
                 />
               </div>
             ) : (
-              <p className="text-sm text-slate-500 mt-1">—</p>
+              <p className="text-sm text-slate-500 mt-1">
+                {incompleteCarryOver.length > 0
+                  ? `${incompleteCarryOver.length} incomplete topic(s)`
+                  : "—"}
+              </p>
             )}
           </CardContent>
         </Card>
@@ -839,9 +894,9 @@ export const LogBookPanel = ({
           <CardHeader>
             <CardTitle>Create Log Book Entry</CardTitle>
             <p className="text-sm text-slate-600">
-              Pick the <strong>Lesson Plan topic</strong> you taught — unit,
-              sub-unit, topic, and objectives fill in automatically. Only add
-              what is new for today.
+              Select what was planned for this date from the Lesson Plan. Missed
+              or incomplete topics from other days can be logged here as
+              carry-over. Progress is calculated only from Log Book entries.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -851,7 +906,13 @@ export const LogBookPanel = ({
                   value={form.dateBs}
                   onChange={(value) => {
                     const month = nepaliMonthFromBsDate(value);
-                    setForm((current) => ({ ...current, dateBs: value }));
+                    setForm((current) => ({
+                      ...current,
+                      dateBs: value,
+                      // Re-pick topic when date changes so “planned for this date” can auto-fill
+                      lessonPlanItemId: "",
+                      lessonPlanId: undefined,
+                    }));
                     if (month) setSelectedMonth(month);
                   }}
                   placeholder="Select date"
@@ -1097,23 +1158,61 @@ export const LogBookPanel = ({
                     {lessonPlansQuery.isLoading
                       ? "Loading Lesson Plan topics…"
                       : lessonItemOptions.length === 0
-                        ? "No Lesson Plan topics — create a Lesson Plan first"
+                        ? "No Lesson Plan topics — create a daily Lesson Plan first"
                         : "Select topic from Lesson Plan"}
                   </option>
-                  {lessonItemOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                      {option.completionStatus === "COMPLETED"
-                        ? " ✓ done"
-                        : ""}
-                    </option>
-                  ))}
+                  {plannedForLogDate.length > 0 ? (
+                    <optgroup
+                      label={`Planned for ${logDateBs || "this date"} (${plannedForLogDate.length})`}
+                    >
+                      {plannedForLogDate.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                          {option.completionStatus === "COMPLETED"
+                            ? " ✓ done"
+                            : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {incompleteCarryOver.length > 0 ? (
+                    <optgroup
+                      label={`Incomplete / carry-over (${incompleteCarryOver.length})`}
+                    >
+                      {incompleteCarryOver.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          Carry-over · {option.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {/* Completed topics not for this date — still available if needed */}
+                  {lessonItemOptions
+                    .filter(
+                      (row) =>
+                        row.completionStatus === "COMPLETED" &&
+                        (!logDateBs || row.teachingDateBs !== logDateBs),
+                    )
+                    .map((option) => (
+                      <option key={option.id} value={option.id}>
+                        Done · {option.label}
+                      </option>
+                    ))}
                 </Select>
                 <p className="mt-1 text-xs text-slate-600">
-                  Chapter, sub-unit, topic, and objectives fill from Lesson Plan
-                  (synced from hierarchical Syllabus). Saving marks the linked
-                  syllabus sub-unit completed.
+                  Prefer topics planned for this date. Incomplete topics from
+                  other days can be completed here — that is how progress is
+                  calculated.
                 </p>
+                {logDateBs &&
+                plannedForLogDate.length === 0 &&
+                incompleteCarryOver.length > 0 ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    No Lesson Plan for {logDateBs}. You can still log a
+                    carry-over incomplete topic, or create a daily Lesson Plan
+                    for this date first.
+                  </p>
+                ) : null}
               </FormField>
 
               {form.lessonPlanItemId ? (
@@ -1380,7 +1479,7 @@ export const LogBookPanel = ({
           ) : selectedEntries.length === 0 ? (
             <EmptyState
               title={`No Log Book entries for ${selectedSubjectMeta.subject.subjectName}`}
-              description="Record a class by selecting a topic from the monthly Lesson Plan."
+              description="Record a class by selecting a topic from the daily Lesson Plan for that date (or complete a missed topic from another day)."
             />
           ) : (
             <>
