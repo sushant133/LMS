@@ -16,6 +16,7 @@ import {
   Wallet
 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ChartBox } from "components/ui/chart-box";
 import { useTranslation } from "react-i18next";
 import {
   COLLEGE_STAFF_CATEGORY_LABELS,
@@ -441,8 +442,9 @@ const BreakdownDonutCard = ({
         ) : (
           <div className="flex flex-col gap-4">
             {/* Extra height so full-word labels outside the ring are not clipped */}
-            <div className="relative mx-auto h-[240px] w-full max-w-[320px] sm:h-[260px] sm:max-w-[360px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="relative mx-auto w-full max-w-[320px] sm:max-w-[360px]">
+              <ChartBox height={260} className="sm:min-h-[260px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <PieChart margin={{ top: 20, right: 28, bottom: 20, left: 28 }}>
                   <Pie
                     data={slices}
@@ -488,6 +490,7 @@ const BreakdownDonutCard = ({
                   />
                 </PieChart>
               </ResponsiveContainer>
+              </ChartBox>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
                   Total
@@ -1523,29 +1526,31 @@ export const DashboardPage = () => {
                 Attendance Trend
               </CardTitle>
             </CardHeader>
-            <CardContent className="h-[300px]">
+            <CardContent>
               {data.attendanceChart.length === 0 ? (
-                <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                <div className="flex h-[300px] items-center justify-center text-sm text-slate-500">
                   Attendance records will appear here once classes are marked.
                 </div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data.attendanceChart}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 12,
-                        border: "1px solid #e2e8f0",
-                        boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
-                        fontSize: 13,
-                      }}
-                    />
-                    <Bar dataKey="present" fill="#0f172a" radius={[8, 8, 0, 0]} />
-                    <Bar dataKey="absent" fill="#cbd5e1" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <ChartBox height={300}>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                    <BarChart data={data.attendanceChart}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid #e2e8f0",
+                          boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
+                          fontSize: 13,
+                        }}
+                      />
+                      <Bar dataKey="present" fill="#0f172a" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="absent" fill="#cbd5e1" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartBox>
               )}
             </CardContent>
           </Card>
@@ -1705,29 +1710,31 @@ export const DashboardPage = () => {
                 Attendance Trend
               </CardTitle>
             </CardHeader>
-            <CardContent className="h-[320px]">
+            <CardContent>
               {data.attendanceChart.length === 0 ? (
-                <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                <div className="flex h-[320px] items-center justify-center text-sm text-slate-500">
                   Attendance analytics will appear once records are available for your scope.
                 </div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data.attendanceChart}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 12,
-                        border: "1px solid #e2e8f0",
-                        boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
-                        fontSize: 13,
-                      }}
-                    />
-                    <Bar dataKey="present" fill="#0f172a" radius={[8, 8, 0, 0]} />
-                    <Bar dataKey="absent" fill="#cbd5e1" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <ChartBox height={320}>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                    <BarChart data={data.attendanceChart}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid #e2e8f0",
+                          boxShadow: "0 8px 24px rgba(15,23,42,0.08)",
+                          fontSize: 13,
+                        }}
+                      />
+                      <Bar dataKey="present" fill="#0f172a" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="absent" fill="#cbd5e1" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartBox>
               )}
             </CardContent>
           </Card>
@@ -1774,8 +1781,9 @@ export const DashboardPage = () => {
                     {isTeacher ? "Teaching Load" : "Institution Mix"}
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                <CardContent>
+                  <ChartBox height={280}>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <PieChart>
                       <Pie
                         data={data.counts}
@@ -1806,6 +1814,7 @@ export const DashboardPage = () => {
                       />
                     </PieChart>
                   </ResponsiveContainer>
+                  </ChartBox>
                 </CardContent>
               </Card>
             ) : null}

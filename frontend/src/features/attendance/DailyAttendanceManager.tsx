@@ -26,6 +26,7 @@ import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
+import { ChartBox } from "components/ui/chart-box";
 import { Input } from "components/ui/input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
@@ -577,23 +578,25 @@ export const DailyAttendanceManager = ({
                 <CardHeader>
                   <CardTitle>Daily Trend</CardTitle>
                 </CardHeader>
-                <CardContent className="h-72">
+                <CardContent>
                   {(dashboardQuery.data?.dailyTrend.length ?? 0) === 0 ? (
                     <EmptyState
                       title="No trend data yet"
                       description="Submit daily attendance to populate charts."
                     />
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={dashboardQuery.data?.dailyTrend ?? []}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="dateBs" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Bar dataKey="present" fill="#0c2d6b" />
-                        <Bar dataKey="absent" fill="#fb7185" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <ChartBox height={288}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                        <BarChart data={dashboardQuery.data?.dailyTrend ?? []}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="dateBs" />
+                          <YAxis allowDecimals={false} />
+                          <Tooltip />
+                          <Bar dataKey="present" fill="#0c2d6b" />
+                          <Bar dataKey="absent" fill="#fb7185" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartBox>
                   )}
                 </CardContent>
               </Card>
@@ -602,23 +605,25 @@ export const DailyAttendanceManager = ({
                 <CardHeader>
                   <CardTitle>Monthly Trend</CardTitle>
                 </CardHeader>
-                <CardContent className="h-72">
+                <CardContent>
                   {(dashboardQuery.data?.monthlyTrend.length ?? 0) === 0 ? (
                     <EmptyState
                       title="No monthly data yet"
                       description="Monthly trends appear after attendance is recorded."
                     />
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={dashboardQuery.data?.monthlyTrend ?? []}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="month" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Bar dataKey="present" fill="#0ea5e9" />
-                        <Bar dataKey="absent" fill="#fb7185" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <ChartBox height={288}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                        <BarChart data={dashboardQuery.data?.monthlyTrend ?? []}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="month" />
+                          <YAxis allowDecimals={false} />
+                          <Tooltip />
+                          <Bar dataKey="present" fill="#0ea5e9" />
+                          <Bar dataKey="absent" fill="#fb7185" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartBox>
                   )}
                 </CardContent>
               </Card>
@@ -627,22 +632,24 @@ export const DailyAttendanceManager = ({
                 <CardHeader>
                   <CardTitle>Class-wise Comparison</CardTitle>
                 </CardHeader>
-                <CardContent className="h-72">
+                <CardContent>
                   {(dashboardQuery.data?.classWise.length ?? 0) === 0 ? (
                     <EmptyState
                       title="No class data yet"
                       description="Class comparisons appear after attendance is recorded."
                     />
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={dashboardQuery.data?.classWise ?? []}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="label" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Bar dataKey="percentage" fill="#0c2d6b" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <ChartBox height={288}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                        <BarChart data={dashboardQuery.data?.classWise ?? []}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="label" />
+                          <YAxis allowDecimals={false} />
+                          <Tooltip />
+                          <Bar dataKey="percentage" fill="#0c2d6b" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartBox>
                   )}
                 </CardContent>
               </Card>

@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { Badge } from "components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
+import { ChartBox } from "components/ui/chart-box";
 import { LoadingState } from "components/shared/LoadingState";
 import { AcademicProgressBar } from "./AcademicProgressBar";
 
@@ -199,17 +200,25 @@ export const AcademicManagementDashboardPanel = ({
           <CardHeader>
             <CardTitle>Monthly Progress</CardTitle>
           </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.monthlyProgress}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="planned" fill="#94a3b8" name="Planned" />
-                <Bar dataKey="completed" fill="#0c2d6b" name="Completed" />
-              </BarChart>
-            </ResponsiveContainer>
+          <CardContent>
+            {(data.monthlyProgress?.length ?? 0) === 0 ? (
+              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
+                No monthly progress data yet.
+              </p>
+            ) : (
+              <ChartBox height={288}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <BarChart data={data.monthlyProgress}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="planned" fill="#94a3b8" name="Planned" />
+                    <Bar dataKey="completed" fill="#0c2d6b" name="Completed" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
+            )}
           </CardContent>
         </Card>
 
@@ -217,25 +226,33 @@ export const AcademicManagementDashboardPanel = ({
           <CardHeader>
             <CardTitle>Subject Progress (remaining %)</CardTitle>
           </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.subjectProgress}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="subjectName" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Bar
-                  dataKey="completionPercent"
-                  fill="#2563eb"
-                  name="Completed %"
-                />
-                <Bar
-                  dataKey="remainingPercent"
-                  fill="#f59e0b"
-                  name="Remaining %"
-                />
-              </BarChart>
-            </ResponsiveContainer>
+          <CardContent>
+            {(data.subjectProgress?.length ?? 0) === 0 ? (
+              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
+                No subject progress data yet.
+              </p>
+            ) : (
+              <ChartBox height={288}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <BarChart data={data.subjectProgress}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="subjectName" />
+                    <YAxis domain={[0, 100]} />
+                    <Tooltip />
+                    <Bar
+                      dataKey="completionPercent"
+                      fill="#2563eb"
+                      name="Completed %"
+                    />
+                    <Bar
+                      dataKey="remainingPercent"
+                      fill="#f59e0b"
+                      name="Remaining %"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
+            )}
           </CardContent>
         </Card>
 
@@ -243,25 +260,33 @@ export const AcademicManagementDashboardPanel = ({
           <CardHeader>
             <CardTitle>Teacher Performance (remaining %)</CardTitle>
           </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.teacherPerformance}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="teacherName" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Bar
-                  dataKey="completionPercent"
-                  fill="#059669"
-                  name="Completed %"
-                />
-                <Bar
-                  dataKey="remainingPercent"
-                  fill="#f59e0b"
-                  name="Remaining %"
-                />
-              </BarChart>
-            </ResponsiveContainer>
+          <CardContent>
+            {(data.teacherPerformance?.length ?? 0) === 0 ? (
+              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
+                No teacher performance data yet.
+              </p>
+            ) : (
+              <ChartBox height={288}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <BarChart data={data.teacherPerformance}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="teacherName" />
+                    <YAxis domain={[0, 100]} />
+                    <Tooltip />
+                    <Bar
+                      dataKey="completionPercent"
+                      fill="#059669"
+                      name="Completed %"
+                    />
+                    <Bar
+                      dataKey="remainingPercent"
+                      fill="#f59e0b"
+                      name="Remaining %"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
+            )}
           </CardContent>
         </Card>
 
@@ -269,21 +294,29 @@ export const AcademicManagementDashboardPanel = ({
           <CardHeader>
             <CardTitle>Syllabus Completion</CardTitle>
           </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.syllabusCompletion}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="subjectName" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Bar dataKey="percent" fill="#7c3aed" name="Completed %" />
-                <Bar
-                  dataKey="remainingPercent"
-                  fill="#f59e0b"
-                  name="Remaining %"
-                />
-              </BarChart>
-            </ResponsiveContainer>
+          <CardContent>
+            {(data.syllabusCompletion?.length ?? 0) === 0 ? (
+              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
+                No syllabus completion data yet.
+              </p>
+            ) : (
+              <ChartBox height={288}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <BarChart data={data.syllabusCompletion}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="subjectName" />
+                    <YAxis domain={[0, 100]} />
+                    <Tooltip />
+                    <Bar dataKey="percent" fill="#7c3aed" name="Completed %" />
+                    <Bar
+                      dataKey="remainingPercent"
+                      fill="#f59e0b"
+                      name="Remaining %"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
+            )}
           </CardContent>
         </Card>
 
@@ -291,25 +324,33 @@ export const AcademicManagementDashboardPanel = ({
           <CardHeader>
             <CardTitle>Faculty Progress</CardTitle>
           </CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.facultyProgress}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="faculty" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Bar
-                  dataKey="completionPercent"
-                  fill="#ea580c"
-                  name="Completed %"
-                />
-                <Bar
-                  dataKey="remainingPercent"
-                  fill="#f59e0b"
-                  name="Remaining %"
-                />
-              </BarChart>
-            </ResponsiveContainer>
+          <CardContent>
+            {(data.facultyProgress?.length ?? 0) === 0 ? (
+              <p className="flex h-72 items-center justify-center text-sm text-slate-500">
+                No faculty progress data yet.
+              </p>
+            ) : (
+              <ChartBox height={288}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <BarChart data={data.facultyProgress}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="faculty" />
+                    <YAxis domain={[0, 100]} />
+                    <Tooltip />
+                    <Bar
+                      dataKey="completionPercent"
+                      fill="#ea580c"
+                      name="Completed %"
+                    />
+                    <Bar
+                      dataKey="remainingPercent"
+                      fill="#f59e0b"
+                      name="Remaining %"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartBox>
+            )}
           </CardContent>
         </Card>
       </div>

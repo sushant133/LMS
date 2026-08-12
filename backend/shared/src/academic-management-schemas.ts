@@ -472,7 +472,11 @@ export const academicLessonPlanItemSchema = z.object({
   /** Syllabus sub-unit ids matched to selected titles (same order when known). */
   syllabusSubUnitIds: z.array(z.string()).optional().default([]),
   subjectLabel: z.string().default(""),
-  plannedTopic: z.string().min(1),
+  /** Allow blank then fill on server from unit title if needed; keep min after trim. */
+  plannedTopic: z.preprocess(
+    (v) => (v == null ? "" : String(v).trim()),
+    z.string().min(1, "Planned topic is required")
+  ),
   description: z.string().default(""),
   learningObjectives: z.string().default(""),
   teachingMethod: z.string().default(""),
@@ -481,7 +485,13 @@ export const academicLessonPlanItemSchema = z.object({
   deadline: z.string().default(""),
   itemStartDateBs: bsDateOptional,
   itemEndDateBs: bsDateOptional,
-  estimatedClasses: z.coerce.number().int().min(1).default(1),
+  /** Coerce blank/NaN from number inputs so lesson-plan save never 400s on empty classes. */
+  estimatedClasses: z.preprocess((value) => {
+    if (value === "" || value === null || value === undefined) return 1;
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return Math.round(n);
+  }, z.number().int().min(1).default(1)),
   remarks: z.string().default("")
 });
 

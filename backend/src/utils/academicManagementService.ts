@@ -754,19 +754,43 @@ export const syncLessonPlanItemProgress = async (lessonPlanItemId: string): Prom
   }
 };
 
-const syncSessionPlanUnitFromLessonItem = async (unitId: string): Promise<void> => {
+/** Recompute Session Plan unit status from live (non-deleted) Lesson Plan items only. */
+export const resyncSessionPlanUnitProgress = async (unitId: string): Promise<void> => {
   const unit = await AcademicSessionPlanUnit.findById(unitId);
   if (!unit) return;
 
-  const items = await AcademicLessonPlanItem.find({ sessionPlanUnitId: unitId });
-  if (items.length === 0) return;
+  // Only items on live (non-deleted) lesson plans count toward unit progress
+  const rawItems = await AcademicLessonPlanItem.find({ sessionPlanUnitId: unitId }).lean();
+  const planIds = [
+    ...new Set(rawItems.map((item) => item.lessonPlanId?.toString()).filter(Boolean))
+  ] as string[];
+  const livePlans = planIds.length
+    ? await AcademicLessonPlan.find({
+        _id: { $in: planIds },
+        isDeleted: false
+      })
+        .select("_id")
+        .lean()
+    : [];
+  const livePlanIds = new Set(livePlans.map((p) => p._id.toString()));
+  const items = rawItems.filter((item) => livePlanIds.has(item.lessonPlanId?.toString() ?? ""));
+
+  if (items.length === 0) {
+    unit.status = "PENDING";
+    await unit.save();
+    return;
+  }
 
   const allCompleted = items.every((item) => item.completionStatus === "COMPLETED");
-  const anyStarted = items.some((item) => item.completedClasses > 0);
+  const anyStarted = items.some((item) => (item.completedClasses ?? 0) > 0);
   const anyDelayed = items.some((item) => item.completionStatus === "DELAYED");
 
   unit.status = allCompleted ? "COMPLETED" : anyDelayed ? "DELAYED" : anyStarted ? "IN_PROGRESS" : "PENDING";
   await unit.save();
+};
+
+const syncSessionPlanUnitFromLessonItem = async (unitId: string): Promise<void> => {
+  await resyncSessionPlanUnitProgress(unitId);
 };
 
 export const syncSessionPlanProgress = async (sessionPlanId: string): Promise<void> => {
@@ -813,9 +837,29 @@ export const getOrCreateLogBook = async (
     month: string;
   }
 ): Promise<mongoose.Types.ObjectId> => {
+  // Only persist valid ObjectIds — empty strings from forms cast and 400
+  const oid = (value?: string) => {
+    const s = (value ?? "").trim();
+    if (!s || !mongoose.Types.ObjectId.isValid(s)) return undefined;
+    return s;
+  };
+  const scope = {
+    academicYearBs: payload.academicYearBs,
+    session: payload.session,
+    faculty: payload.faculty?.trim() || undefined,
+    semesterBs: payload.semesterBs?.trim() || undefined,
+    classId: oid(payload.classId),
+    sectionId: oid(payload.sectionId),
+    batchId: oid(payload.batchId),
+    yearId: oid(payload.yearId),
+    subjectId: payload.subjectId,
+    teacherId: payload.teacherId,
+    month: payload.month
+  };
+
   const existing = await AcademicLogBook.findOne({
     schoolId: tenantObjectId(req),
-    ...payload,
+    ...scope,
     isDeleted: false
   }).lean();
 
@@ -823,7 +867,7 @@ export const getOrCreateLogBook = async (
 
   const created = await AcademicLogBook.create({
     schoolId: tenantObjectId(req),
-    ...payload
+    ...scope
   });
   return created._id;
 };
@@ -1280,6 +1324,29 @@ export const serializeLogBookEntry = async (entryId: string) => {
 
   if (!entry) return null;
 
+  const entryAny = entry as {
+    subUnitTitle?: string;
+    subUnitTitles?: string[];
+    syllabusId?: { toString(): string };
+    syllabusChapterId?: { toString(): string };
+    syllabusUnitId?: { toString(): string };
+    syllabusSubUnitId?: { toString(): string };
+    syllabusSubUnitIds?: Array<string | { toString(): string }>;
+  };
+  const subUnitTitles = Array.isArray(entryAny.subUnitTitles)
+    ? entryAny.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+    : String(entryAny.subUnitTitle || "")
+        .split(/[;\n|]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+  const syllabusSubUnitIds = Array.isArray(entryAny.syllabusSubUnitIds)
+    ? entryAny.syllabusSubUnitIds
+        .map((id) => (typeof id === "string" ? id : id?.toString?.() ?? ""))
+        .filter(Boolean)
+    : entryAny.syllabusSubUnitId
+      ? [entryAny.syllabusSubUnitId.toString()]
+      : [];
+
   return {
     _id: entry._id.toString(),
     schoolId: entry.schoolId.toString(),
@@ -1287,14 +1354,13 @@ export const serializeLogBookEntry = async (entryId: string) => {
     lessonPlanId: entry.lessonPlanId?.toString(),
     lessonPlanItemId: entry.lessonPlanItemId?.toString(),
     sessionPlanUnitId: entry.sessionPlanUnitId?.toString(),
-    subUnitTitle: (entry as { subUnitTitle?: string }).subUnitTitle ?? "",
-    syllabusId: (entry as { syllabusId?: { toString(): string } }).syllabusId?.toString?.() ?? "",
-    syllabusChapterId:
-      (entry as { syllabusChapterId?: { toString(): string } }).syllabusChapterId?.toString?.() ?? "",
-    syllabusUnitId:
-      (entry as { syllabusUnitId?: { toString(): string } }).syllabusUnitId?.toString?.() ?? "",
-    syllabusSubUnitId:
-      (entry as { syllabusSubUnitId?: { toString(): string } }).syllabusSubUnitId?.toString?.() ?? "",
+    subUnitTitle: entryAny.subUnitTitle ?? subUnitTitles.join("; "),
+    subUnitTitles,
+    syllabusId: entryAny.syllabusId?.toString?.() ?? "",
+    syllabusChapterId: entryAny.syllabusChapterId?.toString?.() ?? "",
+    syllabusUnitId: entryAny.syllabusUnitId?.toString?.() ?? "",
+    syllabusSubUnitId: entryAny.syllabusSubUnitId?.toString?.() ?? "",
+    syllabusSubUnitIds,
     academicYearBs: entry.academicYearBs,
     session: entry.session,
     faculty: entry.faculty,

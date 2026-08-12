@@ -615,7 +615,7 @@ export const LogBookPanel = ({
       syllabusUnitId: "",
       syllabusSubUnitId: "",
       syllabusSubUnitIds: [],
-      unit: unit ? `Chapter ${unit.unitNo}: ${unit.chapterName}` : "",
+      unit: unit ? `Unit ${unit.unitNo}: ${unit.chapterName}` : "",
       topicCovered: unit?.topicsCovered || unit?.chapterName || "",
       objectives: unit?.learningOutcomes || current.objectives,
       // Manual unit pick clears lesson-plan link (user can re-link)
@@ -923,10 +923,14 @@ export const LogBookPanel = ({
                   min={1}
                   value={form.periodNumber}
                   onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      periodNumber: event.target.valueAsNumber,
-                    }))
+                    setForm((current) => {
+                      const n = event.target.valueAsNumber;
+                      return {
+                        ...current,
+                        periodNumber:
+                          Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1,
+                      };
+                    })
                   }
                   placeholder="e.g. 1"
                 />

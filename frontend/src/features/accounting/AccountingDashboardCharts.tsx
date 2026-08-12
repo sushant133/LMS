@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
+import { ChartBox } from "components/ui/chart-box";
 import { formatCurrencyNpr } from "lib/utils";
 
 const CHART_COLORS = [
@@ -33,23 +34,25 @@ export const AccountingDashboardCharts = ({ data }: Props) => (
       <CardHeader>
         <CardTitle>Collection Trend</CardTitle>
       </CardHeader>
-      <CardContent className="h-64">
+      <CardContent>
         {(data.collectionTrend ?? []).length === 0 ? (
-          <p className="text-sm text-slate-500">
+          <p className="flex h-64 items-center justify-center text-sm text-slate-500">
             No collection trend data yet.
           </p>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.collectionTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip
-                formatter={(value) => formatCurrencyNpr(Number(value))}
-              />
-              <Bar dataKey="amount" fill="#0c2d6b" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <ChartBox height={256}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <BarChart data={data.collectionTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(value) => formatCurrencyNpr(Number(value))}
+                />
+                <Bar dataKey="amount" fill="#0c2d6b" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartBox>
         )}
       </CardContent>
     </Card>
@@ -58,33 +61,37 @@ export const AccountingDashboardCharts = ({ data }: Props) => (
       <CardHeader>
         <CardTitle>Revenue Sources</CardTitle>
       </CardHeader>
-      <CardContent className="h-64">
+      <CardContent>
         {(data.revenueSources ?? []).length === 0 ? (
-          <p className="text-sm text-slate-500">No revenue breakdown yet.</p>
+          <p className="flex h-64 items-center justify-center text-sm text-slate-500">
+            No revenue breakdown yet.
+          </p>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={data.revenueSources}
-                dataKey="amount"
-                nameKey="label"
-                cx="50%"
-                cy="50%"
-                outerRadius={90}
-                label={(props) => String(props.name ?? "").replace(/_/g, " ")}
-              >
-                {data.revenueSources.map((_, index) => (
-                  <Cell
-                    key={index}
-                    fill={CHART_COLORS[index % CHART_COLORS.length]}
-                  />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(value) => formatCurrencyNpr(Number(value))}
-              />
-            </PieChart>
-          </ResponsiveContainer>
+          <ChartBox height={256}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <PieChart>
+                <Pie
+                  data={data.revenueSources}
+                  dataKey="amount"
+                  nameKey="label"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={(props) => String(props.name ?? "").replace(/_/g, " ")}
+                >
+                  {data.revenueSources.map((_, index) => (
+                    <Cell
+                      key={index}
+                      fill={CHART_COLORS[index % CHART_COLORS.length]}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value) => formatCurrencyNpr(Number(value))}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartBox>
         )}
       </CardContent>
     </Card>

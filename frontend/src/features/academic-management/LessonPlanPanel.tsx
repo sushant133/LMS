@@ -149,11 +149,11 @@ const emptyItem = (
     syllabusUnitId: syllabusMatch?.syllabusUnitId || "",
     syllabusSubUnitId: ids[0] || syllabusMatch?.syllabusSubUnitId || "",
     syllabusSubUnitIds: ids,
-    subjectLabel: unit ? `Chapter ${unit.unitNo}` : "",
+    subjectLabel: unit ? `Unit ${unit.unitNo}` : "",
     plannedTopic: joined
       ? joined
       : unit
-        ? unit.topicsCovered || unit.chapterName
+        ? unit.chapterName || unit.topicsCovered
         : "",
     description: syllabusMatch?.description || "",
     learningObjectives:
@@ -164,10 +164,8 @@ const emptyItem = (
     deadline: "",
     itemStartDateBs: unit?.startDateBs || "",
     itemEndDateBs: unit?.endDateBs || "",
-    estimatedClasses: Math.max(
-      1,
-      Math.round(unit?.estimatedTeachingHours || 1),
-    ),
+    // One daily plan row = 1 class by default (hours ≠ classes)
+    estimatedClasses: 1,
     remarks: "",
   };
 };
@@ -226,6 +224,8 @@ export const LessonPlanPanel = ({
   const [expandedItemKeys, setExpandedItemKeys] = useState<string[]>([]);
   /** Tracks which session plan already had units auto-selected (so Clear stays cleared). */
   const autoSelectedForPlanRef = useRef<string>("");
+  /** Last teachingDate|sessionPlanId key we auto-selected units for (avoid wipe on refetch). */
+  const autoSelectUnitsKeyRef = useRef<string>("");
   const formTopRef = useRef<HTMLDivElement | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
     null,
@@ -261,6 +261,7 @@ export const LessonPlanPanel = ({
     setUnitSearch("");
     setExpandedItemKeys([]);
     autoSelectedForPlanRef.current = "";
+    autoSelectUnitsKeyRef.current = "";
   };
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
@@ -648,7 +649,9 @@ export const LessonPlanPanel = ({
 
   /**
    * Future schedule rule: teaching date fixes which Session Plan units apply.
-   * On create (not continue-draft), auto-select every unit open on that date.
+   * On create (not continue-draft), auto-select every unit open on that date —
+   * only once per date+sessionPlan key so React Query refetches do not wipe
+   * manual unchecks / sub-unit work.
    */
   useEffect(() => {
     if (!showForm || editingId) return;
@@ -656,6 +659,9 @@ export const LessonPlanPanel = ({
     if (!teachingDate || !form.sessionPlanId) return;
     const loaded = unitsQuery.data ?? coverageQuery.data?.units ?? [];
     if (loaded.length === 0) return;
+    const key = `${form.sessionPlanId}|${teachingDate}`;
+    if (autoSelectUnitsKeyRef.current === key) return;
+    autoSelectUnitsKeyRef.current = key;
     const available = loaded
       .filter((u) => unitAllowsTeachingDate(u, teachingDate))
       .map((u) => u._id);
@@ -733,14 +739,14 @@ export const LessonPlanPanel = ({
             ...prev,
             serialNo: index + 1,
             sessionPlanUnitId: unit._id,
-            subjectLabel: `Chapter ${unit.unitNo}`,
+            subjectLabel: `Unit ${unit.unitNo}`,
             subUnitTitles: defaultTitles,
             subUnitTitle: joined,
             plannedTopic:
               prev?.plannedTopic ||
               joined ||
-              unit.topicsCovered ||
-              unit.chapterName,
+              unit.chapterName ||
+              unit.topicsCovered,
             syllabusId:
               prev?.syllabusId ||
               syllabusMatch.syllabusId ||
@@ -775,9 +781,7 @@ export const LessonPlanPanel = ({
               match?.learningOutcomes ||
               unit.learningOutcomes ||
               "",
-            estimatedClasses:
-              prev?.estimatedClasses ||
-              Math.max(1, Math.round(unit.estimatedTeachingHours || 1)),
+            estimatedClasses: prev?.estimatedClasses || 1,
           };
         })
         .filter(Boolean) as AcademicLessonPlanInput["items"];
@@ -837,6 +841,7 @@ export const LessonPlanPanel = ({
       .map((item) => item.sessionPlanUnitId)
       .filter((id): id is string => Boolean(id));
     autoSelectedForPlanRef.current = plan.sessionPlanId || "";
+    autoSelectUnitsKeyRef.current = `${plan.sessionPlanId || ""}|${teaching}`;
     setEditingId(plan._id);
     setSelectedUnitIds(unitIds);
     setExpandedItemKeys([]);
@@ -900,18 +905,35 @@ export const LessonPlanPanel = ({
   };
 
   const saveLessonPlan = () => {
-    const resolvedTeacherId = teacherId || form.teacherId;
     if (!form.sessionPlanId || form.items.length === 0) {
       toast.error("Select a Session Plan and at least one unit before saving");
       return;
     }
+    const sessionPlan = usableSessionPlans.find(
+      (p) => p._id === form.sessionPlanId,
+    );
+    // Teacher must match Session Plan — fall back to the plan’s teacher
+    const resolvedTeacherId =
+      teacherId ||
+      form.teacherId ||
+      sessionPlan?.teacherId ||
+      "";
     const teachingDate = form.teachingDateBs || form.startDateBs || "";
     if (!teachingDate) {
       toast.error("Select the teaching date (BS)");
       return;
     }
     if (!resolvedTeacherId) {
-      toast.error("Teacher profile is required to save a lesson plan");
+      toast.error("Teacher is required — select a teacher or Session Plan");
+      return;
+    }
+    if (
+      sessionPlan?.teacherId &&
+      resolvedTeacherId !== sessionPlan.teacherId
+    ) {
+      toast.error(
+        "Selected teacher does not match the Session Plan teacher. Use the same teacher as the Session Plan.",
+      );
       return;
     }
     const outOfWindow = form.items
@@ -948,14 +970,71 @@ export const LessonPlanPanel = ({
         "Note: this teaching date is in the past. Prefer future dates for scheduling.",
       );
     }
+
+    // Sanitize payload so empty optionals / NaN classes never cause API 400s
+    const sanitizedItems = form.items.map((item, index) => {
+      const unit = units.find((u) => u._id === item.sessionPlanUnitId);
+      const titles = normalizeSubUnitTitles(
+        item.subUnitTitles,
+        item.subUnitTitle,
+      );
+      const joined = joinSubUnitTitles(titles);
+      const plannedTopic = (
+        item.plannedTopic ||
+        joined ||
+        unit?.chapterName ||
+        unit?.topicsCovered ||
+        `Unit ${item.serialNo || index + 1}`
+      ).trim();
+      const estimatedClasses =
+        Number.isFinite(item.estimatedClasses) && item.estimatedClasses >= 1
+          ? Math.round(item.estimatedClasses)
+          : 1;
+      return {
+        serialNo: item.serialNo || index + 1,
+        sessionPlanUnitId: item.sessionPlanUnitId,
+        subUnitTitle: joined || item.subUnitTitle || "",
+        subUnitTitles: titles,
+        syllabusId: item.syllabusId?.trim() || "",
+        syllabusChapterId: item.syllabusChapterId?.trim() || "",
+        syllabusUnitId: item.syllabusUnitId?.trim() || "",
+        syllabusSubUnitId: item.syllabusSubUnitId?.trim() || "",
+        syllabusSubUnitIds: (item.syllabusSubUnitIds ?? []).filter(Boolean),
+        subjectLabel:
+          item.subjectLabel ||
+          (unit ? `Unit ${unit.unitNo}` : `Unit ${index + 1}`),
+        plannedTopic,
+        description: item.description || "",
+        learningObjectives: item.learningObjectives || "",
+        teachingMethod: item.teachingMethod || "",
+        teachingAids: item.teachingAids || "",
+        assessmentMethod: item.assessmentMethod || "",
+        deadline: item.deadline || "",
+        itemStartDateBs: item.itemStartDateBs || unit?.startDateBs || "",
+        itemEndDateBs: item.itemEndDateBs || unit?.endDateBs || "",
+        estimatedClasses,
+        remarks: item.remarks || "",
+      };
+    });
+
     const payload: AcademicLessonPlanInput = {
-      ...form,
+      academicYearBs: form.academicYearBs,
+      session: form.session || form.academicYearBs,
+      faculty: form.faculty || undefined,
+      semesterBs: form.semesterBs || undefined,
+      classId: form.classId || undefined,
+      sectionId: form.sectionId || undefined,
+      batchId: form.batchId || undefined,
+      yearId: form.yearId || undefined,
+      subjectId: form.subjectId,
+      teacherId: resolvedTeacherId,
+      month: form.month || "",
       teachingDateBs: teachingDate,
       startDateBs: teachingDate,
       endDateBs: teachingDate,
-      teacherId: resolvedTeacherId,
-      session: form.session || form.academicYearBs,
-      month: form.month || "",
+      sessionPlanId: form.sessionPlanId,
+      monthlyDescription: form.monthlyDescription || "",
+      items: sanitizedItems,
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, payload });

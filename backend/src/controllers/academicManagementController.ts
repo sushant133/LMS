@@ -61,6 +61,7 @@ import {
   getAttendanceForSession,
   getNepaliMonthNameFromBsDate,
   getOrCreateLogBook,
+  NEPALI_MONTH_NAMES,
   getSessionPlanSyllabusCoverage,
   getTodayTimetable,
   isAcademicAdmin,
@@ -74,6 +75,7 @@ import {
   serializeSyllabus,
   syncLessonPlanItemProgress,
   syncSessionPlanProgress,
+  resyncSessionPlanUnitProgress,
   matchesKeyword
 } from "../utils/academicManagementService.js";
 import { exportAcademicReportCsv, generateAcademicReport, type AcademicReportType } from "../utils/academicManagementReports.js";
@@ -105,6 +107,115 @@ const optionalObjectIdList = (values: unknown): string[] => {
   return values
     .map((v) => optionalObjectId(v))
     .filter((v): v is string => Boolean(v));
+};
+
+/** Build a lesson-plan item document free of empty ObjectId strings (update + create). */
+const buildLessonPlanItemDoc = (
+  item: {
+    serialNo: number;
+    sessionPlanUnitId: string;
+    subjectLabel?: string;
+    plannedTopic?: string;
+    description?: string;
+    learningObjectives?: string;
+    teachingMethod?: string;
+    teachingAids?: string;
+    assessmentMethod?: string;
+    deadline?: string;
+    itemStartDateBs?: string;
+    itemEndDateBs?: string;
+    estimatedClasses?: number;
+    remarks?: string;
+    syllabusId?: string;
+    syllabusChapterId?: string;
+    syllabusUnitId?: string;
+    syllabusSubUnitId?: string;
+    syllabusSubUnitIds?: string[];
+    subUnitTitle?: string;
+    subUnitTitles?: string[];
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  unit: any,
+  schoolId: mongoose.Types.ObjectId,
+  lessonPlanId: mongoose.Types.ObjectId
+) => {
+  const subUnitTitles = Array.isArray(item.subUnitTitles)
+    ? item.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+    : item.subUnitTitle
+      ? String(item.subUnitTitle)
+          .split(/[;\n|]+/)
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
+  const syllabusSubUnitIds = optionalObjectIdList(
+    Array.isArray(item.syllabusSubUnitIds) && item.syllabusSubUnitIds.length > 0
+      ? item.syllabusSubUnitIds
+      : item.syllabusSubUnitId
+        ? [item.syllabusSubUnitId]
+        : []
+  );
+  const unitSyllabusId =
+    unit?.syllabusId == null
+      ? undefined
+      : typeof unit.syllabusId === "string"
+        ? unit.syllabusId
+        : unit.syllabusId?.toString?.();
+  const unitChapterId =
+    unit?.syllabusChapterId == null
+      ? undefined
+      : typeof unit.syllabusChapterId === "string"
+        ? unit.syllabusChapterId
+        : unit.syllabusChapterId?.toString?.();
+  const unitSyllabusUnitId =
+    unit?.syllabusUnitId == null
+      ? undefined
+      : typeof unit.syllabusUnitId === "string"
+        ? unit.syllabusUnitId
+        : unit.syllabusUnitId?.toString?.();
+
+  const plannedTopic = (
+    item.plannedTopic ||
+    (subUnitTitles.length > 0 ? subUnitTitles.join("; ") : "") ||
+    unit?.topicsCovered ||
+    unit?.chapterName ||
+    `Unit ${item.serialNo}`
+  ).trim();
+  // Daily lesson rows default to 1 class — do not treat teaching hours as class count
+  const estimatedClasses =
+    Number.isFinite(item.estimatedClasses) && (item.estimatedClasses as number) >= 1
+      ? Math.round(item.estimatedClasses as number)
+      : 1;
+
+  return {
+    serialNo: item.serialNo,
+    sessionPlanUnitId: item.sessionPlanUnitId,
+    subjectLabel: item.subjectLabel || (unit ? `Unit ${unit.unitNo}` : ""),
+    plannedTopic,
+    description: item.description || "",
+    learningObjectives: item.learningObjectives || unit?.learningOutcomes || "",
+    teachingMethod: item.teachingMethod || "",
+    teachingAids: item.teachingAids || "",
+    assessmentMethod: item.assessmentMethod || "",
+    deadline: item.deadline || "",
+    itemStartDateBs: item.itemStartDateBs || unit?.startDateBs || "",
+    itemEndDateBs: item.itemEndDateBs || unit?.endDateBs || "",
+    estimatedClasses,
+    remarks: item.remarks || "",
+    syllabusId: optionalObjectId(item.syllabusId) || optionalObjectId(unitSyllabusId),
+    syllabusChapterId:
+      optionalObjectId(item.syllabusChapterId) || optionalObjectId(unitChapterId),
+    syllabusUnitId:
+      optionalObjectId(item.syllabusUnitId) || optionalObjectId(unitSyllabusUnitId),
+    syllabusSubUnitId: syllabusSubUnitIds[0],
+    subUnitTitles,
+    subUnitTitle:
+      subUnitTitles.length > 0
+        ? subUnitTitles.join("; ")
+        : item.subUnitTitle?.trim() || "",
+    syllabusSubUnitIds,
+    schoolId,
+    lessonPlanId
+  };
 };
 
 const parseFilters = (req: Request): AcademicManagementFilters => ({
@@ -1563,77 +1674,14 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
 
     await AcademicLessonPlanItem.insertMany(
-      payload.items.map((item) => {
-        const unit = unitMap.get(item.sessionPlanUnitId);
-        const unitAny = unit as
-          | {
-              syllabusId?: { toString(): string };
-              syllabusChapterId?: { toString(): string };
-              learningOutcomes?: string;
-              estimatedTeachingHours?: number;
-              topicsCovered?: string;
-              chapterName?: string;
-              unitNo?: number;
-            }
-          | undefined;
-        const subUnitTitles = Array.isArray(item.subUnitTitles)
-          ? item.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
-          : item.subUnitTitle
-            ? String(item.subUnitTitle)
-                .split(/[;\n|]+/)
-                .map((t) => t.trim())
-                .filter(Boolean)
-            : [];
-        const syllabusSubUnitIds = optionalObjectIdList(
-          Array.isArray(item.syllabusSubUnitIds) && item.syllabusSubUnitIds.length > 0
-            ? item.syllabusSubUnitIds
-            : item.syllabusSubUnitId
-              ? [item.syllabusSubUnitId]
-              : []
-        );
-        return {
-          serialNo: item.serialNo,
-          sessionPlanUnitId: item.sessionPlanUnitId,
-          subjectLabel: item.subjectLabel || (unit ? `Unit ${unit.unitNo}` : ""),
-          plannedTopic:
-            item.plannedTopic ||
-            (unit ? unit.topicsCovered || unit.chapterName : item.plannedTopic),
-          description: item.description || "",
-          learningObjectives: item.learningObjectives || unit?.learningOutcomes || "",
-          teachingMethod: item.teachingMethod || "",
-          teachingAids: item.teachingAids || "",
-          assessmentMethod: item.assessmentMethod || "",
-          deadline: item.deadline || "",
-          itemStartDateBs: item.itemStartDateBs || unit?.startDateBs || "",
-          itemEndDateBs: item.itemEndDateBs || unit?.endDateBs || "",
-          estimatedClasses:
-            item.estimatedClasses ||
-            Math.max(1, Math.round(unit?.estimatedTeachingHours || 1)),
-          remarks: item.remarks || "",
-          // Inherit syllabus unit link from session unit when client omits hierarchy ids
-          syllabusId:
-            optionalObjectId(item.syllabusId) ||
-            unitAny?.syllabusId?.toString?.() ||
-            undefined,
-          syllabusChapterId:
-            optionalObjectId(item.syllabusChapterId) ||
-            unitAny?.syllabusChapterId?.toString?.() ||
-            undefined,
-          syllabusUnitId:
-            optionalObjectId(item.syllabusUnitId) ||
-            (unitAny as { syllabusUnitId?: { toString(): string } })?.syllabusUnitId?.toString?.() ||
-            undefined,
-          syllabusSubUnitId: syllabusSubUnitIds[0] || optionalObjectId(item.syllabusSubUnitId),
-          subUnitTitles,
-          subUnitTitle:
-            subUnitTitles.length > 0
-              ? subUnitTitles.join("; ")
-              : item.subUnitTitle?.trim() || "",
-          syllabusSubUnitIds,
-          schoolId: tenantObjectId(req),
-          lessonPlanId: createdPlan._id
-        };
-      }),
+      payload.items.map((item) =>
+        buildLessonPlanItemDoc(
+          item,
+          unitMap.get(item.sessionPlanUnitId),
+          tenantObjectId(req),
+          createdPlan._id
+        )
+      ),
       sessionOpt
     );
 
@@ -1719,20 +1767,52 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   }
 
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+  // Never assign nested `items` or empty ObjectId strings onto the plan document
+  const {
+    items: _itemsIgnored,
+    classId: rawClassId,
+    sectionId: rawSectionId,
+    batchId: rawBatchId,
+    yearId: rawYearId,
+    subjectId: rawSubjectId,
+    teacherId: rawTeacherId,
+    sessionPlanId: _rawSp,
+    ...restPlanFields
+  } = safePayload;
 
   await withTransaction(async (session) => {
     const sessionOpt = getSessionOption(session);
-    Object.assign(existing, safePayload, {
+    Object.assign(existing, restPlanFields, {
       sessionPlanId,
+      subjectId: optionalObjectId(rawSubjectId) || existing.subjectId,
+      teacherId: optionalObjectId(rawTeacherId) || existing.teacherId,
+      classId: optionalObjectId(rawClassId) ?? existing.classId,
+      sectionId: optionalObjectId(rawSectionId) ?? existing.sectionId,
+      batchId: optionalObjectId(rawBatchId) ?? existing.batchId,
+      yearId: optionalObjectId(rawYearId) ?? existing.yearId,
       month,
       teachingDateBs,
       startDateBs: teachingDateBs,
       endDateBs: teachingDateBs,
       audit: { ...existing.audit, updatedBy: actorObjectId(req) }
     });
+    // Clear optional refs when client explicitly sends empty string
+    if (rawClassId !== undefined && !optionalObjectId(rawClassId)) existing.classId = undefined;
+    if (rawSectionId !== undefined && !optionalObjectId(rawSectionId)) existing.sectionId = undefined;
+    if (rawBatchId !== undefined && !optionalObjectId(rawBatchId)) existing.batchId = undefined;
+    if (rawYearId !== undefined && !optionalObjectId(rawYearId)) existing.yearId = undefined;
     await existing.save(sessionOpt);
 
     if (payload.items) {
+      const unitIds = payload.items.map((item) => item.sessionPlanUnitId).filter(Boolean);
+      const unitsQuery = AcademicSessionPlanUnit.find({
+        _id: { $in: unitIds },
+        sessionPlanId
+      });
+      if (session) unitsQuery.session(session);
+      const units = await unitsQuery.lean();
+      const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
+
       const itemsQuery = AcademicLessonPlanItem.find({ lessonPlanId: existing._id });
       if (session) itemsQuery.session(session);
       const existingItems = await itemsQuery;
@@ -1742,22 +1822,50 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
       for (const item of payload.items) {
         keptSerials.add(item.serialNo);
         const prev = bySerial.get(item.serialNo);
+        const unit = unitMap.get(item.sessionPlanUnitId);
+        const doc = buildLessonPlanItemDoc(
+          item,
+          unit,
+          tenantObjectId(req),
+          existing._id
+        );
         if (prev) {
           // Preserve progress fields — never allow manual COMPLETED without Log Book
           const completedClasses = prev.completedClasses;
           const completionStatus = prev.completionStatus;
-          Object.assign(prev, item, {
-            schoolId: tenantObjectId(req),
-            lessonPlanId: existing._id,
+          // Unset empty ObjectId paths so Mongoose does not cast ""
+          prev.set({
+            serialNo: doc.serialNo,
+            sessionPlanUnitId: doc.sessionPlanUnitId,
+            subjectLabel: doc.subjectLabel,
+            plannedTopic: doc.plannedTopic,
+            description: doc.description,
+            learningObjectives: doc.learningObjectives,
+            teachingMethod: doc.teachingMethod,
+            teachingAids: doc.teachingAids,
+            assessmentMethod: doc.assessmentMethod,
+            deadline: doc.deadline,
+            itemStartDateBs: doc.itemStartDateBs,
+            itemEndDateBs: doc.itemEndDateBs,
+            estimatedClasses: doc.estimatedClasses,
+            remarks: doc.remarks,
+            subUnitTitles: doc.subUnitTitles,
+            subUnitTitle: doc.subUnitTitle,
+            syllabusSubUnitIds: doc.syllabusSubUnitIds,
             completedClasses,
             completionStatus
           });
+          if (doc.syllabusId) prev.set("syllabusId", doc.syllabusId);
+          else prev.set("syllabusId", undefined);
+          if (doc.syllabusChapterId) prev.set("syllabusChapterId", doc.syllabusChapterId);
+          else prev.set("syllabusChapterId", undefined);
+          if (doc.syllabusUnitId) prev.set("syllabusUnitId", doc.syllabusUnitId);
+          else prev.set("syllabusUnitId", undefined);
+          if (doc.syllabusSubUnitId) prev.set("syllabusSubUnitId", doc.syllabusSubUnitId);
+          else prev.set("syllabusSubUnitId", undefined);
           await prev.save(sessionOpt);
         } else {
-          await AcademicLessonPlanItem.create(
-            [{ ...item, schoolId: tenantObjectId(req), lessonPlanId: existing._id }],
-            sessionOpt
-          );
+          await AcademicLessonPlanItem.create([doc], sessionOpt);
         }
       }
 
@@ -1794,9 +1902,29 @@ export const deleteLessonPlan = asyncHandler(async (req: Request, res: Response)
   await assertTeacherOwnership(req, existing.teacherId.toString());
   if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
 
+  const items = await AcademicLessonPlanItem.find({ lessonPlanId: existing._id })
+    .select("sessionPlanUnitId")
+    .lean();
+  const unitIds = [
+    ...new Set(
+      items
+        .map((item) => item.sessionPlanUnitId?.toString())
+        .filter(Boolean) as string[]
+    )
+  ];
+
   existing.isDeleted = true;
   existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
   await existing.save();
+
+  // Recompute unit/session progress so soft-deleted plans stop counting
+  for (const unitId of unitIds) {
+    await resyncSessionPlanUnitProgress(unitId);
+  }
+  if (existing.sessionPlanId) {
+    await syncSessionPlanProgress(existing.sessionPlanId.toString());
+  }
+
   return sendSuccess(res, "Lesson plan deleted");
 });
 
@@ -1875,6 +2003,9 @@ export const listLogBookEntries = asyncHandler(async (req: Request, res: Respons
     filter.reviewStatus = filters.status;
   }
   delete filter.status;
+  // Log book entries store dateBs only — never filter on plan-style month string
+  const monthName = typeof filter.month === "string" ? filter.month : undefined;
+  delete filter.month;
   await applyTeacherScopeToFilter(req, filter);
 
   if (filters.dateFrom || filters.dateTo) {
@@ -1882,6 +2013,15 @@ export const listLogBookEntries = asyncHandler(async (req: Request, res: Respons
       ...(filters.dateFrom ? { $gte: filters.dateFrom } : {}),
       ...(filters.dateTo ? { $lte: filters.dateTo } : {})
     };
+  } else if (monthName) {
+    // Map Nepali month name → BS month number for dateBs prefix filter
+    const monthIdx = NEPALI_MONTH_NAMES.findIndex(
+      (m) => m.toLowerCase() === monthName.toLowerCase()
+    );
+    if (monthIdx >= 0) {
+      const mm = String(monthIdx + 1).padStart(2, "0");
+      filter.dateBs = { $regex: `^\\d{4}-${mm}-` };
+    }
   }
 
   const entries = await AcademicLogBookEntry.find(filter).sort({ dateBs: -1, periodNumber: 1 }).lean();
@@ -2033,46 +2173,95 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
   }
   payload.unit = unitLabel;
   payload.sessionPlanUnitId = unitDoc._id.toString();
-  payload.lessonPlanId = lessonPlanId;
-  payload.lessonPlanItemId = lessonPlanItemId ?? "";
+  // Never assign "" to ObjectId fields — use undefined when unlinked
+  if (lessonPlanId) payload.lessonPlanId = lessonPlanId;
+  else delete (payload as { lessonPlanId?: string }).lessonPlanId;
+  if (lessonPlanItemId) {
+    payload.lessonPlanItemId = lessonPlanItemId;
+  } else {
+    delete (payload as { lessonPlanItemId?: string }).lessonPlanItemId;
+  }
 
   // Use Nepali month name so Log Book groups align with Lesson Plan period
   const month = getNepaliMonthNameFromBsDate(dateBs);
-  const logBookId = await getOrCreateLogBook(req, { ...payload, month });
+  const logBookId = await getOrCreateLogBook(req, {
+    academicYearBs: payload.academicYearBs,
+    session: payload.session,
+    faculty: payload.faculty?.trim() || undefined,
+    semesterBs: payload.semesterBs?.trim() || undefined,
+    classId: optionalObjectId(payload.classId),
+    sectionId: optionalObjectId(payload.sectionId),
+    batchId: optionalObjectId(payload.batchId),
+    yearId: optionalObjectId(payload.yearId),
+    subjectId: payload.subjectId,
+    teacherId: payload.teacherId,
+    month
+  });
 
   const attendance = await getAttendanceForSession(req, {
     subjectId: payload.subjectId,
     teacherId: payload.teacherId,
     dateBs,
-    classId: payload.classId,
-    sectionId: payload.sectionId,
-    batchId: payload.batchId,
-    yearId: payload.yearId
+    classId: optionalObjectId(payload.classId),
+    sectionId: optionalObjectId(payload.sectionId),
+    batchId: optionalObjectId(payload.batchId),
+    yearId: optionalObjectId(payload.yearId)
   });
 
   const count = await AcademicLogBookEntry.countDocuments({ logBookId, isDeleted: false });
 
-  const taughtSubUnitIds = Array.isArray(payload.syllabusSubUnitIds)
-    ? payload.syllabusSubUnitIds.map((id) => String(id).trim()).filter(Boolean)
-    : payload.syllabusSubUnitId?.trim()
-      ? [payload.syllabusSubUnitId.trim()]
-      : [];
+  const taughtSubUnitIds = optionalObjectIdList(
+    Array.isArray(payload.syllabusSubUnitIds)
+      ? payload.syllabusSubUnitIds
+      : payload.syllabusSubUnitId
+        ? [payload.syllabusSubUnitId]
+        : []
+  );
 
   const entry = await AcademicLogBookEntry.create({
-    ...payload,
-    subUnitTitles: taughtTitles,
-    subUnitTitle: taughtTitles.join("; "),
-    syllabusId: payload.syllabusId?.trim() || undefined,
-    syllabusChapterId: payload.syllabusChapterId?.trim() || undefined,
-    syllabusUnitId: payload.syllabusUnitId?.trim() || undefined,
-    syllabusSubUnitId: taughtSubUnitIds[0] || payload.syllabusSubUnitId?.trim() || undefined,
-    syllabusSubUnitIds: taughtSubUnitIds,
     schoolId: tenantObjectId(req),
     logBookId,
+    lessonPlanId: lessonPlanId || undefined,
+    lessonPlanItemId: lessonPlanItemId || undefined,
+    sessionPlanUnitId: unitDoc._id,
+    subUnitTitles: taughtTitles,
+    subUnitTitle: taughtTitles.join("; "),
+    syllabusId: optionalObjectId(payload.syllabusId),
+    syllabusChapterId: optionalObjectId(payload.syllabusChapterId),
+    syllabusUnitId: optionalObjectId(payload.syllabusUnitId),
+    syllabusSubUnitId: taughtSubUnitIds[0],
+    syllabusSubUnitIds: taughtSubUnitIds,
+    academicYearBs: payload.academicYearBs,
+    session: payload.session,
+    faculty: payload.faculty?.trim() || undefined,
+    semesterBs: payload.semesterBs?.trim() || undefined,
+    classId: optionalObjectId(payload.classId),
+    sectionId: optionalObjectId(payload.sectionId),
+    batchId: optionalObjectId(payload.batchId),
+    yearId: optionalObjectId(payload.yearId),
+    subjectId: payload.subjectId,
+    teacherId: payload.teacherId,
+    timetableSlotId: optionalObjectId(payload.timetableSlotId),
     serialNo: count + 1,
+    dateBs,
+    unit: unitLabel,
+    topicCovered: payload.topicCovered,
+    objectives: payload.objectives || "",
+    teachingMethod: payload.teachingMethod || "",
+    teachingAids: payload.teachingAids || "",
+    theoryPractical: payload.theoryPractical || "THEORY",
+    periodNumber: payload.periodNumber,
+    startTime: payload.startTime?.trim() || undefined,
+    endTime: payload.endTime?.trim() || undefined,
     attendancePresent: attendance.present,
     attendanceAbsent: attendance.absent,
     attendancePercent: attendance.percent,
+    homeworkGiven: payload.homeworkGiven || "",
+    assignment: payload.assignment || "",
+    feedback: payload.feedback || "",
+    difficultiesFaced: payload.difficultiesFaced || "",
+    nextClassPlan: payload.nextClassPlan || "",
+    attachmentUrl: payload.attachmentUrl?.trim() || undefined,
     teacherSignature: await getActorName(req.user!.userId),
     audit: { createdBy: actorObjectId(req) }
   });
@@ -2164,10 +2353,101 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   const previousItemId = existing.lessonPlanItemId?.toString();
 
-  Object.assign(existing, safePayload, {
-    lessonPlanItemId,
-    audit: { ...existing.audit, updatedBy: actorObjectId(req) }
-  });
+  // Apply only safe scalar fields; never write "" into ObjectId paths
+  const taughtTitles = Array.isArray(safePayload.subUnitTitles)
+    ? (safePayload.subUnitTitles as string[]).map((t) => String(t).trim()).filter(Boolean)
+    : typeof safePayload.subUnitTitle === "string"
+      ? String(safePayload.subUnitTitle)
+          .split(/[;\n|]+/)
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : undefined;
+  const taughtIds = optionalObjectIdList(
+    safePayload.syllabusSubUnitIds ??
+      (typeof safePayload.syllabusSubUnitId === "string"
+        ? [safePayload.syllabusSubUnitId]
+        : [])
+  );
+
+  if (safePayload.dateBs !== undefined) existing.dateBs = String(safePayload.dateBs);
+  if (safePayload.unit !== undefined) existing.unit = String(safePayload.unit ?? "");
+  if (safePayload.topicCovered !== undefined) {
+    existing.topicCovered = String(safePayload.topicCovered);
+  }
+  if (safePayload.objectives !== undefined) existing.objectives = String(safePayload.objectives ?? "");
+  if (safePayload.teachingMethod !== undefined) {
+    existing.teachingMethod = String(safePayload.teachingMethod ?? "");
+  }
+  if (safePayload.teachingAids !== undefined) {
+    existing.teachingAids = String(safePayload.teachingAids ?? "");
+  }
+  if (safePayload.theoryPractical !== undefined) {
+    existing.theoryPractical = safePayload.theoryPractical as typeof existing.theoryPractical;
+  }
+  if (safePayload.periodNumber !== undefined) {
+    existing.periodNumber = Number(safePayload.periodNumber) || existing.periodNumber;
+  }
+  if (safePayload.startTime !== undefined) {
+    existing.startTime = String(safePayload.startTime || "") || undefined;
+  }
+  if (safePayload.endTime !== undefined) {
+    existing.endTime = String(safePayload.endTime || "") || undefined;
+  }
+  if (safePayload.homeworkGiven !== undefined) {
+    existing.homeworkGiven = String(safePayload.homeworkGiven ?? "");
+  }
+  if (safePayload.assignment !== undefined) existing.assignment = String(safePayload.assignment ?? "");
+  if (safePayload.feedback !== undefined) existing.feedback = String(safePayload.feedback ?? "");
+  if (safePayload.difficultiesFaced !== undefined) {
+    existing.difficultiesFaced = String(safePayload.difficultiesFaced ?? "");
+  }
+  if (safePayload.nextClassPlan !== undefined) {
+    existing.nextClassPlan = String(safePayload.nextClassPlan ?? "");
+  }
+  if (safePayload.attachmentUrl !== undefined) {
+    existing.attachmentUrl = String(safePayload.attachmentUrl || "") || undefined;
+  }
+  if (taughtTitles !== undefined) {
+    existing.subUnitTitles = taughtTitles;
+    existing.subUnitTitle = taughtTitles.join("; ");
+  }
+  if (
+    safePayload.syllabusSubUnitIds !== undefined ||
+    safePayload.syllabusSubUnitId !== undefined
+  ) {
+    existing.set("syllabusSubUnitIds", taughtIds);
+    existing.set("syllabusSubUnitId", taughtIds[0] || undefined);
+  }
+  if (safePayload.syllabusId !== undefined) {
+    existing.set("syllabusId", optionalObjectId(safePayload.syllabusId));
+  }
+  if (safePayload.syllabusChapterId !== undefined) {
+    existing.set("syllabusChapterId", optionalObjectId(safePayload.syllabusChapterId));
+  }
+  if (safePayload.syllabusUnitId !== undefined) {
+    existing.set("syllabusUnitId", optionalObjectId(safePayload.syllabusUnitId));
+  }
+  if (safePayload.sessionPlanUnitId !== undefined) {
+    const uid = optionalObjectId(safePayload.sessionPlanUnitId);
+    if (uid) existing.set("sessionPlanUnitId", uid);
+  }
+  if (safePayload.lessonPlanId !== undefined) {
+    existing.set("lessonPlanId", optionalObjectId(safePayload.lessonPlanId));
+  }
+  if (safePayload.classId !== undefined) {
+    existing.set("classId", optionalObjectId(safePayload.classId));
+  }
+  if (safePayload.sectionId !== undefined) {
+    existing.set("sectionId", optionalObjectId(safePayload.sectionId));
+  }
+  if (safePayload.batchId !== undefined) {
+    existing.set("batchId", optionalObjectId(safePayload.batchId));
+  }
+  if (safePayload.yearId !== undefined) {
+    existing.set("yearId", optionalObjectId(safePayload.yearId));
+  }
+  existing.set("lessonPlanItemId", lessonPlanItemId);
+  existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
 
   if (previousItemId) await syncLessonPlanItemProgress(previousItemId);
