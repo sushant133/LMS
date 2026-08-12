@@ -134,7 +134,7 @@ export const buildCharacterCertificateHtml = (
   const signatureBlocks = SIGNATURE_COLUMNS.map((column, index) => {
     const label = index === SIGNATURE_COLUMNS.length - 1 ? data.signatoryLabel : column.label;
     return `<div class="cc-sign" style="left:${column.center - column.lineWidth / 2}pt;width:${column.lineWidth}pt;">
-      <div class="cc-sign-line">${LEADER}</div>
+      <div class="cc-sign-line"></div>
       <div class="cc-sign-label">${escapeHtml(label)}</div>
     </div>`;
   }).join("");
@@ -172,20 +172,42 @@ ${certificateFontFaceCss()}
     background-repeat: no-repeat;
   }
 
-  /* Tiled house watermark, clipped to the area inside the border. */
+  /*
+   * Tiled house watermark, clipped to the area inside the border. Kept very
+   * light and loosely spaced — at #dcdcdc/9.6pt it used to sit directly under
+   * the body script and made the wording hard to read.
+   */
   .cc-watermark {
     position: absolute;
     left: ${FRAME_INSET}pt; right: ${FRAME_INSET}pt;
     top: ${FRAME_INSET}pt; bottom: ${FRAME_INSET}pt;
     overflow: hidden;
-    color: #dcdcdc;
+    color: #ededed;
     font-family: 'Calibri', 'CC Sans', sans-serif;
-    font-size: 8pt;
-    line-height: 9.6pt;
-    letter-spacing: 0.4pt;
-    word-spacing: 3.5pt;
+    font-size: 7.5pt;
+    line-height: 15pt;
+    letter-spacing: 0.6pt;
+    word-spacing: 9pt;
     white-space: nowrap;
     user-select: none;
+  }
+
+  /* Hairline double rule just inside the ornamental border. */
+  .cc-inner-frame {
+    position: absolute;
+    left: ${FRAME_INSET - 6}pt; right: ${FRAME_INSET - 6}pt;
+    top: ${FRAME_INSET - 6}pt; bottom: ${FRAME_INSET - 6}pt;
+    border: 1.6pt double #c9a227;
+    border-radius: 3pt;
+    pointer-events: none;
+  }
+
+  /* Soft scrim so the watermark never fights the certificate wording. */
+  .cc-body-scrim {
+    position: absolute;
+    left: 54pt; right: 54pt; top: 232pt; height: 236pt;
+    background: rgba(255, 255, 255, 0.82);
+    border-radius: 4pt;
   }
 
   .cc-layer { position: absolute; inset: 0; }
@@ -193,9 +215,13 @@ ${certificateFontFaceCss()}
   /* --- header ------------------------------------------------------ */
 
   .cc-issue-no {
-    position: absolute; left: 57.5pt; top: 52.5pt;
+    position: absolute; left: 57.5pt; top: 50pt;
+    padding: 1.5pt 7pt;
+    border: 0.6pt solid #c9a227; border-radius: 8pt;
+    background: #ffffff;
     font-family: 'Calibri', 'CC Sans', sans-serif;
-    font-size: 11pt; color: #000000; white-space: nowrap;
+    font-size: 10pt; font-weight: 700; letter-spacing: 0.3pt;
+    color: #1f2d5a; white-space: nowrap;
   }
 
   /*
@@ -211,18 +237,33 @@ ${certificateFontFaceCss()}
     top: 68pt;
     font-family: 'Arial Black', 'CC Display', 'Arial', sans-serif;
     font-size: 44pt; line-height: 46pt; color: #0070c0;
-    text-shadow: 2.6pt 2.6pt 0 #a6a6a6;
+    letter-spacing: 0.4pt;
+    /* Softer than the old hard grey offset — reads as depth, not a misprint. */
+    text-shadow: 1.4pt 1.4pt 1.2pt rgba(31, 45, 90, 0.28);
   }
   .cc-address {
     top: 115.5pt;
     font-family: 'Times New Roman', 'CC Serif', serif;
-    font-weight: 700; font-size: 27pt; line-height: 29pt; color: #000000;
+    font-weight: 700; font-size: 24pt; line-height: 27pt; color: #1f2d5a;
+    letter-spacing: 0.3pt;
   }
   .cc-affiliation {
-    top: 147pt;
+    top: 145pt;
     font-family: 'Times New Roman', 'CC Serif', serif;
-    font-weight: 700; font-size: 13pt; line-height: 14pt; color: #000000;
+    font-weight: 700; font-size: 12pt; line-height: 14pt; color: #444444;
+    letter-spacing: 0.5pt;
   }
+
+  /* Gold rule separating the letterhead from the certificate itself. */
+  .cc-header-rule {
+    position: absolute; left: 250pt; top: 178pt; width: 342pt; height: 3pt;
+  }
+  .cc-header-rule::before,
+  .cc-header-rule::after {
+    content: ""; position: absolute; left: 0; right: 0; height: 0.6pt;
+    background: linear-gradient(90deg, rgba(201,162,39,0) 0%, #c9a227 22%, #c9a227 78%, rgba(201,162,39,0) 100%);
+  }
+  .cc-header-rule::after { top: 2.4pt; }
 
   .cc-seal {
     position: absolute; left: 73.5pt; top: 143.5pt; width: 80.5pt; height: 71pt;
@@ -231,19 +272,32 @@ ${certificateFontFaceCss()}
 
   .cc-photo-box {
     position: absolute; left: 668pt; top: 143pt; width: 76pt; height: 73pt;
-    border: 0.75pt solid #000000;
+    border: 0.75pt solid #8a8a8a; border-radius: 2pt;
+    background: #ffffff;
+  }
+  .cc-photo-box span {
+    position: absolute; left: 0; right: 0; top: 30pt;
+    text-align: center;
+    font-family: 'Calibri', 'CC Sans', sans-serif;
+    font-size: 7.5pt; letter-spacing: 0.6pt; color: #b0b0b0;
   }
 
   .cc-heading {
-    top: 197.5pt;
+    top: 195pt;
     font-family: 'Algerian', 'CC Heading', 'Cinzel', serif;
-    font-size: 28pt; line-height: 30pt; color: #ff0000;
-    font-style: italic;
-    text-shadow: 1.2pt 1.2pt 0 rgba(120, 120, 120, 0.35);
+    font-size: 29pt; line-height: 31pt; color: #b8121b;
+    font-style: italic; letter-spacing: 0.6pt;
+    text-shadow: 0.8pt 0.8pt 0.8pt rgba(0, 0, 0, 0.20);
+  }
+
+  /* Small diamond flourish centred under the heading. */
+  .cc-heading-flourish {
+    position: absolute; left: 0; width: ${PAGE.width}pt; top: 226pt;
+    text-align: center; font-size: 9pt; color: #c9a227; letter-spacing: 3pt;
   }
 
   .cc-duplicate-note {
-    position: absolute; left: 0; width: ${PAGE.width}pt; top: 231pt;
+    position: absolute; left: 0; width: ${PAGE.width}pt; top: 233pt;
     text-align: center;
     font-family: 'Calibri', 'CC Sans', sans-serif;
     font-size: 10pt; font-weight: 700; letter-spacing: 0.12em; color: #b22222;
@@ -255,27 +309,39 @@ ${certificateFontFaceCss()}
     position: absolute;
     left: 62.6pt; top: 242.5pt; width: 721.4pt;
     font-family: 'Lucida Calligraphy', 'CC Script', cursive;
-    font-size: 14pt; line-height: 22pt; color: #000000;
+    font-size: 15pt; line-height: 24pt; color: #14181f;
   }
-  .cc-para { margin: 0 0 10pt; text-align: justify; text-justify: inter-word; }
+  .cc-para { margin: 0 0 11pt; text-align: justify; text-justify: inter-word; }
   .cc-para:last-child { margin-bottom: 0; }
-  .cc-blank { letter-spacing: 0.6pt; }
+  /* Names, programme and conduct — the values a reader scans for. */
+  .cc-para strong {
+    font-weight: 700; color: #1f2d5a;
+    border-bottom: 0.5pt dotted rgba(31, 45, 90, 0.45);
+    padding-bottom: 0.4pt;
+  }
+  .cc-blank { letter-spacing: 0.6pt; color: #555555; }
 
   .cc-issue-date {
     position: absolute; left: 85pt; top: 457.5pt;
     font-family: 'Lucida Calligraphy', 'CC Script', cursive;
-    font-size: 14pt; color: #000000; white-space: nowrap;
+    font-size: 13pt; color: #14181f; white-space: nowrap;
   }
 
   /* --- signature row ----------------------------------------------- */
 
   .cc-sign {
     position: absolute; top: 508pt; text-align: center;
-    font-family: 'Lucida Calligraphy', 'CC Script', cursive;
-    font-size: 12pt; color: #000000;
+    font-family: 'Calibri', 'CC Sans', sans-serif;
+    font-size: 10pt; color: #14181f;
   }
-  .cc-sign-line { line-height: 14pt; white-space: nowrap; overflow: hidden; }
-  .cc-sign-label { line-height: 16pt; white-space: nowrap; }
+  /* A drawn rule prints cleaner than a row of ellipsis characters. */
+  .cc-sign-line {
+    height: 0; border-top: 0.75pt solid #555555; margin-bottom: 4pt;
+  }
+  .cc-sign-label {
+    line-height: 12pt; white-space: nowrap;
+    font-weight: 700; letter-spacing: 0.3pt; color: #1f2d5a;
+  }
 
   /* --- duplicate marking ------------------------------------------- */
 
@@ -293,6 +359,8 @@ ${certificateFontFaceCss()}
 <div class="cc-page">
   <div class="cc-border"></div>
   <div class="cc-watermark" aria-hidden="true">${watermarkRows(watermark)}</div>
+  <div class="cc-body-scrim" aria-hidden="true"></div>
+  <div class="cc-inner-frame" aria-hidden="true"></div>
 
   ${data.isDuplicate ? `<div class="cc-duplicate-stamp" aria-hidden="true">DUPLICATE</div>` : ""}
 
@@ -304,13 +372,16 @@ ${certificateFontFaceCss()}
         ? `<div class="cc-seal"><img src="${data.collegeLogoDataUri}" alt=""/></div>`
         : ""
     }
-    <div class="cc-photo-box"></div>
+    <div class="cc-photo-box"><span>PHOTO</span></div>
 
     ${fitLine("cc-college", 624, data.collegeName)}
     ${data.collegeAddress ? fitLine("cc-address", 242, data.collegeAddress) : ""}
     ${data.affiliationText ? fitLine("cc-affiliation", 104, data.affiliationText) : ""}
 
+    <div class="cc-header-rule" aria-hidden="true"></div>
+
     ${fitLine("cc-heading", 345, data.headingText)}
+    <div class="cc-heading-flourish" aria-hidden="true">&#10022;&#160;&#10022;&#160;&#10022;</div>
     ${
       data.isDuplicate
         ? `<div class="cc-duplicate-note">DUPLICATE COPY — ISSUE NO. ${escapeHtml(data.issueNumber)}</div>`
@@ -359,9 +430,11 @@ ${certificateFontFaceCss()}
       var body = document.querySelector(".cc-body");
       if (!body) return;
       var limit = ${BODY_MAX_HEIGHT} * PT;
-      for (var size = 14; size >= 9 && body.scrollHeight > limit; size -= 0.5) {
+      // Floor at 10.5pt — below that the script face stops being readable, and
+      // a certificate that wordy should be shortened rather than shrunk further.
+      for (var size = 15; size >= 10.5 && body.scrollHeight > limit; size -= 0.5) {
         body.style.fontSize = size + "pt";
-        body.style.lineHeight = (size * ${(22 / 14).toFixed(4)}) + "pt";
+        body.style.lineHeight = (size * ${(24 / 15).toFixed(4)}) + "pt";
       }
     }
 
@@ -390,6 +463,9 @@ export const generateCharacterCertificatePdf = async (
     margin: undefined,
     // The certificate ships its own fonts; the global Noto override would
     // otherwise replace every one of them.
-    keepDocumentFonts: true
+    keepDocumentFonts: true,
+    // Never degrade to the plain-text fallback: it emits a multi-page wall of
+    // words (watermark tiles included) that reads as a corrupt certificate.
+    requireBrowser: true
   });
 };

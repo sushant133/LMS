@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import type { PDFOptions } from "puppeteer";
+import { ApiError } from "./apiError.js";
 
 const FONTS_DIR = path.join(process.cwd(), "assets", "fonts");
 
@@ -97,6 +98,24 @@ const injectLocalFonts = (html: string, keepDocumentFonts = false): string => {
 };
 
 /**
+ * 503 so the real, actionable reason reaches the browser — the generic error
+ * branch replaces plain Error messages with "Internal server error".
+ */
+export class BrowserPdfUnavailableError extends ApiError {
+  constructor(cause: unknown) {
+    super(
+      503,
+      "The certificate could not be rendered: Chromium is not available on the server. " +
+        "Run `npx puppeteer browsers install chrome` on the server, or set PUPPETEER_EXECUTABLE_PATH " +
+        "to an installed Chrome/Chromium binary, then try again. " +
+        `(${cause instanceof Error ? cause.message : String(cause)})`
+    );
+    this.name = "BrowserPdfUnavailableError";
+    this.cause = cause;
+  }
+}
+
+/**
  * Convert HTML string to PDF Buffer.
  *
  * Prefer Puppeteer when available (exact HTML layout + embedded local Noto fonts).
@@ -108,33 +127,67 @@ const injectLocalFonts = (html: string, keepDocumentFonts = false): string => {
  *
  * `keepDocumentFonts` leaves the document's own font-family declarations alone;
  * without it every element is forced onto Noto Sans.
+ *
+ * `requireBrowser` disables the text fallback. Designed documents (certificates,
+ * marksheets) are *worse* than useless as a stripped-tags text dump — it prints
+ * as a multi-page wall of words that reads like a corrupt file — so they ask for
+ * a real error the UI can show instead.
  */
 export async function convertHtmlToPdf(
   html: string,
-  pdfOptions?: Partial<PDFOptions> & { keepDocumentFonts?: boolean }
+  pdfOptions?: Partial<PDFOptions> & {
+    keepDocumentFonts?: boolean;
+    requireBrowser?: boolean;
+  }
 ): Promise<Buffer> {
   try {
     return await convertWithPuppeteer(html, pdfOptions);
   } catch (error) {
+    if (pdfOptions?.requireBrowser) {
+      console.error("[convertHtmlToPdf] Chromium render failed:", error);
+      throw new BrowserPdfUnavailableError(error);
+    }
     console.warn(
       "[convertHtmlToPdf] Puppeteer unavailable or failed, using PDFKit text fallback:",
-      error instanceof Error ? error.message : error
+      error instanceof Error ? (error.stack ?? error.message) : error
     );
     return convertWithPdfKitFallback(html);
   }
 }
 
+/**
+ * Explicit Chrome binary for hosts where the bundled download is missing
+ * (slim containers, CI images, Windows boxes with a system Chrome).
+ */
+const chromeExecutablePath = (): string | undefined => {
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    process.env.GOOGLE_CHROME_BIN
+  ];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed && fs.existsSync(trimmed)) return trimmed;
+  }
+  return undefined;
+};
+
 async function convertWithPuppeteer(
   html: string,
-  pdfOptions?: Partial<PDFOptions> & { keepDocumentFonts?: boolean }
+  pdfOptions?: Partial<PDFOptions> & {
+    keepDocumentFonts?: boolean;
+    requireBrowser?: boolean;
+  }
 ): Promise<Buffer> {
   // Dynamic import so the app still boots if puppeteer is not installed.
   const puppeteer = await import("puppeteer");
-  const { keepDocumentFonts, ...pageOptions } = pdfOptions ?? {};
+  const { keepDocumentFonts, requireBrowser: _requireBrowser, ...pageOptions } = pdfOptions ?? {};
   const preparedHtml = injectLocalFonts(html, keepDocumentFonts);
+  const executablePath = chromeExecutablePath();
 
   const browser = await puppeteer.default.launch({
     headless: true,
+    ...(executablePath ? { executablePath } : {}),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",

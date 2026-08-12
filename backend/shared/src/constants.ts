@@ -447,10 +447,22 @@ export const COLLEGE_PROGRAM_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year"] a
 export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year", "Ended"] as const;
 
 /**
- * Library catalog year levels for HA college books.
- * "All Years" = shared / general books not tied to a single year.
+ * Library catalog shelf classification.
+ *
+ * Year levels cover the HA course books; the last three cover everything that
+ * is not tied to a course year:
+ *   "All Years"       — course book shared across every year
+ *   "Reference Books" — dictionaries, atlases, handbooks (usually read in-library)
+ *   "Other Books"     — novels, magazines, competition prep, donations
  */
-export const LIBRARY_YEAR_LEVELS = ["1st Year", "2nd Year", "3rd Year", "All Years"] as const;
+export const LIBRARY_YEAR_LEVELS = [
+  "1st Year",
+  "2nd Year",
+  "3rd Year",
+  "All Years",
+  "Reference Books",
+  "Other Books"
+] as const;
 
 /** Academic lifecycle status for college students. Only ACTIVE students are promoted. */
 export const STUDENT_ACADEMIC_STATUSES = [

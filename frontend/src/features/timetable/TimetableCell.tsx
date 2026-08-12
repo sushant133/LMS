@@ -27,25 +27,28 @@ const densityPad: Record<TimetableDensity, string> = {
   ultra: "p-px px-0.5",
 };
 
+// Print type scale. The page-fit pass stretches rows to fill the sheet, so the
+// boxes are far taller than 8px type needs — these sizes spend that slack on
+// legible text instead of white space.
 const densitySubject: Record<TimetableDensity, string> = {
   screen: "text-xs",
-  compact: "text-[10px]",
-  dense: "text-[9px]",
-  ultra: "text-[8px]",
+  compact: "text-[14px]",
+  dense: "text-[12.5px]",
+  ultra: "text-[10.5px]",
 };
 
 const densityMeta: Record<TimetableDensity, string> = {
   screen: "text-[11px]",
-  compact: "text-[9px]",
-  dense: "text-[8px]",
-  ultra: "text-[7.5px]",
+  compact: "text-[12px]",
+  dense: "text-[11px]",
+  ultra: "text-[9.5px]",
 };
 
 const densityBadge: Record<TimetableDensity, string> = {
   screen: "text-[9px] px-1 py-px",
-  compact: "text-[8px] px-0.5",
-  dense: "text-[7px] px-0.5",
-  ultra: "text-[6.5px] px-0.5",
+  compact: "text-[10.5px] px-1",
+  dense: "text-[9.5px] px-1",
+  ultra: "text-[8.5px] px-0.5",
 };
 
 const SlotContent = ({
@@ -140,7 +143,9 @@ const SlotContent = ({
       className={cn(
         "flex h-full flex-col text-left",
         densityPad[density],
-        isPrint ? "gap-px" : "gap-0.5",
+        // Rows are stretched to fill the page, so centre the text block instead
+        // of leaving it stranded at the top of a tall box.
+        isPrint ? "justify-center gap-px" : "gap-0.5",
         colors.text,
       )}
     >
@@ -318,7 +323,9 @@ export const TimetableCellView = ({
           <div
             className={cn(
               "font-semibold text-amber-700",
-              density === "screen" ? "px-1 pb-1 text-[9px]" : "px-0.5 pb-px text-[7px]",
+              density === "screen"
+              ? "px-1 pb-1 text-[9px]"
+              : "px-1 pb-px text-[9.5px]",
             )}
           >
             +{cell.slots.length - 1} more

@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import {
   canManageInstitution,
+  employeeAttendanceEntryUpsertSchema,
   employeeAttendanceSubmitSchema,
   employeeAttendanceUnlockSchema,
   employeeAttendanceUpdateSchema,
@@ -501,6 +502,136 @@ export const submitEmployeeAttendance = asyncHandler(async (req: Request, res: R
     existing ? 200 : 201
   );
 });
+
+/** Statuses where a check-in / check-out time is meaningful. */
+const STATUSES_WITH_CHECK_TIMES = new Set([
+  "PRESENT",
+  "HALF_DAY",
+  "LATE",
+  "OFFICIAL_DUTY"
+]);
+
+/**
+ * Save one employee's row on its own.
+ *
+ * Staff trickle in and leave across the day, so the sheet is filled person by
+ * person rather than in one sitting: this upserts a single entry into the day
+ * sheet (creating it as DRAFT if the day has not been started) and leaves every
+ * other entry — and the sheet's workflow phase — untouched. The whole-sheet
+ * submit / check-in / check-out / final flow is unchanged.
+ */
+export const upsertEmployeeAttendanceEntry = asyncHandler(
+  async (req: Request, res: Response) => {
+    const payload = employeeAttendanceEntryUpsertSchema.parse(req.body);
+    const dateBs = ensureValidBsDate(payload.dateBs);
+    const schoolId = tenantObjectId(req);
+    await assertEmployeeAttendanceAccess(req, payload.category, "create");
+
+    const employeeId = payload.category === "TEACHER" ? payload.teacherId : payload.staffId;
+    if (!employeeId) {
+      throw new ApiError(
+        400,
+        payload.category === "TEACHER" ? "teacherId is required" : "staffId is required"
+      );
+    }
+
+    const employees =
+      payload.category === "TEACHER" ? await listTeachers(schoolId) : await listStaff(schoolId);
+    const employee = employees.find((e) => e._id === employeeId);
+    if (!employee) throw new ApiError(400, "Employee not found for this attendance category");
+
+    const settings = await Setting.findOne({ schoolId }).select("academicYearBs").lean();
+    let sheet = await EmployeeAttendance.findOne({
+      schoolId,
+      category: payload.category,
+      dateBs,
+      isDeleted: false
+    });
+
+    if (sheet && (sheet.status === "LOCKED" || sheet.status === "SUBMITTED")) {
+      throw new ApiError(400, "This day sheet is locked. Unlock it before editing entries.");
+    }
+
+    if (!sheet) {
+      sheet = await EmployeeAttendance.create({
+        schoolId,
+        category: payload.category,
+        dateBs,
+        academicYearBs: settings?.academicYearBs ?? "",
+        entries: [],
+        notes: "",
+        status: "DRAFT",
+        sourceDefault: "MANUAL",
+        createdBy: actorId(req)
+      });
+    }
+
+    const entryEmployeeId = (entry: { teacherId?: unknown; staffId?: unknown }): string =>
+      String((payload.category === "TEACHER" ? entry.teacherId : entry.staffId) ?? "");
+    const existingEntry = (sheet.entries ?? []).find(
+      (e) => entryEmployeeId(e) === employeeId
+    );
+
+    // A check-in with no status chosen yet means the person has turned up.
+    const status =
+      payload.status ??
+      ((existingEntry?.status as EmployeeAttendanceStatus | undefined) ||
+        (payload.checkInTime || payload.checkOutTime ? "PRESENT" : undefined));
+    if (!status) {
+      throw new ApiError(400, "Select a status (or record a check-in time) before saving");
+    }
+
+    // Omitted fields keep what is already stored; a status without check times drops them.
+    const keepTimes = STATUSES_WITH_CHECK_TIMES.has(status);
+    const checkInTime = keepTimes
+      ? (emptyToUndef(payload.checkInTime) ?? existingEntry?.checkInTime ?? "")
+      : "";
+    const checkOutTime = keepTimes
+      ? (emptyToUndef(payload.checkOutTime) ?? existingEntry?.checkOutTime ?? "")
+      : "";
+
+    const nextEntry = {
+      teacherId: payload.category === "TEACHER" ? employeeId : undefined,
+      staffId: payload.category === "STAFF" ? employeeId : undefined,
+      employeeUserId: employee.userId,
+      employeeCode: employee.employeeCode,
+      fullName: employee.fullName,
+      department: employee.department ?? "",
+      designation: employee.designation ?? "",
+      status,
+      checkInTime,
+      checkOutTime,
+      periodsTaught:
+        payload.category === "TEACHER"
+          ? (payload.periodsTaught ?? existingEntry?.periodsTaught ?? undefined)
+          : undefined,
+      remarks: emptyToUndef(payload.remarks) ?? existingEntry?.remarks ?? "",
+      source: payload.source || "MANUAL"
+    };
+
+    const rest = (sheet.entries ?? []).filter((e) => entryEmployeeId(e) !== employeeId);
+    sheet.entries = [...rest, nextEntry] as never;
+    await sheet.save();
+
+    await recordAudit(req, {
+      action: "employee_attendance.entry.save",
+      entity: "EMPLOYEE_ATTENDANCE",
+      entityId: sheet._id.toString(),
+      after: {
+        employeeCode: employee.employeeCode,
+        status,
+        checkInTime,
+        checkOutTime
+      }
+    });
+
+    return sendSuccess(
+      res,
+      `${employee.fullName} saved`,
+      serializeRecord(sheet.toObject() as never)
+    );
+  }
+);
 
 export const updateEmployeeAttendance = asyncHandler(async (req: Request, res: Response) => {
   const payload = employeeAttendanceUpdateSchema.parse(req.body);

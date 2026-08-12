@@ -30,6 +30,7 @@ import {
   listCashBook,
   listExpenses,
   listFeeReceipts,
+  getIncomeOverview,
   listIncome,
   listPurchases,
   listSalaries,
@@ -228,6 +229,9 @@ router.post("/purchases", managers, requireAccountingPermission("manage_purchase
 router.put("/purchases/:id", managers, requireAccountingPermission("manage_purchases"), updatePurchase);
 router.delete("/purchases/:id", admins, requireAccountingPermission("reverse_transaction"), deletePurchase);
 
+// Combined fee + non-fee income view. Declared before "/income" has no id route,
+// but keep it above the register routes so it can never be shadowed later.
+router.get("/income/overview", readers, requireAccountingPermission("read"), getIncomeOverview);
 router.get("/income", readers, requireAccountingPermission("read"), listIncome);
 router.post("/income", managers, requireAccountingPermission("manage_income"), createIncome);
 router.put("/income/:id", managers, requireAccountingPermission("manage_income"), updateIncome);

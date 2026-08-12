@@ -141,7 +141,10 @@ export const downloadTextFile = (
 
 export type RegisterPrintOptions = {
   appName: string;
+  /** Signature block names — collected from the user before print / PDF. */
   preparedBy?: string;
+  verifiedBy?: string;
+  approvedBy?: string;
   /** e.g. STUDENT / TEACHER / STAFF */
   tabLabel?: string;
   /** Institution name for print header (falls back to branding cache). */
@@ -160,6 +163,22 @@ export const buildAttendanceRegisterPrintHtml = (
 ): string => {
   const appName = escapeHtml(options.appName || "Attendance Register");
   const preparedBy = escapeHtml(options.preparedBy?.trim() || "—");
+  const signatories: Array<{ role: string; name: string }> = [
+    { role: "Prepared By", name: options.preparedBy?.trim() ?? "" },
+    { role: "Verified By", name: options.verifiedBy?.trim() ?? "" },
+    { role: "Approved By", name: options.approvedBy?.trim() ?? "" },
+  ];
+  const signatureBlock = signatories
+    .map(
+      (s) =>
+        `<div class="sig">
+          <div class="sig-space"></div>
+          <div class="sig-line"></div>
+          <div class="sig-role">${s.role}</div>
+          <div class="sig-name">${s.name ? escapeHtml(s.name) : "&nbsp;"}</div>
+        </div>`,
+    )
+    .join("");
   const tabLabel = escapeHtml(
     options.tabLabel || data.tab || "Register",
   );
@@ -294,19 +313,35 @@ export const buildAttendanceRegisterPrintHtml = (
     .legend { margin-top: 8px; font-size: 8px; color: #475569; line-height: 1.6; }
     .leg-item { margin-right: 10px; white-space: nowrap; }
     .footer {
-      margin-top: 18px;
+      margin-top: 10px;
       display: flex;
       justify-content: space-between;
       gap: 12px;
+      page-break-inside: avoid;
     }
     .sig {
       flex: 1;
+      max-width: 55mm;
+      margin: 0 auto;
       text-align: center;
-      border-top: 1px solid #64748b;
-      padding-top: 4px;
-      margin-top: 28px;
       font-size: 9px;
       color: #334155;
+    }
+    /* Blank room to sign, then the rule, then role + typed name below it */
+    .sig-space { height: 14px; }
+    .sig-line {
+      border-top: 1px solid #64748b;
+      margin: 0 0 3px;
+    }
+    .sig-role { font-weight: 600; }
+    /* Keep the row height stable when no name was entered */
+    .sig-name {
+      min-height: 10px;
+      margin-top: 1px;
+      font-size: 8.5px;
+      font-weight: 600;
+      color: #0f172a;
+      line-height: 1.2;
     }
     .stats {
       margin: 4px 0 8px;
@@ -353,13 +388,16 @@ export const buildAttendanceRegisterPrintHtml = (
   </table>
   <div class="legend">${legend || "P=Present · A=Absent · L=Leave · Late · H=Holiday"}</div>
   <div class="footer">
-    <div class="sig">Prepared By<br/><span style="font-size:8px;color:#94a3b8">${preparedBy}</span></div>
-    <div class="sig">Verified By</div>
-    <div class="sig">Approved By</div>
+    ${signatureBlock}
   </div>
   <script>
     (function () {
+      // Single owner of the print dialog. The opener polls this flag and only
+      // prints itself if this script never ran — otherwise the dialog reopens
+      // every time the user cancels it.
       function go() {
+        if (window.__registerPrintStarted) return;
+        window.__registerPrintStarted = true;
         try { window.focus(); window.print(); } catch (e) {}
       }
       if (document.readyState === "complete") {
@@ -390,24 +428,50 @@ export const openAttendanceRegisterPrint = (
     URL.revokeObjectURL(url);
     throw new Error("Popup blocked — allow popups to print the register");
   }
-  // Auto-print once the document is ready
-  const tryPrint = () => {
+  // The popup's own script normally opens the dialog. This is only a fallback
+  // for when that script never runs (CSP, extension); it must fire at most once
+  // and never alongside it, or cancelling the dialog just reopens it.
+  type PrintWindow = Window & { __registerPrintStarted?: boolean };
+  let fallbackSettled = false;
+
+  const printStarted = (): boolean => {
     try {
+      return Boolean((win as PrintWindow).__registerPrintStarted);
+      // Cross-origin/closed window → assume the popup is handling it itself.
+    } catch {
+      return true;
+    }
+  };
+
+  const fallbackPrint = (attempt: number) => {
+    if (fallbackSettled || win.closed) return;
+    if (printStarted()) {
+      fallbackSettled = true;
+      return;
+    }
+    let ready = false;
+    try {
+      ready = win.document.readyState === "complete";
+    } catch {
+      fallbackSettled = true;
+      return;
+    }
+    // Still loading — re-check rather than print before the popup's script ran.
+    if (!ready) {
+      if (attempt < 12) window.setTimeout(() => fallbackPrint(attempt + 1), 400);
+      return;
+    }
+    fallbackSettled = true;
+    try {
+      (win as PrintWindow).__registerPrintStarted = true;
       win.focus();
       win.print();
     } catch {
       /* user can print manually from the tab */
     }
   };
-  // Blob documents: listen for load; also fallback timer
-  try {
-    win.addEventListener("load", () => {
-      window.setTimeout(tryPrint, 200);
-    });
-  } catch {
-    /* ignore */
-  }
-  window.setTimeout(tryPrint, 600);
+
+  window.setTimeout(() => fallbackPrint(0), 900);
   window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
 };
 
@@ -446,9 +510,17 @@ export const downloadAttendanceRegisterPdf = async (
     #attendance-register-pdf-root th { background: #f1f5f9; }
     #attendance-register-pdf-root td.name { text-align: left; white-space: nowrap; font-weight: 600; }
     #attendance-register-pdf-root .sat { background: #e2e8f0 !important; }
-    #attendance-register-pdf-root .footer { margin-top: 18px; display: flex; justify-content: space-between; }
+    #attendance-register-pdf-root .footer {
+      margin-top: 10px; display: flex; justify-content: space-between; gap: 12px;
+    }
     #attendance-register-pdf-root .sig {
-      flex: 1; text-align: center; border-top: 1px solid #64748b; padding-top: 4px; margin-top: 28px;
+      flex: 1; max-width: 55mm; margin: 0 auto; text-align: center; font-size: 9px; color: #334155;
+    }
+    #attendance-register-pdf-root .sig-space { height: 14px; }
+    #attendance-register-pdf-root .sig-line { border-top: 1px solid #64748b; margin: 0 0 3px; }
+    #attendance-register-pdf-root .sig-role { font-weight: 600; }
+    #attendance-register-pdf-root .sig-name {
+      min-height: 10px; margin-top: 1px; font-size: 8.5px; font-weight: 600; color: #0f172a; line-height: 1.2;
     }
     #attendance-register-pdf-root .legend { margin-top: 8px; font-size: 8px; color: #475569; }
   `;

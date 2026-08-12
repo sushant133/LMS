@@ -96,6 +96,37 @@ export const employeeAttendanceSubmitSchema = z.object({
   sourceDefault: employeeAttendanceSourceSchema.optional().default("MANUAL")
 });
 
+/**
+ * One employee's row, saved on its own.
+ *
+ * Teachers arrive and leave at different times, so the day sheet is filled in
+ * one person at a time as they check in and out — this upsert touches a single
+ * entry and never rewrites the rest of the sheet or advances its phase.
+ * Omitted fields keep whatever the stored entry already had.
+ */
+export const employeeAttendanceEntryUpsertSchema = z
+  .object({
+    category: employeeAttendanceCategorySchema,
+    dateBs: z.string().min(1),
+    teacherId: objectId.optional(),
+    staffId: objectId.optional(),
+    status: employeeAttendanceStatusSchema.optional(),
+    checkInTime: timeHm,
+    checkOutTime: timeHm,
+    periodsTaught: periodsTaughtField,
+    remarks: z.string().optional().or(z.literal("")),
+    source: employeeAttendanceSourceSchema.optional().default("MANUAL")
+  })
+  .superRefine((data, ctx) => {
+    if (!data.teacherId && !data.staffId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "teacherId or staffId is required",
+        path: ["teacherId"]
+      });
+    }
+  });
+
 export const employeeAttendanceUpdateSchema = z.object({
   entries: z.array(employeeAttendanceEntrySchema).min(1),
   notes: z.string().optional().or(z.literal(""))
@@ -106,4 +137,7 @@ export const employeeAttendanceUnlockSchema = z.object({
 });
 
 export type EmployeeAttendanceSubmitInput = z.infer<typeof employeeAttendanceSubmitSchema>;
+export type EmployeeAttendanceEntryUpsertInput = z.infer<
+  typeof employeeAttendanceEntryUpsertSchema
+>;
 export type EmployeeAttendanceUpdateInput = z.infer<typeof employeeAttendanceUpdateSchema>;

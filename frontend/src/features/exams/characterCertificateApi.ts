@@ -103,21 +103,50 @@ const toPdfBlob = async (response: BlobResponse): Promise<Blob> => {
 };
 
 /**
+ * On a non-2xx, axios rejects before `toPdfBlob` ever runs and the JSON error
+ * body arrives as an unread Blob — which `parseErrorMessage` cannot see, so the
+ * real reason ("Chromium is not available on the server") used to surface as a
+ * bare "Something went wrong". Read the blob back into a proper Error.
+ */
+const asReadableError = async (error: unknown): Promise<Error> => {
+  const data = (error as { response?: { data?: unknown } })?.response?.data;
+  if (data instanceof Blob) {
+    const text = (await data.text()).trim();
+    if (text) {
+      let message = "";
+      try {
+        const parsed = JSON.parse(text) as { message?: string; error?: string };
+        message = parsed.message || parsed.error || "";
+      } catch {
+        message = text.slice(0, 300);
+      }
+      if (message) return new Error(message);
+    }
+  }
+  return error instanceof Error ? error : new Error("Could not open the certificate");
+};
+
+/**
  * Fetch one issuance as a PDF blob. Read-only on the server — reprinting an
  * existing issuance never touches the record, so this is safe to call freely.
  */
 const fetchCertificateBlob = async (
   certificateId: string,
   issueNumber?: number,
-): Promise<Blob> =>
-  toPdfBlob(
-    await api.get(`${CERTIFICATE_API_BASE}/${certificateId}/pdf`, {
-      params: issueNumber ? { issueNumber } : undefined,
-      responseType: "blob",
-      // Puppeteer's first launch can be slow on a cold server.
-      timeout: 120_000,
-    }),
-  );
+): Promise<Blob> => {
+  try {
+    return toPdfBlob(
+      await api.get(`${CERTIFICATE_API_BASE}/${certificateId}/pdf`, {
+        params: issueNumber ? { issueNumber } : undefined,
+        responseType: "blob",
+        // Puppeteer's first launch can be slow on a cold server.
+        timeout: 120_000,
+      }),
+    );
+  } catch (error) {
+    throw await asReadableError(error);
+  }
+};
 
 export type CertificateDraftPayload = CharacterCertificateDetails & {
   studentId: string;
@@ -135,13 +164,18 @@ export type CertificateDraftPayload = CharacterCertificateDetails & {
  * been saved. Nothing is written, so the admin can check the sheet before a
  * certificate number is committed.
  */
-const fetchCertificateDraftBlob = async (payload: CertificateDraftPayload): Promise<Blob> =>
-  toPdfBlob(
-    await api.post(`${CERTIFICATE_API_BASE}/preview/pdf`, payload, {
-      responseType: "blob",
-      timeout: 120_000,
-    }),
-  );
+const fetchCertificateDraftBlob = async (payload: CertificateDraftPayload): Promise<Blob> => {
+  try {
+    return toPdfBlob(
+      await api.post(`${CERTIFICATE_API_BASE}/preview/pdf`, payload, {
+        responseType: "blob",
+        timeout: 120_000,
+      }),
+    );
+  } catch (error) {
+    throw await asReadableError(error);
+  }
+};
 
 /**
  * Hidden-iframe print. A `window.open` after an await gets caught by popup

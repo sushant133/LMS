@@ -30,6 +30,15 @@ export interface RateLimitOptions {
   /** Build key from request (default IP + path). */
   keyGenerator?: (req: Request) => string;
   message?: string;
+  /**
+   * Refund the attempt when the request succeeds (< 400), so only *failures*
+   * count towards the limit.
+   *
+   * Essential on login: a whole campus shares one public IP, so counting
+   * successful sign-ins locked everyone out after the tenth person of the day
+   * signed in normally.
+   */
+  countOnlyFailures?: boolean;
 }
 
 const clientIp = (req: Request): string => {
@@ -44,9 +53,16 @@ const clientIp = (req: Request): string => {
  * In-memory rate limiter for sensitive auth routes.
  * Suitable for single-instance deployments; use Redis for multi-instance production scale.
  */
+/** "in 3 minutes" / "in 45 seconds" — never a fixed number the user cannot trust. */
+const waitPhrase = (ms: number): string => {
+  const seconds = Math.max(1, Math.ceil(ms / 1000));
+  if (seconds < 90) return `${seconds} seconds`;
+  return `${Math.ceil(seconds / 60)} minutes`;
+};
+
 export const rateLimit =
   (options: RateLimitOptions) =>
-  (req: Request, _res: Response, next: NextFunction): void => {
+  (req: Request, res: Response, next: NextFunction): void => {
     const now = Date.now();
     prune(now);
 
@@ -55,16 +71,19 @@ export const rateLimit =
     let bucket = buckets.get(key);
 
     if (!bucket || bucket.resetAt <= now) {
-      bucket = { count: 0, resetAt: now + options.windowMs };
+      // Carry an unexpired lock across the window roll — recreating the bucket
+      // used to clear it, releasing a lockout early.
+      const carriedLock =
+        bucket?.lockUntil && bucket.lockUntil > now ? bucket.lockUntil : undefined;
+      bucket = { count: 0, resetAt: now + options.windowMs, lockUntil: carriedLock };
       buckets.set(key, bucket);
     }
 
     if (bucket.lockUntil && bucket.lockUntil > now) {
-      const seconds = Math.ceil((bucket.lockUntil - now) / 1000);
       return next(
         new ApiError(
           429,
-          options.message ?? `Too many attempts. Try again in ${seconds} seconds.`
+          `${options.message ?? "Too many attempts."} Try again in ${waitPhrase(bucket.lockUntil - now)}.`
         )
       );
     }
@@ -75,12 +94,22 @@ export const rateLimit =
       if (options.lockMs && options.lockMs > 0) {
         bucket.lockUntil = now + options.lockMs;
       }
+      const waitMs = bucket.lockUntil ? bucket.lockUntil - now : bucket.resetAt - now;
       return next(
         new ApiError(
           429,
-          options.message ?? "Too many requests. Please try again later."
+          `${options.message ?? "Too many requests."} Try again in ${waitPhrase(waitMs)}.`
         )
       );
+    }
+
+    // Refund on success so only failed attempts accumulate.
+    if (options.countOnlyFailures) {
+      res.on("finish", () => {
+        if (res.statusCode >= 400) return;
+        const current = buckets.get(key);
+        if (current) current.count = Math.max(0, current.count - 1);
+      });
     }
 
     return next();

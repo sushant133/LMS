@@ -21,13 +21,40 @@ const authStrictLimit = rateLimit({
   message: "Too many authentication attempts. Please try again in 15 minutes."
 });
 
-const loginLimit = rateLimit({
-  name: "auth-login",
-  // Dev/QA needs multi-account probing; production stays strict
-  max: process.env.NODE_ENV === "production" ? 10 : 80,
+/**
+ * Login throttling is keyed per **account**, not per IP.
+ *
+ * An institution sits behind one public IP, so an IP-keyed counter is really a
+ * campus-wide counter: once ten people had signed in (successfully!) within the
+ * window, everyone else was locked out for 15 minutes. Both limiters below also
+ * refund successful sign-ins, so only wrong passwords accumulate.
+ */
+const loginAccountLimit = rateLimit({
+  name: "auth-login-account",
+  max: process.env.NODE_ENV === "production" ? 8 : 40,
   windowMs: 15 * 60 * 1000,
-  lockMs: process.env.NODE_ENV === "production" ? 15 * 60 * 1000 : 60 * 1000,
-  message: "Too many login attempts. Please try again in 15 minutes."
+  lockMs: process.env.NODE_ENV === "production" ? 10 * 60 * 1000 : 60 * 1000,
+  countOnlyFailures: true,
+  keyGenerator: (req) => {
+    const raw = (req.body as { email?: unknown } | undefined)?.email;
+    const account = typeof raw === "string" ? raw.toLowerCase().trim() : "";
+    return account || "unknown-account";
+  },
+  message: "Too many failed sign-in attempts for this login ID."
+});
+
+/**
+ * Wide flood guard so a scripted attack against many accounts from one host is
+ * still stopped. Sized for a shared campus connection — normal typos across a
+ * college never reach it.
+ */
+const loginIpLimit = rateLimit({
+  name: "auth-login-ip",
+  max: process.env.NODE_ENV === "production" ? 100 : 200,
+  windowMs: 15 * 60 * 1000,
+  lockMs: 5 * 60 * 1000,
+  countOnlyFailures: true,
+  message: "Too many failed sign-in attempts from this network."
 });
 
 const registerLimit = rateLimit({
@@ -39,7 +66,7 @@ const registerLimit = rateLimit({
 });
 
 router.post("/register", registerLimit, register);
-router.post("/login", loginLimit, login);
+router.post("/login", loginIpLimit, loginAccountLimit, login);
 router.post("/logout", logout);
 /** Optional auth: 200 + null when logged out (avoids console 401 on first visit). */
 router.get("/me", optionalAuth, getMe);

@@ -10,7 +10,8 @@ import {
   listEmployeeAttendance,
   submitEmployeeAttendance,
   unlockEmployeeAttendance,
-  updateEmployeeAttendance
+  updateEmployeeAttendance,
+  upsertEmployeeAttendanceEntry
 } from "../controllers/employeeAttendanceController.js";
 import { authorize, protect } from "../middleware/auth.js";
 import { tenantGuard } from "../middleware/tenant.js";
@@ -73,6 +74,8 @@ router.get("/", authorize(...READ), listEmployeeAttendance);
 router.get("/:id", authorize(...READ), getEmployeeAttendanceById);
 
 router.post("/", authorize(...WRITE), submitEmployeeAttendance);
+/** Save one employee's check-in / check-out on its own (no phase change). */
+router.post("/entry", authorize(...WRITE), upsertEmployeeAttendanceEntry);
 router.put("/:id", authorize(...WRITE), updateEmployeeAttendance);
 router.post("/:id/unlock", authorize(...WRITE), unlockEmployeeAttendance);
 /** Delete day sheet: Super Admin / College Admin only */

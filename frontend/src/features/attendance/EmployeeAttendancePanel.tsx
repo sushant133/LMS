@@ -49,6 +49,16 @@ const STATUSES_WITH_CHECK_TIMES: ReadonlySet<EmployeeAttendanceStatus> = new Set
 const hasCheckTimes = (status: EmployeeAttendanceStatus | string): boolean =>
   STATUSES_WITH_CHECK_TIMES.has(status as EmployeeAttendanceStatus);
 
+/** Unmarked rows keep their time fields open — a check-in decides the status. */
+const acceptsCheckTimes = (status: EmployeeAttendanceStatus | ""): boolean =>
+  status === "" || hasCheckTimes(status);
+
+/** "09:05" for the current wall clock — used by the per-row In/Out stamps. */
+const nowHm = (): string => {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+};
+
 const statusClass = (s: string) => {
   switch (s) {
     case "PRESENT":
@@ -80,7 +90,8 @@ interface MarkRow {
   department?: string;
   designation?: string;
   userId?: string;
-  status: EmployeeAttendanceStatus;
+  /** "" = not marked yet; the sheet starts blank and is chosen per employee. */
+  status: EmployeeAttendanceStatus | "";
   checkInTime: string;
   checkOutTime: string;
   /** Periods taught — empty string when not entered (still valid to submit). */
@@ -178,7 +189,9 @@ export const EmployeeAttendancePanel = ({
           department: emp.department,
           designation: emp.designation,
           userId: emp.userId,
-          status: prev?.status ?? "PRESENT",
+          // Blank until someone marks it — an untouched row must not read as
+          // "Present" and get submitted by accident.
+          status: prev?.status ?? "",
           checkInTime: prev?.checkInTime ?? "",
           checkOutTime: prev?.checkOutTime ?? "",
           periodsTaught:
@@ -204,16 +217,16 @@ export const EmployeeAttendancePanel = ({
   const phaseLabel = (() => {
     switch (sheetStatus) {
       case "DRAFT":
-        return "Draft — submit check-in when ready";
+        return "Open — saving rows as people arrive; close the check-in stage when everyone is in";
       case "CHECK_IN_SUBMITTED":
-        return "Check-in submitted — record check-out, then submit check-out";
+        return "Check-in stage closed — keep saving check-out times, then close the check-out stage";
       case "CHECK_OUT_SUBMITTED":
-        return "Check-out submitted — use Final submit to lock the day";
+        return "Check-out stage closed — Final submit locks the day";
       case "LOCKED":
       case "SUBMITTED":
         return "Final — day sheet locked";
       default:
-        return "New sheet — mark status & check-in, then submit check-in";
+        return "Not started — save a row, or fill the table and close the check-in stage";
     }
   })();
 
@@ -233,16 +246,25 @@ export const EmployeeAttendancePanel = ({
     await queryClient.invalidateQueries({ queryKey: ["employee-attendance"] });
   };
 
+  /** Only marked rows are part of the sheet; the rest stay pending. */
+  const markedRows = useMemo(() => rows.filter((r) => r.status !== ""), [rows]);
+  const unmarkedCount = rows.length - markedRows.length;
+
   const submitMut = useMutation({
-    mutationFn: (phase: SubmitPhase) =>
-      unwrap(
+    mutationFn: (phase: SubmitPhase) => {
+      if (markedRows.length === 0) {
+        throw new Error(
+          `Select a status for at least one ${label.toLowerCase()} before submitting`,
+        );
+      }
+      return unwrap(
         api.post("/employee-attendance", {
           category,
           dateBs,
           notes,
           phase,
           asDraft: phase === "DRAFT",
-          entries: rows.map((r) => {
+          entries: markedRows.map((r) => {
             const withTimes = hasCheckTimes(r.status);
             const periodsRaw = r.periodsTaught.trim();
             const periodsNum =
@@ -269,15 +291,16 @@ export const EmployeeAttendancePanel = ({
             };
           }),
         }),
-      ),
+      );
+    },
     onSuccess: async (data, phase) => {
       const msg =
         phase === "DRAFT"
           ? "Draft saved"
           : phase === "CHECK_IN"
-            ? "Check-in submitted — you can return later for check-out"
+            ? `Whole table saved (${markedRows.length} row(s)) — check-in stage closed`
             : phase === "CHECK_OUT"
-              ? "Check-out submitted — use Final submit when the day is complete"
+              ? `Whole table saved (${markedRows.length} row(s)) — check-out stage closed`
               : `${label} attendance submitted and locked for ${dateBs}`;
       toast.success(msg);
       setLoaded(data as EmployeeAttendanceRecord);
@@ -285,6 +308,68 @@ export const EmployeeAttendancePanel = ({
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
+
+  /**
+   * Save one employee's row on its own. Teachers arrive and leave at different
+   * times, so their check-in / check-out is recorded as it happens instead of
+   * waiting to fill in the whole sheet. This never advances the sheet phase —
+   * the check-in / check-out / final submit flow below is unchanged.
+   */
+  const [savingRowId, setSavingRowId] = useState<string | null>(null);
+  const saveRowMut = useMutation({
+    mutationFn: (row: MarkRow) => {
+      const withTimes = acceptsCheckTimes(row.status);
+      const periodsRaw = row.periodsTaught.trim();
+      const periodsNum =
+        category === "TEACHER" && periodsRaw !== "" ? Number(periodsRaw) : undefined;
+      return unwrap(
+        api.post("/employee-attendance/entry", {
+          category,
+          dateBs,
+          teacherId: category === "TEACHER" ? row.id : undefined,
+          staffId: category === "STAFF" ? row.id : undefined,
+          status: row.status || undefined,
+          checkInTime: withTimes ? row.checkInTime || undefined : undefined,
+          checkOutTime: withTimes ? row.checkOutTime || undefined : undefined,
+          periodsTaught:
+            periodsNum !== undefined && Number.isFinite(periodsNum) ? periodsNum : undefined,
+          remarks: row.remarks,
+          source: "MANUAL" as const,
+        }),
+      );
+    },
+    onMutate: (row: MarkRow) => setSavingRowId(row.id),
+    onSuccess: async (data, row) => {
+      toast.success(`${row.fullName} saved`);
+      setLoaded(data as EmployeeAttendanceRecord);
+      // Deliberately not invalidating the mark context: refetching it rebuilds
+      // every row from the server and would discard whatever the user has
+      // typed into other rows but not saved yet.
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["employee-attendance", "dashboard"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["employee-attendance", "register"],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["employee-attendance", "me"] }),
+      ]);
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+    onSettled: () => setSavingRowId(null),
+  });
+
+  /** Stamp the current time into a row and save just that employee. */
+  const stampAndSave = (row: MarkRow, field: "checkInTime" | "checkOutTime") => {
+    const next: MarkRow = {
+      ...row,
+      // A check-in with no status yet means the person has turned up.
+      status: row.status || (field === "checkInTime" ? "PRESENT" : row.status),
+      [field]: nowHm(),
+    };
+    setRows((list) => list.map((r) => (r.id === row.id ? next : r)));
+    saveRowMut.mutate(next);
+  };
 
   const unlockMut = useMutation({
     mutationFn: (id: string) => {
@@ -486,8 +571,15 @@ export const EmployeeAttendancePanel = ({
               {label} attendance — {dateBs}
             </CardTitle>
             <p className="text-sm font-normal text-slate-500">
-              Same table for all steps: mark status, record check-in and submit, then
-              check-out and submit, then Final submit to lock the day.
+              Two ways to fill this sheet, same table.{" "}
+              <strong>One person at a time</strong> — as each{" "}
+              {label.toLowerCase()} arrives or leaves, press{" "}
+              <strong>In now</strong> / <strong>Out now</strong> (or type a time
+              and press <strong>Save</strong>) on their row; only that row is
+              saved. <strong>Everyone at once</strong> — fill the table, then use
+              the “Save all &amp; mark … done” buttons below, which post the whole
+              table as shown on this screen and close that stage. Final submit
+              locks the day.
             </p>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -527,6 +619,17 @@ export const EmployeeAttendancePanel = ({
                 {String(sheetStatus).replace(/_/g, " ")}
               </Badge>
               <span className="text-slate-600">{phaseLabel}</span>
+              <span className="ml-auto text-slate-600">
+                Marked{" "}
+                <strong className="text-slate-800">{markedRows.length}</strong>{" "}
+                of {rows.length}
+                {unmarkedCount > 0 ? (
+                  <span className="text-amber-700">
+                    {" "}
+                    · {unmarkedCount} still blank
+                  </span>
+                ) : null}
+              </span>
             </div>
 
             {isLocked ? (
@@ -560,8 +663,8 @@ export const EmployeeAttendancePanel = ({
                  * Sticky ID + Name while scrolling left-right.
                  */
                 const markMinW = showPeriods
-                  ? "min-w-[1360px]"
-                  : "min-w-[1280px]";
+                  ? "min-w-[1560px]"
+                  : "min-w-[1480px]";
                 const markTableClass = cn(
                   "w-full border-collapse table-fixed",
                   markMinW,
@@ -583,6 +686,7 @@ export const EmployeeAttendancePanel = ({
                     <col style={{ width: "10.5rem" }} />
                     <col style={{ width: "5rem" }} />
                     <col style={{ width: "9rem" }} />
+                    <col style={{ width: "12rem" }} />
                   </colgroup>
                 ) : (
                   <colgroup>
@@ -594,6 +698,7 @@ export const EmployeeAttendancePanel = ({
                     <col style={{ width: "10.5rem" }} />
                     <col style={{ width: "10.5rem" }} />
                     <col style={{ width: "9rem" }} />
+                    <col style={{ width: "12rem" }} />
                   </colgroup>
                 );
                 return (
@@ -632,6 +737,7 @@ export const EmployeeAttendancePanel = ({
                                 <Th className={thClass}>Period</Th>
                               ) : null}
                               <Th className={thClass}>Remarks</Th>
+                              <Th className={thClass}>Save this row</Th>
                             </tr>
                           </TableHead>
                         </Table>
@@ -676,10 +782,11 @@ export const EmployeeAttendancePanel = ({
                                     disabled={!canWriteSheet}
                                     value={row.status}
                                     onChange={(e) => {
-                                      const nextStatus = e.target
-                                        .value as EmployeeAttendanceStatus;
+                                      const nextStatus = e.target.value as
+                                        | EmployeeAttendanceStatus
+                                        | "";
                                       const withTimes =
-                                        hasCheckTimes(nextStatus);
+                                        acceptsCheckTimes(nextStatus);
                                       setRows((list) =>
                                         list.map((r) =>
                                           r.id === row.id
@@ -698,6 +805,9 @@ export const EmployeeAttendancePanel = ({
                                       );
                                     }}
                                   >
+                                    {/* Blank by default — nothing is assumed
+                                        until someone marks the row. */}
+                                    <option value="">— Select —</option>
                                     {STATUSES.map((s) => (
                                       <option key={s} value={s}>
                                         {s.replace(/_/g, " ")}
@@ -706,7 +816,7 @@ export const EmployeeAttendancePanel = ({
                                   </Select>
                                 </Td>
                                 <Td className="p-2">
-                                  {hasCheckTimes(row.status) ? (
+                                  {acceptsCheckTimes(row.status) ? (
                                     <Input
                                       className="time-input h-10 w-[9.75rem] max-w-none shrink-0"
                                       type="time"
@@ -732,7 +842,7 @@ export const EmployeeAttendancePanel = ({
                                   )}
                                 </Td>
                                 <Td className="p-2">
-                                  {hasCheckTimes(row.status) ? (
+                                  {acceptsCheckTimes(row.status) ? (
                                     <Input
                                       className="time-input h-10 w-[9.75rem] max-w-none shrink-0"
                                       type="time"
@@ -801,6 +911,67 @@ export const EmployeeAttendancePanel = ({
                                     }
                                   />
                                 </Td>
+                                {/*
+                                  Per-employee save: each teacher checks in and
+                                  out at their own time, so their row is stored
+                                  on its own without touching anyone else's or
+                                  moving the sheet to the next step.
+                                */}
+                                <Td className="p-2">
+                                  <div className="flex flex-wrap gap-1">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 px-2 text-xs"
+                                      disabled={
+                                        !canWriteSheet ||
+                                        savingRowId === row.id
+                                      }
+                                      title="Stamp the current time as check-in and save this row"
+                                      onClick={() =>
+                                        stampAndSave(row, "checkInTime")
+                                      }
+                                    >
+                                      In now
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 px-2 text-xs"
+                                      disabled={
+                                        !canWriteSheet ||
+                                        savingRowId === row.id
+                                      }
+                                      title="Stamp the current time as check-out and save this row"
+                                      onClick={() =>
+                                        stampAndSave(row, "checkOutTime")
+                                      }
+                                    >
+                                      Out now
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="secondary"
+                                      className="h-8 px-2 text-xs"
+                                      disabled={
+                                        !canWriteSheet ||
+                                        savingRowId === row.id ||
+                                        (row.status === "" &&
+                                          !row.checkInTime &&
+                                          !row.checkOutTime)
+                                      }
+                                      title="Save only this employee's row"
+                                      onClick={() => saveRowMut.mutate(row)}
+                                    >
+                                      {savingRowId === row.id
+                                        ? "Saving…"
+                                        : "Save"}
+                                    </Button>
+                                  </div>
+                                </Td>
                               </tr>
                             ))}
                           </TableBody>
@@ -856,8 +1027,9 @@ export const EmployeeAttendancePanel = ({
                     sheetStatus === "CHECK_OUT_SUBMITTED"
                   }
                   onClick={() => submitMut.mutate("CHECK_IN")}
+                  title={`Posts the whole table as shown on this screen (${markedRows.length} marked row(s)) and marks the check-in stage done. To record one person only, use Save on their row.`}
                 >
-                  Submit check-in
+                  Save all &amp; mark check-in done
                 </Button>
                 <Button
                   variant="secondary"
@@ -870,11 +1042,11 @@ export const EmployeeAttendancePanel = ({
                   onClick={() => submitMut.mutate("CHECK_OUT")}
                   title={
                     sheetStatus === "NONE" || sheetStatus === "DRAFT"
-                      ? "Submit check-in first"
-                      : undefined
+                      ? "Mark the check-in stage done first"
+                      : `Posts the whole table as shown on this screen (${markedRows.length} marked row(s)) and marks the check-out stage done. To record one person only, use Save on their row.`
                   }
                 >
-                  Submit check-out
+                  Save all &amp; mark check-out done
                 </Button>
                 <Button
                   disabled={
@@ -886,7 +1058,7 @@ export const EmployeeAttendancePanel = ({
                   onClick={() => {
                     if (
                       window.confirm(
-                        "Final submit will lock this day sheet. Continue?",
+                        `Final submit posts the whole table as shown here (${markedRows.length} marked row(s)) and locks the day sheet. Continue?`,
                       )
                     ) {
                       submitMut.mutate("FINAL");
@@ -895,8 +1067,8 @@ export const EmployeeAttendancePanel = ({
                   title={
                     sheetStatus !== "CHECK_IN_SUBMITTED" &&
                     sheetStatus !== "CHECK_OUT_SUBMITTED"
-                      ? "Complete check-in (and preferably check-out) first"
-                      : undefined
+                      ? "Use “Save all & mark check-in done” first — the day can only be locked once a stage is closed"
+                      : `Posts the whole table as shown on this screen (${markedRows.length} marked row(s)) and locks the day`
                   }
                 >
                   Final submit &amp; lock

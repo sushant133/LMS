@@ -396,6 +396,7 @@ export const CollegeStaffManager = ({
   };
 
   const staffList = staffQuery.data ?? [];
+  const printableStaff = staffList.filter((staff) => staff.status === "ACTIVE");
   const departmentOptions = useMemo(() => {
     const set = new Set<string>();
     for (const s of staffList) {
@@ -405,7 +406,7 @@ export const CollegeStaffManager = ({
   }, [staffList]);
 
   const printScopeLines = useMemo(() => {
-    const lines: string[] = [];
+    const lines: string[] = ["Active only"];
     if (listCategory) {
       lines.push(`Role: ${title}`);
     }
@@ -436,8 +437,8 @@ export const CollegeStaffManager = ({
   ]);
 
   const handlePrintList = async () => {
-    if (staffList.length === 0) {
-      toast.error("No staff to print");
+    if (printableStaff.length === 0) {
+      toast.error("No activated staff to print");
       return;
     }
     setPrinting(true);
@@ -448,8 +449,8 @@ export const CollegeStaffManager = ({
       }
       await printElementById(STAFF_PRINT_AREA_ID, "staff-list-print");
       toast.success(
-        `Print dialog opened — ${staffList.length} staff member${
-          staffList.length === 1 ? "" : "s"
+        `Print dialog opened — ${printableStaff.length} staff member${
+          printableStaff.length === 1 ? "" : "s"
         }`,
       );
     } catch (e) {
@@ -1026,7 +1027,7 @@ export const CollegeStaffManager = ({
           <Button
             variant="outline"
             className="w-full shrink-0 sm:w-auto"
-            disabled={staffList.length === 0 || printing}
+            disabled={printableStaff.length === 0 || printing}
             onClick={() => void handlePrintList()}
           >
             <Printer className="mr-2 h-4 w-4" />
@@ -1475,8 +1476,8 @@ export const CollegeStaffManager = ({
                     color: "#64748b",
                   }}
                 >
-                  {staffList.length} staff member
-                  {staffList.length === 1 ? "" : "s"}
+                  {printableStaff.length} active staff member
+                  {printableStaff.length === 1 ? "" : "s"}
                 </p>
               </div>
             </div>
@@ -1506,7 +1507,7 @@ export const CollegeStaffManager = ({
               </tr>
             </thead>
             <tbody>
-              {staffList.map((staff, index) => (
+              {printableStaff.map((staff, index) => (
                 <tr
                   key={staff._id}
                   style={{

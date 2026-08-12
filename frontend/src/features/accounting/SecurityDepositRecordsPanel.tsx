@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  BatchRecord,
   EnhancedFeeCollectionRecord,
   StudentRecord,
+  YearRecord,
 } from "@phit-erp/shared";
 import {
   PAYMENT_METHOD_LABELS,
@@ -69,6 +71,27 @@ const useCanEditFeePayments = (): boolean => {
   return (user.secondaryRoles ?? []).some((role) =>
     canManageInstitution(normalizeUserRole(role)),
   );
+};
+
+/** Populated refs arrive as objects, plain ones as ids — compare on the id. */
+const asId = (value: unknown): string => {
+  if (value == null) return "";
+  if (typeof value === "object" && "_id" in (value as Record<string, unknown>)) {
+    return String((value as { _id: unknown })._id);
+  }
+  return String(value);
+};
+
+const studentMatchesGroup = (
+  student: { batchId?: unknown; yearId?: unknown } | undefined | null,
+  batchId: string,
+  yearId: string,
+): boolean => {
+  if (!batchId && !yearId) return true;
+  if (!student) return false;
+  if (batchId && asId(student.batchId) !== batchId) return false;
+  if (yearId && asId(student.yearId) !== yearId) return false;
+  return true;
 };
 
 const resolveStudent = (row: EnhancedFeeCollectionRecord) => {
@@ -139,6 +162,13 @@ export const SecurityDepositRecordsPanel = () => {
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "PAID" | "PARTIAL" | "DUE" | "WAIVED"
   >("ALL");
+  /** Batch / year filters — kept per tab so switching tabs never hides rows. */
+  const [receiptBatchId, setReceiptBatchId] = useState("");
+  const [receiptYearId, setReceiptYearId] = useState("");
+  const [statusBatchId, setStatusBatchId] = useState("");
+  const [statusYearId, setStatusYearId] = useState("");
+  const [pickerBatchId, setPickerBatchId] = useState("");
+  const [pickerYearId, setPickerYearId] = useState("");
 
   const [editingRow, setEditingRow] =
     useState<EnhancedFeeCollectionRecord | null>(null);
@@ -175,14 +205,51 @@ export const SecurityDepositRecordsPanel = () => {
       ),
   });
 
+  const batchesQuery = useQuery({
+    queryKey: ["batches"],
+    queryFn: () => unwrap<BatchRecord[]>(api.get("/academics/batches")),
+  });
+
+  const yearsQuery = useQuery({
+    queryKey: ["years"],
+    queryFn: () => unwrap<YearRecord[]>(api.get("/academics/years")),
+  });
+
+  const batches = batchesQuery.data ?? [];
+  const years = yearsQuery.data ?? [];
+
+  const yearsFor = (batchId: string) =>
+    batchId ? years.filter((y) => asId(y.batchId) === batchId) : years;
+
+  /** "Batch: X", "Year: Y" bits for print captions. */
+  const groupCaption = (batchId: string, yearId: string): string[] => {
+    const bits: string[] = [];
+    const batchName = batches.find((b) => b._id === batchId)?.name?.trim();
+    const yearName = years.find((y) => y._id === yearId)?.name?.trim();
+    if (batchName) bits.push(`Batch: ${batchName}`);
+    if (yearName) bits.push(`Year: ${yearName}`);
+    return bits;
+  };
+
   const invalidate = async () => {
     await invalidateAccountingQueries();
   };
 
   const depositReceipts = useMemo(() => {
-    const rows = (receiptsQuery.data ?? []).filter(
+    let rows = (receiptsQuery.data ?? []).filter(
       (r) => (Number(r.securityDepositPaidNpr) || 0) > 0,
     );
+    if (receiptBatchId || receiptYearId) {
+      rows = rows.filter((row) => {
+        const s = row.studentId as unknown as
+          | { batchId?: unknown; yearId?: unknown }
+          | string
+          | null;
+        // Unpopulated student ref carries no batch/year — cannot match a filter.
+        if (!s || typeof s === "string") return false;
+        return studentMatchesGroup(s, receiptBatchId, receiptYearId);
+      });
+    }
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((row) => {
@@ -190,12 +257,14 @@ export const SecurityDepositRecordsPanel = () => {
       return (
         st.name.toLowerCase().includes(q) ||
         st.admission.toLowerCase().includes(q) ||
+        st.batch.toLowerCase().includes(q) ||
+        st.year.toLowerCase().includes(q) ||
         (row.receiptNumber ?? "").toLowerCase().includes(q) ||
         (row.paidByName ?? "").toLowerCase().includes(q) ||
         (row.receivedByName ?? "").toLowerCase().includes(q)
       );
     });
-  }, [receiptsQuery.data, search]);
+  }, [receiptsQuery.data, search, receiptBatchId, receiptYearId]);
 
   const totalDepositCollected = useMemo(
     () =>
@@ -207,7 +276,9 @@ export const SecurityDepositRecordsPanel = () => {
   );
 
   const studentDepositRows = useMemo(() => {
-    const list = studentsQuery.data ?? [];
+    const list = (studentsQuery.data ?? []).filter((s) =>
+      studentMatchesGroup(s, statusBatchId, statusYearId),
+    );
     const q = search.trim().toLowerCase();
     let rows = list.map((s) => {
       const expected = Number(s.securityDepositExpectedNpr) || 0;
@@ -256,20 +327,26 @@ export const SecurityDepositRecordsPanel = () => {
       );
     }
     return rows.sort((a, b) => b.stillDue - a.stillDue || b.held - a.held);
-  }, [studentsQuery.data, search, statusFilter]);
+  }, [studentsQuery.data, search, statusFilter, statusBatchId, statusYearId]);
 
-  const pickerStudents = useMemo(() => {
+  /** Student picker list for the Record tab — batch/year narrowed, then search. */
+  const pickerMatches = useMemo(() => {
     const q = studentPickerSearch.trim().toLowerCase();
-    const list = studentsQuery.data ?? [];
-    if (!q) return list.slice(0, 40);
-    return list
-      .filter(
-        (s) =>
-          (s.user?.fullName ?? "").toLowerCase().includes(q) ||
-          (s.admissionNumber ?? "").toLowerCase().includes(q),
-      )
-      .slice(0, 40);
-  }, [studentsQuery.data, studentPickerSearch]);
+    return (studentsQuery.data ?? []).filter((s) => {
+      if (!studentMatchesGroup(s, pickerBatchId, pickerYearId)) return false;
+      if (!q) return true;
+      return (
+        (s.user?.fullName ?? "").toLowerCase().includes(q) ||
+        (s.admissionNumber ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [studentsQuery.data, studentPickerSearch, pickerBatchId, pickerYearId]);
+
+  /** Long lists stay capped so the native select does not become unusable. */
+  const pickerStudents = useMemo(
+    () => pickerMatches.slice(0, 40),
+    [pickerMatches],
+  );
 
   const selectedRecordStudent = useMemo(
     () =>
@@ -597,6 +674,13 @@ export const SecurityDepositRecordsPanel = () => {
       return;
     }
 
+    const receiptFilterCaption = [
+      ...groupCaption(receiptBatchId, receiptYearId),
+      search.trim() ? `Search: ${search.trim()}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
     const escapeHtml = (value: string) =>
       value
         .replace(/&/g, "&amp;")
@@ -665,7 +749,7 @@ export const SecurityDepositRecordsPanel = () => {
     ${depositReceipts.length} receipt${depositReceipts.length === 1 ? "" : "s"}
     · Total collected ${escapeHtml(formatCurrencyNpr(totalDepositCollected))}
     · Printed ${escapeHtml(printedAt)}
-    ${search.trim() ? ` · Filter: ${escapeHtml(search.trim())}` : ""}
+    ${receiptFilterCaption ? ` · ${escapeHtml(receiptFilterCaption)}` : ""}
   </div>
   <table>
     <thead>
@@ -762,6 +846,7 @@ export const SecurityDepositRecordsPanel = () => {
     const branding = getPrintInstitutionBranding();
     const institutionHeader = buildPrintInstitutionHeaderHtml({ branding });
     const filterParts = [
+      ...groupCaption(statusBatchId, statusYearId),
       statusFilter !== "ALL" ? `Status: ${statusFilter}` : "",
       search.trim() ? `Search: ${search.trim()}` : "",
     ].filter(Boolean);
@@ -932,6 +1017,37 @@ export const SecurityDepositRecordsPanel = () => {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Select
+                className="w-auto min-w-[140px]"
+                value={receiptBatchId}
+                onChange={(e) => {
+                  setReceiptBatchId(e.target.value);
+                  setReceiptYearId("");
+                }}
+                aria-label="Filter receipts by batch"
+              >
+                <option value="">All batches</option>
+                {batches.map((b) => (
+                  <option key={b._id} value={b._id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                className="w-auto min-w-[140px]"
+                value={receiptYearId}
+                onChange={(e) => setReceiptYearId(e.target.value)}
+                aria-label="Filter receipts by year"
+              >
+                <option value="">
+                  {receiptBatchId ? "All years in batch" : "All years"}
+                </option>
+                {yearsFor(receiptBatchId).map((y) => (
+                  <option key={y._id} value={y._id}>
+                    {y.name}
+                  </option>
+                ))}
+              </Select>
               <Input
                 className="max-w-xs"
                 placeholder="Search student, receipt, name…"
@@ -1186,6 +1302,37 @@ export const SecurityDepositRecordsPanel = () => {
               <CardTitle className="text-base">Student deposit status</CardTitle>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Select
+                className="w-auto min-w-[140px]"
+                value={statusBatchId}
+                onChange={(e) => {
+                  setStatusBatchId(e.target.value);
+                  setStatusYearId("");
+                }}
+                aria-label="Filter students by batch"
+              >
+                <option value="">All batches</option>
+                {batches.map((b) => (
+                  <option key={b._id} value={b._id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                className="w-auto min-w-[140px]"
+                value={statusYearId}
+                onChange={(e) => setStatusYearId(e.target.value)}
+                aria-label="Filter students by year"
+              >
+                <option value="">
+                  {statusBatchId ? "All years in batch" : "All years"}
+                </option>
+                {yearsFor(statusBatchId).map((y) => (
+                  <option key={y._id} value={y._id}>
+                    {y.name}
+                  </option>
+                ))}
+              </Select>
               <Select
                 className="w-auto min-w-[140px]"
                 value={statusFilter}
@@ -1446,6 +1593,45 @@ export const SecurityDepositRecordsPanel = () => {
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <FormField label="Batch">
+                <Select
+                  value={pickerBatchId}
+                  onChange={(e) => {
+                    setPickerBatchId(e.target.value);
+                    setPickerYearId("");
+                    // Selected student may not belong to the new batch
+                    setRecordForm((f) => ({ ...f, studentId: "" }));
+                  }}
+                >
+                  <option value="">All batches</option>
+                  {batches.map((b) => (
+                    <option key={b._id} value={b._id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Year">
+                <Select
+                  value={pickerYearId}
+                  onChange={(e) => {
+                    setPickerYearId(e.target.value);
+                    setRecordForm((f) => ({ ...f, studentId: "" }));
+                  }}
+                >
+                  <option value="">
+                    {pickerBatchId ? "All years in batch" : "All years"}
+                  </option>
+                  {yearsFor(pickerBatchId).map((y) => (
+                    <option key={y._id} value={y._id}>
+                      {y.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            </div>
+
             <FormField label="Student">
               <Input
                 placeholder="Search name or admission number…"
@@ -1459,7 +1645,11 @@ export const SecurityDepositRecordsPanel = () => {
                   setRecordForm((f) => ({ ...f, studentId: e.target.value }))
                 }
               >
-                <option value="">Select student…</option>
+                <option value="">
+                  {pickerMatches.length === 0
+                    ? "No students match this filter"
+                    : "Select student…"}
+                </option>
                 {pickerStudents.map((s) => {
                   const expected = Number(s.securityDepositExpectedNpr) || 0;
                   const held = Number(s.securityDepositNpr) || 0;
@@ -1478,6 +1668,13 @@ export const SecurityDepositRecordsPanel = () => {
                   );
                 })}
               </Select>
+              {pickerMatches.length > pickerStudents.length ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  Showing first {pickerStudents.length} of{" "}
+                  {pickerMatches.length} students — narrow by batch, year, or
+                  search.
+                </p>
+              ) : null}
               {selectedRecordStudent ? (
                 <p className="mt-2 text-xs text-slate-600">
                   Plan{" "}

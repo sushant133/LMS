@@ -2550,6 +2550,185 @@ export const listIncome = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, "Income records fetched", income);
 });
 
+/** Human label for a fee type code on the income overview. */
+const FEE_TYPE_INCOME_LABELS: Record<string, string> = {
+  ADMISSION: "Admission Fee",
+  REGISTRATION: "Registration Fee",
+  TUITION: "Tuition Fee",
+  MONTHLY: "Monthly Fee",
+  EXAM: "Exam Fee",
+  PRACTICAL: "Practical Fee",
+  LIBRARY: "Library Fee",
+  LAB: "Lab Fee",
+  TRANSPORT: "Transport Fee",
+  HOSTEL: "Hostel Fee",
+  FINE: "Fine / Late Fee",
+  MISC: "Miscellaneous Fee",
+  OTHER: "Other Fee",
+  ANNUAL: "Annual Fee"
+};
+
+/**
+ * Complete income picture for the Income screen.
+ *
+ * Student fees and the Other Income register are two different books: fees live in
+ * FeeCollection (posted from Student Fee Records) and non-fee income in
+ * AccountingIncome. Both credit 4xxx income accounts, so a screen that lists only
+ * AccountingIncome looks empty even when fees have been collected all year. This
+ * endpoint merges the two into one cash-basis view.
+ *
+ * Excluded on purpose: admission OPEN- plan rows (a charge, not a receipt) and
+ * security deposits (a refundable liability — reported separately as a memo).
+ */
+export const getIncomeOverview = asyncHandler(async (req: Request, res: Response) => {
+  const schoolId = tenantObjectId(req);
+  const fromDateBs = typeof req.query.fromDateBs === "string" ? req.query.fromDateBs.trim() : "";
+  const toDateBs = typeof req.query.toDateBs === "string" ? req.query.toDateBs.trim() : "";
+
+  // BS dates are zero-padded YYYY-MM-DD, so lexical compare is chronological.
+  const inRange = (value: unknown): boolean => {
+    const dateBs = String(value ?? "");
+    if (!dateBs) return false;
+    if (fromDateBs && dateBs < fromDateBs) return false;
+    if (toDateBs && dateBs > toDateBs) return false;
+    return true;
+  };
+
+  const [collections, incomes] = await Promise.all([
+    FeeCollection.find({ schoolId, isDeleted: false })
+      .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
+      .sort({ paidDateBs: -1 })
+      .lean(),
+    AccountingIncome.find({ schoolId, isDeleted: false }).sort({ dateBs: -1 }).lean()
+  ]);
+
+  const feeReceipts = filterOutOpeningTuitionCharges(
+    collections as unknown as Array<Record<string, unknown>>
+  ).filter((row) => inRange(row.paidDateBs)) as unknown as typeof collections;
+
+  const otherIncomes = incomes.filter((row) => inRange(row.dateBs));
+
+  const byCategory = new Map<string, { label: string; amountNpr: number; kind: "FEE" | "OTHER" }>();
+  const addCategory = (label: string, amountNpr: number, kind: "FEE" | "OTHER") => {
+    if (amountNpr <= 0) return;
+    const key = `${kind}:${label}`;
+    const current = byCategory.get(key) ?? { label, amountNpr: 0, kind };
+    current.amountNpr += amountNpr;
+    byCategory.set(key, current);
+  };
+
+  const studentName = (row: { studentId?: unknown }): string => {
+    const student = row.studentId as
+      | { user?: { fullName?: string }; admissionNumber?: string }
+      | string
+      | null
+      | undefined;
+    if (!student || typeof student === "string") return "Student";
+    return student.user?.fullName || student.admissionNumber || "Student";
+  };
+
+  type OverviewRow = {
+    id: string;
+    kind: "FEE" | "OTHER";
+    dateBs: string;
+    receiptNumber: string;
+    category: string;
+    source: string;
+    description: string;
+    paymentMethod: string;
+    amountNpr: number;
+  };
+
+  const rows: OverviewRow[] = [];
+  let studentFeeNpr = 0;
+  let securityDepositNpr = 0;
+
+  for (const receipt of feeReceipts) {
+    const paid = Number(receipt.amountPaidNpr) || 0;
+    const deposit = Number((receipt as { securityDepositPaidNpr?: number }).securityDepositPaidNpr) || 0;
+    securityDepositNpr += deposit;
+    if (paid <= 0) continue;
+    studentFeeNpr += paid;
+
+    // Split the cash received across the fee lines it was collected against so the
+    // category totals mirror the journal (deposit lines are liability, not income).
+    const feeLines = (receipt.feeBreakdown ?? []).filter(
+      (line) => String(line.feeType) !== "SECURITY_DEPOSIT"
+    );
+    const lineTotal = feeLines.reduce((sum, line) => sum + (Number(line.amountNpr) || 0), 0);
+    if (lineTotal > 0) {
+      for (const line of feeLines) {
+        const share = paid * ((Number(line.amountNpr) || 0) / lineTotal);
+        const type = String(line.feeType);
+        addCategory(FEE_TYPE_INCOME_LABELS[type] ?? type, share, "FEE");
+      }
+    } else {
+      addCategory("Tuition Fee", paid, "FEE");
+    }
+
+    rows.push({
+      id: String(receipt._id),
+      kind: "FEE",
+      dateBs: String(receipt.paidDateBs ?? ""),
+      receiptNumber: String(receipt.receiptNumber ?? ""),
+      category: "Student Fee",
+      source: studentName(receipt),
+      description:
+        feeLines.map((line) => line.title).filter(Boolean).join(", ") || "Fee collection",
+      paymentMethod: String(receipt.paymentMethod ?? ""),
+      amountNpr: paid
+    });
+  }
+
+  let otherIncomeNpr = 0;
+  for (const income of otherIncomes) {
+    const amount = Number(income.amountNpr) || 0;
+    otherIncomeNpr += amount;
+    addCategory(income.category, amount, "OTHER");
+    rows.push({
+      id: String(income._id),
+      kind: "OTHER",
+      dateBs: String(income.dateBs ?? ""),
+      receiptNumber: String(income.receiptNumber ?? income.voucherNumber ?? ""),
+      category: income.category,
+      source: income.source,
+      description: income.description ?? "",
+      paymentMethod: String(income.paymentMethod ?? ""),
+      amountNpr: amount
+    });
+  }
+
+  rows.sort((a, b) => b.dateBs.localeCompare(a.dateBs) || b.amountNpr - a.amountNpr);
+
+  const byMonth = new Map<string, number>();
+  for (const row of rows) {
+    if (row.dateBs.length < 7) continue;
+    const month = row.dateBs.slice(0, 7);
+    byMonth.set(month, (byMonth.get(month) ?? 0) + row.amountNpr);
+  }
+
+  return sendSuccess(res, "Income overview fetched", {
+    fromDateBs: fromDateBs || null,
+    toDateBs: toDateBs || null,
+    totals: {
+      studentFeeNpr,
+      otherIncomeNpr,
+      totalIncomeNpr: studentFeeNpr + otherIncomeNpr,
+      /** Memo only — refundable, never income. */
+      securityDepositCollectedNpr: securityDepositNpr,
+      feeReceiptCount: rows.filter((row) => row.kind === "FEE").length,
+      otherIncomeCount: otherIncomes.length
+    },
+    byCategory: [...byCategory.values()].sort((a, b) => b.amountNpr - a.amountNpr),
+    byMonth: [...byMonth.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([label, amountNpr]) => ({ label, amountNpr })),
+    rowCount: rows.length,
+    /** Capped for payload size — totals above always cover every row. */
+    rows: rows.slice(0, 500)
+  });
+});
+
 export const createIncome = asyncHandler(async (req: Request, res: Response) => {
   const payload = accountingIncomeSchema.parse(req.body);
   ensureValidBsDate(payload.dateBs);

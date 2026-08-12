@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { getTodayBs } from "@munatech/nepali-datepicker";
@@ -175,6 +175,7 @@ export const SubjectAssignmentManager = () => {
   );
   const [deactivateToBs, setDeactivateToBs] = useState("");
   const [deactivateReason, setDeactivateReason] = useState("");
+  const actionPanelRef = useRef<HTMLDivElement>(null);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -419,6 +420,19 @@ export const SubjectAssignmentManager = () => {
     setDeactivateReason("");
   };
 
+  // Cards mount after state updates — scroll once they exist so Edit/Deactivate
+  // is not left off-screen below the assignment table.
+  useEffect(() => {
+    if (!editingRow && !deactivatingRow) return;
+    const frame = window.requestAnimationFrame(() => {
+      actionPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editingRow, deactivatingRow]);
+
   const updateMutation = useMutation({
     mutationFn: async () => {
       if (!editingRow || !editDraft) {
@@ -617,6 +631,186 @@ export const SubjectAssignmentManager = () => {
 
       {tab === "assignments" ? (
         <>
+          {canManage && editingRow && editDraft ? (
+            <div ref={actionPanelRef} className="scroll-mt-28">
+            <Card className="border-brand-200 shadow-sm">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Edit Assignment</CardTitle>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {labelOfTeacher(editingRow.teacherId)} ·{" "}
+                    {labelOfSubject(editingRow.subjectId)} · {groupLabel(editingRow)}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={closeEdit}>
+                  Cancel
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <FormField label="Type">
+                    <Select
+                      value={editDraft.assignmentType}
+                      onChange={(e) =>
+                        setEditDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                assignmentType: e.target.value as SubjectAssignmentType,
+                              }
+                            : d,
+                        )
+                      }
+                    >
+                      {SUBJECT_ASSIGNMENT_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  {editDraft.assignmentType === "UNIT" ? (
+                    <>
+                      <FormField label="Unit From">
+                        <NumberInput
+                          value={editDraft.unitFrom === "" ? undefined : editDraft.unitFrom}
+                          onChange={(e) =>
+                            setEditDraft((d) =>
+                              d
+                                ? {
+                                    ...d,
+                                    unitFrom: Number.isNaN(e.target.valueAsNumber)
+                                      ? ""
+                                      : e.target.valueAsNumber,
+                                  }
+                                : d,
+                            )
+                          }
+                        />
+                      </FormField>
+                      <FormField label="Unit To">
+                        <NumberInput
+                          value={editDraft.unitTo === "" ? undefined : editDraft.unitTo}
+                          onChange={(e) =>
+                            setEditDraft((d) =>
+                              d
+                                ? {
+                                    ...d,
+                                    unitTo: Number.isNaN(e.target.valueAsNumber)
+                                      ? ""
+                                      : e.target.valueAsNumber,
+                                  }
+                                : d,
+                            )
+                          }
+                        />
+                      </FormField>
+                    </>
+                  ) : null}
+                  {editDraft.assignmentType === "PERCENTAGE" ? (
+                    <FormField label="% (1–99)">
+                      <NumberInput
+                        value={
+                          editDraft.assignedPercentage === ""
+                            ? undefined
+                            : editDraft.assignedPercentage
+                        }
+                        onChange={(e) =>
+                          setEditDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  assignedPercentage: Number.isNaN(e.target.valueAsNumber)
+                                    ? ""
+                                    : e.target.valueAsNumber,
+                                }
+                              : d,
+                          )
+                        }
+                      />
+                    </FormField>
+                  ) : null}
+                  <FormField label="Effective From (BS)">
+                    <NepaliDateField
+                      value={editDraft.effectiveFromBs}
+                      onChange={(value) =>
+                        setEditDraft((d) => (d ? { ...d, effectiveFromBs: value } : d))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Remarks">
+                    <Input
+                      value={editDraft.remarks}
+                      onChange={(e) =>
+                        setEditDraft((d) =>
+                          d ? { ...d, remarks: e.target.value } : d,
+                        )
+                      }
+                    />
+                  </FormField>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={closeEdit}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={updateMutation.isPending}
+                    onClick={() => updateMutation.mutate()}
+                  >
+                    {updateMutation.isPending ? "Saving..." : "Save changes"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            </div>
+          ) : null}
+
+          {canManage && deactivatingRow ? (
+            <div ref={actionPanelRef} className="scroll-mt-28">
+            <Card className="border-amber-200 shadow-sm">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Deactivate Assignment</CardTitle>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Ends teaching access for {labelOfTeacher(deactivatingRow.teacherId)} on{" "}
+                    {labelOfSubject(deactivatingRow.subjectId)} ({groupLabel(deactivatingRow)}
+                    ). History is kept with status ENDED.
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={closeDeactivate}>
+                  Cancel
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Effective To (BS)">
+                    <NepaliDateField value={deactivateToBs} onChange={setDeactivateToBs} />
+                  </FormField>
+                  <FormField label="Reason">
+                    <Input
+                      value={deactivateReason}
+                      onChange={(e) => setDeactivateReason(e.target.value)}
+                      placeholder="Deactivated by admin"
+                    />
+                  </FormField>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={closeDeactivate}>
+                    Cancel
+                  </Button>
+                  <Button
+                    className="bg-amber-600 hover:bg-amber-700"
+                    disabled={deactivateMutation.isPending || !deactivateToBs}
+                    onClick={() => deactivateMutation.mutate()}
+                  >
+                    {deactivateMutation.isPending ? "Deactivating..." : "Deactivate"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            </div>
+          ) : null}
+
           {canManage ? (
             <Card>
               <CardHeader>
@@ -1069,182 +1263,6 @@ export const SubjectAssignmentManager = () => {
               ) : null}
             </CardContent>
           </Card>
-
-          {canManage && editingRow && editDraft ? (
-            <Card className="border-brand-200 shadow-sm">
-              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-                <div>
-                  <CardTitle>Edit Assignment</CardTitle>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {labelOfTeacher(editingRow.teacherId)} ·{" "}
-                    {labelOfSubject(editingRow.subjectId)} · {groupLabel(editingRow)}
-                  </p>
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={closeEdit}>
-                  Cancel
-                </Button>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <FormField label="Type">
-                    <Select
-                      value={editDraft.assignmentType}
-                      onChange={(e) =>
-                        setEditDraft((d) =>
-                          d
-                            ? {
-                                ...d,
-                                assignmentType: e.target.value as SubjectAssignmentType,
-                              }
-                            : d,
-                        )
-                      }
-                    >
-                      {SUBJECT_ASSIGNMENT_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  {editDraft.assignmentType === "UNIT" ? (
-                    <>
-                      <FormField label="Unit From">
-                        <NumberInput
-                          value={editDraft.unitFrom === "" ? undefined : editDraft.unitFrom}
-                          onChange={(e) =>
-                            setEditDraft((d) =>
-                              d
-                                ? {
-                                    ...d,
-                                    unitFrom: Number.isNaN(e.target.valueAsNumber)
-                                      ? ""
-                                      : e.target.valueAsNumber,
-                                  }
-                                : d,
-                            )
-                          }
-                        />
-                      </FormField>
-                      <FormField label="Unit To">
-                        <NumberInput
-                          value={editDraft.unitTo === "" ? undefined : editDraft.unitTo}
-                          onChange={(e) =>
-                            setEditDraft((d) =>
-                              d
-                                ? {
-                                    ...d,
-                                    unitTo: Number.isNaN(e.target.valueAsNumber)
-                                      ? ""
-                                      : e.target.valueAsNumber,
-                                  }
-                                : d,
-                            )
-                          }
-                        />
-                      </FormField>
-                    </>
-                  ) : null}
-                  {editDraft.assignmentType === "PERCENTAGE" ? (
-                    <FormField label="% (1–99)">
-                      <NumberInput
-                        value={
-                          editDraft.assignedPercentage === ""
-                            ? undefined
-                            : editDraft.assignedPercentage
-                        }
-                        onChange={(e) =>
-                          setEditDraft((d) =>
-                            d
-                              ? {
-                                  ...d,
-                                  assignedPercentage: Number.isNaN(e.target.valueAsNumber)
-                                    ? ""
-                                    : e.target.valueAsNumber,
-                                }
-                              : d,
-                          )
-                        }
-                      />
-                    </FormField>
-                  ) : null}
-                  <FormField label="Effective From (BS)">
-                    <NepaliDateField
-                      value={editDraft.effectiveFromBs}
-                      onChange={(value) =>
-                        setEditDraft((d) => (d ? { ...d, effectiveFromBs: value } : d))
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Remarks">
-                    <Input
-                      value={editDraft.remarks}
-                      onChange={(e) =>
-                        setEditDraft((d) =>
-                          d ? { ...d, remarks: e.target.value } : d,
-                        )
-                      }
-                    />
-                  </FormField>
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={closeEdit}>
-                    Cancel
-                  </Button>
-                  <Button
-                    disabled={updateMutation.isPending}
-                    onClick={() => updateMutation.mutate()}
-                  >
-                    {updateMutation.isPending ? "Saving..." : "Save changes"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {canManage && deactivatingRow ? (
-            <Card className="border-amber-200 shadow-sm">
-              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-                <div>
-                  <CardTitle>Deactivate Assignment</CardTitle>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Ends teaching access for {labelOfTeacher(deactivatingRow.teacherId)} on{" "}
-                    {labelOfSubject(deactivatingRow.subjectId)} ({groupLabel(deactivatingRow)}
-                    ). History is kept with status ENDED.
-                  </p>
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={closeDeactivate}>
-                  Cancel
-                </Button>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <FormField label="Effective To (BS)">
-                    <NepaliDateField value={deactivateToBs} onChange={setDeactivateToBs} />
-                  </FormField>
-                  <FormField label="Reason">
-                    <Input
-                      value={deactivateReason}
-                      onChange={(e) => setDeactivateReason(e.target.value)}
-                      placeholder="Deactivated by admin"
-                    />
-                  </FormField>
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={closeDeactivate}>
-                    Cancel
-                  </Button>
-                  <Button
-                    className="bg-amber-600 hover:bg-amber-700"
-                    disabled={deactivateMutation.isPending || !deactivateToBs}
-                    onClick={() => deactivateMutation.mutate()}
-                  >
-                    {deactivateMutation.isPending ? "Deactivating..." : "Deactivate"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
 
           <Card>
             <CardHeader>

@@ -1134,7 +1134,7 @@ export const LibraryManager = () => {
                       placeholder="e.g. Anatomy, Physiology"
                     />
                   </FormField>
-                  <FormField label="Year">
+                  <FormField label="Year / Book type">
                     <Select
                       value={bookForm.yearLevel ?? "1st Year"}
                       onChange={(e) =>
@@ -1152,8 +1152,10 @@ export const LibraryManager = () => {
                     </Select>
                   </FormField>
                   <p className="text-xs text-slate-500 -mt-1">
-                    Assign books to 1st, 2nd, or 3rd Year so staff can filter the
-                    catalog by year. Use “All Years” for shared/reference books.
+                    Assign course books to 1st, 2nd, or 3rd Year, or “All Years”
+                    when a title is used across years. Books that are not course
+                    books go under “Reference Books” (dictionaries, atlases,
+                    handbooks) or “Other Books” (novels, magazines, donations).
                   </p>
                   <FormField label="ISBN (optional)">
                     <Input
@@ -1451,7 +1453,7 @@ export const LibraryManager = () => {
                       )
                     }
                   >
-                    <option value="ALL">All years</option>
+                    <option value="ALL">All years &amp; types</option>
                     {LIBRARY_YEAR_LEVELS.map((year) => (
                       <option key={year} value={year}>
                         {year}
@@ -1460,7 +1462,7 @@ export const LibraryManager = () => {
                   </Select>
                   <Input
                     className="max-w-xs"
-                    placeholder="Search title, author, year, or book code…"
+                    placeholder="Search title, author, year/type, or book code…"
                     value={inventorySearch}
                     onChange={(e) => setInventorySearch(e.target.value)}
                   />

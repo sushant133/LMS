@@ -19,6 +19,8 @@ export const invalidateAccountingQueries = async (): Promise<void> => {
     queryClient.invalidateQueries({ queryKey: ["accounting-expenses"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-purchases"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-income"] }),
+    // Combined fee + non-fee income view (Income tab) — moves with fee receipts too
+    queryClient.invalidateQueries({ queryKey: ["accounting-income-overview"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-salaries"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-salary-records"] }),
     queryClient.invalidateQueries({ queryKey: ["accounting-salary-employees"] }),

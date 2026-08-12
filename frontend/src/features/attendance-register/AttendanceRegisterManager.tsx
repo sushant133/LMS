@@ -97,6 +97,13 @@ export const AttendanceRegisterManager = ({
     null,
   );
   const [exportingPdf, setExportingPdf] = useState(false);
+  /** Signature names printed in the footer — asked for before every print / PDF. */
+  const [signatures, setSignatures] = useState({
+    preparedBy: "",
+    verifiedBy: "",
+    approvedBy: "",
+  });
+  const [signPrompt, setSignPrompt] = useState<null | "print" | "pdf">(null);
 
   // Seed month from meta once
   const effectiveMonth = monthBs || meta?.defaultMonthBs || "";
@@ -244,10 +251,33 @@ export const AttendanceRegisterManager = ({
 
   const printOptions = () => ({
     appName: appConfig.appName || "Attendance Register",
-    preparedBy: user?.fullName ?? "—",
+    preparedBy: signatures.preparedBy.trim() || user?.fullName || "",
+    verifiedBy: signatures.verifiedBy.trim(),
+    approvedBy: signatures.approvedBy.trim(),
     tabLabel:
       tab === "TEACHER" ? "Teachers" : tab === "STAFF" ? "Staff" : "Students",
   });
+
+  /** Ask for the footer signatory names before printing / exporting. */
+  const askSignatures = (mode: "print" | "pdf") => {
+    if (!data || data.rows.length === 0) {
+      toast.error("Register not ready to export");
+      return;
+    }
+    setSignatures((prev) =>
+      prev.preparedBy.trim()
+        ? prev
+        : { ...prev, preparedBy: user?.fullName ?? "" },
+    );
+    setSignPrompt(mode);
+  };
+
+  const confirmSignatures = () => {
+    const mode = signPrompt;
+    setSignPrompt(null);
+    if (mode === "print") printRegister();
+    else if (mode === "pdf") void downloadRegisterPdf();
+  };
 
   /** Browser print (Save as PDF from dialog). */
   const printRegister = () => {
@@ -310,7 +340,7 @@ export const AttendanceRegisterManager = ({
         variant="outline"
         size="sm"
         disabled={!data || data.rows.length === 0}
-        onClick={printRegister}
+        onClick={() => askSignatures("print")}
       >
         <Printer className="mr-1.5 h-4 w-4" />
         Print
@@ -320,7 +350,7 @@ export const AttendanceRegisterManager = ({
         variant="outline"
         size="sm"
         disabled={!data || data.rows.length === 0 || exportingPdf}
-        onClick={() => void downloadRegisterPdf()}
+        onClick={() => askSignatures("pdf")}
       >
         <Download className="mr-1.5 h-4 w-4" />
         {exportingPdf ? "PDF…" : "PDF"}
@@ -729,6 +759,86 @@ export const AttendanceRegisterManager = ({
 
         </>
       )}
+
+      {/* Signature names — asked before print / PDF */}
+      {signPrompt ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"
+          onClick={() => setSignPrompt(null)}
+          role="presentation"
+        >
+          <form
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              confirmSignatures();
+            }}
+            aria-label="Signature names"
+          >
+            <h3 className="text-lg font-semibold text-slate-900">
+              Signature names
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              These names print under the signature lines at the bottom of the
+              register. Leave a field blank to print only the line.
+            </p>
+            <div className="mt-4 space-y-3">
+              <FormField label="Prepared by">
+                <Input
+                  autoFocus
+                  value={signatures.preparedBy}
+                  onChange={(e) =>
+                    setSignatures((p) => ({ ...p, preparedBy: e.target.value }))
+                  }
+                  placeholder="Full name"
+                />
+              </FormField>
+              <FormField label="Verified by">
+                <Input
+                  value={signatures.verifiedBy}
+                  onChange={(e) =>
+                    setSignatures((p) => ({ ...p, verifiedBy: e.target.value }))
+                  }
+                  placeholder="Full name"
+                />
+              </FormField>
+              <FormField label="Approved by">
+                <Input
+                  value={signatures.approvedBy}
+                  onChange={(e) =>
+                    setSignatures((p) => ({ ...p, approvedBy: e.target.value }))
+                  }
+                  placeholder="Full name"
+                />
+              </FormField>
+            </div>
+            <div className="mt-5 flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setSignPrompt(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" className="flex-1">
+                {signPrompt === "print" ? (
+                  <>
+                    <Printer className="mr-1.5 h-4 w-4" />
+                    Print
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-1.5 h-4 w-4" />
+                    Download PDF
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {/* Cell detail modal */}
       {detail ? (

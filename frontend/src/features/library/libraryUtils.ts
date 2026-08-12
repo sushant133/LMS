@@ -437,7 +437,7 @@ export async function exportLibraryInventoryPdf(
 
     const metaLines = [
       `Author: ${book.author?.trim() || "—"}   ·   ISBN: ${book.isbn?.trim() || "—"}   ·   Category: ${book.category?.trim() || "—"}`,
-      `Year level: ${book.yearLevel ?? "All Years"}   ·   Default shelf: ${book.shelfLocation?.trim() || "—"}   ·   Stock status: ${book.status}`,
+      `Year / type: ${book.yearLevel ?? "All Years"}   ·   Default shelf: ${book.shelfLocation?.trim() || "—"}   ·   Stock status: ${book.status}`,
       `Copies: total ${book.totalCopies} · available ${book.availableCopies} · issued ${book.issuedCopies} · listed codes ${copies.length}`,
     ];
 

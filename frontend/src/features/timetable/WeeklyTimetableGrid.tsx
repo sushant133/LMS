@@ -57,23 +57,23 @@ const dayPad: Record<TimetableDensity, string> = {
 
 const headerLabel: Record<TimetableDensity, string> = {
   screen: "text-[11px]",
-  compact: "text-[9px]",
-  dense: "text-[8px]",
-  ultra: "text-[7.5px]",
+  compact: "text-[12px]",
+  dense: "text-[11px]",
+  ultra: "text-[9.5px]",
 };
 
 const headerSub: Record<TimetableDensity, string> = {
   screen: "text-[10px]",
-  compact: "text-[8px]",
-  dense: "text-[7.5px]",
-  ultra: "text-[7px]",
+  compact: "text-[11px]",
+  dense: "text-[10px]",
+  ultra: "text-[8.5px]",
 };
 
 const dayLabel: Record<TimetableDensity, string> = {
   screen: "text-xs",
-  compact: "text-[10px]",
-  dense: "text-[9px]",
-  ultra: "text-[8px]",
+  compact: "text-[13px]",
+  dense: "text-[12px]",
+  ultra: "text-[10px]",
 };
 
 export const WeeklyTimetableGrid = ({
@@ -143,7 +143,7 @@ export const WeeklyTimetableGrid = ({
           className={cn(
             "tt-print-table w-full border-collapse",
             isPrint
-              ? "table-fixed text-[9px]"
+              ? "table-fixed text-[11px]"
               : "min-w-[720px] text-sm",
           )}
           style={
@@ -180,7 +180,7 @@ export const WeeklyTimetableGrid = ({
                   "tt-print-th sticky left-0 z-20 border border-slate-400 bg-slate-900 text-left font-bold uppercase tracking-wide text-white",
                   "print:static print:border-black print:bg-slate-900 print:text-white",
                   headerPad[density],
-                  isPrint ? "text-[8px]" : "text-xs",
+                  isPrint ? headerLabel[density] : "text-xs",
                 )}
                 style={{
                   WebkitPrintColorAdjust: "exact",

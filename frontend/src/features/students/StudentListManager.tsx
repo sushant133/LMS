@@ -49,6 +49,7 @@ import {
 import { printElementById } from "lib/printUtils";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { Badge } from "components/ui/badge";
+import { bsDateToAdString } from "components/shared/NepaliDateField";
 import { downloadStudentsExcel } from "./studentExportUtils";
 import { countPendingRequiredDocuments } from "./studentDocumentUtils";
 
@@ -57,7 +58,7 @@ const STUDENTS_PRINT_AREA_ID = "students-list-print-area";
 const printTh: CSSProperties = {
   border: "1px solid #64748b",
   background: "#e2e8f0",
-  padding: "5px 6px",
+  padding: "5px 5px",
   fontSize: 9,
   fontWeight: 700,
   textAlign: "left",
@@ -68,13 +69,19 @@ const printTh: CSSProperties = {
 
 const printTd: CSSProperties = {
   border: "1px solid #94a3b8",
-  padding: "4px 6px",
+  padding: "4px 5px",
   fontSize: 9,
   color: "#0f172a",
   verticalAlign: "top",
-  wordBreak: "break-word",
-  overflowWrap: "anywhere",
+  wordBreak: "normal",
+  overflowWrap: "break-word",
   lineHeight: 1.35,
+};
+
+const printTdNowrap: CSSProperties = {
+  ...printTd,
+  whiteSpace: "nowrap",
+  overflowWrap: "normal",
 };
 
 const printSub: CSSProperties = {
@@ -82,7 +89,12 @@ const printSub: CSSProperties = {
   color: "#475569",
   lineHeight: 1.3,
   marginTop: 1,
+  whiteSpace: "nowrap",
 };
+
+const formatStudentPrintAddress = (
+  address?: StudentRecord["address"],
+): string => formatPrintAddress(address) || "—";
 
 export const StudentListManager = () => {
   const navigate = useNavigate();
@@ -1051,7 +1063,7 @@ export const StudentListManager = () => {
         style={{
           background: "#ffffff",
           color: "#0f172a",
-          padding: "8px 4px",
+          padding: "6px 2px",
           fontFamily:
             '"IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif',
           boxSizing: "border-box",
@@ -1183,31 +1195,82 @@ export const StudentListManager = () => {
           }}
         >
           <colgroup>
-            {/* S.N. | Name | Mobile | Gender | Roll | Admission | Primary | Secondary | Status? | Guardian | Fee? */}
-            <col style={{ width: "3.5%" }} />
-            <col style={{ width: canManage && isCollege ? "15%" : "16%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "5.5%" }} />
-            <col style={{ width: "5.5%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "8%" }} />
-            {isCollege ? <col style={{ width: "8%" }} /> : null}
-            <col style={{ width: canManage ? "12%" : "14%" }} />
-            {canManage ? <col style={{ width: "9%" }} /> : null}
+            {/* Landscape A4: compact columns nowrap; name / father / address wrap. */}
+            {isCollege ? (
+              canManage ? (
+                <>
+                  <col style={{ width: "4%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "5%" }} />
+                  <col style={{ width: "11%" }} />
+                  <col style={{ width: "9%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "8%" }} />
+                </>
+              ) : (
+                <>
+                  <col style={{ width: "4%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "11%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "5%" }} />
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "15%" }} />
+                  <col style={{ width: "18%" }} />
+                </>
+              )
+            ) : canManage ? (
+              <>
+                <col style={{ width: "3.5%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "4.5%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "7%" }} />
+              </>
+            ) : (
+              <>
+                <col style={{ width: "4%" }} />
+                <col style={{ width: "15%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "6.5%" }} />
+                <col style={{ width: "5%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "13.5%" }} />
+              </>
+            )}
           </colgroup>
           <thead>
             <tr>
               <th style={{ ...printTh, textAlign: "center" }}>S.N.</th>
-              <th style={printTh}>Name / Email</th>
+              <th style={printTh}>Name</th>
               <th style={printTh}>Mobile</th>
               <th style={{ ...printTh, textAlign: "center" }}>Gender</th>
-              <th style={{ ...printTh, textAlign: "center" }}>Roll No.</th>
-              <th style={printTh}>Admission / Reg. No.</th>
-              <th style={printTh}>{labels.primary}</th>
-              <th style={printTh}>{labels.secondary}</th>
-              {isCollege ? <th style={printTh}>Status</th> : null}
-              <th style={printTh}>Guardian / Phone</th>
+              <th style={{ ...printTh, textAlign: "center" }}>Roll</th>
+              <th style={printTh}>Reg. No.</th>
+              {!isCollege ? (
+                <>
+                  <th style={printTh}>{labels.primary}</th>
+                  <th style={printTh}>{labels.secondary}</th>
+                </>
+              ) : null}
+              <th style={printTh}>DOB (BS)</th>
+              <th style={printTh}>Father Name</th>
+              <th style={printTh}>Address</th>
               {canManage ? (
                 <th style={{ ...printTh, textAlign: "right" }}>Total Fee</th>
               ) : null}
@@ -1218,21 +1281,17 @@ export const StudentListManager = () => {
               const displayName =
                 student.user?.fullName ?? "Unknown student";
               const displayPhone = student.user?.phone || "—";
-              const primaryLabel =
-                primaryMap.get(
-                  (isCollege ? student.batchId : student.classId) ?? "",
-                ) ?? "—";
-              const secondaryLabel =
-                secondaryMap.get(
-                  (isCollege ? student.yearId : student.sectionId) ?? "",
-                ) ?? "—";
-              const academicStatus = student.academicStatus ?? "ACTIVE";
-              const statusLabel =
-                STUDENT_ACADEMIC_STATUS_LABELS[
-                  academicStatus as keyof typeof STUDENT_ACADEMIC_STATUS_LABELS
-                ] ?? academicStatus.replace(/_/g, " ");
-              const guardianName = student.guardianName?.trim() || "—";
-              const guardianPhone = student.guardianPhone?.trim() || "";
+              const dobBs = student.dateOfBirthBs?.trim() || "";
+              const dobAd = dobBs ? bsDateToAdString(dobBs) : "";
+              const fatherName = student.fatherName?.trim() || "—";
+              const fatherPhone = student.fatherPhone?.trim() || "";
+              const studentAddress = formatStudentPrintAddress(student.address);
+              const primaryLabel = !isCollege
+                ? (primaryMap.get(student.classId ?? "") ?? "—")
+                : "";
+              const secondaryLabel = !isCollege
+                ? (secondaryMap.get(student.sectionId ?? "") ?? "—")
+                : "";
 
               return (
                 <tr
@@ -1243,7 +1302,7 @@ export const StudentListManager = () => {
                 >
                   <td
                     style={{
-                      ...printTd,
+                      ...printTdNowrap,
                       textAlign: "center",
                       fontVariantNumeric: "tabular-nums",
                     }}
@@ -1253,58 +1312,81 @@ export const StudentListManager = () => {
                   <td style={printTd}>
                     <div style={{ fontWeight: 600 }}>{displayName}</div>
                     {student.user?.email ? (
-                      <div style={printSub}>{student.user.email}</div>
+                      <div style={{ ...printSub, whiteSpace: "normal" }}>
+                        {student.user.email}
+                      </div>
                     ) : null}
                   </td>
                   <td
                     style={{
-                      ...printTd,
+                      ...printTdNowrap,
                       fontVariantNumeric: "tabular-nums",
-                      whiteSpace: "nowrap",
                     }}
                   >
                     {displayPhone}
                   </td>
-                  <td style={{ ...printTd, textAlign: "center" }}>
+                  <td
+                    style={{
+                      ...printTdNowrap,
+                      textAlign: "center",
+                    }}
+                  >
                     {student.gender?.trim() || "—"}
                   </td>
                   <td
                     style={{
-                      ...printTd,
+                      ...printTdNowrap,
                       textAlign: "center",
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
                     {student.rollNumber || "—"}
                   </td>
+                  <td style={printTdNowrap}>
+                    {student.registrationNumber?.trim() || "—"}
+                  </td>
+                  {!isCollege ? (
+                    <>
+                      <td style={printTd}>{primaryLabel}</td>
+                      <td style={printTd}>{secondaryLabel}</td>
+                    </>
+                  ) : null}
+                  <td
+                    style={{
+                      ...printTdNowrap,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {dobBs ? (
+                      <>
+                        <div>{dobBs}</div>
+                        {dobAd ? <div style={printSub}>AD {dobAd}</div> : null}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td style={printTd}>
-                    <div style={{ fontWeight: 500 }}>
-                      {student.admissionNumber || "—"}
-                    </div>
-                    {student.registrationNumber ? (
-                      <div style={printSub}>
-                        Reg: {student.registrationNumber}
-                      </div>
+                    <div style={{ fontWeight: 500 }}>{fatherName}</div>
+                    {fatherPhone ? (
+                      <div style={printSub}>{fatherPhone}</div>
                     ) : null}
                   </td>
-                  <td style={printTd}>{primaryLabel}</td>
-                  <td style={printTd}>{secondaryLabel}</td>
-                  {isCollege ? (
-                    <td style={printTd}>{statusLabel}</td>
-                  ) : null}
-                  <td style={printTd}>
-                    <div style={{ fontWeight: 500 }}>{guardianName}</div>
-                    {guardianPhone ? (
-                      <div style={printSub}>{guardianPhone}</div>
-                    ) : null}
+                  <td
+                    style={{
+                      ...printTd,
+                      fontSize: 8,
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    {studentAddress}
                   </td>
                   {canManage ? (
                     <td
                       style={{
-                        ...printTd,
+                        ...printTdNowrap,
                         textAlign: "right",
                         fontVariantNumeric: "tabular-nums",
-                        whiteSpace: "nowrap",
                       }}
                     >
                       {student.hasScholarship

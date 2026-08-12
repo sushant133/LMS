@@ -553,10 +553,9 @@
 }
 
 @media print {
-  @page {
-    size: A4 portrait;
-    margin: 6mm 7mm;
-  }
+  /* Do not set @page here — it leaks into every iframe print (student list,
+     staff, library, …) and forces portrait. Marksheet orientation is set by
+     printMarksheetElement() → printUtils @page. */
 
   .official-marksheet {
     box-shadow:

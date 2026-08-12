@@ -285,6 +285,36 @@ const defaultIncome: AccountingIncomeInput = {
   voucherNumber: "",
 };
 
+/** `GET /accounting/income/overview` — fee receipts + non-fee register combined. */
+type IncomeOverviewRow = {
+  id: string;
+  kind: "FEE" | "OTHER";
+  dateBs: string;
+  receiptNumber: string;
+  category: string;
+  source: string;
+  description: string;
+  paymentMethod: string;
+  amountNpr: number;
+};
+
+type IncomeOverviewResponse = {
+  fromDateBs: string | null;
+  toDateBs: string | null;
+  totals: {
+    studentFeeNpr: number;
+    otherIncomeNpr: number;
+    totalIncomeNpr: number;
+    securityDepositCollectedNpr: number;
+    feeReceiptCount: number;
+    otherIncomeCount: number;
+  };
+  byCategory: Array<{ label: string; amountNpr: number; kind: "FEE" | "OTHER" }>;
+  byMonth: Array<{ label: string; amountNpr: number }>;
+  rowCount: number;
+  rows: IncomeOverviewRow[];
+};
+
 const defaultSalary: SalaryPaymentInput = {
   employeeType: "TEACHER",
   teacherId: "",
@@ -444,6 +474,12 @@ export const AccountingManager = () => {
   );
   const [purchaseForm, setPurchaseForm] = useState(defaultPurchase);
   const [incomeForm, setIncomeForm] = useState(defaultIncome);
+  /** Income tab filters (BS date range + source + free text). */
+  const [incomeFromBs, setIncomeFromBs] = useState("");
+  const [incomeToBs, setIncomeToBs] = useState("");
+  const [incomeKind, setIncomeKind] = useState<"ALL" | "FEE" | "OTHER">("ALL");
+  const [incomeSearch, setIncomeSearch] = useState("");
+  const [showIncomeForm, setShowIncomeForm] = useState(false);
   const [salaryForm, setSalaryForm] = useState(defaultSalary);
   const [cashForm, setCashForm] = useState(defaultCashEntry);
   const [settingsForm, setSettingsForm] = useState(defaultSettings);
@@ -589,6 +625,47 @@ export const AccountingManager = () => {
       unwrap<AccountingIncomeRecord[]>(api.get("/accounting/income")),
     enabled: tab === "income",
   });
+
+  /**
+   * Full income picture = student fee receipts + the non-fee register.
+   * Fees are posted from Student Fee Records, so the register alone never shows them.
+   */
+  const incomeOverviewQuery = useQuery({
+    queryKey: ["accounting-income-overview", incomeFromBs, incomeToBs],
+    queryFn: () =>
+      unwrap<IncomeOverviewResponse>(
+        api.get("/accounting/income/overview", {
+          params: {
+            ...(incomeFromBs ? { fromDateBs: incomeFromBs } : {}),
+            ...(incomeToBs ? { toDateBs: incomeToBs } : {}),
+          },
+        }),
+      ),
+    enabled: tab === "income",
+  });
+
+  const incomeOverview = incomeOverviewQuery.data;
+
+  const incomeRows = useMemo(() => {
+    const rows = incomeOverview?.rows ?? [];
+    const q = incomeSearch.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (incomeKind !== "ALL" && row.kind !== incomeKind) return false;
+      if (!q) return true;
+      return (
+        row.source.toLowerCase().includes(q) ||
+        row.category.toLowerCase().includes(q) ||
+        row.receiptNumber.toLowerCase().includes(q) ||
+        row.description.toLowerCase().includes(q)
+      );
+    });
+  }, [incomeOverview, incomeKind, incomeSearch]);
+
+  /** Non-fee register rows keyed by id — edit/void needs the original record. */
+  const incomeRecordsById = useMemo(
+    () => new Map((incomeQuery.data ?? []).map((row) => [row._id, row])),
+    [incomeQuery.data],
+  );
 
   const salariesQuery = useQuery({
     queryKey: ["accounting-salaries"],
@@ -791,6 +868,7 @@ export const AccountingManager = () => {
     onSuccess: async () => {
       toast.success("Income recorded");
       setIncomeForm(defaultIncome);
+      setShowIncomeForm(false);
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -893,14 +971,32 @@ export const AccountingManager = () => {
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  /**
+   * Void, not delete: the API reverses the journal and keeps the row for audit.
+   * A reason is mandatory — sending no body used to fail validation with a 400.
+   */
   const deleteIncome = useMutation({
-    mutationFn: (id: string) => unwrap(api.delete(`/accounting/income/${id}`)),
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      unwrap(api.delete(`/accounting/income/${id}`, { data: { reason } })),
     onSuccess: async () => {
-      toast.success("Income deleted");
+      toast.success("Income voided — journal entry reversed");
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
+
+  const confirmVoidIncome = (row: IncomeOverviewRow) => {
+    const reason = window.prompt(
+      `Void income entry ${row.receiptNumber || ""} (${formatCurrencyNpr(row.amountNpr)})?\n\nThis reverses the journal and cash book. The record is kept for audit.\n\nReason:`,
+      "Entered by mistake",
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      toast.error("Reason must be at least 3 characters");
+      return;
+    }
+    void deleteIncome.mutateAsync({ id: row.id, reason: reason.trim() });
+  };
 
   /** Super Admin / College Admin — remove a salary sheet entry from recent list */
   const deleteSalary = useMutation({
@@ -994,6 +1090,7 @@ export const AccountingManager = () => {
       toast.success("Income updated");
       setEditingIncome(null);
       setIncomeForm(defaultIncome);
+      setShowIncomeForm(false);
       await invalidateAccounting();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -3042,17 +3139,166 @@ export const AccountingManager = () => {
       ) : null}
 
       {tab === "income" ? (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="space-y-6">
+          {/* Where income actually comes from — fees are posted from Fee Records */}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {(
+              [
+                {
+                  label: "Student fee income",
+                  value: incomeOverview?.totals.studentFeeNpr ?? 0,
+                  hint: `${incomeOverview?.totals.feeReceiptCount ?? 0} receipt(s) · from Student Fee Records`,
+                  tone: "text-brand-700",
+                },
+                {
+                  label: "Other income",
+                  value: incomeOverview?.totals.otherIncomeNpr ?? 0,
+                  hint: `${incomeOverview?.totals.otherIncomeCount ?? 0} entry(s) · recorded below`,
+                  tone: "text-emerald-700",
+                },
+                {
+                  label: "Total income",
+                  value: incomeOverview?.totals.totalIncomeNpr ?? 0,
+                  hint: "Fees + other income (cash received)",
+                  tone: "text-emerald-800",
+                },
+                {
+                  label: "Security deposit (memo)",
+                  value: incomeOverview?.totals.securityDepositCollectedNpr ?? 0,
+                  hint: "Refundable liability — not counted as income",
+                  tone: "text-violet-700",
+                },
+              ] as const
+            ).map((card) => (
+              <Card key={card.label} className="overflow-hidden">
+                <CardHeader className="pb-2">
+                  <CardTitle className="truncate text-sm font-medium text-slate-500">
+                    {card.label}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="min-w-0">
+                  <p
+                    className={cn(
+                      "break-words text-lg font-semibold tabular-nums leading-snug sm:text-xl",
+                      card.tone,
+                    )}
+                    title={formatCurrencyNpr(card.value)}
+                  >
+                    {formatCurrencyNpr(card.value)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">{card.hint}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
           <Card>
+            <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <CardTitle className="text-base">Income</CardTitle>
+                <p className="mt-1 text-sm text-slate-500">
+                  Every rupee earned: student fees (posted automatically from
+                  Student Fee Records) plus non-fee income you record here.
+                  Security deposits are excluded — they are refundable.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <FormField label="From (BS)">
+                  <NepaliDateField
+                    value={incomeFromBs}
+                    onChange={(v) => setIncomeFromBs(v)}
+                  />
+                </FormField>
+                <FormField label="To (BS)">
+                  <NepaliDateField
+                    value={incomeToBs}
+                    onChange={(v) => setIncomeToBs(v)}
+                  />
+                </FormField>
+                <FormField label="Source">
+                  <Select
+                    value={incomeKind}
+                    onChange={(e) =>
+                      setIncomeKind(e.target.value as typeof incomeKind)
+                    }
+                  >
+                    <option value="ALL">All income</option>
+                    <option value="FEE">Student fees</option>
+                    <option value="OTHER">Other income</option>
+                  </Select>
+                </FormField>
+                <FormField label="Search">
+                  <Input
+                    placeholder="Student, source, receipt…"
+                    value={incomeSearch}
+                    onChange={(e) => setIncomeSearch(e.target.value)}
+                  />
+                </FormField>
+                {incomeFromBs || incomeToBs || incomeKind !== "ALL" || incomeSearch ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIncomeFromBs("");
+                      setIncomeToBs("");
+                      setIncomeKind("ALL");
+                      setIncomeSearch("");
+                    }}
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+            </CardHeader>
+            {(incomeOverview?.byCategory.length ?? 0) > 0 ? (
+              <CardContent className="pt-0">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Income by head
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(incomeOverview?.byCategory ?? []).map((item) => (
+                    <span
+                      key={`${item.kind}-${item.label}`}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+                        item.kind === "FEE"
+                          ? "border-brand-200 bg-brand-50 text-brand-800"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-800",
+                      )}
+                    >
+                      <span className="font-medium">{item.label}</span>
+                      <span className="tabular-nums">
+                        {formatCurrencyNpr(item.amountNpr)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </CardContent>
+            ) : null}
+          </Card>
+
+          <div className="grid gap-6 xl:grid-cols-3">
+          <Card className={cn("xl:col-span-1", !showIncomeForm && !editingIncome && "h-fit")}>
             <CardHeader>
               <CardTitle>
                 {editingIncome ? "Edit Income" : "Other Income Register"}
               </CardTitle>
               <p className="text-sm text-slate-500">
-                Non-fee income (donation, certificate, form sales, fine,
-                interest). Auto journal + ledger.
+                Non-fee income only (donation, certificate, form sales, fine,
+                interest). Auto journal + ledger. Student fees are collected in
+                Student Fee Records — do not re-enter them here or income will be
+                counted twice.
               </p>
+              {!showIncomeForm && !editingIncome ? (
+                <Button
+                  className="mt-3 w-fit"
+                  variant="outline"
+                  onClick={() => setShowIncomeForm(true)}
+                >
+                  Add other income
+                </Button>
+              ) : null}
             </CardHeader>
+            {showIncomeForm || editingIncome ? (
             <CardContent className="space-y-3">
               <FormField label="Date">
                 <NepaliDateField
@@ -3139,13 +3385,14 @@ export const AccountingManager = () => {
                 />
               </FormField>
               <div className="flex gap-2">
-                {editingIncome ? (
+                {editingIncome || showIncomeForm ? (
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => {
                       setEditingIncome(null);
                       setIncomeForm(defaultIncome);
+                      setShowIncomeForm(false);
                     }}
                   >
                     Cancel
@@ -3172,98 +3419,162 @@ export const AccountingManager = () => {
                 </Button>
               </div>
             </CardContent>
+            ) : null}
           </Card>
-          <Card>
+
+          <Card className="xl:col-span-2">
             <CardHeader>
-              <CardTitle>Income Records</CardTitle>
+              <CardTitle className="text-base">Income records</CardTitle>
+              <p className="mt-1 text-sm text-slate-500">
+                {incomeRows.length} of {incomeOverview?.rowCount ?? 0} entries
+                {(incomeOverview?.rowCount ?? 0) > (incomeOverview?.rows.length ?? 0)
+                  ? " (latest 500 shown — totals above cover every entry)"
+                  : ""}
+              </p>
             </CardHeader>
             <CardContent className="overflow-x-auto">
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th>Date</Th>
-                    <Th>Receipt</Th>
-                    <Th>Type</Th>
-                    <Th>Source</Th>
-                    <Th>Amount</Th>
-                    <Th />
-                  </tr>
-                </TableHead>
-                <TableBody>
-                  {(incomeQuery.data ?? []).map((row) => (
-                    <tr key={row._id}>
-                      <Td>{row.dateBs}</Td>
-                      <Td className="font-mono text-xs">
-                        {row.receiptNumber ?? row.voucherNumber ?? "—"}
-                      </Td>
-                      <Td>{row.category}</Td>
-                      <Td>{row.source}</Td>
-                      <Td>{formatCurrencyNpr(row.amountNpr)}</Td>
-                      <Td>
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              printRegisterVoucher({
-                                kind: "Income",
-                                voucherNumber:
-                                  row.receiptNumber || row.voucherNumber,
-                                dateBs: row.dateBs,
-                                amountNpr: row.amountNpr,
-                                narration: row.description,
-                                fields: [
-                                  { label: "Income Type", value: row.category },
-                                  { label: "Source", value: row.source },
-                                  {
-                                    label: "Payment Mode",
-                                    value: row.paymentMethod.replace(/_/g, " "),
-                                  },
-                                ],
-                              })
-                            }
-                          >
-                            <Printer className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingIncome(row);
-                              setIncomeForm({
-                                category:
-                                  row.category as AccountingIncomeInput["category"],
-                                source: row.source,
-                                dateBs: row.dateBs,
-                                amountNpr: row.amountNpr,
-                                paymentMethod: row.paymentMethod,
-                                description: row.description ?? "",
-                                receiptNumber: row.receiptNumber ?? "",
-                                voucherNumber: row.voucherNumber ?? "",
-                              });
-                            }}
-                          >
-                            Edit
-                          </Button>
-                          {canDelete ? (
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() =>
-                                void deleteIncome.mutateAsync(row._id)
-                              }
-                            >
-                              Delete
-                            </Button>
-                          ) : null}
-                        </div>
-                      </Td>
+              {incomeOverviewQuery.isLoading ? (
+                <LoadingState />
+              ) : incomeRows.length === 0 ? (
+                <EmptyState
+                  title="No income in this range"
+                  description="Collect fees in Student Fee Records or add a non-fee entry in the Other Income Register."
+                />
+              ) : (
+                <Table>
+                  <TableHead>
+                    <tr>
+                      <Th>Date</Th>
+                      <Th>Receipt</Th>
+                      <Th>Source of income</Th>
+                      <Th>From</Th>
+                      <Th>Mode</Th>
+                      <Th>Amount</Th>
+                      <Th />
                     </tr>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {incomeRows.map((row) => {
+                      const record =
+                        row.kind === "OTHER"
+                          ? incomeRecordsById.get(row.id)
+                          : undefined;
+                      return (
+                        <tr key={`${row.kind}-${row.id}`}>
+                          <Td className="whitespace-nowrap">{row.dateBs || "—"}</Td>
+                          <Td className="font-mono text-xs">
+                            {row.receiptNumber || "—"}
+                          </Td>
+                          <Td>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Badge
+                                className={cn(
+                                  row.kind === "OTHER" &&
+                                    "bg-emerald-100 text-emerald-800",
+                                )}
+                              >
+                                {row.kind === "FEE" ? "Student fee" : "Other"}
+                              </Badge>
+                              <span>{row.category}</span>
+                            </div>
+                            {row.description ? (
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                {row.description}
+                              </p>
+                            ) : null}
+                          </Td>
+                          <Td>{row.source || "—"}</Td>
+                          <Td className="whitespace-nowrap">
+                            {row.paymentMethod.replace(/_/g, " ") || "—"}
+                          </Td>
+                          <Td className="whitespace-nowrap font-semibold tabular-nums">
+                            {formatCurrencyNpr(row.amountNpr)}
+                          </Td>
+                          <Td>
+                            {row.kind === "FEE" ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setTab("fee-records")}
+                                title="Fee receipts are managed in Student Fee Records"
+                              >
+                                Open in Fee Records
+                              </Button>
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    printRegisterVoucher({
+                                      kind: "Income",
+                                      voucherNumber: row.receiptNumber,
+                                      dateBs: row.dateBs,
+                                      amountNpr: row.amountNpr,
+                                      narration: row.description,
+                                      fields: [
+                                        {
+                                          label: "Income Type",
+                                          value: row.category,
+                                        },
+                                        { label: "Source", value: row.source },
+                                        {
+                                          label: "Payment Mode",
+                                          value: row.paymentMethod.replace(
+                                            /_/g,
+                                            " ",
+                                          ),
+                                        },
+                                      ],
+                                    })
+                                  }
+                                >
+                                  <Printer className="h-3.5 w-3.5" />
+                                </Button>
+                                {record ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setEditingIncome(record);
+                                      setShowIncomeForm(true);
+                                      setIncomeForm({
+                                        category:
+                                          record.category as AccountingIncomeInput["category"],
+                                        source: record.source,
+                                        dateBs: record.dateBs,
+                                        amountNpr: record.amountNpr,
+                                        paymentMethod: record.paymentMethod,
+                                        description: record.description ?? "",
+                                        receiptNumber: record.receiptNumber ?? "",
+                                        voucherNumber: record.voucherNumber ?? "",
+                                      });
+                                    }}
+                                  >
+                                    Edit
+                                  </Button>
+                                ) : null}
+                                {canDelete ? (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => confirmVoidIncome(row)}
+                                  >
+                                    Void
+                                  </Button>
+                                ) : null}
+                              </div>
+                            )}
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
+          </div>
         </div>
       ) : null}
 

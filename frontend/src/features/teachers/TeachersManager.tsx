@@ -199,10 +199,13 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const teachers = (teachersQuery.data ?? []).filter(
     (teacher) => Boolean(teacher.user),
   );
+  const isTeacherActive = (teacher: (typeof teachers)[number]) =>
+    teacher.status !== "INACTIVE" && teacher.user?.isActive !== false;
+  const printableTeachers = teachers.filter(isTeacherActive);
 
   const handlePrintList = async () => {
-    if (teachers.length === 0) {
-      toast.error("No teachers to print");
+    if (printableTeachers.length === 0) {
+      toast.error("No activated teachers to print");
       return;
     }
     setPrinting(true);
@@ -213,8 +216,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       }
       await printElementById(TEACHERS_PRINT_AREA_ID, "teachers-list-print");
       toast.success(
-        `Print dialog opened — ${teachers.length} teacher${
-          teachers.length === 1 ? "" : "s"
+        `Print dialog opened — ${printableTeachers.length} teacher${
+          printableTeachers.length === 1 ? "" : "s"
         }`,
       );
     } catch (e) {
@@ -323,7 +326,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
           <Button
             variant="outline"
             className="w-full shrink-0 sm:w-auto"
-            disabled={teachers.length === 0 || printing}
+            disabled={printableTeachers.length === 0 || printing}
             onClick={() => void handlePrintList()}
           >
             <Printer className="mr-2 h-4 w-4" />
@@ -578,13 +581,23 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                 </p>
                 <p
                   style={{
+                    margin: "4px 0 0",
+                    fontSize: 11,
+                    color: "#334155",
+                    fontWeight: 600,
+                  }}
+                >
+                  Active only
+                </p>
+                <p
+                  style={{
                     margin: "2px 0 0",
                     fontSize: 10,
                     color: "#64748b",
                   }}
                 >
-                  {teachers.length} teacher
-                  {teachers.length === 1 ? "" : "s"}
+                  {printableTeachers.length} active teacher
+                  {printableTeachers.length === 1 ? "" : "s"}
                 </p>
               </div>
             </div>
@@ -615,7 +628,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
               </tr>
             </thead>
             <tbody>
-              {teachers.map((teacher, index) => {
+              {printableTeachers.map((teacher, index) => {
                 const designation =
                   teacher.user?.designation?.trim() ||
                   DEFAULT_TEACHER_DESIGNATION;

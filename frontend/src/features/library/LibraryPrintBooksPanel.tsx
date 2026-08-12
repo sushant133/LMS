@@ -410,7 +410,7 @@ export const LibraryPrintBooksPanel = () => {
                 setYearFilter(e.target.value as "ALL" | LibraryYearLevel)
               }
             >
-              <option value="ALL">All years</option>
+              <option value="ALL">All years &amp; types</option>
               {LIBRARY_YEAR_LEVELS.map((year) => (
                 <option key={year} value={year}>
                   {year}

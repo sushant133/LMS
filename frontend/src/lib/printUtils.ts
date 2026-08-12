@@ -709,6 +709,21 @@ const fitTimetableSheetToPage = (
   });
 };
 
+/** Multi-page list print CSS (students, staff, library). Kept outside the HTML
+ *  template so comments cannot break the surrounding string. */
+const LIST_PRINT_CSS = [
+  "body { display: block !important; width: auto !important; height: auto !important; min-height: 0 !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; }",
+  "body > * { display: block !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; overflow: visible !important; }",
+  "table { width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; page-break-inside: auto !important; break-inside: auto !important; }",
+  "thead { display: table-header-group !important; }",
+  "tfoot { display: table-footer-group !important; }",
+  "tr { page-break-inside: avoid !important; break-inside: avoid !important; }",
+  "th, td { word-break: normal !important; overflow-wrap: break-word !important; vertical-align: top !important; }",
+  '[data-print-list="students"] table { table-layout: fixed !important; width: 100% !important; }',
+  '[data-print-list="students"] th { white-space: nowrap !important; overflow-wrap: normal !important; }',
+  "img { max-width: 100% !important; height: auto !important; }",
+].join("\n");
+
 const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): string => {
   const clone = clonePrintableElement(element);
   const isLandscape = pageFormat === "a4-landscape";
@@ -748,50 +763,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         print-color-adjust: exact !important;
       }
       /* Multi-page list sheets: natural flow, repeat headers, keep rows whole */
-      ${
-        isTimetable
-          ? ""
-          : `
-      body {
-        display: block !important;
-        width: auto !important;
-        height: auto !important;
-        min-height: 0 !important;
-        overflow: visible !important;
-        padding: 0 !important;
-        margin: 0 !important;
-      }
-      body > * {
-        display: block !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-        overflow: visible !important;
-      }
-      table {
-        width: 100% !important;
-        max-width: 100% !important;
-        border-collapse: collapse !important;
-        page-break-inside: auto !important;
-        break-inside: auto !important;
-      }
-      thead { display: table-header-group !important; }
-      tfoot { display: table-footer-group !important; }
-      tr {
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
-      }
-      th, td {
-        word-break: break-word !important;
-        overflow-wrap: anywhere !important;
-        vertical-align: top !important;
-      }
-      img {
-        max-width: 100% !important;
-        height: auto !important;
-      }
-      `
-      }
+      ${isTimetable ? "" : LIST_PRINT_CSS}
       /* Timetable: high-contrast period header + single A4 landscape fit */
       .timetable-print-sheet,
       .tt-print-grid {
@@ -888,21 +860,21 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       /* Density-aware print type scale (set via data-tt-density on sheet/grid) */
       .timetable-print-sheet[data-tt-density="compact"] .tt-print-table,
       .tt-print-grid[data-tt-density="compact"] .tt-print-table {
-        font-size: 9px !important;
+        font-size: 13px !important;
       }
       .timetable-print-sheet[data-tt-density="dense"] .tt-print-table,
       .tt-print-grid[data-tt-density="dense"] .tt-print-table {
-        font-size: 8px !important;
+        font-size: 11.5px !important;
       }
       .timetable-print-sheet[data-tt-density="ultra"] .tt-print-table,
       .tt-print-grid[data-tt-density="ultra"] .tt-print-table {
-        font-size: 7.5px !important;
+        font-size: 10px !important;
       }
       .sticky {
         position: static !important;
       }
       @page {
-        size: A4 ${isLandscape ? "landscape" : "portrait"};
+        size: ${isLandscape ? "297mm 210mm" : "210mm 297mm"};
         margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "8mm 6mm"};
       }
       @media print {
@@ -952,6 +924,8 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         color: #000000;
         background: #ffffff;
       }
+      /* Sizes below assume the landscape sheet used by printBulkResultsElement
+         (≈285mm of content width vs 198mm portrait) — hence the larger type. */
       .iar-report {
         display: block !important;
         box-sizing: border-box !important;
@@ -959,8 +933,8 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         color: #000 !important;
         background: #fff !important;
         font-family: "Times New Roman", Times, Georgia, serif !important;
-        font-size: 8.5px !important;
-        line-height: 1.15 !important;
+        font-size: 11px !important;
+        line-height: 1.2 !important;
       }
       .iar-report *,
       .iar-report *::before,
@@ -969,7 +943,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       .iar-title {
         text-align: center;
-        font-size: 11px;
+        font-size: 15px;
         font-weight: 700;
         letter-spacing: 0.05em;
         text-transform: uppercase;
@@ -977,29 +951,29 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       .iar-office {
         text-align: center;
-        font-size: 10px;
+        font-size: 13px;
         font-weight: 700;
         text-transform: uppercase;
         margin: 0 0 2px;
       }
       .iar-sheet-title {
         text-align: center;
-        font-size: 10px;
+        font-size: 13px;
         font-weight: 700;
         text-transform: uppercase;
-        margin: 0 0 5px;
+        margin: 0 0 6px;
       }
       .iar-meta {
         width: 100% !important;
         border-collapse: collapse !important;
         border: 1px solid #000 !important;
-        margin: 0 0 5px !important;
+        margin: 0 0 6px !important;
         table-layout: fixed !important;
-        font-size: 8px !important;
+        font-size: 10.5px !important;
       }
       .iar-meta td {
         border: 1px solid #000 !important;
-        padding: 2px 4px !important;
+        padding: 3px 5px !important;
         vertical-align: top !important;
         text-align: left !important;
       }
@@ -1009,12 +983,12 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
         border-collapse: collapse !important;
         border: 1px solid #000 !important;
         table-layout: fixed !important;
-        font-size: 7px !important;
+        font-size: 9.5px !important;
       }
       .iar-marks th,
       .iar-marks td {
         border: 1px solid #000 !important;
-        padding: 1.5px 1px !important;
+        padding: 2.5px 2px !important;
         vertical-align: middle !important;
         background: #fff !important;
       }
@@ -1035,16 +1009,16 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .iar-regd {
         text-align: center !important;
         font-family: Consolas, "Courier New", monospace !important;
-        font-size: 6px !important;
+        font-size: 8px !important;
         word-break: break-all;
-        line-height: 1.1;
+        line-height: 1.15;
       }
-      .iar-symbol { text-align: center !important; font-size: 6.5px !important; }
+      .iar-symbol { text-align: center !important; font-size: 8.5px !important; }
       .iar-name {
         text-align: left !important;
         font-weight: 700 !important;
-        font-size: 6.5px !important;
-        line-height: 1.1;
+        font-size: 9px !important;
+        line-height: 1.15;
         padding-left: 2px !important;
         padding-right: 2px !important;
         word-break: break-word;
@@ -1052,16 +1026,16 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .iar-corner {
         text-align: center !important;
         font-weight: 700 !important;
-        font-size: 6px !important;
-        line-height: 1.1;
+        font-size: 8px !important;
+        line-height: 1.15;
         vertical-align: middle !important;
       }
       .iar-corner-empty { background: #fff !important; }
       .iar-subject-name {
         text-align: center !important;
         font-weight: 700 !important;
-        font-size: 6px !important;
-        line-height: 1.05;
+        font-size: 8px !important;
+        line-height: 1.1;
         word-break: break-word;
         hyphens: auto;
         vertical-align: middle !important;
@@ -1069,59 +1043,72 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       .iar-tp {
         text-align: center !important;
         font-weight: 700 !important;
-        font-size: 6.5px !important;
+        font-size: 8.5px !important;
       }
       .iar-num {
         text-align: center !important;
         font-variant-numeric: tabular-nums;
-        font-size: 6.5px !important;
+        font-size: 9px !important;
         white-space: nowrap;
       }
       .iar-total,
       .iar-pct,
       .iar-grade {
         text-align: center !important;
-        font-size: 6.5px !important;
+        font-size: 9px !important;
         font-weight: 600;
         white-space: nowrap;
       }
       .iar-grade { font-weight: 700 !important; }
       .iar-remarks {
         text-align: left !important;
-        font-size: 6px !important;
+        font-size: 8px !important;
         padding-left: 2px !important;
       }
       .iar-legend {
         width: 100% !important;
         border-collapse: collapse !important;
         border: 1px solid #000 !important;
-        margin-top: 5px !important;
+        margin-top: 6px !important;
         table-layout: fixed !important;
-        font-size: 7px !important;
+        font-size: 9px !important;
       }
       .iar-legend td {
         border: 1px solid #000 !important;
-        padding: 2px 4px !important;
+        padding: 3px 5px !important;
       }
       .iar-signatures {
         display: flex !important;
         justify-content: space-between !important;
         margin-top: 22px !important;
         padding: 0 24px !important;
-        font-size: 9px !important;
+        font-size: 11px !important;
         font-weight: 700 !important;
       }
-      .iar-sign { text-align: center; min-width: 140px; }
+      .iar-sign { text-align: center; min-width: 170px; }
       .iar-sign-line {
         border-top: 1px dotted #000 !important;
         margin: 0 auto 5px !important;
-        width: 140px !important;
+        width: 170px !important;
       }
       .official-marksheet {
         max-width: none;
         width: 100%;
         margin: 0;
         padding: 5mm 6mm;
+      }
+    </style>
+    <!-- Last in <head> so this wins over marksheet.css @page { size: A4 portrait }. -->
+    <style id="print-page-orientation">
+      @page {
+        size: ${isLandscape ? "297mm 210mm" : "210mm 297mm"};
+        margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "8mm 6mm"};
+      }
+      @media print {
+        @page {
+          size: ${isLandscape ? "297mm 210mm" : "210mm 297mm"};
+          margin: ${isTimetable ? `${TIMETABLE_PAGE_MARGIN_MM}mm` : "8mm 6mm"};
+        }
       }
     </style>
   </head>
@@ -1514,8 +1501,12 @@ export const printMarksheetElement = async (element: HTMLElement | null): Promis
   await printElement(element, "a4-portrait");
 };
 
+/**
+ * Bulk results (CTEVT Internal Assessment Report) print landscape — the wide
+ * per-subject Th/Pr column grid needs the 297mm edge to stay readable.
+ */
 export const printBulkResultsElement = async (element: HTMLElement | null): Promise<void> => {
-  await printElement(element, "a4-portrait");
+  await printElement(element, "a4-landscape");
 };
 
 export const downloadMarksheetPdfFromElement = async (
