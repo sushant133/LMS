@@ -455,11 +455,24 @@ export const COLLEGE_YEAR_NAMES = ["1st Year", "2nd Year", "3rd Year", "Ended"] 
  *   "Reference Books" — dictionaries, atlases, handbooks (usually read in-library)
  *   "Other Books"     — novels, magazines, competition prep, donations
  */
+/**
+ * Year / Book type a library book is shelved under.
+ *
+ * Mixes study years, programme streams (ANM / MLT / Civil), and general
+ * categories in one list because the library files books by whichever of those
+ * applies — a programme-specific title is not tied to a single year.
+ *
+ * Values are stored verbatim on LibraryBook.yearLevel and are the model's enum,
+ * so renaming an entry orphans existing books; add rather than rename.
+ */
 export const LIBRARY_YEAR_LEVELS = [
   "1st Year",
   "2nd Year",
   "3rd Year",
   "All Years",
+  "ANM",
+  "MLT",
+  "Civil",
   "Reference Books",
   "Other Books"
 ] as const;
@@ -797,6 +810,25 @@ export const TIMETABLE_SESSION_TYPES = [
 ] as const;
 
 export const TIMETABLE_ROOM_KINDS = ["CLASSROOM", "LABORATORY", "OTHER"] as const;
+
+/**
+ * Staff duty timetable kinds. Deliberately separate from TIMETABLE_SESSION_TYPES:
+ * a non-teaching staff roster has no theory/practical distinction, and the two
+ * lists would drift if shared.
+ *
+ * DUTY occupies a numbered period column; BREAK and DAY_OFF do not and take a
+ * synthetic period key derived from their start time (see periodNumberFromStartTime).
+ */
+export const STAFF_TIMETABLE_SESSION_TYPES = ["DUTY", "BREAK", "DAY_OFF"] as const;
+
+export const STAFF_TIMETABLE_SESSION_TYPE_LABELS: Record<
+  (typeof STAFF_TIMETABLE_SESSION_TYPES)[number],
+  string
+> = {
+  DUTY: "Duty",
+  BREAK: "Break",
+  DAY_OFF: "Day off"
+};
 
 /** Common break labels for Nepali college schedules. */
 export const TIMETABLE_BREAK_LABELS = [

@@ -1,3 +1,4 @@
+import type { LIBRARY_YEAR_LEVELS } from "./constants.js";
 import type { UserRole } from "./types.js";
 
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -65,8 +66,15 @@ export type LibraryIssueStatus = "ISSUED" | "RETURNED" | "OVERDUE";
 /** Status of one physical book copy. */
 export type LibraryCopyStatus = "AVAILABLE" | "ISSUED" | "LOST" | "DAMAGED" | "MAINTENANCE";
 
-/** Academic year level for library catalog (HA: 1st / 2nd / 3rd Year). */
-export type LibraryYearLevel = "1st Year" | "2nd Year" | "3rd Year" | "All Years";
+/**
+ * Year / Book type for the library catalog.
+ *
+ * Derived from LIBRARY_YEAR_LEVELS rather than spelled out: as a hand-written
+ * union it had already fallen behind the constant (it was missing the
+ * Reference/Other categories the model enum accepts), and the UI casts to this
+ * type, so the drift was invisible at compile time.
+ */
+export type LibraryYearLevel = (typeof LIBRARY_YEAR_LEVELS)[number];
 
 export type LeaveType = "CASUAL" | "SICK" | "MATERNITY" | "UNPAID" | "OTHER";
 
@@ -91,6 +99,9 @@ export type TimetableSessionType =
 
 export type TimetableRoomKind = "CLASSROOM" | "LABORATORY" | "OTHER";
 
+/** Staff duty roster kinds — separate from the teaching session types above. */
+export type StaffTimetableSessionType = "DUTY" | "BREAK" | "DAY_OFF";
+
 export interface TimetableSlotRecord {
   _id: string;
   schoolId: string;
@@ -113,6 +124,36 @@ export interface TimetableSlotRecord {
   remarks?: string;
   roomKind?: TimetableRoomKind;
   subjectAssignmentId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** One cell of a college staff member's weekly duty timetable. */
+export interface StaffTimetableSlotRecord {
+  _id: string;
+  schoolId: string;
+  /** Populated to `{ _id, fullName, staffId, designation, department }` on list. */
+  staffId:
+    | string
+    | {
+        _id: string;
+        fullName: string;
+        staffId?: string;
+        designation?: string;
+        department?: string;
+      };
+  dayOfWeek: DayOfWeek;
+  /** DUTY: 1–12. BREAK/DAY_OFF: synthetic ≥1000 from start time. */
+  periodNumber: number;
+  startTime: string;
+  endTime: string;
+  academicYearBs: string;
+  sessionType: StaffTimetableSessionType;
+  dutyTitle?: string;
+  room?: string;
+  department?: string;
+  breakLabel?: string;
+  remarks?: string;
   createdAt?: string;
   updatedAt?: string;
 }

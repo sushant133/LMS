@@ -4,11 +4,13 @@ import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   INSTITUTION_NAME,
+  canAccessAcademicStructure,
   canAccessAttendanceManagement,
   canAccessExaminationManagement,
   canAccessModule,
   canManageInstitution,
   hasInstitutionAccess,
+  isAcademicStructurePath,
   isAttendanceManagementPath,
   isExaminationManagementPath,
   isSystemAdministrator,
@@ -649,6 +651,10 @@ export const AppLayout = () => {
   /** Explicit department grant (not legacy unconfigured full access) */
   const hasExplicitModuleGrant = (path: string): boolean => {
     if (!moduleAccessConfigured) return false;
+    // Academic Structure: own visibility module, never inherited from `academics`
+    if (isAcademicStructurePath(path)) {
+      return canAccessAcademicStructure(moduleAccessMap);
+    }
     // Teacher / Staff Attendance module grants unlock Attendance Management hub
     if (
       isAttendanceManagementPath(path) &&
@@ -715,6 +721,12 @@ export const AppLayout = () => {
       if (effectiveRoles.has("STUDENT")) return true;
       if (staffMaySeeFieldManagement || hasFieldCoordinatorAccess) return true;
       return canAccessModule(moduleAccessMap, "field-duty");
+    }
+    // Academic Structure screen: hidden unless its own toggle is on.
+    // Academic data stays readable for fee/exam/attendance pickers either way.
+    if (isAcademicStructurePath(path)) {
+      if (!moduleAccessConfigured) return isAdmin || institutionAccess;
+      return canAccessAcademicStructure(moduleAccessMap);
     }
     if (isAttendanceManagementPath(path)) {
       // Teachers always keep My Attendance; HR teacher/staff attendance is via grants

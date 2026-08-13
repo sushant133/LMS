@@ -7,6 +7,7 @@ import { OfflineLoginOnly } from "components/shared/OfflineLoginOnly";
 import { PageLoadingState } from "components/shared/LoadingState";
 import { ProtectedRoute } from "features/auth/ProtectedRoute";
 import { lazyWithRetry as lazy } from "lib/lazyWithRetry";
+import { isNativeApp } from "lib/platform";
 import { LoginPage } from "pages/LoginPage";
 import SplashScreen from "components/SplashScreen";
 
@@ -94,7 +95,12 @@ const LazyRoute = ({ children }: { children: ReactNode }) => {
 };
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(true);
+  /**
+   * Web: show the React splash for 1.5s.
+   * Native app: skip it — the Capacitor launch screen (3s, capacitor.config.ts)
+   * already covers startup, so showing both would stack to 4.5s.
+   */
+  const [showSplash, setShowSplash] = useState(() => !isNativeApp());
 
   if (showSplash) {
     return <SplashScreen onFinish={() => setShowSplash(false)} />;

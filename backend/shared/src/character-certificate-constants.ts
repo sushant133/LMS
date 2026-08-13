@@ -121,6 +121,28 @@ To the best of my knowledge and belief {{genderPronounLower}} bears a **{{conduc
 /** Printed under the right-hand signature block. */
 export const DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY = "Director/Chairperson";
 
+/**
+ * Small print set under the address line on the letterhead. Editable per
+ * template, but every certificate carries it unless an admin clears it.
+ */
+export const DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION = "(Affiliated To CTEVT)";
+
+/**
+ * Letterhead identity for the printed certificate.
+ *
+ * The certificate is a legal document and carries the institution's registered
+ * name and full municipal address, which are longer than the short forms used
+ * on screen (dashboard, login, report headers). They are seeded onto the
+ * default template as overrides rather than pushed into Institution Settings,
+ * so changing them affects this document only. Clear an override and the
+ * certificate falls back to Institution Settings.
+ */
+export const DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_NAME =
+  "Public Himal Institute Of Technology (Pvt.) Ltd";
+
+export const DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_ADDRESS =
+  "Ward 3, Dhangadhimai Municipality, Siraha, Madesh Province";
+
 /** Fixed labels under the first three signature blocks of the printed form. */
 export const CHARACTER_CERTIFICATE_SIGNATURE_LABELS = [
   "Prepared by",

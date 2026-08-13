@@ -3,7 +3,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CHARACTER_CERTIFICATE_PLACEHOLDERS,
   CHARACTER_CERTIFICATE_PLACEHOLDER_LABELS,
+  DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION,
   DEFAULT_CHARACTER_CERTIFICATE_BODY,
+  DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_ADDRESS,
+  DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_NAME,
   DEFAULT_CHARACTER_CERTIFICATE_HEADING,
   DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
   type CharacterCertificateTemplateRecord,
@@ -32,6 +35,8 @@ interface TemplateForm {
   bodyTemplate: string;
   signatoryLabel: string;
   affiliationText: string;
+  collegeNameOverride: string;
+  collegeAddressOverride: string;
   isDefault: boolean;
   isActive: boolean;
 }
@@ -41,7 +46,9 @@ const emptyForm = (): TemplateForm => ({
   headingText: DEFAULT_CHARACTER_CERTIFICATE_HEADING,
   bodyTemplate: DEFAULT_CHARACTER_CERTIFICATE_BODY,
   signatoryLabel: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
-  affiliationText: "",
+  affiliationText: DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION,
+  collegeNameOverride: DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_NAME,
+  collegeAddressOverride: DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_ADDRESS,
   isDefault: false,
   isActive: true,
 });
@@ -75,6 +82,8 @@ export const CertificateTemplatesPanel = () => {
         bodyTemplate: form.bodyTemplate.trim(),
         signatoryLabel: form.signatoryLabel.trim() || DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
         affiliationText: form.affiliationText.trim(),
+        collegeNameOverride: form.collegeNameOverride.trim(),
+        collegeAddressOverride: form.collegeAddressOverride.trim(),
         isDefault: form.isDefault,
         isActive: form.isActive,
       };
@@ -109,6 +118,8 @@ export const CertificateTemplatesPanel = () => {
       bodyTemplate: template.bodyTemplate,
       signatoryLabel: template.signatoryLabel || DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
       affiliationText: template.affiliationText ?? "",
+      collegeNameOverride: template.collegeNameOverride ?? "",
+      collegeAddressOverride: template.collegeAddressOverride ?? "",
       isDefault: template.isDefault,
       isActive: template.isActive,
     });
@@ -183,13 +194,37 @@ export const CertificateTemplatesPanel = () => {
                   }
                 />
               </FormField>
-              <FormField label="Affiliation line (optional)">
+              <FormField label="Affiliation line (printed under the address)">
                 <Input
                   value={form.affiliationText}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, affiliationText: event.target.value }))
                   }
-                  placeholder="e.g. (Affiliated To CTEVT)"
+                  placeholder={DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION}
+                />
+              </FormField>
+              <FormField label="Institution name on the certificate">
+                <Input
+                  value={form.collegeNameOverride}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      collegeNameOverride: event.target.value,
+                    }))
+                  }
+                  placeholder="Leave blank to use Institution Settings"
+                />
+              </FormField>
+              <FormField label="Address on the certificate">
+                <Input
+                  value={form.collegeAddressOverride}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      collegeAddressOverride: event.target.value,
+                    }))
+                  }
+                  placeholder="Leave blank to use Institution Settings"
                 />
               </FormField>
               <div className="flex items-end gap-5 pb-2">

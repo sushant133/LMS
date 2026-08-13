@@ -1,11 +1,13 @@
 import {
   INSTITUTION_ACCESS_ROLES,
   INSTITUTION_ADMIN_ROLES,
+  canAccessAcademicStructure,
   canAccessAttendanceManagement,
   canAccessExaminationManagement,
   canAccessModule,
   canManageInstitution,
   hasInstitutionAccess,
+  isAcademicStructurePath,
   isAttendanceManagementPath,
   isExaminationManagementPath,
   isInstitutionAdmin,
@@ -91,6 +93,11 @@ export const hasProtectedRouteAccess = (
       canAccessExaminationManagement(options.moduleAccess)
     ) {
       return true;
+    }
+    // Academic Structure is gated by its own visibility module, so a data grant
+    // on `academics` (or a role baseline) never re-opens the screen.
+    if (isAcademicStructurePath(options.pathname)) {
+      return canAccessAcademicStructure(options.moduleAccess);
     }
     const moduleKey = resolveModuleFromRoutePath(options.pathname);
     if (moduleKey && canAccessModule(options.moduleAccess, moduleKey)) {

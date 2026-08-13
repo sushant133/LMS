@@ -1,7 +1,10 @@
 import type { Types } from "mongoose";
 import {
   CHARACTER_CERTIFICATE_NUMBER_PREFIX,
+  DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION,
   DEFAULT_CHARACTER_CERTIFICATE_BODY,
+  DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_ADDRESS,
+  DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_NAME,
   DEFAULT_CHARACTER_CERTIFICATE_HEADING,
   DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
   DEFAULT_CHARACTER_CERTIFICATE_TEMPLATE_NAME,
@@ -11,7 +14,10 @@ import { AcademicPromotion } from "../models/AcademicPromotion.js";
 import { CharacterCertificate } from "../models/CharacterCertificate.js";
 import { CharacterCertificateTemplate } from "../models/CharacterCertificateTemplate.js";
 import { Setting } from "../models/Setting.js";
+import { VoucherCounter } from "../models/VoucherCounter.js";
+import { escapeRegex } from "./escapeRegex.js";
 import { adToBsDate, getTodayBs } from "./nepaliDate.js";
+import { resolveSchoolBranding } from "./schoolBranding.js";
 
 /**
  * Resolve {{token}} placeholders in a template body.
@@ -40,33 +46,75 @@ export const genderPronouns = (
 };
 
 /**
+ * Seed the counter for a series that predates it.
+ *
+ * Certificates issued before the counter existed were numbered from the document
+ * count, so starting a fresh counter at zero would re-issue numbers that are
+ * already on paper. On first use the counter is planted just above the highest
+ * number on file instead.
+ *
+ * `$setOnInsert` makes this safe under a race: if two issues both find no
+ * counter, only one insert lands and the other becomes a no-op, after which both
+ * take their number from the same atomic `$inc`.
+ */
+const seedCertificateCounter = async (
+  schoolId: Types.ObjectId,
+  scope: string,
+  prefix: string
+): Promise<void> => {
+  const existing = await VoucherCounter.findOne({ schoolId, scope }).select("_id").lean();
+  if (existing) return;
+
+  const latest = await CharacterCertificate.find({
+    schoolId,
+    certificateNumber: { $regex: `^${escapeRegex(prefix)}` }
+  })
+    .sort({ certificateNumber: -1 })
+    .limit(1)
+    .select("certificateNumber")
+    .lean();
+
+  const highest = latest[0]
+    ? Number.parseInt(latest[0].certificateNumber.slice(prefix.length), 10) || 0
+    : 0;
+
+  await VoucherCounter.updateOne(
+    { schoolId, scope },
+    { $setOnInsert: { seq: highest } },
+    { upsert: true }
+  );
+};
+
+/**
  * Next certificate number for a school, e.g. CC-2082-00042.
  *
- * The counter is per-school and derived from the current document count, then
- * verified against existing numbers — two admins issuing at the same instant
- * would otherwise race to the same value and trip the unique index.
+ * Numbers come from an atomic per-school, per-BS-year counter, so a number is
+ * never handed out twice: deleting a certificate does NOT return its number to
+ * the pool, and two admins issuing at the same instant get different numbers.
+ * A deleted certificate therefore leaves a permanent gap in the series, which is
+ * the point — the register has to show that a number was spent.
+ *
+ * The existence check below is belt-and-braces for numbers created before the
+ * counter (or inserted by hand); with the counter seeded above the high-water
+ * mark it should never fire.
  */
 export const generateCertificateNumber = async (
   schoolId: Types.ObjectId
 ): Promise<string> => {
   const yearBs = (getTodayBs().split("-")[0] ?? "").trim() || String(new Date().getFullYear());
   const prefix = `${CHARACTER_CERTIFICATE_NUMBER_PREFIX}-${yearBs}-`;
+  const scope = `${CHARACTER_CERTIFICATE_NUMBER_PREFIX}:${yearBs}`;
 
-  const latest = await CharacterCertificate.find({
-    schoolId,
-    certificateNumber: { $regex: `^${prefix}` }
-  })
-    .sort({ certificateNumber: -1 })
-    .limit(1)
-    .lean();
+  await seedCertificateCounter(schoolId, scope, prefix);
 
-  const lastSequence = latest[0]
-    ? Number.parseInt(latest[0].certificateNumber.slice(prefix.length), 10) || 0
-    : 0;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const counter = await VoucherCounter.findOneAndUpdate(
+      { schoolId, scope },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
 
-  // Walk forward until the number is free so a concurrent issue cannot collide.
-  for (let sequence = lastSequence + 1; sequence < lastSequence + 1000; sequence += 1) {
-    const candidate = `${prefix}${String(sequence).padStart(5, "0")}`;
+    const candidate = `${prefix}${String(counter.seq).padStart(5, "0")}`;
     const exists = await CharacterCertificate.exists({ schoolId, certificateNumber: candidate });
     if (!exists) return candidate;
   }
@@ -158,6 +206,9 @@ export const ensureDefaultCertificateTemplate = async (
       headingText: DEFAULT_CHARACTER_CERTIFICATE_HEADING,
       bodyTemplate: DEFAULT_CHARACTER_CERTIFICATE_BODY,
       signatoryLabel: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
+      affiliationText: DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION,
+      collegeNameOverride: DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_NAME,
+      collegeAddressOverride: DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_ADDRESS,
       isDefault: true,
       isActive: true
     });
@@ -173,4 +224,60 @@ export const ensureDefaultCertificateTemplate = async (
       }
     }
   );
+
+  /*
+   * Letterhead fields postdate the first templates, so a school seeded earlier
+   * has them unset. Only ever fill a blank — an admin who deliberately cleared
+   * an override to fall back to Institution Settings must keep that.
+   */
+  await CharacterCertificateTemplate.updateMany(
+    { schoolId, $or: [{ affiliationText: { $exists: false } }, { affiliationText: "" }] },
+    { $set: { affiliationText: DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION } }
+  );
+  await CharacterCertificateTemplate.updateMany(
+    { schoolId, collegeNameOverride: { $exists: false } },
+    { $set: { collegeNameOverride: DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_NAME } }
+  );
+  await CharacterCertificateTemplate.updateMany(
+    { schoolId, collegeAddressOverride: { $exists: false } },
+    { $set: { collegeAddressOverride: DEFAULT_CHARACTER_CERTIFICATE_COLLEGE_ADDRESS } }
+  );
+};
+
+export interface CertificateLetterhead {
+  collegeName: string;
+  collegeNameNp?: string;
+  collegeAddress?: string;
+  affiliationText: string;
+}
+
+/**
+ * The letterhead block printed above the heading.
+ *
+ * Name and address come from the template's overrides when set, falling back to
+ * Institution Settings. That keeps the certificate's registered/legal wording
+ * independent of the shorter name the rest of the ERP shows on screen.
+ */
+export const resolveCertificateLetterhead = async (
+  schoolId: Types.ObjectId,
+  templateId?: Types.ObjectId | string | null
+): Promise<CertificateLetterhead> => {
+  // A school that has not opened the Templates tab since the letterhead fields
+  // were added would otherwise print the old Institution Settings name here.
+  // The seeder is idempotent and only ever fills fields that are absent.
+  await ensureDefaultCertificateTemplate(schoolId);
+
+  const [branding, template] = await Promise.all([
+    resolveSchoolBranding(schoolId),
+    templateId
+      ? CharacterCertificateTemplate.findOne({ _id: templateId, schoolId }).lean()
+      : CharacterCertificateTemplate.findOne({ schoolId, isDefault: true }).lean()
+  ]);
+
+  return {
+    collegeName: template?.collegeNameOverride?.trim() || branding.collegeName,
+    collegeNameNp: branding.collegeNameNp,
+    collegeAddress: template?.collegeAddressOverride?.trim() || branding.collegeAddress,
+    affiliationText: template?.affiliationText?.trim() || DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION
+  };
 };

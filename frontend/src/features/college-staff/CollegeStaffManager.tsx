@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   COLLEGE_STAFF_CATEGORIES,
@@ -122,6 +129,20 @@ export const CollegeStaffManager = ({
   const [viewing, setViewing] = useState<CollegeStaffRecord | null>(null);
   /** Separate from edit form — open Module Access from list without full edit. */
   const [accessStaff, setAccessStaff] = useState<CollegeStaffRecord | null>(null);
+  const moduleAccessRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Bring the panel itself into view once it has rendered.
+   *
+   * The button used to jump to the top of the page instead, which landed above
+   * the panel — with the add-staff card in between it read as "the page just
+   * scrolled up" rather than as the module access opening. The panel does not
+   * exist until this state is set, so the scroll has to happen in an effect.
+   */
+  useEffect(() => {
+    if (!accessStaff?.user?._id) return;
+    moduleAccessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [accessStaff]);
   const [isUploading, setIsUploading] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -995,7 +1016,7 @@ export const CollegeStaffManager = ({
       ) : null}
 
       {canManage && (accessStaff?.user?._id || editing?.user?._id) ? (
-        <div className="space-y-2">
+        <div ref={moduleAccessRef} className="scroll-mt-4 space-y-2">
           {accessStaff && !editing ? (
             <div className="flex justify-end">
               <Button size="sm" variant="outline" onClick={() => setAccessStaff(null)}>
@@ -1292,10 +1313,6 @@ export const CollegeStaffManager = ({
                                         setAccessStaff(staff);
                                         setEditing(null);
                                         setViewing(null);
-                                        window.scrollTo({
-                                          top: 0,
-                                          behavior: "smooth",
-                                        });
                                       }}
                                     >
                                       Module Access

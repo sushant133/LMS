@@ -29,8 +29,11 @@ export interface CharacterCertificateTemplateRecord {
   headingText: string;
   bodyTemplate: string;
   signatoryLabel: string;
-  /** Small print above the heading, e.g. "(Affiliated To CTEVT)". */
+  /** Small print under the address line, e.g. "(Affiliated To CTEVT)". */
   affiliationText?: string;
+  /** Letterhead overrides for the certificate; blank falls back to Institution Settings. */
+  collegeNameOverride?: string;
+  collegeAddressOverride?: string;
   /** Used when the issue form does not pick a template explicitly. */
   isDefault: boolean;
   isActive: boolean;

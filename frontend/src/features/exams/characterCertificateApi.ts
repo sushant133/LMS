@@ -47,6 +47,45 @@ export const fetchCertificateRecords = (filters: { batchId: string; search: stri
 export const fetchCertificateTemplates = () =>
   unwrap<CharacterCertificateTemplateRecord[]>(api.get(`${CERTIFICATE_API_BASE}/templates`));
 
+export type CertificateCorrectionPayload = CharacterCertificateDetails & {
+  /** Which issuance to correct; omitted means the most recent one. */
+  issueNumber?: number;
+  studentName?: string;
+  fatherName?: string;
+  motherName?: string;
+  registrationNumber?: string;
+  dateOfBirthBs?: string;
+  resolvedBody?: string;
+  headingText?: string;
+  signatoryLabel?: string;
+  affiliationText?: string;
+  conduct?: string;
+  purpose?: string;
+  remarks?: string;
+  issueDateBs?: string;
+  reason?: string;
+};
+
+/**
+ * Correct an issued certificate in place. The certificate number is never
+ * changed — a record with the wrong number is deleted and reissued instead.
+ */
+export const updateCertificateRecord = (
+  certificateId: string,
+  payload: CertificateCorrectionPayload,
+) =>
+  unwrap<CharacterCertificateRecord>(
+    api.put(`${CERTIFICATE_API_BASE}/${certificateId}`, payload),
+  );
+
+/** Delete a certificate so the student can be issued a new one. */
+export const deleteCertificateRecord = (certificateId: string, reason?: string) =>
+  unwrap<{ certificateId: string; certificateNumber: string }>(
+    api.delete(`${CERTIFICATE_API_BASE}/${certificateId}`, {
+      params: reason ? { reason } : undefined,
+    }),
+  );
+
 export interface CertificatePreviewResponse {
   student: PassedOutStudentRecord & {
     fatherName?: string;

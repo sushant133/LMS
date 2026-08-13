@@ -18,8 +18,11 @@ export const characterCertificateTemplateSchema = z.object({
     .trim()
     .max(120)
     .default(DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY),
-  /** Small print above the heading, e.g. "(Affiliated To CTEVT)". */
+  /** Small print under the address line, e.g. "(Affiliated To CTEVT)". */
   affiliationText: z.string().trim().max(160).optional().or(z.literal("")),
+  /** Letterhead overrides — blank falls back to Institution Settings. */
+  collegeNameOverride: z.string().trim().max(200).optional().or(z.literal("")),
+  collegeAddressOverride: z.string().trim().max(240).optional().or(z.literal("")),
   isDefault: z.boolean().default(false),
   isActive: z.boolean().default(true)
 });
@@ -106,6 +109,39 @@ export const characterCertificatePreviewPdfSchema = characterCertificateDetailsS
   issueDateBs: bsDateSchema.optional().or(z.literal("")),
   isDuplicate: z.boolean().optional()
 });
+
+/**
+ * Correct an already-issued certificate in place.
+ *
+ * A sheet handed over with a typo has to be fixable without burning a new
+ * certificate number, so everything printed on it is editable here. The number
+ * itself never is — a record with the wrong number is deleted and reissued.
+ *
+ * `resolvedBody` is the text that actually prints (tokens were resolved at
+ * issue time), so correcting a misspelt name means editing that, not just the
+ * student fields, which drive the records list and search only.
+ */
+export const characterCertificateUpdateSchema = characterCertificateDetailsSchema.extend({
+  /** Which issuance to correct. Defaults to the most recent one. */
+  issueNumber: z.number().int().min(1).optional(),
+  studentName: z.string().trim().min(1).max(160).optional(),
+  fatherName: optionalText(160),
+  motherName: optionalText(160),
+  registrationNumber: optionalText(60),
+  dateOfBirthBs: optionalText(20),
+  resolvedBody: z.string().trim().min(20).max(8000).optional().or(z.literal("")),
+  headingText: optionalText(160),
+  signatoryLabel: optionalText(120),
+  affiliationText: optionalText(160),
+  conduct: optionalText(120),
+  purpose: optionalText(500),
+  remarks: optionalText(1000),
+  issueDateBs: bsDateSchema.optional().or(z.literal("")),
+  /** Why the correction was made — stored on the audit entry. */
+  reason: optionalText(500)
+});
+
+export type CharacterCertificateUpdateInput = z.infer<typeof characterCertificateUpdateSchema>;
 
 export type CharacterCertificateTemplateInput = z.infer<typeof characterCertificateTemplateSchema>;
 export type CharacterCertificateDetailsInput = z.infer<typeof characterCertificateDetailsSchema>;

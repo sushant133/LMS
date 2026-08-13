@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   moduleStaffSchema,
@@ -44,6 +44,13 @@ export const ModuleStaffPanel = ({
   const canManage = useIsTenantAdmin();
   const [form, setForm] = useState<ModuleStaffInput>(defaultStaff);
   const [accessUser, setAccessUser] = useState<UserProfile | null>(null);
+  const moduleAccessRef = useRef<HTMLDivElement | null>(null);
+
+  /** The panel renders below the list, so bring it into view once it exists. */
+  useEffect(() => {
+    if (!accessUser) return;
+    moduleAccessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [accessUser]);
 
   const staffQuery = useQuery({
     queryKey: [queryKey],
@@ -225,7 +232,7 @@ export const ModuleStaffPanel = ({
       </Card>
 
       {canManage && accessUser ? (
-        <div className="space-y-2">
+        <div ref={moduleAccessRef} className="scroll-mt-4 space-y-2">
           <div className="flex justify-end">
             <Button
               size="sm"

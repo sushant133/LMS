@@ -22,7 +22,7 @@ export interface CharacterCertificateTemplateData {
   collegeNameNp?: string;
   collegeAddress?: string;
   collegeLogoDataUri?: string;
-  /** Small print above the college name, e.g. "(Affiliated To CTEVT)". */
+  /** Small print under the address line, e.g. "(Affiliated To CTEVT)". */
   affiliationText?: string;
   headingText: string;
   certificateNumber: string;
@@ -173,41 +173,31 @@ ${certificateFontFaceCss()}
   }
 
   /*
-   * Tiled house watermark, clipped to the area inside the border. Kept very
-   * light and loosely spaced — at #dcdcdc/9.6pt it used to sit directly under
-   * the body script and made the wording hard to read.
+   * Tiled house watermark across the full sheet inside the ornamental border,
+   * including behind the body — there is no scrim panel any more, so the mark
+   * reads continuously from top to bottom.
+   *
+   * Weight and tone are chosen for PAPER, not screen: a hairline at #ededed
+   * drops out entirely on most laser printers, so this is set bold at a mid
+   * light grey, which survives printing while staying clearly secondary to the
+   * certificate wording.
    */
   .cc-watermark {
     position: absolute;
     left: ${FRAME_INSET}pt; right: ${FRAME_INSET}pt;
     top: ${FRAME_INSET}pt; bottom: ${FRAME_INSET}pt;
     overflow: hidden;
-    color: #ededed;
+    color: #d4d4d4;
     font-family: 'Calibri', 'CC Sans', sans-serif;
-    font-size: 7.5pt;
-    line-height: 15pt;
-    letter-spacing: 0.6pt;
-    word-spacing: 9pt;
+    font-size: 9pt;
+    font-weight: 700;
+    line-height: 18pt;
+    letter-spacing: 1pt;
+    word-spacing: 12pt;
     white-space: nowrap;
     user-select: none;
-  }
-
-  /* Hairline double rule just inside the ornamental border. */
-  .cc-inner-frame {
-    position: absolute;
-    left: ${FRAME_INSET - 6}pt; right: ${FRAME_INSET - 6}pt;
-    top: ${FRAME_INSET - 6}pt; bottom: ${FRAME_INSET - 6}pt;
-    border: 1.6pt double #c9a227;
-    border-radius: 3pt;
-    pointer-events: none;
-  }
-
-  /* Soft scrim so the watermark never fights the certificate wording. */
-  .cc-body-scrim {
-    position: absolute;
-    left: 54pt; right: 54pt; top: 232pt; height: 236pt;
-    background: rgba(255, 255, 255, 0.82);
-    border-radius: 4pt;
+    /* Keep the tint when the browser/printer would otherwise drop backgrounds. */
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
   .cc-layer { position: absolute; inset: 0; }
@@ -359,8 +349,6 @@ ${certificateFontFaceCss()}
 <div class="cc-page">
   <div class="cc-border"></div>
   <div class="cc-watermark" aria-hidden="true">${watermarkRows(watermark)}</div>
-  <div class="cc-body-scrim" aria-hidden="true"></div>
-  <div class="cc-inner-frame" aria-hidden="true"></div>
 
   ${data.isDuplicate ? `<div class="cc-duplicate-stamp" aria-hidden="true">DUPLICATE</div>` : ""}
 

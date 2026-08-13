@@ -49,7 +49,7 @@ import {
   filterYearsByBatch,
   type ScopeOption,
 } from "lib/teacherScopeUtils";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 import { SESSION_COLORS, SESSION_LABELS } from "./timetableColors";
 import { TimetablePrintView } from "./TimetablePrintView";
 import {
@@ -61,6 +61,7 @@ import {
   type PeriodColumn,
   type TimetableSlotRow,
 } from "./timetableMatrixUtils";
+import { StaffTimetablePanel } from "./StaffTimetablePanel";
 import { WeeklyTimetableGrid } from "./WeeklyTimetableGrid";
 
 type PeriodTimeEdit = {
@@ -75,6 +76,13 @@ type PeriodTimeEdit = {
 };
 
 type ViewMode = "group" | "mine" | "teacher" | "room" | "lab";
+
+/**
+ * Academic = class/batch teaching timetable. Staff = non-teaching duty roster.
+ * They share nothing but the weekly layout, so they are separate sections
+ * rather than another ViewMode on the academic grid.
+ */
+type TimetableSection = "academic" | "staff";
 
 const SATURDAY_KEY = "phit-timetable-saturday-holiday";
 
@@ -117,6 +125,7 @@ export const TimetableManager = () => {
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
+  const [section, setSection] = useState<TimetableSection>("academic");
   const [form, setForm] = useState<TimetableSlotInput>(defaultSlot);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -727,6 +736,47 @@ export const TimetableManager = () => {
     return <LoadingState />;
   }
 
+  /** Students only ever see their own class timetable — no section switch. */
+  const showSectionSwitch = !isStudent;
+  const sectionSwitch = showSectionSwitch ? (
+    <div className="flex flex-wrap gap-2">
+      {(
+        [
+          ["academic", "Academic Timetable"],
+          ["staff", "Staff Timetable"],
+        ] as Array<[TimetableSection, string]>
+      ).map(([key, label]) => (
+        <Button
+          key={key}
+          type="button"
+          size="sm"
+          variant={section === key ? "default" : "outline"}
+          className={cn(section === key && "bg-brand-600 hover:bg-brand-700")}
+          onClick={() => setSection(key)}
+        >
+          {label}
+        </Button>
+      ))}
+    </div>
+  ) : null;
+
+  if (section === "staff") {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Timetable Management"
+          description="Weekly duty roster for non-teaching college staff."
+        />
+        {sectionSwitch}
+        <StaffTimetablePanel
+          academicYearBs={form.academicYearBs}
+          saturdayIsHoliday={saturdayIsHoliday}
+          canWrite={isAdmin}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -739,6 +789,8 @@ export const TimetableManager = () => {
               : "Create periods as before; the weekly matrix updates automatically for print-ready display."
         }
       />
+
+      {sectionSwitch}
 
       {/* Note + Saturday toggle */}
       <Card>

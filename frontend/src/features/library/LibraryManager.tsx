@@ -1151,12 +1151,6 @@ export const LibraryManager = () => {
                       ))}
                     </Select>
                   </FormField>
-                  <p className="text-xs text-slate-500 -mt-1">
-                    Assign course books to 1st, 2nd, or 3rd Year, or “All Years”
-                    when a title is used across years. Books that are not course
-                    books go under “Reference Books” (dictionaries, atlases,
-                    handbooks) or “Other Books” (novels, magazines, donations).
-                  </p>
                   <FormField label="ISBN (optional)">
                     <Input
                       value={bookForm.isbn}

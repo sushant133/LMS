@@ -11,9 +11,11 @@ import {
   Download,
   FileText,
   GraduationCap,
+  Pencil,
   Printer,
   Search,
   Settings2,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
@@ -26,9 +28,11 @@ import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
 import { cn, parseErrorMessage } from "lib/utils";
 import { CertificateTemplatesPanel } from "./CertificateTemplatesPanel";
+import { CharacterCertificateEditDialog } from "./CharacterCertificateEditDialog";
 import { CharacterCertificateIssueDialog } from "./CharacterCertificateIssueDialog";
 import {
   certificateRecordsKey,
+  deleteCertificateRecord,
   downloadCertificatePdf,
   fetchCertificateRecords,
   fetchPassedOutStudents,
@@ -81,6 +85,11 @@ export const PassedOutStudentsPanel = ({ batches, years }: PassedOutStudentsPane
   const [dialogCertificate, setDialogCertificate] = useState<CharacterCertificateRecord | null>(
     null,
   );
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editCertificate, setEditCertificate] = useState<CharacterCertificateRecord | null>(null);
+  /** Set while a delete is in flight so the row's button can show progress. */
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const studentsQuery = useQuery({
     queryKey: passedOutStudentsKey({ batchId: batchFilter, yearId: yearFilter, certificateStatus }),
@@ -137,6 +146,39 @@ export const PassedOutStudentsPanel = ({ batches, years }: PassedOutStudentsPane
     setDialogCertificate(certificate);
     setDialogStudent(null);
     setDialogOpen(true);
+  };
+
+  const openEditDialog = (certificate: CharacterCertificateRecord) => {
+    setEditCertificate(certificate);
+    setEditOpen(true);
+  };
+
+  /**
+   * Deleting frees the student to be issued a fresh certificate. The old number
+   * is retired for good, so the confirmation spells out what is actually lost.
+   */
+  const handleDelete = async (record: CharacterCertificateRecord) => {
+    const confirmed = window.confirm(
+      `Delete certificate ${record.certificateNumber} for ${record.student.studentName}?\n\n` +
+        `This removes all ${record.issueCount} issuance record${record.issueCount === 1 ? "" : "s"} ` +
+        `and cannot be undone.\n\n` +
+        `${record.certificateNumber} is retired permanently and will never be reissued. ` +
+        `${record.student.studentName} will show as "Not issued" again and can be issued a ` +
+        `certificate with a new number.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(record._id);
+    try {
+      await deleteCertificateRecord(record._id);
+      toast.success(`Certificate ${record.certificateNumber} deleted`);
+      // The Passed-Out list shows certificate status, so refresh both tabs.
+      await Promise.all([recordsQuery.refetch(), studentsQuery.refetch()]);
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handlePrint = async (certificateId: string, issueNumber?: number) => {
@@ -440,10 +482,30 @@ export const PassedOutStudentsPanel = ({ batches, years }: PassedOutStudentsPane
                           <Button
                             type="button"
                             size="sm"
+                            variant="outline"
+                            onClick={() => openEditDialog(record)}
+                          >
+                            <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
                             onClick={() => openDuplicateDialog(record)}
                           >
                             <Copy className="mr-1.5 h-3.5 w-3.5" />
                             Duplicate
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={deletingId === record._id}
+                            className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                            onClick={() => void handleDelete(record)}
+                          >
+                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                            {deletingId === record._id ? "Deleting…" : "Delete"}
                           </Button>
                         </div>
                       </div>
@@ -533,6 +595,16 @@ export const PassedOutStudentsPanel = ({ batches, years }: PassedOutStudentsPane
         certificate={dialogCertificate}
         onClose={() => setDialogOpen(false)}
         onIssued={() => {
+          void studentsQuery.refetch();
+          void recordsQuery.refetch();
+        }}
+      />
+
+      <CharacterCertificateEditDialog
+        open={editOpen}
+        certificate={editCertificate}
+        onClose={() => setEditOpen(false)}
+        onSaved={() => {
           void studentsQuery.refetch();
           void recordsQuery.refetch();
         }}

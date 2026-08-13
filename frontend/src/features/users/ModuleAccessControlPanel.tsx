@@ -430,13 +430,10 @@ export const ModuleAccessControlPanel = ({
                           <p className="text-sm font-medium text-slate-900">
                             {moduleLabel(key)}
                           </p>
-                          {!compact ? (
-                            <p
-                              className={cn(
-                                "text-xs text-slate-500",
-                                isFieldDuty ? "" : "line-clamp-1",
-                              )}
-                            >
+                          {/* Modules with no description skip the line entirely
+                              rather than leaving an empty row. */}
+                          {!compact && moduleDescription(key) ? (
+                            <p className="line-clamp-1 text-xs text-slate-500">
                               {moduleDescription(key)}
                             </p>
                           ) : null}

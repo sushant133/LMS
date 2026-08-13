@@ -10,8 +10,21 @@ import {
   type SubjectRecord,
   canManageInstitution,
 } from "@phit-erp/shared";
-import { getTodayBs } from "@munatech/nepali-datepicker";
-import { Check, ChevronDown, ChevronUp, Pencil, Plus, Search, Send } from "lucide-react";
+import {
+  getTodayBs,
+  parseBsDate,
+  type NepaliDate,
+} from "@munatech/nepali-datepicker";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
@@ -162,8 +175,13 @@ const emptyItem = (
     teachingAids: "",
     assessmentMethod: "",
     deadline: "",
-    itemStartDateBs: unit?.startDateBs || "",
-    itemEndDateBs: unit?.endDateBs || "",
+    /*
+     * Left blank on purpose — a sub-unit sits on one day, and the form fills it
+     * from the lesson's teaching date. Seeding the unit's window here would make
+     * a new row look like it spans the whole unit.
+     */
+    itemStartDateBs: "",
+    itemEndDateBs: "",
     // One daily plan row = 1 class by default (hours ≠ classes)
     estimatedClasses: 1,
     remarks: "",
@@ -768,13 +786,11 @@ export const LessonPlanPanel = ({
               prev?.syllabusSubUnitIds?.length
                 ? prev.syllabusSubUnitIds
                 : multi.syllabusSubUnitIds,
+            // One fixed day per sub-unit: keep what was set, else the teaching date.
             itemStartDateBs:
-              prev?.itemStartDateBs ||
-              unit.startDateBs ||
-              current.startDateBs ||
-              "",
+              prev?.itemStartDateBs || current.teachingDateBs || current.startDateBs || "",
             itemEndDateBs:
-              prev?.itemEndDateBs || unit.endDateBs || current.endDateBs || "",
+              prev?.itemStartDateBs || current.teachingDateBs || current.startDateBs || "",
             learningObjectives:
               prev?.learningObjectives ||
               multi.learningOutcomes ||
@@ -889,9 +905,9 @@ export const LessonPlanPanel = ({
           teachingAids: item.teachingAids || "",
           assessmentMethod: item.assessmentMethod || "",
           deadline: item.deadline || "",
-          itemStartDateBs:
-            item.itemStartDateBs || item.unit?.startDateBs || "",
-          itemEndDateBs: item.itemEndDateBs || item.unit?.endDateBs || "",
+          // Reopening a draft: keep the stored day, else the plan's teaching date.
+          itemStartDateBs: item.itemStartDateBs || teaching || "",
+          itemEndDateBs: item.itemStartDateBs || teaching || "",
           estimatedClasses: item.estimatedClasses || 1,
           remarks: item.remarks || "",
         };
@@ -990,6 +1006,11 @@ export const LessonPlanPanel = ({
         Number.isFinite(item.estimatedClasses) && item.estimatedClasses >= 1
           ? Math.round(item.estimatedClasses)
           : 1;
+      const subUnitDate =
+        item.itemStartDateBs?.trim() ||
+        teachingDate ||
+        unit?.startDateBs ||
+        "";
       return {
         serialNo: item.serialNo || index + 1,
         sessionPlanUnitId: item.sessionPlanUnitId,
@@ -1010,8 +1031,13 @@ export const LessonPlanPanel = ({
         teachingAids: item.teachingAids || "",
         assessmentMethod: item.assessmentMethod || "",
         deadline: item.deadline || "",
-        itemStartDateBs: item.itemStartDateBs || unit?.startDateBs || "",
-        itemEndDateBs: item.itemEndDateBs || unit?.endDateBs || "",
+        /*
+         * A sub-unit sits on ONE day. Both stored fields carry that same date —
+         * untouched rows fall back to the lesson's teaching date rather than
+         * spanning the unit's whole window.
+         */
+        itemStartDateBs: subUnitDate,
+        itemEndDateBs: subUnitDate,
         estimatedClasses,
         remarks: item.remarks || "",
       };
@@ -1048,6 +1074,20 @@ export const LessonPlanPanel = ({
       unwrap(api.post(`/academic-management/lesson-plans/${id}/submit`)),
     onSuccess: () => {
       toast.success("Lesson plan submitted");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  /**
+   * Soft-deletes on the server and resyncs unit / session progress, so the
+   * removed day stops counting towards Session Plan coverage.
+   */
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/academic-management/lesson-plans/${id}`)),
+    onSuccess: () => {
+      toast.success("Lesson plan deleted");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -1228,6 +1268,45 @@ export const LessonPlanPanel = ({
   }, [selectedSubject, selectedPlans, filteredPlans]);
 
   const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
+
+  /**
+   * Outer bounds of the Session Plan: earliest unit start → latest unit end.
+   *
+   * The teaching date picker is clamped to this so a teacher cannot choose a day
+   * the Session Plan does not cover. Per-unit windows are narrower still and are
+   * enforced by the API; this only stops the obviously-out-of-range picks before
+   * a save round-trip. Units with no dates set leave the corresponding bound open.
+   */
+  const sessionPlanDateBounds = useMemo(() => {
+    const open: {
+      minBs: string;
+      maxBs: string;
+      minDate?: NepaliDate;
+      maxDate?: NepaliDate;
+    } = { minBs: "", maxBs: "" };
+    if (units.length === 0) return open;
+    let min = "";
+    let max = "";
+    for (const unit of units) {
+      const start = (unit.startDateBs || "").trim();
+      const end = (unit.endDateBs || "").trim();
+      /*
+       * A unit with no window is unconstrained server-side, so one dateless unit
+       * means the whole picker has to stay open — clamping to the units that do
+       * have dates would block a legitimately schedulable day.
+       */
+      if (!start || !end) return open;
+      if (!min || start < min) min = start;
+      if (!max || end > max) max = end;
+    }
+    return {
+      minBs: min,
+      maxBs: max,
+      minDate: parseBsDate(min) ?? undefined,
+      maxDate: parseBsDate(max) ?? undefined,
+    };
+  }, [units]);
+
   const teachingDateForForm =
     form.teachingDateBs || form.startDateBs || "";
   const todayBs = useMemo(() => formatTodayBs(), []);
@@ -1406,10 +1485,10 @@ export const LessonPlanPanel = ({
                 : "Schedule a future teaching day"}
             </CardTitle>
             <p className="text-sm text-slate-600">
-              <strong>1)</strong> Choose a future teaching date ·{" "}
-              <strong>2)</strong> Units open on that date are fixed from the
-              Session Plan · <strong>3)</strong> Assign sub-units to this date
-              (already scheduled ones are marked). Save draft;{" "}
+              <strong>1)</strong> Pick the Session Plan ·{" "}
+              <strong>2)</strong> Pick a teaching date inside it ·{" "}
+              <strong>3)</strong> Units open on that date load automatically ·{" "}
+              <strong>4)</strong> Tick the sub-units taught that day. Save draft;{" "}
               <strong>Continue</strong> next to Submit later.
             </p>
             {editingId ? (
@@ -1419,12 +1498,23 @@ export const LessonPlanPanel = ({
             ) : null}
           </CardHeader>
           <CardContent className="space-y-5">
-            {/* Step 1 — day + basics */}
+            {/*
+              Step 1 — the Session Plan comes first because everything after it
+              depends on it: it fixes the subject and teacher, and its unit
+              windows are what bound the teaching date in Step 2. The four fields
+              here only narrow the Session Plan list; the plan itself overwrites
+              them on selection.
+            */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Step 1 · Future teaching date
+                Step 1 · Session Plan
               </p>
-            <div className="grid gap-3 md:grid-cols-4">
+              <p className="text-xs text-slate-500">
+                Pick the Session Plan this day belongs to. Subject, teacher, and
+                the allowed dates all come from it — the fields below just narrow
+                the list.
+              </p>
+              <div className="grid gap-3 md:grid-cols-4">
               <FormField label="Academic Year (BS)">
                 <Input
                   value={form.academicYearBs}
@@ -1543,43 +1633,17 @@ export const LessonPlanPanel = ({
                   </Select>
                 </FormField>
               ) : null}
-              <FormField label="Teaching date (BS) *">
-                <NepaliDateField
-                  value={form.teachingDateBs || form.startDateBs || ""}
-                  onChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      teachingDateBs: value,
-                      startDateBs: value,
-                      endDateBs: value,
-                    }))
+              </div>
+              {formNepaliText ? (
+                <NepaliSubjectBanner
+                  subjectName={
+                    selectedFormSubject
+                      ? `${selectedFormSubject.name}${selectedFormSubject.code ? ` (${selectedFormSubject.code})` : ""}`
+                      : undefined
                   }
-                  placeholder="Future teaching day"
                 />
-                <p className="mt-1 text-xs text-slate-500">
-                  Units are fixed by Session Plan start–end for this date. Prefer
-                  a future date (today BS: {todayBs}).
-                </p>
-                {teachingDateIsPast ? (
-                  <p className="mt-1 text-xs text-amber-700">
-                    This date is in the past. Lesson plans are meant for future
-                    scheduling.
-                  </p>
-                ) : null}
-              </FormField>
-            </div>
+              ) : null}
 
-            {formNepaliText ? (
-              <NepaliSubjectBanner
-                subjectName={
-                  selectedFormSubject
-                    ? `${selectedFormSubject.name}${selectedFormSubject.code ? ` (${selectedFormSubject.code})` : ""}`
-                    : undefined
-                }
-              />
-            ) : null}
-
-            <div className="grid gap-3 md:grid-cols-2">
               <FormField label="Session Plan *">
                 <Select
                   value={form.sessionPlanId}
@@ -1659,19 +1723,72 @@ export const LessonPlanPanel = ({
                   </p>
                 ) : null}
               </FormField>
-              <FormField label="Day notes (optional)">
-                <Input
-                  value={form.monthlyDescription ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      monthlyDescription: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional short note for this day"
-                />
-              </FormField>
             </div>
+
+            {/* Step 2 — the date, now bounded by the plan chosen above */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Step 2 · Teaching date
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <FormField label="Teaching date (BS) *">
+                  <NepaliDateField
+                    value={form.teachingDateBs || form.startDateBs || ""}
+                    minDate={sessionPlanDateBounds.minDate}
+                    maxDate={sessionPlanDateBounds.maxDate}
+                    onChange={(value) =>
+                      setForm((current) => ({
+                        ...current,
+                        teachingDateBs: value,
+                        startDateBs: value,
+                        endDateBs: value,
+                      }))
+                    }
+                    placeholder={
+                      form.sessionPlanId
+                        ? "Pick a day inside the plan"
+                        : "Choose a Session Plan first"
+                    }
+                  />
+                  {!form.sessionPlanId ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Choose a Session Plan in Step 1 — it decides which dates
+                      are available here.
+                    </p>
+                  ) : sessionPlanDateBounds.minBs &&
+                    sessionPlanDateBounds.maxBs ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      This Session Plan runs{" "}
+                      <strong>{sessionPlanDateBounds.minBs}</strong> →{" "}
+                      <strong>{sessionPlanDateBounds.maxBs}</strong>. Today BS:{" "}
+                      {todayBs}.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Units are fixed by Session Plan start–end for this date.
+                      Prefer a future date (today BS: {todayBs}).
+                    </p>
+                  )}
+                  {teachingDateIsPast ? (
+                    <p className="mt-1 text-xs text-amber-700">
+                      This date is in the past. Lesson plans are meant for future
+                      scheduling.
+                    </p>
+                  ) : null}
+                </FormField>
+                <FormField label="Day notes (optional)">
+                  <Input
+                    value={form.monthlyDescription ?? ""}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        monthlyDescription: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional short note for this day"
+                  />
+                </FormField>
+              </div>
             </div>
 
             {form.sessionPlanId && futureScheduleForSession.length > 0 ? (
@@ -1734,7 +1851,7 @@ export const LessonPlanPanel = ({
               <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Step 2 · Units fixed for this date
+                    Step 3 · Units fixed for this date
                   </p>
                   {teachingDateForForm ? (
                     <span className="text-xs text-slate-600">
@@ -1842,7 +1959,7 @@ export const LessonPlanPanel = ({
             {form.sessionPlanId && form.items.length > 0 ? (
               <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Step 3 · Fix sub-units on{" "}
+                  Step 4 · Fix sub-units on{" "}
                   {form.teachingDateBs || form.startDateBs || "this day"}
                 </p>
                 <p className="text-xs text-slate-500">
@@ -1855,6 +1972,13 @@ export const LessonPlanPanel = ({
                     (u) => u._id === item.sessionPlanUnitId,
                   );
                   const subUnits = parseSubUnitsFromTopics(unit?.topicsCovered);
+                  /** Bounds every date on this row is held to. */
+                  const unitWindowMin = unit?.startDateBs
+                    ? (parseBsDate(unit.startDateBs) ?? undefined)
+                    : undefined;
+                  const unitWindowMax = unit?.endDateBs
+                    ? (parseBsDate(unit.endDateBs) ?? undefined)
+                    : undefined;
                   const itemKey = item.sessionPlanUnitId || String(index);
                   const expanded = expandedItemKeys.includes(itemKey);
                   const selectedTitles = normalizeSubUnitTitles(
@@ -2138,15 +2262,49 @@ export const LessonPlanPanel = ({
                               placeholder="Lecture, demo…"
                             />
                           </FormField>
+                          {/*
+                            A sub-unit is taught on ONE fixed day, not over a
+                            range. The single picker below writes that day to
+                            both stored date fields, matching how the lesson plan
+                            itself mirrors teachingDateBs into start/end — that
+                            keeps the model and the API validation unchanged.
+                            It defaults to the lesson's teaching date and can be
+                            nudged a day or two, but never outside the unit window.
+                          */}
+                          <FormField label="Sub-unit date (BS)">
+                            <NepaliDateField
+                              value={
+                                item.itemStartDateBs ||
+                                teachingDateForForm ||
+                                ""
+                              }
+                              minDate={unitWindowMin}
+                              maxDate={unitWindowMax}
+                              onChange={(value) => {
+                                updateItemField(index, "itemStartDateBs", value);
+                                updateItemField(index, "itemEndDateBs", value);
+                              }}
+                              placeholder="Defaults to the teaching date"
+                            />
+                          </FormField>
                           <FormField label="Deadline (BS)">
                             <NepaliDateField
                               value={item.deadline}
+                              minDate={unitWindowMin}
+                              maxDate={unitWindowMax}
                               onChange={(value) =>
                                 updateItemField(index, "deadline", value)
                               }
                               placeholder="Optional"
                             />
                           </FormField>
+                          {unit?.startDateBs || unit?.endDateBs ? (
+                            <p className="text-xs text-slate-500 sm:col-span-2">
+                              Dates above must stay inside the Session Plan
+                              window for Unit {unit.unitNo}:{" "}
+                              <strong>{formatUnitDateWindow(unit)}</strong>
+                            </p>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -2414,6 +2572,37 @@ export const LessonPlanPanel = ({
                                 </Button>
                               </>
                             ) : null}
+                            {/* Admins may remove an approved plan too; teachers
+                                only while it is still editable (DRAFT/REJECTED),
+                                which is what the API enforces. */}
+                            {isAdmin ||
+                            plan.status === "DRAFT" ||
+                            plan.status === "REJECTED" ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={deleteMutation.isPending}
+                                onClick={() => {
+                                  const dateLabel =
+                                    plan.teachingDateBs ||
+                                    plan.startDateBs ||
+                                    plan.month ||
+                                    "this day";
+                                  if (
+                                    !window.confirm(
+                                      `Delete the lesson plan for ${dateLabel}?\n\nIts topics stop counting towards Session Plan coverage. This cannot be undone from here.`,
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  deleteMutation.mutate(plan._id);
+                                }}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </Button>
+                            ) : null}
                             {isAdmin && plan.status === "PENDING_APPROVAL" ? (
                               <>
                                 <Button
@@ -2471,7 +2660,71 @@ export const LessonPlanPanel = ({
         </div>
       </div>
 
-      <div id="lesson-plan-print-area" className="hidden print:block">
+      {/*
+        Print / PDF area — deliberately mirrors the Session Plan report so the
+        two documents file together: same table rules, same column treatment,
+        repeating header row across pages.
+      */}
+      <div
+        id="lesson-plan-print-area"
+        className="hidden print:block"
+        style={{ background: "#ffffff", color: "#0f172a", width: "100%" }}
+      >
+        <style>
+          {`
+            #lesson-plan-print-area .lp-print-table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: fixed;
+              font-size: 11px;
+              line-height: 1.35;
+              color: #0f172a;
+            }
+            #lesson-plan-print-area .lp-print-table thead {
+              display: table-header-group;
+            }
+            #lesson-plan-print-area .lp-print-table tr {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            #lesson-plan-print-area .lp-print-table th,
+            #lesson-plan-print-area .lp-print-table td {
+              border: 1px solid #94a3b8 !important;
+              padding: 5px 6px;
+              vertical-align: top;
+              word-wrap: break-word;
+              overflow-wrap: break-word;
+            }
+            #lesson-plan-print-area .lp-print-table thead th,
+            #lesson-plan-print-area .lp-print-table th {
+              background: transparent !important;
+              background-color: transparent !important;
+              color: #0f172a !important;
+              font-weight: 700 !important;
+              text-align: center;
+              white-space: nowrap;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            #lesson-plan-print-area .lp-print-table td.lp-num {
+              text-align: center;
+              white-space: nowrap;
+            }
+            #lesson-plan-print-area .lp-print-table td.lp-text {
+              text-align: left;
+            }
+            #lesson-plan-print-area .lp-print-meta {
+              margin: 0 0 6px;
+              font-size: 12px;
+              line-height: 1.4;
+            }
+            #lesson-plan-print-area .lp-print-section {
+              margin-bottom: 14px;
+              page-break-inside: auto;
+              break-inside: auto;
+            }
+          `}
+        </style>
         <AcademicPrintHeader
           institutionName={institutionName}
           title="Lesson Plan Report"
@@ -2483,45 +2736,90 @@ export const LessonPlanPanel = ({
           academicYearBs={filters.academicYearBs}
           generatedAt={new Date().toLocaleString()}
         />
-        {groupByTeacher(printPlans).map((group) => (
-          <div key={group.teacherId} className="mb-8">
-            <h3 className="mb-2 font-bold">Teacher: {group.teacherName}</h3>
-            {group.items.map((plan) => (
-              <div key={plan._id} className="mb-6">
-                <p className="font-semibold">
-                  {plan.subject?.name} ·{" "}
-                  {plan.teachingDateBs || plan.startDateBs || plan.month} ·{" "}
-                  {plan.status} · {plan.completedPercent}% complete
-                </p>
-                {plan.monthlyDescription ? (
-                  <p className="text-sm mb-1">{plan.monthlyDescription}</p>
-                ) : null}
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr>
-                      <th className="border p-1 text-left">Topic</th>
-                      <th className="border p-1 text-left">Deadline</th>
-                      <th className="border p-1 text-left">Classes</th>
-                      <th className="border p-1 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {plan.items.map((item) => (
-                      <tr key={item._id}>
-                        <td className="border p-1">{item.plannedTopic}</td>
-                        <td className="border p-1">{item.deadline || "—"}</td>
-                        <td className="border p-1">
-                          {item.completedClasses}/{item.estimatedClasses}
-                        </td>
-                        <td className="border p-1">{item.completionStatus}</td>
+        {printPlans.length === 0 ? (
+          <p className="text-sm text-slate-600">No lesson plans to export.</p>
+        ) : (
+          groupByTeacher(printPlans).map((group) => (
+            <div key={group.teacherId} className="lp-print-section">
+              <h3
+                className="lp-print-meta"
+                style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}
+              >
+                Teacher: {group.teacherName}
+              </h3>
+              {group.items.map((plan) => (
+                <div key={plan._id} className="lp-print-section">
+                  <p className="lp-print-meta" style={{ fontWeight: 600 }}>
+                    Subject: {plan.subject?.name ?? "—"}
+                    {plan.subject?.code ? ` (${plan.subject.code})` : ""} ·
+                    Teaching Date:{" "}
+                    {plan.teachingDateBs || plan.startDateBs || plan.month || "—"}{" "}
+                    · Status: {plan.status}
+                  </p>
+                  {plan.monthlyDescription ? (
+                    <p className="lp-print-meta" style={{ color: "#475569" }}>
+                      {plan.monthlyDescription}
+                    </p>
+                  ) : null}
+                  <table className="lp-print-table">
+                    <colgroup>
+                      <col style={{ width: "5%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "28%" }} />
+                      <col style={{ width: "34%" }} />
+                      <col style={{ width: "7%" }} />
+                      <col style={{ width: "17%" }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>S.N</th>
+                        <th>Unit No.</th>
+                        <th>Units</th>
+                        <th>Sub Units</th>
+                        <th>C/Hr</th>
+                        <th>Remarks</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-          </div>
-        ))}
+                    </thead>
+                    <tbody>
+                      {plan.items.map((item, itemIndex) => {
+                        const subUnits = normalizeSubUnitTitles(
+                          item.subUnitTitles,
+                          item.subUnitTitle,
+                        );
+                        return (
+                          <tr key={item._id || `${plan._id}-${itemIndex}`}>
+                            <td className="lp-num">{itemIndex + 1}</td>
+                            <td className="lp-num">
+                              {item.unit?.unitNo ?? "—"}
+                            </td>
+                            <td className="lp-text">
+                              {item.unit?.chapterName ||
+                                item.subjectLabel ||
+                                "—"}
+                            </td>
+                            <td className="lp-text">
+                              {subUnits.length > 0
+                                ? subUnits.join(", ")
+                                : item.plannedTopic || "—"}
+                            </td>
+                            <td className="lp-num">
+                              {Number.isFinite(item.estimatedClasses)
+                                ? item.estimatedClasses
+                                : "—"}
+                            </td>
+                            <td className="lp-text">
+                              {item.remarks?.trim() || ""}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
         <AcademicPrintFooter />
       </div>
     </div>

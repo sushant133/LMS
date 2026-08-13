@@ -1,15 +1,18 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 
 /**
- * Atomic sequence source for voucher numbering.
+ * Atomic sequence source for every numbered document series.
  *
- * Voucher numbers were previously derived from `countDocuments()` plus a random suffix,
- * which produced neither sequential nor gap-free numbering: the count included reversals
- * and soft-deleted entries, and two cashiers posting at once read the same count. IRD
- * expects a gap-free series per fiscal year, so the sequence is now held here and handed
- * out by a single atomic `$inc`.
+ * Numbers were previously derived from `countDocuments()` (plus, for vouchers, a random
+ * suffix), which produced neither sequential nor reuse-proof numbering: the count included
+ * reversals and deleted rows, and two users posting at once read the same count. A number
+ * that has been handed out must never be handed out again, so the sequence lives here and
+ * is issued by a single atomic `$inc` that no delete can wind back.
  *
- * One counter per (school, scope) where scope is e.g. "JV:2083/2084".
+ * One counter per (school, scope). Scope keys the series and is opaque to this model:
+ *   "JV:2083/2084"  journal vouchers for a fiscal year
+ *   "RCPT:2083/2084" fee receipts
+ *   "CC:2082"       character certificates for a BS year
  */
 const voucherCounterSchema = new Schema(
   {

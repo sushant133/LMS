@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_TEACHER_DESIGNATION,
@@ -131,6 +131,20 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const [editDocuments, setEditDocuments] = useState<HrDocument[]>([]);
   const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
+  const moduleAccessRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Bring the panel itself into view once it has rendered.
+   *
+   * The button used to jump to the top of the page instead, which landed above
+   * the panel — with the add-teacher card in between it read as "the page just
+   * scrolled up" rather than as the module access opening. The panel does not
+   * exist until this state is set, so the scroll has to happen in an effect.
+   */
+  useEffect(() => {
+    if (!accessTeacher?.user?._id) return;
+    moduleAccessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [accessTeacher]);
   const [assignmentsTeacher, setAssignmentsTeacher] =
     useState<TeacherRecord | null>(null);
   const teachersQuery = useQuery({
@@ -298,7 +312,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       ) : null}
 
       {canManage && accessTeacher?.user?._id && !editing ? (
-        <div className="space-y-2">
+        <div ref={moduleAccessRef} className="scroll-mt-4 space-y-2">
           <div className="flex justify-end">
             <Button
               size="sm"
@@ -455,7 +469,6 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                               onClick={() => {
                                 setEditing(null);
                                 setAccessTeacher(teacher);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
                               }}
                             >
                               Module Access

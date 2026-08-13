@@ -1,5 +1,6 @@
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
 import {
+  DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION,
   DEFAULT_CHARACTER_CERTIFICATE_HEADING,
   DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY
 } from "@phit-erp/shared";
@@ -24,8 +25,19 @@ const characterCertificateTemplateSchema = new Schema(
       trim: true,
       default: DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY
     },
-    /** Small print above the heading, e.g. "(Affiliated To CTEVT)". */
-    affiliationText: { type: String, trim: true, default: "" },
+    /** Small print under the address line, e.g. "(Affiliated To CTEVT)". */
+    affiliationText: {
+      type: String,
+      trim: true,
+      default: DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION
+    },
+    /**
+     * Letterhead overrides for this document only. Blank falls back to
+     * Institution Settings, so clearing them is a supported way to go back to
+     * the institution-wide name/address.
+     */
+    collegeNameOverride: { type: String, trim: true, default: "" },
+    collegeAddressOverride: { type: String, trim: true, default: "" },
     /** Pre-selected on the issue form. Only one per school; enforced in the controller. */
     isDefault: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true, index: true },

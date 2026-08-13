@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import type { Types } from "mongoose";
 import {
   CHARACTER_CERTIFICATE_CONDUCT_RATINGS,
+  DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION,
   DEFAULT_CHARACTER_CERTIFICATE_BODY,
   DEFAULT_CHARACTER_CERTIFICATE_HEADING,
   DEFAULT_CHARACTER_CERTIFICATE_SIGNATORY,
@@ -11,6 +12,7 @@ import {
   characterCertificatePreviewPdfSchema,
   characterCertificatePreviewSchema,
   characterCertificateTemplateSchema,
+  characterCertificateUpdateSchema,
   type CharacterCertificateDetailsInput,
   type CharacterCertificateTokenMap
 } from "@phit-erp/shared";
@@ -28,6 +30,7 @@ import {
   ensureDefaultCertificateTemplate,
   generateCertificateNumber,
   genderPronouns,
+  resolveCertificateLetterhead,
   resolveCertificateTokens,
   resolveProgramName
 } from "../utils/characterCertificateService.js";
@@ -440,7 +443,7 @@ export const previewCertificate = asyncHandler(async (req: Request, res: Respons
     : await CharacterCertificateTemplate.findOne({ schoolId, isDefault: true }).lean();
   headingText = template?.headingText || headingText;
   signatoryLabel = template?.signatoryLabel || signatoryLabel;
-  affiliationText = template?.affiliationText || "";
+  affiliationText = template?.affiliationText || DEFAULT_CHARACTER_CERTIFICATE_AFFILIATION;
   if (!bodyTemplate) {
     bodyTemplate = template?.bodyTemplate ?? DEFAULT_CHARACTER_CERTIFICATE_BODY;
   }
@@ -490,10 +493,10 @@ export const previewCertificatePdf = asyncHandler(async (req: Request, res: Resp
   const schoolId = tenantObjectId(req);
   const payload = characterCertificatePreviewPdfSchema.parse(req.body);
 
-  const [students, programName, branding] = await Promise.all([
+  const [students, programName, letterhead] = await Promise.all([
     loadPassedOutStudents(schoolId, { _id: payload.studentId }),
     resolveProgramName(schoolId),
-    resolveSchoolBranding(schoolId)
+    resolveCertificateLetterhead(schoolId)
   ]);
 
   const student = students[0];
@@ -510,11 +513,11 @@ export const previewCertificatePdf = asyncHandler(async (req: Request, res: Resp
 
   const details = pickDetails(payload);
   const pdfBuffer = await generateCharacterCertificatePdf({
-    collegeName: branding.collegeName,
-    collegeNameNp: branding.collegeNameNp,
-    collegeAddress: branding.collegeAddress,
+    collegeName: letterhead.collegeName,
+    collegeNameNp: letterhead.collegeNameNp,
+    collegeAddress: letterhead.collegeAddress,
     collegeLogoDataUri: readCollegeLogoDataUri(),
-    affiliationText: payload.affiliationText || undefined,
+    affiliationText: payload.affiliationText || letterhead.affiliationText,
     headingText: payload.headingText || DEFAULT_CHARACTER_CERTIFICATE_HEADING,
     certificateNumber: existing?.certificateNumber ?? "(assigned on issue)",
     issueNo: details.issueNo || undefined,
@@ -776,6 +779,137 @@ export const getCertificateRecord = asyncHandler(async (req: Request, res: Respo
 });
 
 /**
+ * Correct an issued certificate in place.
+ *
+ * Certificates are handed to students, so a typo caught after issue has to be
+ * fixable without spending a new certificate number — that number stays with
+ * the student for life and is not editable here. Every correction is audited
+ * with the full before/after so the register still reconstructs.
+ *
+ * Only the fields actually supplied are touched; an omitted field keeps what
+ * was issued rather than being blanked.
+ */
+export const updateCertificateRecord = asyncHandler(async (req: Request, res: Response) => {
+  await requireCollegeInstitution(req);
+  const schoolId = tenantObjectId(req);
+  const certificateId = String(req.params.certificateId);
+  const payload = characterCertificateUpdateSchema.parse(req.body);
+
+  const certificate = await CharacterCertificate.findOne({ _id: certificateId, schoolId });
+  if (!certificate) {
+    throw new ApiError(404, "Character certificate not found");
+  }
+
+  const before = certificate.toObject();
+
+  const index = payload.issueNumber
+    ? certificate.issuances.findIndex((entry) => entry.issueNumber === payload.issueNumber)
+    : certificate.issuances.length - 1;
+  const issuance = index >= 0 ? certificate.issuances[index] : undefined;
+  if (!issuance) {
+    throw new ApiError(404, "Requested issuance not found for this certificate");
+  }
+
+  // Record-level fields — these drive the list and search, not the printed body.
+  if (payload.studentName !== undefined && payload.studentName !== "") {
+    certificate.student.studentName = payload.studentName;
+  }
+  if (payload.fatherName !== undefined) certificate.student.fatherName = payload.fatherName;
+  if (payload.motherName !== undefined) certificate.student.motherName = payload.motherName;
+  if (payload.registrationNumber !== undefined) {
+    certificate.student.registrationNumber = payload.registrationNumber;
+  }
+  if (payload.dateOfBirthBs !== undefined) {
+    certificate.student.dateOfBirthBs = payload.dateOfBirthBs;
+  }
+  if (payload.conduct !== undefined) certificate.conduct = payload.conduct;
+
+  // Printed sheet.
+  if (payload.resolvedBody) issuance.resolvedBody = payload.resolvedBody;
+  if (payload.headingText !== undefined) issuance.headingText = payload.headingText;
+  if (payload.signatoryLabel !== undefined) issuance.signatoryLabel = payload.signatoryLabel;
+  if (payload.affiliationText !== undefined) issuance.affiliationText = payload.affiliationText;
+  if (payload.purpose !== undefined) issuance.purpose = payload.purpose;
+  if (payload.remarks !== undefined) issuance.remarks = payload.remarks;
+  if (payload.issueDateBs) issuance.issueDateBs = payload.issueDateBs;
+  // The stored subdocument requires every blank to be a string, so fill the
+  // merged result out rather than letting an untouched key arrive undefined.
+  const merged = mergeDetails(issuance.details, pickDetails(payload));
+  issuance.details = {
+    issueNo: merged.issueNo ?? "",
+    courseDuration: merged.courseDuration ?? "",
+    programName: merged.programName ?? "",
+    studyFromBs: merged.studyFromBs ?? "",
+    studyFromAd: merged.studyFromAd ?? "",
+    examYearBs: merged.examYearBs ?? "",
+    examYearAd: merged.examYearAd ?? "",
+    division: merged.division ?? ""
+  };
+
+  // Keep the denormalised date columns in step with the issuance just edited.
+  if (payload.issueDateBs) {
+    if (issuance.issueNumber === 1) certificate.originalIssueDateBs = payload.issueDateBs;
+    if (index === certificate.issuances.length - 1) {
+      certificate.lastIssueDateBs = payload.issueDateBs;
+    }
+  }
+
+  certificate.markModified("issuances");
+  await certificate.save();
+
+  await recordAudit(req, {
+    action: "UPDATE",
+    entity: "CharacterCertificate",
+    entityId: certificateId,
+    before,
+    after: {
+      ...certificate.toObject(),
+      correctedIssueNumber: issuance.issueNumber,
+      reason: payload.reason || null
+    }
+  });
+
+  return sendSuccess(res, "Certificate corrected", certificate);
+});
+
+/**
+ * Delete a certificate so the student can be issued a fresh one.
+ *
+ * The student drops back to "Not issued" on the Passed-Out list and can be
+ * issued again — with a NEW number. The deleted number is never reissued: it
+ * came from an atomic counter that a delete cannot wind back, so the series
+ * keeps a permanent gap showing that the number was spent. The audit entry
+ * below holds the full before-image of what that number was used for.
+ */
+export const deleteCertificateRecord = asyncHandler(async (req: Request, res: Response) => {
+  await requireCollegeInstitution(req);
+  const schoolId = tenantObjectId(req);
+  const certificateId = String(req.params.certificateId);
+
+  const certificate = await CharacterCertificate.findOne({ _id: certificateId, schoolId }).lean();
+  if (!certificate) {
+    throw new ApiError(404, "Character certificate not found");
+  }
+
+  await CharacterCertificate.deleteOne({ _id: certificateId, schoolId });
+
+  await recordAudit(req, {
+    action: "DELETE",
+    entity: "CharacterCertificate",
+    entityId: certificateId,
+    before: certificate,
+    after: {
+      reason: typeof req.query.reason === "string" ? req.query.reason : null
+    }
+  });
+
+  return sendSuccess(res, "Certificate deleted", {
+    certificateId,
+    certificateNumber: certificate.certificateNumber
+  });
+});
+
+/**
  * Print/download a certificate. Read-only: reprinting an existing issuance
  * never mutates the record. `issueNumber` selects which issuance to reproduce
  * and defaults to the most recent one.
@@ -785,14 +919,18 @@ export const downloadCertificatePdf = asyncHandler(async (req: Request, res: Res
   const schoolId = tenantObjectId(req);
   const certificateId = String(req.params.certificateId);
 
-  const [certificate, branding] = await Promise.all([
-    CharacterCertificate.findOne({ _id: certificateId, schoolId }).lean(),
-    resolveSchoolBranding(schoolId)
-  ]);
+  const certificate = await CharacterCertificate.findOne({ _id: certificateId, schoolId }).lean();
 
   if (!certificate) {
     throw new ApiError(404, "Character certificate not found");
   }
+
+  // Letterhead follows the template the certificate was issued from, so a
+  // reprint reproduces the sheet that was handed over.
+  const letterhead = await resolveCertificateLetterhead(
+    schoolId,
+    certificate.issuances[certificate.issuances.length - 1]?.templateId
+  );
 
   const requested = Number.parseInt(String(req.query.issueNumber ?? ""), 10);
   const issuance = Number.isFinite(requested)
@@ -804,11 +942,11 @@ export const downloadCertificatePdf = asyncHandler(async (req: Request, res: Res
   }
 
   const pdfBuffer = await generateCharacterCertificatePdf({
-    collegeName: branding.collegeName,
-    collegeNameNp: branding.collegeNameNp,
-    collegeAddress: branding.collegeAddress,
+    collegeName: letterhead.collegeName,
+    collegeNameNp: letterhead.collegeNameNp,
+    collegeAddress: letterhead.collegeAddress,
     collegeLogoDataUri: readCollegeLogoDataUri(),
-    affiliationText: issuance.affiliationText || undefined,
+    affiliationText: issuance.affiliationText || letterhead.affiliationText,
     headingText: issuance.headingText || DEFAULT_CHARACTER_CERTIFICATE_HEADING,
     certificateNumber: certificate.certificateNumber,
     issueNo: issuance.details?.issueNo || undefined,

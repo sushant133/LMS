@@ -3,6 +3,7 @@ import {
   COMPLAINT_CATEGORIES,
   COMPLAINT_STATUSES,
   LIBRARY_YEAR_LEVELS,
+  STAFF_TIMETABLE_SESSION_TYPES,
   TIMETABLE_ROOM_KINDS,
   TIMETABLE_SESSION_TYPES,
   USER_ROLES
@@ -96,6 +97,66 @@ export const timetableSlotSchema = z
     }
     if (!data.teacherId) {
       ctx.addIssue({ code: "custom", message: "Teacher is required", path: ["teacherId"] });
+    }
+  });
+
+/**
+ * One cell of a college staff member's weekly duty timetable.
+ *
+ * Same weekly shape as the academic timetable (day × period column) so the two
+ * read alike, but the payload is duty/location/department rather than
+ * subject/teacher — staff are not scheduled against a batch or year.
+ *
+ * BREAK and DAY_OFF need only a time range; the API derives their storage key
+ * from startTime exactly as the academic timetable does for BREAK/HOLIDAY.
+ */
+export const staffTimetableSlotSchema = z
+  .object({
+    staffId: objectIdSchema,
+    dayOfWeek: dayOfWeekSchema,
+    /** Required 1–12 for DUTY; derived from startTime for BREAK / DAY_OFF. */
+    periodNumber: z.coerce.number().int().min(0).max(2500).optional(),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/, "Start time is required (HH:MM)"),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/, "End time is required (HH:MM)"),
+    academicYearBs: academicYearSchema,
+    sessionType: z.enum(STAFF_TIMETABLE_SESSION_TYPES).optional().default("DUTY"),
+    /** What the staff member is doing, e.g. "Fee counter", "Front desk". */
+    dutyTitle: z.string().trim().max(120).optional().or(z.literal("")),
+    /** Where — room, counter, or gate. */
+    room: z.string().trim().max(120).optional().or(z.literal("")),
+    /** Defaults to the staff member's own department when left blank. */
+    department: z.string().trim().max(120).optional().or(z.literal("")),
+    /** When sessionType is BREAK: Tiffin, Lunch, etc. */
+    breakLabel: z.string().trim().max(80).optional().or(z.literal("")),
+    remarks: z.string().trim().max(500).optional().or(z.literal(""))
+  })
+  .superRefine((data, ctx) => {
+    const type = data.sessionType ?? "DUTY";
+    const toMin = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+    if (data.startTime && data.endTime && toMin(data.startTime) >= toMin(data.endTime)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "End time must be after start time",
+        path: ["endTime"]
+      });
+    }
+    if (type === "BREAK" || type === "DAY_OFF") {
+      // Time range is the whole record — no period column, no duty title.
+      return;
+    }
+    const p = data.periodNumber;
+    if (p == null || p < 1 || p > 12) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Period number (1–12) is required for a duty slot",
+        path: ["periodNumber"]
+      });
+    }
+    if (!data.dutyTitle?.trim()) {
+      ctx.addIssue({ code: "custom", message: "Duty is required", path: ["dutyTitle"] });
     }
   });
 

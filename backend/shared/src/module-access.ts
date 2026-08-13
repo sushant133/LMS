@@ -16,6 +16,8 @@ export const ERP_MODULE_KEYS = [
   "teacher-attendance",
   "staff-attendance",
   "field-duty",
+  /** Visibility-only gate for the Academic Structure screen (/academics) */
+  "academic-structure",
   "academics",
   "subject-assignment",
   "academic-management",
@@ -192,15 +194,40 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
   {
     key: "field-duty",
     label: "Field Management",
-    description:
-      "Manage = full access (create postings & hospital rosters, assign coordinators/students, take & unlock attendance, master data, monitoring). View = read-only. Assigned coordinators can take attendance on their postings without this grant.",
+    /**
+     * The panel already spells out what each level allows in a callout under
+     * the toggle, so this stays a plain summary like every other module.
+     * Note: assigned coordinators can take attendance on their own postings
+     * without any grant here.
+     */
+    description: "Field postings, hospital rosters, and field attendance",
     apiPrefixes: ["/field-duty"],
     routePrefixes: ["/field-management", "/attendance"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
+    key: "academic-structure",
+    label: "Academic Structure",
+    /**
+     * Visibility only. Hiding this screen never breaks the batch, year, class,
+     * section, and subject lists that fees, exams, attendance, and student
+     * forms read — those follow the `academics` module below.
+     */
+    description: "Shows or hides the Academic Structure screen",
+    // Deliberately empty: this module gates the screen, not the data.
+    apiPrefixes: [],
+    // Route handled explicitly via isAcademicStructurePath so `academics`
+    // stays the module that resolves /academics for read/write checks.
+    routePrefixes: [],
+    availableActions: ["view"]
+  },
+  {
     key: "academics",
-    label: "Academic Management",
+    label: "Academic Data (classes, batches, subjects)",
+    /**
+     * The data itself, used ERP-wide — not whether the Academic Structure menu
+     * item appears, which is the `academic-structure` module above.
+     */
     description: "Classes, sections, batches, years, subjects, promotions",
     apiPrefixes: ["/academics", "/academic-promotion"],
     routePrefixes: ["/academics"],
@@ -233,8 +260,8 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
   {
     key: "timetable",
     label: "Timetable",
-    description: "Class and teacher timetables",
-    apiPrefixes: ["/timetable"],
+    description: "Class, teacher, and college staff duty timetables",
+    apiPrefixes: ["/timetable", "/staff-timetable"],
     routePrefixes: ["/timetable"],
     availableActions: ["view", "create", "edit", "delete", "publish", "export"]
   },
@@ -705,6 +732,7 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
     title: "Academics",
     description: "Classes, subjects, plans, and exams",
     keys: [
+      "academic-structure",
       "academics",
       "subject-assignment",
       "academic-management",
@@ -846,6 +874,29 @@ export const canWriteExaminationCollege = (
 export const canWriteExaminationCtevt = (
   map: ModuleAccessMap | null | undefined
 ): boolean => canWriteModule(map, "examinations-ctevt");
+
+/**
+ * Academic Structure screen (/academics) — visibility only.
+ * Kept separate from the `academics` data module so hiding the screen never
+ * breaks the batch / year / class / section / subject lists that fees, exams,
+ * attendance, and student forms read.
+ * Subject Assignments (/academics/subject-assignments) is its own module.
+ */
+export const isAcademicStructurePath = (routePath: string): boolean => {
+  const path = (routePath.split("?")[0] ?? routePath) || "/";
+  if (
+    path === "/academics/subject-assignments" ||
+    path.startsWith("/academics/subject-assignments/")
+  ) {
+    return false;
+  }
+  return path === "/academics" || path.startsWith("/academics/");
+};
+
+/** True when the Academic Structure menu item / route should be shown. */
+export const canAccessAcademicStructure = (
+  map: ModuleAccessMap | null | undefined
+): boolean => canAccessModule(map, "academic-structure");
 
 export const canReadModule = (
   map: ModuleAccessMap | null | undefined,

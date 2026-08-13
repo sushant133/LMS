@@ -50,6 +50,7 @@ import {
   assertApprovedSessionPlanForLesson,
   assertEditableStatus,
   assertLessonPlanItemsBelongToSessionPlan,
+  assertLessonPlanItemDatesWithinSessionPlanUnits,
   assertTeachingDateWithinSessionPlanUnits,
   assertUniqueUnitsInLessonPlan,
   assertNoDuplicateLogBookForItemDate,
@@ -1629,6 +1630,12 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     teachingDateBs,
     unitIds
   );
+  // Sub-unit rows carry their own dates — hold those to the unit window too
+  await assertLessonPlanItemDatesWithinSessionPlanUnits(
+    req,
+    payload.sessionPlanId,
+    payload.items
+  );
 
   const result = await withTransaction(async (session) => {
     const sessionOpt = getSessionOption(session);
@@ -1746,6 +1753,11 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
         unitIds
       );
     }
+    await assertLessonPlanItemDatesWithinSessionPlanUnits(
+      req,
+      sessionPlanId,
+      payload.items
+    );
   } else if (teachingDateBs) {
     // Date changed without re-sending items — still enforce window against existing items
     const existingItems = await AcademicLessonPlanItem.find({

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createCertificateTemplate,
+  deleteCertificateRecord,
   deleteCertificateTemplate,
   downloadCertificatePdf,
   getCertificateRecord,
@@ -11,6 +12,7 @@ import {
   listPassedOutStudents,
   previewCertificate,
   previewCertificatePdf,
+  updateCertificateRecord,
   updateCertificateTemplate
 } from "../controllers/characterCertificateController.js";
 import { authorize, protect } from "../middleware/auth.js";
@@ -42,5 +44,8 @@ router.get("/", listCertificateRecords);
 router.get("/:certificateId", getCertificateRecord);
 router.get("/:certificateId/pdf", downloadCertificatePdf);
 router.post("/:certificateId/duplicate", issueDuplicateCertificate);
+// Correct a mistake on an issued sheet; delete frees the student to be reissued.
+router.put("/:certificateId", updateCertificateRecord);
+router.delete("/:certificateId", deleteCertificateRecord);
 
 export default router;

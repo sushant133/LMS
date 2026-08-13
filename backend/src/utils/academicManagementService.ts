@@ -582,6 +582,90 @@ export const assertTeachingDateWithinSessionPlanUnits = async (
 };
 
 /**
+ * Every date a Lesson Plan row carries must sit inside its Session Plan unit's
+ * start/end window.
+ *
+ * The teaching date is already checked by assertTeachingDateWithinSessionPlanUnits;
+ * this covers the per-row (sub-unit) dates — item start/end and the topic
+ * deadline — which are seeded from the unit but can be sent with any value.
+ *
+ * A unit with no window set is unconstrained, matching how the teaching-date
+ * check treats it. Log Book entries are deliberately not validated this way:
+ * a log book records what actually happened, which may fall outside the plan.
+ */
+export const assertLessonPlanItemDatesWithinSessionPlanUnits = async (
+  req: Request,
+  sessionPlanId: string,
+  items: Array<{
+    sessionPlanUnitId: string;
+    itemStartDateBs?: string;
+    itemEndDateBs?: string;
+    deadline?: string;
+  }>
+): Promise<void> => {
+  const uniqueIds = [...new Set(items.map((item) => item.sessionPlanUnitId).filter(Boolean))];
+  if (uniqueIds.length === 0) return;
+
+  const units = await AcademicSessionPlanUnit.find({
+    _id: { $in: uniqueIds },
+    schoolId: tenantObjectId(req),
+    sessionPlanId
+  })
+    .select("_id unitNo chapterName startDateBs endDateBs")
+    .lean();
+
+  if (units.length !== uniqueIds.length) {
+    throw new ApiError(400, "One or more selected units do not belong to the Session Plan.");
+  }
+
+  const unitMap = new Map(units.map((unit) => [unit._id.toString(), unit]));
+
+  for (const item of items) {
+    const unit = unitMap.get(item.sessionPlanUnitId);
+    if (!unit) continue;
+
+    const windowStart = String(unit.startDateBs || "").trim();
+    const windowEnd = String(unit.endDateBs || "").trim();
+    const label = `Unit ${unit.unitNo} (${unit.chapterName || "unit"})`;
+    const windowLabel = `${windowStart || "—"} to ${windowEnd || "—"}`;
+
+    const checks: Array<{ value: string; field: string }> = [
+      { value: String(item.itemStartDateBs || "").trim(), field: "start date" },
+      { value: String(item.itemEndDateBs || "").trim(), field: "end date" },
+      { value: String(item.deadline || "").trim(), field: "deadline" }
+    ];
+
+    for (const { value, field } of checks) {
+      if (!value || !BS_DATE_RE.test(value)) continue;
+      if (windowStart && BS_DATE_RE.test(windowStart) && compareBsDates(value, windowStart) < 0) {
+        throw new ApiError(
+          400,
+          `${label} is scheduled ${windowLabel} in the Session Plan. The ${field} ${value} is before that window.`
+        );
+      }
+      if (windowEnd && BS_DATE_RE.test(windowEnd) && compareBsDates(value, windowEnd) > 0) {
+        throw new ApiError(
+          400,
+          `${label} is scheduled ${windowLabel} in the Session Plan. The ${field} ${value} is after that window.`
+        );
+      }
+    }
+
+    const itemStart = String(item.itemStartDateBs || "").trim();
+    const itemEnd = String(item.itemEndDateBs || "").trim();
+    if (
+      itemStart &&
+      itemEnd &&
+      BS_DATE_RE.test(itemStart) &&
+      BS_DATE_RE.test(itemEnd) &&
+      compareBsDates(itemStart, itemEnd) > 0
+    ) {
+      throw new ApiError(400, `${label}: end date ${itemEnd} is before start date ${itemStart}.`);
+    }
+  }
+};
+
+/**
  * @deprecated Use assertUniqueUnitsInLessonPlan + assertTeachingDateWithinSessionPlanUnits.
  * Kept as a thin wrapper so any external import still resolves during rebuild.
  */
