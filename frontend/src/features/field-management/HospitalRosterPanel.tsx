@@ -5,6 +5,7 @@ import {
   type BatchRecord,
   type CollegeStaffRecord,
   type DutyShiftRecord,
+  type FieldDutyRosterStudent,
   type FieldHospitalRecord,
   type HospitalDepartmentRecord,
   type HospitalRosterCell,
@@ -25,6 +26,7 @@ import {
   Tag,
   Trash2,
   UserMinus,
+  UserPlus,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -41,7 +43,11 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
 import { api, unwrap } from "lib/api";
-import { getPrintInstitutionBranding } from "lib/printBranding";
+import {
+  buildPrintInstitutionHeaderHtml,
+  getPrintInstitutionBranding,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { cn, parseErrorMessage } from "lib/utils";
 
 type SubTab =
@@ -128,15 +134,61 @@ const cleanOptionalId = (value?: string | null): string | undefined => {
 
 const sanitizeCellsForApi = (cells: HospitalRosterCell[]): HospitalRosterCell[] =>
   cells
-    .map((c) => ({
-      studentId: c.studentId,
-      day: c.day,
-      shiftId: cleanOptionalId(c.shiftId),
-      departmentId: cleanOptionalId(c.departmentId),
-      code: (c.code ?? "").trim(),
-      remarks: (c.remarks ?? "").trim(),
-    }))
+    .map((c) => {
+      const row: HospitalRosterCell = {
+        studentId: String(c.studentId),
+        day: Number(c.day),
+        code: (c.code ?? "").trim(),
+        remarks: (c.remarks ?? "").trim(),
+      };
+      const shiftId = cleanOptionalId(c.shiftId);
+      const departmentId = cleanOptionalId(c.departmentId);
+      if (shiftId) row.shiftId = shiftId;
+      if (departmentId) row.departmentId = departmentId;
+      return row;
+    })
     .filter((c) => Boolean(c.shiftId || c.departmentId || c.code));
+
+const escapePrintHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const openRosterPrintWindow = (title: string, bodyHtml: string) => {
+  const win = window.open("", "_blank");
+  if (!win) {
+    toast.error("Pop-up blocked — allow pop-ups to print the roster");
+    return;
+  }
+  const institutionHeader = buildPrintInstitutionHeaderHtml();
+  win.document.write(`<!DOCTYPE html><html><head>
+    <meta charset="utf-8"/>
+    <title>${escapePrintHtml(title)}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: system-ui, sans-serif; padding: 8mm; color: #0f172a; }
+      h1 { font-size: 14px; margin: 8px 0 4px; }
+      .meta { font-size: 11px; color: #475569; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 8px; }
+      th, td { border: 1px solid #94a3b8; padding: 2px 3px; }
+      th { background: #f1f5f9; font-weight: 600; }
+      td.student { text-align: left; white-space: nowrap; font-weight: 600; }
+      td.cell { text-align: center; font-family: ui-monospace, monospace; font-weight: 600; }
+      thead { display: table-header-group; }
+      tr { page-break-inside: avoid; }
+      .legend { margin-top: 8px; font-size: 10px; color: #334155; }
+      @page { size: A4 landscape; margin: 8mm; }
+      ${PRINT_INSTITUTION_HEADER_CSS}
+    </style>
+    </head><body>
+    ${institutionHeader}
+    ${bodyHtml}
+    <script>window.onload=function(){window.print()}</script>
+    </body></html>`);
+  win.document.close();
+};
 
 export const HospitalRosterPanel = ({ isAdmin }: Props) => {
   const qc = useQueryClient();
@@ -1800,6 +1852,9 @@ const RosterBuilder = ({
     null,
   );
   const [dirty, setDirty] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addSearch, setAddSearch] = useState("");
+  const [pickedIds, setPickedIds] = useState<string[]>([]);
   /**
    * In-app cell clipboard for Ctrl+C / Ctrl+V on individual student cells
    * (shift, department, code, remarks) — not whole day columns.
@@ -1975,21 +2030,26 @@ const RosterBuilder = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, locked, roster._id]);
 
+  const persistCells = async (cells: HospitalRosterCell[]) =>
+    unwrap<HospitalRosterRecord>(
+      api.put(`/field-duty/hospital-rosters/${roster._id}/cells`, {
+        cells: sanitizeCellsForApi(cells),
+        replace: true,
+      }),
+    );
+
   const saveCells = useMutation({
-    mutationFn: (cells: HospitalRosterCell[]) =>
-      unwrap(
-        api.put(`/field-duty/hospital-rosters/${roster._id}/cells`, {
-          cells: sanitizeCellsForApi(cells),
-          replace: true,
-        }),
-      ),
-    onSuccess: async (_data, cells) => {
+    mutationFn: (cells: HospitalRosterCell[]) => persistCells(cells),
+    onSuccess: async (saved, cells) => {
       toast.success("Roster saved");
       // Only clear dirty if the user did not edit further while the request was in flight.
       const stillMatches =
         JSON.stringify(sanitizeCellsForApi(localCellsRef.current)) ===
         JSON.stringify(sanitizeCellsForApi(cells));
-      if (stillMatches) setDirty(false);
+      if (stillMatches) {
+        setDirty(false);
+        if (saved?.cells) setLocalCells(saved.cells);
+      }
       await onChanged();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -2069,14 +2129,8 @@ const RosterBuilder = ({
         .filter((id) => id !== studentId);
       // Persist cell grid without this student, then update student list
       // (backend also drops their cells when students are updated).
-      const cellsForSave = sanitizeCellsForApi(
+      await persistCells(
         localCellsRef.current.filter((c) => c.studentId !== studentId),
-      );
-      await unwrap(
-        api.put(`/field-duty/hospital-rosters/${roster._id}/cells`, {
-          cells: cellsForSave,
-          replace: true,
-        }),
       );
       return unwrap(
         api.put(`/field-duty/hospital-rosters/${roster._id}/students`, {
@@ -2093,12 +2147,142 @@ const RosterBuilder = ({
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
 
+  const onRosterIds = useMemo(
+    () => new Set((roster.studentIds ?? students.map((s) => s.studentId)).map(String)),
+    [roster.studentIds, students],
+  );
+
+  const assignableQuery = useQuery({
+    queryKey: ["field-duty", "assignable", roster.batchId, roster.yearId],
+    queryFn: () =>
+      unwrap<FieldDutyRosterStudent[]>(
+        api.get("/field-duty/assignable-students", {
+          params: {
+            batchId: roster.batchId || undefined,
+            yearId: roster.yearId || undefined,
+          },
+        }),
+      ),
+    enabled: isAdmin && !locked && addOpen && Boolean(roster.batchId && roster.yearId),
+  });
+
+  const availableToAdd = useMemo(() => {
+    const q = addSearch.trim().toLowerCase();
+    return (assignableQuery.data ?? []).filter((s) => {
+      if (onRosterIds.has(String(s._id))) return false;
+      if (!q) return true;
+      const hay = `${s.fullName} ${s.admissionNumber ?? ""} ${s.rollNumber ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [assignableQuery.data, onRosterIds, addSearch]);
+
+  const addStudentsMut = useMutation({
+    mutationFn: async (idsToAdd: string[]) => {
+      const unique = [...new Set(idsToAdd.map(String).filter(Boolean))];
+      if (!unique.length) throw new Error("Select at least one student to add");
+      // Persist unsaved grid first so refetch does not wipe in-progress work.
+      if (dirtyRef.current) {
+        await persistCells(localCellsRef.current);
+      }
+      const current = (roster.studentIds ?? students.map((s) => s.studentId)).map(String);
+      const merged = [...current];
+      for (const id of unique) {
+        if (!merged.includes(id)) merged.push(id);
+      }
+      return unwrap<HospitalRosterRecord>(
+        api.put(`/field-duty/hospital-rosters/${roster._id}/students`, {
+          studentIds: merged,
+        }),
+      );
+    },
+    onSuccess: async (saved, ids) => {
+      toast.success(
+        ids.length === 1 ? "Student added to roster" : `${ids.length} students added to roster`,
+      );
+      setPickedIds([]);
+      setAddSearch("");
+      setDirty(false);
+      if (saved?.cells) setLocalCells(saved.cells);
+      await onChanged();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
   const selectedCell = selected
     ? cellMap.get(cellKey(selected.studentId, selected.day))
     : undefined;
 
   const printRoster = () => {
-    window.print();
+    const headDays = days
+      .map((d) => {
+        const date = roster.startDateBs ? dayDateLabel(d).slice(5) : "";
+        return `<th>${d}${date ? `<div style="font-weight:400;color:#64748b">${escapePrintHtml(date)}</div>` : ""}</th>`;
+      })
+      .join("");
+    const bodyRows =
+      students.length > 0
+        ? students
+            .map((st) => {
+              const dayCells = days
+                .map((d) => {
+                  const label = cellLabel(cellMap.get(cellKey(st.studentId, d)));
+                  return `<td class="cell">${escapePrintHtml(label || "")}</td>`;
+                })
+                .join("");
+              const notes = days
+                .map((d) => cellMap.get(cellKey(st.studentId, d))?.remarks?.trim())
+                .filter(Boolean)
+                .slice(0, 3)
+                .join("; ");
+              const roll =
+                st.rollNumber != null ? `R${st.rollNumber}` : st.admissionNumber ?? "";
+              return `<tr>
+                <td class="student">${escapePrintHtml(st.fullName)}${
+                  roll
+                    ? `<div style="font-weight:400;color:#64748b">${escapePrintHtml(String(roll))}</div>`
+                    : ""
+                }</td>
+                ${dayCells}
+                <td>${escapePrintHtml(notes || "")}</td>
+              </tr>`;
+            })
+            .join("")
+        : `<tr><td colspan="${days.length + 2}">No students in this roster.</td></tr>`;
+
+    const legendParts = [
+      ...shifts
+        .filter((s) => s.isActive)
+        .map((s) => `${s.shortCode}=${s.name} (${s.dutyHours}h)`),
+      ...activeCodes.map((c) => `${c.code}=${c.label}`),
+    ];
+
+    openRosterPrintWindow(
+      `${roster.name} — Hospital Duty Roster`,
+      `<h1>Hospital Duty Roster</h1>
+      <div class="meta">
+        <strong>${escapePrintHtml(roster.name)}</strong>
+        · ${escapePrintHtml(roster.hospitalName || "Hospital")}
+        · ${escapePrintHtml(periodLabel(roster))} (${dayCount} day${dayCount === 1 ? "" : "s"})
+        · ${escapePrintHtml(`${roster.batchName ?? "Batch"} / ${roster.yearName ?? "Year"}`)}
+        · ${escapePrintHtml(roster.status)}
+        · ${students.length} student(s)
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Student</th>
+            ${headDays}
+            <th>Remarks</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+      ${
+        legendParts.length
+          ? `<p class="legend">Note: ${escapePrintHtml(legendParts.join(" · "))}</p>`
+          : ""
+      }`,
+    );
   };
 
   const printBranding = getPrintInstitutionBranding();
@@ -2134,19 +2318,36 @@ const RosterBuilder = ({
           <div className="flex flex-wrap gap-2 print:hidden">
             {isAdmin && !locked ? (
               <Button
+                type="button"
                 size="sm"
-                disabled={!dirty || saveCells.isPending}
-                onClick={() => saveCells.mutate(localCells)}
+                variant={addOpen ? "default" : "outline"}
+                onClick={() => {
+                  setAddOpen((v) => !v);
+                  setPickedIds([]);
+                  setAddSearch("");
+                }}
               >
-                Save roster
+                <UserPlus className="mr-1 h-3.5 w-3.5" />
+                {addOpen ? "Hide add students" : "Add students"}
               </Button>
             ) : null}
             {isAdmin && !locked ? (
               <Button
+                type="button"
+                size="sm"
+                disabled={saveCells.isPending}
+                onClick={() => saveCells.mutate(localCellsRef.current)}
+              >
+                {saveCells.isPending ? "Saving…" : "Save roster"}
+              </Button>
+            ) : null}
+            {isAdmin && !locked ? (
+              <Button
+                type="button"
                 size="sm"
                 variant="secondary"
                 onClick={() => lockMut.mutate()}
-                disabled={lockMut.isPending}
+                disabled={lockMut.isPending || saveCells.isPending}
               >
                 <Lock className="mr-1 h-3.5 w-3.5" />
                 Lock
@@ -2154,6 +2355,7 @@ const RosterBuilder = ({
             ) : null}
             {isAdmin && locked ? (
               <Button
+                type="button"
                 size="sm"
                 variant="secondary"
                 onClick={() => unlockMut.mutate()}
@@ -2163,13 +2365,123 @@ const RosterBuilder = ({
                 Unlock
               </Button>
             ) : null}
-            <Button size="sm" variant="outline" onClick={printRoster}>
+            <Button type="button" size="sm" variant="outline" onClick={printRoster}>
               <Printer className="mr-1 h-3.5 w-3.5" />
               Print
             </Button>
           </div>
         </CardHeader>
         <CardContent className="min-w-0 space-y-3">
+          {isAdmin && !locked && addOpen ? (
+            <Card className="border-brand-200 bg-brand-50/40 print:hidden">
+              <CardContent className="space-y-3 py-4">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">
+                      Add students from {roster.batchName ?? "this batch"} /{" "}
+                      {roster.yearName ?? "year"}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Use this if a student was removed by mistake. Only active students
+                      not already on this roster are listed.
+                    </p>
+                  </div>
+                  <Input
+                    className="w-56"
+                    placeholder="Search name, roll, admission…"
+                    value={addSearch}
+                    onChange={(e) => setAddSearch(e.target.value)}
+                  />
+                </div>
+                {assignableQuery.isLoading ? (
+                  <LoadingState />
+                ) : availableToAdd.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    {(assignableQuery.data ?? []).every((s) => onRosterIds.has(String(s._id))) &&
+                    (assignableQuery.data ?? []).length > 0
+                      ? "Every active student from this batch and year is already on the roster."
+                      : "No matching students found to add."}
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setPickedIds(availableToAdd.map((s) => String(s._id)))
+                        }
+                      >
+                        Select all ({availableToAdd.length})
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setPickedIds([])}
+                        disabled={pickedIds.length === 0}
+                      >
+                        Clear selection
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={pickedIds.length === 0 || addStudentsMut.isPending}
+                        onClick={() => addStudentsMut.mutate(pickedIds)}
+                      >
+                        <UserPlus className="mr-1 h-3.5 w-3.5" />
+                        {addStudentsMut.isPending
+                          ? "Adding…"
+                          : `Add selected (${pickedIds.length})`}
+                      </Button>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                      <Table>
+                        <TableHead>
+                          <tr>
+                            <Th className="w-10" />
+                            <Th>Roll</Th>
+                            <Th>Student</Th>
+                            <Th>Admission</Th>
+                          </tr>
+                        </TableHead>
+                        <TableBody>
+                          {availableToAdd.map((s) => {
+                            const id = String(s._id);
+                            const checked = pickedIds.includes(id);
+                            return (
+                              <tr key={id}>
+                                <Td>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() =>
+                                      setPickedIds((prev) =>
+                                        checked
+                                          ? prev.filter((x) => x !== id)
+                                          : [...prev, id],
+                                      )
+                                    }
+                                  />
+                                </Td>
+                                <Td className="text-sm">{s.rollNumber ?? "—"}</Td>
+                                <Td className="text-sm font-medium">{s.fullName}</Td>
+                                <Td className="text-xs text-slate-500">
+                                  {s.admissionNumber || "—"}
+                                </Td>
+                              </tr>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+
           {/* Grid */}
           <div className="max-h-[min(70vh,720px)] overflow-auto overscroll-contain rounded-xl border border-slate-200 [scrollbar-width:thin]">
             <table className="w-full min-w-[1100px] border-collapse text-xs">
@@ -2204,7 +2516,8 @@ const RosterBuilder = ({
                       colSpan={days.length + 2}
                       className="border border-slate-200 px-3 py-8 text-center text-slate-500"
                     >
-                      No students in this roster. Re-create with batch/year or update students.
+                      No students in this roster. Use Add students to put them back
+                      from this batch and year.
                     </td>
                   </tr>
                 ) : (
@@ -2466,7 +2779,89 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
               {roster.daysInMonth ? ` · ${roster.daysInMonth} day(s)` : ""}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => window.print()}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const summaryRows = summary.dutySummary
+                .map(
+                  (row) => `<tr>
+                    <td class="student">${escapePrintHtml(row.fullName)}</td>
+                    <td class="cell">${row.totalDuties}</td>
+                    <td class="cell">${row.totalDutyHours}</td>
+                    <td class="cell">${row.workingDays}</td>
+                    <td class="cell">${row.leaveDays}</td>
+                    <td class="cell">${row.offDays}</td>
+                  </tr>`,
+                )
+                .join("");
+              const deptHead = deptCodes
+                .map((c) => `<th>${escapePrintHtml(c)}</th>`)
+                .join("");
+              const deptRows = summary.dutySummary
+                .map((row) => {
+                  const total = Object.values(row.byDepartment).reduce((a, b) => a + b, 0);
+                  return `<tr>
+                    <td class="student">${escapePrintHtml(row.fullName)}</td>
+                    ${deptCodes
+                      .map((c) => `<td class="cell">${row.byDepartment[c] ?? 0}</td>`)
+                      .join("")}
+                    <td class="cell">${total}</td>
+                  </tr>`;
+                })
+                .join("");
+              const shiftHead = shiftCodes
+                .map((c) => `<th>${escapePrintHtml(c)}</th>`)
+                .join("");
+              const shiftRows = summary.dutySummary
+                .map((row) => {
+                  const total = Object.values(row.byShift).reduce((a, b) => a + b, 0);
+                  return `<tr>
+                    <td class="student">${escapePrintHtml(row.fullName)}</td>
+                    ${shiftCodes
+                      .map((c) => `<td class="cell">${row.byShift[c] ?? 0}</td>`)
+                      .join("")}
+                    <td class="cell">${total}</td>
+                    <td class="cell">${row.totalDutyHours}</td>
+                  </tr>`;
+                })
+                .join("");
+              openRosterPrintWindow(
+                `${roster.name} — Hospital Duty Summary`,
+                `<h1>Hospital Duty Summary</h1>
+                <div class="meta">
+                  <strong>${escapePrintHtml(roster.name)}</strong>
+                  · ${escapePrintHtml(periodLabel(roster))}
+                  ${roster.daysInMonth ? ` · ${roster.daysInMonth} day(s)` : ""}
+                </div>
+                <h1>Student duty summary</h1>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th><th>Total duties</th><th>Duty hours</th>
+                      <th>Working days</th><th>Leave</th><th>Off</th>
+                    </tr>
+                  </thead>
+                  <tbody>${summaryRows || `<tr><td colspan="6">No duty rows.</td></tr>`}</tbody>
+                </table>
+                <h1>Department days</h1>
+                <table>
+                  <thead>
+                    <tr><th>Student</th>${deptHead}<th>Dept days</th></tr>
+                  </thead>
+                  <tbody>${deptRows || `<tr><td colspan="${deptCodes.length + 2}">No department assignments.</td></tr>`}</tbody>
+                </table>
+                <h1>Shift days</h1>
+                <table>
+                  <thead>
+                    <tr><th>Student</th>${shiftHead}<th>Shift days</th><th>Hours</th></tr>
+                  </thead>
+                  <tbody>${shiftRows || `<tr><td colspan="${shiftCodes.length + 3}">No shift assignments.</td></tr>`}</tbody>
+                </table>`,
+              );
+            }}
+          >
             <Printer className="mr-1 h-3.5 w-3.5" />
             Print
           </Button>

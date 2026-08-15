@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { SalarySheetRow, SchoolSettingsRecord } from "@phit-erp/shared";
+import type {
+  SalaryPaymentStatus,
+  SalarySheetRow,
+  SchoolSettingsRecord,
+} from "@phit-erp/shared";
 import {
   formatNrsAmountInWords,
   PAYMENT_METHODS,
@@ -40,10 +44,13 @@ import { canManageInstitution, normalizeUserRole } from "lib/roles";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
 import {
+  approveSalarySheetClient,
   deleteSalarySheetMonthClient,
   fetchSalarySheet,
   fetchSalarySheetMonths,
+  rejectSalarySheetClient,
   saveSalarySheetClient,
+  submitSalarySheetClient,
 } from "./salarySheetClient";
 import { printHtmlViaIframe } from "./voucherPrint";
 
@@ -210,23 +217,25 @@ export const SalaryPaymentRecordsPanel = ({
   focusKey,
 }: SalaryPaymentRecordsPanelProps = {}) => {
   const { user } = useAuth();
-  /**
-   * Super Admin / College Admin only (primary or secondary role):
-   * all salary sheet edit, save, add, remove, and delete.
-   * Accountant / Cashier / Principal / others: view + print/export only.
-   */
-  const canEditSheet = useMemo(() => {
-    if (!user) return false;
-    const roles = [user.role, ...(user.secondaryRoles ?? [])].filter(Boolean);
-    return roles.some((role) =>
-      canManageInstitution(normalizeUserRole(String(role))),
-    );
+  const allRoles = useMemo(() => {
+    if (!user) return [] as string[];
+    return [user.role, ...(user.secondaryRoles ?? [])]
+      .filter(Boolean)
+      .map((role) => normalizeUserRole(String(role)));
   }, [user]);
+  const isSuperAdmin = allRoles.includes("SUPER_ADMIN");
+  const isCollegeAdmin = allRoles.includes("COLLEGE_ADMIN");
+  const isAdmin = useMemo(
+    () =>
+      isSuperAdmin ||
+      isCollegeAdmin ||
+      allRoles.some((role) => canManageInstitution(role)),
+    [allRoles, isSuperAdmin, isCollegeAdmin],
+  );
+  const isAccountant = allRoles.includes("ACCOUNTANT");
+  const canPrepareSheet = isAdmin || isAccountant;
   /** Same gate — delete saved months / rows */
-  const canDeleteMonth = canEditSheet;
-  const canManualAttendance = canEditSheet;
-  /** Alias for save / period status / add-remove actions */
-  const canWritePayroll = canEditSheet;
+  const canDeleteMonth = isAdmin;
   /** prepare = working sheet; history = saved months archive */
   const [viewMode, setViewMode] = useState<"prepare" | "history">("prepare");
   const [monthBs, setMonthBs] = useState(() => {
@@ -240,7 +249,7 @@ export const SalaryPaymentRecordsPanel = ({
   const [listType, setListType] = useState("");
   /** Employees already on this month's sheet (added one-by-one or previously saved) */
   const [rows, setRows] = useState<EditableRow[]>([]);
-  const [status, setStatus] = useState<"DRAFT" | "PROCESSED" | "PAID">("DRAFT");
+  const [status, setStatus] = useState<SalaryPaymentStatus>("DRAFT");
   const [paidDateBs, setPaidDateBs] = useState("");
   const [paymentMethod, setPaymentMethod] =
     useState<(typeof PAYMENT_METHODS)[number]>("BANK_TRANSFER");
@@ -333,10 +342,10 @@ export const SalaryPaymentRecordsPanel = ({
 
     // Align sheet status with saved payroll rows for this month
     if (saved.length > 0) {
-      const statuses = saved.map((r) => r.status).filter(Boolean) as Array<
-        "DRAFT" | "PROCESSED" | "PAID"
-      >;
+      const statuses = saved.map((r) => r.status).filter(Boolean) as SalaryPaymentStatus[];
       if (statuses.includes("PAID")) setStatus("PAID");
+      else if (statuses.includes("APPROVED")) setStatus("APPROVED");
+      else if (statuses.includes("PENDING_APPROVAL")) setStatus("PENDING_APPROVAL");
       else if (statuses.includes("PROCESSED")) setStatus("PROCESSED");
       else setStatus("DRAFT");
     }
@@ -345,7 +354,7 @@ export const SalaryPaymentRecordsPanel = ({
   const saveMutation = useMutation({
     mutationFn: (body: {
       monthBs: string;
-      status: "DRAFT" | "PROCESSED" | "PAID";
+      status: SalaryPaymentStatus;
       paidDateBs?: string;
       paymentMethod: string;
       rows: Array<{
@@ -369,10 +378,60 @@ export const SalaryPaymentRecordsPanel = ({
       }>;
     }) => saveSalarySheetClient(body),
     onSuccess: async () => {
-      toast.success("Salary sheet saved — payroll records updated");
+      toast.success("Saved");
       await sheetQuery.refetch();
-      // Keep archive list fresh for next visit
       void monthsQuery.refetch();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const approval = sheetQuery.data?.approval;
+  const canEditSheet =
+    canPrepareSheet && (status === "DRAFT" || status === "PROCESSED");
+  const canWritePayroll = canEditSheet;
+  const canManualAttendance = canEditSheet;
+  const canSaveSheet =
+    canEditSheet || (isAdmin && (status === "APPROVED" || status === "PAID"));
+  const canSubmitSheet =
+    canPrepareSheet &&
+    rows.length > 0 &&
+    (status === "DRAFT" || status === "PROCESSED");
+  const canApproveSheet =
+    isAdmin &&
+    status === "PENDING_APPROVAL" &&
+    ((isCollegeAdmin && !approval?.collegeAdminApproved) ||
+      (isSuperAdmin && !approval?.superAdminApproved));
+  const canRejectSheet =
+    isAdmin && (status === "PENDING_APPROVAL" || status === "APPROVED");
+
+  const refreshSheet = async () => {
+    await sheetQuery.refetch();
+    void monthsQuery.refetch();
+  };
+
+  const submitMutation = useMutation({
+    mutationFn: () => submitSalarySheetClient(monthBs),
+    onSuccess: async () => {
+      toast.success("Submitted");
+      await refreshSheet();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: () => approveSalarySheetClient(monthBs),
+    onSuccess: async () => {
+      toast.success("Approved");
+      await refreshSheet();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: () => rejectSalarySheetClient(monthBs),
+    onSuccess: async () => {
+      toast.success("Rejected");
+      await refreshSheet();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
@@ -506,7 +565,7 @@ export const SalaryPaymentRecordsPanel = ({
 
   const addOrUpdateEntry = () => {
     if (!canWritePayroll) {
-      toast.error("Only Super Admin or College Admin can edit the salary sheet");
+      toast.error("Cannot edit");
       return;
     }
     if (!entry.employeeKey) {
@@ -576,7 +635,7 @@ export const SalaryPaymentRecordsPanel = ({
 
   const startEditRow = (row: EditableRow) => {
     if (!canWritePayroll) {
-      toast.error("Only Super Admin or College Admin can edit the salary sheet");
+      toast.error("Cannot edit");
       return;
     }
     const key = employeeKeyOf(row);
@@ -597,7 +656,7 @@ export const SalaryPaymentRecordsPanel = ({
 
   const removeRow = (row: EditableRow) => {
     if (!canWritePayroll) {
-      toast.error("Only Super Admin or College Admin can remove salary rows");
+      toast.error("Cannot remove");
       return;
     }
     const key = employeeKeyOf(row);
@@ -1252,8 +1311,8 @@ export const SalaryPaymentRecordsPanel = ({
   };
 
   const saveSheet = () => {
-    if (!canWritePayroll) {
-      toast.error("Only Super Admin or College Admin can save salary payroll");
+    if (!canSaveSheet) {
+      toast.error("Cannot save");
       return;
     }
     if (!monthBs || !/^\d{4}-\d{2}$/.test(monthBs)) {
@@ -1412,11 +1471,19 @@ export const SalaryPaymentRecordsPanel = ({
                       const statusLabel =
                         m.status === "MIXED"
                           ? `Mixed (${m.paidCount} paid · ${m.processedCount} proc. · ${m.draftCount} draft)`
-                          : m.status;
+                          : m.status === "PENDING_APPROVAL"
+                            ? "Pending"
+                            : m.status === "APPROVED"
+                              ? "Approved"
+                              : m.status;
                       const statusClass =
                         m.status === "PAID"
                           ? "bg-emerald-100 text-emerald-800"
-                          : m.status === "PROCESSED"
+                          : m.status === "APPROVED"
+                            ? "bg-emerald-50 text-emerald-800"
+                            : m.status === "PENDING_APPROVAL"
+                              ? "bg-amber-100 text-amber-900"
+                              : m.status === "PROCESSED"
                             ? "bg-sky-100 text-sky-800"
                             : m.status === "MIXED"
                               ? "bg-amber-100 text-amber-900"
@@ -1478,7 +1545,7 @@ export const SalaryPaymentRecordsPanel = ({
                                   size="sm"
                                   variant="ghost"
                                   className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
-                                  title="Delete this entire month (Super Admin / College Admin)"
+                                  title="Delete"
                                   disabled={deleteMonthMutation.isPending}
                                   onClick={() => {
                                     const label = `${formatPayrollMonthLabel(m.monthBs)} (${m.monthBs}) · ${m.employeeCount} employee(s) · ${formatCurrencyNpr(m.totalNetSalaryNpr)}`;
@@ -1590,7 +1657,7 @@ export const SalaryPaymentRecordsPanel = ({
         <FileDown className="mr-1 h-4 w-4" />
         Excel
       </Button>
-      {canWritePayroll ? (
+      {canSaveSheet ? (
         <Button
           type="button"
           size="sm"
@@ -1598,7 +1665,72 @@ export const SalaryPaymentRecordsPanel = ({
           onClick={saveSheet}
         >
           <Save className="mr-1 h-4 w-4" />
-          {saveMutation.isPending ? "Saving…" : "Save payroll"}
+          {saveMutation.isPending ? "Saving…" : "Save"}
+        </Button>
+      ) : null}
+      {canSubmitSheet ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={submitMutation.isPending || saveMutation.isPending}
+          onClick={() => {
+            const persistThenSubmit = async () => {
+              if (rows.some((r) => r.dirty || !r.salaryPaymentId)) {
+                await saveMutation.mutateAsync({
+                  monthBs,
+                  status: "DRAFT",
+                  paidDateBs: paidDateBs || undefined,
+                  paymentMethod,
+                  rows: rows.map((r) => ({
+                    employeeType: r.employeeType,
+                    teacherId: r.teacherId,
+                    staffId: r.staffId,
+                    employeeName: r.employeeName,
+                    monthlySalaryNpr: r.monthlySalaryNpr,
+                    presentDays: r.presentDays,
+                    absentDays: r.absentDays,
+                    extraDuty: r.extraDuty,
+                    extraAmountNpr: r.extraAmountNpr,
+                    absentDeductionNpr: r.absentDeductionNpr,
+                    salaryAmountNpr: r.salaryAmountNpr,
+                    tax1PercentNpr: r.tax1PercentNpr,
+                    netSalaryNpr: r.netSalaryNpr,
+                    remarks: r.remarks,
+                    attendanceManualOverride: r.attendanceManualOverride,
+                    valuesManualOverride: Boolean(r.valuesManualOverride),
+                    salaryPaymentId: r.salaryPaymentId,
+                  })),
+                });
+              }
+              submitMutation.mutate();
+            };
+            void persistThenSubmit();
+          }}
+        >
+          {submitMutation.isPending ? "Submitting…" : "Submit"}
+        </Button>
+      ) : null}
+      {canApproveSheet ? (
+        <Button
+          type="button"
+          size="sm"
+          disabled={approveMutation.isPending}
+          onClick={() => approveMutation.mutate()}
+        >
+          {approveMutation.isPending ? "Approving…" : "Approve"}
+        </Button>
+      ) : null}
+      {canRejectSheet ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="text-rose-700"
+          disabled={rejectMutation.isPending}
+          onClick={() => rejectMutation.mutate()}
+        >
+          Reject
         </Button>
       ) : null}
     </div>
@@ -1617,11 +1749,6 @@ export const SalaryPaymentRecordsPanel = ({
                 </span>
                 Salary Sheet / Payroll
               </CardTitle>
-              {!canWritePayroll ? (
-                <p className="mt-2 inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-                  View only — edit &amp; delete restricted to Super Admin / College Admin
-                </p>
-              ) : null}
               <div className="mt-3">{viewModeToggle}</div>
             </div>
             {toolbarActions}
@@ -1639,18 +1766,34 @@ export const SalaryPaymentRecordsPanel = ({
                 onChange={(e) => setMonthBs(e.target.value.trim())}
               />
             </FormField>
-            <FormField label="Save status">
-              <Select
-                value={status}
-                disabled={!canWritePayroll}
-                onChange={(e) =>
-                  setStatus(e.target.value as "DRAFT" | "PROCESSED" | "PAID")
-                }
-              >
-                <option value="DRAFT">Draft</option>
-                <option value="PROCESSED">Processed</option>
-                <option value="PAID">Paid</option>
-              </Select>
+            <FormField label="Status">
+              {isAdmin && status === "APPROVED" ? (
+                <Select
+                  value={status}
+                  onChange={(e) =>
+                    setStatus(e.target.value as SalaryPaymentStatus)
+                  }
+                >
+                  <option value="APPROVED">Approved</option>
+                  <option value="PAID">Paid</option>
+                </Select>
+              ) : (
+                <Input
+                  value={
+                    status === "PENDING_APPROVAL"
+                      ? "Pending"
+                      : status === "APPROVED"
+                        ? "Approved"
+                        : status === "PAID"
+                          ? "Paid"
+                          : status === "PROCESSED"
+                            ? "Processed"
+                            : "Draft"
+                  }
+                  disabled
+                  readOnly
+                />
+              )}
             </FormField>
             <FormField label="Payment method">
               <Select
@@ -1669,6 +1812,33 @@ export const SalaryPaymentRecordsPanel = ({
                 ))}
               </Select>
             </FormField>
+            {status === "PENDING_APPROVAL" ||
+            status === "APPROVED" ||
+            approval?.collegeAdminApproved ||
+            approval?.superAdminApproved ? (
+              <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-1">
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-1 text-xs font-medium",
+                    approval?.collegeAdminApproved
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-slate-100 text-slate-600",
+                  )}
+                >
+                  Admin{approval?.collegeAdminApproved ? " ✓" : ""}
+                </span>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-1 text-xs font-medium",
+                    approval?.superAdminApproved
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-slate-100 text-slate-600",
+                  )}
+                >
+                  Super Admin{approval?.superAdminApproved ? " ✓" : ""}
+                </span>
+              </div>
+            ) : null}
             {status === "PAID" ? (
               <FormField label="Paid date (BS) *">
                 {canWritePayroll ? (
@@ -1712,19 +1882,7 @@ export const SalaryPaymentRecordsPanel = ({
         <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <p className="font-medium">Attendance notice</p>
             <p className="text-amber-900/90">{sheetQuery.data.attendanceWarning}</p>
-            {canEditSheet ? (
-              <p className="mt-1 text-xs">
-                Super Admin / College Admin can edit days and amounts in the sheet
-                table below.
-              </p>
-            ) : (
-              <p className="mt-1 text-xs">
-                Amounts are automatic. Ask Super Admin or College Admin to correct
-                them if needed.
-              </p>
-            )}
           </div>
         </div>
       ) : null}
@@ -1952,23 +2110,30 @@ export const SalaryPaymentRecordsPanel = ({
                   {monthBs}
                 </span>
               </CardTitle>
-              <p className="mt-1 text-xs text-slate-500">
-                {canEditSheet
-                  ? "Admin: edit cells in the table (Backspace to clear). Recalc restores auto amounts from days."
-                  : "Read-only view. Only Super Admin or College Admin can edit, save, or remove rows."}
-              </p>
             </div>
             <Badge
               className={cn(
                 "w-fit shrink-0",
                 status === "PAID"
                   ? "bg-emerald-100 text-emerald-900"
+                  : status === "APPROVED"
+                    ? "bg-emerald-50 text-emerald-900"
+                    : status === "PENDING_APPROVAL"
+                      ? "bg-amber-100 text-amber-900"
                   : status === "PROCESSED"
                     ? "bg-sky-100 text-sky-900"
                     : "bg-slate-100 text-slate-700",
               )}
             >
-              {status}
+              {status === "PENDING_APPROVAL"
+                ? "Pending"
+                : status === "APPROVED"
+                  ? "Approved"
+                  : status === "PAID"
+                    ? "Paid"
+                    : status === "PROCESSED"
+                      ? "Processed"
+                      : "Draft"}
             </Badge>
           </div>
           <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">

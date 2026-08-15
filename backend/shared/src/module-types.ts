@@ -57,7 +57,7 @@ export interface ComplaintRecord {
 
 export type InventoryStockStatus = "AVAILABLE" | "LOW_STOCK" | "CRITICAL_STOCK" | "OUT_OF_STOCK";
 
-export type LibraryBorrowerType = "STUDENT" | "TEACHER";
+export type LibraryBorrowerType = "STUDENT" | "TEACHER" | "STAFF";
 
 export type SmsDeliveryStatus = "PENDING" | "SENT" | "FAILED" | "SKIPPED";
 
@@ -321,6 +321,7 @@ export interface LibraryIssueRecord {
   borrowerType: LibraryBorrowerType;
   studentId?: string;
   teacherId?: string;
+  staffId?: string;
   borrowerName?: string;
   bookTitle?: string;
   /** User who issued the book (admin or library staff). */

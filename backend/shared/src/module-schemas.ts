@@ -365,9 +365,10 @@ export const libraryIssueSchema = z
     copyId: optionalObjectIdSchema,
     /** Alternative: issue by librarian book code (e.g. ANA003). */
     bookCode: z.string().trim().min(1).optional().or(z.literal("")),
-    borrowerType: z.enum(["STUDENT", "TEACHER"]),
+    borrowerType: z.enum(["STUDENT", "TEACHER", "STAFF"]),
     studentId: optionalObjectIdSchema,
     teacherId: optionalObjectIdSchema,
+    staffId: optionalObjectIdSchema,
     issuedDateBs: bsDateSchema,
     dueDateBs: bsDateSchema
   })
@@ -377,6 +378,9 @@ export const libraryIssueSchema = z
     }
     if (value.borrowerType === "TEACHER" && !value.teacherId) {
       ctx.addIssue({ code: "custom", message: "teacherId is required for teacher borrowers", path: ["teacherId"] });
+    }
+    if (value.borrowerType === "STAFF" && !value.staffId) {
+      ctx.addIssue({ code: "custom", message: "staffId is required for staff borrowers", path: ["staffId"] });
     }
     const code = value.bookCode?.trim();
     if (!value.copyId && !code) {

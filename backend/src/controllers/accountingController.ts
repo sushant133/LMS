@@ -132,6 +132,26 @@ const assertCanEditOrDeleteFeePayment = async (req: {
     "Only Super Admin or College Admin can edit or delete this accounting record"
   );
 };
+
+const actorAccountingRoles = async (req: {
+  user?: { userId: string; role: string };
+}): Promise<string[]> => {
+  const roles = [normalizeUserRole(req.user?.role ?? "")];
+  if (req.user?.userId) {
+    const secondary = await getUserSecondaryRoles(req.user.userId);
+    roles.push(...secondary.map((r) => normalizeUserRole(r)));
+  }
+  return [...new Set(roles.filter(Boolean))];
+};
+
+const isSalarySheetAdmin = (roles: string[]): boolean =>
+  roles.some((r) => r === "SUPER_ADMIN" || r === "COLLEGE_ADMIN" || isInstitutionAdmin(r));
+
+const isSalarySheetSuperAdmin = (roles: string[]): boolean =>
+  roles.includes("SUPER_ADMIN");
+
+const isSalarySheetCollegeAdmin = (roles: string[]): boolean =>
+  roles.includes("COLLEGE_ADMIN");
 import { formatAddressLine } from "../utils/formatAddress.js";
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
@@ -188,7 +208,11 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
     AccountingPurchase.find({ schoolId, isDeleted: false, paymentStatus: "PAID" })
       .select("totalAmountNpr")
       .lean(),
-    FeeRefund.find({ schoolId, isDeleted: false }).select("amountNpr").lean(),
+    FeeRefund.find({
+      schoolId,
+      isDeleted: false,
+      status: { $nin: ["PENDING_APPROVAL", "REJECTED"] }
+    }).select("amountNpr").lean(),
     FeeCollection.find({ schoolId, isDeleted: false })
       .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
       .sort({ createdAt: -1 })
@@ -202,7 +226,11 @@ export const getAccountingDashboard = asyncHandler(async (req: Request, res: Res
       .limit(8)
       .lean(),
     AccountingPurchase.find({ schoolId, isDeleted: false }).sort({ createdAt: -1 }).limit(8).lean(),
-    FeeRefund.find({ schoolId, isDeleted: false })
+    FeeRefund.find({
+      schoolId,
+      isDeleted: false,
+      status: { $nin: ["PENDING_APPROVAL", "REJECTED"] }
+    })
       .populate({ path: "studentId", populate: { path: "user", select: "fullName" } })
       .sort({ createdAt: -1 })
       .limit(8)
@@ -642,7 +670,12 @@ export const getStudentFinancialHistory = asyncHandler(async (req: Request, res:
       FeeCollection.find({ schoolId, studentId: student._id, isDeleted: false })
         .sort({ paidDateBs: -1 })
         .lean(),
-      FeeRefund.find({ schoolId, studentId: student._id, isDeleted: false })
+      FeeRefund.find({
+        schoolId,
+        studentId: student._id,
+        isDeleted: false,
+        status: { $nin: ["PENDING_APPROVAL", "REJECTED"] }
+      })
         .sort({ dateBs: -1 })
         .lean(),
       StudentScholarshipAward.find({
@@ -3010,6 +3043,74 @@ const resolvePayrollAmounts = (payload: {
   };
 };
 
+const loadSalarySheetApproval = async (
+  schoolId: ReturnType<typeof tenantObjectId>,
+  monthBs: string
+) => {
+  const rows = await SalaryPayment.find({
+    schoolId,
+    monthBs,
+    isDeleted: false
+  })
+    .select(
+      "status submittedAt collegeAdminApprovedBy superAdminApprovedBy collegeAdminApprovedAt superAdminApprovedAt"
+    )
+    .lean();
+
+  if (!rows.length) {
+    return {
+      submitted: false,
+      collegeAdminApproved: false,
+      superAdminApproved: false,
+      fullyApproved: false
+    };
+  }
+
+  const submitted = rows.every(
+    (r) =>
+      r.status === "PENDING_APPROVAL" ||
+      r.status === "APPROVED" ||
+      r.status === "PAID" ||
+      Boolean(r.submittedAt)
+  );
+  const collegeAdminApproved = rows.every((r) => Boolean(r.collegeAdminApprovedBy));
+  const superAdminApproved = rows.every((r) => Boolean(r.superAdminApprovedBy));
+  const fullyApproved =
+    rows.every((r) => r.status === "APPROVED" || r.status === "PAID") ||
+    (collegeAdminApproved && superAdminApproved);
+
+  const adminId = rows.find((r) => r.collegeAdminApprovedBy)?.collegeAdminApprovedBy;
+  const superId = rows.find((r) => r.superAdminApprovedBy)?.superAdminApprovedBy;
+  const users = await User.find({
+    _id: { $in: [adminId, superId].filter(Boolean) }
+  })
+    .select("fullName")
+    .lean();
+  const nameById = new Map(users.map((u) => [String(u._id), u.fullName?.trim() || ""]));
+
+  return {
+    submitted,
+    collegeAdminApproved,
+    superAdminApproved,
+    fullyApproved,
+    collegeAdminApprovedByName: adminId
+      ? nameById.get(String(adminId)) || undefined
+      : undefined,
+    superAdminApprovedByName: superId
+      ? nameById.get(String(superId)) || undefined
+      : undefined
+  };
+};
+
+const clearSalarySheetApprovals = (row: InstanceType<typeof SalaryPayment>) => {
+  row.collegeAdminApprovedAt = undefined;
+  row.collegeAdminApprovedBy = undefined;
+  row.superAdminApprovedAt = undefined;
+  row.superAdminApprovedBy = undefined;
+  row.rejectedAt = undefined;
+  row.rejectedBy = undefined;
+};
+
 export const getSalarySheet = asyncHandler(async (req: Request, res: Response) => {
   const monthBs = String(req.query.monthBs || "").trim();
   if (!/^\d{4}-\d{2}$/.test(monthBs)) {
@@ -3027,19 +3128,54 @@ export const getSalarySheet = asyncHandler(async (req: Request, res: Response) =
     employeeId: typeof req.query.employeeId === "string" ? req.query.employeeId : "",
     search: typeof req.query.q === "string" ? req.query.q : ""
   });
-  return sendSuccess(res, "Salary sheet generated", sheet);
+  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  return sendSuccess(res, "Salary sheet generated", { ...sheet, approval });
 });
 
 export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) => {
-  // Entire salary sheet write path is Super Admin / College Admin only
-  await assertCanEditOrDeleteFeePayment(req);
-
   const payload = salarySheetSaveSchema.parse(req.body);
   const schoolId = tenantObjectId(req);
   const userId = req.user!.userId;
+  const roles = await actorAccountingRoles(req);
+  const admin = isSalarySheetAdmin(roles);
+
+  const existingMonth = await SalaryPayment.find({
+    schoolId,
+    monthBs: payload.monthBs,
+    isDeleted: false
+  })
+    .select("status submittedAt collegeAdminApprovedBy superAdminApprovedBy")
+    .lean();
+
+  const monthLockedForAccountant = existingMonth.some(
+    (r) =>
+      r.status === "PENDING_APPROVAL" ||
+      r.status === "APPROVED" ||
+      r.status === "PAID"
+  );
+  if (!admin && monthLockedForAccountant) {
+    throw new ApiError(403, "This salary sheet is locked until it is rejected or paid");
+  }
+
+  if (!admin && (payload.status === "PAID" || payload.status === "APPROVED")) {
+    throw new ApiError(403, "Only Super Admin or College Admin can approve or mark paid");
+  }
+
+  if (payload.status === "PAID") {
+    const approval = await loadSalarySheetApproval(schoolId, payload.monthBs);
+    const hasRows = existingMonth.length > 0 || payload.rows.length > 0;
+    if (hasRows && !approval.fullyApproved && existingMonth.some((r) => r.status !== "PAID")) {
+      throw new ApiError(400, "Salary sheet must be approved before it can be marked paid");
+    }
+  }
 
   // Admins may save fully manual money columns
-  const canManualValues = true;
+  const canManualValues = admin;
+  const saveStatus = !admin
+    ? payload.status === "PENDING_APPROVAL"
+      ? "PENDING_APPROVAL"
+      : "DRAFT"
+    : payload.status;
 
   // Derive working days from BS calendar for consistent per-day rates
   const [y, m] = payload.monthBs.split("-").map(Number);
@@ -3047,7 +3183,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   const workingDaysInMonth =
     y && m ? getDaysInBsMonth(y, m) : 30;
 
-  if (payload.status === "PAID" && payload.paidDateBs) {
+  if (saveStatus === "PAID" && payload.paidDateBs) {
     const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
     await assertFiscalPeriodOpen(schoolId, payload.paidDateBs);
   }
@@ -3117,7 +3253,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       valuesManualOverride: useManualValues,
       attendanceIncomplete: false,
       notes: row.remarks ?? "",
-      status: payload.status,
+      status: saveStatus,
       paidDateBs: payload.paidDateBs || undefined,
       paymentMethod: payload.paymentMethod
     };
@@ -3142,15 +3278,22 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
     }
 
     if (existing) {
-      if (existing.status === "PAID" && payload.status !== "PAID") {
+      if (existing.status === "PAID" && saveStatus !== "PAID") {
         continue;
       }
       const wasPaid = existing.status === "PAID";
+      if (saveStatus === "DRAFT" || saveStatus === "PENDING_APPROVAL") {
+        clearSalarySheetApprovals(existing);
+      }
+      if (saveStatus === "PENDING_APPROVAL") {
+        existing.submittedAt = new Date();
+        existing.submittedBy = userId as unknown as typeof existing.submittedBy;
+      }
       Object.assign(existing, docFields);
       await existing.save();
       savedIds.push(String(existing._id));
 
-      if (!wasPaid && payload.status === "PAID" && payload.paidDateBs) {
+      if (!wasPaid && saveStatus === "PAID" && payload.paidDateBs) {
         await recordCashEntry(req, {
           dateBs: payload.paidDateBs,
           entryType: "DEBIT",
@@ -3176,11 +3319,14 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       const created = await SalaryPayment.create({
         ...docFields,
         schoolId,
-        createdBy: userId
+        createdBy: userId,
+        ...(saveStatus === "PENDING_APPROVAL"
+          ? { submittedAt: new Date(), submittedBy: userId }
+          : {})
       });
       savedIds.push(String(created._id));
 
-      if (payload.status === "PAID" && payload.paidDateBs) {
+      if (saveStatus === "PAID" && payload.paidDateBs) {
         await recordCashEntry(req, {
           dateBs: payload.paidDateBs,
           entryType: "DEBIT",
@@ -3209,15 +3355,158 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
     action: "accounting.salary.sheet.save",
     entity: "SalaryPayment",
     entityId: payload.monthBs,
-    after: { monthBs: payload.monthBs, count: savedIds.length, status: payload.status }
+    after: { monthBs: payload.monthBs, count: savedIds.length, status: saveStatus }
   });
 
   const sheet = await buildSalarySheet({ schoolId, monthBs: payload.monthBs });
+  const approval = await loadSalarySheetApproval(schoolId, payload.monthBs);
   return sendSuccess(res, `Salary sheet saved (${savedIds.length} employee(s))`, {
     ...sheet,
+    approval,
     savedIds,
     totalNetInWords: formatNrsAmountInWords(sheet.totals.totalNetSalaryNpr)
   });
+});
+
+const monthBsParam = (value: string): string => {
+  const monthBs = String(value || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(monthBs)) {
+    throw new ApiError(400, "monthBs must be YYYY-MM (BS)");
+  }
+  return monthBs;
+};
+
+export const submitSalarySheet = asyncHandler(async (req: Request, res: Response) => {
+  const monthBs = monthBsParam(String(req.params.monthBs || ""));
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId;
+  const rows = await SalaryPayment.find({
+    schoolId,
+    monthBs,
+    isDeleted: false
+  });
+  if (!rows.length) {
+    throw new ApiError(400, "Save the salary sheet first");
+  }
+  if (rows.some((r) => r.status === "PAID")) {
+    throw new ApiError(400, "Paid salary sheet cannot be submitted");
+  }
+
+  for (const row of rows) {
+    clearSalarySheetApprovals(row);
+    row.status = "PENDING_APPROVAL";
+    row.submittedAt = new Date();
+    row.submittedBy = userId as unknown as typeof row.submittedBy;
+    await row.save();
+  }
+
+  await recordAudit(req, {
+    action: "accounting.salary.sheet.submit",
+    entity: "SalaryPayment",
+    entityId: monthBs,
+    after: { monthBs, count: rows.length }
+  });
+
+  const sheet = await buildSalarySheet({ schoolId, monthBs });
+  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  return sendSuccess(res, "Salary sheet submitted", { ...sheet, approval });
+});
+
+export const approveSalarySheet = asyncHandler(async (req: Request, res: Response) => {
+  await assertCanEditOrDeleteFeePayment(req);
+  const monthBs = monthBsParam(String(req.params.monthBs || ""));
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId;
+  const roles = await actorAccountingRoles(req);
+  const asSuper = isSalarySheetSuperAdmin(roles);
+  const asCollege = isSalarySheetCollegeAdmin(roles);
+  if (!asSuper && !asCollege) {
+    throw new ApiError(403, "Only Super Admin or College Admin can approve");
+  }
+
+  const rows = await SalaryPayment.find({
+    schoolId,
+    monthBs,
+    isDeleted: false
+  });
+  if (!rows.length) {
+    throw new ApiError(404, "Salary sheet not found");
+  }
+  if (rows.some((r) => r.status === "PAID")) {
+    throw new ApiError(400, "Paid salary sheet is already final");
+  }
+  if (rows.some((r) => r.status !== "PENDING_APPROVAL" && r.status !== "APPROVED")) {
+    throw new ApiError(400, "Salary sheet must be submitted before approval");
+  }
+
+  const now = new Date();
+  for (const row of rows) {
+    if (asCollege) {
+      row.collegeAdminApprovedAt = now;
+      row.collegeAdminApprovedBy = userId as unknown as typeof row.collegeAdminApprovedBy;
+    }
+    if (asSuper) {
+      row.superAdminApprovedAt = now;
+      row.superAdminApprovedBy = userId as unknown as typeof row.superAdminApprovedBy;
+    }
+    if (row.collegeAdminApprovedBy && row.superAdminApprovedBy) {
+      row.status = "APPROVED";
+    } else {
+      row.status = "PENDING_APPROVAL";
+    }
+    await row.save();
+  }
+
+  await recordAudit(req, {
+    action: "accounting.salary.sheet.approve",
+    entity: "SalaryPayment",
+    entityId: monthBs,
+    after: { monthBs, collegeAdmin: asCollege, superAdmin: asSuper }
+  });
+
+  const sheet = await buildSalarySheet({ schoolId, monthBs });
+  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  return sendSuccess(res, "Salary sheet approved", { ...sheet, approval });
+});
+
+export const rejectSalarySheet = asyncHandler(async (req: Request, res: Response) => {
+  await assertCanEditOrDeleteFeePayment(req);
+  const monthBs = monthBsParam(String(req.params.monthBs || ""));
+  const schoolId = tenantObjectId(req);
+  const userId = req.user!.userId;
+
+  const rows = await SalaryPayment.find({
+    schoolId,
+    monthBs,
+    isDeleted: false
+  });
+  if (!rows.length) {
+    throw new ApiError(404, "Salary sheet not found");
+  }
+  if (rows.some((r) => r.status === "PAID")) {
+    throw new ApiError(400, "Paid salary sheet cannot be rejected");
+  }
+
+  for (const row of rows) {
+    clearSalarySheetApprovals(row);
+    row.status = "DRAFT";
+    row.submittedAt = undefined;
+    row.submittedBy = undefined;
+    row.rejectedAt = new Date();
+    row.rejectedBy = userId as unknown as typeof row.rejectedBy;
+    await row.save();
+  }
+
+  await recordAudit(req, {
+    action: "accounting.salary.sheet.reject",
+    entity: "SalaryPayment",
+    entityId: monthBs,
+    after: { monthBs }
+  });
+
+  const sheet = await buildSalarySheet({ schoolId, monthBs });
+  const approval = await loadSalarySheetApproval(schoolId, monthBs);
+  return sendSuccess(res, "Salary sheet rejected", { ...sheet, approval });
 });
 
 export const createSalary = asyncHandler(async (req: Request, res: Response) => {
@@ -3469,7 +3758,11 @@ export const listSalarySheetMonths = asyncHandler(
       totalSalaryAmountNpr: number;
       draftCount: number;
       processedCount: number;
+      pendingApprovalCount: number;
+      approvedCount: number;
       paidCount: number;
+      collegeAdminApprovedCount: number;
+      superAdminApprovedCount: number;
       paidDates: Array<string | null | undefined>;
       paymentMethods: Array<string | null | undefined>;
       updatedAt: Date | null;
@@ -3495,8 +3788,20 @@ export const listSalarySheetMonths = asyncHandler(
           processedCount: {
             $sum: { $cond: [{ $eq: ["$status", "PROCESSED"] }, 1, 0] }
           },
+          pendingApprovalCount: {
+            $sum: { $cond: [{ $eq: ["$status", "PENDING_APPROVAL"] }, 1, 0] }
+          },
+          approvedCount: {
+            $sum: { $cond: [{ $eq: ["$status", "APPROVED"] }, 1, 0] }
+          },
           paidCount: {
             $sum: { $cond: [{ $eq: ["$status", "PAID"] }, 1, 0] }
+          },
+          collegeAdminApprovedCount: {
+            $sum: { $cond: [{ $ifNull: ["$collegeAdminApprovedBy", false] }, 1, 0] }
+          },
+          superAdminApprovedCount: {
+            $sum: { $cond: [{ $ifNull: ["$superAdminApprovedBy", false] }, 1, 0] }
           },
           paidDates: { $push: "$paidDateBs" },
           paymentMethods: { $push: "$paymentMethod" },
@@ -3510,12 +3815,18 @@ export const listSalarySheetMonths = asyncHandler(
       const monthBs = String(g._id || "").trim();
       const draftCount = Number(g.draftCount || 0);
       const processedCount = Number(g.processedCount || 0);
+      const pendingApprovalCount = Number(g.pendingApprovalCount || 0);
+      const approvedCount = Number(g.approvedCount || 0);
       const paidCount = Number(g.paidCount || 0);
       const distinctStatuses = [
         draftCount > 0 ? "DRAFT" : null,
         processedCount > 0 ? "PROCESSED" : null,
+        pendingApprovalCount > 0 ? "PENDING_APPROVAL" : null,
+        approvedCount > 0 ? "APPROVED" : null,
         paidCount > 0 ? "PAID" : null
-      ].filter(Boolean) as Array<"DRAFT" | "PROCESSED" | "PAID">;
+      ].filter(Boolean) as Array<
+        "DRAFT" | "PROCESSED" | "PENDING_APPROVAL" | "APPROVED" | "PAID"
+      >;
       const status =
         distinctStatuses.length === 1
           ? distinctStatuses[0]!
@@ -3544,7 +3855,15 @@ export const listSalarySheetMonths = asyncHandler(
         status,
         draftCount,
         processedCount,
+        pendingApprovalCount,
+        approvedCount,
         paidCount,
+        collegeAdminApproved:
+          Number(g.collegeAdminApprovedCount || 0) === Number(g.employeeCount || 0) &&
+          Number(g.employeeCount || 0) > 0,
+        superAdminApproved:
+          Number(g.superAdminApprovedCount || 0) === Number(g.employeeCount || 0) &&
+          Number(g.employeeCount || 0) > 0,
         paidDateBs,
         paymentMethod,
         updatedAt: g.updatedAt ? new Date(g.updatedAt).toISOString() : undefined
@@ -3873,6 +4192,7 @@ export const generateAccountingReport = asyncHandler(async (req: Request, res: R
       const filter: Record<string, unknown> = {
         schoolId,
         isDeleted: false,
+        status: { $nin: ["PENDING_APPROVAL", "REJECTED"] },
         ...bsFieldDateFilter("dateBs", dateOpts)
       };
       const refunds = await FeeRefund.find(filter)

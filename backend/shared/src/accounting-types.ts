@@ -14,7 +14,12 @@ export type PaymentMethod =
 
 export type PaymentStatus = "PENDING" | "PARTIAL" | "PAID";
 
-export type SalaryPaymentStatus = "DRAFT" | "PROCESSED" | "PAID";
+export type SalaryPaymentStatus =
+  | "DRAFT"
+  | "PROCESSED"
+  | "PENDING_APPROVAL"
+  | "APPROVED"
+  | "PAID";
 
 export type CashBookEntryType = "DEBIT" | "CREDIT";
 
@@ -314,6 +319,15 @@ export interface SalarySheetTotals {
   totalNetSalaryInWords: string;
 }
 
+export interface SalarySheetApproval {
+  submitted: boolean;
+  collegeAdminApproved: boolean;
+  superAdminApproved: boolean;
+  collegeAdminApprovedByName?: string;
+  superAdminApprovedByName?: string;
+  fullyApproved: boolean;
+}
+
 export interface SalarySheetResponse {
   monthBs: string;
   workingDaysInMonth: number;
@@ -322,6 +336,7 @@ export interface SalarySheetResponse {
   attendanceWarning?: string;
   rows: SalarySheetRow[];
   totals: SalarySheetTotals;
+  approval?: SalarySheetApproval;
 }
 
 /**
@@ -337,7 +352,11 @@ export interface SalarySheetMonthSummary {
   status: SalaryPaymentStatus | "MIXED";
   draftCount: number;
   processedCount: number;
+  pendingApprovalCount?: number;
+  approvedCount?: number;
   paidCount: number;
+  collegeAdminApproved?: boolean;
+  superAdminApproved?: boolean;
   /** Latest non-empty paid date among rows, if any */
   paidDateBs?: string;
   paymentMethod?: PaymentMethod;

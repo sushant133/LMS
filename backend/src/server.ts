@@ -49,8 +49,9 @@ app.use(
 );
 
 app.use(cookieParser(env.COOKIE_SECRET));
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+// Hospital roster grids (student × day cells) can exceed 1mb on long periods.
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(originCheck);
 
 // Development: detailed logs. Production: Apache combined (no sensitive bodies).

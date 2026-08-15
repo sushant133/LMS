@@ -94,6 +94,9 @@ export const parseErrorMessage = (error: unknown): string => {
         : (data.message ?? "Validation failed");
     }
     if (data?.message) return data.message;
+    if (response?.status === 413) {
+      return "Roster is too large to save in one request. Shorten the period or save again.";
+    }
     if (response?.status === 400) return "Bad request — check the form and try again";
     if (response?.status === 404) return "Record not found";
     return "Something went wrong";

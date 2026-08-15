@@ -10,6 +10,7 @@ import {
   moduleStaffSchema
 } from "@phit-erp/shared";
 import { LibraryBook, LibraryBookCopy, LibraryIssue } from "../models/LibraryBook.js";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
 import { User } from "../models/User.js";
@@ -59,6 +60,11 @@ const issueBorrowerPopulate: Array<{
     ]
   },
   { path: "teacherId", populate: { path: "user", select: "fullName" } },
+  {
+    path: "staffId",
+    select: "fullName staffId designation department user",
+    populate: { path: "user", select: "fullName" }
+  },
   { path: "issuedByUserId", select: "fullName role" }
 ];
 
@@ -84,6 +90,13 @@ const personFullName = (person: unknown): string | undefined => {
   return fullName?.trim() || undefined;
 };
 
+const staffDisplayName = (staff: unknown): string | undefined => {
+  if (!staff || typeof staff !== "object") return undefined;
+  const fromDoc = (staff as { fullName?: string }).fullName?.trim();
+  if (fromDoc) return fromDoc;
+  return personFullName(staff);
+};
+
 const refIdAndName = (
   value: unknown
 ): { id?: string; name?: string } => {
@@ -105,7 +118,11 @@ const formatIssue = (issue: Record<string, unknown>) => {
 
   const studentId = refId(issue.studentId);
   const teacherId = refId(issue.teacherId);
-  const borrowerName = personFullName(issue.studentId) ?? personFullName(issue.teacherId);
+  const staffId = refId(issue.staffId);
+  const borrowerName =
+    personFullName(issue.studentId) ??
+    personFullName(issue.teacherId) ??
+    staffDisplayName(issue.staffId);
 
   const copyId =
     typeof copy === "string"
@@ -153,6 +170,7 @@ const formatIssue = (issue: Record<string, unknown>) => {
     bookId: refId(issue.bookId) ?? issue.bookId,
     studentId,
     teacherId,
+    staffId,
     copyId,
     bookCode: (issue.bookCode as string | undefined) ?? bookCodeFromCopy,
     bookTitle: book?.title,
@@ -186,6 +204,15 @@ const getBorrowerFilter = async (req: Request): Promise<Record<string, unknown> 
       throw new ApiError(404, "Teacher profile not found");
     }
     return { borrowerType: "TEACHER", teacherId: teacher._id };
+  }
+
+  const staff = await CollegeStaff.findOne(
+    withTenantScope(req, { user: req.user?.userId, isDeleted: false })
+  )
+    .select("_id")
+    .lean();
+  if (staff) {
+    return { borrowerType: "STAFF", staffId: staff._id };
   }
 
   return null;
@@ -594,6 +621,31 @@ export const deleteBookCopy = asyncHandler(async (req: Request, res: Response) =
   return sendSuccess(res, "Book copy deleted");
 });
 
+/** Slim active college-staff list for Issue Books (library staff + admin). */
+export const listAssignableStaffBorrowers = asyncHandler(
+  async (req: Request, res: Response) => {
+    const staff = await CollegeStaff.find(
+      withTenantScope(req, { isDeleted: false, status: "ACTIVE" })
+    )
+      .select("fullName staffId designation department")
+      .sort({ fullName: 1 })
+      .limit(500)
+      .lean();
+
+    return sendSuccess(
+      res,
+      "Staff borrowers fetched",
+      staff.map((s) => ({
+        _id: s._id.toString(),
+        staffId: s.staffId,
+        fullName: s.fullName,
+        designation: s.designation ?? "",
+        department: s.department ?? ""
+      }))
+    );
+  }
+);
+
 export const listIssues = asyncHandler(async (req: Request, res: Response) => {
   await syncSchoolLibraryOverdueStatuses(req.tenantSchoolId!);
 
@@ -622,7 +674,7 @@ export const listIssues = asyncHandler(async (req: Request, res: Response) => {
 export const listMyBooks = asyncHandler(async (req: Request, res: Response) => {
   const borrowerFilter = await getBorrowerFilter(req);
   if (!borrowerFilter) {
-    throw new ApiError(403, "Only students and teachers can view borrowed books");
+    throw new ApiError(403, "Only students, teachers, and staff can view borrowed books");
   }
 
   await syncSchoolLibraryOverdueStatuses(req.tenantSchoolId!);
@@ -691,6 +743,19 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     if (!teacher) {
       throw new ApiError(404, "Teacher not found");
     }
+  } else if (payload.borrowerType === "STAFF" && payload.staffId) {
+    const staff = await CollegeStaff.findOne(
+      withTenantScope(req, {
+        _id: payload.staffId,
+        isDeleted: false,
+        status: "ACTIVE"
+      })
+    );
+    if (!staff) {
+      throw new ApiError(404, "Staff member not found or inactive");
+    }
+  } else {
+    throw new ApiError(400, "Select a valid student, teacher, or staff borrower");
   }
 
   const book = await LibraryBook.findOne(withTenantScope(req, { _id: payload.bookId }));
@@ -741,6 +806,7 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
     borrowerType: payload.borrowerType,
     studentId: payload.studentId,
     teacherId: payload.teacherId,
+    staffId: payload.staffId,
     issuedByUserId: req.user?.userId,
     issuedDateBs: payload.issuedDateBs,
     dueDateBs: payload.dueDateBs,
@@ -778,6 +844,19 @@ export const issueBook = asyncHandler(async (req: Request, res: Response) => {
       await sendNotification({
         schoolId,
         recipientUserId: teacher.user.toString(),
+        title: "Library book issued",
+        message: `${displayTitle} — due ${payload.dueDateBs}`,
+        type: "LIBRARY",
+        channel: "BOTH",
+        metadata: { libraryIssueId: issue._id.toString() }
+      });
+    }
+  } else if (payload.borrowerType === "STAFF" && payload.staffId) {
+    const staff = await CollegeStaff.findById(payload.staffId).select("user").lean();
+    if (staff?.user) {
+      await sendNotification({
+        schoolId,
+        recipientUserId: staff.user.toString(),
         title: "Library book issued",
         message: `${displayTitle} — due ${payload.dueDateBs}`,
         type: "LIBRARY",
@@ -855,6 +934,19 @@ export const returnBook = asyncHandler(async (req: Request, res: Response) => {
       await sendNotification({
         schoolId,
         recipientUserId: teacher.user.toString(),
+        title: "Library book returned",
+        message: `"${bookTitle}${codeLabel}" was returned on ${payload.returnedDateBs}.${fineMessage}`,
+        type: "LIBRARY",
+        channel: "BOTH",
+        metadata: { libraryIssueId: issue._id.toString(), action: "RETURNED" }
+      });
+    }
+  } else if (issue.borrowerType === "STAFF" && issue.staffId) {
+    const staff = await CollegeStaff.findById(issue.staffId).select("user").lean();
+    if (staff?.user) {
+      await sendNotification({
+        schoolId,
+        recipientUserId: staff.user.toString(),
         title: "Library book returned",
         message: `"${bookTitle}${codeLabel}" was returned on ${payload.returnedDateBs}.${fineMessage}`,
         type: "LIBRARY",

@@ -5,7 +5,9 @@ import {
   feeRefundSchema,
   fiscalYearSchema,
   goshwaraVoucherSchema,
+  isInstitutionAdmin,
   journalEntrySchema,
+  normalizeUserRole,
   vendorSchema,
   type AccountingReportType
 } from "@phit-erp/shared";
@@ -27,6 +29,7 @@ import { Setting } from "../models/Setting.js";
 import { User } from "../models/User.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
+import { getUserSecondaryRoles } from "../utils/moduleAccessService.js";
 import { recordAudit } from "../utils/audit.js";
 import { sendSuccess } from "../utils/response.js";
 import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
@@ -701,11 +704,136 @@ export const updateVendor = asyncHandler(async (req: Request, res: Response) => 
   return sendSuccess(res, "Vendor updated", vendor);
 });
 
+const refundActorRoles = async (req: {
+  user?: { userId: string; role: string };
+}): Promise<string[]> => {
+  const roles = [normalizeUserRole(req.user?.role ?? "")];
+  if (req.user?.userId) {
+    const secondary = await getUserSecondaryRoles(req.user.userId);
+    roles.push(...secondary.map((r) => normalizeUserRole(r)));
+  }
+  return [...new Set(roles.filter(Boolean))];
+};
+
+const resolveRefundStatus = (
+  refund: {
+    status?: string | null;
+    journalEntryId?: unknown;
+    collegeAdminApprovedBy?: unknown;
+    superAdminApprovedBy?: unknown;
+  }
+): "PENDING_APPROVAL" | "APPROVED" | "REJECTED" => {
+  if (refund.status === "APPROVED" || refund.status === "REJECTED" || refund.status === "PENDING_APPROVAL") {
+    return refund.status;
+  }
+  if (refund.journalEntryId) return "APPROVED";
+  if (refund.collegeAdminApprovedBy && refund.superAdminApprovedBy) return "APPROVED";
+  return "APPROVED";
+};
+
+const formatFeeRefund = (refund: Record<string, unknown>) => {
+  const status = resolveRefundStatus(refund);
+  const collegeAdminApproved =
+    status === "APPROVED" || Boolean(refund.collegeAdminApprovedBy);
+  const superAdminApproved =
+    status === "APPROVED" || Boolean(refund.superAdminApprovedBy);
+  return {
+    ...refund,
+    status,
+    collegeAdminApproved,
+    superAdminApproved,
+    fullyApproved: status === "APPROVED"
+  };
+};
+
+const pendingDepositRefundTotal = async (
+  schoolId: ReturnType<typeof tenantObjectId>,
+  studentId: string
+): Promise<number> => {
+  const pending = await FeeRefund.find({
+    schoolId,
+    studentId,
+    isDeleted: false,
+    refundType: "DEPOSIT_REFUND",
+    status: "PENDING_APPROVAL"
+  })
+    .select("amountNpr")
+    .lean();
+  return pending.reduce((sum, row) => sum + Number(row.amountNpr || 0), 0);
+};
+
+const applyApprovedFeeRefund = async (
+  req: Request,
+  refund: InstanceType<typeof FeeRefund>
+): Promise<void> => {
+  if (refund.journalEntryId) return;
+
+  const schoolId = tenantObjectId(req);
+  const refundType = refund.refundType || "OTHER";
+  const amountNpr = Number(refund.amountNpr) || 0;
+  const studentId = String(refund.studentId);
+
+  if (refundType === "DEPOSIT_REFUND") {
+    const student = await Student.findOne({ _id: studentId, schoolId });
+    if (!student) throw new ApiError(404, "Student not found");
+    if (student.securityDepositWaived) {
+      throw new ApiError(400, "Security deposit was not taken / cancelled for this student");
+    }
+    const held = Math.max(0, Number(student.securityDepositNpr) || 0);
+    const alreadyRefunded = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
+    const remaining = Math.max(0, held - alreadyRefunded);
+    if (held <= 0 || remaining <= 0 || amountNpr > remaining + 0.001) {
+      throw new ApiError(400, "Refund amount exceeds remaining deposit");
+    }
+    student.securityDepositRefundedNpr = alreadyRefunded + amountNpr;
+    await student.save();
+  }
+
+  await postFeeRefundJournal({
+    schoolId,
+    userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
+    refundId: refund._id,
+    studentId,
+    dateBs: refund.dateBs,
+    amountNpr,
+    paymentMethod: refund.paymentMethod,
+    bankAccountId: refund.bankAccountId ?? undefined,
+    refundNumber: refund.refundNumber,
+    isDepositRefund: refundType === "DEPOSIT_REFUND"
+  });
+
+  const journal = await JournalEntry.findOne({
+    schoolId,
+    referenceType: "FeeRefund",
+    referenceId: refund._id
+  }).sort({ createdAt: -1 });
+  if (journal) {
+    refund.journalEntryId = journal._id as unknown as typeof refund.journalEntryId;
+  }
+
+  await recordCashEntry(req, {
+    dateBs: refund.dateBs,
+    entryType: "DEBIT",
+    category:
+      refundType === "DEPOSIT_REFUND" ? "Security Deposit Refund" : "Fee Refund",
+    description: `${refundType === "DEPOSIT_REFUND" ? "Deposit refund" : "Refund"} ${refund.refundNumber}`,
+    amountNpr,
+    paymentMethod: refund.paymentMethod,
+    referenceType: "FeeRefund",
+    referenceId: refund._id.toString()
+  });
+};
+
 export const listFeeRefunds = asyncHandler(async (req: Request, res: Response) => {
   const refunds = await FeeRefund.find(withTenantScope(req, { isDeleted: false }))
     .populate({ path: "studentId", populate: { path: "user", select: "-password" } })
-    .sort({ dateBs: -1 });
-  return sendSuccess(res, "Fee refunds fetched", refunds);
+    .sort({ dateBs: -1 })
+    .lean();
+  return sendSuccess(
+    res,
+    "Fee refunds fetched",
+    refunds.map((r) => formatFeeRefund(r as Record<string, unknown>))
+  );
 });
 
 export const createFeeRefund = asyncHandler(async (req: Request, res: Response) => {
@@ -722,8 +850,6 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
   const refundType = payload.refundType ?? "OTHER";
   const amountNpr = payload.amountNpr;
 
-  // ── Admission security deposit refund (pass-out / withdrawal) ───────────
-  // Deposit must already have been collected via Student Fee Records payment.
   if (refundType === "DEPOSIT_REFUND") {
     if (student.securityDepositWaived) {
       throw new ApiError(
@@ -734,7 +860,8 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
 
     const held = Math.max(0, Number(student.securityDepositNpr) || 0);
     const alreadyRefunded = Math.max(0, Number(student.securityDepositRefundedNpr) || 0);
-    const remaining = Math.max(0, held - alreadyRefunded);
+    const pendingAmt = await pendingDepositRefundTotal(schoolId, payload.studentId);
+    const remaining = Math.max(0, held - alreadyRefunded - pendingAmt);
 
     if (held <= 0 || remaining <= 0) {
       throw new ApiError(
@@ -748,19 +875,8 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
         `Refund amount exceeds remaining deposit. Held ${held}, already refunded ${alreadyRefunded}, remaining ${remaining}.`
       );
     }
-
-    const passoutStatuses = new Set(["PASSED_OUT", "ALUMNI", "WITHDRAWN", "CANCELLED"]);
-    if (!passoutStatuses.has(String(student.academicStatus || "ACTIVE"))) {
-      // Allow but warn via notes — still process (admin may refund early on special approval)
-      // Prefer pass-out; no hard block so college can handle edge cases.
-    }
-
-    student.securityDepositRefundedNpr = alreadyRefunded + amountNpr;
-    await student.save();
   }
 
-  // Gap-free per-fiscal-year series. Counting existing refunds handed the same number to
-  // two concurrent approvers and stamped the AD year onto a BS ledger.
   const refundNumber = await nextVoucherNumberForDate({
     schoolId,
     prefix: "RFND",
@@ -782,50 +898,119 @@ export const createFeeRefund = asyncHandler(async (req: Request, res: Response) 
     notes: payload.notes ?? "",
     approvedBy: payload.approvedBy?.trim() || "",
     attachments: payload.attachments ?? [],
-    createdBy: req.user!.userId
-  });
-
-  // Deposit refunds are liability returns — do not inflate feesDue.
-  // Other refunds: cash out + journal only (do not auto-increase student debt).
-
-  await postFeeRefundJournal({
-    schoolId,
-    userId: req.user!.userId as unknown as import("mongoose").Types.ObjectId,
-    refundId: refund._id,
-    studentId: payload.studentId,
-    dateBs: payload.dateBs,
-    amountNpr,
-    paymentMethod: payload.paymentMethod,
-    bankAccountId: payload.bankAccountId,
-    refundNumber,
-    isDepositRefund: refundType === "DEPOSIT_REFUND"
-  });
-
-  await recordCashEntry(req, {
-    dateBs: payload.dateBs,
-    entryType: "DEBIT",
-    category:
-      refundType === "DEPOSIT_REFUND" ? "Security Deposit Refund" : "Fee Refund",
-    description: `${refundType === "DEPOSIT_REFUND" ? "Deposit refund" : "Refund"} ${refundNumber}`,
-    amountNpr,
-    paymentMethod: payload.paymentMethod,
-    referenceType: "FeeRefund",
-    referenceId: refund._id.toString()
+    createdBy: req.user!.userId,
+    status: "PENDING_APPROVAL",
+    submittedAt: new Date(),
+    submittedBy: req.user!.userId
   });
 
   await recordAudit(req, {
-    action: "accounting.refund.create",
+    action: "accounting.refund.submit",
     entity: "FeeRefund",
     entityId: refund._id.toString(),
     after: refund
   });
   return sendSuccess(
     res,
-    refundType === "DEPOSIT_REFUND"
-      ? "Admission deposit refund processed"
-      : "Student refund processed",
-    refund,
+    "Refund submitted",
+    formatFeeRefund(refund.toObject() as Record<string, unknown>),
     201
+  );
+});
+
+export const approveFeeRefund = asyncHandler(async (req: Request, res: Response) => {
+  const roles = await refundActorRoles(req);
+  const asSuper = roles.includes("SUPER_ADMIN");
+  const asCollege = roles.includes("COLLEGE_ADMIN") || (isInstitutionAdmin(roles[0] ?? "") && !asSuper);
+  if (!asSuper && !asCollege) {
+    throw new ApiError(403, "Only Super Admin or College Admin can approve");
+  }
+
+  const schoolId = tenantObjectId(req);
+  const refund = await FeeRefund.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
+  if (!refund) throw new ApiError(404, "Refund not found");
+
+  const current = resolveRefundStatus(refund);
+  if (current === "REJECTED") {
+    throw new ApiError(400, "Rejected refund cannot be approved");
+  }
+  if (current === "APPROVED") {
+    return sendSuccess(res, "Refund already approved", formatFeeRefund(refund.toObject() as Record<string, unknown>));
+  }
+
+  const userId = req.user!.userId as unknown as typeof refund.collegeAdminApprovedBy;
+  const now = new Date();
+  if (asCollege) {
+    refund.collegeAdminApprovedAt = now;
+    refund.collegeAdminApprovedBy = userId;
+  }
+  if (asSuper) {
+    refund.superAdminApprovedAt = now;
+    refund.superAdminApprovedBy = userId;
+  }
+
+  if (refund.collegeAdminApprovedBy && refund.superAdminApprovedBy) {
+    await applyApprovedFeeRefund(req, refund);
+    refund.status = "APPROVED";
+  } else {
+    refund.status = "PENDING_APPROVAL";
+  }
+  await refund.save();
+
+  await recordAudit(req, {
+    action: "accounting.refund.approve",
+    entity: "FeeRefund",
+    entityId: refund._id.toString(),
+    after: { collegeAdmin: asCollege, superAdmin: asSuper, status: refund.status }
+  });
+
+  return sendSuccess(
+    res,
+    "Refund approved",
+    formatFeeRefund(refund.toObject() as Record<string, unknown>)
+  );
+});
+
+export const rejectFeeRefund = asyncHandler(async (req: Request, res: Response) => {
+  const roles = await refundActorRoles(req);
+  if (!roles.includes("SUPER_ADMIN") && !roles.includes("COLLEGE_ADMIN") && !roles.some((r) => isInstitutionAdmin(r))) {
+    throw new ApiError(403, "Only Super Admin or College Admin can reject");
+  }
+
+  const schoolId = tenantObjectId(req);
+  const refund = await FeeRefund.findOne({
+    _id: req.params.id,
+    schoolId,
+    isDeleted: false
+  });
+  if (!refund) throw new ApiError(404, "Refund not found");
+  if (resolveRefundStatus(refund) === "APPROVED") {
+    throw new ApiError(400, "Approved refund cannot be rejected");
+  }
+
+  refund.status = "REJECTED";
+  refund.rejectedAt = new Date();
+  refund.rejectedBy = req.user!.userId as unknown as typeof refund.rejectedBy;
+  refund.collegeAdminApprovedAt = undefined;
+  refund.collegeAdminApprovedBy = undefined;
+  refund.superAdminApprovedAt = undefined;
+  refund.superAdminApprovedBy = undefined;
+  await refund.save();
+
+  await recordAudit(req, {
+    action: "accounting.refund.reject",
+    entity: "FeeRefund",
+    entityId: refund._id.toString()
+  });
+
+  return sendSuccess(
+    res,
+    "Refund rejected",
+    formatFeeRefund(refund.toObject() as Record<string, unknown>)
   );
 });
 
@@ -1015,7 +1200,11 @@ export const generateLedgerReport = asyncHandler(async (req: Request, res: Respo
       const [students, collections, refunds, batches, years, classes, sections] = await Promise.all([
         Student.find(studentFilter).populate("user", "-password").sort({ rollNumber: 1 }).lean(),
         FeeCollection.find({ schoolId, isDeleted: false }).lean(),
-        FeeRefund.find({ schoolId, isDeleted: false }).lean(),
+        FeeRefund.find({
+          schoolId,
+          isDeleted: false,
+          status: { $nin: ["PENDING_APPROVAL", "REJECTED"] }
+        }).lean(),
         college ? Batch.find({ schoolId }).lean() : [],
         college ? Year.find({ schoolId }).lean() : [],
         college ? [] : SchoolClass.find({ schoolId }).lean(),

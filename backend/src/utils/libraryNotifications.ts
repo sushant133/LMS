@@ -4,6 +4,7 @@ import { LibraryIssue, type LibraryIssueDocument } from "../models/LibraryBook.j
 
 type LibraryIssueEntity = HydratedDocument<LibraryIssueDocument>;
 import { Notification } from "../models/Notification.js";
+import { CollegeStaff } from "../models/CollegeStaff.js";
 import { Student } from "../models/Student.js";
 import { Teacher } from "../models/Teacher.js";
 import { compareBsDates, getOffsetBsDate, getTodayBs } from "./nepaliDate.js";
@@ -78,6 +79,11 @@ const getBorrowerUserId = async (issue: LibraryIssueEntity): Promise<string | nu
   if (borrowerType === "TEACHER" && issue.teacherId) {
     const teacher = await Teacher.findById(issue.teacherId).select("user").lean();
     return teacher?.user?.toString() ?? null;
+  }
+
+  if (borrowerType === "STAFF" && issue.staffId) {
+    const staff = await CollegeStaff.findById(issue.staffId).select("user").lean();
+    return staff?.user?.toString() ?? null;
   }
 
   if (issue.studentId) {

@@ -617,7 +617,7 @@ type SaveRow = {
  */
 export const saveSalarySheetClient = async (payload: {
   monthBs: string;
-  status: "DRAFT" | "PROCESSED" | "PAID";
+  status: "DRAFT" | "PROCESSED" | "PENDING_APPROVAL" | "APPROVED" | "PAID";
   paidDateBs?: string;
   paymentMethod: string;
   rows: SaveRow[];
@@ -724,3 +724,12 @@ export const saveSalarySheetClient = async (payload: {
     }
   }
 };
+
+export const submitSalarySheetClient = async (monthBs: string) =>
+  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/submit`));
+
+export const approveSalarySheetClient = async (monthBs: string) =>
+  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/approve`));
+
+export const rejectSalarySheetClient = async (monthBs: string) =>
+  unwrap(api.post(`/accounting/salary-sheet/${monthBs}/reject`));

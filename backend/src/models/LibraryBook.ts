@@ -72,9 +72,10 @@ const libraryIssueSchema = new Schema(
     copyId: { type: Schema.Types.ObjectId, ref: "LibraryBookCopy" },
     /** Snapshot of code at issue time for history/display. */
     bookCode: { type: String, trim: true },
-    borrowerType: { type: String, enum: ["STUDENT", "TEACHER"], default: "STUDENT" },
+    borrowerType: { type: String, enum: ["STUDENT", "TEACHER", "STAFF"], default: "STUDENT" },
     studentId: { type: Schema.Types.ObjectId, ref: "Student" },
     teacherId: { type: Schema.Types.ObjectId, ref: "Teacher" },
+    staffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff" },
     /** User who issued the book (admin or library staff). */
     issuedByUserId: { type: Schema.Types.ObjectId, ref: "User" },
     issuedDateBs: { type: String, required: true },
@@ -89,6 +90,8 @@ const libraryIssueSchema = new Schema(
 libraryIssueSchema.index({ schoolId: 1, status: 1 });
 libraryIssueSchema.index({ schoolId: 1, copyId: 1, status: 1 });
 libraryIssueSchema.index({ schoolId: 1, studentId: 1, status: 1 });
+libraryIssueSchema.index({ schoolId: 1, teacherId: 1, status: 1 });
+libraryIssueSchema.index({ schoolId: 1, staffId: 1, status: 1 });
 
 export type LibraryIssueDocument = InferSchemaType<typeof libraryIssueSchema>;
 export const LibraryIssue = mongoose.model("LibraryIssue", libraryIssueSchema);

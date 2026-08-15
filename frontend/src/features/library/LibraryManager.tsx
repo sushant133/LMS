@@ -83,6 +83,14 @@ type IssueTeacherRow = {
   user?: { fullName?: string } | null;
 };
 
+type IssueStaffRow = {
+  _id: string;
+  staffId?: string;
+  fullName: string;
+  designation?: string;
+  department?: string;
+};
+
 type Tab =
   | "dashboard"
   | "inventory"
@@ -150,6 +158,7 @@ const defaultIssue: LibraryIssueInput = {
   borrowerType: "STUDENT",
   studentId: "",
   teacherId: "",
+  staffId: "",
   issuedDateBs: "",
   dueDateBs: "",
 };
@@ -223,6 +232,7 @@ export const LibraryManager = () => {
   // Issue-book filters & search
   const [issueStudentSearch, setIssueStudentSearch] = useState("");
   const [issueTeacherSearch, setIssueTeacherSearch] = useState("");
+  const [issueStaffSearch, setIssueStaffSearch] = useState("");
   const [issueBookSearch, setIssueBookSearch] = useState("");
   const [issueBatchId, setIssueBatchId] = useState("");
   const [issueYearId, setIssueYearId] = useState("");
@@ -272,6 +282,14 @@ export const LibraryManager = () => {
   const teachersQuery = useQuery({
     queryKey: ["teachers", "library-issue"],
     queryFn: () => unwrap<IssueTeacherRow[]>(api.get("/teachers")),
+    enabled: tab === "issue",
+    retry: 1,
+  });
+
+  const collegeStaffBorrowersQuery = useQuery({
+    queryKey: ["library-borrowers-staff"],
+    queryFn: () =>
+      unwrap<IssueStaffRow[]>(api.get("/library/borrowers/staff")),
     enabled: tab === "issue",
     retry: 1,
   });
@@ -390,6 +408,17 @@ export const LibraryManager = () => {
     );
   }, [teachersQuery.data, issueTeacherSearch]);
 
+  const filteredIssueStaff = useMemo(() => {
+    const list = collegeStaffBorrowersQuery.data ?? [];
+    const q = issueStaffSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((s) => {
+      const hay =
+        `${s.fullName} ${s.staffId ?? ""} ${s.designation ?? ""} ${s.department ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [collegeStaffBorrowersQuery.data, issueStaffSearch]);
+
   /** Books with at least one available copy, filtered by title/author/isbn/code. */
   const filteredIssueBooks = useMemo(() => {
     const q = issueBookSearch.trim().toLowerCase();
@@ -451,6 +480,15 @@ export const LibraryManager = () => {
       null
     );
   }, [teachersQuery.data, issueForm.teacherId]);
+
+  const selectedStaff = useMemo(() => {
+    if (!issueForm.staffId) return null;
+    return (
+      (collegeStaffBorrowersQuery.data ?? []).find(
+        (s) => s._id === issueForm.staffId,
+      ) ?? null
+    );
+  }, [collegeStaffBorrowersQuery.data, issueForm.staffId]);
 
   const selectBookForIssue = (bookId: string) => {
     setIssueForm((c) => ({
@@ -635,6 +673,7 @@ export const LibraryManager = () => {
       setIssueForm(defaultIssue);
       setIssueStudentSearch("");
       setIssueTeacherSearch("");
+      setIssueStaffSearch("");
       setIssueBookSearch("");
       await invalidateLibrary();
       if (studentId) {
@@ -1869,8 +1908,8 @@ export const LibraryManager = () => {
             <CardHeader className="pb-2">
               <CardTitle>Issue book</CardTitle>
               <p className="text-sm text-slate-600">
-                Search and filter students by batch/year, search books by name or
-                code, pick a physical copy, then issue.
+                Choose a student, teacher, or staff borrower, search books by
+                name or code, pick a physical copy, then issue.
               </p>
             </CardHeader>
           </Card>
@@ -1888,16 +1927,22 @@ export const LibraryManager = () => {
                     onChange={(e) => {
                       setIssueForm((c) => ({
                         ...c,
-                        borrowerType: e.target.value as "STUDENT" | "TEACHER",
+                        borrowerType: e.target.value as
+                          | "STUDENT"
+                          | "TEACHER"
+                          | "STAFF",
                         studentId: "",
                         teacherId: "",
+                        staffId: "",
                       }));
                       setIssueStudentSearch("");
                       setIssueTeacherSearch("");
+                      setIssueStaffSearch("");
                     }}
                   >
                     <option value="STUDENT">Student</option>
                     <option value="TEACHER">Teacher</option>
+                    <option value="STAFF">Staff</option>
                   </Select>
                 </FormField>
 
@@ -2093,7 +2138,7 @@ export const LibraryManager = () => {
                       </div>
                     ) : null}
                   </>
-                ) : (
+                ) : issueForm.borrowerType === "TEACHER" ? (
                   <>
                     <FormField label="Search teacher">
                       <Input
@@ -2151,6 +2196,92 @@ export const LibraryManager = () => {
                         <strong>
                           {selectedTeacher.user?.fullName ?? "Teacher"}
                         </strong>
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <FormField label="Search staff">
+                      <Input
+                        value={issueStaffSearch}
+                        onChange={(e) => setIssueStaffSearch(e.target.value)}
+                        placeholder="Name, staff ID, designation…"
+                      />
+                    </FormField>
+                    {collegeStaffBorrowersQuery.isError ? (
+                      <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                        Could not load staff:{" "}
+                        {parseErrorMessage(collegeStaffBorrowersQuery.error)}.
+                      </p>
+                    ) : null}
+                    <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200">
+                      {collegeStaffBorrowersQuery.isLoading ? (
+                        <p className="p-3 text-sm text-slate-500">
+                          Loading staff…
+                        </p>
+                      ) : filteredIssueStaff.length === 0 ? (
+                        <p className="p-3 text-sm text-slate-500">
+                          No active staff match this search.
+                        </p>
+                      ) : (
+                        <ul className="divide-y divide-slate-100">
+                          {filteredIssueStaff.slice(0, 80).map((s) => {
+                            const selected = issueForm.staffId === s._id;
+                            return (
+                              <li key={s._id}>
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "flex w-full items-start gap-2 px-3 py-2 text-left text-sm transition",
+                                    selected
+                                      ? "bg-brand-50 text-brand-900"
+                                      : "hover:bg-slate-50",
+                                  )}
+                                  onClick={() =>
+                                    setIssueForm((c) => ({
+                                      ...c,
+                                      staffId: s._id,
+                                    }))
+                                  }
+                                >
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block font-medium">
+                                      {s.fullName}
+                                    </span>
+                                    <span className="block text-xs text-slate-500">
+                                      {s.staffId ? `${s.staffId}` : "Staff"}
+                                      {s.designation
+                                        ? ` · ${s.designation}`
+                                        : ""}
+                                      {s.department
+                                        ? ` · ${s.department}`
+                                        : ""}
+                                    </span>
+                                  </span>
+                                  {selected ? (
+                                    <Badge className="bg-brand-100 text-brand-800">
+                                      Selected
+                                    </Badge>
+                                  ) : null}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    {filteredIssueStaff.length > 80 ? (
+                      <p className="text-xs text-slate-500">
+                        Showing first 80 of {filteredIssueStaff.length}. Narrow
+                        the search.
+                      </p>
+                    ) : null}
+                    {selectedStaff ? (
+                      <p className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
+                        Borrower: <strong>{selectedStaff.fullName}</strong>
+                        {selectedStaff.designation
+                          ? ` · ${selectedStaff.designation}`
+                          : ""}
                       </p>
                     ) : null}
                   </>
@@ -2332,7 +2463,9 @@ export const LibraryManager = () => {
                     ? ` to ${selectedStudent.user?.fullName ?? "student"}`
                     : issueForm.borrowerType === "TEACHER" && selectedTeacher
                       ? ` to ${selectedTeacher.user?.fullName ?? "teacher"}`
-                      : ""}
+                      : issueForm.borrowerType === "STAFF" && selectedStaff
+                        ? ` to ${selectedStaff.fullName}`
+                        : ""}
                   . Only this code will become ISSUED; other copies stay
                   available.
                 </p>

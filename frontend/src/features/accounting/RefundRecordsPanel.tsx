@@ -47,14 +47,19 @@ import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { downloadRecordsExcel } from "./accountingUtils";
 import { printHtmlViaIframe } from "./voucherPrint";
 
-/** Super Admin / College Admin (primary or secondary role) — print + sensitive actions. */
-const useCanAdminPrintRefunds = (): boolean => {
+/** Super Admin / College Admin (primary or secondary role). */
+const useRefundAdminRoles = () => {
   const { user } = useAuth();
-  if (!user) return false;
-  if (canManageInstitution(user.role)) return true;
-  return (user.secondaryRoles ?? []).some((role) =>
-    canManageInstitution(normalizeUserRole(role)),
-  );
+  const roles = [user?.role, ...(user?.secondaryRoles ?? [])]
+    .filter(Boolean)
+    .map((role) => normalizeUserRole(String(role)));
+  const isSuperAdmin = roles.includes("SUPER_ADMIN");
+  const isCollegeAdmin = roles.includes("COLLEGE_ADMIN");
+  const isAdmin =
+    isSuperAdmin ||
+    isCollegeAdmin ||
+    roles.some((role) => canManageInstitution(role));
+  return { isSuperAdmin, isCollegeAdmin, isAdmin };
 };
 
 const escapeHtml = (value: string) =>
@@ -158,7 +163,8 @@ const defaultReason = (type: FeeRefundType): string => {
 
 export const RefundRecordsPanel = () => {
   const queryClient = useQueryClient();
-  const canAdminPrint = useCanAdminPrintRefunds();
+  const { isSuperAdmin, isCollegeAdmin, isAdmin } = useRefundAdminRoles();
+  const canAdminPrint = isAdmin;
   const [tab, setTab] = useState<PanelTab>("register");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -170,7 +176,7 @@ export const RefundRecordsPanel = () => {
   const [form, setForm] = useState({
     studentId: "",
     refundType: "DEPOSIT_REFUND" as FeeRefundType,
-    amountNpr: 0,
+    amountNpr: undefined as number | undefined,
     dateBs: "",
     reason: defaultReason("DEPOSIT_REFUND"),
     paymentMethod: "BANK_TRANSFER" as (typeof PAYMENT_METHODS)[number],
@@ -288,13 +294,14 @@ export const RefundRecordsPanel = () => {
   }, [refundsQuery.data, search, typeFilter, fromDate, toDate, batchId, yearId]);
 
   const summary = useMemo(() => {
-    const deposit = filtered.filter((r) => r.refundType === "DEPOSIT_REFUND");
-    const other = filtered.filter((r) => r.refundType !== "DEPOSIT_REFUND");
+    const posted = filtered.filter((r) => r.status !== "PENDING_APPROVAL" && r.status !== "REJECTED");
+    const deposit = posted.filter((r) => r.refundType === "DEPOSIT_REFUND");
+    const other = posted.filter((r) => r.refundType !== "DEPOSIT_REFUND");
     return {
       count: filtered.length,
       depositTotal: deposit.reduce((s, r) => s + r.amountNpr, 0),
       otherTotal: other.reduce((s, r) => s + r.amountNpr, 0),
-      allTotal: filtered.reduce((s, r) => s + r.amountNpr, 0),
+      allTotal: posted.reduce((s, r) => s + r.amountNpr, 0),
     };
   }, [filtered]);
 
@@ -309,11 +316,11 @@ export const RefundRecordsPanel = () => {
     mutationFn: (payload: Record<string, unknown>) =>
       unwrap(api.post("/accounting/refunds", payload)),
     onSuccess: async () => {
-      toast.success("Refund processed successfully");
+      toast.success("Submitted");
       setForm({
         studentId: "",
         refundType: "DEPOSIT_REFUND",
-        amountNpr: 0,
+        amountNpr: undefined,
         dateBs: "",
         reason: defaultReason("DEPOSIT_REFUND"),
         paymentMethod: "BANK_TRANSFER",
@@ -325,6 +332,26 @@ export const RefundRecordsPanel = () => {
       setAttachments([]);
       await invalidate();
       setTab("register");
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/accounting/refunds/${id}/approve`)),
+    onSuccess: async () => {
+      toast.success("Approved");
+      await invalidate();
+    },
+    onError: (e) => toast.error(parseErrorMessage(e)),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.post(`/accounting/refunds/${id}/reject`)),
+    onSuccess: async () => {
+      toast.success("Rejected");
+      await invalidate();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
   });
@@ -370,7 +397,7 @@ export const RefundRecordsPanel = () => {
         const held = s.securityDepositNpr ?? 0;
         const refunded = s.securityDepositRefundedNpr ?? 0;
         const rem = Math.max(0, held - refunded);
-        next.amountNpr = rem > 0 ? rem : 0;
+        next.amountNpr = rem > 0 ? rem : undefined;
       }
       return next;
     });
@@ -866,8 +893,8 @@ export const RefundRecordsPanel = () => {
                         <Th>Reason</Th>
                         <Th>Date</Th>
                         <Th>Method</Th>
-                        <Th>Remarks</Th>
-                        {canAdminPrint ? (
+                        <Th>Status</Th>
+                        {isAdmin || canAdminPrint ? (
                           <Th className="text-right">Actions</Th>
                         ) : null}
                       </tr>
@@ -906,20 +933,86 @@ export const RefundRecordsPanel = () => {
                           <Td className="text-sm">
                             {row.paymentMethod.replace(/_/g, " ")}
                           </Td>
-                          <Td className="max-w-[140px] truncate text-sm">
-                            {row.approvedBy || row.notes || "—"}
-                          </Td>
-                          {canAdminPrint ? (
-                            <Td className="text-right">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => printSingleRefund(row)}
-                                title="Print this refund voucher"
+                          <Td>
+                            <div className="flex flex-wrap items-center gap-1">
+                              <Badge
+                                className={
+                                  row.status === "APPROVED"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : row.status === "REJECTED"
+                                      ? "bg-rose-100 text-rose-800"
+                                      : "bg-amber-100 text-amber-900"
+                                }
                               >
-                                <Printer className="mr-1 h-3.5 w-3.5" />
-                                Print
-                              </Button>
+                                {row.status === "APPROVED"
+                                  ? "Approved"
+                                  : row.status === "REJECTED"
+                                    ? "Rejected"
+                                    : "Pending"}
+                              </Badge>
+                              {row.status === "PENDING_APPROVAL" ||
+                              row.status === "APPROVED" ? (
+                                <>
+                                  <span
+                                    className={
+                                      row.collegeAdminApproved
+                                        ? "rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800"
+                                        : "rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+                                    }
+                                  >
+                                    Admin{row.collegeAdminApproved ? " ✓" : ""}
+                                  </span>
+                                  <span
+                                    className={
+                                      row.superAdminApproved
+                                        ? "rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800"
+                                        : "rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+                                    }
+                                  >
+                                    Super Admin{row.superAdminApproved ? " ✓" : ""}
+                                  </span>
+                                </>
+                              ) : null}
+                            </div>
+                          </Td>
+                          {isAdmin || canAdminPrint ? (
+                            <Td className="text-right">
+                              <div className="flex flex-wrap items-center justify-end gap-1">
+                                {isAdmin &&
+                                row.status === "PENDING_APPROVAL" &&
+                                ((isCollegeAdmin && !row.collegeAdminApproved) ||
+                                  (isSuperAdmin && !row.superAdminApproved)) ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={approveMutation.isPending}
+                                    onClick={() => approveMutation.mutate(row._id)}
+                                  >
+                                    Approve
+                                  </Button>
+                                ) : null}
+                                {isAdmin && row.status === "PENDING_APPROVAL" ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-rose-700"
+                                    disabled={rejectMutation.isPending}
+                                    onClick={() => rejectMutation.mutate(row._id)}
+                                  >
+                                    Reject
+                                  </Button>
+                                ) : null}
+                                {canAdminPrint ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => printSingleRefund(row)}
+                                    title="Print"
+                                  >
+                                    <Printer className="mr-1 h-3.5 w-3.5" />
+                                    Print
+                                  </Button>
+                                ) : null}
+                              </div>
                             </Td>
                           ) : null}
                         </tr>
@@ -1059,10 +1152,10 @@ export const RefundRecordsPanel = () => {
                   <NumberInput
                     min={0}
                     value={form.amountNpr}
-                    onChange={(e) =>
+                    onValueChange={(v) =>
                       setForm((c) => ({
                         ...c,
-                        amountNpr: e.target.valueAsNumber || 0,
+                        amountNpr: v,
                       }))
                     }
                   />
@@ -1115,15 +1208,6 @@ export const RefundRecordsPanel = () => {
                   onChange={(e) =>
                     setForm((c) => ({ ...c, reason: e.target.value }))
                   }
-                />
-              </FormField>
-              <FormField label="Approved By">
-                <Input
-                  value={form.approvedBy}
-                  onChange={(e) =>
-                    setForm((c) => ({ ...c, approvedBy: e.target.value }))
-                  }
-                  placeholder="Principal / Admin name"
                 />
               </FormField>
               <FormField label="Internal notes">
@@ -1202,7 +1286,7 @@ export const RefundRecordsPanel = () => {
                     setForm({
                       studentId: "",
                       refundType: "DEPOSIT_REFUND",
-                      amountNpr: 0,
+                      amountNpr: undefined,
                       dateBs: "",
                       reason: defaultReason("DEPOSIT_REFUND"),
                       paymentMethod: "BANK_TRANSFER",
@@ -1226,9 +1310,7 @@ export const RefundRecordsPanel = () => {
                   }
                   onClick={submit}
                 >
-                  {createMutation.isPending
-                    ? "Processing…"
-                    : "Process refund"}
+                  {createMutation.isPending ? "Submitting…" : "Submit"}
                 </Button>
               </div>
             </CardContent>

@@ -935,7 +935,11 @@ export const updateHospitalRosterStudents = asyncHandler(
     assertRosterEditable(roster.status);
 
     const studentIds = payload.studentIds.map(String).filter(Boolean);
-    await assertValidRosterStudents(schoolId, studentIds, {
+    const existingIds = new Set((roster.studentIds ?? []).map(String));
+    const newlyAdded = studentIds.filter((id) => !existingIds.has(id));
+    // Only newly added names must be active in this batch/year.
+    // Existing roster members can stay so an add is not blocked by one inactive row.
+    await assertValidRosterStudents(schoolId, newlyAdded, {
       batchId: String(roster.batchId),
       yearId: String(roster.yearId),
     });
@@ -944,12 +948,14 @@ export const updateHospitalRosterStudents = asyncHandler(
       "studentIds",
       studentIds as unknown as typeof roster.studentIds,
     );
+    roster.markModified("studentIds");
     // Drop cells for removed students
     const keep = new Set(studentIds);
     const nextCells = (roster.cells ?? []).filter((c) =>
       keep.has(String(c.studentId)),
     );
     roster.set("cells", nextCells as unknown as typeof roster.cells);
+    roster.markModified("cells");
     await roster.save();
     return sendSuccess(
       res,
@@ -958,6 +964,51 @@ export const updateHospitalRosterStudents = asyncHandler(
     );
   },
 );
+
+type SanitizedRosterCell = {
+  studentId: string;
+  day: number;
+  code: string;
+  remarks: string;
+  shiftId?: string;
+  departmentId?: string;
+};
+
+const rosterPeriodDays = (roster: { daysInMonth?: number | null; startDateBs?: string; endDateBs?: string }) => {
+  if (typeof roster.daysInMonth === "number" && roster.daysInMonth >= 1) {
+    return Math.min(93, roster.daysInMonth);
+  }
+  if (roster.startDateBs && roster.endDateBs) {
+    try {
+      return Math.min(93, Math.max(1, countInclusiveBsDays(roster.startDateBs, roster.endDateBs)));
+    } catch {
+      /* fall through */
+    }
+  }
+  return 30;
+};
+
+const toSanitizedCell = (c: {
+  studentId?: unknown;
+  day?: unknown;
+  shiftId?: unknown;
+  departmentId?: unknown;
+  code?: unknown;
+  remarks?: unknown;
+}): SanitizedRosterCell | null => {
+  const studentId = String(c.studentId ?? "").trim();
+  const day = Number(c.day);
+  if (!studentId || !Number.isInteger(day) || day < 1 || day > 93) return null;
+  const shiftId = cleanId(c.shiftId);
+  const departmentId = cleanId(c.departmentId);
+  const code = String(c.code ?? "").trim();
+  const remarks = String(c.remarks ?? "").trim();
+  if (!shiftId && !departmentId && !code) return null;
+  const row: SanitizedRosterCell = { studentId, day, code, remarks };
+  if (shiftId) row.shiftId = shiftId;
+  if (departmentId) row.departmentId = departmentId;
+  return row;
+};
 
 export const updateHospitalRosterCells = asyncHandler(async (req: Request, res: Response) => {
   await assertCanWriteRoster(req);
@@ -971,39 +1022,20 @@ export const updateHospitalRosterCells = asyncHandler(async (req: Request, res: 
   if (!roster) throw new ApiError(404, "Roster not found");
   assertRosterEditable(roster.status);
 
-  const days = roster.daysInMonth || 30;
+  const days = rosterPeriodDays(roster);
   const validStudents = new Set((roster.studentIds ?? []).map(String));
   const sanitized = payload.cells
-    .filter((c) => validStudents.has(String(c.studentId)) && c.day >= 1 && c.day <= days)
-    .map((c) => {
-      const shiftId = cleanId(c.shiftId);
-      const departmentId = cleanId(c.departmentId);
-      const code = (c.code ?? "").trim();
-      const remarks = (c.remarks ?? "").trim();
-      return {
-        studentId: String(c.studentId),
-        day: c.day,
-        shiftId,
-        departmentId,
-        code,
-        remarks,
-      };
-    })
-    .filter((c) => Boolean(c.shiftId || c.departmentId || c.code));
+    .map((c) => toSanitizedCell(c))
+    .filter((c): c is SanitizedRosterCell => Boolean(c))
+    .filter((c) => validStudents.has(c.studentId) && c.day >= 1 && c.day <= days);
 
   if (payload.replace) {
     roster.set("cells", sanitized as unknown as typeof roster.cells);
   } else {
-    const map = new Map<string, (typeof sanitized)[0]>();
+    const map = new Map<string, SanitizedRosterCell>();
     for (const c of roster.cells ?? []) {
-      map.set(`${String(c.studentId)}:${c.day}`, {
-        studentId: String(c.studentId),
-        day: c.day,
-        shiftId: cleanId(c.shiftId),
-        departmentId: cleanId(c.departmentId),
-        code: c.code || "",
-        remarks: c.remarks || "",
-      });
+      const existing = toSanitizedCell(c);
+      if (existing) map.set(`${existing.studentId}:${existing.day}`, existing);
     }
     for (const c of sanitized) {
       map.set(`${c.studentId}:${c.day}`, c);
@@ -1025,6 +1057,7 @@ export const updateHospitalRosterCells = asyncHandler(async (req: Request, res: 
     );
   }
 
+  roster.markModified("cells");
   await roster.save();
   return sendSuccess(
     res,
@@ -1051,20 +1084,14 @@ export const lockHospitalRoster = asyncHandler(async (req: Request, res: Respons
   }
   // Optional last-second cell save when client sends cells with lock
   if (req.body && Array.isArray(req.body.cells)) {
-    const days = roster.daysInMonth || 30;
+    const days = rosterPeriodDays(roster);
     const validStudents = new Set((roster.studentIds ?? []).map(String));
     const sanitized = (req.body.cells as HospitalRosterCell[])
-      .filter((c) => validStudents.has(String(c.studentId)) && c.day >= 1 && c.day <= days)
-      .map((c) => ({
-        studentId: String(c.studentId),
-        day: c.day,
-        shiftId: cleanId(c.shiftId),
-        departmentId: cleanId(c.departmentId),
-        code: (c.code ?? "").trim(),
-        remarks: (c.remarks ?? "").trim(),
-      }))
-      .filter((c) => Boolean(c.shiftId || c.departmentId || c.code));
+      .map((c) => toSanitizedCell(c))
+      .filter((c): c is SanitizedRosterCell => Boolean(c))
+      .filter((c) => validStudents.has(c.studentId) && c.day >= 1 && c.day <= days);
     roster.set("cells", sanitized as unknown as typeof roster.cells);
+    roster.markModified("cells");
   }
   roster.status = "LOCKED";
   roster.lockedAt = new Date();

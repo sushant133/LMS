@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { LibraryIssueRecord } from "@phit-erp/shared";
+import type { LibraryBorrowerType, LibraryIssueRecord } from "@phit-erp/shared";
 import {
   BookMarked,
   ChevronLeft,
@@ -20,6 +20,7 @@ import { Select } from "components/ui/select";
 import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import {
+  borrowerTypeLabel,
   filterIssuedBooks,
   formatIssuedByLabel,
   uniqueBatchOptionsFromIssues,
@@ -108,6 +109,7 @@ const issueStatusStyles: Record<string, string> = {
 type IssuedSlide = 0 | 1;
 
 type StatusFilter = "ALL" | "ISSUED" | "OVERDUE";
+type BorrowerFilter = "ALL" | LibraryBorrowerType;
 
 interface LibraryIssuedBooksPanelProps {
   /** From dashboard: ALL (issued card) or OVERDUE (overdue card only). */
@@ -136,6 +138,7 @@ export const LibraryIssuedBooksPanel = ({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(
     initialStatusFilter,
   );
+  const [borrowerFilter, setBorrowerFilter] = useState<BorrowerFilter>("ALL");
   const [issuedSlide, setIssuedSlide] = useState<IssuedSlide>(0);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [editDueDateBs, setEditDueDateBs] = useState("");
@@ -176,6 +179,7 @@ export const LibraryIssuedBooksPanel = ({
         classId: classId || undefined,
         sectionId: sectionId || undefined,
         status: statusFilter,
+        borrowerType: borrowerFilter,
       }),
     [
       activeIssues,
@@ -185,6 +189,7 @@ export const LibraryIssuedBooksPanel = ({
       classId,
       sectionId,
       statusFilter,
+      borrowerFilter,
     ],
   );
 
@@ -244,6 +249,9 @@ export const LibraryIssuedBooksPanel = ({
   };
 
   const placementLabel = (issue: LibraryIssueRecord): string => {
+    if (issue.borrowerType === "TEACHER" || issue.borrowerType === "STAFF") {
+      return borrowerTypeLabel(issue.borrowerType);
+    }
     if (isCollege) {
       const parts = [issue.studentBatchName, issue.studentYearName].filter(
         Boolean,
@@ -278,14 +286,8 @@ export const LibraryIssuedBooksPanel = ({
     const rowsHtml = filteredIssues
       .map((issue, index) => {
         const borrower =
-          issue.borrowerName?.trim() ||
-          (issue.borrowerType === "TEACHER" ? "Teacher" : "Student");
-        const typeNote =
-          issue.borrowerType === "TEACHER"
-            ? " (Teacher)"
-            : issue.borrowerType === "STUDENT"
-              ? " (Student)"
-              : "";
+          issue.borrowerName?.trim() || borrowerTypeLabel(issue.borrowerType);
+        const typeNote = ` (${borrowerTypeLabel(issue.borrowerType)})`;
         return `<tr>
           <td class="num">${index + 1}</td>
           <td>${escapeHtml(issue.bookTitle ?? "—")}</td>
@@ -313,6 +315,9 @@ export const LibraryIssuedBooksPanel = ({
         : null,
       !isCollege && sectionId
         ? `Section: ${sectionOptions.find((s) => s._id === sectionId)?.name ?? sectionId}`
+        : null,
+      borrowerFilter !== "ALL"
+        ? `Borrower: ${borrowerTypeLabel(borrowerFilter)}`
         : null,
     ]
       .filter(Boolean)
@@ -525,7 +530,7 @@ export const LibraryIssuedBooksPanel = ({
                       <p className="mt-1 text-sm text-slate-500">
                         {statusFilter === "OVERDUE"
                           ? "Books past their due date only. Change status filter to see all issued books."
-                          : `Search and filter by ${isCollege ? "batch and year" : "class and section"}. Select a row or use Manage to open the detail panel.`}
+                          : `Search and filter by borrower (student, teacher, staff)${isCollege ? ", batch and year" : ", class and section"}. Select a row or use Manage to open the detail panel.`}
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -554,7 +559,32 @@ export const LibraryIssuedBooksPanel = ({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-end gap-3">
-                    {isCollege ? (
+                    <div className="min-w-[140px] flex-1 sm:flex-none">
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Borrower
+                      </label>
+                      <Select
+                        value={borrowerFilter}
+                        onChange={(e) => {
+                          const next = e.target.value as BorrowerFilter;
+                          setBorrowerFilter(next);
+                          if (next === "TEACHER" || next === "STAFF") {
+                            setBatchId("");
+                            setYearId("");
+                            setClassId("");
+                            setSectionId("");
+                          }
+                        }}
+                      >
+                        <option value="ALL">All borrowers</option>
+                        <option value="STUDENT">Students</option>
+                        <option value="TEACHER">Teachers</option>
+                        <option value="STAFF">Staff</option>
+                      </Select>
+                    </div>
+                    {borrowerFilter !== "TEACHER" &&
+                    borrowerFilter !== "STAFF" &&
+                    isCollege ? (
                       <>
                         <div className="min-w-[140px] flex-1 sm:flex-none">
                           <label className="mb-1 block text-xs font-medium text-slate-600">
@@ -592,7 +622,10 @@ export const LibraryIssuedBooksPanel = ({
                           </Select>
                         </div>
                       </>
-                    ) : (
+                    ) : null}
+                    {borrowerFilter !== "TEACHER" &&
+                    borrowerFilter !== "STAFF" &&
+                    !isCollege ? (
                       <>
                         <div className="min-w-[140px] flex-1 sm:flex-none">
                           <label className="mb-1 block text-xs font-medium text-slate-600">
@@ -630,7 +663,7 @@ export const LibraryIssuedBooksPanel = ({
                           </Select>
                         </div>
                       </>
-                    )}
+                    ) : null}
                     <div className="min-w-[120px] flex-1 sm:flex-none">
                       <label className="mb-1 block text-xs font-medium text-slate-600">
                         Status
@@ -650,13 +683,13 @@ export const LibraryIssuedBooksPanel = ({
                     </div>
                     <div className="min-w-[200px] flex-1">
                       <label className="mb-1 block text-xs font-medium text-slate-600">
-                        Search student / book
+                        Search borrower / book
                       </label>
                       <div className="relative">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <Input
                           className="pl-9"
-                          placeholder="Student name, book title, or code…"
+                          placeholder="Name, book title, or code…"
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                         />
@@ -747,9 +780,10 @@ export const LibraryIssuedBooksPanel = ({
                                   ) : (
                                     <span>
                                       {issue.borrowerName?.trim() || "—"}
-                                      {issue.borrowerType === "TEACHER" ? (
+                                      {issue.borrowerType === "TEACHER" ||
+                                      issue.borrowerType === "STAFF" ? (
                                         <span className="ml-1 text-xs text-slate-400">
-                                          (Teacher)
+                                          ({borrowerTypeLabel(issue.borrowerType)})
                                         </span>
                                       ) : null}
                                     </span>
@@ -889,8 +923,9 @@ export const LibraryIssuedBooksPanel = ({
                             ) : (
                               <>
                                 {selectedIssue.borrowerName?.trim() || "—"}
-                                {selectedIssue.borrowerType === "TEACHER"
-                                  ? " (Teacher)"
+                                {selectedIssue.borrowerType === "TEACHER" ||
+                                selectedIssue.borrowerType === "STAFF"
+                                  ? ` (${borrowerTypeLabel(selectedIssue.borrowerType)})`
                                   : null}
                               </>
                             )}

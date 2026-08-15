@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import type {
   LibraryBookRecord,
+  LibraryBorrowerType,
   LibraryCopyStatus,
   LibraryIssueRecord,
   LibraryIssueStatus,
@@ -42,6 +43,14 @@ export type IssuedBooksFilter = {
   classId?: string;
   sectionId?: string;
   status?: "ALL" | "ISSUED" | "OVERDUE";
+  borrowerType?: "ALL" | LibraryBorrowerType;
+};
+
+export const borrowerTypeLabel = (type?: LibraryBorrowerType | string): string => {
+  if (type === "TEACHER") return "Teacher";
+  if (type === "STAFF") return "Staff";
+  if (type === "STUDENT") return "Student";
+  return "Borrower";
 };
 
 /** Filter issued-book rows by name/code search and academic placement. */
@@ -53,6 +62,9 @@ export const filterIssuedBooks = (
 
   if (filters.status && filters.status !== "ALL") {
     list = list.filter((issue) => issue.status === filters.status);
+  }
+  if (filters.borrowerType && filters.borrowerType !== "ALL") {
+    list = list.filter((issue) => issue.borrowerType === filters.borrowerType);
   }
   if (filters.batchId) {
     list = list.filter((issue) => issue.studentBatchId === filters.batchId);

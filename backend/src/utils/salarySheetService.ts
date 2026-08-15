@@ -550,7 +550,13 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       attendanceDaysRecorded: d.attendanceDaysRecorded,
       workingDaysInMonth,
       salaryPaymentId: d.salaryPaymentId,
-      status: d.status as "DRAFT" | "PROCESSED" | "PAID" | undefined
+      status: d.status as
+        | "DRAFT"
+        | "PROCESSED"
+        | "PENDING_APPROVAL"
+        | "APPROVED"
+        | "PAID"
+        | undefined
     };
   });
 

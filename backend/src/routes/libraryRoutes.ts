@@ -9,6 +9,7 @@ import {
   getInventoryAccess,
   getLibraryDashboard,
   issueBook,
+  listAssignableStaffBorrowers,
   listBooks,
   listIssues,
   listLibraryStaff,
@@ -37,7 +38,17 @@ const router = Router();
 router.use(protect, tenantGuard);
 
 router.get("/dashboard", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), getLibraryDashboard);
-router.get("/my-books", authorize("STUDENT", "TEACHER"), listMyBooks);
+router.get(
+  "/my-books",
+  authorize("STUDENT", "TEACHER", "COLLEGE_STAFF"),
+  listMyBooks
+);
+
+router.get(
+  "/borrowers/staff",
+  authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"),
+  listAssignableStaffBorrowers
+);
 
 router.get("/inventory-access", authorize("COLLEGE_ADMIN", "LIBRARY_STAFF"), getInventoryAccess);
 router.put("/inventory-access", authorizeInstitutionAdmin, setInventoryAccess);

@@ -284,6 +284,10 @@ export interface FeeRefundRecord {
   transactionNumber?: string;
   notes?: string;
   approvedBy?: string;
+  status?: "PENDING_APPROVAL" | "APPROVED" | "REJECTED";
+  collegeAdminApproved?: boolean;
+  superAdminApproved?: boolean;
+  fullyApproved?: boolean;
   attachments?: Array<{ name?: string; url: string; mimeType?: string; size?: number }>;
   journalEntryId?: string;
   createdBy: string;

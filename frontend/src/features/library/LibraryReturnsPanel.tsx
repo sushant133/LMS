@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import {
+  borrowerTypeLabel,
   filterLibraryIssues,
   formatIssuedByLabel,
 } from "features/library/libraryUtils";
@@ -456,7 +457,13 @@ export const LibraryReturnsPanel = ({
                       name={selectedIssue.borrowerName?.trim() || "Student"}
                     />
                   ) : (
-                    selectedIssue.borrowerName?.trim() || "—"
+                    <>
+                      {selectedIssue.borrowerName?.trim() || "—"}
+                      {selectedIssue.borrowerType === "TEACHER" ||
+                      selectedIssue.borrowerType === "STAFF"
+                        ? ` (${borrowerTypeLabel(selectedIssue.borrowerType)})`
+                        : null}
+                    </>
                   )}
                 </p>
                 <p className="text-slate-600">
@@ -601,7 +608,13 @@ export const LibraryReturnsPanel = ({
                               name={issue.borrowerName?.trim() || "Student"}
                             />
                           ) : (
-                            issue.borrowerName?.trim() || "—"
+                            <>
+                              {issue.borrowerName?.trim() || "—"}
+                              {issue.borrowerType === "TEACHER" ||
+                              issue.borrowerType === "STAFF"
+                                ? ` (${borrowerTypeLabel(issue.borrowerType)})`
+                                : null}
+                            </>
                           )}
                         </Td>
                         <Td>{issue.issuedDateBs}</Td>
@@ -712,7 +725,13 @@ export const LibraryReturnsPanel = ({
                             name={issue.borrowerName?.trim() || "Student"}
                           />
                         ) : (
-                          issue.borrowerName?.trim() || "—"
+                          <>
+                            {issue.borrowerName?.trim() || "—"}
+                            {issue.borrowerType === "TEACHER" ||
+                            issue.borrowerType === "STAFF"
+                              ? ` (${borrowerTypeLabel(issue.borrowerType)})`
+                              : null}
+                          </>
                         )}
                       </Td>
                       <Td>{issue.issuedDateBs}</Td>

@@ -198,7 +198,7 @@ export const salaryPaymentSchema = z
     attendanceIncomplete: z.boolean().optional().default(false),
     attendanceManualOverride: z.boolean().optional().default(false),
     valuesManualOverride: z.boolean().optional().default(false),
-    status: z.enum(["DRAFT", "PROCESSED", "PAID"]).default("DRAFT"),
+    status: z.enum(["DRAFT", "PROCESSED", "PENDING_APPROVAL", "APPROVED", "PAID"]).default("DRAFT"),
     paidDateBs: bsDateSchema.optional().or(z.literal("")),
     paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),
     transactionNumber: z.string().optional().or(z.literal("")),
@@ -306,7 +306,7 @@ export type SalaryPaymentInput = z.infer<typeof salaryPaymentSchema>;
 
 export const salarySheetSaveSchema = z.object({
   monthBs: z.string().regex(/^\d{4}-\d{2}$/, "Use YYYY-MM (BS month)"),
-  status: z.enum(["DRAFT", "PROCESSED", "PAID"]).default("DRAFT"),
+  status: z.enum(["DRAFT", "PROCESSED", "PENDING_APPROVAL", "APPROVED", "PAID"]).default("DRAFT"),
   paidDateBs: bsDateSchema.optional().or(z.literal("")),
   paymentMethod: z.enum(PAYMENT_METHODS).default("BANK_TRANSFER"),
   rows: z

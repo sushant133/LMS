@@ -38,6 +38,9 @@ import {
   listSalarySheetMonths,
   getSalarySheet,
   saveSalarySheet,
+  submitSalarySheet,
+  approveSalarySheet,
+  rejectSalarySheet,
   deleteSalarySheetMonth,
   listStudentAccounts,
   listStudentScholarshipAwards,
@@ -66,6 +69,7 @@ import {
 import {
   closeFiscalYear,
   createChartOfAccount,
+  approveFeeRefund,
   createFeeRefund,
   createFiscalYear,
   createGoshwaraVoucher,
@@ -78,6 +82,7 @@ import {
   generateLedgerReport,
   listChartOfAccounts,
   listFeeRefunds,
+  rejectFeeRefund,
   listFiscalYears,
   listGoshwaraVouchers,
   listJournalEntries,
@@ -216,6 +221,18 @@ router.post("/approvals/:id/reject", approvers, requireAccountingPermission("app
 // Refunds
 router.get("/refunds", readers, requireAccountingPermission("read"), listFeeRefunds);
 router.post("/refunds", managers, requireAccountingPermission("reverse_transaction"), createFeeRefund);
+router.post(
+  "/refunds/:id/approve",
+  admins,
+  requireAccountingPermission("approve_transactions"),
+  approveFeeRefund
+);
+router.post(
+  "/refunds/:id/reject",
+  admins,
+  requireAccountingPermission("approve_transactions"),
+  rejectFeeRefund
+);
 
 // Expenses, purchases, income (void = soft-delete, never hard-delete)
 // Delete/void: Super Admin / College Admin only
@@ -238,7 +255,7 @@ router.put("/income/:id", managers, requireAccountingPermission("manage_income")
 router.delete("/income/:id", admins, requireAccountingPermission("reverse_transaction"), deleteIncome);
 
 // Salaries / monthly salary sheet (payroll)
-// READ: all accounting readers. WRITE/DELETE: Super Admin / College Admin only.
+// READ: all accounting readers. PREPARE/SUBMIT: Accountant + Admin. APPROVE/PAY/DELETE: Admin.
 router.get("/salaries", readers, requireAccountingPermission("read"), listSalaries);
 router.get("/salary-employees", readers, requireAccountingPermission("read"), listSalaryEmployees);
 router.get("/salary-sheet", readers, requireAccountingPermission("read"), getSalarySheet);
@@ -251,9 +268,27 @@ router.get(
 );
 router.post(
   "/salary-sheet/save",
-  admins,
+  managers,
   requireAccountingPermission("manage_salaries"),
   saveSalarySheet
+);
+router.post(
+  "/salary-sheet/:monthBs/submit",
+  managers,
+  requireAccountingPermission("manage_salaries"),
+  submitSalarySheet
+);
+router.post(
+  "/salary-sheet/:monthBs/approve",
+  admins,
+  requireAccountingPermission("approve_transactions"),
+  approveSalarySheet
+);
+router.post(
+  "/salary-sheet/:monthBs/reject",
+  admins,
+  requireAccountingPermission("approve_transactions"),
+  rejectSalarySheet
 );
 // Super Admin / College Admin — delete entire payroll month
 router.delete(

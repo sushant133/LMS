@@ -42,6 +42,20 @@ const feeRefundSchema = new Schema(
     transactionNumber: { type: String },
     notes: { type: String },
     approvedBy: { type: String },
+    status: {
+      type: String,
+      enum: ["PENDING_APPROVAL", "APPROVED", "REJECTED"],
+      default: "PENDING_APPROVAL",
+      index: true
+    },
+    submittedAt: { type: Date },
+    submittedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    collegeAdminApprovedAt: { type: Date },
+    collegeAdminApprovedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    superAdminApprovedAt: { type: Date },
+    superAdminApprovedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    rejectedAt: { type: Date },
+    rejectedBy: { type: Schema.Types.ObjectId, ref: "User" },
     attachments: {
       type: [
         {

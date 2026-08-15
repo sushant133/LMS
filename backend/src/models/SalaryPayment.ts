@@ -36,7 +36,19 @@ const salaryPaymentSchema = new Schema(
      */
     valuesManualOverride: { type: Boolean, default: false },
     netSalaryNpr: { type: Number, required: true },
-    status: { type: String, enum: ["DRAFT", "PROCESSED", "PAID"], default: "DRAFT" },
+    status: {
+      type: String,
+      enum: ["DRAFT", "PROCESSED", "PENDING_APPROVAL", "APPROVED", "PAID"],
+      default: "DRAFT"
+    },
+    submittedAt: { type: Date },
+    submittedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    collegeAdminApprovedAt: { type: Date },
+    collegeAdminApprovedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    superAdminApprovedAt: { type: Date },
+    superAdminApprovedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    rejectedAt: { type: Date },
+    rejectedBy: { type: Schema.Types.ObjectId, ref: "User" },
     paidDateBs: { type: String },
     paymentMethod: {
       type: String,
