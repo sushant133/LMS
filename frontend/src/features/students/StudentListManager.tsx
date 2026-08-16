@@ -285,7 +285,7 @@ export const StudentListManager = () => {
     const yearNameWanted = yearNameFilter.trim().toLowerCase();
     const statusWanted = statusFilter.trim().toUpperCase();
 
-    return students.filter((student) => {
+    const rows = students.filter((student) => {
       // Skip orphaned student records (user account missing)
       if (!student.user) return false;
 
@@ -350,6 +350,19 @@ export const StudentListManager = () => {
         fatherPhone.includes(query) ||
         motherPhone.includes(query)
       );
+    });
+
+    return rows.slice().sort((a, b) => {
+      const ar = a.rollNumber;
+      const br = b.rollNumber;
+      const aHas = typeof ar === "number" && Number.isFinite(ar) && ar > 0;
+      const bHas = typeof br === "number" && Number.isFinite(br) && br > 0;
+      if (aHas && bHas && ar !== br) return ar - br;
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      const aName = a.user?.fullName ?? "";
+      const bName = b.user?.fullName ?? "";
+      return aName.localeCompare(bName, undefined, { sensitivity: "base" });
     });
   }, [
     batchFilter,

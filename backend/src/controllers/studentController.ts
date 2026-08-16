@@ -143,7 +143,7 @@ export const listStudents = asyncHandler(async (req: Request, res: Response) => 
     .populate("yearId", "name level batchId")
     .populate("classId", "name")
     .populate("sectionId", "name classId")
-    .sort(isTeacher ? { rollNumber: 1, createdAt: -1 } : { createdAt: -1 });
+    .sort({ rollNumber: 1, createdAt: 1 });
 
   // Drop orphaned rows where the linked User was deleted (populate returns null)
   let linked = students.filter((student) => Boolean(student.user));

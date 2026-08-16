@@ -9,6 +9,7 @@ import {
   type FieldDutyScheduleRecord,
   type FieldDutyShift,
   type FieldDutyStudentStatus,
+  type FieldHospitalRecord,
   type FieldPostingSection,
   type YearRecord,
 } from "@phit-erp/shared";
@@ -220,6 +221,30 @@ export const FieldPostingSectionPanel = ({
       ),
     enabled: isAdmin,
   });
+
+  const hospitalsQuery = useQuery({
+    queryKey: ["field-duty", "hospitals"],
+    queryFn: () =>
+      unwrap<FieldHospitalRecord[]>(api.get("/field-duty/hospitals")),
+    enabled: isAdmin && section === "HOSPITAL",
+  });
+
+  const hospitalOptions = useMemo(() => {
+    const rows = Array.isArray(hospitalsQuery.data) ? hospitalsQuery.data : [];
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+    const out: FieldHospitalRecord[] = [];
+    for (const h of rows) {
+      if (!h?._id || seenIds.has(h._id)) continue;
+      if (String(h.status || "ACTIVE").toUpperCase() === "INACTIVE") continue;
+      const nameKey = (h.name || "").trim().toLowerCase();
+      if (nameKey && seenNames.has(nameKey)) continue;
+      seenIds.add(h._id);
+      if (nameKey) seenNames.add(nameKey);
+      out.push(h);
+    }
+    return out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [hospitalsQuery.data]);
 
   const schedulesQuery = useQuery({
     queryKey: ["field-duty", "schedules", section],
@@ -1280,58 +1305,98 @@ export const FieldPostingSectionPanel = ({
                 </FormField>
               </div>
 
-              <FormField label="Hospital / PHC / Community Name">
-                <Input
-                  value={form.siteName}
-                  onChange={(e) => setForm((f) => ({ ...f, siteName: e.target.value }))}
-                  placeholder="Site name"
-                />
-              </FormField>
+              {section === "HOSPITAL" ? (
+                <FormField label="Hospital *">
+                  <Select
+                    value={
+                      hospitalOptions.some(
+                        (h) =>
+                          h.name.trim().toLowerCase() ===
+                          form.siteName.trim().toLowerCase(),
+                      )
+                        ? hospitalOptions.find(
+                            (h) =>
+                              h.name.trim().toLowerCase() ===
+                              form.siteName.trim().toLowerCase(),
+                          )?.name ?? ""
+                        : form.siteName.trim()
+                          ? "__other__"
+                          : ""
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "__other__") {
+                        setForm((f) => ({ ...f, siteName: "", hospitalName: "" }));
+                        return;
+                      }
+                      const picked = hospitalOptions.find((h) => h.name === v);
+                      setForm((f) => ({
+                        ...f,
+                        siteName: v,
+                        hospitalName: v,
+                        address: f.address.trim() ? f.address : picked?.address || "",
+                      }));
+                    }}
+                  >
+                    <option value="">Select hospital</option>
+                    {hospitalOptions.map((h) => (
+                      <option key={h._id} value={h.name}>
+                        {h.name}
+                      </option>
+                    ))}
+                    <option value="__other__">Other (type a new hospital)</option>
+                  </Select>
+                  {hospitalOptions.length === 0 ? (
+                    <p className="mt-1 text-xs text-amber-700">
+                      No hospitals in the registry yet. Type a name below, or add
+                      them under Hospital Roster → Hospitals.
+                    </p>
+                  ) : null}
+                  {!hospitalOptions.some(
+                    (h) =>
+                      h.name.trim().toLowerCase() ===
+                      form.siteName.trim().toLowerCase(),
+                  ) ? (
+                    <Input
+                      className="mt-2"
+                      value={form.siteName}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          siteName: e.target.value,
+                          hospitalName: e.target.value,
+                        }))
+                      }
+                      placeholder="Hospital name"
+                    />
+                  ) : null}
+                </FormField>
+              ) : (
+                <FormField label="Hospital / PHC / Community Name">
+                  <Input
+                    value={form.siteName}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, siteName: e.target.value }))
+                    }
+                    placeholder="Site name"
+                  />
+                </FormField>
+              )}
               <FormField label="Address">
                 <Input
                   value={form.address}
                   onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
                 />
               </FormField>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <FormField label="Ward / Department (optional)">
-                  <Input
-                    value={form.department || form.ward}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        department: e.target.value,
-                        ward: e.target.value,
-                      }))
-                    }
-                  />
+              {form.rosterMode === "MULTI_SHIFT" ? (
+                <FormField label="Shift assignment">
+                  <p className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                    Multi-shift mode: assign each student a shift below. Attendance is
+                    taken separately per shift.
+                  </p>
                 </FormField>
-                {form.rosterMode !== "MULTI_SHIFT" ? (
-                  <FormField label="Shift (all roster students)">
-                    <Select
-                      value={form.shift}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          shift: e.target.value as FieldDutyShift,
-                        }))
-                      }
-                    >
-                      {FIELD_SHIFTS.map((s) => (
-                        <option key={s} value={s}>
-                          {s.replace(/_/g, " ")}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                ) : (
-                  <FormField label="Shift assignment">
-                    <p className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
-                      Multi-shift mode: assign each student a shift below. Attendance is
-                      taken separately per shift.
-                    </p>
-                  </FormField>
-                )}
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
                 <FormField label="Start Date (BS)">
                   <NepaliDateField
                     value={form.startDateBs}

@@ -99,6 +99,25 @@ const countInclusiveDays = (startBs: string, endBs: string): number => {
   }
 };
 
+const compareRollNo = (
+  a: { rollNumber?: number; fullName?: string },
+  b: { rollNumber?: number; fullName?: string },
+) => {
+  const ar = a.rollNumber;
+  const br = b.rollNumber;
+  const aHas = typeof ar === "number" && Number.isFinite(ar);
+  const bHas = typeof br === "number" && Number.isFinite(br);
+  if (aHas && bHas && ar !== br) return ar - br;
+  if (aHas && !bHas) return -1;
+  if (!aHas && bHas) return 1;
+  return (a.fullName || "").localeCompare(b.fullName || "", undefined, {
+    sensitivity: "base",
+  });
+};
+
+const rollLabel = (n?: number) =>
+  typeof n === "number" && Number.isFinite(n) ? String(n) : "—";
+
 const periodLabel = (r: {
   startDateBs?: string;
   endDateBs?: string;
@@ -118,6 +137,32 @@ interface Props {
 }
 
 const cellKey = (studentId: string, day: number) => `${studentId}:${day}`;
+
+const hospitalNameKey = (name?: string) =>
+  (name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+/** Unique active hospitals for selects — skips duplicate names and missing status. */
+const selectableHospitals = (
+  hospitals: FieldHospitalRecord[] | undefined,
+  keepId?: string,
+): FieldHospitalRecord[] => {
+  const rows = Array.isArray(hospitals) ? hospitals : [];
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  const out: FieldHospitalRecord[] = [];
+  for (const h of rows) {
+    if (!h?._id) continue;
+    if (seenIds.has(h._id)) continue;
+    const status = String(h.status || "ACTIVE").toUpperCase();
+    if (status === "INACTIVE" && h._id !== keepId) continue;
+    const nameKey = hospitalNameKey(h.name);
+    if (nameKey && seenNames.has(nameKey) && h._id !== keepId) continue;
+    seenIds.add(h._id);
+    if (nameKey) seenNames.add(nameKey);
+    out.push(h);
+  }
+  return out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+};
 
 const statusBadge = (status: string) => {
   if (status === "LOCKED") return "bg-slate-800 text-white";
@@ -355,9 +400,10 @@ export const HospitalRosterPanel = ({ isAdmin }: Props) => {
 
       {subTab === "builder" ? (
         !activeRosterId ? (
-          <EmptyState
-            title="Select a roster"
-            description="Open a roster from the Rosters tab to edit the student × day grid."
+          <RosterBuilderPicker
+            rosters={rostersQuery.data ?? []}
+            hospitals={hospitalsQuery.data ?? []}
+            onOpen={openBuilder}
           />
         ) : rosterQuery.isLoading ? (
           <LoadingState />
@@ -393,6 +439,107 @@ export const HospitalRosterPanel = ({ isAdmin }: Props) => {
         )
       ) : null}
     </div>
+  );
+};
+
+// ─── Roster Builder hospital / roster picker ────────────────────────────────
+
+const RosterBuilderPicker = ({
+  rosters,
+  hospitals,
+  onOpen,
+}: {
+  rosters: HospitalRosterRecord[];
+  hospitals: FieldHospitalRecord[];
+  onOpen: (id: string) => void;
+}) => {
+  const hospitalRows = selectableHospitals(hospitals);
+  const rosterList = Array.isArray(rosters) ? rosters : [];
+  const byHospital = new Map<
+    string,
+    { hospital: FieldHospitalRecord | null; label: string; rosters: HospitalRosterRecord[] }
+  >();
+
+  for (const h of hospitalRows) {
+    byHospital.set(h._id, { hospital: h, label: h.name, rosters: [] });
+  }
+  for (const r of rosterList) {
+    const id = r.hospitalId || r._id;
+    const existing = byHospital.get(r.hospitalId);
+    if (existing) {
+      existing.rosters.push(r);
+    } else {
+      byHospital.set(id, {
+        hospital: null,
+        label: r.hospitalName || r.name || "Hospital",
+        rosters: [r],
+      });
+    }
+  }
+
+  const groups = [...byHospital.values()].sort((a, b) =>
+    a.label.localeCompare(b.label),
+  );
+
+  if (groups.length === 0) {
+    return (
+      <EmptyState
+        title="No hospitals yet"
+        description="Add hospitals under the Hospitals tab, or create a Hospital Posting. Then create a roster and open it here."
+      />
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Roster Builder</CardTitle>
+        <p className="text-sm text-slate-500">
+          Open a roster to edit the student × day grid. Every hospital you created
+          is listed here.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {groups.map((g) => (
+          <div
+            key={g.hospital?._id ?? g.label}
+            className="rounded-xl border border-slate-200 px-3 py-3"
+          >
+            <p className="font-medium text-slate-900">{g.label}</p>
+            {g.hospital?.address ? (
+              <p className="text-xs text-slate-500">{g.hospital.address}</p>
+            ) : null}
+            {g.rosters.length === 0 ? (
+              <p className="mt-2 text-xs text-slate-500">
+                No roster yet for this hospital. Create one on the Rosters tab.
+              </p>
+            ) : (
+              <div className="mt-2 flex flex-col gap-2">
+                {g.rosters.map((r) => (
+                  <div
+                    key={r._id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800">{r.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {periodLabel(r)}
+                        {r.batchName || r.yearName
+                          ? ` · ${r.batchName ?? "Batch"} / ${r.yearName ?? "Year"}`
+                          : ""}
+                      </p>
+                    </div>
+                    <Button size="sm" onClick={() => onOpen(r._id)}>
+                      Open
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 };
 
@@ -1451,6 +1598,11 @@ const RostersList = ({
       .sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
   }, [years, form.batchId]);
 
+  const hospitalChoices = useMemo(
+    () => selectableHospitals(hospitals, form.hospitalId),
+    [hospitals, form.hospitalId],
+  );
+
   const startEdit = (r: HospitalRosterRecord) => {
     setEditingId(r._id);
     setForm({
@@ -1648,14 +1800,18 @@ const RostersList = ({
                 }
               >
                 <option value="">Select hospital</option>
-                {hospitals
-                  .filter((h) => h.status === "ACTIVE")
-                  .map((h) => (
-                    <option key={h._id} value={h._id}>
-                      {h.name}
-                    </option>
-                  ))}
+                {hospitalChoices.map((h) => (
+                  <option key={h._id} value={h._id}>
+                    {h.name}
+                  </option>
+                ))}
               </Select>
+              {hospitalChoices.length === 0 ? (
+                <p className="mt-1 text-xs text-amber-700">
+                  No hospitals yet. Add them under Hospital Roster → Hospitals,
+                  or create a Hospital Posting — they will appear here.
+                </p>
+              ) : null}
             </FormField>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FormField label="From date (BS) *">
@@ -2307,7 +2463,7 @@ const RosterBuilder = ({
           <div>
             <CardTitle>{roster.name}</CardTitle>
             <p className="mt-1 text-sm text-slate-500">
-              {roster.hospitalName} · {periodLabel(roster)} ({dayCount} day
+              {roster.hospitalName || "Hospital"} · {periodLabel(roster)} ({dayCount} day
               {dayCount === 1 ? "" : "s"}) · {roster.batchName}/{roster.yearName} ·{" "}
               <Badge className={statusBadge(roster.status)}>{roster.status}</Badge>
               {dirty ? (
@@ -2752,24 +2908,167 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
     return Array.from(set).sort();
   }, [summary]);
 
+  const dutyRows = useMemo(
+    () => [...summary.dutySummary].sort(compareRollNo),
+    [summary.dutySummary],
+  );
+  const clinicalRows = useMemo(
+    () => [...summary.clinicalRecord].sort(compareRollNo),
+    [summary.clinicalRecord],
+  );
+
   const roster = summary.roster;
-  const printBranding = getPrintInstitutionBranding();
-  const institutionName = printBranding.name || "Institution";
-  const institutionAddress = printBranding.address?.trim() || "";
+
+  const printSection = (title: string, tableHtml: string) => {
+    openRosterPrintWindow(
+      `${roster.name} — ${title}`,
+      `<style>
+        table.summary { font-size: 11px; }
+        th.sn, td.sn, th.roll, td.roll { text-align: center; width: 36px; }
+      </style>
+      <h1>${escapePrintHtml(title)}</h1>
+      <div class="meta">
+        <strong>${escapePrintHtml(roster.name)}</strong>
+        · ${escapePrintHtml(periodLabel(roster))}
+        ${roster.daysInMonth ? ` · ${roster.daysInMonth} day(s)` : ""}
+        ${roster.hospitalName ? ` · ${escapePrintHtml(roster.hospitalName)}` : ""}
+        ${roster.batchName || roster.yearName ? ` · ${escapePrintHtml(`${roster.batchName ?? "Batch"} / ${roster.yearName ?? "Year"}`)}` : ""}
+      </div>
+      ${tableHtml}`,
+    );
+  };
+
+  const printStudentDuty = () => {
+    const rows = dutyRows
+      .map(
+        (row, i) => `<tr>
+          <td class="sn">${i + 1}</td>
+          <td class="roll">${escapePrintHtml(rollLabel(row.rollNumber))}</td>
+          <td class="student">${escapePrintHtml(row.fullName)}</td>
+          <td class="cell">${row.totalDuties}</td>
+          <td class="cell">${row.totalDutyHours}</td>
+          <td class="cell">${row.workingDays}</td>
+          <td class="cell">${row.leaveDays}</td>
+          <td class="cell">${row.offDays}</td>
+        </tr>`,
+      )
+      .join("");
+    printSection(
+      "Student duty summary",
+      `<table class="summary">
+        <thead>
+          <tr>
+            <th class="sn">S.N.</th><th class="roll">Roll</th><th>Student</th>
+            <th>Total duties</th><th>Duty hours</th>
+            <th>Working days</th><th>Leave</th><th>Off</th>
+          </tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="8">No duty rows.</td></tr>`}</tbody>
+      </table>`,
+    );
+  };
+
+  const printDepartmentDays = () => {
+    const head = deptCodes.map((c) => `<th>${escapePrintHtml(c)}</th>`).join("");
+    const rows = dutyRows
+      .map((row, i) => {
+        const total = Object.values(row.byDepartment).reduce((a, b) => a + b, 0);
+        return `<tr>
+          <td class="sn">${i + 1}</td>
+          <td class="roll">${escapePrintHtml(rollLabel(row.rollNumber))}</td>
+          <td class="student">${escapePrintHtml(row.fullName)}</td>
+          ${deptCodes
+            .map((c) => `<td class="cell">${row.byDepartment[c] ?? 0}</td>`)
+            .join("")}
+          <td class="cell">${total}</td>
+        </tr>`;
+      })
+      .join("");
+    printSection(
+      "Department days by student",
+      `<table class="summary">
+        <thead>
+          <tr>
+            <th class="sn">S.N.</th><th class="roll">Roll</th><th>Student</th>
+            ${head}<th>Dept days</th>
+          </tr>
+        </thead>
+        <tbody>${
+          rows ||
+          `<tr><td colspan="${deptCodes.length + 4}">No department assignments.</td></tr>`
+        }</tbody>
+      </table>`,
+    );
+  };
+
+  const printShiftDays = () => {
+    const head = shiftCodes.map((c) => `<th>${escapePrintHtml(c)}</th>`).join("");
+    const rows = dutyRows
+      .map((row, i) => {
+        const total = Object.values(row.byShift).reduce((a, b) => a + b, 0);
+        return `<tr>
+          <td class="sn">${i + 1}</td>
+          <td class="roll">${escapePrintHtml(rollLabel(row.rollNumber))}</td>
+          <td class="student">${escapePrintHtml(row.fullName)}</td>
+          ${shiftCodes
+            .map((c) => `<td class="cell">${row.byShift[c] ?? 0}</td>`)
+            .join("")}
+          <td class="cell">${total}</td>
+          <td class="cell">${row.totalDutyHours}</td>
+        </tr>`;
+      })
+      .join("");
+    printSection(
+      "Shift days by student",
+      `<table class="summary">
+        <thead>
+          <tr>
+            <th class="sn">S.N.</th><th class="roll">Roll</th><th>Student</th>
+            ${head}<th>Shift days</th><th>Hours</th>
+          </tr>
+        </thead>
+        <tbody>${
+          rows ||
+          `<tr><td colspan="${shiftCodes.length + 5}">No shift assignments.</td></tr>`
+        }</tbody>
+      </table>`,
+    );
+  };
+
+  const printClinicalRecord = () => {
+    const head = deptCodes.map((c) => `<th>${escapePrintHtml(c)}</th>`).join("");
+    const rows = clinicalRows
+      .map(
+        (row, i) => `<tr>
+          <td class="sn">${i + 1}</td>
+          <td class="roll">${escapePrintHtml(rollLabel(row.rollNumber))}</td>
+          <td class="student">${escapePrintHtml(row.fullName)}</td>
+          ${deptCodes
+            .map((c) => `<td class="cell">${row.byDepartment[c] ?? 0}</td>`)
+            .join("")}
+          <td class="cell">${row.totalDuties}</td>
+        </tr>`,
+      )
+      .join("");
+    printSection(
+      "Clinical duty record (departments)",
+      `<table class="summary">
+        <thead>
+          <tr>
+            <th class="sn">S.N.</th><th class="roll">Roll</th><th>Student</th>
+            ${head}<th>Total duties</th>
+          </tr>
+        </thead>
+        <tbody>${
+          rows ||
+          `<tr><td colspan="${deptCodes.length + 4}">No clinical duty rows.</td></tr>`
+        }</tbody>
+      </table>`,
+    );
+  };
 
   return (
     <div className="space-y-6">
-      <div className="hidden border-b border-slate-300 pb-3 text-center print:block">
-        <p className="text-base font-bold uppercase tracking-wide text-slate-900">
-          {institutionName}
-        </p>
-        {institutionAddress ? (
-          <p className="mt-1 text-sm text-slate-600">{institutionAddress}</p>
-        ) : null}
-        <p className="mt-2 text-sm font-semibold text-slate-800">
-          Hospital Duty Summary
-        </p>
-      </div>
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <div>
@@ -2779,98 +3078,18 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
               {roster.daysInMonth ? ` · ${roster.daysInMonth} day(s)` : ""}
             </p>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              const summaryRows = summary.dutySummary
-                .map(
-                  (row) => `<tr>
-                    <td class="student">${escapePrintHtml(row.fullName)}</td>
-                    <td class="cell">${row.totalDuties}</td>
-                    <td class="cell">${row.totalDutyHours}</td>
-                    <td class="cell">${row.workingDays}</td>
-                    <td class="cell">${row.leaveDays}</td>
-                    <td class="cell">${row.offDays}</td>
-                  </tr>`,
-                )
-                .join("");
-              const deptHead = deptCodes
-                .map((c) => `<th>${escapePrintHtml(c)}</th>`)
-                .join("");
-              const deptRows = summary.dutySummary
-                .map((row) => {
-                  const total = Object.values(row.byDepartment).reduce((a, b) => a + b, 0);
-                  return `<tr>
-                    <td class="student">${escapePrintHtml(row.fullName)}</td>
-                    ${deptCodes
-                      .map((c) => `<td class="cell">${row.byDepartment[c] ?? 0}</td>`)
-                      .join("")}
-                    <td class="cell">${total}</td>
-                  </tr>`;
-                })
-                .join("");
-              const shiftHead = shiftCodes
-                .map((c) => `<th>${escapePrintHtml(c)}</th>`)
-                .join("");
-              const shiftRows = summary.dutySummary
-                .map((row) => {
-                  const total = Object.values(row.byShift).reduce((a, b) => a + b, 0);
-                  return `<tr>
-                    <td class="student">${escapePrintHtml(row.fullName)}</td>
-                    ${shiftCodes
-                      .map((c) => `<td class="cell">${row.byShift[c] ?? 0}</td>`)
-                      .join("")}
-                    <td class="cell">${total}</td>
-                    <td class="cell">${row.totalDutyHours}</td>
-                  </tr>`;
-                })
-                .join("");
-              openRosterPrintWindow(
-                `${roster.name} — Hospital Duty Summary`,
-                `<h1>Hospital Duty Summary</h1>
-                <div class="meta">
-                  <strong>${escapePrintHtml(roster.name)}</strong>
-                  · ${escapePrintHtml(periodLabel(roster))}
-                  ${roster.daysInMonth ? ` · ${roster.daysInMonth} day(s)` : ""}
-                </div>
-                <h1>Student duty summary</h1>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Student</th><th>Total duties</th><th>Duty hours</th>
-                      <th>Working days</th><th>Leave</th><th>Off</th>
-                    </tr>
-                  </thead>
-                  <tbody>${summaryRows || `<tr><td colspan="6">No duty rows.</td></tr>`}</tbody>
-                </table>
-                <h1>Department days</h1>
-                <table>
-                  <thead>
-                    <tr><th>Student</th>${deptHead}<th>Dept days</th></tr>
-                  </thead>
-                  <tbody>${deptRows || `<tr><td colspan="${deptCodes.length + 2}">No department assignments.</td></tr>`}</tbody>
-                </table>
-                <h1>Shift days</h1>
-                <table>
-                  <thead>
-                    <tr><th>Student</th>${shiftHead}<th>Shift days</th><th>Hours</th></tr>
-                  </thead>
-                  <tbody>${shiftRows || `<tr><td colspan="${shiftCodes.length + 3}">No shift assignments.</td></tr>`}</tbody>
-                </table>`,
-              );
-            }}
-          >
+          <Button type="button" size="sm" variant="outline" onClick={printStudentDuty}>
             <Printer className="mr-1 h-3.5 w-3.5" />
             Print
           </Button>
         </CardHeader>
         <CardContent className="min-w-0">
           <div className="overflow-x-auto">
-            <Table className="min-w-[900px]">
+            <Table className="min-w-[960px]">
               <TableHead>
                 <tr>
+                  <Th className="w-12 text-center">S.N.</Th>
+                  <Th className="w-16 text-center">Roll</Th>
                   <Th>Student</Th>
                   <Th>Total duties</Th>
                   <Th>Duty hours</Th>
@@ -2880,8 +3099,10 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                 </tr>
               </TableHead>
               <TableBody>
-                {summary.dutySummary.map((row) => (
+                {dutyRows.map((row, i) => (
                   <tr key={row.studentId}>
+                    <Td className="text-center tabular-nums">{i + 1}</Td>
+                    <Td className="text-center tabular-nums">{rollLabel(row.rollNumber)}</Td>
                     <Td className="font-medium">{row.fullName}</Td>
                     <Td className="tabular-nums">{row.totalDuties}</Td>
                     <Td className="tabular-nums">{row.totalDutyHours}</Td>
@@ -2897,17 +3118,25 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Department days by student</CardTitle>
-          <p className="text-sm text-slate-500">
-            How many days each student worked in each department (column = department code).
-          </p>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>Department days by student</CardTitle>
+            <p className="text-sm text-slate-500">
+              How many days each student worked in each department (column = department code).
+            </p>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={printDepartmentDays}>
+            <Printer className="mr-1 h-3.5 w-3.5" />
+            Print
+          </Button>
         </CardHeader>
         <CardContent className="min-w-0">
           <div className="overflow-x-auto">
             <Table className="min-w-[960px]">
               <TableHead>
                 <tr>
+                  <Th className="w-12 text-center">S.N.</Th>
+                  <Th className="w-16 text-center">Roll</Th>
                   <Th>Student</Th>
                   {deptCodes.map((c) => {
                     const name =
@@ -2923,13 +3152,17 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                 </tr>
               </TableHead>
               <TableBody>
-                {summary.dutySummary.map((row) => {
+                {dutyRows.map((row, i) => {
                   const deptTotal = Object.values(row.byDepartment).reduce(
                     (a, b) => a + b,
                     0,
                   );
                   return (
                     <tr key={row.studentId}>
+                      <Td className="text-center tabular-nums">{i + 1}</Td>
+                      <Td className="text-center tabular-nums">
+                        {rollLabel(row.rollNumber)}
+                      </Td>
                       <Td className="font-medium">{row.fullName}</Td>
                       {deptCodes.map((c) => (
                         <Td key={c} className="text-center tabular-nums">
@@ -2954,18 +3187,26 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Shift days by student</CardTitle>
-          <p className="text-sm text-slate-500">
-            How many days each student worked each shift (column = shift code). Separate from
-            department counts.
-          </p>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>Shift days by student</CardTitle>
+            <p className="text-sm text-slate-500">
+              How many days each student worked each shift (column = shift code). Separate from
+              department counts.
+            </p>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={printShiftDays}>
+            <Printer className="mr-1 h-3.5 w-3.5" />
+            Print
+          </Button>
         </CardHeader>
         <CardContent className="min-w-0">
           <div className="overflow-x-auto">
             <Table className="min-w-[960px]">
               <TableHead>
                 <tr>
+                  <Th className="w-12 text-center">S.N.</Th>
+                  <Th className="w-16 text-center">Roll</Th>
                   <Th>Student</Th>
                   {shiftCodes.map((c) => {
                     const sh = summary.shiftLegend.find((s) => s.shortCode === c);
@@ -2984,13 +3225,17 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                 </tr>
               </TableHead>
               <TableBody>
-                {summary.dutySummary.map((row) => {
+                {dutyRows.map((row, i) => {
                   const shiftTotal = Object.values(row.byShift).reduce(
                     (a, b) => a + b,
                     0,
                   );
                   return (
                     <tr key={row.studentId}>
+                      <Td className="text-center tabular-nums">{i + 1}</Td>
+                      <Td className="text-center tabular-nums">
+                        {rollLabel(row.rollNumber)}
+                      </Td>
                       <Td className="font-medium">{row.fullName}</Td>
                       {shiftCodes.map((c) => (
                         <Td key={c} className="text-center tabular-nums">
@@ -3018,17 +3263,25 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Clinical duty record (departments)</CardTitle>
-          <p className="text-sm text-slate-500">
-            Same department matrix as above — compact clinical record view.
-          </p>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>Clinical duty record (departments)</CardTitle>
+            <p className="text-sm text-slate-500">
+              Same department matrix as above — compact clinical record view.
+            </p>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={printClinicalRecord}>
+            <Printer className="mr-1 h-3.5 w-3.5" />
+            Print
+          </Button>
         </CardHeader>
         <CardContent className="min-w-0">
           <div className="overflow-x-auto">
             <Table className="min-w-[960px]">
               <TableHead>
                 <tr>
+                  <Th className="w-12 text-center">S.N.</Th>
+                  <Th className="w-16 text-center">Roll</Th>
                   <Th>Student</Th>
                   {deptCodes.map((c) => (
                     <Th key={c} className="text-center">
@@ -3039,8 +3292,12 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                 </tr>
               </TableHead>
               <TableBody>
-                {summary.clinicalRecord.map((row) => (
+                {clinicalRows.map((row, i) => (
                   <tr key={row.studentId}>
+                    <Td className="text-center tabular-nums">{i + 1}</Td>
+                    <Td className="text-center tabular-nums">
+                      {rollLabel(row.rollNumber)}
+                    </Td>
                     <Td className="font-medium">{row.fullName}</Td>
                     {deptCodes.map((c) => (
                       <Td key={c} className="text-center tabular-nums">

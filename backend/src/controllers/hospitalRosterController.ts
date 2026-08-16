@@ -13,6 +13,7 @@ import {
   hospitalRosterSchema,
   hospitalRosterStudentsUpdateSchema,
   hospitalRosterUpdateSchema,
+  postingTypesForSection,
   rosterDutyCodeSchema,
   rosterDutyCodeUpdateSchema,
   type ClinicalDutyRecordRow,
@@ -22,6 +23,7 @@ import {
 import { Batch } from "../models/Batch.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { DutyShift } from "../models/DutyShift.js";
+import { FieldDutySchedule } from "../models/FieldDutySchedule.js";
 import { FieldHospital } from "../models/FieldHospital.js";
 import { HospitalDepartment } from "../models/HospitalDepartment.js";
 import { HospitalRoster } from "../models/HospitalRoster.js";
@@ -39,7 +41,7 @@ import {
   getOffsetFromBsDate,
 } from "../utils/nepaliDate.js";
 import { sendSuccess } from "../utils/response.js";
-import { withTenantScope } from "../utils/tenant.js";
+import { tenantObjectId, withTenantScope } from "../utils/tenant.js";
 
 const tenantId = (req: Request) => {
   const id = req.tenantSchoolId;
@@ -75,6 +77,122 @@ const cleanId = (value: unknown): string | undefined => {
   const s = String(value).trim();
   if (!s || !/^[a-f\d]{24}$/i.test(s)) return undefined;
   return s;
+};
+
+const normalizeHospitalName = (name: string): string =>
+  name.trim().replace(/\s+/g, " ");
+
+const hospitalNameKey = (name: string): string =>
+  normalizeHospitalName(name).toLowerCase();
+
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Match FieldHospital rows even if schoolId was stored as ObjectId or string,
+ * and even if isDeleted was never written (legacy rows).
+ */
+const hospitalTenantFilter = (req: Request) => {
+  const oid = tenantObjectId(req);
+  return {
+    $or: [{ schoolId: oid }, { schoolId: oid.toString() }],
+  };
+};
+
+const hospitalNotDeleted = { isDeleted: { $ne: true } };
+
+const findHospitalById = (req: Request, id: string) =>
+  FieldHospital.findOne({
+    _id: id,
+    ...hospitalTenantFilter(req),
+    ...hospitalNotDeleted,
+  });
+
+/**
+ * Promote hospital posting site names into the FieldHospital registry so
+ * Roster Builder / Create roster can select every hospital the college uses.
+ */
+const syncHospitalsFromPostings = async (req: Request) => {
+  const schoolId = tenantObjectId(req);
+  const hospitalTypes = postingTypesForSection("HOSPITAL");
+  const postings = await FieldDutySchedule.find({
+    $and: [
+      { $or: [{ schoolId }, { schoolId: schoolId.toString() }] },
+      { isDeleted: { $ne: true } },
+      {
+        $or: [
+          { postingType: { $in: hospitalTypes } },
+          { postingType: { $exists: false } },
+          { postingType: null },
+          { postingType: "" },
+        ],
+      },
+    ],
+  })
+    .select("siteName hospitalName address")
+    .lean();
+
+  const existing = await FieldHospital.find({
+    ...hospitalTenantFilter(req),
+    ...hospitalNotDeleted,
+  })
+    .select("name")
+    .lean();
+  const have = new Set(
+    existing.map((h) => hospitalNameKey(String(h.name || ""))).filter(Boolean),
+  );
+
+  const toCreate: Array<{
+    schoolId: typeof schoolId;
+    name: string;
+    address: string;
+    status: "ACTIVE";
+    isDeleted: false;
+    createdBy?: string;
+  }> = [];
+  const seen = new Set(have);
+  for (const p of postings) {
+    const name = normalizeHospitalName(
+      String(p.siteName || p.hospitalName || ""),
+    );
+    if (!name) continue;
+    const key = hospitalNameKey(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    toCreate.push({
+      schoolId,
+      name,
+      address: String(p.address || ""),
+      status: "ACTIVE",
+      isDeleted: false,
+      createdBy: req.user?.userId,
+    });
+  }
+  if (toCreate.length) {
+    try {
+      await FieldHospital.insertMany(toCreate, { ordered: false });
+    } catch {
+      // Race / duplicate name — list query still returns saved hospitals.
+    }
+  }
+};
+
+const dedupeHospitalDocs = <T extends { _id: unknown; name?: unknown }>(
+  rows: T[],
+): T[] => {
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  const out: T[] = [];
+  for (const row of rows) {
+    const id = String(row._id);
+    if (seenIds.has(id)) continue;
+    const key = hospitalNameKey(String(row.name || ""));
+    if (key && seenNames.has(key)) continue;
+    seenIds.add(id);
+    if (key) seenNames.add(key);
+    out.push(row);
+  }
+  return out;
 };
 
 // ─── Seed helpers ───────────────────────────────────────────────────────────
@@ -313,28 +431,64 @@ const assertRosterEditable = (status: string) => {
 // ─── Hospitals ──────────────────────────────────────────────────────────────
 
 export const listHospitals = asyncHandler(async (req: Request, res: Response) => {
-  const schoolId = tenantId(req);
-  const filter: Record<string, unknown> = { schoolId, isDeleted: false };
+  await syncHospitalsFromPostings(req);
+  const filter: Record<string, unknown> = {
+    ...hospitalTenantFilter(req),
+    ...hospitalNotDeleted,
+  };
   if (req.query.status === "ACTIVE" || req.query.status === "INACTIVE") {
     filter.status = req.query.status;
   }
   const rows = await FieldHospital.find(filter).sort({ name: 1 }).lean();
-  const formatted = await Promise.all(rows.map((r) => formatHospital(r as Record<string, unknown>)));
+  const unique = dedupeHospitalDocs(rows);
+  const formatted = await Promise.all(
+    unique.map((r) => formatHospital(r as Record<string, unknown>)),
+  );
   return sendSuccess(res, "Hospitals fetched", formatted);
 });
 
 export const createHospital = asyncHandler(async (req: Request, res: Response) => {
   await assertAdmin(req);
-  const schoolId = tenantId(req);
+  const schoolId = tenantObjectId(req);
   const payload = fieldHospitalSchema.parse(req.body);
+  const name = normalizeHospitalName(payload.name);
+  if (name.length < 2) throw new ApiError(400, "Hospital name is required");
+
+  const existing = await FieldHospital.findOne({
+    ...hospitalTenantFilter(req),
+    name: { $regex: `^${escapeRegex(name)}$`, $options: "i" },
+  });
+  if (existing) {
+    if (existing.isDeleted || existing.status === "INACTIVE") {
+      existing.isDeleted = false;
+      existing.name = name;
+      existing.address = payload.address ?? existing.address ?? "";
+      existing.contact = payload.contact ?? existing.contact ?? "";
+      existing.status = payload.status ?? "ACTIVE";
+      existing.remarks = payload.remarks ?? existing.remarks ?? "";
+      const coordinatorId = cleanId(payload.coordinatorStaffId);
+      if (coordinatorId) {
+        existing.set("coordinatorStaffId", coordinatorId);
+      }
+      await existing.save();
+      return sendSuccess(
+        res,
+        "Hospital restored",
+        await formatHospital(existing.toObject() as Record<string, unknown>),
+      );
+    }
+    throw new ApiError(409, "A hospital with this name already exists");
+  }
+
   const doc = await FieldHospital.create({
     schoolId,
-    name: payload.name,
+    name,
     address: payload.address ?? "",
     contact: payload.contact ?? "",
     coordinatorStaffId: cleanId(payload.coordinatorStaffId),
     status: payload.status ?? "ACTIVE",
     remarks: payload.remarks ?? "",
+    isDeleted: false,
     createdBy: req.user?.userId,
   });
   return sendSuccess(
@@ -347,11 +501,10 @@ export const createHospital = asyncHandler(async (req: Request, res: Response) =
 
 export const updateHospital = asyncHandler(async (req: Request, res: Response) => {
   await assertAdmin(req);
-  const schoolId = tenantId(req);
   const payload = fieldHospitalUpdateSchema.parse(req.body);
   const $set: Record<string, unknown> = {};
   const $unset: Record<string, 1> = {};
-  if (payload.name !== undefined) $set.name = payload.name;
+  if (payload.name !== undefined) $set.name = normalizeHospitalName(payload.name);
   if (payload.address !== undefined) $set.address = payload.address;
   if (payload.contact !== undefined) $set.contact = payload.contact;
   if (payload.status !== undefined) $set.status = payload.status;
@@ -369,7 +522,7 @@ export const updateHospital = asyncHandler(async (req: Request, res: Response) =
     throw new ApiError(400, "No fields to update");
   }
   const doc = await FieldHospital.findOneAndUpdate(
-    { _id: req.params.id, schoolId, isDeleted: false },
+    { _id: req.params.id, ...hospitalTenantFilter(req), ...hospitalNotDeleted },
     update,
     { new: true },
   ).lean();
@@ -379,17 +532,17 @@ export const updateHospital = asyncHandler(async (req: Request, res: Response) =
 
 export const deleteHospital = asyncHandler(async (req: Request, res: Response) => {
   await assertAdmin(req);
-  const schoolId = tenantId(req);
+  const schoolId = tenantObjectId(req);
   const inUse = await HospitalRoster.countDocuments({
-    schoolId,
+    $or: [{ schoolId }, { schoolId: schoolId.toString() }],
     hospitalId: req.params.id,
-    isDeleted: false,
+    isDeleted: { $ne: true },
   });
   if (inUse > 0) {
     throw new ApiError(400, "Cannot delete hospital used by existing rosters. Mark inactive instead.");
   }
   const doc = await FieldHospital.findOneAndUpdate(
-    { _id: req.params.id, schoolId, isDeleted: false },
+    { _id: req.params.id, ...hospitalTenantFilter(req), ...hospitalNotDeleted },
     { $set: { isDeleted: true } },
     { new: true },
   );
@@ -774,11 +927,7 @@ export const createHospitalRoster = asyncHandler(async (req: Request, res: Respo
   const schoolId = tenantId(req);
   const payload = hospitalRosterSchema.parse(req.body);
 
-  const hospital = await FieldHospital.findOne({
-    _id: payload.hospitalId,
-    schoolId,
-    isDeleted: false,
-  });
+  const hospital = await findHospitalById(req, payload.hospitalId);
   if (!hospital) throw new ApiError(404, "Hospital not found");
 
   let studentIds = (payload.studentIds ?? []).map(String).filter(Boolean);
@@ -1228,6 +1377,23 @@ const buildSummary = async (schoolId: string, rosterDoc: Record<string, unknown>
       offDays,
     };
   });
+
+  const compareRoll = (
+    a: { rollNumber?: number; fullName?: string },
+    b: { rollNumber?: number; fullName?: string },
+  ) => {
+    const ar = a.rollNumber;
+    const br = b.rollNumber;
+    const aHas = typeof ar === "number" && Number.isFinite(ar);
+    const bHas = typeof br === "number" && Number.isFinite(br);
+    if (aHas && bHas && ar !== br) return ar - br;
+    if (aHas && !bHas) return -1;
+    if (!aHas && bHas) return 1;
+    return (a.fullName || "").localeCompare(b.fullName || "", undefined, {
+      sensitivity: "base",
+    });
+  };
+  dutySummary.sort(compareRoll);
 
   const clinicalRecord: ClinicalDutyRecordRow[] = dutySummary.map((row) => ({
     studentId: row.studentId,
