@@ -9,6 +9,7 @@ import { ProtectedRoute } from "features/auth/ProtectedRoute";
 import { lazyWithRetry as lazy } from "lib/lazyWithRetry";
 import { isNativeApp } from "lib/platform";
 import { LoginPage } from "pages/LoginPage";
+import { AppUpdatePrompt } from "components/AppUpdatePrompt";
 import SplashScreen from "components/SplashScreen";
 
 const RegisterPage = lazy(() => import("pages/RegisterPage").then((module) => ({ default: module.RegisterPage })));
@@ -107,6 +108,7 @@ export default function App() {
   }
   return (
     <OfflineLoginOnly>
+    <AppUpdatePrompt />
     <Routes>
       <Route path="/" element={<RootRedirect />} />
 

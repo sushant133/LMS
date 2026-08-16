@@ -31,6 +31,10 @@ export const sanitizeFcmPlatform = (raw: unknown): FcmPlatform => {
 /**
  * Bind a device token to the authenticated user only.
  * Removes the same token from any other account (shared-device safety).
+ *
+ * Uses atomic updates — never user.save() on a partial .select("fcmTokens")
+ * document. That re-ran User validation without role/schoolId and 500'd for
+ * every role (COLLEGE_ADMIN schoolId looked missing; SUPER_ADMIN too).
  */
 export const registerFcmToken = async (
   userId: string,
@@ -45,24 +49,34 @@ export const registerFcmToken = async (
     { $pull: { fcmTokens: { token } } }
   );
 
-  const user = await User.findById(userId).select("fcmTokens");
-  if (!user) return;
+  const refreshed = await User.updateOne(
+    { _id: userId, "fcmTokens.token": token },
+    { $set: { "fcmTokens.$.platform": platform, "fcmTokens.$.updatedAt": now } }
+  );
+  if (refreshed.matchedCount > 0) return;
 
-  const existing = (user.fcmTokens ?? []).filter((entry) => entry.token !== token);
-  existing.push({ token, platform, updatedAt: now });
-  // Keep newest tokens only
-  existing.sort((a, b) => {
-    const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-    const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-    return bTime - aTime;
-  });
-  user.fcmTokens = existing.slice(0, MAX_TOKENS_PER_USER);
-  await user.save();
+  await User.updateOne(
+    { _id: userId },
+    {
+      $push: {
+        fcmTokens: {
+          $each: [{ token, platform, updatedAt: now }],
+          $slice: -MAX_TOKENS_PER_USER
+        }
+      }
+    }
+  );
 };
 
-/** Remove one device token from the authenticated user (logout / revoke). */
-export const unregisterFcmToken = async (userId: string, token: string): Promise<void> => {
-  await User.updateOne({ _id: userId }, { $pull: { fcmTokens: { token } } });
+/**
+ * Remove this device token from every account (logout / shared phone).
+ * The next login re-binds it to the new session user only.
+ */
+export const unregisterFcmToken = async (_userId: string, token: string): Promise<void> => {
+  await User.updateMany(
+    { "fcmTokens.token": token },
+    { $pull: { fcmTokens: { token } } }
+  );
 };
 
 const removeInvalidTokens = async (tokens: string[]): Promise<void> => {

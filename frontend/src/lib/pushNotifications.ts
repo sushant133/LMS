@@ -7,6 +7,8 @@ const ANDROID_CHANNEL_ID = "lms_default";
 
 let listenersAttached = false;
 let initInFlight: Promise<void> | null = null;
+/** Bumped on logout so an in-flight register cannot re-bind the old user. */
+let registrationEpoch = 0;
 
 const persistLocalToken = (token: string | null): void => {
   try {
@@ -42,10 +44,17 @@ const attachListenersOnce = (): void => {
   void PushNotifications.addListener("registration", (event) => {
     const token = event.value?.trim();
     if (!token) return;
+    const epoch = registrationEpoch;
     persistLocalToken(token);
-    void postDeviceToken(token).catch((error) => {
-      console.error("[push] Failed to register device token", error);
-    });
+    void (async () => {
+      if (epoch !== registrationEpoch) return;
+      try {
+        await postDeviceToken(token);
+      } catch (error) {
+        if (epoch !== registrationEpoch) return;
+        console.error("[push] Failed to register device token", error);
+      }
+    })();
   });
 
   void PushNotifications.addListener("registrationError", (error) => {
@@ -72,7 +81,10 @@ export const initPushNotifications = async (): Promise<void> => {
   if (!Capacitor.isNativePlatform()) return;
   if (initInFlight) return initInFlight;
 
+  const epoch = registrationEpoch;
+
   initInFlight = (async () => {
+    if (epoch !== registrationEpoch) return;
     attachListenersOnce();
 
     if (Capacitor.getPlatform() === "android") {
@@ -95,12 +107,14 @@ export const initPushNotifications = async (): Promise<void> => {
     if (permission.receive !== "granted") return;
 
     await PushNotifications.register();
+    if (epoch !== registrationEpoch) return;
 
     const existing = readLocalToken();
     if (existing) {
       try {
         await postDeviceToken(existing);
       } catch (error) {
+        if (epoch !== registrationEpoch) return;
         console.error("[push] Failed to re-bind stored token", error);
       }
     }
@@ -115,7 +129,11 @@ export const initPushNotifications = async (): Promise<void> => {
 export const unregisterPushNotifications = async (): Promise<void> => {
   if (!Capacitor.isNativePlatform()) return;
 
+  registrationEpoch += 1;
+  initInFlight = null;
+
   const token = readLocalToken();
+  persistLocalToken(null);
   if (!token) return;
 
   try {

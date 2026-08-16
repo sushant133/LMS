@@ -117,9 +117,9 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
   // Native only: request FCM permission + save token after a session exists.
   // No-op on web. Skips the login screen (sessionUserId is null until login).
   useEffect(() => {
-    if (!sessionUserId) return;
+    if (!sessionUserId || loggingOut) return;
     void initPushNotifications();
-  }, [sessionUserId]);
+  }, [sessionUserId, loggingOut]);
 
   const isBootstrapping = meQuery.isPending && meQuery.data === undefined;
 
