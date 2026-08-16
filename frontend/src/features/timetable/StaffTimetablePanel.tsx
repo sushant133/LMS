@@ -1,33 +1,46 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  DAYS_OF_WEEK,
   STAFF_TIMETABLE_SESSION_TYPE_LABELS,
   STAFF_TIMETABLE_SESSION_TYPES,
+  TIMETABLE_BREAK_LABELS,
   type StaffTimetableSessionType,
   type StaffTimetableSlotRecord,
 } from "@phit-erp/shared";
-import { Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { Download, Image as ImageIcon, Plus, Printer, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
+import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
+import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { api, unwrap } from "lib/api";
+import {
+  formatPrintAddress,
+  getPrintInstitutionBranding,
+} from "lib/printBranding";
+import {
+  downloadImageFromElementById,
+  downloadPdfFromElementById,
+  printElementById,
+} from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
-import { printElementById } from "lib/printUtils";
-import { cn, parseErrorMessage } from "lib/utils";
+import { parseErrorMessage } from "lib/utils";
+import { SESSION_COLORS } from "./timetableColors";
+import { TimetablePrintView } from "./TimetablePrintView";
+import {
+  buildWeeklyMatrix,
+  uniqueRooms,
+  type PeriodColumn,
+  type TimetableSlotRow,
+} from "./timetableMatrixUtils";
+import { WeeklyTimetableGrid } from "./WeeklyTimetableGrid";
 
-/**
- * Weekly duty timetable for non-teaching college staff.
- *
- * Deliberately its own grid rather than a reuse of WeeklyTimetableGrid: that one
- * is built around subject/teacher cells and the academic colour system, and a
- * duty roster carries neither. The layout still mirrors it — days down, period
- * columns across — so the two sections read the same way.
- */
 interface StaffTimetablePanelProps {
   academicYearBs: string;
   saturdayIsHoliday: boolean;
@@ -43,74 +56,150 @@ interface StaffOption {
   status?: string;
 }
 
-const DAY_NAMES = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-] as const;
+type StaffViewMode = "staff" | "department" | "room" | "combined";
 
-const SESSION_STYLES: Record<StaffTimetableSessionType, string> = {
-  DUTY: "bg-sky-50 border-sky-200 text-sky-900",
-  BREAK: "bg-amber-50 border-amber-200 text-amber-900",
-  DAY_OFF: "bg-slate-100 border-slate-300 text-slate-600",
-};
-
-const PRINT_ID = "staff-timetable-print";
-
-const emptyForm = () => ({
+const emptyForm = (academicYearBs: string) => ({
   staffId: "",
   dayOfWeek: 0,
   periodNumber: 1,
   startTime: "10:00",
-  endTime: "11:00",
+  endTime: "10:50",
   sessionType: "DUTY" as StaffTimetableSessionType,
   dutyTitle: "",
   room: "",
   department: "",
   breakLabel: "",
   remarks: "",
+  academicYearBs,
 });
 
 type SlotForm = ReturnType<typeof emptyForm>;
 
-const idOf = (value: StaffTimetableSlotRecord["staffId"]): string =>
+const idOfStaff = (value: StaffTimetableSlotRecord["staffId"]): string =>
   typeof value === "string" ? value : (value?._id ?? "");
 
-const timeToMinutes = (time: string): number => {
-  const parts = String(time ?? "00:00").split(":");
-  return Number(parts[0] ?? 0) * 60 + Number(parts[1] ?? 0);
+const staffNameOf = (
+  slot: StaffTimetableSlotRecord,
+  people: StaffOption[],
+): string => {
+  const populated = typeof slot.staffId === "object" ? slot.staffId : null;
+  if (populated?.fullName) return populated.fullName;
+  const id = idOfStaff(slot.staffId);
+  return people.find((p) => p._id === id)?.fullName || "Staff member";
+};
+
+const staffDesignationOf = (
+  slot: StaffTimetableSlotRecord,
+  people: StaffOption[],
+): string => {
+  const populated = typeof slot.staffId === "object" ? slot.staffId : null;
+  if (populated?.designation) return populated.designation;
+  const id = idOfStaff(slot.staffId);
+  return people.find((p) => p._id === id)?.designation || "";
+};
+
+const mapStaffSlotToRow = (
+  slot: StaffTimetableSlotRecord,
+  people: StaffOption[],
+): TimetableSlotRow => {
+  const type = slot.sessionType ?? "DUTY";
+  const sessionType =
+    type === "BREAK" ? "BREAK" : type === "DAY_OFF" ? "HOLIDAY" : "SPECIAL";
+  return {
+    _id: slot._id,
+    dayOfWeek: slot.dayOfWeek,
+    periodNumber: slot.periodNumber,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+    room: slot.room,
+    academicYearBs: slot.academicYearBs,
+    sessionType,
+    breakLabel: slot.breakLabel,
+    remarks: slot.remarks,
+    badgeLabel: type === "DUTY" ? "Duty" : undefined,
+    subjectId: {
+      name:
+        type === "DUTY"
+          ? slot.dutyTitle || "Duty"
+          : type === "BREAK"
+            ? slot.breakLabel || "Break"
+            : "Day off",
+    },
+    teacherId: { user: { fullName: staffNameOf(slot, people) } },
+  };
 };
 
 export const StaffTimetablePanel = ({
-  academicYearBs,
+  academicYearBs: yearFromParent,
   saturdayIsHoliday,
   canWrite,
 }: StaffTimetablePanelProps) => {
+  const [academicYearBs, setAcademicYearBs] = useState(yearFromParent);
+  const [viewMode, setViewMode] = useState<StaffViewMode>("staff");
   const [staffFilter, setStaffFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
+  const [roomFilter, setRoomFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<SlotForm>(emptyForm);
+  const [form, setForm] = useState<SlotForm>(() => emptyForm(yearFromParent));
+  const [periodTimeEdit, setPeriodTimeEdit] = useState<{
+    period: PeriodColumn;
+    staffId: string;
+    tableTitle: string;
+  } | null>(null);
+  const [periodNewStart, setPeriodNewStart] = useState("");
+  const [periodNewEnd, setPeriodNewEnd] = useState("");
+
+  useEffect(() => {
+    if (!yearFromParent) return;
+    setAcademicYearBs((current) => current || yearFromParent);
+    setForm((current) =>
+      current.academicYearBs ? current : { ...current, academicYearBs: yearFromParent },
+    );
+  }, [yearFromParent]);
+
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () =>
+      unwrap<{
+        schoolName?: string;
+        schoolNameNp?: string;
+        principalName?: string;
+        academicYearBs?: string;
+        address?: Parameters<typeof formatPrintAddress>[0];
+      }>(api.get("/settings")),
+  });
+
+  useEffect(() => {
+    const year = settingsQuery.data?.academicYearBs;
+    if (!year) return;
+    setAcademicYearBs((current) => current || year);
+    setForm((current) =>
+      current.academicYearBs ? current : { ...current, academicYearBs: year },
+    );
+  }, [settingsQuery.data?.academicYearBs]);
 
   const staffQuery = useQuery({
     queryKey: ["college-staff", "timetable-picker"],
     queryFn: () =>
-      unwrap<StaffOption[]>(api.get("/college-staff", { params: { status: "ACTIVE" } })),
+      unwrap<StaffOption[]>(
+        api.get("/college-staff", { params: { status: "ACTIVE" } }),
+      ),
   });
 
   const slotsQuery = useQuery({
-    queryKey: ["staff-timetable", academicYearBs, staffFilter, departmentFilter],
+    queryKey: ["staff-timetable", academicYearBs, staffFilter, departmentFilter, roomFilter],
     queryFn: () =>
       unwrap<StaffTimetableSlotRecord[]>(
         api.get("/staff-timetable", {
           params: {
-            academicYearBs,
-            staffId: staffFilter || undefined,
-            department: departmentFilter || undefined,
+            academicYearBs: academicYearBs || undefined,
+            staffId: viewMode === "staff" && staffFilter ? staffFilter : undefined,
+            department:
+              viewMode === "department" && departmentFilter
+                ? departmentFilter
+                : undefined,
+            room: viewMode === "room" && roomFilter ? roomFilter : undefined,
           },
         }),
       ),
@@ -118,66 +207,97 @@ export const StaffTimetablePanel = ({
 
   const staff = useMemo(() => staffQuery.data ?? [], [staffQuery.data]);
   const slots = useMemo(() => slotsQuery.data ?? [], [slotsQuery.data]);
+  const allRooms = useMemo(
+    () =>
+      uniqueRooms(
+        slots.map((slot) => ({
+          _id: slot._id,
+          dayOfWeek: slot.dayOfWeek,
+          periodNumber: slot.periodNumber,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          room: slot.room,
+        })),
+      ),
+    [slots],
+  );
 
   const departments = useMemo(() => {
     const set = new Set<string>();
     for (const person of staff) {
       if (person.department?.trim()) set.add(person.department.trim());
     }
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [staff]);
-
-  const visibleDays = useMemo(
-    () => (saturdayIsHoliday ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3, 4, 5, 6]),
-    [saturdayIsHoliday],
-  );
-
-  /**
-   * Group the roster by staff member so each person gets their own grid, the
-   * same way the academic view renders one table per year.
-   */
-  const staffTables = useMemo(() => {
-    const byStaff = new Map<string, StaffTimetableSlotRecord[]>();
     for (const slot of slots) {
-      const key = idOf(slot.staffId);
-      if (!key) continue;
-      const existing = byStaff.get(key);
-      if (existing) existing.push(slot);
-      else byStaff.set(key, [slot]);
+      if (slot.department?.trim()) set.add(slot.department.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [staff, slots]);
+
+  type StaffTable = {
+    key: string;
+    title: string;
+    subtitle?: string;
+    staffId?: string;
+    department?: string;
+    slots: StaffTimetableSlotRecord[];
+  };
+
+  const tables = useMemo((): StaffTable[] => {
+    if (viewMode === "combined" || viewMode === "room") {
+      const title =
+        viewMode === "room"
+          ? `Room: ${roomFilter || "All"}`
+          : "Combined staff timetable";
+      return [{ key: "combined", title, slots }];
+    }
+    if (viewMode === "department") {
+      const byDept = new Map<string, StaffTimetableSlotRecord[]>();
+      for (const slot of slots) {
+        const key = (slot.department || "General").trim() || "General";
+        const list = byDept.get(key) ?? [];
+        list.push(slot);
+        byDept.set(key, list);
+      }
+      return [...byDept.entries()]
+        .map(([department, rows]) => ({
+          key: `dept-${department}`,
+          title: department,
+          department,
+          slots: rows,
+        }))
+        .sort((a, b) => a.title.localeCompare(b.title));
     }
 
+    const byStaff = new Map<string, StaffTimetableSlotRecord[]>();
+    for (const slot of slots) {
+      const key = idOfStaff(slot.staffId);
+      if (!key) continue;
+      const list = byStaff.get(key) ?? [];
+      list.push(slot);
+      byStaff.set(key, list);
+    }
+    if (staffFilter && !byStaff.has(staffFilter)) {
+      byStaff.set(staffFilter, []);
+    }
     return [...byStaff.entries()]
       .map(([id, rows]) => {
-        const person = staff.find((entry) => entry._id === id);
-        const populated = typeof rows[0]?.staffId === "object" ? rows[0].staffId : null;
-        const name =
-          person?.fullName ??
-          (populated && typeof populated === "object" ? populated.fullName : "") ??
-          "Staff member";
-        const designation =
-          person?.designation ??
-          (populated && typeof populated === "object" ? populated.designation : "") ??
-          "";
-
-        // Period columns are the distinct time ranges this person actually works,
-        // so someone on a short shift does not get a grid full of empty columns.
-        const columns = [
-          ...new Map(
-            rows.map((row) => [`${row.startTime}-${row.endTime}`, row]),
-          ).values(),
-        ]
-          .map((row) => ({
-            key: `${row.startTime}-${row.endTime}`,
-            startTime: row.startTime,
-            endTime: row.endTime,
-            periodNumber: row.periodNumber,
-          }))
-          .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-
-        return { staffId: id, name, designation, rows, columns };
+        const sample = rows[0];
+        const name = sample
+          ? staffNameOf(sample, staff)
+          : staff.find((p) => p._id === id)?.fullName || "Staff member";
+        const designation = sample
+          ? staffDesignationOf(sample, staff)
+          : staff.find((p) => p._id === id)?.designation || "";
+        return {
+          key: id,
+          staffId: id,
+          title: name,
+          subtitle: designation,
+          slots: rows,
+        };
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [slots, staff]);
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [slots, staff, viewMode, staffFilter, roomFilter]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload: SlotForm) => {
@@ -187,7 +307,7 @@ export const StaffTimetablePanel = ({
         periodNumber: payload.periodNumber,
         startTime: payload.startTime,
         endTime: payload.endTime,
-        academicYearBs,
+        academicYearBs: payload.academicYearBs || academicYearBs,
         sessionType: payload.sessionType,
         dutyTitle: payload.dutyTitle,
         room: payload.room,
@@ -195,32 +315,76 @@ export const StaffTimetablePanel = ({
         breakLabel: payload.breakLabel,
         remarks: payload.remarks,
       };
-      if (editingId) return api.put(`/staff-timetable/${editingId}`, body);
-      return api.post("/staff-timetable", body);
+      if (editingId) return unwrap(api.put(`/staff-timetable/${editingId}`, body));
+      return unwrap(api.post("/staff-timetable", body));
     },
     onSuccess: async () => {
-      toast.success(editingId ? "Duty slot updated" : "Duty slot added");
+      toast.success(editingId ? "Duty slot updated" : "Duty slot saved");
       setShowForm(false);
       setEditingId(null);
-      setForm(emptyForm());
+      setForm((current) => ({
+        ...emptyForm(current.academicYearBs || academicYearBs),
+        staffId: staffFilter || "",
+        academicYearBs: current.academicYearBs || academicYearBs,
+      }));
       await queryClient.invalidateQueries({ queryKey: ["staff-timetable"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (slotId: string) => api.delete(`/staff-timetable/${slotId}`),
+    mutationFn: (slotId: string) => unwrap(api.delete(`/staff-timetable/${slotId}`)),
     onSuccess: async () => {
-      toast.success("Duty slot removed");
+      toast.success("Duty slot deleted");
       await queryClient.invalidateQueries({ queryKey: ["staff-timetable"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const startEdit = (slot: StaffTimetableSlotRecord) => {
+  const clearMutation = useMutation({
+    mutationFn: async (slotIds: string[]) => {
+      for (const id of slotIds) {
+        await unwrap(api.delete(`/staff-timetable/${id}`));
+      }
+    },
+    onSuccess: async () => {
+      toast.success("Staff timetable cleared");
+      await queryClient.invalidateQueries({ queryKey: ["staff-timetable"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const periodTimeMutation = useMutation({
+    mutationFn: (payload: {
+      academicYearBs: string;
+      staffId: string;
+      oldStartTime: string;
+      oldEndTime: string;
+      newStartTime: string;
+      newEndTime: string;
+    }) =>
+      unwrap<{
+        updatedCount: number;
+        daysUpdated: number;
+        newStartTime: string;
+        newEndTime: string;
+      }>(api.put("/staff-timetable/period-times", payload)),
+    onSuccess: async (data) => {
+      toast.success(
+        `Period time updated for ${data.updatedCount} slot(s) across ${data.daysUpdated} day(s) → ${data.newStartTime}–${data.newEndTime}`,
+      );
+      setPeriodTimeEdit(null);
+      await queryClient.invalidateQueries({ queryKey: ["staff-timetable"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
+  const startEdit = (row: TimetableSlotRow) => {
+    const slot = slots.find((s) => s._id === row._id);
+    if (!slot) return;
     setEditingId(slot._id);
     setForm({
-      staffId: idOf(slot.staffId),
+      staffId: idOfStaff(slot.staffId),
       dayOfWeek: slot.dayOfWeek,
       periodNumber: slot.periodNumber > 900 ? 1 : slot.periodNumber,
       startTime: slot.startTime,
@@ -231,112 +395,245 @@ export const StaffTimetablePanel = ({
       department: slot.department ?? "",
       breakLabel: slot.breakLabel ?? "",
       remarks: slot.remarks ?? "",
+      academicYearBs: slot.academicYearBs || academicYearBs,
     });
     setShowForm(true);
   };
 
-  const startCreate = () => {
+  const startCreate = (staffId?: string) => {
     setEditingId(null);
-    const preset = emptyForm();
-    if (staffFilter) {
-      preset.staffId = staffFilter;
+    const preset = emptyForm(academicYearBs);
+    const nextStaff = staffId || staffFilter;
+    if (nextStaff) {
+      preset.staffId = nextStaff;
       preset.department =
-        staff.find((entry) => entry._id === staffFilter)?.department ?? "";
+        staff.find((entry) => entry._id === nextStaff)?.department ?? "";
     }
     setForm(preset);
     setShowForm(true);
   };
 
-  const handleDelete = (slot: StaffTimetableSlotRecord) => {
+  const handleDeleteSlot = (row: TimetableSlotRow) => {
     if (!window.confirm("Remove this duty slot from the staff timetable?")) return;
-    deleteMutation.mutate(slot._id);
+    deleteMutation.mutate(row._id);
+  };
+
+  const handlePrint = (printId: string) => {
+    void printElementById(printId, "staff-timetable-print");
+  };
+
+  const handlePdf = async (printId: string, title: string) => {
+    try {
+      toast.message("Generating PDF…");
+      await downloadPdfFromElementById(printId, `${title}.pdf`);
+      toast.success("PDF downloaded");
+    } catch (error) {
+      toast.error(
+        parseErrorMessage(error) ||
+          "Could not download PDF. Try Print → Save as PDF.",
+      );
+    }
+  };
+
+  const handleImage = async (printId: string, filename: string) => {
+    try {
+      toast.message("Generating image…");
+      await downloadImageFromElementById(printId, `${filename}.png`);
+      toast.success("Image downloaded");
+    } catch (error) {
+      toast.error(
+        parseErrorMessage(error) ||
+          "Could not download image. Try Print → Save as PDF.",
+      );
+    }
+  };
+
+  const submitPeriodTimeEdit = () => {
+    if (!periodTimeEdit) return;
+    const start = periodNewStart.trim();
+    const end = periodNewEnd.trim();
+    if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
+      toast.error("Times must be HH:MM (24-hour), e.g. 10:00 and 10:50");
+      return;
+    }
+    const toMin = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+    if (toMin(start) >= toMin(end)) {
+      toast.error("End time must be after start time");
+      return;
+    }
+    if (
+      start === periodTimeEdit.period.startTime &&
+      end === periodTimeEdit.period.endTime
+    ) {
+      toast.error("Change the start or end time first");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Change this period from ${periodTimeEdit.period.startTime}–${periodTimeEdit.period.endTime} to ${start}–${end} for ALL days in ${periodTimeEdit.tableTitle}?`,
+      )
+    ) {
+      return;
+    }
+    periodTimeMutation.mutate({
+      academicYearBs,
+      staffId: periodTimeEdit.staffId,
+      oldStartTime: periodTimeEdit.period.startTime,
+      oldEndTime: periodTimeEdit.period.endTime,
+      newStartTime: start,
+      newEndTime: end,
+    });
   };
 
   const isNonDuty = form.sessionType === "BREAK" || form.sessionType === "DAY_OFF";
-  const canSubmit =
-    Boolean(form.staffId) &&
-    (isNonDuty || form.dutyTitle.trim().length > 0) &&
-    !saveMutation.isPending;
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!form.staffId) {
+      toast.error("Select a staff member");
+      return;
+    }
+    if (!form.startTime?.trim() || !form.endTime?.trim()) {
+      toast.error("Start time and end time are required");
+      return;
+    }
+    if (!isNonDuty && !form.dutyTitle.trim()) {
+      toast.error("Duty / task is required");
+      return;
+    }
+    if (!isNonDuty && (form.periodNumber < 1 || form.periodNumber > 12)) {
+      toast.error("Period number (1–12) is required");
+      return;
+    }
+    saveMutation.mutate({ ...form, academicYearBs: form.academicYearBs || academicYearBs });
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Staff duty timetable</CardTitle>
-          <p className="text-sm text-slate-500">
-            Weekly duty roster for non-teaching college staff. Academic year {academicYearBs}.
-          </p>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <FormField label="Staff member">
-            <Select
-              value={staffFilter}
-              onChange={(event) => setStaffFilter(event.target.value)}
-            >
-              <option value="">All staff</option>
-              {staff.map((person) => (
-                <option key={person._id} value={person._id}>
-                  {person.fullName}
-                  {person.designation ? ` — ${person.designation}` : ""}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-
-          <FormField label="Department">
-            <Select
-              value={departmentFilter}
-              onChange={(event) => setDepartmentFilter(event.target.value)}
-            >
-              <option value="">All departments</option>
-              {departments.map((department) => (
-                <option key={department} value={department}>
-                  {department}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-
-          <div className="flex items-end gap-2 xl:col-span-2">
-            {canWrite ? (
-              <Button type="button" onClick={startCreate}>
-                <Plus className="mr-1.5 h-4 w-4" />
-                Add duty slot
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              disabled={staffTables.length === 0}
-              onClick={() => printElementById(PRINT_ID, "Staff Duty Timetable")}
-            >
-              <Printer className="mr-1.5 h-4 w-4" />
-              Print
-            </Button>
-          </div>
+        <CardContent className="flex flex-wrap items-center gap-3 py-3">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Note
+          </span>
+          <Badge className={`${SESSION_COLORS.SPECIAL.badge} border ${SESSION_COLORS.SPECIAL.border}`}>
+            Duty
+          </Badge>
+          <Badge className={`${SESSION_COLORS.BREAK.badge} border ${SESSION_COLORS.BREAK.border}`}>
+            Break
+          </Badge>
+          <Badge className={`${SESSION_COLORS.HOLIDAY.badge} border ${SESSION_COLORS.HOLIDAY.border}`}>
+            Day off
+          </Badge>
+          <Badge className={`${SESSION_COLORS.HOLIDAY_ROW.badge} border`}>
+            Saturday holiday
+          </Badge>
         </CardContent>
       </Card>
 
-      {showForm && canWrite ? (
-        <Card>
-          <CardHeader className="flex-row items-start justify-between gap-4 pb-2">
-            <CardTitle className="text-base">
-              {editingId ? "Edit duty slot" : "New duty slot"}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Filters & view</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <FormField label="Academic Year (BS)">
+            <Input
+              value={academicYearBs}
+              onChange={(event) => {
+                setAcademicYearBs(event.target.value);
+                setForm((current) => ({
+                  ...current,
+                  academicYearBs: event.target.value,
+                }));
+              }}
+            />
+          </FormField>
+          <FormField label="View mode">
+            <Select
+              value={viewMode}
+              onChange={(event) => setViewMode(event.target.value as StaffViewMode)}
+            >
+              <option value="staff">By staff (weekly timetable)</option>
+              <option value="department">By department</option>
+              <option value="room">By room / location</option>
+              <option value="combined">Combined weekly timetable</option>
+            </Select>
+          </FormField>
+          {viewMode === "staff" ? (
+            <FormField label="Staff member">
+              <Select
+                value={staffFilter}
+                onChange={(event) => setStaffFilter(event.target.value)}
+              >
+                <option value="">All staff</option>
+                {staff.map((person) => (
+                  <option key={person._id} value={person._id}>
+                    {person.fullName}
+                    {person.designation ? ` — ${person.designation}` : ""}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          ) : null}
+          {viewMode === "department" ? (
+            <FormField label="Department">
+              <Select
+                value={departmentFilter}
+                onChange={(event) => setDepartmentFilter(event.target.value)}
+              >
+                <option value="">All departments</option>
+                {departments.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          ) : null}
+          {viewMode === "room" ? (
+            <FormField label="Room / location">
+              <Select
+                value={roomFilter}
+                onChange={(event) => setRoomFilter(event.target.value)}
+              >
+                <option value="">All rooms</option>
+                {allRooms.map((room) => (
+                  <option key={room} value={room}>
+                    {room}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {canWrite && showForm ? (
+        <Card className="border-brand-200 shadow-md">
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle>
+              {editingId ? "Edit timetable slot" : "Add timetable slot"}
             </CardTitle>
             <Button
               type="button"
               size="sm"
-              variant="ghost"
+              variant="outline"
               onClick={() => {
                 setShowForm(false);
                 setEditingId(null);
               }}
             >
-              <X className="h-4 w-4" />
+              <X className="mr-1 h-4 w-4" />
+              Close
             </Button>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <CardContent>
+            <form
+              className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+              onSubmit={handleSubmit}
+            >
               <FormField label="Staff member">
                 <Select
                   value={form.staffId}
@@ -360,26 +657,7 @@ export const StaffTimetablePanel = ({
                   ))}
                 </Select>
               </FormField>
-
-              <FormField label="Day">
-                <Select
-                  value={String(form.dayOfWeek)}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      dayOfWeek: Number(event.target.value),
-                    }))
-                  }
-                >
-                  {visibleDays.map((day) => (
-                    <option key={day} value={day}>
-                      {DAY_NAMES[day]}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-
-              <FormField label="Entry type">
+              <FormField label="Session type">
                 <Select
                   value={form.sessionType}
                   onChange={(event) =>
@@ -396,90 +674,134 @@ export const StaffTimetablePanel = ({
                   ))}
                 </Select>
               </FormField>
-
-              {!isNonDuty ? (
-                <FormField label="Period (1–12)">
+              {isNonDuty ? (
+                form.sessionType === "BREAK" ? (
+                  <FormField label="Break label">
+                    <Select
+                      value={form.breakLabel || ""}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          breakLabel: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Select break</option>
+                      {TIMETABLE_BREAK_LABELS.map((label) => (
+                        <option key={label} value={label === "Custom" ? "" : label}>
+                          {label}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                ) : (
+                  <div className="flex items-end">
+                    <p className="pb-2 text-xs text-slate-500">
+                      Day off is not a duty period — only set the time interval.
+                    </p>
+                  </div>
+                )
+              ) : (
+                <FormField label="Duty / task">
                   <Input
-                    type="number"
+                    value={form.dutyTitle}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        dutyTitle: event.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Fee counter, Front desk"
+                  />
+                </FormField>
+              )}
+              <FormField label="Day">
+                <Select
+                  value={form.dayOfWeek}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      dayOfWeek: Number(event.target.value),
+                    }))
+                  }
+                >
+                  {DAYS_OF_WEEK.map((day, index) => (
+                    <option key={day} value={index}>
+                      {day}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              {!isNonDuty ? (
+                <FormField label="Period">
+                  <NumberInput
                     min={1}
                     max={12}
                     value={form.periodNumber}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
-                        periodNumber: Number(event.target.value),
+                        periodNumber: event.target.valueAsNumber,
                       }))
                     }
                   />
                 </FormField>
-              ) : null}
-
-              <FormField label="Start time">
+              ) : (
+                <div className="flex items-end">
+                  <p className="pb-2 text-xs text-slate-500">
+                    Break / day off is not a duty period — only set the time.
+                  </p>
+                </div>
+              )}
+              <FormField label={isNonDuty ? "Start time" : "Start time"}>
                 <Input
                   type="time"
                   value={form.startTime}
+                  required
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, startTime: event.target.value }))
+                    setForm((current) => ({
+                      ...current,
+                      startTime: event.target.value,
+                    }))
                   }
                 />
               </FormField>
-
-              <FormField label="End time">
+              <FormField label={isNonDuty ? "End time" : "End time"}>
                 <Input
                   type="time"
                   value={form.endTime}
+                  required
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, endTime: event.target.value }))
+                    setForm((current) => ({
+                      ...current,
+                      endTime: event.target.value,
+                    }))
                   }
                 />
               </FormField>
-
               {!isNonDuty ? (
-                <>
-                  <FormField label="Duty / task">
-                    <Input
-                      value={form.dutyTitle}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, dutyTitle: event.target.value }))
-                      }
-                      placeholder="e.g. Fee counter, Front desk"
-                    />
-                  </FormField>
-
-                  <FormField label="Location / room">
-                    <Input
-                      value={form.room}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, room: event.target.value }))
-                      }
-                      placeholder="e.g. Admin Block, Counter 2"
-                    />
-                  </FormField>
-                </>
-              ) : null}
-
-              {form.sessionType === "BREAK" ? (
-                <FormField label="Break label">
+                <FormField label="Room / location">
                   <Input
-                    value={form.breakLabel}
+                    value={form.room}
                     onChange={(event) =>
-                      setForm((current) => ({ ...current, breakLabel: event.target.value }))
+                      setForm((current) => ({ ...current, room: event.target.value }))
                     }
-                    placeholder="e.g. Lunch Break"
+                    placeholder="e.g. Admin Block, Counter 2"
                   />
                 </FormField>
               ) : null}
-
               <FormField label="Department">
                 <Input
                   value={form.department}
                   onChange={(event) =>
-                    setForm((current) => ({ ...current, department: event.target.value }))
+                    setForm((current) => ({
+                      ...current,
+                      department: event.target.value,
+                    }))
                   }
                   placeholder="Defaults to the staff member's department"
                 />
               </FormField>
-
               <FormField label="Remarks">
                 <Input
                   value={form.remarks}
@@ -488,157 +810,249 @@ export const StaffTimetablePanel = ({
                   }
                 />
               </FormField>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setShowForm(false);
-                  setEditingId(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                disabled={!canSubmit}
-                onClick={() => saveMutation.mutate(form)}
-              >
-                {editingId ? "Save changes" : "Add slot"}
-              </Button>
-            </div>
+              <div className="md:col-span-2 xl:col-span-4 flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowForm(false);
+                    setEditingId(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={saveMutation.isPending}>
+                  {editingId ? "Update slot" : "Save slot"}
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
       ) : null}
 
       {slotsQuery.isLoading ? (
         <LoadingState />
-      ) : staffTables.length === 0 ? (
+      ) : tables.length === 0 ? (
         <EmptyState
           title="No staff duties scheduled"
           description={
             canWrite
-              ? "Add a duty slot to start building the weekly staff roster."
+              ? "Use Add period — the weekly matrix builds automatically, same as Academic Timetable."
               : "The office has not published a staff duty timetable yet."
           }
         />
       ) : (
-        <div id={PRINT_ID} className="space-y-6">
-          {staffTables.map((table) => (
-            <Card key={table.staffId}>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  {table.name}
-                  {table.designation ? (
-                    <span className="ml-2 text-sm font-normal text-slate-500">
-                      {table.designation}
-                    </span>
-                  ) : null}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-slate-50">
-                        <th className="border-b border-r border-slate-200 px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          Day
-                        </th>
-                        {table.columns.map((column) => (
-                          <th
-                            key={column.key}
-                            className="border-b border-r border-slate-200 px-2 py-2 text-center text-xs font-semibold text-slate-600"
-                          >
-                            {column.startTime}–{column.endTime}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleDays.map((day) => (
-                        <tr key={day}>
-                          <td className="border-b border-r border-slate-200 px-2 py-2 text-xs font-semibold text-slate-700">
-                            {DAY_NAMES[day]}
-                          </td>
-                          {table.columns.map((column) => {
-                            const slot = table.rows.find(
-                              (row) =>
-                                row.dayOfWeek === day &&
-                                `${row.startTime}-${row.endTime}` === column.key,
-                            );
-                            if (!slot) {
-                              return (
-                                <td
-                                  key={column.key}
-                                  className="border-b border-r border-slate-200 px-2 py-2 text-center text-xs text-slate-300"
-                                >
-                                  —
-                                </td>
-                              );
+        <div className="space-y-6">
+          {tables.map((table) => {
+            const matrix = buildWeeklyMatrix(
+              table.slots.map((slot) => mapStaffSlotToRow(slot, staff)),
+              { saturdayIsHoliday },
+            );
+            const printId = `staff-timetable-print-${table.key}`;
+            const viewTitle = table.subtitle
+              ? `${table.title} · ${table.subtitle}`
+              : table.title;
+            return (
+              <Card key={table.key} className="border-slate-200">
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg">{viewTitle}</CardTitle>
+                    <p className="text-xs text-slate-500">
+                      {table.slots.length} period
+                      {table.slots.length === 1 ? "" : "s"} · Matrix generated
+                      from existing slots · Click a cell to edit
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="no-print"
+                      onClick={() => handlePrint(printId)}
+                    >
+                      <Printer className="mr-1.5 h-4 w-4" />
+                      Print
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="no-print"
+                      onClick={() =>
+                        void handlePdf(printId, `staff-timetable-${table.key}`)
+                      }
+                    >
+                      <Download className="mr-1.5 h-4 w-4" />
+                      PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="no-print"
+                      onClick={() =>
+                        void handleImage(printId, `staff-timetable-${table.key}`)
+                      }
+                    >
+                      <ImageIcon className="mr-1.5 h-4 w-4" />
+                      Image
+                    </Button>
+                    {canWrite ? (
+                      <Button
+                        size="sm"
+                        className="no-print"
+                        onClick={() => startCreate(table.staffId)}
+                      >
+                        <Plus className="mr-1.5 h-4 w-4" />
+                        Add period
+                      </Button>
+                    ) : null}
+                    {canWrite && table.slots.length > 0 ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="no-print border-rose-200 text-rose-700"
+                        disabled={clearMutation.isPending}
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              `Delete all ${table.slots.length} slots for ${table.title}?`,
+                            )
+                          ) {
+                            return;
+                          }
+                          clearMutation.mutate(table.slots.map((s) => s._id));
+                        }}
+                      >
+                        <Trash2 className="mr-1.5 h-4 w-4" />
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {table.slots.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No periods scheduled yet.
+                      {canWrite
+                        ? " Use Add period — the weekly matrix builds automatically."
+                        : ""}
+                    </p>
+                  ) : (
+                    <WeeklyTimetableGrid
+                      matrix={matrix}
+                      onEditSlot={canWrite ? startEdit : undefined}
+                      onDeleteSlot={canWrite ? handleDeleteSlot : undefined}
+                      onChangePeriodTime={
+                        canWrite && table.staffId
+                          ? (period) => {
+                              setPeriodTimeEdit({
+                                period,
+                                staffId: table.staffId!,
+                                tableTitle: viewTitle,
+                              });
+                              setPeriodNewStart(period.startTime);
+                              setPeriodNewEnd(period.endTime);
                             }
-                            const type = slot.sessionType ?? "DUTY";
-                            return (
-                              <td
-                                key={column.key}
-                                className="border-b border-r border-slate-200 p-1 align-top"
-                              >
-                                <div
-                                  className={cn(
-                                    "group relative rounded-lg border px-2 py-1.5",
-                                    SESSION_STYLES[type],
-                                  )}
-                                >
-                                  <div className="text-xs font-semibold">
-                                    {type === "DUTY"
-                                      ? slot.dutyTitle || "Duty"
-                                      : type === "BREAK"
-                                        ? slot.breakLabel || "Break"
-                                        : "Day off"}
-                                  </div>
-                                  {slot.room ? (
-                                    <div className="text-[11px] opacity-80">{slot.room}</div>
-                                  ) : null}
-                                  {slot.department ? (
-                                    <div className="text-[10px] uppercase tracking-wide opacity-70">
-                                      {slot.department}
-                                    </div>
-                                  ) : null}
-                                  {canWrite ? (
-                                    <div className="mt-1 flex gap-1 opacity-0 transition group-hover:opacity-100 print:hidden">
-                                      <button
-                                        type="button"
-                                        className="rounded p-0.5 hover:bg-white/70"
-                                        aria-label="Edit duty slot"
-                                        onClick={() => startEdit(slot)}
-                                      >
-                                        <Pencil className="h-3 w-3" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="rounded p-0.5 text-rose-700 hover:bg-white/70"
-                                        aria-label="Delete duty slot"
-                                        onClick={() => handleDelete(slot)}
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                          : undefined
+                      }
+                    />
+                  )}
+                  <TimetablePrintView
+                    printId={printId}
+                    matrix={matrix}
+                    meta={{
+                      collegeName:
+                        settingsQuery.data?.schoolName ||
+                        getPrintInstitutionBranding().name ||
+                        "College",
+                      collegeNameNp: settingsQuery.data?.schoolNameNp,
+                      collegeAddress:
+                        formatPrintAddress(settingsQuery.data?.address) ||
+                        getPrintInstitutionBranding().address,
+                      principalName: settingsQuery.data?.principalName,
+                      academicYearBs,
+                      generatedAt: new Date().toLocaleDateString(),
+                      viewTitle,
+                      documentTitle: "Weekly Staff Timetable",
+                      staffName: table.staffId ? table.title : undefined,
+                      department: table.department,
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
+
+      {canWrite && !showForm && tables.length === 0 ? (
+        <div className="flex justify-end">
+          <Button type="button" onClick={() => startCreate()}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add period
+          </Button>
+        </div>
+      ) : null}
+
+      {periodTimeEdit ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="staff-period-time-edit-title"
+        >
+          <Card className="w-full max-w-md shadow-xl">
+            <CardHeader>
+              <CardTitle id="staff-period-time-edit-title" className="text-lg">
+                Change period time (all days)
+              </CardTitle>
+              <p className="text-sm text-slate-500">
+                {periodTimeEdit.tableTitle}
+                {" · "}
+                Current: {periodTimeEdit.period.startTime}–
+                {periodTimeEdit.period.endTime}
+              </p>
+              <p className="text-xs text-slate-500">
+                This updates every weekday that uses this period column so the
+                full week stays aligned.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="New start (HH:MM)">
+                  <Input
+                    type="time"
+                    value={periodNewStart}
+                    onChange={(event) => setPeriodNewStart(event.target.value)}
+                  />
+                </FormField>
+                <FormField label="New end (HH:MM)">
+                  <Input
+                    type="time"
+                    value={periodNewEnd}
+                    onChange={(event) => setPeriodNewEnd(event.target.value)}
+                  />
+                </FormField>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPeriodTimeEdit(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={periodTimeMutation.isPending}
+                  onClick={submitPeriodTimeEdit}
+                >
+                  Update week
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 };

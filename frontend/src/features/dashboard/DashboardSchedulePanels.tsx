@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { WeeklyTimetableGrid } from "features/timetable/WeeklyTimetableGrid";
+import { DashboardTimetableSlider } from "./DashboardTimetableSlider";
 import {
   buildWeeklyMatrix,
   idOf,
@@ -360,7 +361,12 @@ export const DashboardSchedulePanels = () => {
                         {table.slots.length === 1 ? "" : "s"}
                       </Badge>
                     </div>
-                    <WeeklyTimetableGrid matrix={matrix} compact />
+                    <div className="md:hidden">
+                      <DashboardTimetableSlider matrix={matrix} />
+                    </div>
+                    <div className="hidden md:block">
+                      <WeeklyTimetableGrid matrix={matrix} compact />
+                    </div>
                   </div>
                 );
               })

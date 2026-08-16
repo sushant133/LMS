@@ -17,6 +17,8 @@ export type TimetableSlotRow = {
   breakLabel?: string;
   remarks?: string;
   roomKind?: "CLASSROOM" | "LABORATORY" | "OTHER" | string;
+  /** Optional cell badge (e.g. Duty on the staff timetable). */
+  badgeLabel?: string;
   batchId?: { _id?: string; name?: string } | string;
   yearId?: { _id?: string; name?: string; level?: number } | string;
   classId?: { _id?: string; name?: string } | string;

@@ -274,3 +274,75 @@ export const deleteStaffTimetableSlot = asyncHandler(async (req: Request, res: R
   if (!slot) throw new ApiError(404, "Staff timetable slot not found");
   return sendSuccess(res, "Staff timetable slot deleted");
 });
+
+/** Change one period column's start/end for every weekday of one staff member. */
+export const bulkUpdateStaffPeriodTimes = asyncHandler(async (req: Request, res: Response) => {
+  await requireCollegeInstitution(req);
+  const body = req.body as {
+    academicYearBs?: string;
+    staffId?: string;
+    oldStartTime?: string;
+    oldEndTime?: string;
+    newStartTime?: string;
+    newEndTime?: string;
+  };
+
+  const academicYearBs = String(body.academicYearBs ?? "").trim();
+  const staffId = String(body.staffId ?? "").trim();
+  const oldStartTime = String(body.oldStartTime ?? "").trim();
+  const oldEndTime = String(body.oldEndTime ?? "").trim();
+  const newStartTime = String(body.newStartTime ?? "").trim();
+  const newEndTime = String(body.newEndTime ?? "").trim();
+
+  const timeRe = /^\d{2}:\d{2}$/;
+  if (!academicYearBs) throw new ApiError(400, "Academic year is required");
+  if (!staffId) throw new ApiError(400, "Staff member is required");
+  if (!timeRe.test(oldStartTime) || !timeRe.test(oldEndTime)) {
+    throw new ApiError(400, "Current period times are invalid");
+  }
+  if (!timeRe.test(newStartTime) || !timeRe.test(newEndTime)) {
+    throw new ApiError(400, "New times must be HH:MM (24-hour)");
+  }
+  if (toMinutes(newStartTime) >= toMinutes(newEndTime)) {
+    throw new ApiError(400, "End time must be after start time");
+  }
+  if (oldStartTime === newStartTime && oldEndTime === newEndTime) {
+    throw new ApiError(400, "New times are the same as the current times");
+  }
+
+  const schoolId = tenantObjectId(req);
+  const slots = await StaffTimetableSlot.find({
+    schoolId,
+    academicYearBs,
+    staffId,
+    startTime: oldStartTime,
+    endTime: oldEndTime
+  }).lean();
+
+  if (slots.length === 0) {
+    throw new ApiError(
+      404,
+      `No staff timetable slots found for ${oldStartTime}–${oldEndTime}`
+    );
+  }
+
+  let updatedCount = 0;
+  for (const slot of slots) {
+    const sessionType = slot.sessionType ?? "DUTY";
+    const nextPeriod = resolvePeriodNumber(sessionType, newStartTime, slot.periodNumber);
+    await StaffTimetableSlot.updateOne(
+      { _id: slot._id, schoolId },
+      { $set: { startTime: newStartTime, endTime: newEndTime, periodNumber: nextPeriod } }
+    );
+    updatedCount += 1;
+  }
+
+  return sendSuccess(res, "Period times updated for the full week", {
+    updatedCount,
+    oldStartTime,
+    oldEndTime,
+    newStartTime,
+    newEndTime,
+    daysUpdated: [...new Set(slots.map((s) => s.dayOfWeek))].length
+  });
+});

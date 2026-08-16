@@ -199,7 +199,8 @@ const SlotContent = ({
               colors.badge,
             )}
           >
-            {lab && type === "THEORY" ? "Lab" : SESSION_LABELS[type]}
+            {slot.badgeLabel ||
+              (lab && type === "THEORY" ? "Lab" : SESSION_LABELS[type])}
           </span>
         </div>
       ) : null}

@@ -17,6 +17,10 @@ export type TimetablePrintMeta = {
   generatedAt: string;
   principalName?: string;
   viewTitle: string;
+  /** Printed heading under the college name. Defaults to weekly class timetable. */
+  documentTitle?: string;
+  staffName?: string;
+  department?: string;
 };
 
 interface TimetablePrintViewProps {
@@ -142,7 +146,7 @@ export const TimetablePrintView = ({
             color: "#000",
           }}
         >
-          Weekly Class Timetable
+          {meta.documentTitle || "Weekly Class Timetable"}
         </p>
         <p
           style={{
@@ -172,6 +176,8 @@ export const TimetablePrintView = ({
           {meta.yearName ? <span>Year: {meta.yearName}</span> : null}
           {meta.className ? <span>Class: {meta.className}</span> : null}
           {meta.sectionName ? <span>Section: {meta.sectionName}</span> : null}
+          {meta.staffName ? <span>Staff: {meta.staffName}</span> : null}
+          {meta.department ? <span>Department: {meta.department}</span> : null}
           {meta.academicYearBs ? (
             <span>Academic Year (BS): {meta.academicYearBs}</span>
           ) : null}

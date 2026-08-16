@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  bulkUpdateStaffPeriodTimes,
   createStaffTimetableSlot,
   deleteStaffTimetableSlot,
   listStaffTimetable,
@@ -38,6 +39,7 @@ router.get(
 const staffTimetableAdmins = authorize("COLLEGE_ADMIN", "SUPER_ADMIN");
 
 router.post("/", staffTimetableAdmins, createStaffTimetableSlot);
+router.put("/period-times", staffTimetableAdmins, bulkUpdateStaffPeriodTimes);
 router.put("/:id", staffTimetableAdmins, updateStaffTimetableSlot);
 router.delete("/:id", staffTimetableAdmins, deleteStaffTimetableSlot);
 

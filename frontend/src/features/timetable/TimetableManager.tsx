@@ -765,11 +765,25 @@ export const TimetableManager = () => {
       <div className="space-y-6">
         <PageHeader
           title="Timetable Management"
-          description="Weekly duty roster for non-teaching college staff."
+          description="Create a weekly staff duty timetable the same way as Academic Timetable — add periods, print, PDF, and image."
         />
         {sectionSwitch}
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-3 py-3">
+            <label className="ml-auto flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={saturdayIsHoliday}
+                onChange={(e) => setSaturdayIsHoliday(e.target.checked)}
+              />
+              Saturday is holiday
+            </label>
+          </CardContent>
+        </Card>
         <StaffTimetablePanel
-          academicYearBs={form.academicYearBs}
+          academicYearBs={
+            settingsQuery.data?.academicYearBs || form.academicYearBs
+          }
           saturdayIsHoliday={saturdayIsHoliday}
           canWrite={isAdmin}
         />
