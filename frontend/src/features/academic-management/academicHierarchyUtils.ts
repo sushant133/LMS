@@ -1250,6 +1250,8 @@ export const matchLogBookKeyword = (
     entry.subject?.name,
     entry.teacher?.user?.fullName,
     entry.unit,
+    entry.subUnitTitle,
+    ...(entry.subUnitTitles ?? []),
     entry.topicCovered,
     entry.objectives,
     entry.teachingMethod,

@@ -817,21 +817,31 @@ export const exportLogBookExcel = (
   entries: AcademicLogBookEntryRecord[],
   filename: string,
 ) => {
-  const rows = entries.map((entry) => ({
+  const rows = entries.map((entry, index) => ({
+    "S.N": index + 1,
     Date: entry.dateBs,
+    Unit: entry.unit,
+    "Sub-unit":
+      (entry.subUnitTitles ?? []).filter(Boolean).join("; ") ||
+      entry.subUnitTitle ||
+      entry.topicCovered ||
+      "",
+    Method: entry.teachingMethod,
+    "T/P":
+      entry.theoryPractical === "PRACTICAL"
+        ? "P"
+        : entry.theoryPractical === "BOTH"
+          ? "T/P"
+          : "T",
+    Time:
+      entry.startTime || entry.endTime
+        ? `${entry.startTime ?? ""}${entry.startTime && entry.endTime ? "–" : ""}${entry.endTime ?? ""}`
+        : "",
+    Feedback: entry.feedback,
+    Signature: entry.teacherSignature || entry.teacher?.user?.fullName || "",
     "Academic Year": entry.academicYearBs,
     Teacher: entry.teacher?.user?.fullName ?? entry.teacherId,
     Subject: entry.subject?.name ?? entry.subjectId,
-    Unit: entry.unit,
-    Topic: entry.topicCovered,
-    Objectives: entry.objectives,
-    Method: entry.teachingMethod,
-    "Theory/Practical": entry.theoryPractical,
-    Period: entry.periodNumber,
-    "Start Time": entry.startTime ?? "",
-    "End Time": entry.endTime ?? "",
-    Feedback: entry.feedback,
-    Attendance: `${entry.attendancePercent}%`,
     "Review Status": entry.reviewStatus,
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);

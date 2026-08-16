@@ -539,9 +539,10 @@ export const academicLessonPlanSchema = scopeSchema
 
 export const academicLogBookEntrySchema = scopeSchema.extend({
   lessonPlanId: z.string().optional(),
-  /** Preferred: link to a Lesson Plan topic when available. */
+  /** Optional link to a Lesson Plan topic when the teacher wants progress tracking. */
   lessonPlanItemId: z.string().optional().default(""),
-  sessionPlanUnitId: z.string().min(1, "Select a unit from the Session Plan"),
+  /** Optional Session Plan unit — log book rows can be filled without a plan. */
+  sessionPlanUnitId: z.string().optional().default(""),
   /** Legacy single title; prefer `subUnitTitles`. */
   subUnitTitle: z.string().default(""),
   /** Sub-units actually taught this class (multi-select from Lesson Plan / Session Plan). */
@@ -561,7 +562,7 @@ export const academicLogBookEntrySchema = scopeSchema.extend({
   timetableSlotId: z.string().optional(),
   dateBs: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date (BS) is required"),
   unit: z.string().default(""),
-  topicCovered: z.string().min(1),
+  topicCovered: z.string().optional().default(""),
   /** What the teacher intended to achieve during that lesson. */
   objectives: z.string().default(""),
   teachingMethod: z.string().default(""),
@@ -571,7 +572,7 @@ export const academicLogBookEntrySchema = scopeSchema.extend({
    */
   teachingAids: z.string().default(""),
   theoryPractical: z.enum(["THEORY", "PRACTICAL", "BOTH"]).default("THEORY"),
-  periodNumber: z.coerce.number().int().min(1),
+  periodNumber: z.coerce.number().int().min(1).optional().default(1),
   startTime: z.string().optional(),
   endTime: z.string().optional(),
   homeworkGiven: z.string().default(""),
@@ -579,7 +580,9 @@ export const academicLogBookEntrySchema = scopeSchema.extend({
   feedback: z.string().default(""),
   difficultiesFaced: z.string().default(""),
   nextClassPlan: z.string().default(""),
-  attachmentUrl: z.string().optional()
+  attachmentUrl: z.string().optional(),
+  /** Teacher signature — optional; can be filled the same day or later. */
+  teacherSignature: z.string().optional().default("")
 });
 
 export const academicApprovalActionSchema = z.object({

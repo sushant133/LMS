@@ -3,24 +3,20 @@ import {
   type AcademicLessonPlanRecord,
   type AcademicLogBookEntryInput,
   type AcademicLogBookEntryRecord,
-  type AcademicSessionPlanRecord,
   type SubjectAssignmentRecord,
   type SubjectRecord,
-  type TodayTimetableSlot,
   canManageInstitution,
 } from "@phit-erp/shared";
 import { getTodayBs } from "@munatech/nepali-datepicker";
-import { CalendarPlus, CheckCircle2, Link2 } from "lucide-react";
+import { CalendarPlus, CheckCircle2, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
-import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
-import { Textarea } from "components/ui/textarea";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
@@ -36,8 +32,6 @@ import {
   ensureSubjectInOptions,
   filterSubjectsByClass,
   filterSubjectsByYear,
-  filtersToParams,
-  NEPALI_MONTHS,
   joinSubUnitTitles,
   normalizeSubUnitTitles,
   parseSubUnitsFromTopics,
@@ -45,9 +39,7 @@ import {
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
-import { AcademicAttachmentUpload } from "./AcademicAttachmentUpload";
 import { AcademicCommentsPanel } from "./AcademicCommentsPanel";
-import { AcademicProgressBar } from "./AcademicProgressBar";
 import {
   AcademicPrintFooter,
   AcademicPrintHeader,
@@ -69,14 +61,179 @@ const formatTodayBs = (): string => {
   return `${today.year}-${String(today.month).padStart(2, "0")}-${String(today.day).padStart(2, "0")}`;
 };
 
-/** Map BS month number (1–12) to Nepali month name used by Lesson Plans. */
-const nepaliMonthFromBsDate = (dateBs: string): string => {
-  const monthNum = Number(dateBs.split("-")[1] ?? 0);
-  if (monthNum >= 1 && monthNum <= 12) {
-    return NEPALI_MONTHS[monthNum - 1] ?? "";
-  }
-  return "";
+const titleKey = (value: string) => value.trim().toLowerCase();
+const normText = (value?: string | null) =>
+  (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+const formatTp = (value?: string) => {
+  if (value === "PRACTICAL") return "P";
+  if (value === "BOTH") return "T/P";
+  if (value === "THEORY") return "T";
+  return "—";
 };
+
+const formatTime = (start?: string, end?: string) => {
+  const a = (start || "").trim();
+  const b = (end || "").trim();
+  if (a && b) return `${a}–${b}`;
+  return a || b || "—";
+};
+
+const parseTimeRange = (
+  value: string,
+): { startTime?: string; endTime?: string } => {
+  const t = value.trim();
+  if (!t) return {};
+  const parts = t.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) return { startTime: parts[0], endTime: parts[1] };
+  return { startTime: t };
+};
+
+const entryTimeValue = (entry: AcademicLogBookEntryRecord) => {
+  const a = (entry.startTime || "").trim();
+  const b = (entry.endTime || "").trim();
+  if (a && b) return `${a}-${b}`;
+  return a || b || "";
+};
+
+const entrySubUnits = (entry: AcademicLogBookEntryRecord) =>
+  normalizeSubUnitTitles(entry.subUnitTitles, entry.subUnitTitle);
+
+type LessonPlanPick = {
+  unitId: string;
+  label: string;
+  unitNo: string;
+  unitName: string;
+  dateBs: string;
+  lessonPlanId: string;
+  lessonPlanItemId: string;
+  sessionPlanUnitId: string;
+  subUnitTitles: string[];
+  teachingMethod: string;
+  syllabusId: string;
+  syllabusChapterId: string;
+  syllabusUnitId: string;
+  syllabusSubUnitIds: string[];
+  titleToId: Record<string, string>;
+};
+
+const lessonPlanDateOf = (plan: AcademicLessonPlanRecord, itemStart?: string) =>
+  (itemStart || plan.teachingDateBs || plan.startDateBs || plan.endDateBs || "").trim();
+
+/** Session Plan headings are often already "Unit 1 : …" — do not prefix again. */
+const formatLogUnitLabel = (unitNo: string, unitName: string) => {
+  const name = unitName.trim();
+  if (name && /^unit\s*\d+/i.test(name)) return name.replace(/\s+/g, " ").trim();
+  if (unitNo && name) return `Unit ${unitNo}: ${name}`;
+  if (unitNo) return `Unit ${unitNo}`;
+  return name || "Unit";
+};
+
+const cleanDuplicatedUnitLabel = (value?: string) => {
+  const s = (value || "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  return s.replace(
+    /^(unit\s*\d+\s*[:.\-]?\s*)(?:unit\s*\d+\s*[:.\-]?\s*)+/i,
+    "$1",
+  );
+};
+
+const flattenLessonPlanPicks = (
+  plans: AcademicLessonPlanRecord[],
+): LessonPlanPick[] => {
+  const out: LessonPlanPick[] = [];
+  for (const plan of plans) {
+    for (const item of plan.items ?? []) {
+      const dateBs = lessonPlanDateOf(plan, item.itemStartDateBs);
+      const unitId =
+        item.sessionPlanUnitId || item.unit?._id || item._id || "";
+      if (!unitId) continue;
+      const unitNo =
+        item.unit?.unitNo != null ? String(item.unit.unitNo) : "";
+      const unitName = (
+        item.unit?.chapterName ||
+        item.subjectLabel ||
+        ""
+      ).trim();
+      const label = formatLogUnitLabel(unitNo, unitName);
+      const subUnitTitles = [
+        ...normalizeSubUnitTitles(
+          item.subUnitTitles,
+          item.subUnitTitle || item.plannedTopic,
+        ),
+        ...parseSubUnitsFromTopics(item.unit?.topicsCovered),
+      ].filter(
+        (t, i, arr) => arr.findIndex((x) => titleKey(x) === titleKey(t)) === i,
+      );
+      const syllabusSubUnitIds = (item.syllabusSubUnitIds ?? [])
+        .map((id) => String(id))
+        .filter(Boolean);
+      if (item.syllabusSubUnitId && !syllabusSubUnitIds.includes(item.syllabusSubUnitId)) {
+        syllabusSubUnitIds.unshift(item.syllabusSubUnitId);
+      }
+      const titleToId: Record<string, string> = {};
+      subUnitTitles.forEach((title, index) => {
+        const id = syllabusSubUnitIds[index];
+        if (id) titleToId[titleKey(title)] = id;
+      });
+      out.push({
+        unitId,
+        label,
+        unitNo,
+        unitName,
+        dateBs,
+        lessonPlanId: plan._id,
+        lessonPlanItemId: item._id,
+        sessionPlanUnitId: item.sessionPlanUnitId || item.unit?._id || "",
+        subUnitTitles,
+        teachingMethod: item.teachingMethod || "",
+        syllabusId: item.syllabusId || item.unit?.syllabusId || "",
+        syllabusChapterId:
+          item.syllabusChapterId || item.unit?.syllabusChapterId || "",
+        syllabusUnitId: item.syllabusUnitId || item.unit?.syllabusUnitId || "",
+        syllabusSubUnitIds,
+        titleToId,
+      });
+    }
+  }
+  return out;
+};
+
+const uniqueUnits = (picks: LessonPlanPick[]) => {
+  const seen = new Map<string, LessonPlanPick>();
+  for (const pick of picks) {
+    if (!seen.has(pick.unitId)) seen.set(pick.unitId, pick);
+  }
+  return [...seen.values()].sort((a, b) => {
+    const an = Number(a.unitNo);
+    const bn = Number(b.unitNo);
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    return a.label.localeCompare(b.label);
+  });
+};
+
+const mergeSubs = (picks: LessonPlanPick[]) =>
+  picks
+    .flatMap((pick) => pick.subUnitTitles)
+    .filter((t, i, arr) => arr.findIndex((x) => titleKey(x) === titleKey(t)) === i);
+
+type DraftLogRow = {
+  key: string;
+  dateBs: string;
+  sessionPlanUnitId: string;
+  lessonPlanId?: string;
+  lessonPlanItemId: string;
+  unit: string;
+  subUnitTitles: string[];
+  teachingMethod: string;
+  theoryPractical: AcademicLogBookEntryInput["theoryPractical"];
+  time: string;
+  feedback: string;
+  signature: string;
+};
+
+const newRowKey = () =>
+  `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 interface LogBookPanelProps {
   filters: AcademicManagementFilters;
@@ -114,10 +271,25 @@ export const LogBookPanel = ({
   const queryClient = useQueryClient();
   const isAdmin = canManageInstitution(user?.role ?? "");
   const canMutate = writeAccess;
+  const defaultSignature = user?.fullName || "";
+
+  const makeBlankRow = (dateBs = formatTodayBs()): DraftLogRow => ({
+    key: newRowKey(),
+    dateBs,
+    sessionPlanUnitId: "",
+    lessonPlanId: undefined,
+    lessonPlanItemId: "",
+    unit: "",
+    subUnitTitles: [],
+    teachingMethod: "",
+    theoryPractical: "THEORY",
+    time: "",
+    feedback: "",
+    signature: defaultSignature,
+  });
+
   const [showForm, setShowForm] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<TodayTimetableSlot | null>(
-    null,
-  );
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
     null,
@@ -125,16 +297,10 @@ export const LogBookPanel = ({
   const [selectedYearKey, setSelectedYearKey] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] =
     useState<HierarchySubjectNode | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState(
-    () =>
-      filters.month ||
-      nepaliMonthFromBsDate(formatTodayBs()) ||
-      NEPALI_MONTHS[0] ||
-      "Baisakh",
-  );
-  const [form, setForm] = useState<AcademicLogBookEntryInput>({
-    academicYearBs: filters.academicYearBs || "2082/083",
-    session: filters.session || filters.academicYearBs || "2082/083",
+  const [rows, setRows] = useState<DraftLogRow[]>(() => [makeBlankRow()]);
+  const [scope, setScope] = useState({
+    academicYearBs: filters.academicYearBs || "",
+    session: filters.session || filters.academicYearBs || "",
     faculty: filters.faculty || "",
     semesterBs: filters.semesterBs || "",
     classId: filters.classId,
@@ -143,83 +309,57 @@ export const LogBookPanel = ({
     yearId: filters.yearId,
     subjectId: filters.subjectId || "",
     teacherId: teacherId || filters.teacherId || "",
-    dateBs: filters.dateFrom || formatTodayBs(),
-    lessonPlanItemId: "",
-    lessonPlanId: undefined,
-    sessionPlanUnitId: "",
-    subUnitTitle: "",
-    subUnitTitles: [],
-    syllabusId: "",
-    syllabusChapterId: "",
-    syllabusUnitId: "",
-    syllabusSubUnitId: "",
-    syllabusSubUnitIds: [],
-    topicCovered: "",
-    unit: "",
-    objectives: "",
-    teachingMethod: "",
-    teachingAids: "",
-    theoryPractical: "THEORY",
-    periodNumber: 1,
-    homeworkGiven: "",
-    assignment: "",
-    feedback: "",
-    difficultiesFaced: "",
-    nextClassPlan: "",
-    attachmentUrl: "",
   });
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
   const subjectOptions = useMemo(() => {
     const base =
       isCollege || yearOptions.length > 0
-        ? filterSubjectsByYear(subjects, years, form.yearId)
-        : filterSubjectsByClass(subjects, form.classId);
-    return ensureSubjectInOptions(base, form.subjectId, subjects);
+        ? filterSubjectsByYear(subjects, years, scope.yearId)
+        : filterSubjectsByClass(subjects, scope.classId);
+    return ensureSubjectInOptions(base, scope.subjectId, subjects);
   }, [
     subjects,
     years,
-    form.yearId,
-    form.classId,
-    form.subjectId,
+    scope.yearId,
+    scope.classId,
+    scope.subjectId,
     isCollege,
     yearOptions.length,
   ]);
 
   const subjectSelectValue = useMemo(
-    () => resolveSubjectSelectValue(subjectOptions, form.subjectId),
-    [subjectOptions, form.subjectId],
+    () => resolveSubjectSelectValue(subjectOptions, scope.subjectId),
+    [subjectOptions, scope.subjectId],
   );
 
   const selectedFormSubject = useMemo(() => {
-    if (!form.subjectId) return undefined;
+    if (!scope.subjectId) return undefined;
     return (
       subjectOptions.find(
         (s) =>
-          s._id === form.subjectId ||
+          s._id === scope.subjectId ||
           ((s as { subjectIds?: string[] }).subjectIds ?? []).includes(
-            form.subjectId,
+            scope.subjectId,
           ),
-      ) ?? subjects.find((s) => s._id === form.subjectId)
+      ) ?? subjects.find((s) => s._id === scope.subjectId)
     );
-  }, [subjectOptions, form.subjectId, subjects]);
+  }, [subjectOptions, scope.subjectId, subjects]);
   const formNepaliText = isNepaliSubject(selectedFormSubject);
 
-  // Keep teacherId once teacher scope resolves
   useEffect(() => {
     if (!teacherId) return;
-    setForm((current) =>
+    setScope((current) =>
       current.teacherId === teacherId
         ? current
         : { ...current, teacherId },
     );
   }, [teacherId]);
 
-  // Sync academic year from filter bar when settings load
   useEffect(() => {
     if (!filters.academicYearBs) return;
-    setForm((current) => {
-      if (current.academicYearBs?.trim()) return current;
+    setScope((current) => {
+      if (current.academicYearBs === filters.academicYearBs) return current;
       return {
         ...current,
         academicYearBs: filters.academicYearBs!,
@@ -229,7 +369,7 @@ export const LogBookPanel = ({
   }, [filters.academicYearBs, filters.session]);
 
   const effectiveTeacherId =
-    teacherId || form.teacherId || filters.teacherId || "";
+    teacherId || scope.teacherId || filters.teacherId || "";
 
   const listParams = useMemo(
     () => academicListApiParams(filters, { isCollege }),
@@ -246,193 +386,193 @@ export const LogBookPanel = ({
       ),
   });
 
-  const effectiveDateBs = form.dateBs || formatTodayBs();
+  const formCurriculumSubjectIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (scope.subjectId) ids.add(scope.subjectId);
+    const fromOption = (
+      selectedFormSubject as { subjectIds?: string[] } | undefined
+    )?.subjectIds;
+    for (const id of fromOption ?? []) ids.add(id);
 
-  const timetableQuery = useQuery({
-    queryKey: ["academic-management", "timetable-today", effectiveDateBs],
-    queryFn: () =>
-      unwrap<TodayTimetableSlot[]>(
-        api.get("/academic-management/timetable/today", {
-          params: { dateBs: effectiveDateBs },
-        }),
-      ),
-    enabled: isTeacher && showForm,
-  });
+    const selected =
+      subjects.find((s) => s._id === scope.subjectId) ?? selectedFormSubject;
+    if (!selected) return [...ids];
 
-  // Session Plan units — do not reuse hub month/status/batch filters (Session Plans are yearly)
-  const sessionPlansQuery = useQuery({
-    queryKey: [
-      "academic-management",
-      "session-plans-for-log",
-      form.subjectId,
-      effectiveTeacherId,
-      form.academicYearBs,
-    ],
-    queryFn: () =>
-      unwrap<AcademicSessionPlanRecord[]>(
-        api.get("/academic-management/session-plans", {
-          params: filtersToParams({
-            academicYearBs: form.academicYearBs || filters.academicYearBs,
-            subjectId: form.subjectId || filters.subjectId || undefined,
-            teacherId: effectiveTeacherId || undefined,
-          }),
-        }),
-      ),
-    enabled: showForm && Boolean(form.subjectId || filters.subjectId),
-  });
+    const keyCode = normText(selected.code);
+    const keyName = normText(selected.name);
+    const rawMaster = selected.masterSubjectId as
+      | string
+      | { _id?: string }
+      | null
+      | undefined;
+    const keyMaster =
+      typeof rawMaster === "object" && rawMaster
+        ? String(rawMaster._id ?? "")
+        : rawMaster
+          ? String(rawMaster)
+          : "";
 
-  // All Lesson Plans for subject/year (no month/status filter) so topics cascade into Log Book
+    for (const s of subjects) {
+      if (s._id === scope.subjectId) {
+        ids.add(s._id);
+        continue;
+      }
+      const sMaster = s.masterSubjectId as
+        | string
+        | { _id?: string }
+        | null
+        | undefined;
+      const sMasterStr =
+        typeof sMaster === "object" && sMaster
+          ? String(sMaster._id ?? "")
+          : sMaster
+            ? String(sMaster)
+            : "";
+      if (keyMaster && sMasterStr && sMasterStr === keyMaster) {
+        ids.add(s._id);
+        continue;
+      }
+      if (keyCode && normText(s.code) === keyCode) {
+        ids.add(s._id);
+        continue;
+      }
+      if (keyName && normText(s.name) === keyName) ids.add(s._id);
+    }
+    return [...ids];
+  }, [scope.subjectId, selectedFormSubject, subjects]);
+
+  /**
+   * Load every Lesson Plan for the form (same approach as Lesson Plan tab).
+   * Do not pin subjectId / academicYearBs on the API — those hide valid units.
+   */
   const lessonPlansQuery = useQuery({
     queryKey: [
       "academic-management",
       "lesson-plans-for-log",
-      form.subjectId,
-      effectiveTeacherId,
-      form.academicYearBs,
+      "all-for-form",
+      effectiveTeacherId || "any-teacher",
     ],
-    queryFn: () =>
-      unwrap<AcademicLessonPlanRecord[]>(
-        api.get("/academic-management/lesson-plans", {
-          params: filtersToParams({
-            academicYearBs: form.academicYearBs || filters.academicYearBs,
-            subjectId: form.subjectId || filters.subjectId || undefined,
-            teacherId: effectiveTeacherId || undefined,
-          }),
-        }),
-      ),
-    enabled: showForm && Boolean(form.subjectId || filters.subjectId),
+    queryFn: async () => {
+      const params: Record<string, string> = {};
+      if (effectiveTeacherId) params.teacherId = effectiveTeacherId;
+      return unwrap<AcademicLessonPlanRecord[]>(
+        api.get("/academic-management/lesson-plans", { params }),
+      );
+    },
+    enabled: showForm,
   });
 
-  const sessionUnits = useMemo(() => {
-    const plans = sessionPlansQuery.data ?? [];
-    return plans.flatMap((plan) =>
-      plan.units.map((unit) => ({
-        ...unit,
-        planId: plan._id,
-        planStatus: plan.status,
-      })),
+  const matchedLessonPlans = useMemo(() => {
+    const all = (lessonPlansQuery.data ?? []).filter(
+      (plan) => plan.status !== "REJECTED",
     );
-  }, [sessionPlansQuery.data]);
+    if (!scope.subjectId) return all;
 
-  const selectedSessionUnit = useMemo(
-    () => sessionUnits.find((unit) => unit._id === form.sessionPlanUnitId),
-    [sessionUnits, form.sessionPlanUnitId],
-  );
+    const subjectSet = new Set(formCurriculumSubjectIds);
+    const selectedName = normText(selectedFormSubject?.name);
+    const selectedCode = normText(selectedFormSubject?.code);
+    const siblingNames = new Set<string>();
+    const siblingCodes = new Set<string>();
+    for (const s of subjects) {
+      if (subjectSet.has(s._id)) {
+        if (normText(s.name)) siblingNames.add(normText(s.name));
+        if (normText(s.code)) siblingCodes.add(normText(s.code));
+      }
+    }
+    if (selectedName) siblingNames.add(selectedName);
+    if (selectedCode) siblingCodes.add(selectedCode);
 
-  const logSubUnits = useMemo(
-    () => parseSubUnitsFromTopics(selectedSessionUnit?.topicsCovered),
-    [selectedSessionUnit?.topicsCovered],
-  );
-
-  const lessonItemOptions = useMemo(() => {
-    const plans = lessonPlansQuery.data ?? [];
-    const options = plans.flatMap((plan) => {
-      const teachingDate =
-        (plan.teachingDateBs || plan.startDateBs || "").trim();
-      return plan.items.map((item) => {
-        const plannedSubs = normalizeSubUnitTitles(
-          item.subUnitTitles,
-          item.subUnitTitle,
-        );
-        const plannedIds = (item.syllabusSubUnitIds ?? [])
-          .map((id) => String(id))
-          .filter(Boolean);
-        if (plannedIds.length === 0 && item.syllabusSubUnitId) {
-          plannedIds.push(String(item.syllabusSubUnitId));
+    const matched = all.filter((plan) => {
+      if (effectiveTeacherId && plan.teacherId !== effectiveTeacherId) {
+        return false;
+      }
+      if (subjectSet.has(plan.subjectId)) return true;
+      const planName = normText(plan.subject?.name);
+      const planCode = normText(plan.subject?.code);
+      if (planName && siblingNames.has(planName)) return true;
+      if (planCode && siblingCodes.has(planCode)) return true;
+      if (selectedName) {
+        const planSubjectRow = subjects.find((s) => s._id === plan.subjectId);
+        if (planSubjectRow && normText(planSubjectRow.name) === selectedName) {
+          return true;
         }
-        const subLabel =
-          plannedSubs.length > 0
-            ? plannedSubs.join(", ")
-            : item.subUnitTitle || "";
-        const unitLabel = item.unit
-          ? `Unit ${item.unit.unitNo}`
-          : item.subjectLabel || "Unit";
-        const progress = `${item.completedClasses ?? 0}/${item.estimatedClasses ?? 1}`;
-        return {
-          id: item._id,
-          planId: plan._id,
-          teachingDateBs: teachingDate,
-          month: plan.month || teachingDate || "",
-          label: `${teachingDate || plan.month || "Plan"} · ${unitLabel}${subLabel ? ` · ${subLabel}` : ""} · ${item.plannedTopic} · ${progress}`,
-          topic: item.plannedTopic,
-          subUnitTitle:
-            joinSubUnitTitles(plannedSubs) || item.subUnitTitle || "",
-          subUnitTitles: plannedSubs,
-          syllabusSubUnitIds: plannedIds,
-          unit: item.unit
-            ? `Unit ${item.unit.unitNo}: ${item.unit.chapterName}`
-            : item.subjectLabel || "",
-          objectives: item.learningObjectives || "",
-          teachingMethod: item.teachingMethod || "",
-          teachingAids: item.teachingAids || "",
-          subjectId: plan.subjectId,
-          sessionPlanUnitId: item.sessionPlanUnitId || "",
-          syllabusId: item.syllabusId || item.unit?.syllabusId || "",
-          syllabusChapterId:
-            item.syllabusChapterId || item.unit?.syllabusChapterId || "",
-          syllabusUnitId: item.syllabusUnitId || "",
-          syllabusSubUnitId: plannedIds[0] || item.syllabusSubUnitId || "",
-          completionStatus: item.completionStatus,
-          completedPercent: item.completedPercent,
-          remainingPercent: item.remainingPercent,
-          completedClasses: item.completedClasses ?? 0,
-          estimatedClasses: item.estimatedClasses ?? 1,
-        };
-      });
+      }
+      return false;
     });
-    return options.sort((a, b) => {
-      const aDone = a.completionStatus === "COMPLETED" ? 1 : 0;
-      const bDone = b.completionStatus === "COMPLETED" ? 1 : 0;
-      if (aDone !== bDone) return aDone - bDone;
-      return (b.teachingDateBs || "").localeCompare(a.teachingDateBs || "");
-    });
-  }, [lessonPlansQuery.data]);
 
-  const logDateBs = (form.dateBs || "").trim();
+    const formYear = (
+      scope.academicYearBs ||
+      filters.academicYearBs ||
+      ""
+    ).trim();
+    if (!formYear) return matched;
+    const sameYear = matched.filter(
+      (plan) => (plan.academicYearBs || "").trim() === formYear,
+    );
+    return sameYear.length > 0 ? sameYear : matched;
+  }, [
+    lessonPlansQuery.data,
+    scope.subjectId,
+    scope.academicYearBs,
+    filters.academicYearBs,
+    formCurriculumSubjectIds,
+    selectedFormSubject,
+    subjects,
+    effectiveTeacherId,
+  ]);
 
-  /** Topics from the Lesson Plan for the selected log date (primary list). */
-  const plannedForLogDate = useMemo(
-    () =>
-      lessonItemOptions.filter(
-        (row) => logDateBs && row.teachingDateBs === logDateBs,
-      ),
-    [lessonItemOptions, logDateBs],
+  const lessonPicks = useMemo(
+    () => flattenLessonPlanPicks(matchedLessonPlans),
+    [matchedLessonPlans],
   );
 
-  /** Incomplete topics from other days — can be logged as catch-up. */
-  const incompleteCarryOver = useMemo(
-    () =>
-      lessonItemOptions.filter(
-        (row) =>
-          row.completionStatus !== "COMPLETED" &&
-          (!logDateBs || row.teachingDateBs !== logDateBs),
-      ),
-    [lessonItemOptions, logDateBs],
-  );
+  const unitsForDate = (dateBs: string) => {
+    const onDate = uniqueUnits(lessonPicks.filter((p) => p.dateBs === dateBs));
+    if (onDate.length > 0) return { units: onDate, fromDate: true };
+    return { units: uniqueUnits(lessonPicks), fromDate: false };
+  };
 
-  const selectedLessonPlan = useMemo(() => {
-    const plans = lessonPlansQuery.data ?? [];
-    if (form.lessonPlanId) {
-      return plans.find((p) => p._id === form.lessonPlanId);
-    }
-    if (logDateBs) {
-      const forDate = plans.find(
-        (p) => (p.teachingDateBs || p.startDateBs || "") === logDateBs,
+  const picksForUnit = (dateBs: string, unitId: string) => {
+    const onDate = lessonPicks.filter(
+      (p) => p.unitId === unitId && p.dateBs === dateBs,
+    );
+    if (onDate.length > 0) return onDate;
+    return lessonPicks.filter((p) => p.unitId === unitId);
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async (payloads: AcademicLogBookEntryInput[]) => {
+      const results: unknown[] = [];
+      for (let i = 0; i < payloads.length; i += 1) {
+        if (editingId && i === 0) {
+          results.push(
+            await unwrap(
+              api.put(
+                `/academic-management/log-book-entries/${editingId}`,
+                payloads[i],
+              ),
+            ),
+          );
+        } else {
+          results.push(
+            await unwrap(
+              api.post("/academic-management/log-book-entries", payloads[i]),
+            ),
+          );
+        }
+      }
+      return results;
+    },
+    onSuccess: (results) => {
+      toast.success(
+        results.length === 1
+          ? "Log book entry saved"
+          : `${results.length} log book entries saved`,
       );
-      if (forDate) return forDate;
-    }
-    if (plans.length === 1) return plans[0];
-    return plans[0];
-  }, [lessonPlansQuery.data, form.lessonPlanId, logDateBs]);
-
-  const createMutation = useMutation({
-    mutationFn: (payload: AcademicLogBookEntryInput) =>
-      unwrap(api.post("/academic-management/log-book-entries", payload)),
-    onSuccess: () => {
-      toast.success("Log book entry saved — progress updated automatically");
       void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
       setShowForm(false);
-      setSelectedSlot(null);
+      setEditingId(null);
+      setRows([makeBlankRow()]);
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
@@ -457,220 +597,192 @@ export const LogBookPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
-  const applyTimetableSlot = async (slot: TodayTimetableSlot) => {
-    setSelectedSlot(slot);
-    const attendance = await unwrap<{
-      present: number;
-      absent: number;
-      percent: number;
-      marked: boolean;
-    }>(
-      api.get("/academic-management/attendance/summary", {
-        params: {
-          subjectId: slot.subjectId,
-          teacherId: teacherId || form.teacherId,
-          dateBs: form.dateBs,
-          classId: slot.classId,
-          sectionId: slot.sectionId,
-          batchId: slot.batchId,
-          yearId: slot.yearId,
-        },
-      }),
+  const updateRow = (index: number, patch: Partial<DraftLogRow>) => {
+    setRows((current) =>
+      current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     );
-
-    setForm((current) => ({
-      ...current,
-      subjectId: slot.subjectId,
-      classId: slot.classId,
-      sectionId: slot.sectionId,
-      batchId: slot.batchId,
-      yearId: slot.yearId,
-      periodNumber: slot.periodNumber,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      timetableSlotId: slot._id,
-      // Clear topic link when subject changes via timetable
-      lessonPlanItemId:
-        current.subjectId === slot.subjectId
-          ? current.lessonPlanItemId
-          : "",
-      lessonPlanId:
-        current.subjectId === slot.subjectId
-          ? current.lessonPlanId
-          : undefined,
-    }));
-
-    if (attendance.marked) {
-      toast.message(
-        `Attendance loaded: ${attendance.present} present, ${attendance.absent} absent (${attendance.percent}%)`,
-      );
-    }
   };
 
-  const applyLessonItemToForm = (
-    itemId: string,
-    options: typeof lessonItemOptions,
-    quiet = false,
-  ) => {
-    if (!itemId) {
-      setForm((current) => ({
-        ...current,
-        lessonPlanItemId: "",
-        lessonPlanId: undefined,
-      }));
+  const applyRowDate = (index: number, dateBs: string) => {
+    const row = rows[index];
+    const { units } = unitsForDate(dateBs);
+    const stillValid = units.some((u) => u.unitId === row?.sessionPlanUnitId);
+    if (stillValid && row) {
+      const picks = picksForUnit(dateBs, row.sessionPlanUnitId);
+      const first = picks[0];
+      updateRow(index, {
+        dateBs,
+        lessonPlanId: first?.lessonPlanId,
+        lessonPlanItemId: first?.lessonPlanItemId || "",
+        subUnitTitles: row.subUnitTitles.filter((t) =>
+          mergeSubs(picks).some((opt) => titleKey(opt) === titleKey(t)),
+        ),
+      });
       return;
     }
-    const option = options.find((row) => row.id === itemId);
-    if (!option) return;
-    // Full cascade: Lesson Plan → Log Book (+ hierarchical syllabus links).
-    // Pre-select all planned sub-units; teacher can uncheck what was not taught.
-    const titles =
-      option.subUnitTitles?.length > 0
-        ? option.subUnitTitles
-        : normalizeSubUnitTitles(undefined, option.subUnitTitle);
-    const ids =
-      option.syllabusSubUnitIds?.length > 0
-        ? option.syllabusSubUnitIds
-        : option.syllabusSubUnitId
-          ? [option.syllabusSubUnitId]
-          : [];
-    setForm((current) => ({
-      ...current,
-      lessonPlanItemId: itemId,
-      lessonPlanId: option.planId,
-      subjectId: option.subjectId || current.subjectId,
-      sessionPlanUnitId:
-        option.sessionPlanUnitId || current.sessionPlanUnitId || "",
-      subUnitTitles: titles,
-      subUnitTitle: joinSubUnitTitles(titles),
-      syllabusId: option.syllabusId || current.syllabusId || "",
-      syllabusChapterId:
-        option.syllabusChapterId || current.syllabusChapterId || "",
-      syllabusUnitId: option.syllabusUnitId || current.syllabusUnitId || "",
-      syllabusSubUnitIds: ids,
-      syllabusSubUnitId: ids[0] || option.syllabusSubUnitId || "",
-      unit: option.unit || current.unit,
-      topicCovered:
-        option.topic ||
-        joinSubUnitTitles(titles) ||
-        option.subUnitTitle ||
-        current.topicCovered,
-      objectives: option.objectives || current.objectives,
-      teachingMethod: option.teachingMethod || current.teachingMethod,
-      teachingAids: option.teachingAids || current.teachingAids,
-    }));
-    if (!quiet) {
-      toast.success(
-        titles.length > 0
-          ? `Filled from Lesson Plan · ${titles.length} sub-unit(s) — uncheck any not taught`
-          : "Filled from Lesson Plan",
-      );
-    }
-  };
-
-  const selectLessonItem = (itemId: string) => {
-    applyLessonItemToForm(itemId, lessonItemOptions, false);
-  };
-
-  // Auto-pick: prefer incomplete topic planned for log date, else sole incomplete overall
-  useEffect(() => {
-    if (!showForm) return;
-    if (form.lessonPlanItemId) return;
-    if (lessonItemOptions.length === 0) return;
-    const openForDate = plannedForLogDate.filter(
-      (row) => row.completionStatus !== "COMPLETED",
-    );
-    const auto =
-      openForDate.length === 1
-        ? openForDate[0]
-        : plannedForLogDate.length === 1
-          ? plannedForLogDate[0]
-          : incompleteCarryOver.length === 1
-            ? incompleteCarryOver[0]
-            : lessonItemOptions.length === 1
-              ? lessonItemOptions[0]
-              : null;
-    if (!auto) return;
-    applyLessonItemToForm(auto.id, lessonItemOptions, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when options / date appear
-  }, [
-    showForm,
-    form.subjectId,
-    form.dateBs,
-    lessonItemOptions,
-    plannedForLogDate,
-    incompleteCarryOver,
-    form.lessonPlanItemId,
-  ]);
-
-  const selectSessionUnit = (unitId: string) => {
-    const unit = sessionUnits.find((row) => row._id === unitId);
-    setForm((current) => ({
-      ...current,
-      sessionPlanUnitId: unitId,
-      subUnitTitle: "",
-      subUnitTitles: [],
-      syllabusId: unit?.syllabusId || "",
-      syllabusChapterId: unit?.syllabusChapterId || "",
-      syllabusUnitId: "",
-      syllabusSubUnitId: "",
-      syllabusSubUnitIds: [],
-      unit: unit ? `Unit ${unit.unitNo}: ${unit.chapterName}` : "",
-      topicCovered: unit?.topicsCovered || unit?.chapterName || "",
-      objectives: unit?.learningOutcomes || current.objectives,
-      // Manual unit pick clears lesson-plan link (user can re-link)
-      lessonPlanItemId: "",
+    updateRow(index, {
+      dateBs,
+      sessionPlanUnitId: "",
       lessonPlanId: undefined,
-    }));
+      lessonPlanItemId: "",
+      unit: "",
+      subUnitTitles: [],
+    });
   };
 
-  const selectedLessonOption = useMemo(
-    () => lessonItemOptions.find((row) => row.id === form.lessonPlanItemId),
-    [lessonItemOptions, form.lessonPlanItemId],
-  );
-
-  /** Sub-units teacher can tick as taught — from lesson plan or session unit topics. */
-  const taughtSubUnitOptions = useMemo(() => {
-    if (selectedLessonOption) {
-      const planned = selectedLessonOption.subUnitTitles ?? [];
-      if (planned.length > 0) return planned;
-      return parseSubUnitsFromTopics(
-        selectedSessionUnit?.topicsCovered || selectedLessonOption.topic,
-      );
+  const applyRowUnit = (index: number, unitId: string) => {
+    const dateBs = rows[index]?.dateBs || "";
+    if (!unitId) {
+      updateRow(index, {
+        sessionPlanUnitId: "",
+        lessonPlanId: undefined,
+        lessonPlanItemId: "",
+        unit: "",
+        subUnitTitles: [],
+      });
+      return;
     }
-    return logSubUnits;
-  }, [selectedLessonOption, selectedSessionUnit, logSubUnits]);
+    const picks = picksForUnit(dateBs, unitId);
+    const first = picks[0];
+    const currentMethod = (rows[index]?.teachingMethod || "").trim();
+    updateRow(index, {
+      sessionPlanUnitId: unitId,
+      lessonPlanId: first?.lessonPlanId,
+      lessonPlanItemId: first?.lessonPlanItemId || "",
+      unit: first?.label || "",
+      subUnitTitles: [],
+      teachingMethod: currentMethod || first?.teachingMethod || "",
+    });
+  };
 
-  const applyTaughtSubUnits = (titles: string[]) => {
-    const unique = normalizeSubUnitTitles(titles);
-    // Map selected titles back to syllabus ids from the lesson plan when possible
-    let ids: string[] = [];
-    if (selectedLessonOption) {
-      const planned = selectedLessonOption.subUnitTitles ?? [];
-      const plannedIds = selectedLessonOption.syllabusSubUnitIds ?? [];
-      ids = unique
-        .map((title) => {
-          const idx = planned.findIndex(
-            (p) => p.toLowerCase() === title.toLowerCase(),
-          );
-          return idx >= 0 ? plannedIds[idx] : undefined;
-        })
-        .filter((id): id is string => Boolean(id));
+  const openNewForm = () => {
+    setEditingId(null);
+    const nextScope = { ...scope };
+    if (selectedSubject?.subjectIds[0]) {
+      nextScope.subjectId = selectedSubject.subjectIds[0];
+    } else if (filters.subjectId && !nextScope.subjectId) {
+      nextScope.subjectId = filters.subjectId;
     }
-    setForm((current) => ({
+    if (filters.academicYearBs) {
+      nextScope.academicYearBs = filters.academicYearBs;
+      nextScope.session = filters.session || filters.academicYearBs;
+    }
+    setScope(nextScope);
+    setRows([makeBlankRow()]);
+    setShowForm(true);
+  };
+
+  const openEdit = (entry: AcademicLogBookEntryRecord) => {
+    setEditingId(entry._id);
+    setScope((current) => ({
       ...current,
-      subUnitTitles: unique,
-      subUnitTitle: joinSubUnitTitles(unique),
-      syllabusSubUnitIds: ids,
-      syllabusSubUnitId: ids[0] || "",
-      topicCovered:
-        unique.length > 0
-          ? joinSubUnitTitles(unique)
-          : selectedLessonOption?.topic ||
-            selectedSessionUnit?.topicsCovered ||
-            selectedSessionUnit?.chapterName ||
-            current.topicCovered,
+      academicYearBs: entry.academicYearBs || current.academicYearBs,
+      session: entry.session || current.session,
+      faculty: entry.faculty || current.faculty,
+      semesterBs: entry.semesterBs || current.semesterBs,
+      classId: entry.classId || current.classId,
+      sectionId: entry.sectionId || current.sectionId,
+      batchId: entry.batchId || current.batchId,
+      yearId: entry.yearId || current.yearId,
+      subjectId: entry.subjectId || current.subjectId,
+      teacherId: entry.teacherId || current.teacherId,
     }));
+    setRows([
+      {
+        key: entry._id,
+        dateBs: entry.dateBs,
+        sessionPlanUnitId: entry.sessionPlanUnitId || "",
+        lessonPlanId: entry.lessonPlanId,
+        lessonPlanItemId: entry.lessonPlanItemId || "",
+        unit: entry.unit || "",
+        subUnitTitles: entrySubUnits(entry),
+        teachingMethod: entry.teachingMethod || "",
+        theoryPractical: entry.theoryPractical || "THEORY",
+        time: entryTimeValue(entry),
+        feedback: entry.feedback || "",
+        signature: entry.teacherSignature || defaultSignature,
+      },
+    ]);
+    setShowForm(true);
+  };
+
+  const handleSave = () => {
+    if (!scope.subjectId) {
+      toast.error("Select a subject");
+      return;
+    }
+    const teacher = teacherId || scope.teacherId;
+    if (!teacher) {
+      toast.error("Select a teacher");
+      return;
+    }
+    const ready = rows.filter((row) => row.dateBs.trim());
+    if (ready.length === 0) {
+      toast.error("Add at least one row with a date");
+      return;
+    }
+    const oid = (value?: string) => {
+      const s = (value || "").trim();
+      return /^[a-fA-F0-9]{24}$/.test(s) ? s : "";
+    };
+    const payloads: AcademicLogBookEntryInput[] = ready.map((row, index) => {
+      const taught = normalizeSubUnitTitles(row.subUnitTitles);
+      const times = parseTimeRange(row.time);
+      const picks = row.sessionPlanUnitId
+        ? picksForUnit(row.dateBs, row.sessionPlanUnitId)
+        : [];
+      const first = picks[0];
+      const unitLabel = row.unit.trim() || first?.label || "";
+      const year =
+        (scope.academicYearBs || filters.academicYearBs || "").trim() ||
+        "2082/083";
+      return {
+        academicYearBs: year,
+        session: (scope.session || year).trim() || year,
+        faculty: scope.faculty || "",
+        semesterBs: scope.semesterBs || "",
+        classId: oid(scope.classId) || undefined,
+        sectionId: oid(scope.sectionId) || undefined,
+        batchId: oid(scope.batchId) || undefined,
+        yearId: oid(scope.yearId) || undefined,
+        subjectId: scope.subjectId,
+        teacherId: teacher,
+        dateBs: row.dateBs,
+        lessonPlanItemId: oid(row.lessonPlanItemId || first?.lessonPlanItemId),
+        lessonPlanId: oid(row.lessonPlanId || first?.lessonPlanId) || undefined,
+        sessionPlanUnitId: oid(first?.sessionPlanUnitId),
+        subUnitTitles: taught,
+        subUnitTitle: joinSubUnitTitles(taught),
+        syllabusId: oid(first?.syllabusId),
+        syllabusChapterId: oid(first?.syllabusChapterId),
+        syllabusUnitId: oid(first?.syllabusUnitId),
+        syllabusSubUnitId: oid(
+          taught
+            .map((title) => first?.titleToId[titleKey(title)])
+            .find(Boolean) || first?.syllabusSubUnitIds[0],
+        ),
+        syllabusSubUnitIds: taught
+          .map((title) => first?.titleToId[titleKey(title)] || "")
+          .filter((id) => /^[a-fA-F0-9]{24}$/.test(id)),
+        unit: unitLabel,
+        topicCovered: joinSubUnitTitles(taught) || unitLabel || "Class taught",
+        objectives: "",
+        teachingMethod: row.teachingMethod.trim(),
+        teachingAids: "",
+        theoryPractical: row.theoryPractical || "THEORY",
+        periodNumber: index + 1,
+        startTime: times.startTime,
+        endTime: times.endTime,
+        homeworkGiven: "",
+        assignment: "",
+        feedback: row.feedback.trim(),
+        difficultiesFaced: "",
+        nextClassPlan: "",
+        attachmentUrl: "",
+        teacherSignature: row.signature.trim(),
+      };
+    });
+    saveMutation.mutate(payloads);
   };
 
   const filteredEntries = useMemo(
@@ -802,8 +914,19 @@ export const LogBookPanel = ({
     isCollege,
   ]);
 
+  const sortEntries = (list: AcademicLogBookEntryRecord[]) =>
+    [...list].sort((a, b) => {
+      const dateCmp = (a.dateBs || "").localeCompare(b.dateBs || "");
+      if (dateCmp !== 0) return dateCmp;
+      return (a.serialNo || 0) - (b.serialNo || 0);
+    });
+
   const teacherGroups = useMemo(
-    () => groupByTeacher(selectedEntries),
+    () =>
+      groupByTeacher(selectedEntries).map((group) => ({
+        ...group,
+        items: sortEntries(group.items),
+      })),
     [selectedEntries],
   );
 
@@ -813,11 +936,10 @@ export const LogBookPanel = ({
   }, [selectedSubject, selectedEntries, filteredEntries]);
 
   const logBookStats = useMemo(() => {
-    const rows = selectedEntries.length > 0 ? selectedEntries : filteredEntries;
-    const topics = new Set(rows.map((r) => r.topicCovered).filter(Boolean));
+    const list = selectedEntries.length > 0 ? selectedEntries : filteredEntries;
     return {
-      dailyEntries: rows.length,
-      topicsCovered: topics.size,
+      dailyEntries: list.length,
+      unitsLogged: new Set(list.map((r) => r.unit).filter(Boolean)).size,
     };
   }, [selectedEntries, filteredEntries]);
 
@@ -829,23 +951,23 @@ export const LogBookPanel = ({
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Log Book</h2>
           <p className="text-sm text-slate-600">
-            {isAdmin
-              ? "Daily teaching records for all teachers. Entries pull from daily Lesson Plans; progress is calculated from the Log Book only."
-              : "Record what you taught: pick the Lesson Plan topic for this date (or an incomplete carry-over). Progress comes only from Log Book entries."}
+            Fill whenever you taught — the same day, or later if you missed it.
+            Pick Date, then Unit and Sub-unit from the Lesson Plan, then write
+            method and the rest.
           </p>
         </div>
         {canMutate ? (
-          <Button onClick={() => setShowForm((current) => !current)}>
+          <Button onClick={() => (showForm ? setShowForm(false) : openNewForm())}>
             <CalendarPlus className="mr-2 h-4 w-4" />
-            New Entry
+            {showForm ? "Close" : "New Entry"}
           </Button>
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3 no-print">
+      <div className="grid gap-3 sm:grid-cols-2 no-print">
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-slate-500">Daily entries</p>
+            <p className="text-xs text-slate-500">Entries</p>
             <p className="text-2xl font-semibold text-slate-900">
               {logBookStats.dailyEntries}
             </p>
@@ -853,38 +975,10 @@ export const LogBookPanel = ({
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-slate-500">Topics covered</p>
+            <p className="text-xs text-slate-500">Units logged</p>
             <p className="text-2xl font-semibold text-slate-900">
-              {logBookStats.topicsCovered}
+              {logBookStats.unitsLogged}
             </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-slate-500">
-              {selectedLessonPlan
-                ? `Plan ${selectedLessonPlan.teachingDateBs || selectedLessonPlan.startDateBs || selectedLessonPlan.month || ""}`
-                : "Lesson plan progress"}
-            </p>
-            {selectedLessonPlan ? (
-              <div className="mt-1">
-                <p className="text-sm font-medium text-slate-800">
-                  {selectedLessonPlan.completedPercent}% complete
-                </p>
-                <AcademicProgressBar
-                  className="mt-1"
-                  completedPercent={selectedLessonPlan.completedPercent}
-                  remainingPercent={selectedLessonPlan.remainingPercent}
-                  compact
-                />
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500 mt-1">
-                {incompleteCarryOver.length > 0
-                  ? `${incompleteCarryOver.length} incomplete topic(s)`
-                  : "—"}
-              </p>
-            )}
           </CardContent>
         </Card>
       </div>
@@ -892,85 +986,37 @@ export const LogBookPanel = ({
       {showForm && canMutate ? (
         <Card className="no-print">
           <CardHeader>
-            <CardTitle>Create Log Book Entry</CardTitle>
+            <CardTitle>
+              {editingId ? "Edit Log Book Entry" : "Create Log Book"}
+            </CardTitle>
             <p className="text-sm text-slate-600">
-              Select what was planned for this date from the Lesson Plan. Missed
-              or incomplete topics from other days can be logged here as
-              carry-over. Progress is calculated only from Log Book entries.
+              Select the date you taught, then Unit and Sub-unit from that
+              subject&apos;s Lesson Plan. Then write Method, T/P, Time,
+              Feedback and Signature. You can fill a missed day later.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <FormField label="Date taught (BS)">
-                <NepaliDateField
-                  value={form.dateBs}
-                  onChange={(value) => {
-                    const month = nepaliMonthFromBsDate(value);
-                    setForm((current) => ({
-                      ...current,
-                      dateBs: value,
-                      // Re-pick topic when date changes so “planned for this date” can auto-fill
-                      lessonPlanItemId: "",
-                      lessonPlanId: undefined,
-                    }));
-                    if (month) setSelectedMonth(month);
-                  }}
-                  placeholder="Select date"
-                />
-              </FormField>
-              <FormField label="Period number">
-                <NumberInput
-                  min={1}
-                  value={form.periodNumber}
-                  onChange={(event) =>
-                    setForm((current) => {
-                      const n = event.target.valueAsNumber;
-                      return {
-                        ...current,
-                        periodNumber:
-                          Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1,
-                      };
-                    })
-                  }
-                  placeholder="e.g. 1"
-                />
-              </FormField>
-              <FormField label="Theory / Practical">
-                <Select
-                  value={form.theoryPractical}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      theoryPractical: event.target
-                        .value as AcademicLogBookEntryInput["theoryPractical"],
-                    }))
-                  }
-                >
-                  <option value="THEORY">Theory</option>
-                  <option value="PRACTICAL">Practical</option>
-                  <option value="BOTH">Both</option>
-                </Select>
-              </FormField>
               {isAdmin && teachers.length > 0 ? (
                 <FormField label="Teacher">
                   <Select
-                    value={form.teacherId}
-                    onChange={(event) =>
-                      setForm((current) => ({
+                    value={scope.teacherId}
+                    onChange={(event) => {
+                      setScope((current) => ({
                         ...current,
                         teacherId: event.target.value,
-                        lessonPlanItemId: "",
-                        lessonPlanId: undefined,
-                        sessionPlanUnitId: "",
-                        subUnitTitle: "",
-                        subUnitTitles: [],
-                        syllabusSubUnitIds: [],
-                        syllabusSubUnitId: "",
-                        topicCovered: "",
-                        unit: "",
-                        objectives: "",
-                      }))
-                    }
+                      }));
+                      setRows((current) =>
+                        current.map((row) => ({
+                          ...row,
+                          sessionPlanUnitId: "",
+                          lessonPlanId: undefined,
+                          lessonPlanItemId: "",
+                          unit: "",
+                          subUnitTitles: [],
+                        })),
+                      );
+                    }}
                   >
                     <option value="">Select teacher</option>
                     {teachers.map((teacher) => (
@@ -984,24 +1030,23 @@ export const LogBookPanel = ({
               {yearOptions.length > 0 ? (
                 <FormField label="Year">
                   <Select
-                    value={form.yearId || ""}
+                    value={scope.yearId || ""}
                     onChange={(event) => {
-                      const yearId = event.target.value;
-                      setForm((current) => ({
+                      setScope((current) => ({
                         ...current,
-                        yearId,
+                        yearId: event.target.value,
                         subjectId: "",
-                        lessonPlanItemId: "",
-                        lessonPlanId: undefined,
-                        sessionPlanUnitId: "",
-                        subUnitTitle: "",
-                        subUnitTitles: [],
-                        syllabusSubUnitIds: [],
-                        syllabusSubUnitId: "",
-                        topicCovered: "",
-                        unit: "",
-                        objectives: "",
                       }));
+                      setRows((current) =>
+                        current.map((row) => ({
+                          ...row,
+                          sessionPlanUnitId: "",
+                          lessonPlanId: undefined,
+                          lessonPlanItemId: "",
+                          unit: "",
+                          subUnitTitles: [],
+                        })),
+                      );
                     }}
                   >
                     <option value="">Select year first</option>
@@ -1016,24 +1061,23 @@ export const LogBookPanel = ({
               ) : classes.length > 0 ? (
                 <FormField label="Class">
                   <Select
-                    value={form.classId || ""}
+                    value={scope.classId || ""}
                     onChange={(event) => {
-                      const classId = event.target.value;
-                      setForm((current) => ({
+                      setScope((current) => ({
                         ...current,
-                        classId,
+                        classId: event.target.value,
                         subjectId: "",
-                        lessonPlanItemId: "",
-                        lessonPlanId: undefined,
-                        sessionPlanUnitId: "",
-                        subUnitTitle: "",
-                        subUnitTitles: [],
-                        syllabusSubUnitIds: [],
-                        syllabusSubUnitId: "",
-                        topicCovered: "",
-                        unit: "",
-                        objectives: "",
                       }));
+                      setRows((current) =>
+                        current.map((row) => ({
+                          ...row,
+                          sessionPlanUnitId: "",
+                          lessonPlanId: undefined,
+                          lessonPlanItemId: "",
+                          unit: "",
+                          subUnitTitles: [],
+                        })),
+                      );
                     }}
                   >
                     <option value="">Select class first</option>
@@ -1048,34 +1092,34 @@ export const LogBookPanel = ({
               <FormField label="Subject">
                 <Select
                   value={subjectSelectValue}
-                  onChange={(event) =>
-                    setForm((current) => ({
+                  onChange={(event) => {
+                    setScope((current) => ({
                       ...current,
                       subjectId: event.target.value,
-                      lessonPlanItemId: "",
-                      lessonPlanId: undefined,
-                      sessionPlanUnitId: "",
-                      subUnitTitle: "",
-                      subUnitTitles: [],
-                      syllabusSubUnitIds: [],
-                      syllabusSubUnitId: "",
-                      topicCovered: "",
-                      unit: "",
-                      objectives: "",
-                    }))
-                  }
+                    }));
+                    setRows((current) =>
+                      current.map((row) => ({
+                        ...row,
+                        sessionPlanUnitId: "",
+                        lessonPlanId: undefined,
+                        lessonPlanItemId: "",
+                        unit: "",
+                        subUnitTitles: [],
+                      })),
+                    );
+                  }}
                   disabled={
                     yearOptions.length > 0
-                      ? !form.yearId
+                      ? !scope.yearId
                       : classes.length > 0
-                        ? !form.classId
+                        ? !scope.classId
                         : false
                   }
                 >
                   <option value="">
-                    {yearOptions.length > 0 && !form.yearId
+                    {yearOptions.length > 0 && !scope.yearId
                       ? "Select year first"
-                      : classes.length > 0 && !form.classId
+                      : classes.length > 0 && !scope.classId
                         ? "Select class first"
                         : subjectOptions.length === 0
                           ? "No subjects for this year"
@@ -1088,30 +1132,6 @@ export const LogBookPanel = ({
                     </option>
                   ))}
                 </Select>
-              </FormField>
-              <FormField label="Start time (optional)">
-                <Input
-                  value={form.startTime ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      startTime: event.target.value,
-                    }))
-                  }
-                  placeholder="e.g. 10:00"
-                />
-              </FormField>
-              <FormField label="End time (optional)">
-                <Input
-                  value={form.endTime ?? ""}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      endTime: event.target.value,
-                    }))
-                  }
-                  placeholder="e.g. 10:45"
-                />
               </FormField>
             </div>
 
@@ -1126,324 +1146,242 @@ export const LogBookPanel = ({
               />
             ) : null}
 
-            {isTeacher && (timetableQuery.data?.length ?? 0) > 0 ? (
-              <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
-                <p className="mb-2 text-sm font-medium text-brand-900">
-                  Today&apos;s Timetable
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {timetableQuery.data?.map((slot) => (
-                    <Button
-                      key={slot._id}
-                      size="sm"
-                      variant={
-                        selectedSlot?._id === slot._id ? "default" : "outline"
-                      }
-                      onClick={() => void applyTimetableSlot(slot)}
-                    >
-                      P{slot.periodNumber} · {slot.subjectName}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="rounded-2xl border border-brand-100 bg-brand-50/50 p-4 space-y-3">
-              <p className="text-sm font-semibold text-brand-950 flex items-center gap-2">
-                <Link2 className="h-4 w-4" />
-                From Lesson Plan (recommended)
-              </p>
-              <FormField label="Lesson Plan topic taught *">
-                <Select
-                  value={form.lessonPlanItemId ?? ""}
-                  onChange={(event) => selectLessonItem(event.target.value)}
-                >
-                  <option value="">
-                    {lessonPlansQuery.isLoading
-                      ? "Loading Lesson Plan topics…"
-                      : lessonItemOptions.length === 0
-                        ? "No Lesson Plan topics — create a daily Lesson Plan first"
-                        : "Select topic from Lesson Plan"}
-                  </option>
-                  {plannedForLogDate.length > 0 ? (
-                    <optgroup
-                      label={`Planned for ${logDateBs || "this date"} (${plannedForLogDate.length})`}
-                    >
-                      {plannedForLogDate.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                          {option.completionStatus === "COMPLETED"
-                            ? " ✓ done"
-                            : ""}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
-                  {incompleteCarryOver.length > 0 ? (
-                    <optgroup
-                      label={`Incomplete / carry-over (${incompleteCarryOver.length})`}
-                    >
-                      {incompleteCarryOver.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          Carry-over · {option.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
-                  {/* Completed topics not for this date — still available if needed */}
-                  {lessonItemOptions
-                    .filter(
-                      (row) =>
-                        row.completionStatus === "COMPLETED" &&
-                        (!logDateBs || row.teachingDateBs !== logDateBs),
-                    )
-                    .map((option) => (
-                      <option key={option.id} value={option.id}>
-                        Done · {option.label}
-                      </option>
-                    ))}
-                </Select>
-                <p className="mt-1 text-xs text-slate-600">
-                  Prefer topics planned for this date. Incomplete topics from
-                  other days can be completed here — that is how progress is
-                  calculated.
-                </p>
-                {logDateBs &&
-                plannedForLogDate.length === 0 &&
-                incompleteCarryOver.length > 0 ? (
-                  <p className="mt-1 text-xs text-amber-700">
-                    No Lesson Plan for {logDateBs}. You can still log a
-                    carry-over incomplete topic, or create a daily Lesson Plan
-                    for this date first.
-                  </p>
-                ) : null}
-              </FormField>
-
-              {form.lessonPlanItemId ? (
-                <div className="space-y-3 rounded-xl border border-emerald-100 bg-white p-3">
-                  <FormField label="Unit">
-                    <Input value={form.unit} readOnly className="bg-slate-50" />
-                  </FormField>
-                  <FormField label="Sub-units taught today *">
-                    <SubUnitMultiSelect
-                      options={taughtSubUnitOptions}
-                      value={normalizeSubUnitTitles(
-                        form.subUnitTitles,
-                        form.subUnitTitle,
-                      )}
-                      onChange={applyTaughtSubUnits}
-                      allowCustom
-                      nepali={formNepaliText}
-                      placeholder={
-                        formNepaliText
-                          ? "थप उप-एकाइ थप्नुहोस्…"
-                          : "Add another sub-unit taught…"
-                      }
-                      hint="Select every sub-unit you taught in this class (from the Lesson Plan). Uncheck any you did not cover."
-                    />
-                  </FormField>
-                </div>
-              ) : null}
-            </div>
-
-            {!form.lessonPlanItemId ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
-                <p className="text-sm font-medium text-slate-800">
-                  Or pick unit from Session Plan (if no Lesson Plan yet)
-                </p>
-                <FormField label="Unit (Session Plan)">
-                  <Select
-                    value={form.sessionPlanUnitId || ""}
-                    onChange={(event) => selectSessionUnit(event.target.value)}
-                  >
-                    <option value="">
-                      {sessionPlansQuery.isLoading
-                        ? "Loading units…"
-                        : sessionUnits.length === 0
-                          ? "No Session Plan units"
-                          : "Select unit"}
-                    </option>
-                    {sessionUnits.map((unit) => (
-                      <option key={unit._id} value={unit._id}>
-                        Chapter {unit.unitNo}: {unit.chapterName}
-                      </option>
-                    ))}
-                  </Select>
-                </FormField>
-                <FormField label="Sub-units taught (one or more)">
-                  <SubUnitMultiSelect
-                    options={logSubUnits}
-                    value={normalizeSubUnitTitles(
-                      form.subUnitTitles,
-                      form.subUnitTitle,
-                    )}
-                    onChange={applyTaughtSubUnits}
-                    allowCustom
-                    nepali={formNepaliText}
-                    placeholder={
-                      formNepaliText
-                        ? "नयाँ उप-एकाइ थप्नुहोस्…"
-                        : "Add custom sub-unit taught…"
-                    }
-                    hint="Select multiple sub-units taught, or add a custom one."
-                  />
-                </FormField>
-              </div>
-            ) : null}
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <FormField label="Teaching method">
-                <Input
-                  value={form.teachingMethod}
-                  nepali={formNepaliText}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      teachingMethod: event.target.value,
-                    }))
-                  }
-                  placeholder={
-                    formNepaliText
-                      ? "प्रवचन, छलफल…"
-                      : "Lecture, discussion, demo…"
-                  }
-                />
-              </FormField>
-              <FormField label="Objectives">
-                <Textarea
-                  value={form.objectives}
-                  nepali={formNepaliText}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      objectives: event.target.value,
-                    }))
-                  }
-                  placeholder={
-                    formNepaliText
-                      ? "विद्यार्थीहरू सक्षम हुनेछन्:\n• …"
-                      : "Students will be able to:\n• Explain the skeletal system.\n• Identify different bones.\n• Understand bone functions."
-                  }
-                />
-              </FormField>
-              <FormField label="Feedback">
-                <Textarea
-                  value={form.feedback}
-                  nepali={formNepaliText}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      feedback: event.target.value,
-                    }))
-                  }
-                  placeholder={
-                    formNepaliText
-                      ? "विद्यार्थी प्रतिक्रिया"
-                      : "Student feedback / class response"
-                  }
-                />
-              </FormField>
-              <FormField label="Additional remarks (optional)">
-                <Textarea
-                  value={form.difficultiesFaced}
-                  nepali={formNepaliText}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      difficultiesFaced: event.target.value,
-                    }))
-                  }
-                  placeholder={
-                    formNepaliText
-                      ? "अतिरिक्त टिप्पणी"
-                      : "Difficulties or extra notes"
-                  }
-                />
-              </FormField>
-              <FormField label="Homework given">
-                <Textarea
-                  value={form.homeworkGiven}
-                  nepali={formNepaliText}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      homeworkGiven: event.target.value,
-                    }))
-                  }
-                  placeholder={formNepaliText ? "गृहकार्य" : "Optional"}
-                />
-              </FormField>
-              <FormField label="Next class plan">
-                <Textarea
-                  value={form.nextClassPlan}
-                  nepali={formNepaliText}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      nextClassPlan: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional"
-                />
-              </FormField>
-            </div>
-            <AcademicAttachmentUpload
-              attachmentUrl={form.attachmentUrl}
-              onChange={(url) =>
-                setForm((current) => ({ ...current, attachmentUrl: url }))
-              }
-            />
-            <div className="flex gap-2">
-              <Button
-                onClick={() => {
-                  if (!form.dateBs) {
-                    toast.error("Select the date taught");
-                    return;
-                  }
-                  if (!form.lessonPlanItemId && !form.sessionPlanUnitId) {
-                    toast.error(
-                      "Select a Lesson Plan topic (or a Session Plan unit)",
+            <div className="overflow-x-auto rounded-xl border border-slate-300">
+              <table className="w-full min-w-[1100px] border-collapse text-sm">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="w-12 border border-slate-300 px-2 py-2 text-center text-xs font-semibold">
+                      S.N
+                    </th>
+                    <th className="w-[13rem] border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                      Date
+                    </th>
+                    <th className="w-44 border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                      Unit
+                    </th>
+                    <th className="border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                      Sub-unit
+                    </th>
+                    <th className="w-32 border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                      Method
+                    </th>
+                    <th className="w-20 border border-slate-300 px-2 py-2 text-center text-xs font-semibold">
+                      T/P
+                    </th>
+                    <th className="w-28 border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                      Time
+                    </th>
+                    <th className="w-36 border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                      Feedback
+                    </th>
+                    <th className="w-32 border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                      Signature
+                    </th>
+                    <th className="w-10 border border-slate-300 px-1 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, index) => {
+                    const dateUnits = unitsForDate(row.dateBs);
+                    const unitPicks = row.sessionPlanUnitId
+                      ? picksForUnit(row.dateBs, row.sessionPlanUnitId)
+                      : [];
+                    const subOptions = mergeSubs(unitPicks);
+                    const unitReady = Boolean(row.dateBs);
+                    return (
+                      <tr key={row.key}>
+                        <td className="border border-slate-300 px-2 py-2 text-center tabular-nums text-slate-700">
+                          {index + 1}
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          <NepaliDateField
+                            value={row.dateBs}
+                            onChange={(value) => applyRowDate(index, value)}
+                            placeholder="Date taught"
+                          />
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          {!scope.subjectId ? (
+                            <p className="py-2 text-xs text-slate-400">
+                              Select subject first
+                            </p>
+                          ) : !unitReady ? (
+                            <p className="py-2 text-xs text-slate-400">
+                              Select date first
+                            </p>
+                          ) : lessonPlansQuery.isLoading ? (
+                            <p className="py-2 text-xs text-slate-400">
+                              Loading Lesson Plan…
+                            </p>
+                          ) : lessonPlansQuery.isError ? (
+                            <p className="py-2 text-xs text-rose-700">
+                              Could not load Lesson Plans. Try again.
+                            </p>
+                          ) : dateUnits.units.length === 0 ? (
+                            <p className="py-2 text-xs text-amber-700">
+                              {(lessonPlansQuery.data?.length ?? 0) > 0
+                                ? "No units on the Lesson Plan for this subject."
+                                : "No Lesson Plan units. Create a Lesson Plan first."}
+                            </p>
+                          ) : (
+                            <>
+                              <Select
+                                value={row.sessionPlanUnitId}
+                                onChange={(event) =>
+                                  applyRowUnit(index, event.target.value)
+                                }
+                              >
+                                <option value="">Select unit</option>
+                                {dateUnits.units.map((u) => (
+                                  <option key={u.unitId} value={u.unitId}>
+                                    {u.label}
+                                  </option>
+                                ))}
+                              </Select>
+                              {!dateUnits.fromDate && row.dateBs ? (
+                                <p className="mt-1 text-[11px] text-amber-700">
+                                  No Lesson Plan on this date. Units are from
+                                  the Lesson Plan so you can fill a missed day.
+                                </p>
+                              ) : null}
+                            </>
+                          )}
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          {!row.sessionPlanUnitId ? (
+                            <p className="py-2 text-xs text-slate-400">
+                              Select unit first
+                            </p>
+                          ) : subOptions.length === 0 ? (
+                            <p className="py-2 text-xs text-slate-400">
+                              No sub-units in this Lesson Plan unit
+                            </p>
+                          ) : (
+                            <SubUnitMultiSelect
+                              options={subOptions}
+                              value={row.subUnitTitles}
+                              onChange={(next) =>
+                                updateRow(index, { subUnitTitles: next })
+                              }
+                              allowCustom={false}
+                              nepali={formNepaliText}
+                              placeholder="Select sub-unit"
+                            />
+                          )}
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          <Input
+                            value={row.teachingMethod}
+                            nepali={formNepaliText}
+                            onChange={(event) =>
+                              updateRow(index, {
+                                teachingMethod: event.target.value,
+                              })
+                            }
+                            placeholder="Optional"
+                          />
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          <Select
+                            value={row.theoryPractical}
+                            onChange={(event) =>
+                              updateRow(index, {
+                                theoryPractical: event.target
+                                  .value as DraftLogRow["theoryPractical"],
+                              })
+                            }
+                          >
+                            <option value="THEORY">T</option>
+                            <option value="PRACTICAL">P</option>
+                            <option value="BOTH">T/P</option>
+                          </Select>
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          <Input
+                            value={row.time}
+                            onChange={(event) =>
+                              updateRow(index, { time: event.target.value })
+                            }
+                            placeholder="10:00-10:45"
+                          />
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          <Input
+                            value={row.feedback}
+                            nepali={formNepaliText}
+                            onChange={(event) =>
+                              updateRow(index, { feedback: event.target.value })
+                            }
+                            placeholder="Optional"
+                          />
+                        </td>
+                        <td className="border border-slate-300 px-2 py-2 align-top">
+                          <Input
+                            value={row.signature}
+                            nepali={formNepaliText}
+                            onChange={(event) =>
+                              updateRow(index, {
+                                signature: event.target.value,
+                              })
+                            }
+                            placeholder="Optional"
+                          />
+                        </td>
+                        <td className="border border-slate-300 px-1 py-2 align-top text-center">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-rose-600"
+                            title="Remove this row"
+                            onClick={() =>
+                              setRows((current) =>
+                                current.length <= 1
+                                  ? [makeBlankRow()]
+                                  : current.filter((_, i) => i !== index),
+                              )
+                            }
+                          >
+                            <Trash2 className="mr-1 h-4 w-4" />
+                            Remove
+                          </Button>
+                        </td>
+                      </tr>
                     );
-                    return;
-                  }
-                  const taught = normalizeSubUnitTitles(
-                    form.subUnitTitles,
-                    form.subUnitTitle,
-                  );
-                  createMutation.mutate({
-                    ...form,
-                    teacherId: teacherId || form.teacherId,
-                    lessonPlanItemId: form.lessonPlanItemId || "",
-                    sessionPlanUnitId: form.sessionPlanUnitId || "",
-                    subUnitTitles: taught,
-                    subUnitTitle: joinSubUnitTitles(taught),
-                    syllabusSubUnitIds: form.syllabusSubUnitIds ?? [],
-                    syllabusSubUnitId:
-                      form.syllabusSubUnitIds?.[0] ||
-                      form.syllabusSubUnitId ||
-                      "",
-                    topicCovered:
-                      form.topicCovered ||
-                      joinSubUnitTitles(taught) ||
-                      form.unit ||
-                      "Topic taught",
-                  });
-                }}
-                disabled={
-                  !form.dateBs ||
-                  (!form.lessonPlanItemId && !form.sessionPlanUnitId) ||
-                  !form.subjectId ||
-                  !(teacherId || form.teacherId) ||
-                  createMutation.isPending
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setRows((current) => [
+                    ...current,
+                    makeBlankRow(current[current.length - 1]?.dateBs || formatTodayBs()),
+                  ])
                 }
               >
-                Save Entry
+                <Plus className="mr-2 h-4 w-4" />
+                Add row
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={
+                  !scope.subjectId ||
+                  !(teacherId || scope.teacherId) ||
+                  saveMutation.isPending
+                }
+              >
+                {saveMutation.isPending ? "Saving…" : "Save"}
               </Button>
               <Button
                 variant="outline"
                 onClick={() => {
                   setShowForm(false);
-                  setSelectedSlot(null);
+                  setEditingId(null);
                 }}
               >
                 Cancel
@@ -1483,7 +1421,7 @@ export const LogBookPanel = ({
           ) : selectedEntries.length === 0 ? (
             <EmptyState
               title={`No Log Book entries for ${selectedSubjectMeta.subject.subjectName}`}
-              description="Record a class by selecting a topic from the daily Lesson Plan for that date (or complete a missed topic from another day)."
+              description="Add a row for the day you taught. You can fill it the same day or later if you missed it."
             />
           ) : (
             <>
@@ -1501,10 +1439,6 @@ export const LogBookPanel = ({
                   <p className="text-sm text-slate-600">
                     Teacher(s):{" "}
                     {selectedSubjectMeta.subject.teacherNames.join(", ") || "—"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    One curriculum subject · Teachers grouped below (not by
-                    batch)
                   </p>
                 </CardContent>
               </Card>
@@ -1525,91 +1459,126 @@ export const LogBookPanel = ({
                       <Table>
                         <TableHead>
                           <tr>
+                            <Th>S.N</Th>
                             <Th>Date</Th>
                             <Th>Unit</Th>
-                            <Th>Topic</Th>
-                            <Th>Objectives</Th>
+                            <Th>Sub-unit</Th>
                             <Th>Method</Th>
                             <Th>T/P</Th>
                             <Th>Time</Th>
                             <Th>Feedback</Th>
-                            <Th>Review</Th>
+                            <Th>Signature</Th>
+                            <Th className="no-print">Review</Th>
                             <Th className="no-print">Actions</Th>
                           </tr>
                         </TableHead>
                         <TableBody>
-                          {group.items.map((entry) => (
-                            <tr key={entry._id}>
-                              <Td className="whitespace-nowrap">
-                                {entry.dateBs}
-                              </Td>
-                              <Td>{entry.unit || "—"}</Td>
-                              <Td>{entry.topicCovered}</Td>
-                              <Td className="max-w-[140px] truncate">
-                                {entry.objectives || "—"}
-                              </Td>
-                              <Td>{entry.teachingMethod || "—"}</Td>
-                              <Td>{entry.theoryPractical}</Td>
-                              <Td className="whitespace-nowrap text-xs">
-                                {entry.startTime || entry.endTime
-                                  ? `${entry.startTime ?? ""}–${entry.endTime ?? ""}`
-                                  : `P${entry.periodNumber}`}
-                              </Td>
-                              <Td className="max-w-[120px] truncate">
-                                {entry.feedback || "—"}
-                              </Td>
-                              <Td>
-                                <Badge
-                                  className={statusBadgeClass(
-                                    entry.reviewStatus,
+                          {group.items.map((entry, index) => {
+                            const subs = entrySubUnits(entry);
+                            return (
+                              <tr key={entry._id}>
+                                <Td className="tabular-nums">{index + 1}</Td>
+                                <Td className="whitespace-nowrap">
+                                  {entry.dateBs}
+                                </Td>
+                                <Td>
+                                  {cleanDuplicatedUnitLabel(entry.unit) || "—"}
+                                </Td>
+                                <Td>
+                                  {subs.length > 0 ? (
+                                    <div className="space-y-0.5">
+                                      {subs.map((title) => (
+                                        <div key={title}>{title}</div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    "—"
                                   )}
-                                >
-                                  {entry.reviewStatus}
-                                </Badge>
-                              </Td>
-                              <Td className="no-print">
-                                <div className="flex flex-wrap gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() =>
-                                      setSelectedEntryId(entry._id)
-                                    }
+                                </Td>
+                                <Td>{entry.teachingMethod || "—"}</Td>
+                                <Td>{formatTp(entry.theoryPractical)}</Td>
+                                <Td className="whitespace-nowrap text-xs">
+                                  {formatTime(entry.startTime, entry.endTime)}
+                                </Td>
+                                <Td className="max-w-[140px] truncate">
+                                  {entry.feedback || "—"}
+                                </Td>
+                                <Td>
+                                  {entry.teacherSignature ||
+                                    entry.teacher?.user?.fullName ||
+                                    "—"}
+                                </Td>
+                                <Td className="no-print">
+                                  <Badge
+                                    className={statusBadgeClass(
+                                      entry.reviewStatus,
+                                    )}
                                   >
-                                    Notes
-                                  </Button>
-                                  {isAdmin && canMutate ? (
-                                    <>
+                                    {entry.reviewStatus}
+                                  </Badge>
+                                </Td>
+                                <Td className="no-print">
+                                  <div className="flex flex-wrap gap-1">
+                                    {canMutate ? (
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        onClick={() =>
-                                          reviewMutation.mutate({
-                                            id: entry._id,
-                                            reviewStatus: "APPROVED",
-                                          })
-                                        }
+                                        title="Edit this log book row"
+                                        onClick={() => openEdit(entry)}
                                       >
-                                        <CheckCircle2 className="h-4 w-4" />
+                                        <Pencil className="mr-1 h-3.5 w-3.5" />
+                                        Edit
                                       </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() =>
-                                          reviewMutation.mutate({
-                                            id: entry._id,
-                                            reviewStatus: "NEEDS_IMPROVEMENT",
-                                          })
-                                        }
-                                      >
-                                        Review
-                                      </Button>
-                                    </>
-                                  ) : null}
-                                </div>
-                              </Td>
-                            </tr>
-                          ))}
+                                    ) : null}
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      title="Open comments for this row"
+                                      onClick={() =>
+                                        setSelectedEntryId(entry._id)
+                                      }
+                                    >
+                                      Comments
+                                    </Button>
+                                    {isAdmin && canMutate ? (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-emerald-700"
+                                          title="Approve this log book entry"
+                                          onClick={() =>
+                                            reviewMutation.mutate({
+                                              id: entry._id,
+                                              reviewStatus: "APPROVED",
+                                            })
+                                          }
+                                        >
+                                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                                          Approve
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-amber-700"
+                                          title="Mark as needs improvement"
+                                          onClick={() =>
+                                            reviewMutation.mutate({
+                                              id: entry._id,
+                                              reviewStatus:
+                                                "NEEDS_IMPROVEMENT",
+                                            })
+                                          }
+                                        >
+                                          Needs improvement
+                                        </Button>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                </Td>
+                              </tr>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </CardContent>
@@ -1649,33 +1618,52 @@ export const LogBookPanel = ({
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr>
+                  <th className="border p-1 text-left">S.N</th>
                   <th className="border p-1 text-left">Date</th>
                   <th className="border p-1 text-left">Unit</th>
-                  <th className="border p-1 text-left">Topic</th>
+                  <th className="border p-1 text-left">Sub-unit</th>
                   <th className="border p-1 text-left">Method</th>
                   <th className="border p-1 text-left">T/P</th>
                   <th className="border p-1 text-left">Time</th>
                   <th className="border p-1 text-left">Feedback</th>
-                  <th className="border p-1 text-left">Review</th>
+                  <th className="border p-1 text-left">Signature</th>
                 </tr>
               </thead>
               <tbody>
-                {group.items.map((entry) => (
-                  <tr key={entry._id}>
-                    <td className="border p-1">{entry.dateBs}</td>
-                    <td className="border p-1">{entry.unit}</td>
-                    <td className="border p-1">{entry.topicCovered}</td>
-                    <td className="border p-1">{entry.teachingMethod}</td>
-                    <td className="border p-1">{entry.theoryPractical}</td>
-                    <td className="border p-1">
-                      {entry.startTime || entry.endTime
-                        ? `${entry.startTime ?? ""}–${entry.endTime ?? ""}`
-                        : `P${entry.periodNumber}`}
-                    </td>
-                    <td className="border p-1">{entry.feedback}</td>
-                    <td className="border p-1">{entry.reviewStatus}</td>
-                  </tr>
-                ))}
+                {sortEntries(group.items).map((entry, index) => {
+                  const subs = entrySubUnits(entry);
+                  return (
+                    <tr key={entry._id}>
+                      <td className="border p-1">{index + 1}</td>
+                      <td className="border p-1">{entry.dateBs}</td>
+                      <td className="border p-1">
+                        {cleanDuplicatedUnitLabel(entry.unit)}
+                      </td>
+                      <td className="border p-1">
+                        {subs.length > 0
+                          ? subs.map((title) => (
+                              <div key={title}>{title}</div>
+                            ))
+                          : ""}
+                      </td>
+                      <td className="border p-1">{entry.teachingMethod || ""}</td>
+                      <td className="border p-1">
+                        {formatTp(entry.theoryPractical)}
+                      </td>
+                      <td className="border p-1">
+                        {formatTime(entry.startTime, entry.endTime) === "—"
+                          ? ""
+                          : formatTime(entry.startTime, entry.endTime)}
+                      </td>
+                      <td className="border p-1">{entry.feedback || ""}</td>
+                      <td className="border p-1">
+                        {entry.teacherSignature ||
+                          entry.teacher?.user?.fullName ||
+                          ""}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

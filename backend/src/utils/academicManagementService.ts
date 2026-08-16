@@ -20,6 +20,7 @@ import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
+import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import {
   computeHierarchyStats,
   ensureSyllabusHierarchy,
@@ -682,6 +683,231 @@ export const assertNoDuplicateLessonPlanUnitsInMonth = async (
 /**
  * Prevent two Log Book entries for the same Lesson Plan topic on the same BS date.
  */
+/** Next free period number for this teacher + subject + teaching date (unique index). */
+export const nextLogBookPeriodNumber = async (
+  req: Request,
+  teacherId: string,
+  subjectId: string,
+  dateBs: string,
+  excludeEntryId?: string
+): Promise<number> => {
+  const rows = await AcademicLogBookEntry.find({
+    schoolId: tenantObjectId(req),
+    teacherId,
+    subjectId,
+    dateBs,
+    isDeleted: false,
+    ...(excludeEntryId ? { _id: { $ne: excludeEntryId } } : {})
+  })
+    .select("periodNumber")
+    .lean();
+  const used = new Set(rows.map((row) => Number(row.periodNumber) || 0));
+  let n = 1;
+  while (used.has(n)) n += 1;
+  return n;
+};
+
+const headingKey = (value?: string) =>
+  (value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\d+(\.\d+)*\s*[:.)\-–]?\s*/, "")
+    .replace(/^unit\s*\d+\s*[:.\-]?\s*/i, "")
+    .replace(/\s+/g, " ");
+
+const asId = (value?: string) => {
+  const s = (value ?? "").trim();
+  if (!s || !mongoose.Types.ObjectId.isValid(s)) return undefined;
+  return s;
+};
+
+/**
+ * Find the Lesson Plan item this log row should update (progress chain).
+ * Prefer an explicit item id; otherwise match teacher + subject + date + unit.
+ */
+export const resolveLogBookLessonPlanLink = async (
+  req: Request,
+  params: {
+    lessonPlanItemId?: string;
+    sessionPlanUnitId?: string;
+    teacherId: string;
+    subjectId: string;
+    dateBs: string;
+  }
+): Promise<{
+  itemId: string;
+  planId: string;
+  sessionPlanUnitId?: string;
+  syllabusId?: string;
+  syllabusChapterId?: string;
+  syllabusUnitId?: string;
+  syllabusSubUnitIds: string[];
+  subUnitTitles: string[];
+} | null> => {
+  const schoolId = tenantObjectId(req);
+  const date = (params.dateBs || "").trim();
+
+  let item = asId(params.lessonPlanItemId)
+    ? await AcademicLessonPlanItem.findById(params.lessonPlanItemId).lean()
+    : null;
+  if (item && item.schoolId.toString() !== schoolId.toString()) item = null;
+
+  if (!item) {
+    const siblingIds = await expandCurriculumSubjectIds(schoolId, params.subjectId);
+    const subjectFilter = siblingIds.length > 0 ? { $in: siblingIds } : params.subjectId;
+    const plans = await AcademicLessonPlan.find({
+      schoolId,
+      isDeleted: false,
+      teacherId: params.teacherId,
+      subjectId: subjectFilter,
+      ...(date
+        ? {
+            $or: [{ teachingDateBs: date }, { startDateBs: date }, { endDateBs: date }]
+          }
+        : {})
+    })
+      .select("_id")
+      .lean();
+
+    const planIds = plans.map((plan) => plan._id);
+    const unitId = asId(params.sessionPlanUnitId);
+    if (planIds.length) {
+      const filter: Record<string, unknown> = {
+        schoolId,
+        lessonPlanId: { $in: planIds }
+      };
+      if (unitId) filter.sessionPlanUnitId = unitId;
+      item = await AcademicLessonPlanItem.findOne(filter).sort({ serialNo: 1 }).lean();
+    }
+
+    if (!item && date) {
+      const dateItems = await AcademicLessonPlanItem.find({
+        schoolId,
+        itemStartDateBs: date,
+        ...(unitId ? { sessionPlanUnitId: unitId } : {})
+      }).lean();
+      for (const cand of dateItems) {
+        const plan = await AcademicLessonPlan.findOne({
+          _id: cand.lessonPlanId,
+          schoolId,
+          isDeleted: false,
+          teacherId: params.teacherId,
+          subjectId: subjectFilter
+        })
+          .select("_id")
+          .lean();
+        if (plan) {
+          item = cand;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!item) return null;
+
+  const plan = await AcademicLessonPlan.findOne({
+    _id: item.lessonPlanId,
+    schoolId,
+    isDeleted: false
+  }).lean();
+  if (!plan) return null;
+
+  const anyItem = item as {
+    syllabusId?: { toString(): string };
+    syllabusChapterId?: { toString(): string };
+    syllabusUnitId?: { toString(): string };
+    syllabusSubUnitId?: { toString(): string };
+    syllabusSubUnitIds?: Array<string | { toString(): string }>;
+    subUnitTitle?: string;
+    subUnitTitles?: string[];
+    sessionPlanUnitId?: { toString(): string };
+  };
+  const syllabusSubUnitIds = Array.isArray(anyItem.syllabusSubUnitIds)
+    ? anyItem.syllabusSubUnitIds
+        .map((id) => (typeof id === "string" ? id : id?.toString?.() ?? ""))
+        .filter(Boolean)
+    : anyItem.syllabusSubUnitId
+      ? [anyItem.syllabusSubUnitId.toString()]
+      : [];
+  const subUnitTitles = Array.isArray(anyItem.subUnitTitles)
+    ? anyItem.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+    : String(anyItem.subUnitTitle || "")
+        .split(/[;\n|]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+  return {
+    itemId: item._id.toString(),
+    planId: plan._id.toString(),
+    sessionPlanUnitId: anyItem.sessionPlanUnitId?.toString(),
+    syllabusId: anyItem.syllabusId?.toString(),
+    syllabusChapterId: anyItem.syllabusChapterId?.toString(),
+    syllabusUnitId: anyItem.syllabusUnitId?.toString(),
+    syllabusSubUnitIds,
+    subUnitTitles
+  };
+};
+
+/**
+ * Map taught sub-unit titles (and any known ids) onto syllabus sub-unit documents
+ * so Log Book save can mark them COMPLETED and raise syllabus %.
+ */
+export const resolveTaughtSyllabusSubUnitIds = async (
+  req: Request,
+  params: {
+    taughtTitles: string[];
+    knownIds?: string[];
+    syllabusId?: string;
+    syllabusUnitId?: string;
+    syllabusChapterId?: string;
+    subjectId?: string;
+  }
+): Promise<string[]> => {
+  const schoolId = tenantObjectId(req);
+  const found = new Set(
+    (params.knownIds ?? [])
+      .map((id) => asId(id))
+      .filter((id): id is string => Boolean(id))
+  );
+  const titles = (params.taughtTitles ?? []).map((t) => t.trim()).filter(Boolean);
+  if (titles.length === 0) return [...found];
+
+  const filter: Record<string, unknown> = { schoolId };
+  const syllabusId = asId(params.syllabusId);
+  const unitId = asId(params.syllabusUnitId);
+  const chapterId = asId(params.syllabusChapterId);
+  if (syllabusId) filter.syllabusId = syllabusId;
+  if (unitId) filter.unitId = unitId;
+  if (chapterId) filter.chapterId = chapterId;
+
+  if (!filter.syllabusId && params.subjectId) {
+    const siblingIds = await expandCurriculumSubjectIds(schoolId, params.subjectId);
+    const syllabi = await AcademicSyllabus.find({
+      schoolId,
+      subjectId: siblingIds.length > 0 ? { $in: siblingIds } : params.subjectId,
+      isDeleted: false
+    })
+      .select("_id")
+      .lean();
+    if (syllabi.length > 0) {
+      filter.syllabusId = { $in: syllabi.map((row) => row._id) };
+    }
+  }
+
+  const rows = await AcademicSyllabusSubUnit.find(filter).select("_id heading").lean();
+  const wanted = new Set(titles.map(headingKey).filter(Boolean));
+  const wantedRaw = new Set(titles.map((t) => t.trim().toLowerCase()));
+  for (const row of rows) {
+    const raw = String(row.heading || "").trim().toLowerCase();
+    const key = headingKey(row.heading);
+    if ((key && wanted.has(key)) || (raw && wantedRaw.has(raw))) {
+      found.add(row._id.toString());
+    }
+  }
+  return [...found];
+};
+
 export const assertNoDuplicateLogBookForItemDate = async (
   req: Request,
   lessonPlanItemId: string,

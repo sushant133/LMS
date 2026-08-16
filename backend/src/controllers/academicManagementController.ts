@@ -54,6 +54,9 @@ import {
   assertTeachingDateWithinSessionPlanUnits,
   assertUniqueUnitsInLessonPlan,
   assertNoDuplicateLogBookForItemDate,
+  nextLogBookPeriodNumber,
+  resolveLogBookLessonPlanLink,
+  resolveTaughtSyllabusSubUnitIds,
   assertSyllabusAccess,
   assertTeacherOwnership,
   buildAcademicFilter,
@@ -2109,6 +2112,8 @@ export const listLogBookEntries = asyncHandler(async (req: Request, res: Respons
     matchesKeyword(filters.keyword, [
       entry?.topicCovered,
       entry?.unit,
+      entry?.subUnitTitle,
+      ...(entry?.subUnitTitles ?? []),
       entry?.subject?.name,
       entry?.teacher?.user?.fullName,
       entry?.reviewStatus
@@ -2127,108 +2132,78 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     if (payload.teacherId !== scope.teacherId) throw new ApiError(403, "Teachers can only create their own log book entries");
   }
 
-  // Prefer Session Plan unit; optionally link a Lesson Plan topic
-  const unitDoc = await AcademicSessionPlanUnit.findById(payload.sessionPlanUnitId).lean();
-  if (!unitDoc || unitDoc.schoolId.toString() !== tenantObjectId(req).toString()) {
-    throw new ApiError(400, "Select a valid unit from the Session Plan.");
+  // Unit / Lesson Plan links are resolved so Log Book updates completion %
+  const unitId = optionalObjectId(payload.sessionPlanUnitId);
+  let unitDoc = unitId ? await AcademicSessionPlanUnit.findById(unitId).lean() : null;
+  if (unitDoc && unitDoc.schoolId.toString() !== tenantObjectId(req).toString()) {
+    unitDoc = null;
   }
 
-  let unitLabel = payload.unit || `Unit ${unitDoc.unitNo}: ${unitDoc.chapterName}`;
-  let lessonPlanId: string | undefined = payload.lessonPlanId || undefined;
-  let lessonPlanItemId: string | undefined =
-    payload.lessonPlanItemId && payload.lessonPlanItemId.length > 0
-      ? payload.lessonPlanItemId
-      : undefined;
+  let unitLabel =
+    (payload.unit || "").trim() ||
+    (unitDoc ? `Unit ${unitDoc.unitNo}: ${unitDoc.chapterName}` : "");
+  let lessonPlanId: string | undefined = optionalObjectId(payload.lessonPlanId);
+  let lessonPlanItemId: string | undefined = optionalObjectId(payload.lessonPlanItemId);
 
-  if (lessonPlanItemId) {
-    const item = await AcademicLessonPlanItem.findById(lessonPlanItemId).lean();
-    if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
-      throw new ApiError(400, "Invalid lesson plan topic selected.");
+  const link = await resolveLogBookLessonPlanLink(req, {
+    lessonPlanItemId,
+    sessionPlanUnitId: unitId || payload.sessionPlanUnitId,
+    teacherId: payload.teacherId,
+    subjectId: payload.subjectId,
+    dateBs
+  });
+  if (link) {
+    lessonPlanItemId = link.itemId;
+    lessonPlanId = link.planId;
+    if (!unitDoc && link.sessionPlanUnitId) {
+      const linkedUnit = await AcademicSessionPlanUnit.findById(link.sessionPlanUnitId).lean();
+      if (linkedUnit && linkedUnit.schoolId.toString() === tenantObjectId(req).toString()) {
+        unitDoc = linkedUnit;
+        unitLabel =
+          unitLabel || `Unit ${linkedUnit.unitNo}: ${linkedUnit.chapterName}`;
+      }
     }
-    const plan = await AcademicLessonPlan.findOne({
-      _id: item.lessonPlanId,
-      schoolId: tenantObjectId(req),
-      isDeleted: false
-    }).lean();
-    if (!plan) throw new ApiError(400, "Lesson plan for this topic was not found");
-    if (plan.teacherId.toString() !== payload.teacherId) {
-      throw new ApiError(400, "Lesson plan topic does not belong to the selected teacher");
+    unitLabel = unitLabel || unitDoc?.chapterName || "";
+    payload.topicCovered = payload.topicCovered || link.subUnitTitles.join("; ") || unitLabel;
+    if (!payload.syllabusId && link.syllabusId) payload.syllabusId = link.syllabusId;
+    if (!payload.syllabusChapterId && link.syllabusChapterId) {
+      payload.syllabusChapterId = link.syllabusChapterId;
     }
-    if (plan.subjectId.toString() !== payload.subjectId) {
-      throw new ApiError(400, "Lesson plan topic subject does not match this log entry");
+    if (!payload.syllabusUnitId && link.syllabusUnitId) {
+      payload.syllabusUnitId = link.syllabusUnitId;
     }
-    lessonPlanId = plan._id.toString();
-    unitLabel = unitLabel || item.subjectLabel || unitLabel;
-    payload.topicCovered = payload.topicCovered || item.plannedTopic;
-    payload.objectives = payload.objectives || item.learningObjectives || "";
-    // Inherit hierarchical syllabus links from the Lesson Plan item
-    const itemAny = item as {
-      syllabusId?: { toString(): string };
-      syllabusChapterId?: { toString(): string };
-      syllabusUnitId?: { toString(): string };
-      syllabusSubUnitId?: { toString(): string };
-      syllabusSubUnitIds?: Array<string | { toString(): string }>;
-      subUnitTitle?: string;
-      subUnitTitles?: string[];
-    };
-    if (!payload.syllabusId && itemAny.syllabusId) payload.syllabusId = itemAny.syllabusId.toString();
-    if (!payload.syllabusChapterId && itemAny.syllabusChapterId) {
-      payload.syllabusChapterId = itemAny.syllabusChapterId.toString();
-    }
-    if (!payload.syllabusUnitId && itemAny.syllabusUnitId) {
-      payload.syllabusUnitId = itemAny.syllabusUnitId.toString();
-    }
-    // Prefer teacher-selected multi sub-units; fall back to full lesson-plan list
     const payloadTitles = Array.isArray(payload.subUnitTitles)
       ? payload.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
       : [];
-    const itemTitles = Array.isArray(itemAny.subUnitTitles)
-      ? itemAny.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
-      : itemAny.subUnitTitle
-        ? String(itemAny.subUnitTitle)
-            .split(/[;\n|]+/)
-            .map((t) => t.trim())
-            .filter(Boolean)
-        : [];
-    if (payloadTitles.length === 0 && itemTitles.length > 0) {
-      payload.subUnitTitles = itemTitles;
-      payload.subUnitTitle = itemTitles.join("; ");
-    } else if (payloadTitles.length > 0) {
+    if (payloadTitles.length > 0) {
       payload.subUnitTitles = payloadTitles;
       payload.subUnitTitle = payloadTitles.join("; ");
-    } else if (!payload.subUnitTitle && itemAny.subUnitTitle) {
-      payload.subUnitTitle = itemAny.subUnitTitle;
+    } else if (link.subUnitTitles.length > 0) {
+      payload.subUnitTitles = link.subUnitTitles;
+      payload.subUnitTitle = link.subUnitTitles.join("; ");
     }
-
     const payloadIds = Array.isArray(payload.syllabusSubUnitIds)
       ? payload.syllabusSubUnitIds.map((id) => String(id).trim()).filter(Boolean)
       : [];
-    const itemIds = Array.isArray(itemAny.syllabusSubUnitIds)
-      ? itemAny.syllabusSubUnitIds.map((id) => String(id).toString().trim()).filter(Boolean)
-      : itemAny.syllabusSubUnitId
-        ? [itemAny.syllabusSubUnitId.toString()]
-        : [];
-    if (payloadIds.length === 0 && itemIds.length > 0 && payloadTitles.length === 0) {
-      // Inherit all planned syllabus links only when teacher did not narrow titles
-      payload.syllabusSubUnitIds = itemIds;
-      payload.syllabusSubUnitId = itemIds[0] || "";
-    } else if (payloadIds.length > 0) {
+    if (payloadIds.length > 0) {
       payload.syllabusSubUnitIds = payloadIds;
       payload.syllabusSubUnitId = payloadIds[0] || "";
-    } else if (!payload.syllabusSubUnitId && itemAny.syllabusSubUnitId) {
-      payload.syllabusSubUnitId = itemAny.syllabusSubUnitId.toString();
+    } else if (link.syllabusSubUnitIds.length > 0 && payloadTitles.length === 0) {
+      payload.syllabusSubUnitIds = link.syllabusSubUnitIds;
+      payload.syllabusSubUnitId = link.syllabusSubUnitIds[0] || "";
     }
-    await assertNoDuplicateLogBookForItemDate(req, lessonPlanItemId, dateBs);
   }
 
   // Inherit chapter link from Session Plan unit when not set
-  const unitAny = unitDoc as {
-    syllabusId?: { toString(): string };
-    syllabusChapterId?: { toString(): string };
-  };
-  if (!payload.syllabusId && unitAny.syllabusId) payload.syllabusId = unitAny.syllabusId.toString();
-  if (!payload.syllabusChapterId && unitAny.syllabusChapterId) {
-    payload.syllabusChapterId = unitAny.syllabusChapterId.toString();
+  if (unitDoc) {
+    const unitAny = unitDoc as {
+      syllabusId?: { toString(): string };
+      syllabusChapterId?: { toString(): string };
+    };
+    if (!payload.syllabusId && unitAny.syllabusId) payload.syllabusId = unitAny.syllabusId.toString();
+    if (!payload.syllabusChapterId && unitAny.syllabusChapterId) {
+      payload.syllabusChapterId = unitAny.syllabusChapterId.toString();
+    }
   }
 
   const taughtTitles = Array.isArray(payload.subUnitTitles)
@@ -2243,15 +2218,17 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
   payload.subUnitTitle = taughtTitles.join("; ");
 
   if (taughtTitles.length > 0) {
+    const unitName = unitDoc?.chapterName || unitLabel;
     payload.topicCovered =
       payload.topicCovered ||
-      `${unitDoc.chapterName} — ${taughtTitles.join("; ")}`;
+      (unitName ? `${unitName} — ${taughtTitles.join("; ")}` : taughtTitles.join("; "));
   } else {
     payload.topicCovered =
-      payload.topicCovered || unitDoc.topicsCovered || unitDoc.chapterName;
+      payload.topicCovered || unitDoc?.topicsCovered || unitDoc?.chapterName || unitLabel || "";
   }
   payload.unit = unitLabel;
-  payload.sessionPlanUnitId = unitDoc._id.toString();
+  if (unitDoc) payload.sessionPlanUnitId = unitDoc._id.toString();
+  else delete (payload as { sessionPlanUnitId?: string }).sessionPlanUnitId;
   // Never assign "" to ObjectId fields — use undefined when unlinked
   if (lessonPlanId) payload.lessonPlanId = lessonPlanId;
   else delete (payload as { lessonPlanId?: string }).lessonPlanId;
@@ -2288,21 +2265,35 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
   });
 
   const count = await AcademicLogBookEntry.countDocuments({ logBookId, isDeleted: false });
-
-  const taughtSubUnitIds = optionalObjectIdList(
-    Array.isArray(payload.syllabusSubUnitIds)
-      ? payload.syllabusSubUnitIds
-      : payload.syllabusSubUnitId
-        ? [payload.syllabusSubUnitId]
-        : []
+  const periodNumber = await nextLogBookPeriodNumber(
+    req,
+    payload.teacherId,
+    payload.subjectId,
+    dateBs
   );
+
+  const taughtSubUnitIds = await resolveTaughtSyllabusSubUnitIds(req, {
+    taughtTitles,
+    knownIds: [
+      ...(Array.isArray(payload.syllabusSubUnitIds) ? payload.syllabusSubUnitIds : []),
+      payload.syllabusSubUnitId || ""
+    ],
+    syllabusId:
+      payload.syllabusId ||
+      (unitDoc as { syllabusId?: { toString(): string } } | null)?.syllabusId?.toString?.(),
+    syllabusUnitId: payload.syllabusUnitId,
+    syllabusChapterId:
+      payload.syllabusChapterId ||
+      (unitDoc as { syllabusChapterId?: { toString(): string } } | null)?.syllabusChapterId?.toString?.(),
+    subjectId: payload.subjectId
+  });
 
   const entry = await AcademicLogBookEntry.create({
     schoolId: tenantObjectId(req),
     logBookId,
     lessonPlanId: lessonPlanId || undefined,
     lessonPlanItemId: lessonPlanItemId || undefined,
-    sessionPlanUnitId: unitDoc._id,
+    sessionPlanUnitId: unitDoc?._id,
     subUnitTitles: taughtTitles,
     subUnitTitle: taughtTitles.join("; "),
     syllabusId: optionalObjectId(payload.syllabusId),
@@ -2324,12 +2315,12 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     serialNo: count + 1,
     dateBs,
     unit: unitLabel,
-    topicCovered: payload.topicCovered,
+    topicCovered: payload.topicCovered || "",
     objectives: payload.objectives || "",
     teachingMethod: payload.teachingMethod || "",
     teachingAids: payload.teachingAids || "",
     theoryPractical: payload.theoryPractical || "THEORY",
-    periodNumber: payload.periodNumber,
+    periodNumber,
     startTime: payload.startTime?.trim() || undefined,
     endTime: payload.endTime?.trim() || undefined,
     attendancePresent: attendance.present,
@@ -2341,7 +2332,7 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     difficultiesFaced: payload.difficultiesFaced || "",
     nextClassPlan: payload.nextClassPlan || "",
     attachmentUrl: payload.attachmentUrl?.trim() || undefined,
-    teacherSignature: await getActorName(req.user!.userId),
+    teacherSignature: payload.teacherSignature?.trim() || "",
     audit: { createdBy: actorObjectId(req) }
   });
 
@@ -2403,30 +2394,23 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     throw new ApiError(403, "Approved log book entries cannot be modified");
   }
 
-  const lessonPlanItemId = payload.lessonPlanItemId ?? existing.lessonPlanItemId?.toString();
-  if (!lessonPlanItemId) {
-    throw new ApiError(400, "Log Book entries must remain linked to a Lesson Plan topic.");
-  }
-
-  const dateBs = payload.dateBs ?? existing.dateBs;
-  await assertNoDuplicateLogBookForItemDate(req, lessonPlanItemId, dateBs, existing._id.toString());
-
   // If topic link changed, re-validate and re-populate inherited fields
   if (payload.lessonPlanItemId && payload.lessonPlanItemId !== existing.lessonPlanItemId?.toString()) {
     const item = await AcademicLessonPlanItem.findById(payload.lessonPlanItemId).lean();
-    if (!item || item.schoolId.toString() !== tenantObjectId(req).toString()) {
-      throw new ApiError(400, "Invalid lesson plan item");
+    const plan =
+      item && item.schoolId.toString() === tenantObjectId(req).toString()
+        ? await AcademicLessonPlan.findOne({
+            _id: item.lessonPlanId,
+            schoolId: tenantObjectId(req),
+            isDeleted: false
+          }).lean()
+        : null;
+    if (item && plan) {
+      payload.lessonPlanId = plan._id.toString();
+      if (item.sessionPlanUnitId) payload.sessionPlanUnitId = item.sessionPlanUnitId.toString();
+      if (!payload.topicCovered) payload.topicCovered = item.plannedTopic;
+      if (!payload.objectives) payload.objectives = item.learningObjectives || "";
     }
-    const plan = await AcademicLessonPlan.findOne({
-      _id: item.lessonPlanId,
-      schoolId: tenantObjectId(req),
-      isDeleted: false
-    }).lean();
-    if (!plan) throw new ApiError(400, "Lesson plan for this item was not found");
-    payload.lessonPlanId = plan._id.toString();
-    if (item.sessionPlanUnitId) payload.sessionPlanUnitId = item.sessionPlanUnitId.toString();
-    if (!payload.topicCovered) payload.topicCovered = item.plannedTopic;
-    if (!payload.objectives) payload.objectives = item.learningObjectives || "";
   }
 
   const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
@@ -2448,7 +2432,18 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
         : [])
   );
 
-  if (safePayload.dateBs !== undefined) existing.dateBs = String(safePayload.dateBs);
+  if (safePayload.dateBs !== undefined && String(safePayload.dateBs) !== existing.dateBs) {
+    existing.dateBs = String(safePayload.dateBs);
+    existing.periodNumber = await nextLogBookPeriodNumber(
+      req,
+      existing.teacherId.toString(),
+      existing.subjectId.toString(),
+      existing.dateBs,
+      existing._id.toString()
+    );
+  } else if (safePayload.dateBs !== undefined) {
+    existing.dateBs = String(safePayload.dateBs);
+  }
   if (safePayload.unit !== undefined) existing.unit = String(safePayload.unit ?? "");
   if (safePayload.topicCovered !== undefined) {
     existing.topicCovered = String(safePayload.topicCovered);
@@ -2507,8 +2502,7 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     existing.set("syllabusUnitId", optionalObjectId(safePayload.syllabusUnitId));
   }
   if (safePayload.sessionPlanUnitId !== undefined) {
-    const uid = optionalObjectId(safePayload.sessionPlanUnitId);
-    if (uid) existing.set("sessionPlanUnitId", uid);
+    existing.set("sessionPlanUnitId", optionalObjectId(safePayload.sessionPlanUnitId));
   }
   if (safePayload.lessonPlanId !== undefined) {
     existing.set("lessonPlanId", optionalObjectId(safePayload.lessonPlanId));
@@ -2525,12 +2519,60 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (safePayload.yearId !== undefined) {
     existing.set("yearId", optionalObjectId(safePayload.yearId));
   }
-  existing.set("lessonPlanItemId", lessonPlanItemId);
+  if (payload.lessonPlanItemId !== undefined) {
+    const linkedItemId = optionalObjectId(payload.lessonPlanItemId);
+    if (linkedItemId) existing.set("lessonPlanItemId", linkedItemId);
+  }
+  if (safePayload.teacherSignature !== undefined) {
+    existing.teacherSignature = String(safePayload.teacherSignature ?? "");
+  }
   existing.audit = { ...existing.audit, updatedBy: actorObjectId(req) };
   await existing.save();
 
+  if (!existing.lessonPlanItemId) {
+    const relink = await resolveLogBookLessonPlanLink(req, {
+      lessonPlanItemId: payload.lessonPlanItemId,
+      sessionPlanUnitId: existing.sessionPlanUnitId?.toString(),
+      teacherId: existing.teacherId.toString(),
+      subjectId: existing.subjectId.toString(),
+      dateBs: existing.dateBs
+    });
+    if (relink) {
+      existing.set("lessonPlanItemId", relink.itemId);
+      existing.set("lessonPlanId", relink.planId);
+      if (relink.sessionPlanUnitId) existing.set("sessionPlanUnitId", relink.sessionPlanUnitId);
+      await existing.save();
+    }
+  }
+
+  const updatedTitles = Array.isArray(existing.subUnitTitles)
+    ? existing.subUnitTitles.map((t) => String(t).trim()).filter(Boolean)
+    : [];
+  const updatedSubIds = await resolveTaughtSyllabusSubUnitIds(req, {
+    taughtTitles: updatedTitles,
+    knownIds: (existing.syllabusSubUnitIds ?? []).map((id) => id.toString()),
+    syllabusId: existing.syllabusId?.toString(),
+    syllabusUnitId: existing.syllabusUnitId?.toString(),
+    syllabusChapterId: existing.syllabusChapterId?.toString(),
+    subjectId: existing.subjectId.toString()
+  });
+  if (updatedSubIds.length > 0) {
+    existing.set("syllabusSubUnitIds", updatedSubIds);
+    existing.set("syllabusSubUnitId", updatedSubIds[0]);
+    await existing.save();
+    await AcademicSyllabusSubUnit.updateMany(
+      { _id: { $in: updatedSubIds }, schoolId: tenantObjectId(req) },
+      {
+        $set: {
+          status: "COMPLETED",
+          todaysCoverage: existing.topicCovered || updatedTitles.join("; ") || ""
+        }
+      }
+    );
+  }
+
   if (previousItemId) await syncLessonPlanItemProgress(previousItemId);
-  if (existing.lessonPlanItemId && existing.lessonPlanItemId.toString() !== previousItemId) {
+  if (existing.lessonPlanItemId) {
     await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
   }
   await recordAudit(req, { action: "academic.log_book.update", entity: "LOG_BOOK_ENTRY", entityId: existing._id.toString(), after: existing });

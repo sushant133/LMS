@@ -19,7 +19,6 @@ const SplashScreen = ({ onFinish }: SplashScreenProps) => {
         src="/college-logo.png"
         alt="PHIT College"
         decoding="sync"
-        fetchPriority="high"
         className="pointer-events-none block select-none object-contain object-center"
         style={{
           width: "clamp(4.5rem, 22vmin, 7rem)",

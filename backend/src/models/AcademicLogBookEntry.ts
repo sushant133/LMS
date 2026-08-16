@@ -46,7 +46,7 @@ const entrySchema = new Schema(
     serialNo: { type: Number, required: true, min: 1 },
     dateBs: { type: String, required: true, index: true },
     unit: { type: String, default: "" },
-    topicCovered: { type: String, required: true },
+    topicCovered: { type: String, default: "" },
     objectives: { type: String, default: "" },
     teachingMethod: { type: String, default: "" },
     teachingAids: { type: String, default: "" },
