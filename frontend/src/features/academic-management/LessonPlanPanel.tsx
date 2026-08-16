@@ -13,7 +13,6 @@ import {
 import {
   adToBs,
   bsToAd,
-  getTodayBs,
   parseBsDate,
   type NepaliDate,
 } from "@munatech/nepali-datepicker";
@@ -30,6 +29,7 @@ import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
+
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { NepaliSubjectBanner } from "components/shared/NepaliSubjectBanner";
 import { useAuth } from "features/auth/AuthProvider";
@@ -43,10 +43,10 @@ import {
   filterSubjectsByClass,
   filterSubjectsByYear,
   filtersToParams,
+  collectLessonSubUnitOptions,
   joinSubUnitTitles,
   matchSyllabusSubUnit,
   normalizeSubUnitTitles,
-  parseSubUnitsFromTopics,
   resolveSubjectSelectValue,
   statusBadgeClass,
 } from "./academicManagementUtils";
@@ -60,7 +60,6 @@ import { AcademicYearSubjectTree } from "./AcademicYearSubjectTree";
 import {
   buildAcademicHierarchy,
   buildYearIdToLevelKeyMap,
-  dedupePlansByCurriculum,
   groupByTeacher,
   matchLessonPlanKeyword,
   recordsForCurriculumSubject,
@@ -94,10 +93,10 @@ const unitAllowsTeachingDate = (
   unit: Pick<AcademicSessionPlanUnitRecord, "startDateBs" | "endDateBs">,
   teachingDateBs?: string | null,
 ): boolean => {
-  const date = (teachingDateBs || "").trim();
+  const date = normalizeBsDate(teachingDateBs) || (teachingDateBs || "").trim();
   if (!date) return true;
-  const start = (unit.startDateBs || "").trim();
-  const end = (unit.endDateBs || "").trim();
+  const start = normalizeBsDate(unit.startDateBs);
+  const end = normalizeBsDate(unit.endDateBs);
   if (!start && !end) return true;
   if (start && date < start) return false;
   if (end && date > end) return false;
@@ -113,11 +112,6 @@ const formatUnitDateWindow = (
   if (start) return `from ${start}`;
   if (end) return `until ${end}`;
   return "no date limit";
-};
-
-const formatTodayBs = (): string => {
-  const t = getTodayBs();
-  return `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`;
 };
 
 const nextBsDate = (dateBs: string): string => {
@@ -137,15 +131,103 @@ const nextBsDate = (dateBs: string): string => {
   }
 };
 
+const enumerateBsDates = (startBs: string, endBs: string): string[] => {
+  if (!startBs) return [];
+  const end = endBs && endBs >= startBs ? endBs : startBs;
+  const out: string[] = [];
+  let cur = startBs;
+  for (let i = 0; i < 400; i += 1) {
+    out.push(cur);
+    if (cur >= end) break;
+    const next = nextBsDate(cur);
+    if (!next || next === cur) break;
+    cur = next;
+  }
+  return out;
+};
+
+/** Discrete teaching days fixed on a Session Plan unit (start–end, inclusive). */
+/** Accept YYYY-MM-DD, YYYY/MM/DD, or unpadded YYYY-M-D. */
+const normalizeBsDate = (value?: string | null): string => {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/\//g, "-");
+  const m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return "";
+  const y = m[1]!;
+  const mo = String(Number(m[2])).padStart(2, "0");
+  const d = String(Number(m[3])).padStart(2, "0");
+  return `${y}-${mo}-${d}`;
+};
+
+const unitFixedDates = (
+  unit: Pick<AcademicSessionPlanUnitRecord, "startDateBs" | "endDateBs">,
+): string[] => {
+  const start = normalizeBsDate(unit.startDateBs);
+  const end = normalizeBsDate(unit.endDateBs);
+  if (start && end) {
+    return start <= end ? enumerateBsDates(start, end) : enumerateBsDates(end, start);
+  }
+  if (start) return [start];
+  if (end) return [end];
+  return [];
+};
+
+const sessionPlanFixedDates = (
+  units: Array<Pick<AcademicSessionPlanUnitRecord, "startDateBs" | "endDateBs">>,
+): string[] => {
+  const set = new Set<string>();
+  for (const unit of units) {
+    for (const date of unitFixedDates(unit)) set.add(date);
+  }
+  return [...set].sort();
+};
+
+const dateRangeFromUnits = (
+  units: Array<Pick<AcademicSessionPlanUnitRecord, "startDateBs" | "endDateBs">>,
+): {
+  minBs: string;
+  maxBs: string;
+  minDate?: NepaliDate;
+  maxDate?: NepaliDate;
+} => {
+  let min = "";
+  let max = "";
+  for (const unit of units) {
+    const start = normalizeBsDate(unit.startDateBs);
+    const end = normalizeBsDate(unit.endDateBs) || start;
+    const from = start || end;
+    const to = end || start;
+    if (!from) continue;
+    if (!min || from < min) min = from;
+    if (!max || to > max) max = to;
+  }
+  return {
+    minBs: min,
+    maxBs: max,
+    minDate: min ? (parseBsDate(min) ?? undefined) : undefined,
+    maxDate: max ? (parseBsDate(max) ?? undefined) : undefined,
+  };
+};
+
+const clampBsDate = (dateBs: string, minBs: string, maxBs: string): string => {
+  if (!dateBs) return minBs || "";
+  if (minBs && dateBs < minBs) return minBs;
+  if (maxBs && dateBs > maxBs) return maxBs;
+  return dateBs;
+};
+
 const titleKey = (t: string) => t.trim().toLowerCase();
 
 /** One table row in the college Lesson Plan (S.N | Date | Unit No. | Unit Name | Sub-Unit | C/Hr | Remarks). */
 type LessonPlanTableRow = {
   planId: string;
   dateBs: string;
+  unitId: string;
   unitNo: string;
   unitName: string;
   subUnit: string;
+  subUnits: string[];
   hours: string;
   remarks: string;
 };
@@ -153,45 +235,150 @@ type LessonPlanTableRow = {
 const flattenLessonPlanTableRows = (
   plans: AcademicLessonPlanRecord[],
 ): LessonPlanTableRow[] => {
-  const rows: LessonPlanTableRow[] = [];
+  const merged = new Map<string, LessonPlanTableRow & { subUnits: string[] }>();
   for (const plan of plans) {
-    const dateBs =
+    const planDate =
       plan.teachingDateBs || plan.startDateBs || plan.endDateBs || "";
     const items = [...(plan.items ?? [])].sort(
       (a, b) => (a.serialNo ?? 0) - (b.serialNo ?? 0),
     );
     for (const item of items) {
+      const dateBs =
+        normalizeBsDate(item.itemStartDateBs) ||
+        normalizeBsDate(planDate) ||
+        planDate;
       const subUnits = normalizeSubUnitTitles(
         item.subUnitTitles,
-        item.subUnitTitle,
+        item.subUnitTitle || item.plannedTopic,
       );
-      rows.push({
-        planId: plan._id,
-        dateBs,
-        unitNo:
-          item.unit?.unitNo != null && String(item.unit.unitNo).trim()
-            ? String(item.unit.unitNo)
+      const unitId =
+        item.sessionPlanUnitId || item.unit?._id || `${plan._id}:${item._id}`;
+      const unitNo =
+        item.unit?.unitNo != null && String(item.unit.unitNo).trim()
+          ? String(item.unit.unitNo)
+          : "—";
+      const unitName =
+        (item.unit?.chapterName || item.subjectLabel || "").trim() || "—";
+      const key = `${dateBs}|${unitId}`;
+      const prev = merged.get(key);
+      if (!prev) {
+        merged.set(key, {
+          planId: plan._id,
+          dateBs,
+          unitId,
+          unitNo,
+          unitName,
+          subUnits,
+          subUnit: subUnits.join("; ") || (item.plannedTopic || "").trim() || "—",
+          hours: Number.isFinite(item.estimatedClasses)
+            ? String(item.estimatedClasses)
             : "—",
-        unitName: (item.unit?.chapterName || item.subjectLabel || "").trim() || "—",
-        subUnit:
-          subUnits.length > 0
-            ? subUnits.join(", ")
-            : (item.plannedTopic || "").trim() || "—",
-        hours: Number.isFinite(item.estimatedClasses)
-          ? String(item.estimatedClasses)
-          : "—",
-        remarks: (item.remarks ?? "").trim(),
-      });
+          remarks: (item.remarks ?? "").trim(),
+        });
+        continue;
+      }
+      const allSubs = normalizeSubUnitTitles(
+        [...prev.subUnits, ...subUnits],
+        "",
+      );
+      prev.subUnits = allSubs;
+      prev.subUnit = allSubs.join("; ") || prev.subUnit;
+      if (item.remarks?.trim() && !prev.remarks.includes(item.remarks.trim())) {
+        prev.remarks = [prev.remarks, item.remarks.trim()]
+          .filter(Boolean)
+          .join("; ");
+      }
     }
   }
-  rows.sort((a, b) => {
-    if (a.dateBs !== b.dateBs) return a.dateBs.localeCompare(b.dateBs);
-    const an = Number(a.unitNo);
-    const bn = Number(b.unitNo);
-    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
-    return 0;
-  });
-  return rows;
+  return [...merged.values()].sort((a, b) => {
+      if (a.dateBs !== b.dateBs) return a.dateBs.localeCompare(b.dateBs);
+      const an = Number(a.unitNo);
+      const bn = Number(b.unitNo);
+      if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+      return 0;
+    });
+};
+
+const lessonPlanStatusRank = (status?: string) => {
+  switch (status) {
+    case "APPROVED":
+      return 5;
+    case "PENDING_APPROVAL":
+    case "SUBMITTED":
+      return 4;
+    case "DRAFT":
+      return 3;
+    case "REJECTED":
+      return 2;
+    default:
+      return 1;
+  }
+};
+
+/** Keep every teaching day; drop only same-day copies of the same subject/teacher. */
+const dedupeLessonPlansByDay = (
+  plans: AcademicLessonPlanRecord[],
+): AcademicLessonPlanRecord[] => {
+  const best = new Map<string, AcademicLessonPlanRecord>();
+  for (const plan of plans) {
+    const date =
+      normalizeBsDate(plan.teachingDateBs) ||
+      normalizeBsDate(plan.startDateBs) ||
+      plan.teachingDateBs ||
+      plan.startDateBs ||
+      plan._id;
+    const key = `${plan.teacherId || ""}::${plan.subject?.code || plan.subjectId}::${date}`;
+    const existing = best.get(key);
+    if (!existing) {
+      best.set(key, plan);
+      continue;
+    }
+    const rankNew = lessonPlanStatusRank(plan.status);
+    const rankOld = lessonPlanStatusRank(existing.status);
+    if (rankNew >= rankOld) best.set(key, plan);
+  }
+  return [...best.values()];
+};
+
+const mergeItemsByUnit = (
+  items: AcademicLessonPlanInput["items"],
+): AcademicLessonPlanInput["items"] => {
+  const map = new Map<string, AcademicLessonPlanInput["items"][number]>();
+  for (const item of items) {
+    const key = item.sessionPlanUnitId;
+    if (!key) continue;
+    const titles = normalizeSubUnitTitles(item.subUnitTitles, item.subUnitTitle);
+    const prev = map.get(key);
+    if (!prev) {
+      const joined = joinSubUnitTitles(titles);
+      map.set(key, {
+        ...item,
+        subUnitTitles: titles,
+        subUnitTitle: joined,
+        plannedTopic: joined || item.plannedTopic,
+      });
+      continue;
+    }
+    const mergedTitles = normalizeSubUnitTitles(
+      [...(prev.subUnitTitles ?? []), ...titles],
+      "",
+    );
+    const joined = joinSubUnitTitles(mergedTitles);
+    map.set(key, {
+      ...prev,
+      subUnitTitles: mergedTitles,
+      subUnitTitle: joined,
+      plannedTopic: joined || prev.plannedTopic,
+      remarks: [prev.remarks, item.remarks].filter(Boolean).join("; "),
+      syllabusSubUnitIds: [
+        ...new Set([
+          ...(prev.syllabusSubUnitIds ?? []),
+          ...(item.syllabusSubUnitIds ?? []),
+        ]),
+      ],
+    });
+  }
+  return [...map.values()].map((item, i) => ({ ...item, serialNo: i + 1 }));
 };
 
 const emptyItem = (
@@ -590,14 +777,15 @@ export const LessonPlanPanel = ({
       form.sessionPlanId !== usableSessionPlans[0]!._id
     ) {
       const plan = usableSessionPlans[0]!;
-      const starts = plan.units
-        .map((u) => u.startDateBs)
-        .filter(Boolean) as string[];
+      const planDates = sessionPlanFixedDates(plan.units ?? []);
       setForm((current) => {
         const defaultTeaching =
-          current.teachingDateBs ||
-          current.startDateBs ||
-          (starts.length ? [...starts].sort()[0]! : formatTodayBs());
+          (current.teachingDateBs &&
+          planDates.includes(current.teachingDateBs)
+            ? current.teachingDateBs
+            : "") ||
+          planDates[0] ||
+          "";
         const firstRow = {
           ...emptyItem(1),
           itemStartDateBs: defaultTeaching,
@@ -818,15 +1006,17 @@ export const LessonPlanPanel = ({
 
   const applyRowUnit = (index: number, unitId: string) => {
     const unit = units.find((u) => u._id === unitId);
+    const range = unit ? dateRangeFromUnits([unit]) : sessionPlanDateRange;
     setForm((current) => ({
       ...current,
       items: current.items.map((row, i) => {
         if (i !== index) return row;
-        const date =
+        const currentDate =
           row.itemStartDateBs ||
           current.teachingDateBs ||
           current.startDateBs ||
           "";
+        const date = clampBsDate(currentDate, range.minBs, range.maxBs);
         const next = emptyItem(i + 1, unit, []);
         return {
           ...next,
@@ -884,21 +1074,24 @@ export const LessonPlanPanel = ({
         last?.itemStartDateBs ||
         current.teachingDateBs ||
         current.startDateBs ||
-        formatTodayBs();
-      const nextDate = last?.itemStartDateBs
-        ? nextBsDate(lastDate)
-        : lastDate;
+        sessionPlanDateRange.minBs ||
+        "";
+      const date = clampBsDate(
+        lastDate,
+        sessionPlanDateRange.minBs,
+        sessionPlanDateRange.maxBs,
+      );
       return {
         ...current,
-        teachingDateBs: current.teachingDateBs || nextDate,
-        startDateBs: current.startDateBs || nextDate,
-        endDateBs: current.endDateBs || nextDate,
+        teachingDateBs: current.teachingDateBs || date,
+        startDateBs: current.startDateBs || date,
+        endDateBs: current.endDateBs || date,
         items: [
           ...current.items,
           {
             ...emptyItem(current.items.length + 1),
-            itemStartDateBs: nextDate,
-            itemEndDateBs: nextDate,
+            itemStartDateBs: date,
+            itemEndDateBs: date,
           },
         ],
       };
@@ -919,8 +1112,8 @@ export const LessonPlanPanel = ({
       toast.error("Select a Session Plan first");
       return;
     }
-    if (form.items.length === 0) {
-      toast.error("Add at least one row (date, unit, sub-unit)");
+    if (form.items.every((row) => !row.sessionPlanUnitId)) {
+      toast.error("Select a unit on at least one row");
       return;
     }
     const sessionPlan = usableSessionPlans.find(
@@ -948,36 +1141,31 @@ export const LessonPlanPanel = ({
     >();
     for (let index = 0; index < form.items.length; index += 1) {
       const item = form.items[index]!;
+      if (!item.sessionPlanUnitId) {
+        continue;
+      }
       const unit = units.find((u) => u._id === item.sessionPlanUnitId);
       const date = (
         item.itemStartDateBs ||
+        (unit ? dateRangeFromUnits([unit]).minBs : "") ||
         form.teachingDateBs ||
         form.startDateBs ||
         ""
       ).trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        toast.error(`Row ${index + 1}: pick a date`);
-        return;
-      }
-      if (!item.sessionPlanUnitId) {
-        toast.error(`Row ${index + 1}: select a unit`);
+        toast.error(`Row ${index + 1}: pick a date inside this unit’s range`);
         return;
       }
       if (unit && !unitAllowsTeachingDate(unit, date)) {
         toast.error(
-          `Row ${index + 1}: Unit ${unit.unitNo} is scheduled ${formatUnitDateWindow(unit)}. Date ${date} is outside that range.`,
+          `Row ${index + 1}: Unit ${unit.unitNo} can only be planned ${formatUnitDateWindow(unit)}.`,
         );
         return;
       }
-      const available = parseSubUnitsFromTopics(unit?.topicsCovered);
       const titles = normalizeSubUnitTitles(
         item.subUnitTitles,
         item.subUnitTitle,
       );
-      if (available.length > 0 && titles.length === 0) {
-        toast.error(`Row ${index + 1}: select at least one sub-unit`);
-        return;
-      }
       const joined = joinSubUnitTitles(titles);
       const plannedTopic = (
         item.plannedTopic ||
@@ -1019,14 +1207,26 @@ export const LessonPlanPanel = ({
       groups.set(date, list);
     }
 
-    const existingPlans = plansQuery.data ?? [];
+    if (groups.size === 0) {
+      toast.error("Add at least one row with a unit and date");
+      return;
+    }
+
+    for (const [date, list] of groups) {
+      groups.set(date, mergeItemsByUnit(list));
+    }
+
     setSavingTable(true);
     try {
+      const latestPlans = await unwrap<AcademicLessonPlanRecord[]>(
+        api.get("/academic-management/lesson-plans", { params: listParams }),
+      );
+      const existingPlans = latestPlans ?? plansQuery.data ?? [];
       let created = 0;
       let updated = 0;
       const dates = [...groups.keys()].sort();
       for (const date of dates) {
-        const items = groups.get(date)!;
+        let items = groups.get(date)!;
         const payload: AcademicLessonPlanInput = {
           academicYearBs: form.academicYearBs,
           session: form.session || form.academicYearBs,
@@ -1046,31 +1246,120 @@ export const LessonPlanPanel = ({
           monthlyDescription: form.monthlyDescription || "",
           items,
         };
+        const editingPlan = editingId
+          ? existingPlans.find((p) => p._id === editingId)
+          : undefined;
+        const editingDate =
+          editingPlan?.teachingDateBs || editingPlan?.startDateBs || "";
         const existing =
-          (editingId &&
-          (existingPlans.find((p) => p._id === editingId)?.teachingDateBs ||
-            existingPlans.find((p) => p._id === editingId)?.startDateBs) ===
-            date
-            ? existingPlans.find((p) => p._id === editingId)
-            : undefined) ||
+          (editingPlan && editingDate === date ? editingPlan : undefined) ||
           existingPlans.find((p) => {
             const pDate = p.teachingDateBs || p.startDateBs || "";
+            const sameSession =
+              !form.sessionPlanId ||
+              !p.sessionPlanId ||
+              p.sessionPlanId === form.sessionPlanId;
+            const sameTeacher =
+              !resolvedTeacherId || p.teacherId === resolvedTeacherId;
             return (
-              p.sessionPlanId === form.sessionPlanId &&
+              sameSession &&
+              sameTeacher &&
               pDate === date &&
               (p.status === "DRAFT" || p.status === "REJECTED")
             );
           });
+        if (existing && existing._id !== editingId) {
+          const existingItems: AcademicLessonPlanInput["items"] =
+            existing.items.map((item, index) => {
+              const titles = normalizeSubUnitTitles(
+                item.subUnitTitles,
+                item.subUnitTitle,
+              );
+              return {
+                serialNo: item.serialNo || index + 1,
+                sessionPlanUnitId: item.sessionPlanUnitId || "",
+                subUnitTitle: joinSubUnitTitles(titles),
+                subUnitTitles: titles,
+                syllabusId: item.syllabusId || "",
+                syllabusChapterId: item.syllabusChapterId || "",
+                syllabusUnitId: item.syllabusUnitId || "",
+                syllabusSubUnitId: item.syllabusSubUnitId || "",
+                syllabusSubUnitIds: item.syllabusSubUnitIds ?? [],
+                subjectLabel: item.subjectLabel || "",
+                plannedTopic: item.plannedTopic || joinSubUnitTitles(titles),
+                description: item.description || "",
+                learningObjectives: item.learningObjectives || "",
+                teachingMethod: item.teachingMethod || "",
+                teachingAids: item.teachingAids || "",
+                assessmentMethod: item.assessmentMethod || "",
+                deadline: item.deadline || "",
+                itemStartDateBs: date,
+                itemEndDateBs: date,
+                estimatedClasses: item.estimatedClasses || 1,
+                remarks: item.remarks || "",
+              };
+            });
+          items = mergeItemsByUnit([...existingItems, ...items]);
+          payload.items = items;
+        }
         if (existing) {
           await unwrap(
             api.put(`/academic-management/lesson-plans/${existing._id}`, payload),
           );
           updated += 1;
         } else {
-          await unwrap(
-            api.post("/academic-management/lesson-plans", payload),
-          );
-          created += 1;
+          try {
+            await unwrap(
+              api.post("/academic-management/lesson-plans", payload),
+            );
+            created += 1;
+          } catch (error) {
+            const message = parseErrorMessage(error);
+            if (!/duplicate|already|E11000/i.test(message)) throw error;
+            const retryList = await unwrap<AcademicLessonPlanRecord[]>(
+              api.get("/academic-management/lesson-plans", { params: listParams }),
+            );
+            const retry = retryList.find((p) => {
+              const pDate = p.teachingDateBs || p.startDateBs || "";
+              return pDate === date && (p.status === "DRAFT" || p.status === "REJECTED");
+            });
+            if (!retry) throw error;
+            const existingItems: AcademicLessonPlanInput["items"] =
+              retry.items.map((item, index) => {
+                const titles = normalizeSubUnitTitles(
+                  item.subUnitTitles,
+                  item.subUnitTitle,
+                );
+                return {
+                  serialNo: item.serialNo || index + 1,
+                  sessionPlanUnitId: item.sessionPlanUnitId || "",
+                  subUnitTitle: joinSubUnitTitles(titles),
+                  subUnitTitles: titles,
+                  syllabusId: item.syllabusId || "",
+                  syllabusChapterId: item.syllabusChapterId || "",
+                  syllabusUnitId: item.syllabusUnitId || "",
+                  syllabusSubUnitId: item.syllabusSubUnitId || "",
+                  syllabusSubUnitIds: item.syllabusSubUnitIds ?? [],
+                  subjectLabel: item.subjectLabel || "",
+                  plannedTopic: item.plannedTopic || joinSubUnitTitles(titles),
+                  description: item.description || "",
+                  learningObjectives: item.learningObjectives || "",
+                  teachingMethod: item.teachingMethod || "",
+                  teachingAids: item.teachingAids || "",
+                  assessmentMethod: item.assessmentMethod || "",
+                  deadline: item.deadline || "",
+                  itemStartDateBs: date,
+                  itemEndDateBs: date,
+                  estimatedClasses: item.estimatedClasses || 1,
+                  remarks: item.remarks || "",
+                };
+              });
+            payload.items = mergeItemsByUnit([...existingItems, ...items]);
+            await unwrap(
+              api.put(`/academic-management/lesson-plans/${retry._id}`, payload),
+            );
+            updated += 1;
+          }
         }
       }
       const parts = [
@@ -1267,8 +1556,8 @@ export const LessonPlanPanel = ({
       yearIdToLevelKey,
       isCollege,
     );
-    // Collapse batch-instance duplicates; keep separate plans per teacher
-    return dedupePlansByCurriculum(matched, subjects, true);
+    // Keep every teaching day. Only collapse same-day batch-instance copies.
+    return dedupeLessonPlansByDay(matched);
   }, [
     filteredPlans,
     selectedSubject,
@@ -1288,45 +1577,54 @@ export const LessonPlanPanel = ({
     return filteredPlans;
   }, [selectedSubject, selectedPlans, filteredPlans]);
 
-  const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
+  const selectedSessionPlan = useMemo(
+    () => usableSessionPlans.find((p) => p._id === form.sessionPlanId),
+    [usableSessionPlans, form.sessionPlanId],
+  );
 
-  /**
-   * Outer bounds of the Session Plan: earliest unit start → latest unit end.
-   *
-   * The teaching date picker is clamped to this so a teacher cannot choose a day
-   * the Session Plan does not cover. Per-unit windows are narrower still and are
-   * enforced by the API; this only stops the obviously-out-of-range picks before
-   * a save round-trip. Units with no dates set leave the corresponding bound open.
-   */
-  const sessionPlanDateBounds = useMemo(() => {
-    const open: {
-      minBs: string;
-      maxBs: string;
-      minDate?: NepaliDate;
-      maxDate?: NepaliDate;
-    } = { minBs: "", maxBs: "" };
-    if (units.length === 0) return open;
-    let min = "";
-    let max = "";
-    for (const unit of units) {
-      const start = (unit.startDateBs || "").trim();
-      const end = (unit.endDateBs || "").trim();
-      /*
-       * A unit with no window is unconstrained server-side, so one dateless unit
-       * means the whole picker has to stay open — clamping to the units that do
-       * have dates would block a legitimately schedulable day.
-       */
-      if (!start || !end) return open;
-      if (!min || start < min) min = start;
-      if (!max || end > max) max = end;
-    }
-    return {
-      minBs: min,
-      maxBs: max,
-      minDate: parseBsDate(min) ?? undefined,
-      maxDate: parseBsDate(max) ?? undefined,
+  const units = useMemo(() => {
+    const byId = new Map<string, AcademicSessionPlanUnitRecord>();
+    const add = (list?: AcademicSessionPlanUnitRecord[]) => {
+      for (const unit of list ?? []) {
+        if (!unit?._id) continue;
+        const prev = byId.get(unit._id);
+        byId.set(unit._id, {
+          ...(prev ?? unit),
+          ...unit,
+          topicsCovered: unit.topicsCovered?.trim() || prev?.topicsCovered || "",
+          chapterName: unit.chapterName?.trim() || prev?.chapterName || "",
+          syllabusId: unit.syllabusId || prev?.syllabusId,
+          syllabusChapterId: unit.syllabusChapterId || prev?.syllabusChapterId,
+          syllabusUnitId: unit.syllabusUnitId || prev?.syllabusUnitId,
+          startDateBs:
+            normalizeBsDate(unit.startDateBs) ||
+            normalizeBsDate(prev?.startDateBs) ||
+            unit.startDateBs ||
+            prev?.startDateBs ||
+            "",
+          endDateBs:
+            normalizeBsDate(unit.endDateBs) ||
+            normalizeBsDate(prev?.endDateBs) ||
+            unit.endDateBs ||
+            prev?.endDateBs ||
+            "",
+        });
+      }
     };
-  }, [units]);
+    add(selectedSessionPlan?.units);
+    add(coverageQuery.data?.units);
+    add(unitsQuery.data);
+    return [...byId.values()].sort((a, b) => (a.unitNo ?? 0) - (b.unitNo ?? 0));
+  }, [
+    selectedSessionPlan?.units,
+    coverageQuery.data?.units,
+    unitsQuery.data,
+  ]);
+
+  const sessionPlanDateRange = useMemo(
+    () => dateRangeFromUnits(units),
+    [units],
+  );
 
   const updateItemField = <K extends keyof AcademicLessonPlanInput["items"][number]>(
     index: number,
@@ -1552,18 +1850,16 @@ export const LessonPlanPanel = ({
                     const plan = usableSessionPlans.find(
                       (row) => row._id === event.target.value,
                     );
-                    const starts = (plan?.units ?? [])
-                      .map((u) => u.startDateBs)
-                      .filter(Boolean) as string[];
+                    const planDates = sessionPlanFixedDates(plan?.units ?? []);
                     autoSelectedForPlanRef.current = event.target.value || "";
-                    const fromUnits =
-                      starts.length ? [...starts].sort()[0]! : "";
                     setForm((current) => {
                       const defaultTeaching =
-                        current.teachingDateBs ||
-                        current.startDateBs ||
-                        fromUnits ||
-                        formatTodayBs();
+                        (current.teachingDateBs &&
+                        planDates.includes(current.teachingDateBs)
+                          ? current.teachingDateBs
+                          : "") ||
+                        planDates[0] ||
+                        "";
                       const firstRow =
                         current.items[0] ??
                         {
@@ -1640,48 +1936,81 @@ export const LessonPlanPanel = ({
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Lesson plan table
                   </p>
-                  <Button type="button" size="sm" variant="outline" onClick={addLessonRow}>
-                    <Plus className="mr-1 h-3.5 w-3.5" />
-                    Add row
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={addLessonRow}>
+                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      Add row
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setForm((current) => {
+                          const last = current.items[current.items.length - 1];
+                          const lastDate =
+                            last?.itemStartDateBs ||
+                            current.teachingDateBs ||
+                            sessionPlanDateRange.minBs ||
+                            "";
+                          const nextDate = clampBsDate(
+                            nextBsDate(lastDate || sessionPlanDateRange.minBs),
+                            sessionPlanDateRange.minBs,
+                            sessionPlanDateRange.maxBs,
+                          );
+                          return {
+                            ...current,
+                            items: [
+                              ...current.items,
+                              {
+                                ...emptyItem(current.items.length + 1),
+                                itemStartDateBs: nextDate,
+                                itemEndDateBs: nextDate,
+                              },
+                            ],
+                          };
+                        });
+                      }}
+                    >
+                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      Add next day
+                    </Button>
+                  </div>
                 </div>
-                {sessionPlanDateBounds.minBs && sessionPlanDateBounds.maxBs ? (
-                  <p className="text-xs text-slate-500">
-                    Session Plan dates: {sessionPlanDateBounds.minBs} →{" "}
-                    {sessionPlanDateBounds.maxBs}
-                  </p>
-                ) : null}
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full min-w-[860px] border-collapse text-sm">
-                    <thead className="bg-slate-50">
+                <div className="overflow-x-auto rounded-xl border border-slate-300">
+                  <table className="w-full min-w-[980px] border-collapse text-sm">
+                    <thead className="bg-slate-100">
                       <tr>
-                        <th className="w-10 border-b border-slate-200 px-2 py-2 text-center text-xs font-semibold">
+                        <th className="w-12 border border-slate-300 px-2 py-2 text-center text-xs font-semibold">
                           S.N
                         </th>
-                        <th className="w-36 border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
+                        <th className="w-20 border border-slate-300 px-2 py-2 text-center text-xs font-semibold">
+                          Unit No.
+                        </th>
+                        <th className="w-56 border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
+                          Unit Name
+                        </th>
+                        <th className="w-[13.5rem] border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
                           Date
                         </th>
-                        <th className="w-48 border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
-                          Unit No. / Unit Name
-                        </th>
-                        <th className="border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
+                        <th className="border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
                           Sub-Unit
                         </th>
-                        <th className="w-16 border-b border-slate-200 px-2 py-2 text-center text-xs font-semibold">
+                        <th className="w-16 border border-slate-300 px-2 py-2 text-center text-xs font-semibold">
                           C/Hr
                         </th>
-                        <th className="w-36 border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
+                        <th className="w-32 border border-slate-300 px-2 py-2 text-left text-xs font-semibold">
                           Remarks
                         </th>
-                        <th className="w-10 border-b border-slate-200 px-1 py-2" />
+                        <th className="w-10 border border-slate-300 px-1 py-2" />
                       </tr>
                     </thead>
                     <tbody>
                       {form.items.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={7}
-                            className="px-3 py-6 text-center text-sm text-slate-500"
+                            colSpan={8}
+                            className="border border-slate-300 px-3 py-6 text-center text-sm text-slate-500"
                           >
                             Click Add row to start the table.
                           </td>
@@ -1691,73 +2020,100 @@ export const LessonPlanPanel = ({
                           const unit = units.find(
                             (u) => u._id === item.sessionPlanUnitId,
                           );
-                          const subOptions = parseSubUnitsFromTopics(
-                            unit?.topicsCovered,
-                          );
                           const selectedTitles = normalizeSubUnitTitles(
                             item.subUnitTitles,
                             item.subUnitTitle,
                           );
+                          const subOptions = [
+                            ...collectLessonSubUnitOptions(unit, [
+                              matchedSyllabus,
+                              ...(syllabiQuery.data ?? []),
+                            ]),
+                            ...selectedTitles,
+                          ].filter(
+                            (t, i, arr) =>
+                              arr.findIndex(
+                                (x) => titleKey(x) === titleKey(t),
+                              ) === i,
+                          );
+                          const rowRange = unit
+                            ? dateRangeFromUnits([unit])
+                            : { minBs: "", maxBs: "", minDate: undefined, maxDate: undefined };
                           const rowDate =
                             item.itemStartDateBs ||
-                            form.teachingDateBs ||
-                            form.startDateBs ||
+                            (unit ? rowRange.minBs : "") ||
                             "";
-                          const unitsForDate = units.filter((u) =>
-                            unitAllowsTeachingDate(u, rowDate),
-                          );
-                          const unitChoices =
-                            unitsForDate.length > 0 ? unitsForDate : units;
+                          const dateValue =
+                            unit && rowDate && unitAllowsTeachingDate(unit, rowDate)
+                              ? rowDate
+                              : unit
+                                ? rowRange.minBs
+                                : "";
                           return (
                             <tr key={`${item.sessionPlanUnitId || "new"}-${index}`}>
-                              <td className="border-t border-slate-100 px-2 py-2 text-center tabular-nums text-slate-600">
+                              <td className="border border-slate-300 px-2 py-2 text-center tabular-nums text-slate-700">
                                 {index + 1}
                               </td>
-                              <td className="border-t border-slate-100 px-2 py-2 align-top">
-                                <NepaliDateField
-                                  value={rowDate}
-                                  minDate={sessionPlanDateBounds.minDate}
-                                  maxDate={sessionPlanDateBounds.maxDate}
-                                  onChange={(value) => {
-                                    setForm((current) => ({
-                                      ...current,
-                                      teachingDateBs:
-                                        current.teachingDateBs || value,
-                                      startDateBs: current.startDateBs || value,
-                                      endDateBs: current.endDateBs || value,
-                                      items: current.items.map((row, i) =>
-                                        i === index
-                                          ? {
-                                              ...row,
-                                              itemStartDateBs: value,
-                                              itemEndDateBs: value,
-                                            }
-                                          : row,
-                                      ),
-                                    }));
-                                  }}
-                                  placeholder="Date"
-                                />
-                              </td>
-                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                              <td className="border border-slate-300 px-2 py-2 align-top">
                                 <Select
                                   value={item.sessionPlanUnitId || ""}
                                   onChange={(event) =>
                                     applyRowUnit(index, event.target.value)
                                   }
                                 >
-                                  <option value="">Select unit</option>
-                                  {unitChoices.map((u) => (
+                                  <option value="">Select</option>
+                                  {units.map((u) => (
                                     <option key={u._id} value={u._id}>
-                                      {u.unitNo}. {u.chapterName}
+                                      {u.unitNo}
                                     </option>
                                   ))}
                                 </Select>
                               </td>
-                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                              <td className="border border-slate-300 px-2 py-2 align-top text-slate-800">
+                                {unit?.chapterName || item.subjectLabel || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-2 py-2 align-top">
+                                {unit ? (
+                                  <NepaliDateField
+                                    value={dateValue}
+                                    minDate={rowRange.minDate}
+                                    maxDate={rowRange.maxDate}
+                                    onChange={(value) => {
+                                      const next = clampBsDate(
+                                        value,
+                                        rowRange.minBs,
+                                        rowRange.maxBs,
+                                      );
+                                      setForm((current) => ({
+                                        ...current,
+                                        teachingDateBs:
+                                          current.teachingDateBs || next,
+                                        startDateBs:
+                                          current.startDateBs || next,
+                                        endDateBs: current.endDateBs || next,
+                                        items: current.items.map((row, i) =>
+                                          i === index
+                                            ? {
+                                                ...row,
+                                                itemStartDateBs: next,
+                                                itemEndDateBs: next,
+                                              }
+                                            : row,
+                                        ),
+                                      }));
+                                    }}
+                                    placeholder="Pick date"
+                                  />
+                                ) : (
+                                  <p className="py-2 text-xs text-slate-400">
+                                    Select unit first
+                                  </p>
+                                )}
+                              </td>
+                              <td className="border border-slate-300 px-2 py-2 align-top">
                                 {item.sessionPlanUnitId ? (
                                   subOptions.length > 0 ? (
-                                    <div className="max-h-28 space-y-1 overflow-y-auto">
+                                    <div className="max-h-44 space-y-1 overflow-y-auto">
                                       {subOptions.map((title) => {
                                         const on = selectedTitles.some(
                                           (t) =>
@@ -1808,7 +2164,7 @@ export const LessonPlanPanel = ({
                                   </p>
                                 )}
                               </td>
-                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                              <td className="border border-slate-300 px-2 py-2 align-top">
                                 <NumberInput
                                   className="h-9 w-16"
                                   min={1}
@@ -1822,7 +2178,7 @@ export const LessonPlanPanel = ({
                                   }
                                 />
                               </td>
-                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                              <td className="border border-slate-300 px-2 py-2 align-top">
                                 <Input
                                   value={item.remarks}
                                   onChange={(event) =>
@@ -1835,7 +2191,7 @@ export const LessonPlanPanel = ({
                                   placeholder="—"
                                 />
                               </td>
-                              <td className="border-t border-slate-100 px-1 py-2 align-top">
+                              <td className="border border-slate-300 px-1 py-2 align-top text-center">
                                 <Button
                                   type="button"
                                   size="sm"
@@ -2040,7 +2396,20 @@ export const LessonPlanPanel = ({
                                   </Td>
                                   <Td className="text-center tabular-nums">{row.unitNo}</Td>
                                   <Td>{row.unitName}</Td>
-                                  <Td>{row.subUnit}</Td>
+                                  <Td className="whitespace-pre-wrap">
+                                    {(row.subUnits?.length
+                                      ? row.subUnits
+                                      : row.subUnit && row.subUnit !== "—"
+                                        ? [row.subUnit]
+                                        : []
+                                    ).map((s, si) => (
+                                      <div key={`${si}-${s}`}>{s}</div>
+                                    ))}
+                                    {!row.subUnits?.length &&
+                                    (!row.subUnit || row.subUnit === "—")
+                                      ? "—"
+                                      : null}
+                                  </Td>
                                   <Td className="text-center tabular-nums">{row.hours}</Td>
                                   <Td>{row.remarks || ""}</Td>
                                 </tr>
@@ -2207,9 +2576,9 @@ export const LessonPlanPanel = ({
             #lesson-plan-print-area .lp-print-table {
               width: 100%;
               border-collapse: collapse;
-              table-layout: fixed;
+              table-layout: auto;
               font-size: 11px;
-              line-height: 1.35;
+              line-height: 1.4;
               color: #0f172a;
             }
             #lesson-plan-print-area .lp-print-table thead {
@@ -2244,6 +2613,16 @@ export const LessonPlanPanel = ({
             }
             #lesson-plan-print-area .lp-print-table td.lp-text {
               text-align: left;
+              white-space: pre-wrap;
+              word-break: break-word;
+            }
+            #lesson-plan-print-area .lp-print-table td.lp-sub {
+              text-align: left;
+              white-space: pre-wrap;
+              word-break: break-word;
+            }
+            #lesson-plan-print-area .lp-print-table td.lp-sub div {
+              margin: 0 0 2px;
             }
             #lesson-plan-print-area .lp-print-meta {
               margin: 0 0 6px;
@@ -2288,13 +2667,13 @@ export const LessonPlanPanel = ({
               </p>
               <table className="lp-print-table">
                 <colgroup>
-                  <col style={{ width: "6%" }} />
-                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "5%" }} />
+                  <col style={{ width: "11%" }} />
                   <col style={{ width: "8%" }} />
-                  <col style={{ width: "22%" }} />
-                  <col style={{ width: "32%" }} />
-                  <col style={{ width: "7%" }} />
-                  <col style={{ width: "13%" }} />
+                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "36%" }} />
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "14%" }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -2315,17 +2694,29 @@ export const LessonPlanPanel = ({
                       </td>
                     </tr>
                   ) : (
-                    tableRows.map((row, i) => (
-                      <tr key={`${row.planId}-${i}`}>
+                    tableRows.map((row, i) => {
+                      const subs =
+                        row.subUnits?.length > 0
+                          ? row.subUnits
+                          : row.subUnit && row.subUnit !== "—"
+                            ? row.subUnit.split(/;\s*/).filter(Boolean)
+                            : [];
+                      return (
+                      <tr key={`${row.planId}-${row.dateBs}-${row.unitId}-${i}`}>
                         <td className="lp-num">{i + 1}</td>
                         <td className="lp-num">{row.dateBs || "—"}</td>
                         <td className="lp-num">{row.unitNo}</td>
                         <td className="lp-text">{row.unitName}</td>
-                        <td className="lp-text">{row.subUnit}</td>
+                        <td className="lp-sub">
+                          {subs.length > 0
+                            ? subs.map((s, si) => <div key={`${si}-${s}`}>{s}</div>)
+                            : "—"}
+                        </td>
                         <td className="lp-num">{row.hours}</td>
-                        <td className="lp-text">{row.remarks}</td>
+                        <td className="lp-text">{row.remarks || ""}</td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>

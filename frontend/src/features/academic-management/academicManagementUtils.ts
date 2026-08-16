@@ -269,12 +269,104 @@ export const filterSubjectsByClass = <
  */
 export const parseSubUnitsFromTopics = (topicsCovered?: string): string[] => {
   if (!topicsCovered?.trim()) return [];
-  return topicsCovered
-    .split(/[\n;|]+/)
-    .flatMap((part) => part.split(/,(?=\s)/))
-    .map((part) => part.trim())
+  const text = topicsCovered.replace(/\r\n/g, "\n").trim();
+  const parts = /[\n;|]/.test(text)
+    ? text.split(/[\n;|]+/)
+    : text
+        .split(/(?=\d+[.)]\s+)/)
+        .flatMap((part) =>
+          /^\d+[.)]\s+/.test(part.trim()) ? [part] : part.split(/,(?=\s)/),
+        );
+  return parts
+    .map((part) => part.replace(/^\d+[.)]\s+/, "").trim())
     .filter(Boolean)
     .filter((value, index, arr) => arr.indexOf(value) === index);
+};
+
+const stripUnitPrefix = (name?: string) =>
+  (name || "")
+    .replace(/^unit\s*\d+\s*[:.\-]?\s*/i, "")
+    .trim()
+    .toLowerCase();
+
+type SyllabusWalkNode = {
+  _id?: string;
+  title?: string;
+  heading?: string;
+  subUnits?: SyllabusWalkNode[];
+  children?: SyllabusWalkNode[];
+};
+
+/**
+ * Every selectable sub-unit for a Session Plan unit:
+ * stored topicsCovered + matching syllabus unit (by id or heading) including nested children.
+ */
+export const collectLessonSubUnitOptions = (
+  unit:
+    | {
+        chapterName?: string;
+        topicsCovered?: string;
+        syllabusChapterId?: string;
+        syllabusUnitId?: string;
+      }
+    | undefined,
+  syllabi: Array<{
+    chapters?: Array<{
+      _id: string;
+      units?: SyllabusWalkNode[];
+    }>;
+  } | null | undefined>,
+): string[] => {
+  const out: string[] = [];
+  const add = (title?: string) => {
+    const s = (title || "").trim();
+    if (!s) return;
+    if (out.some((x) => x.toLowerCase() === s.toLowerCase())) return;
+    out.push(s);
+  };
+
+  for (const t of parseSubUnitsFromTopics(unit?.topicsCovered)) add(t);
+
+  const walk = (nodes?: SyllabusWalkNode[]) => {
+    for (const n of nodes ?? []) {
+      add(n.heading || n.title);
+      walk(n.children);
+      walk(n.subUnits);
+    }
+  };
+
+  const unitId = (unit?.syllabusUnitId || "").trim();
+  const chapterId = (unit?.syllabusChapterId || "").trim();
+  const unitName = stripUnitPrefix(unit?.chapterName);
+
+  const matched: SyllabusWalkNode[] = [];
+  const loose: SyllabusWalkNode[] = [];
+
+  for (const syllabus of syllabi) {
+    for (const ch of syllabus?.chapters ?? []) {
+      for (const su of ch.units ?? []) {
+        const name = stripUnitPrefix(su.title || su.heading);
+        if (unitId && su._id === unitId) {
+          matched.push(su);
+          continue;
+        }
+        if (chapterId && ch._id === chapterId && unitName && name === unitName) {
+          matched.push(su);
+          continue;
+        }
+        if (unitName && name && (name === unitName || unitName.includes(name) || name.includes(unitName))) {
+          loose.push(su);
+        }
+      }
+    }
+  }
+
+  for (const su of matched.length > 0 ? matched : loose) {
+    walk(su.subUnits);
+    walk(su.children);
+  }
+
+  return out;
 };
 
 /** Normalize multi / legacy sub-unit title fields into a unique list. */

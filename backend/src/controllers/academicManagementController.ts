@@ -110,6 +110,71 @@ const optionalObjectIdList = (values: unknown): string[] => {
     .filter((v): v is string => Boolean(v));
 };
 
+/** Same unit + different sub-units on one day → one row with all sub-units. */
+const mergeLessonPlanItemsByUnit = <
+  T extends {
+    sessionPlanUnitId: string;
+    serialNo: number;
+    subUnitTitle?: string;
+    subUnitTitles?: string[];
+    plannedTopic?: string;
+    remarks?: string;
+    syllabusSubUnitIds?: string[];
+    syllabusSubUnitId?: string;
+  },
+>(
+  items: T[],
+): T[] => {
+  const map = new Map<string, T>();
+  for (const item of items) {
+    const key = item.sessionPlanUnitId;
+    if (!key) continue;
+    const titles = [
+      ...(item.subUnitTitles ?? []),
+      ...(item.subUnitTitle || "")
+        .split(/[;\n|]+/)
+        .map((t) => t.trim())
+        .filter(Boolean),
+    ].filter(
+      (t, i, arr) =>
+        arr.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i,
+    );
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, {
+        ...item,
+        subUnitTitles: titles,
+        subUnitTitle: titles.join("; "),
+        plannedTopic: titles.join("; ") || item.plannedTopic,
+      });
+      continue;
+    }
+    const merged = [
+      ...(prev.subUnitTitles ?? []),
+      ...titles,
+    ].filter(
+      (t, i, arr) =>
+        arr.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i,
+    );
+    const ids = [
+      ...(prev.syllabusSubUnitIds ?? []),
+      ...(item.syllabusSubUnitIds ?? []),
+      prev.syllabusSubUnitId || "",
+      item.syllabusSubUnitId || "",
+    ].filter((id, i, arr) => Boolean(id) && arr.indexOf(id) === i);
+    map.set(key, {
+      ...prev,
+      subUnitTitles: merged,
+      subUnitTitle: merged.join("; "),
+      plannedTopic: merged.join("; ") || prev.plannedTopic,
+      remarks: [prev.remarks, item.remarks].filter(Boolean).join("; "),
+      syllabusSubUnitIds: ids,
+      syllabusSubUnitId: ids[0] || prev.syllabusSubUnitId || "",
+    });
+  }
+  return [...map.values()].map((item, i) => ({ ...item, serialNo: i + 1 }));
+};
+
 /** Build a lesson-plan item document free of empty ObjectId strings (update + create). */
 const buildLessonPlanItemDoc = (
   item: {
@@ -1621,6 +1686,7 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     (payload.teachingDateBs || payload.startDateBs || payload.endDateBs || "").trim();
   const derivedMonth =
     payload.month || getNepaliMonthNameFromBsDate(teachingDateBs) || "";
+  payload.items = mergeLessonPlanItemsByUnit(payload.items);
   const unitIds = payload.items.map((item) => item.sessionPlanUnitId);
   assertUniqueUnitsInLessonPlan(unitIds);
   // Same unit may span many teaching days; date must stay inside Session Plan unit window
@@ -1742,6 +1808,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   });
 
   if (payload.items) {
+    payload.items = mergeLessonPlanItemsByUnit(payload.items);
     await assertLessonPlanItemsBelongToSessionPlan(req, sessionPlanId, payload.items);
     const unitIds = payload.items.map((item) => item.sessionPlanUnitId);
     assertUniqueUnitsInLessonPlan(unitIds);

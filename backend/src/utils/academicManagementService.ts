@@ -776,6 +776,8 @@ export const getSessionPlanSyllabusCoverage = async (
       practicalRequired: unit.practicalRequired,
       internalAssessment: unit.internalAssessment,
       tentativeCompletionMonth: unit.tentativeCompletionMonth,
+      startDateBs: String((unit as { startDateBs?: string }).startDateBs ?? "").trim(),
+      endDateBs: String((unit as { endDateBs?: string }).endDateBs ?? "").trim(),
       status: unit.status as LessonPlanItemStatus,
       attachmentUrl: unit.attachmentUrl ?? undefined,
       plannedInMonths,
