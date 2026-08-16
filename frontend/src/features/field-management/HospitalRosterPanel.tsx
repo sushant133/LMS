@@ -201,13 +201,25 @@ const escapePrintHtml = (value: string): string =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-const openRosterPrintWindow = (title: string, bodyHtml: string) => {
+const openRosterPrintWindow = (
+  title: string,
+  bodyHtml: string,
+  header?: { name: string; address?: string },
+) => {
   const win = window.open("", "_blank");
   if (!win) {
     toast.error("Pop-up blocked — allow pop-ups to print the roster");
     return;
   }
-  const institutionHeader = buildPrintInstitutionHeaderHtml();
+  const headingName = header?.name?.trim();
+  const institutionHeader = headingName
+    ? buildPrintInstitutionHeaderHtml({
+        branding: {
+          name: headingName,
+          address: header?.address?.trim() || undefined,
+        },
+      })
+    : buildPrintInstitutionHeaderHtml();
   win.document.write(`<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
     <title>${escapePrintHtml(title)}</title>
@@ -2412,12 +2424,14 @@ const RosterBuilder = ({
       ...activeCodes.map((c) => `${c.code}=${c.label}`),
     ];
 
+    const collegeName =
+      getPrintInstitutionBranding().name?.trim() || "Institution";
     openRosterPrintWindow(
       `${roster.name} — Hospital Duty Roster`,
       `<h1>Hospital Duty Roster</h1>
       <div class="meta">
-        <strong>${escapePrintHtml(roster.name)}</strong>
-        · ${escapePrintHtml(roster.hospitalName || "Hospital")}
+        <strong>${escapePrintHtml(collegeName)}</strong>
+        · ${escapePrintHtml(roster.name)}
         · ${escapePrintHtml(periodLabel(roster))} (${dayCount} day${dayCount === 1 ? "" : "s"})
         · ${escapePrintHtml(`${roster.batchName ?? "Batch"} / ${roster.yearName ?? "Year"}`)}
         · ${escapePrintHtml(roster.status)}
@@ -2438,25 +2452,23 @@ const RosterBuilder = ({
           ? `<p class="legend">Note: ${escapePrintHtml(legendParts.join(" · "))}</p>`
           : ""
       }`,
+      { name: roster.hospitalName || "Hospital" },
     );
   };
 
   const printBranding = getPrintInstitutionBranding();
   const institutionName = printBranding.name || "Institution";
-  const institutionAddress = printBranding.address?.trim() || "";
 
   return (
     <div className="space-y-4">
       <div className="hidden border-b border-slate-300 pb-3 text-center print:block">
         <p className="text-base font-bold uppercase tracking-wide text-slate-900">
-          {institutionName}
+          {roster.hospitalName || "Hospital"}
         </p>
-        {institutionAddress ? (
-          <p className="mt-1 text-sm text-slate-600">{institutionAddress}</p>
-        ) : null}
         <p className="mt-2 text-sm font-semibold text-slate-800">
           Hospital Duty Roster
         </p>
+        <p className="mt-1 text-sm text-slate-600">{institutionName}</p>
       </div>
       <Card className="print:shadow-none">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -2920,6 +2932,8 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
   const roster = summary.roster;
 
   const printSection = (title: string, tableHtml: string) => {
+    const collegeName =
+      getPrintInstitutionBranding().name?.trim() || "Institution";
     openRosterPrintWindow(
       `${roster.name} — ${title}`,
       `<style>
@@ -2928,13 +2942,14 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
       </style>
       <h1>${escapePrintHtml(title)}</h1>
       <div class="meta">
-        <strong>${escapePrintHtml(roster.name)}</strong>
+        <strong>${escapePrintHtml(collegeName)}</strong>
+        · ${escapePrintHtml(roster.name)}
         · ${escapePrintHtml(periodLabel(roster))}
         ${roster.daysInMonth ? ` · ${roster.daysInMonth} day(s)` : ""}
-        ${roster.hospitalName ? ` · ${escapePrintHtml(roster.hospitalName)}` : ""}
         ${roster.batchName || roster.yearName ? ` · ${escapePrintHtml(`${roster.batchName ?? "Batch"} / ${roster.yearName ?? "Year"}`)}` : ""}
       </div>
       ${tableHtml}`,
+      { name: roster.hospitalName || "Hospital" },
     );
   };
 
