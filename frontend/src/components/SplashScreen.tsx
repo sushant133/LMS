@@ -14,12 +14,19 @@ const SplashScreen = ({ onFinish }: SplashScreenProps) => {
   }, [onFinish]);
 
   return (
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-white">
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center overflow-hidden bg-white">
       <img
         src="/college-logo.png"
         alt="PHIT College"
-        className="w-40 h-40 object-contain"
-        style={{ maxWidth: "160px", maxHeight: "160px" }}
+        decoding="sync"
+        fetchPriority="high"
+        className="pointer-events-none block select-none object-contain object-center"
+        style={{
+          width: "clamp(4.5rem, 22vmin, 7rem)",
+          height: "clamp(4.5rem, 22vmin, 7rem)",
+          maxWidth: "36vw",
+          maxHeight: "36vh",
+        }}
       />
     </div>
   );

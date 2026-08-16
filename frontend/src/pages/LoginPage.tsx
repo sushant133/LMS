@@ -22,7 +22,7 @@ const HERO_TAGLINE =
 const LoginHero = ({ isDesktop }: { isDesktop: boolean }) => {
   if (!isDesktop) {
     return (
-      <div className="flex flex-col items-center gap-3 px-6 pt-8 text-center text-white">
+      <div className="app-login-hero flex flex-col items-center gap-3 px-6 pt-8 text-center text-white">
         <div className="rounded-2xl bg-white/10 p-2">
           <CollegeLogo variant="light" className="h-12 w-12" />
         </div>
@@ -111,7 +111,7 @@ navigate(target, { replace: true });
       <LoginHero isDesktop={isDesktop} />
 
       <div
-        className="flex items-center justify-center p-6"
+        className="app-login-pane flex items-center justify-center p-6"
         style={isDesktop ? { gridColumnStart: 2 } : undefined}
       >
         <Card className="w-full max-w-md border-white/60 bg-white/95 shadow-2xl">

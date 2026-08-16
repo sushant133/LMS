@@ -45,6 +45,7 @@ import {
   formatPrintAddress,
   setPrintInstitutionBranding,
 } from "lib/printBranding";
+import { setNativeSystemBarStyle } from "lib/platform";
 import { redirectToLogin } from "lib/redirectToLogin";
 import { resetAppShell } from "lib/resetAppShell";
 
@@ -463,6 +464,10 @@ export const AppLayout = () => {
   const { user, logout, availableSchools } = useAuth();
   const { unreadCount } = useNotificationBadge();
   const { t } = useTranslation();
+
+  useEffect(() => {
+    setNativeSystemBarStyle("light");
+  }, []);
 
   /** Settings name/address are preferred for print/PDF headers when available. */
   const printSettingsQuery = useQuery({

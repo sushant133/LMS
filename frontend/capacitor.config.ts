@@ -14,12 +14,19 @@ const config: CapacitorConfig = {
       launchAutoHide: true,
       backgroundColor: "#ffffff",
       androidSplashResourceName: "splash",
+      androidScaleType: "CENTER_INSIDE",
+      layoutName: "launch_splash",
+      useDialog: true,
       showSpinner: false,
       splashFullScreen: true,
       splashImmersive: true
     },
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"]
+    },
+    SystemBars: {
+      insetsHandling: "css",
+      style: "LIGHT"
     }
   },
   android: {

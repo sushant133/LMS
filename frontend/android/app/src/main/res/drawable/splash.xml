@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MIUI/Redmi draw android:background and often ignore the Android 12 icon API.
+  Center a density-correct 120dp bitmap — do not use a full-bleed logo, and
+  do not set item width/height (those are dropped on some Xiaomi firmwares).
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background" />
+    <item android:gravity="center">
+        <bitmap
+            android:antialias="true"
+            android:dither="true"
+            android:filter="true"
+            android:gravity="center"
+            android:src="@drawable/splash_logo" />
+    </item>
+</layer-list>

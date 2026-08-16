@@ -114,10 +114,11 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
 
   const sessionUserId = meQuery.data?.user?._id ?? null;
 
-  // Mobile app only: register FCM after login / restored session. No-op on web.
+  // Native only: request FCM permission + save token after a session exists.
+  // No-op on web. Skips the login screen (sessionUserId is null until login).
   useEffect(() => {
     if (!sessionUserId) return;
-    void initPushNotifications(sessionUserId);
+    void initPushNotifications();
   }, [sessionUserId]);
 
   const isBootstrapping = meQuery.isPending && meQuery.data === undefined;
@@ -141,6 +142,7 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
         void queryClient.invalidateQueries({
           predicate: (query) => !keepAuthMeQuery(query.queryKey),
         });
+        void initPushNotifications();
         return data;
       },
       register: async (payload: RegisterInput) => {
@@ -151,6 +153,7 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
         void queryClient.invalidateQueries({
           predicate: (query) => !keepAuthMeQuery(query.queryKey),
         });
+        void initPushNotifications();
         return data;
       },
       logout: logoutMutation.mutateAsync,

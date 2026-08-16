@@ -1,4 +1,4 @@
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, SystemBars, SystemBarsStyle } from "@capacitor/core";
 
 /**
  * True when running inside the Capacitor native shell (Android / iOS app),
@@ -11,4 +11,14 @@ export const isNativeApp = (): boolean => {
   } catch {
     return false;
   }
+};
+
+/** Light = dark icons (white header). Dark = light icons (login hero). */
+export const setNativeSystemBarStyle = (style: "light" | "dark"): void => {
+  if (!isNativeApp()) return;
+  void SystemBars.setStyle({
+    style: style === "light" ? SystemBarsStyle.Light : SystemBarsStyle.Dark,
+  }).catch(() => {
+    // Plugin may be unavailable on older WebViews
+  });
 };

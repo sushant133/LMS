@@ -26,7 +26,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             }}
           >
             <App />
-            <Toaster richColors position="top-right" />
+            <Toaster richColors position="top-right" offset="calc(12px + var(--app-safe-top, 0px))" />
           </BrowserRouter>
         </AuthProvider>
       </QueryClientProvider>

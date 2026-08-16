@@ -17,6 +17,15 @@
 
 :root {
   --app-sidebar-width: 18rem;
+  /*
+   * Capacitor SystemBars injects --safe-area-inset-* (including 0 when the
+   * WebView is already padded). Prefer that over env() so Redmi/Oppo do not
+   * double-inset. Fall back to env() for browsers / first paint.
+   */
+  --app-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --app-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --app-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --app-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   font-family: "IBM Plex Sans", "Noto Sans Devanagari", system-ui, sans-serif;
   color: #0f172a;
   background: #f8fafc;
@@ -35,6 +44,7 @@
   flex-shrink: 0;
   overflow: hidden;
   width: min(var(--app-sidebar-width), 88vw);
+  height: 100%;
   height: 100dvh;
   border-right: 1px solid rgba(255, 255, 255, 0.6);
   background: linear-gradient(180deg, #061535 0%, #020617 48%, #020617 100%);
@@ -49,9 +59,11 @@
   }
 }
 
-/* Sticky top app bar — phone-safe, native-app feel */
+/* Sticky top app bar — sits below status bar / notch, full width */
 .app-topbar {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--app-safe-top);
+  padding-left: var(--app-safe-left);
+  padding-right: var(--app-safe-right);
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
@@ -64,8 +76,9 @@
     z-index: 60;
     width: min(20rem, 86vw);
     max-width: 20rem;
-    padding-top: max(1rem, env(safe-area-inset-top));
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    padding-top: max(1rem, var(--app-safe-top));
+    padding-bottom: max(1rem, var(--app-safe-bottom));
+    padding-left: max(1rem, var(--app-safe-left));
     transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
     will-change: transform;
   }
@@ -91,7 +104,8 @@
     top: 0;
     z-index: 30;
     width: var(--app-sidebar-width);
-    height: 100vh;
+    height: 100%;
+    height: 100dvh;
   }
   .app-sidebar[data-desktop-hidden="true"] {
     /* Fully leave the flex layout so main content can use 100% width */
@@ -112,8 +126,18 @@
  */
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  min-height: 100%;
+  min-height: 100dvh;
   width: 100%;
+}
+
+/* Login: clear notch / status bar and home indicator without changing spacing on web */
+.app-login-hero {
+  padding-top: max(2rem, var(--app-safe-top));
+}
+
+.app-login-pane {
+  padding-bottom: max(1.5rem, var(--app-safe-bottom));
 }
 
 .app-shell-main {
@@ -123,6 +147,27 @@
   min-width: 0;
   width: 100%;
   max-width: 100%;
+}
+
+/* Keep page content above the gesture / 3-button nav bar */
+.app-shell-main > main {
+  padding-bottom: calc(1.5rem + var(--app-safe-bottom));
+  padding-left: max(1rem, var(--app-safe-left));
+  padding-right: max(1rem, var(--app-safe-right));
+}
+
+@media (min-width: 640px) {
+  .app-shell-main > main {
+    padding-left: max(1.5rem, var(--app-safe-left));
+    padding-right: max(1.5rem, var(--app-safe-right));
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-shell-main > main {
+    padding-left: max(2rem, var(--app-safe-left));
+    padding-right: max(2rem, var(--app-safe-right));
+  }
 }
 
 .app-shell-header-inner,
@@ -217,17 +262,35 @@ textarea.font-nepali {
 }
 
 html {
-  scrollbar-gutter: stable;
+  height: 100%;
+}
+
+@media (min-width: 768px) {
+  html {
+    scrollbar-gutter: stable;
+  }
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  min-height: 100%;
+  min-height: 100dvh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 #root {
   min-width: 0;
   width: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+}
+
+/* Tailwind min-h-screen is 100vh; 100dvh matches the visible Android frame */
+.min-h-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 a {
