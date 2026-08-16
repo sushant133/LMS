@@ -11,20 +11,13 @@ import {
   canManageInstitution,
 } from "@phit-erp/shared";
 import {
+  adToBs,
+  bsToAd,
   getTodayBs,
   parseBsDate,
   type NepaliDate,
 } from "@munatech/nepali-datepicker";
-import {
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Pencil,
-  Plus,
-  Search,
-  Send,
-  Trash2,
-} from "lucide-react";
+import { Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "components/ui/badge";
@@ -59,7 +52,6 @@ import {
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
 import { AcademicCommentsPanel } from "./AcademicCommentsPanel";
-import { AcademicProgressBar } from "./AcademicProgressBar";
 import {
   AcademicPrintFooter,
   AcademicPrintHeader,
@@ -128,7 +120,79 @@ const formatTodayBs = (): string => {
   return `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`;
 };
 
+const nextBsDate = (dateBs: string): string => {
+  const parts = dateBs.split("-").map(Number);
+  const y = parts[0];
+  const m = parts[1];
+  const d = parts[2];
+  if (!y || !m || !d) return dateBs;
+  try {
+    const ad = bsToAd(y, m, d);
+    const js = new Date(ad.year, ad.month - 1, ad.day, 12, 0, 0);
+    js.setDate(js.getDate() + 1);
+    const bs = adToBs(js.getFullYear(), js.getMonth() + 1, js.getDate());
+    return `${bs.year}-${String(bs.month).padStart(2, "0")}-${String(bs.day).padStart(2, "0")}`;
+  } catch {
+    return dateBs;
+  }
+};
+
 const titleKey = (t: string) => t.trim().toLowerCase();
+
+/** One table row in the college Lesson Plan (S.N | Date | Unit No. | Unit Name | Sub-Unit | C/Hr | Remarks). */
+type LessonPlanTableRow = {
+  planId: string;
+  dateBs: string;
+  unitNo: string;
+  unitName: string;
+  subUnit: string;
+  hours: string;
+  remarks: string;
+};
+
+const flattenLessonPlanTableRows = (
+  plans: AcademicLessonPlanRecord[],
+): LessonPlanTableRow[] => {
+  const rows: LessonPlanTableRow[] = [];
+  for (const plan of plans) {
+    const dateBs =
+      plan.teachingDateBs || plan.startDateBs || plan.endDateBs || "";
+    const items = [...(plan.items ?? [])].sort(
+      (a, b) => (a.serialNo ?? 0) - (b.serialNo ?? 0),
+    );
+    for (const item of items) {
+      const subUnits = normalizeSubUnitTitles(
+        item.subUnitTitles,
+        item.subUnitTitle,
+      );
+      rows.push({
+        planId: plan._id,
+        dateBs,
+        unitNo:
+          item.unit?.unitNo != null && String(item.unit.unitNo).trim()
+            ? String(item.unit.unitNo)
+            : "—",
+        unitName: (item.unit?.chapterName || item.subjectLabel || "").trim() || "—",
+        subUnit:
+          subUnits.length > 0
+            ? subUnits.join(", ")
+            : (item.plannedTopic || "").trim() || "—",
+        hours: Number.isFinite(item.estimatedClasses)
+          ? String(item.estimatedClasses)
+          : "—",
+        remarks: (item.remarks ?? "").trim(),
+      });
+    }
+  }
+  rows.sort((a, b) => {
+    if (a.dateBs !== b.dateBs) return a.dateBs.localeCompare(b.dateBs);
+    const an = Number(a.unitNo);
+    const bn = Number(b.unitNo);
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    return 0;
+  });
+  return rows;
+};
 
 const emptyItem = (
   serialNo: number,
@@ -235,15 +299,10 @@ export const LessonPlanPanel = ({
   const isAdmin = canManageInstitution(user?.role ?? "");
   const canMutate = writeAccess;
   const [showForm, setShowForm] = useState(false);
+  const [savingTable, setSavingTable] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [unitSearch, setUnitSearch] = useState("");
-  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
-  /** Expand optional fields per unit row in the simplified form. */
-  const [expandedItemKeys, setExpandedItemKeys] = useState<string[]>([]);
-  /** Tracks which session plan already had units auto-selected (so Clear stays cleared). */
+  /** Tracks which session plan was already applied to the form. */
   const autoSelectedForPlanRef = useRef<string>("");
-  /** Last teachingDate|sessionPlanId key we auto-selected units for (avoid wipe on refetch). */
-  const autoSelectUnitsKeyRef = useRef<string>("");
   const formTopRef = useRef<HTMLDivElement | null>(null);
   const [selectedFacultyKey, setSelectedFacultyKey] = useState<string | null>(
     null,
@@ -275,11 +334,7 @@ export const LessonPlanPanel = ({
   const resetLessonForm = () => {
     setEditingId(null);
     setForm(blankForm());
-    setSelectedUnitIds([]);
-    setUnitSearch("");
-    setExpandedItemKeys([]);
     autoSelectedForPlanRef.current = "";
-    autoSelectUnitsKeyRef.current = "";
   };
 
   const yearOptions = useMemo(() => dedupeYearsForSelect(years), [years]);
@@ -542,7 +597,12 @@ export const LessonPlanPanel = ({
         const defaultTeaching =
           current.teachingDateBs ||
           current.startDateBs ||
-          (starts.length ? [...starts].sort()[0]! : "");
+          (starts.length ? [...starts].sort()[0]! : formatTodayBs());
+        const firstRow = {
+          ...emptyItem(1),
+          itemStartDateBs: defaultTeaching,
+          itemEndDateBs: defaultTeaching,
+        };
         return {
           ...current,
           sessionPlanId: plan._id,
@@ -559,11 +619,10 @@ export const LessonPlanPanel = ({
           teachingDateBs: defaultTeaching,
           startDateBs: defaultTeaching,
           endDateBs: defaultTeaching,
+          items: current.items.length > 0 ? current.items : [firstRow],
         };
       });
-      // Daily plan: do not pre-select all units — teacher picks units for this day
       autoSelectedForPlanRef.current = plan._id;
-      setSelectedUnitIds([]);
     }
   }, [usableSessionPlans, form.sessionPlanId, showForm, teacherId, editingId]);
 
@@ -665,162 +724,6 @@ export const LessonPlanPanel = ({
     coverageQuery.data?.units,
   ]);
 
-  /**
-   * Future schedule rule: teaching date fixes which Session Plan units apply.
-   * On create (not continue-draft), auto-select every unit open on that date —
-   * only once per date+sessionPlan key so React Query refetches do not wipe
-   * manual unchecks / sub-unit work.
-   */
-  useEffect(() => {
-    if (!showForm || editingId) return;
-    const teachingDate = form.teachingDateBs || form.startDateBs || "";
-    if (!teachingDate || !form.sessionPlanId) return;
-    const loaded = unitsQuery.data ?? coverageQuery.data?.units ?? [];
-    if (loaded.length === 0) return;
-    const key = `${form.sessionPlanId}|${teachingDate}`;
-    if (autoSelectUnitsKeyRef.current === key) return;
-    autoSelectUnitsKeyRef.current = key;
-    const available = loaded
-      .filter((u) => unitAllowsTeachingDate(u, teachingDate))
-      .map((u) => u._id);
-    setSelectedUnitIds(available);
-  }, [
-    showForm,
-    editingId,
-    form.teachingDateBs,
-    form.startDateBs,
-    form.sessionPlanId,
-    unitsQuery.data,
-    coverageQuery.data?.units,
-  ]);
-
-  // Rebuild form items when selected units change — inherit Session Plan + syllabus hierarchy
-  useEffect(() => {
-    if (!form.sessionPlanId) return;
-    if (selectedUnitIds.length === 0) {
-      setForm((current) =>
-        current.items.length === 0 ? current : { ...current, items: [] },
-      );
-      return;
-    }
-    const units = unitsQuery.data ?? coverageQuery.data?.units ?? [];
-    // Wait for units to load so Continue-draft does not wipe items
-    if (units.length === 0) return;
-    const unitMap = new Map(units.map((unit) => [unit._id, unit]));
-    setForm((current) => {
-      const nextItems = selectedUnitIds
-        .map((unitId, index) => {
-          const unit = unitMap.get(unitId);
-          const prev = current.items.find(
-            (item) => item.sessionPlanUnitId === unitId,
-          );
-          // Keep existing draft row if unit metadata is not yet available
-          if (!unit) {
-            return prev
-              ? { ...prev, serialNo: index + 1 }
-              : null;
-          }
-          const subUnits = parseSubUnitsFromTopics(unit.topicsCovered);
-          const prevTitles = normalizeSubUnitTitles(
-            prev?.subUnitTitles,
-            prev?.subUnitTitle,
-          );
-          // New unit row: leave sub-units empty so teacher fixes them to this date
-          // (remaining / already-planned hints are shown in the UI).
-          const defaultTitles = prevTitles.length > 0 ? prevTitles : [];
-          const multi = matchMultipleSubUnits(
-            matchedSyllabus,
-            unit.syllabusChapterId,
-            defaultTitles,
-          );
-          const match = multi.firstMatch;
-          const syllabusMatch = match
-            ? {
-                syllabusId: matchedSyllabus?._id,
-                syllabusChapterId:
-                  match.syllabusChapterId || unit.syllabusChapterId,
-                syllabusUnitId: match.syllabusUnitId,
-                syllabusSubUnitId: multi.syllabusSubUnitIds[0] || match.syllabusSubUnitId,
-                syllabusSubUnitIds: multi.syllabusSubUnitIds,
-                learningOutcomes:
-                  multi.learningOutcomes || match.learningOutcomes,
-                description: multi.description || match.description,
-              }
-            : {
-                syllabusId: unit.syllabusId || matchedSyllabus?._id || "",
-                syllabusChapterId: unit.syllabusChapterId || "",
-                syllabusSubUnitIds: multi.syllabusSubUnitIds,
-              };
-          const joined = joinSubUnitTitles(defaultTitles);
-          return {
-            ...emptyItem(index + 1, unit, defaultTitles, syllabusMatch),
-            ...prev,
-            serialNo: index + 1,
-            sessionPlanUnitId: unit._id,
-            subjectLabel: `Unit ${unit.unitNo}`,
-            subUnitTitles: defaultTitles,
-            subUnitTitle: joined,
-            plannedTopic:
-              prev?.plannedTopic ||
-              joined ||
-              unit.chapterName ||
-              unit.topicsCovered,
-            syllabusId:
-              prev?.syllabusId ||
-              syllabusMatch.syllabusId ||
-              unit.syllabusId ||
-              "",
-            syllabusChapterId:
-              prev?.syllabusChapterId ||
-              syllabusMatch.syllabusChapterId ||
-              unit.syllabusChapterId ||
-              "",
-            syllabusUnitId:
-              prev?.syllabusUnitId || match?.syllabusUnitId || "",
-            syllabusSubUnitId:
-              prev?.syllabusSubUnitId ||
-              multi.syllabusSubUnitIds[0] ||
-              match?.syllabusSubUnitId ||
-              "",
-            syllabusSubUnitIds:
-              prev?.syllabusSubUnitIds?.length
-                ? prev.syllabusSubUnitIds
-                : multi.syllabusSubUnitIds,
-            // One fixed day per sub-unit: keep what was set, else the teaching date.
-            itemStartDateBs:
-              prev?.itemStartDateBs || current.teachingDateBs || current.startDateBs || "",
-            itemEndDateBs:
-              prev?.itemStartDateBs || current.teachingDateBs || current.startDateBs || "",
-            learningObjectives:
-              prev?.learningObjectives ||
-              multi.learningOutcomes ||
-              match?.learningOutcomes ||
-              unit.learningOutcomes ||
-              "",
-            estimatedClasses: prev?.estimatedClasses || 1,
-          };
-        })
-        .filter(Boolean) as AcademicLessonPlanInput["items"];
-
-      // Daily plan: keep a single teaching day (do not expand to unit date ranges)
-      const teaching =
-        current.teachingDateBs || current.startDateBs || current.endDateBs || "";
-      return {
-        ...current,
-        items: nextItems,
-        teachingDateBs: teaching,
-        startDateBs: teaching,
-        endDateBs: teaching,
-      };
-    });
-  }, [
-    selectedUnitIds,
-    unitsQuery.data,
-    coverageQuery.data?.units,
-    form.sessionPlanId,
-    matchedSyllabus,
-  ]);
-
   const createMutation = useMutation({
     mutationFn: (payload: AcademicLessonPlanInput) =>
       unwrap(api.post("/academic-management/lesson-plans", payload)),
@@ -853,15 +756,8 @@ export const LessonPlanPanel = ({
   const openContinueDraft = (plan: AcademicLessonPlanRecord) => {
     const teaching =
       plan.teachingDateBs || plan.startDateBs || plan.endDateBs || "";
-    const unitIds = plan.items
-      .map((item) => item.sessionPlanUnitId)
-      .filter((id): id is string => Boolean(id));
     autoSelectedForPlanRef.current = plan.sessionPlanId || "";
-    autoSelectUnitsKeyRef.current = `${plan.sessionPlanId || ""}|${teaching}`;
     setEditingId(plan._id);
-    setSelectedUnitIds(unitIds);
-    setExpandedItemKeys([]);
-    setUnitSearch("");
     setForm({
       academicYearBs: plan.academicYearBs || filters.academicYearBs || "",
       session: plan.session || plan.academicYearBs || "",
@@ -920,25 +816,118 @@ export const LessonPlanPanel = ({
     toast.message("Continue editing this draft");
   };
 
-  const saveLessonPlan = () => {
-    if (!form.sessionPlanId || form.items.length === 0) {
-      toast.error("Select a Session Plan and at least one unit before saving");
+  const applyRowUnit = (index: number, unitId: string) => {
+    const unit = units.find((u) => u._id === unitId);
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((row, i) => {
+        if (i !== index) return row;
+        const date =
+          row.itemStartDateBs ||
+          current.teachingDateBs ||
+          current.startDateBs ||
+          "";
+        const next = emptyItem(i + 1, unit, []);
+        return {
+          ...next,
+          itemStartDateBs: date,
+          itemEndDateBs: date,
+          estimatedClasses: row.estimatedClasses || 1,
+          remarks: row.remarks || "",
+        };
+      }),
+    }));
+  };
+
+  const applyRowSubs = (index: number, titles: string[]) => {
+    const item = form.items[index];
+    const unit = units.find((u) => u._id === item?.sessionPlanUnitId);
+    const multi = matchMultipleSubUnits(
+      matchedSyllabus,
+      unit?.syllabusChapterId || item?.syllabusChapterId,
+      titles,
+    );
+    const match = multi.firstMatch;
+    const joined = joinSubUnitTitles(titles);
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((row, i) =>
+        i === index
+          ? {
+              ...row,
+              subUnitTitles: titles,
+              subUnitTitle: joined,
+              plannedTopic: joined || unit?.chapterName || row.plannedTopic,
+              syllabusId:
+                matchedSyllabus?._id ||
+                unit?.syllabusId ||
+                row.syllabusId ||
+                "",
+              syllabusChapterId:
+                match?.syllabusChapterId ||
+                unit?.syllabusChapterId ||
+                row.syllabusChapterId ||
+                "",
+              syllabusUnitId: match?.syllabusUnitId || row.syllabusUnitId || "",
+              syllabusSubUnitId: multi.syllabusSubUnitIds[0] || "",
+              syllabusSubUnitIds: multi.syllabusSubUnitIds,
+            }
+          : row,
+      ),
+    }));
+  };
+
+  const addLessonRow = () => {
+    setForm((current) => {
+      const last = current.items[current.items.length - 1];
+      const lastDate =
+        last?.itemStartDateBs ||
+        current.teachingDateBs ||
+        current.startDateBs ||
+        formatTodayBs();
+      const nextDate = last?.itemStartDateBs
+        ? nextBsDate(lastDate)
+        : lastDate;
+      return {
+        ...current,
+        teachingDateBs: current.teachingDateBs || nextDate,
+        startDateBs: current.startDateBs || nextDate,
+        endDateBs: current.endDateBs || nextDate,
+        items: [
+          ...current.items,
+          {
+            ...emptyItem(current.items.length + 1),
+            itemStartDateBs: nextDate,
+            itemEndDateBs: nextDate,
+          },
+        ],
+      };
+    });
+  };
+
+  const removeLessonRow = (index: number) => {
+    setForm((current) => ({
+      ...current,
+      items: current.items
+        .filter((_, i) => i !== index)
+        .map((row, i) => ({ ...row, serialNo: i + 1 })),
+    }));
+  };
+
+  const saveLessonPlan = async () => {
+    if (!form.sessionPlanId) {
+      toast.error("Select a Session Plan first");
+      return;
+    }
+    if (form.items.length === 0) {
+      toast.error("Add at least one row (date, unit, sub-unit)");
       return;
     }
     const sessionPlan = usableSessionPlans.find(
       (p) => p._id === form.sessionPlanId,
     );
-    // Teacher must match Session Plan — fall back to the plan’s teacher
     const resolvedTeacherId =
-      teacherId ||
-      form.teacherId ||
-      sessionPlan?.teacherId ||
-      "";
-    const teachingDate = form.teachingDateBs || form.startDateBs || "";
-    if (!teachingDate) {
-      toast.error("Select the teaching date (BS)");
-      return;
-    }
+      teacherId || form.teacherId || sessionPlan?.teacherId || "";
     if (!resolvedTeacherId) {
       toast.error("Teacher is required — select a teacher or Session Plan");
       return;
@@ -948,52 +937,47 @@ export const LessonPlanPanel = ({
       resolvedTeacherId !== sessionPlan.teacherId
     ) {
       toast.error(
-        "Selected teacher does not match the Session Plan teacher. Use the same teacher as the Session Plan.",
+        "Selected teacher does not match the Session Plan teacher.",
       );
       return;
-    }
-    const outOfWindow = form.items
-      .map((item) => units.find((u) => u._id === item.sessionPlanUnitId))
-      .filter(
-        (unit): unit is AcademicSessionPlanUnitRecord =>
-          Boolean(unit) && !unitAllowsTeachingDate(unit!, teachingDate),
-      );
-    if (outOfWindow.length > 0) {
-      const u = outOfWindow[0]!;
-      toast.error(
-        `Unit ${u.unitNo} (${u.chapterName}) is scheduled ${formatUnitDateWindow(u)}. Teaching date ${teachingDate} is outside that range.`,
-      );
-      return;
-    }
-    const missingSubs = form.items.filter((item) => {
-      const unit = units.find((u) => u._id === item.sessionPlanUnitId);
-      const available = parseSubUnitsFromTopics(unit?.topicsCovered);
-      if (available.length === 0) return false;
-      const selected = normalizeSubUnitTitles(
-        item.subUnitTitles,
-        item.subUnitTitle,
-      );
-      return selected.length === 0;
-    });
-    if (missingSubs.length > 0) {
-      toast.error(
-        "Assign at least one sub-unit to each selected unit for this teaching date.",
-      );
-      return;
-    }
-    if (teachingDate < formatTodayBs()) {
-      toast.message(
-        "Note: this teaching date is in the past. Prefer future dates for scheduling.",
-      );
     }
 
-    // Sanitize payload so empty optionals / NaN classes never cause API 400s
-    const sanitizedItems = form.items.map((item, index) => {
+    const groups = new Map<
+      string,
+      AcademicLessonPlanInput["items"]
+    >();
+    for (let index = 0; index < form.items.length; index += 1) {
+      const item = form.items[index]!;
       const unit = units.find((u) => u._id === item.sessionPlanUnitId);
+      const date = (
+        item.itemStartDateBs ||
+        form.teachingDateBs ||
+        form.startDateBs ||
+        ""
+      ).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        toast.error(`Row ${index + 1}: pick a date`);
+        return;
+      }
+      if (!item.sessionPlanUnitId) {
+        toast.error(`Row ${index + 1}: select a unit`);
+        return;
+      }
+      if (unit && !unitAllowsTeachingDate(unit, date)) {
+        toast.error(
+          `Row ${index + 1}: Unit ${unit.unitNo} is scheduled ${formatUnitDateWindow(unit)}. Date ${date} is outside that range.`,
+        );
+        return;
+      }
+      const available = parseSubUnitsFromTopics(unit?.topicsCovered);
       const titles = normalizeSubUnitTitles(
         item.subUnitTitles,
         item.subUnitTitle,
       );
+      if (available.length > 0 && titles.length === 0) {
+        toast.error(`Row ${index + 1}: select at least one sub-unit`);
+        return;
+      }
       const joined = joinSubUnitTitles(titles);
       const plannedTopic = (
         item.plannedTopic ||
@@ -1002,17 +986,8 @@ export const LessonPlanPanel = ({
         unit?.topicsCovered ||
         `Unit ${item.serialNo || index + 1}`
       ).trim();
-      const estimatedClasses =
-        Number.isFinite(item.estimatedClasses) && item.estimatedClasses >= 1
-          ? Math.round(item.estimatedClasses)
-          : 1;
-      const subUnitDate =
-        item.itemStartDateBs?.trim() ||
-        teachingDate ||
-        unit?.startDateBs ||
-        "";
-      return {
-        serialNo: item.serialNo || index + 1,
+      const sanitized = {
+        serialNo: (groups.get(date)?.length ?? 0) + 1,
         sessionPlanUnitId: item.sessionPlanUnitId,
         subUnitTitle: joined || item.subUnitTitle || "",
         subUnitTitles: titles,
@@ -1031,41 +1006,87 @@ export const LessonPlanPanel = ({
         teachingAids: item.teachingAids || "",
         assessmentMethod: item.assessmentMethod || "",
         deadline: item.deadline || "",
-        /*
-         * A sub-unit sits on ONE day. Both stored fields carry that same date —
-         * untouched rows fall back to the lesson's teaching date rather than
-         * spanning the unit's whole window.
-         */
-        itemStartDateBs: subUnitDate,
-        itemEndDateBs: subUnitDate,
-        estimatedClasses,
+        itemStartDateBs: date,
+        itemEndDateBs: date,
+        estimatedClasses:
+          Number.isFinite(item.estimatedClasses) && item.estimatedClasses >= 1
+            ? Math.round(item.estimatedClasses)
+            : 1,
         remarks: item.remarks || "",
       };
-    });
+      const list = groups.get(date) ?? [];
+      list.push(sanitized);
+      groups.set(date, list);
+    }
 
-    const payload: AcademicLessonPlanInput = {
-      academicYearBs: form.academicYearBs,
-      session: form.session || form.academicYearBs,
-      faculty: form.faculty || undefined,
-      semesterBs: form.semesterBs || undefined,
-      classId: form.classId || undefined,
-      sectionId: form.sectionId || undefined,
-      batchId: form.batchId || undefined,
-      yearId: form.yearId || undefined,
-      subjectId: form.subjectId,
-      teacherId: resolvedTeacherId,
-      month: form.month || "",
-      teachingDateBs: teachingDate,
-      startDateBs: teachingDate,
-      endDateBs: teachingDate,
-      sessionPlanId: form.sessionPlanId,
-      monthlyDescription: form.monthlyDescription || "",
-      items: sanitizedItems,
-    };
-    if (editingId) {
-      updateMutation.mutate({ id: editingId, payload });
-    } else {
-      createMutation.mutate(payload);
+    const existingPlans = plansQuery.data ?? [];
+    setSavingTable(true);
+    try {
+      let created = 0;
+      let updated = 0;
+      const dates = [...groups.keys()].sort();
+      for (const date of dates) {
+        const items = groups.get(date)!;
+        const payload: AcademicLessonPlanInput = {
+          academicYearBs: form.academicYearBs,
+          session: form.session || form.academicYearBs,
+          faculty: form.faculty || undefined,
+          semesterBs: form.semesterBs || undefined,
+          classId: form.classId || undefined,
+          sectionId: form.sectionId || undefined,
+          batchId: form.batchId || undefined,
+          yearId: form.yearId || undefined,
+          subjectId: form.subjectId,
+          teacherId: resolvedTeacherId,
+          month: form.month || "",
+          teachingDateBs: date,
+          startDateBs: date,
+          endDateBs: date,
+          sessionPlanId: form.sessionPlanId,
+          monthlyDescription: form.monthlyDescription || "",
+          items,
+        };
+        const existing =
+          (editingId &&
+          (existingPlans.find((p) => p._id === editingId)?.teachingDateBs ||
+            existingPlans.find((p) => p._id === editingId)?.startDateBs) ===
+            date
+            ? existingPlans.find((p) => p._id === editingId)
+            : undefined) ||
+          existingPlans.find((p) => {
+            const pDate = p.teachingDateBs || p.startDateBs || "";
+            return (
+              p.sessionPlanId === form.sessionPlanId &&
+              pDate === date &&
+              (p.status === "DRAFT" || p.status === "REJECTED")
+            );
+          });
+        if (existing) {
+          await unwrap(
+            api.put(`/academic-management/lesson-plans/${existing._id}`, payload),
+          );
+          updated += 1;
+        } else {
+          await unwrap(
+            api.post("/academic-management/lesson-plans", payload),
+          );
+          created += 1;
+        }
+      }
+      const parts = [
+        created ? `${created} day(s) added` : "",
+        updated ? `${updated} day(s) updated` : "",
+      ].filter(Boolean);
+      toast.success(
+        parts.length ? `Lesson plan saved — ${parts.join(", ")}` : "Lesson plan saved",
+      );
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+      setShowForm(false);
+      resetLessonForm();
+    } catch (error) {
+      toast.error(parseErrorMessage(error));
+    } finally {
+      setSavingTable(false);
     }
   };
 
@@ -1307,130 +1328,6 @@ export const LessonPlanPanel = ({
     };
   }, [units]);
 
-  const teachingDateForForm =
-    form.teachingDateBs || form.startDateBs || "";
-  const todayBs = useMemo(() => formatTodayBs(), []);
-  const teachingDateIsPast =
-    Boolean(teachingDateForForm) && teachingDateForForm < todayBs;
-
-  /** Sub-units already fixed on other Lesson Plan dates (same Session Plan). */
-  const plannedSubUnitSchedule = useMemo(() => {
-    const byUnit = new Map<
-      string,
-      Array<{ title: string; dateBs: string; planId: string }>
-    >();
-    for (const plan of plansQuery.data ?? []) {
-      if (editingId && plan._id === editingId) continue;
-      if (
-        form.sessionPlanId &&
-        plan.sessionPlanId &&
-        plan.sessionPlanId !== form.sessionPlanId
-      ) {
-        continue;
-      }
-      if (
-        form.subjectId &&
-        plan.subjectId &&
-        plan.subjectId !== form.subjectId
-      ) {
-        // still allow if same curriculum teacher year — subject filter is soft
-      }
-      const dateBs =
-        plan.teachingDateBs || plan.startDateBs || plan.endDateBs || "";
-      for (const item of plan.items) {
-        const unitId = item.sessionPlanUnitId || "";
-        if (!unitId) continue;
-        const titles = normalizeSubUnitTitles(
-          item.subUnitTitles,
-          item.subUnitTitle,
-        );
-        const rows = byUnit.get(unitId) ?? [];
-        for (const title of titles) {
-          rows.push({ title, dateBs, planId: plan._id });
-        }
-        byUnit.set(unitId, rows);
-      }
-    }
-    return byUnit;
-  }, [
-    plansQuery.data,
-    editingId,
-    form.sessionPlanId,
-    form.subjectId,
-  ]);
-
-  const futureScheduleForSession = useMemo(() => {
-    if (!form.sessionPlanId) return [];
-    return (plansQuery.data ?? [])
-      .filter((p) => p.sessionPlanId === form.sessionPlanId)
-      .map((p) => ({
-        plan: p,
-        dateBs: p.teachingDateBs || p.startDateBs || p.endDateBs || "",
-      }))
-      .sort((a, b) => a.dateBs.localeCompare(b.dateBs));
-  }, [plansQuery.data, form.sessionPlanId]);
-
-  const unitsAvailableToday = useMemo(
-    () =>
-      units.filter((unit) =>
-        unitAllowsTeachingDate(unit, teachingDateForForm),
-      ),
-    [units, teachingDateForForm],
-  );
-  const filteredUnits = useMemo(() => {
-    const q = unitSearch.toLowerCase().trim();
-    const list = teachingDateForForm ? unitsAvailableToday : units;
-    if (!q) return list;
-    return list.filter(
-      (unit) =>
-        String(unit.unitNo).includes(q) ||
-        unit.chapterName.toLowerCase().includes(q) ||
-        (unit.topicsCovered || "").toLowerCase().includes(q),
-    );
-  }, [unitSearch, units, unitsAvailableToday, teachingDateForForm]);
-
-  const unitsOutOfWindow = useMemo(() => {
-    if (!teachingDateForForm) return [];
-    return units.filter(
-      (unit) => !unitAllowsTeachingDate(unit, teachingDateForForm),
-    );
-  }, [units, teachingDateForForm]);
-
-  const toggleUnit = (unitId: string) => {
-    const unit = units.find((u) => u._id === unitId);
-    if (
-      unit &&
-      teachingDateForForm &&
-      !unitAllowsTeachingDate(unit, teachingDateForForm)
-    ) {
-      toast.error(
-        `Unit ${unit.unitNo} is scheduled ${formatUnitDateWindow(unit)}. Teaching date ${teachingDateForForm} is outside that range.`,
-      );
-      return;
-    }
-    setSelectedUnitIds((current) =>
-      current.includes(unitId)
-        ? current.filter((id) => id !== unitId)
-        : [...current, unitId],
-    );
-  };
-
-  const selectAllSessionUnits = () => {
-    const available = teachingDateForForm ? unitsAvailableToday : units;
-    if (available.length === 0) {
-      toast.message(
-        teachingDateForForm
-          ? "No Session Plan units allow this teaching date"
-          : "No units on this Session Plan",
-      );
-      return;
-    }
-    setSelectedUnitIds(available.map((u) => u._id));
-    toast.success(
-      `Selected ${available.length} unit${available.length === 1 ? "" : "s"} available for this day`,
-    );
-  };
-
   const updateItemField = <K extends keyof AcademicLessonPlanInput["items"][number]>(
     index: number,
     key: K,
@@ -1452,9 +1349,9 @@ export const LessonPlanPanel = ({
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Lesson Plan</h2>
           <p className="text-sm text-slate-600">
-            Plan teaching <strong>in advance</strong>. Units and sub-units are
-            fixed by the Session Plan date windows — pick a future date, then
-            assign which sub-units fall on that day.
+            Fill the college table one row at a time:{" "}
+            <strong>Date · Unit No. · Unit Name · Sub-Unit · C/Hr · Remarks</strong>.
+            Add as many days as you need, then save.
           </p>
         </div>
         {canMutate ? (
@@ -1466,11 +1363,23 @@ export const LessonPlanPanel = ({
                 return;
               }
               resetLessonForm();
+              const subjectId =
+                selectedSubject?.subjectIds?.[0] || filters.subjectId || "";
+              setForm((current) => ({
+                ...current,
+                subjectId: subjectId || current.subjectId,
+                teacherId:
+                  teacherId ||
+                  selectedSubject?.teacherIds?.[0] ||
+                  current.teacherId,
+                academicYearBs:
+                  filters.academicYearBs || current.academicYearBs,
+              }));
               setShowForm(true);
             }}
           >
             <Plus className="mr-2 h-4 w-4" />
-            {showForm ? "Close form" : "Schedule future day"}
+            {showForm ? "Close form" : "Make lesson plan"}
           </Button>
         ) : null}
       </div>
@@ -1480,16 +1389,11 @@ export const LessonPlanPanel = ({
         <Card className="no-print border-brand-200 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle>
-              {editingId
-                ? "Continue draft schedule"
-                : "Schedule a future teaching day"}
+              {editingId ? "Edit lesson plan" : "Make lesson plan"}
             </CardTitle>
             <p className="text-sm text-slate-600">
-              <strong>1)</strong> Pick the Session Plan ·{" "}
-              <strong>2)</strong> Pick a teaching date inside it ·{" "}
-              <strong>3)</strong> Units open on that date load automatically ·{" "}
-              <strong>4)</strong> Tick the sub-units taught that day. Save draft;{" "}
-              <strong>Continue</strong> next to Submit later.
+              Choose the Session Plan, then fill rows like the paper sheet.
+              Click <strong>Add row</strong> for the next day.
             </p>
             {editingId ? (
               <Badge className="w-fit bg-amber-100 text-amber-900">
@@ -1507,12 +1411,10 @@ export const LessonPlanPanel = ({
             */}
             <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Step 1 · Session Plan
+                Session Plan
               </p>
               <p className="text-xs text-slate-500">
-                Pick the Session Plan this day belongs to. Subject, teacher, and
-                the allowed dates all come from it — the fields below just narrow
-                the list.
+                Pick the Session Plan. Units and sub-units for the table come from it.
               </p>
               <div className="grid gap-3 md:grid-cols-4">
               <FormField label="Academic Year (BS)">
@@ -1541,7 +1443,6 @@ export const LessonPlanPanel = ({
                         subjectId: "",
                         sessionPlanId: "",
                       }));
-                      setSelectedUnitIds([]);
                     }}
                   >
                     <option value="">Select year first</option>
@@ -1565,7 +1466,6 @@ export const LessonPlanPanel = ({
                         subjectId: "",
                         sessionPlanId: "",
                       }));
-                      setSelectedUnitIds([]);
                     }}
                   >
                     <option value="">Select class first</option>
@@ -1656,8 +1556,6 @@ export const LessonPlanPanel = ({
                       .map((u) => u.startDateBs)
                       .filter(Boolean) as string[];
                     autoSelectedForPlanRef.current = event.target.value || "";
-                    // Daily plan: teacher chooses units for this day (not all units)
-                    setSelectedUnitIds([]);
                     const fromUnits =
                       starts.length ? [...starts].sort()[0]! : "";
                     setForm((current) => {
@@ -1665,7 +1563,14 @@ export const LessonPlanPanel = ({
                         current.teachingDateBs ||
                         current.startDateBs ||
                         fromUnits ||
-                        "";
+                        formatTodayBs();
+                      const firstRow =
+                        current.items[0] ??
+                        {
+                          ...emptyItem(1),
+                          itemStartDateBs: defaultTeaching,
+                          itemEndDateBs: defaultTeaching,
+                        };
                       return {
                         ...current,
                         sessionPlanId: event.target.value,
@@ -1685,11 +1590,15 @@ export const LessonPlanPanel = ({
                         teachingDateBs: defaultTeaching,
                         startDateBs: defaultTeaching,
                         endDateBs: defaultTeaching,
+                        items:
+                          current.items.length > 0
+                            ? current.items
+                            : [firstRow],
                       };
                     });
                     if (plan?.units?.length) {
                       toast.success(
-                        `Session Plan loaded (${plan.units.length} units). Pick units for this teaching day.`,
+                        `Session Plan loaded. Fill the table: date, unit, sub-unit, hours.`,
                       );
                     }
                   }}
@@ -1725,598 +1634,229 @@ export const LessonPlanPanel = ({
               </FormField>
             </div>
 
-            {/* Step 2 — the date, now bounded by the plan chosen above */}
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Step 2 · Teaching date
-              </p>
-              <div className="grid gap-3 md:grid-cols-2">
-                <FormField label="Teaching date (BS) *">
-                  <NepaliDateField
-                    value={form.teachingDateBs || form.startDateBs || ""}
-                    minDate={sessionPlanDateBounds.minDate}
-                    maxDate={sessionPlanDateBounds.maxDate}
-                    onChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        teachingDateBs: value,
-                        startDateBs: value,
-                        endDateBs: value,
-                      }))
-                    }
-                    placeholder={
-                      form.sessionPlanId
-                        ? "Pick a day inside the plan"
-                        : "Choose a Session Plan first"
-                    }
-                  />
-                  {!form.sessionPlanId ? (
-                    <p className="mt-1 text-xs text-slate-500">
-                      Choose a Session Plan in Step 1 — it decides which dates
-                      are available here.
-                    </p>
-                  ) : sessionPlanDateBounds.minBs &&
-                    sessionPlanDateBounds.maxBs ? (
-                    <p className="mt-1 text-xs text-slate-500">
-                      This Session Plan runs{" "}
-                      <strong>{sessionPlanDateBounds.minBs}</strong> →{" "}
-                      <strong>{sessionPlanDateBounds.maxBs}</strong>. Today BS:{" "}
-                      {todayBs}.
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-xs text-slate-500">
-                      Units are fixed by Session Plan start–end for this date.
-                      Prefer a future date (today BS: {todayBs}).
-                    </p>
-                  )}
-                  {teachingDateIsPast ? (
-                    <p className="mt-1 text-xs text-amber-700">
-                      This date is in the past. Lesson plans are meant for future
-                      scheduling.
-                    </p>
-                  ) : null}
-                </FormField>
-                <FormField label="Day notes (optional)">
-                  <Input
-                    value={form.monthlyDescription ?? ""}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        monthlyDescription: event.target.value,
-                      }))
-                    }
-                    placeholder="Optional short note for this day"
-                  />
-                </FormField>
-              </div>
-            </div>
-
-            {form.sessionPlanId && futureScheduleForSession.length > 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Fixed schedule (this Session Plan)
-                </p>
-                <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-100">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50 text-slate-600">
+            {form.sessionPlanId ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Lesson plan table
+                  </p>
+                  <Button type="button" size="sm" variant="outline" onClick={addLessonRow}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    Add row
+                  </Button>
+                </div>
+                {sessionPlanDateBounds.minBs && sessionPlanDateBounds.maxBs ? (
+                  <p className="text-xs text-slate-500">
+                    Session Plan dates: {sessionPlanDateBounds.minBs} →{" "}
+                    {sessionPlanDateBounds.maxBs}
+                  </p>
+                ) : null}
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[860px] border-collapse text-sm">
+                    <thead className="bg-slate-50">
                       <tr>
-                        <th className="px-2 py-1.5 text-left font-medium">Date</th>
-                        <th className="px-2 py-1.5 text-left font-medium">Units / sub-units</th>
-                        <th className="px-2 py-1.5 text-left font-medium">Status</th>
+                        <th className="w-10 border-b border-slate-200 px-2 py-2 text-center text-xs font-semibold">
+                          S.N
+                        </th>
+                        <th className="w-36 border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
+                          Date
+                        </th>
+                        <th className="w-48 border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
+                          Unit No. / Unit Name
+                        </th>
+                        <th className="border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
+                          Sub-Unit
+                        </th>
+                        <th className="w-16 border-b border-slate-200 px-2 py-2 text-center text-xs font-semibold">
+                          C/Hr
+                        </th>
+                        <th className="w-36 border-b border-slate-200 px-2 py-2 text-left text-xs font-semibold">
+                          Remarks
+                        </th>
+                        <th className="w-10 border-b border-slate-200 px-1 py-2" />
                       </tr>
                     </thead>
                     <tbody>
-                      {futureScheduleForSession.map(({ plan, dateBs }) => (
-                        <tr
-                          key={plan._id}
-                          className={
-                            dateBs === teachingDateForForm
-                              ? "bg-brand-50/60"
-                              : "border-t border-slate-100"
-                          }
-                        >
-                          <td className="px-2 py-1.5 whitespace-nowrap font-medium text-slate-800">
-                            {dateBs || "—"}
-                          </td>
-                          <td className="px-2 py-1.5 text-slate-700">
-                            {plan.items
-                              .map((item) => {
-                                const subs = normalizeSubUnitTitles(
-                                  item.subUnitTitles,
-                                  item.subUnitTitle,
-                                );
-                                const unitLabel = item.unit
-                                  ? `U${item.unit.unitNo}`
-                                  : item.subjectLabel || "Unit";
-                                return subs.length > 0
-                                  ? `${unitLabel}: ${subs.join(", ")}`
-                                  : unitLabel;
-                              })
-                              .join(" · ")}
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <Badge className={statusBadgeClass(plan.status)}>
-                              {plan.status}
-                            </Badge>
+                      {form.items.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="px-3 py-6 text-center text-sm text-slate-500"
+                          >
+                            Click Add row to start the table.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        form.items.map((item, index) => {
+                          const unit = units.find(
+                            (u) => u._id === item.sessionPlanUnitId,
+                          );
+                          const subOptions = parseSubUnitsFromTopics(
+                            unit?.topicsCovered,
+                          );
+                          const selectedTitles = normalizeSubUnitTitles(
+                            item.subUnitTitles,
+                            item.subUnitTitle,
+                          );
+                          const rowDate =
+                            item.itemStartDateBs ||
+                            form.teachingDateBs ||
+                            form.startDateBs ||
+                            "";
+                          const unitsForDate = units.filter((u) =>
+                            unitAllowsTeachingDate(u, rowDate),
+                          );
+                          const unitChoices =
+                            unitsForDate.length > 0 ? unitsForDate : units;
+                          return (
+                            <tr key={`${item.sessionPlanUnitId || "new"}-${index}`}>
+                              <td className="border-t border-slate-100 px-2 py-2 text-center tabular-nums text-slate-600">
+                                {index + 1}
+                              </td>
+                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                                <NepaliDateField
+                                  value={rowDate}
+                                  minDate={sessionPlanDateBounds.minDate}
+                                  maxDate={sessionPlanDateBounds.maxDate}
+                                  onChange={(value) => {
+                                    setForm((current) => ({
+                                      ...current,
+                                      teachingDateBs:
+                                        current.teachingDateBs || value,
+                                      startDateBs: current.startDateBs || value,
+                                      endDateBs: current.endDateBs || value,
+                                      items: current.items.map((row, i) =>
+                                        i === index
+                                          ? {
+                                              ...row,
+                                              itemStartDateBs: value,
+                                              itemEndDateBs: value,
+                                            }
+                                          : row,
+                                      ),
+                                    }));
+                                  }}
+                                  placeholder="Date"
+                                />
+                              </td>
+                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                                <Select
+                                  value={item.sessionPlanUnitId || ""}
+                                  onChange={(event) =>
+                                    applyRowUnit(index, event.target.value)
+                                  }
+                                >
+                                  <option value="">Select unit</option>
+                                  {unitChoices.map((u) => (
+                                    <option key={u._id} value={u._id}>
+                                      {u.unitNo}. {u.chapterName}
+                                    </option>
+                                  ))}
+                                </Select>
+                              </td>
+                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                                {item.sessionPlanUnitId ? (
+                                  subOptions.length > 0 ? (
+                                    <div className="max-h-28 space-y-1 overflow-y-auto">
+                                      {subOptions.map((title) => {
+                                        const on = selectedTitles.some(
+                                          (t) =>
+                                            titleKey(t) === titleKey(title),
+                                        );
+                                        return (
+                                          <label
+                                            key={title}
+                                            className="flex cursor-pointer items-start gap-1.5 text-xs text-slate-700"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              className="mt-0.5"
+                                              checked={on}
+                                              onChange={(event) => {
+                                                const next = event.target.checked
+                                                  ? [...selectedTitles, title]
+                                                  : selectedTitles.filter(
+                                                      (t) =>
+                                                        titleKey(t) !==
+                                                        titleKey(title),
+                                                    );
+                                                applyRowSubs(index, next);
+                                              }}
+                                            />
+                                            <span>{title}</span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <Input
+                                      value={item.plannedTopic}
+                                      nepali={formNepaliText}
+                                      onChange={(event) =>
+                                        updateItemField(
+                                          index,
+                                          "plannedTopic",
+                                          event.target.value,
+                                        )
+                                      }
+                                      placeholder="Type sub-unit"
+                                    />
+                                  )
+                                ) : (
+                                  <p className="text-xs text-slate-400">
+                                    Select a unit first
+                                  </p>
+                                )}
+                              </td>
+                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                                <NumberInput
+                                  className="h-9 w-16"
+                                  min={1}
+                                  value={item.estimatedClasses}
+                                  onChange={(event) =>
+                                    updateItemField(
+                                      index,
+                                      "estimatedClasses",
+                                      event.target.valueAsNumber || 1,
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="border-t border-slate-100 px-2 py-2 align-top">
+                                <Input
+                                  value={item.remarks}
+                                  onChange={(event) =>
+                                    updateItemField(
+                                      index,
+                                      "remarks",
+                                      event.target.value,
+                                    )
+                                  }
+                                  placeholder="—"
+                                />
+                              </td>
+                              <td className="border-t border-slate-100 px-1 py-2 align-top">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-rose-600"
+                                  onClick={() => removeLessonRow(index)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
             ) : null}
 
-            {form.sessionPlanId ? (
-              <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Step 3 · Units fixed for this date
-                  </p>
-                  {teachingDateForForm ? (
-                    <span className="text-xs text-slate-600">
-                      {unitsAvailableToday.length} unit
-                      {unitsAvailableToday.length === 1 ? "" : "s"} open on{" "}
-                      {teachingDateForForm}
-                      {unitsOutOfWindow.length > 0
-                        ? ` · ${unitsOutOfWindow.length} outside window (hidden)`
-                        : ""}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="text-xs text-slate-500">
-                  Only Session Plan units whose start–end includes this teaching
-                  date appear. They are selected automatically for this day —
-                  uncheck any you will not cover today.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative min-w-[12rem] flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      className="pl-9"
-                      value={unitSearch}
-                      onChange={(event) => setUnitSearch(event.target.value)}
-                      placeholder="Search unit…"
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={selectAllSessionUnits}
-                  >
-                    Select all for date
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setSelectedUnitIds([])}
-                  >
-                    Clear
-                  </Button>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {filteredUnits.length === 0 ? (
-                    <p className="col-span-full rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                      {teachingDateForForm
-                        ? "No units are scheduled for this date on the Session Plan. Pick a date inside a unit’s start–end window."
-                        : "Pick a future teaching date to load fixed units."}
-                    </p>
-                  ) : (
-                    filteredUnits.map((unit) => {
-                      const selected = selectedUnitIds.includes(unit._id);
-                      const subs = parseSubUnitsFromTopics(unit.topicsCovered);
-                      const scheduled = plannedSubUnitSchedule.get(unit._id) ?? [];
-                      const scheduledCount = new Set(
-                        scheduled.map((s) => titleKey(s.title)),
-                      ).size;
-                      return (
-                        <button
-                          key={unit._id}
-                          type="button"
-                          onClick={() => toggleUnit(unit._id)}
-                          className={`rounded-xl border p-3 text-left transition ${
-                            selected
-                              ? "border-brand-500 bg-brand-50 shadow-sm"
-                              : "border-slate-200 bg-white hover:border-slate-300"
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <span
-                              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
-                                selected
-                                  ? "border-brand-600 bg-brand-600 text-white"
-                                  : "border-slate-300"
-                              }`}
-                            >
-                              {selected ? <Check className="h-3 w-3" /> : null}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-slate-900 text-sm">
-                                Unit {unit.unitNo}: {unit.chapterName}
-                              </p>
-                              <p className="mt-0.5 text-xs text-slate-600">
-                                Fixed window: {formatUnitDateWindow(unit)}
-                              </p>
-                              <p className="mt-0.5 text-xs text-slate-500">
-                                {subs.length} sub-unit
-                                {subs.length === 1 ? "" : "s"}
-                                {scheduledCount > 0
-                                  ? ` · ${scheduledCount} already dated`
-                                  : " · none dated yet"}
-                              </p>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {form.sessionPlanId && form.items.length > 0 ? (
-              <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Step 4 · Fix sub-units on{" "}
-                  {form.teachingDateBs || form.startDateBs || "this day"}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Sub-units come from the Session Plan. Tick which ones are
-                  taught on this date. Ones already fixed on another day are
-                  marked — leave them for that day or reassign carefully.
-                </p>
-                {form.items.map((item, index) => {
-                  const unit = units.find(
-                    (u) => u._id === item.sessionPlanUnitId,
-                  );
-                  const subUnits = parseSubUnitsFromTopics(unit?.topicsCovered);
-                  /** Bounds every date on this row is held to. */
-                  const unitWindowMin = unit?.startDateBs
-                    ? (parseBsDate(unit.startDateBs) ?? undefined)
-                    : undefined;
-                  const unitWindowMax = unit?.endDateBs
-                    ? (parseBsDate(unit.endDateBs) ?? undefined)
-                    : undefined;
-                  const itemKey = item.sessionPlanUnitId || String(index);
-                  const expanded = expandedItemKeys.includes(itemKey);
-                  const selectedTitles = normalizeSubUnitTitles(
-                    item.subUnitTitles,
-                    item.subUnitTitle,
-                  );
-                  const scheduledRows =
-                    plannedSubUnitSchedule.get(item.sessionPlanUnitId || "") ??
-                    [];
-                  const scheduledByTitle = new Map<string, string[]>();
-                  for (const row of scheduledRows) {
-                    const k = titleKey(row.title);
-                    const dates = scheduledByTitle.get(k) ?? [];
-                    if (row.dateBs && !dates.includes(row.dateBs)) {
-                      dates.push(row.dateBs);
-                    }
-                    scheduledByTitle.set(k, dates);
-                  }
-                  const remainingSubs = subUnits.filter(
-                    (t) => !scheduledByTitle.has(titleKey(t)),
-                  );
-                  const applySubUnitTitles = (titles: string[]) => {
-                    const multi = matchMultipleSubUnits(
-                      matchedSyllabus,
-                      unit?.syllabusChapterId || item.syllabusChapterId,
-                      titles,
-                    );
-                    const match = multi.firstMatch;
-                    const joined = joinSubUnitTitles(titles);
-                    setForm((current) => ({
-                      ...current,
-                      items: current.items.map((row, i) =>
-                        i === index
-                          ? {
-                              ...row,
-                              subUnitTitles: titles,
-                              subUnitTitle: joined,
-                              plannedTopic:
-                                joined || unit?.chapterName || row.plannedTopic,
-                              syllabusId:
-                                matchedSyllabus?._id ||
-                                unit?.syllabusId ||
-                                row.syllabusId ||
-                                "",
-                              syllabusChapterId:
-                                match?.syllabusChapterId ||
-                                unit?.syllabusChapterId ||
-                                row.syllabusChapterId ||
-                                "",
-                              syllabusUnitId:
-                                match?.syllabusUnitId ||
-                                row.syllabusUnitId ||
-                                "",
-                              syllabusSubUnitId:
-                                multi.syllabusSubUnitIds[0] || "",
-                              syllabusSubUnitIds: multi.syllabusSubUnitIds,
-                              learningObjectives:
-                                multi.learningOutcomes ||
-                                row.learningObjectives,
-                              description:
-                                multi.description || row.description,
-                            }
-                          : row,
-                      ),
-                    }));
-                  };
-                  return (
-                    <div
-                      key={itemKey}
-                      className="rounded-xl border border-slate-200 bg-white p-3 space-y-3"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <p className="font-semibold text-slate-900 text-sm">
-                            {unit
-                              ? `Unit ${unit.unitNo}: ${unit.chapterName}`
-                              : item.subjectLabel || `Unit ${index + 1}`}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            Session window:{" "}
-                            {unit
-                              ? formatUnitDateWindow(unit)
-                              : "—"}{" "}
-                            · Fixed on:{" "}
-                            {form.teachingDateBs || form.startDateBs || "—"}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                            Classes
-                            <NumberInput
-                              className="w-16 h-8"
-                              min={1}
-                              value={item.estimatedClasses}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "estimatedClasses",
-                                  event.target.valueAsNumber || 1,
-                                )
-                              }
-                            />
-                          </label>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              setExpandedItemKeys((current) =>
-                                current.includes(itemKey)
-                                  ? current.filter((k) => k !== itemKey)
-                                  : [...current, itemKey],
-                              )
-                            }
-                          >
-                            {expanded ? (
-                              <>
-                                <ChevronUp className="mr-1 h-3.5 w-3.5" />
-                                Less
-                              </>
-                            ) : (
-                              <>
-                                <ChevronDown className="mr-1 h-3.5 w-3.5" />
-                                More
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-
-                      <FormField label="Sub-units fixed for this date">
-                        {subUnits.length > 0 ? (
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap gap-2">
-                              {subUnits.map((title) => {
-                                const on = selectedTitles.some(
-                                  (t) => titleKey(t) === titleKey(title),
-                                );
-                                const otherDates =
-                                  scheduledByTitle.get(titleKey(title)) ?? [];
-                                return (
-                                  <button
-                                    key={title}
-                                    type="button"
-                                    onClick={() => {
-                                      const titles = on
-                                        ? selectedTitles.filter(
-                                            (t) =>
-                                              titleKey(t) !== titleKey(title),
-                                          )
-                                        : [...selectedTitles, title];
-                                      applySubUnitTitles(titles);
-                                    }}
-                                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                                      on
-                                        ? "border-brand-600 bg-brand-600 text-white"
-                                        : otherDates.length > 0
-                                          ? "border-slate-300 bg-slate-100 text-slate-600"
-                                          : "border-slate-300 bg-white text-slate-700 hover:border-brand-400"
-                                    }`}
-                                    title={
-                                      otherDates.length > 0
-                                        ? `Already planned on: ${otherDates.join(", ")}`
-                                        : "Assign to this teaching date"
-                                    }
-                                  >
-                                    {on ? "✓ " : ""}
-                                    {title}
-                                    {otherDates.length > 0 ? (
-                                      <span
-                                        className={
-                                          on
-                                            ? " opacity-90"
-                                            : " text-slate-500"
-                                        }
-                                      >
-                                        {" "}
-                                        · {otherDates[0]}
-                                        {otherDates.length > 1 ? "…" : ""}
-                                      </span>
-                                    ) : null}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {remainingSubs.length > 0 ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 rounded-full text-xs"
-                                  onClick={() =>
-                                    applySubUnitTitles(remainingSubs)
-                                  }
-                                >
-                                  Assign all remaining ({remainingSubs.length})
-                                </Button>
-                              ) : null}
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 rounded-full text-xs"
-                                onClick={() => applySubUnitTitles(subUnits)}
-                              >
-                                Assign all sub-units
-                              </Button>
-                              {selectedTitles.length > 0 ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 rounded-full text-xs"
-                                  onClick={() => applySubUnitTitles([])}
-                                >
-                                  Clear
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-amber-700">
-                            No sub-units listed on the Session Plan for this unit.
-                            Add topics on the Session Plan so they can be fixed by
-                            date.
-                          </p>
-                        )}
-                        {selectedTitles.length > 0 ? (
-                          <p className="mt-1 text-xs text-emerald-700">
-                            Fixed on this date: {selectedTitles.join(" · ")}
-                          </p>
-                        ) : subUnits.length > 0 ? (
-                          <p className="mt-1 text-xs text-amber-700">
-                            Select at least one sub-unit to fix on this date.
-                          </p>
-                        ) : null}
-                      </FormField>
-
-                      {expanded ? (
-                        <div className="grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-2">
-                          <FormField label="Planned topic label">
-                            <Input
-                              value={item.plannedTopic}
-                              nepali={formNepaliText}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "plannedTopic",
-                                  event.target.value,
-                                )
-                              }
-                              placeholder="Auto-filled from sub-units"
-                            />
-                          </FormField>
-                          <FormField label="Learning objectives">
-                            <Input
-                              value={item.learningObjectives}
-                              nepali={formNepaliText}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "learningObjectives",
-                                  event.target.value,
-                                )
-                              }
-                              placeholder="Optional"
-                            />
-                          </FormField>
-                          <FormField label="Teaching method">
-                            <Input
-                              value={item.teachingMethod}
-                              nepali={formNepaliText}
-                              onChange={(event) =>
-                                updateItemField(
-                                  index,
-                                  "teachingMethod",
-                                  event.target.value,
-                                )
-                              }
-                              placeholder="Lecture, demo…"
-                            />
-                          </FormField>
-                          {/*
-                            A sub-unit is taught on ONE fixed day, not over a
-                            range. The single picker below writes that day to
-                            both stored date fields, matching how the lesson plan
-                            itself mirrors teachingDateBs into start/end — that
-                            keeps the model and the API validation unchanged.
-                            It defaults to the lesson's teaching date and can be
-                            nudged a day or two, but never outside the unit window.
-                          */}
-                          <FormField label="Sub-unit date (BS)">
-                            <NepaliDateField
-                              value={
-                                item.itemStartDateBs ||
-                                teachingDateForForm ||
-                                ""
-                              }
-                              minDate={unitWindowMin}
-                              maxDate={unitWindowMax}
-                              onChange={(value) => {
-                                updateItemField(index, "itemStartDateBs", value);
-                                updateItemField(index, "itemEndDateBs", value);
-                              }}
-                              placeholder="Defaults to the teaching date"
-                            />
-                          </FormField>
-                          <FormField label="Deadline (BS)">
-                            <NepaliDateField
-                              value={item.deadline}
-                              minDate={unitWindowMin}
-                              maxDate={unitWindowMax}
-                              onChange={(value) =>
-                                updateItemField(index, "deadline", value)
-                              }
-                              placeholder="Optional"
-                            />
-                          </FormField>
-                          {unit?.startDateBs || unit?.endDateBs ? (
-                            <p className="text-xs text-slate-500 sm:col-span-2">
-                              Dates above must stay inside the Session Plan
-                              window for Unit {unit.unitNo}:{" "}
-                              <strong>{formatUnitDateWindow(unit)}</strong>
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : form.sessionPlanId ? (
-              <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Step 2: select at least one unit above to plan sub-units for this
-                day.
-              </p>
-            ) : form.subjectId ? (
+            {!form.sessionPlanId && form.subjectId ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-1">
                 {sessionPlansQuery.isLoading ? (
                   <p>Looking for your Session Plan…</p>
@@ -2362,17 +1902,15 @@ export const LessonPlanPanel = ({
                   !form.sessionPlanId ||
                   form.items.length === 0 ||
                   !form.subjectId ||
-                  !(form.teachingDateBs || form.startDateBs) ||
                   !(teacherId || form.teacherId) ||
-                  createMutation.isPending ||
-                  updateMutation.isPending
+                  savingTable
                 }
               >
-                {createMutation.isPending || updateMutation.isPending
+                {savingTable
                   ? "Saving…"
                   : editingId
                     ? "Update draft"
-                    : "Save as draft"}
+                    : "Save lesson plan"}
               </Button>
               <Button
                 variant="outline"
@@ -2423,7 +1961,7 @@ export const LessonPlanPanel = ({
           ) : selectedPlans.length === 0 ? (
             <EmptyState
               title={`No Lesson Plans for ${selectedSubjectMeta.subject.subjectName}`}
-              description="Schedule future teaching days: pick a date, units open on that date are fixed from the Session Plan, then assign sub-units to that date."
+              description="Build the college lesson plan table: one row per teaching date with Unit No., Unit Name, Sub-Unit, C/Hr, and Remarks."
             />
           ) : (
             <>
@@ -2449,7 +1987,9 @@ export const LessonPlanPanel = ({
                 </CardContent>
               </Card>
 
-              {teacherGroups.map((group) => (
+              {teacherGroups.map((group) => {
+                const tableRows = flattenLessonPlanTableRows(group.items);
+                return (
                 <div key={group.teacherId} className="space-y-3">
                   {teacherGroups.length > 1 ? (
                     <div className="flex items-center gap-2 no-print">
@@ -2460,7 +2000,65 @@ export const LessonPlanPanel = ({
                       <div className="h-px flex-1 bg-slate-200" />
                     </div>
                   ) : null}
-                  {group.items.map((plan) => (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Lesson Plan</CardTitle>
+                      <p className="text-sm text-slate-600">
+                        {group.teacherName}
+                        {selectedSubjectMeta
+                          ? ` · ${selectedSubjectMeta.subject.subjectName}`
+                          : ""}
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="overflow-x-auto">
+                        <Table className="min-w-[880px]">
+                          <TableHead>
+                            <tr>
+                              <Th className="w-12 text-center">S.N</Th>
+                              <Th className="w-28">Date</Th>
+                              <Th className="w-20 text-center">Unit No.</Th>
+                              <Th>Unit Name</Th>
+                              <Th>Sub-Unit</Th>
+                              <Th className="w-16 text-center">C/Hr</Th>
+                              <Th className="w-28">Remarks</Th>
+                            </tr>
+                          </TableHead>
+                          <TableBody>
+                            {tableRows.length === 0 ? (
+                              <tr>
+                                <Td colSpan={7} className="py-6 text-center text-slate-500">
+                                  No lesson plan rows yet.
+                                </Td>
+                              </tr>
+                            ) : (
+                              tableRows.map((row, i) => (
+                                <tr key={`${row.planId}-${i}`}>
+                                  <Td className="text-center tabular-nums">{i + 1}</Td>
+                                  <Td className="whitespace-nowrap tabular-nums">
+                                    {row.dateBs || "—"}
+                                  </Td>
+                                  <Td className="text-center tabular-nums">{row.unitNo}</Td>
+                                  <Td>{row.unitName}</Td>
+                                  <Td>{row.subUnit}</Td>
+                                  <Td className="text-center tabular-nums">{row.hours}</Td>
+                                  <Td>{row.remarks || ""}</Td>
+                                </tr>
+                              ))
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  {group.items
+                    .slice()
+                    .sort((a, b) => {
+                      const ad = a.teachingDateBs || a.startDateBs || "";
+                      const bd = b.teachingDateBs || b.startDateBs || "";
+                      return ad.localeCompare(bd);
+                    })
+                    .map((plan) => (
                     <Card key={plan._id}>
                       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                         <div>
@@ -2472,83 +2070,19 @@ export const LessonPlanPanel = ({
                           </CardTitle>
                           <p className="text-sm text-slate-600">
                             {plan.teacher?.user?.fullName}
-                            {plan.month ? ` · ${plan.month}` : ""} · Topics:{" "}
-                            {plan.plannedTopics ?? plan.items.length} ·
-                            Completed: {plan.completedTopics ?? 0} · Pending:{" "}
-                            {plan.pendingTopics ?? plan.pendingUnits}
+                            {plan.month ? ` · ${plan.month}` : ""}
                           </p>
                           {plan.monthlyDescription ? (
                             <p className="mt-1 text-sm text-slate-600">
                               {plan.monthlyDescription}
                             </p>
                           ) : null}
-                          <AcademicProgressBar
-                            className="mt-2 max-w-md"
-                            completedPercent={plan.completedPercent}
-                            remainingPercent={plan.remainingPercent}
-                          />
                         </div>
                         <Badge className={statusBadgeClass(plan.status)}>
                           {plan.status}
                         </Badge>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        <div className="overflow-x-auto">
-                          <Table>
-                            <TableHead>
-                              <tr>
-                                <Th>SN</Th>
-                                <Th>Unit</Th>
-                                <Th>Topic</Th>
-                                <Th>Deadline</Th>
-                                <Th>Classes</Th>
-                                <Th>Progress</Th>
-                                <Th>Status</Th>
-                              </tr>
-                            </TableHead>
-                            <TableBody>
-                              {plan.items.map((item) => {
-                                const remaining =
-                                  item.remainingPercent ??
-                                  Math.max(0, 100 - item.completedPercent);
-                                return (
-                                  <tr key={item._id}>
-                                    <Td>{item.serialNo}</Td>
-                                    <Td>
-                                      {item.unit
-                                        ? `U${item.unit.unitNo}: ${item.unit.chapterName}`
-                                        : item.subjectLabel || "—"}
-                                    </Td>
-                                    <Td>{item.plannedTopic}</Td>
-                                    <Td className="whitespace-nowrap text-xs">
-                                      {item.deadline || "—"}
-                                    </Td>
-                                    <Td>
-                                      {item.completedClasses}/
-                                      {item.estimatedClasses}
-                                    </Td>
-                                    <Td className="min-w-[120px]">
-                                      <AcademicProgressBar
-                                        completedPercent={item.completedPercent}
-                                        remainingPercent={remaining}
-                                        compact
-                                      />
-                                    </Td>
-                                    <Td>
-                                      <Badge
-                                        className={statusBadgeClass(
-                                          item.completionStatus,
-                                        )}
-                                      >
-                                        {item.completionStatus}
-                                      </Badge>
-                                    </Td>
-                                  </tr>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                        </div>
                         {canMutate ? (
                           <div className="flex flex-wrap gap-2 no-print">
                             {plan.status === "DRAFT" ||
@@ -2572,9 +2106,6 @@ export const LessonPlanPanel = ({
                                 </Button>
                               </>
                             ) : null}
-                            {/* Admins may remove an approved plan too; teachers
-                                only while it is still editable (DRAFT/REJECTED),
-                                which is what the API enforces. */}
                             {isAdmin ||
                             plan.status === "DRAFT" ||
                             plan.status === "REJECTED" ? (
@@ -2654,7 +2185,8 @@ export const LessonPlanPanel = ({
                     </Card>
                   ))}
                 </div>
-              ))}
+                );
+              })}
             </>
           )}
         </div>
@@ -2727,7 +2259,7 @@ export const LessonPlanPanel = ({
         </style>
         <AcademicPrintHeader
           institutionName={institutionName}
-          title="Lesson Plan Report"
+          title="Lesson Plan"
           subtitle={
             selectedSubjectMeta
               ? `${selectedSubjectMeta.faculty.label} · ${selectedSubjectMeta.year.label} · ${selectedSubjectMeta.subject.subjectName}`
@@ -2739,86 +2271,67 @@ export const LessonPlanPanel = ({
         {printPlans.length === 0 ? (
           <p className="text-sm text-slate-600">No lesson plans to export.</p>
         ) : (
-          groupByTeacher(printPlans).map((group) => (
+          groupByTeacher(printPlans).map((group) => {
+            const tableRows = flattenLessonPlanTableRows(group.items);
+            const subjectName =
+              group.items[0]?.subject?.name ??
+              selectedSubjectMeta?.subject.subjectName ??
+              "—";
+            const subjectCode = group.items[0]?.subject?.code;
+            return (
             <div key={group.teacherId} className="lp-print-section">
-              <h3
-                className="lp-print-meta"
-                style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}
-              >
+              <p className="lp-print-meta" style={{ fontWeight: 600 }}>
                 Teacher: {group.teacherName}
-              </h3>
-              {group.items.map((plan) => (
-                <div key={plan._id} className="lp-print-section">
-                  <p className="lp-print-meta" style={{ fontWeight: 600 }}>
-                    Subject: {plan.subject?.name ?? "—"}
-                    {plan.subject?.code ? ` (${plan.subject.code})` : ""} ·
-                    Teaching Date:{" "}
-                    {plan.teachingDateBs || plan.startDateBs || plan.month || "—"}{" "}
-                    · Status: {plan.status}
-                  </p>
-                  {plan.monthlyDescription ? (
-                    <p className="lp-print-meta" style={{ color: "#475569" }}>
-                      {plan.monthlyDescription}
-                    </p>
-                  ) : null}
-                  <table className="lp-print-table">
-                    <colgroup>
-                      <col style={{ width: "5%" }} />
-                      <col style={{ width: "9%" }} />
-                      <col style={{ width: "28%" }} />
-                      <col style={{ width: "34%" }} />
-                      <col style={{ width: "7%" }} />
-                      <col style={{ width: "17%" }} />
-                    </colgroup>
-                    <thead>
-                      <tr>
-                        <th>S.N</th>
-                        <th>Unit No.</th>
-                        <th>Units</th>
-                        <th>Sub Units</th>
-                        <th>C/Hr</th>
-                        <th>Remarks</th>
+                {" · "}
+                Subject: {subjectName}
+                {subjectCode ? ` (${subjectCode})` : ""}
+              </p>
+              <table className="lp-print-table">
+                <colgroup>
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "8%" }} />
+                  <col style={{ width: "22%" }} />
+                  <col style={{ width: "32%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "13%" }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>S.N</th>
+                    <th>Date</th>
+                    <th>Unit No.</th>
+                    <th>Unit Name</th>
+                    <th>Sub-Unit</th>
+                    <th>C/Hr</th>
+                    <th>Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="lp-text">
+                        No lesson plan rows.
+                      </td>
+                    </tr>
+                  ) : (
+                    tableRows.map((row, i) => (
+                      <tr key={`${row.planId}-${i}`}>
+                        <td className="lp-num">{i + 1}</td>
+                        <td className="lp-num">{row.dateBs || "—"}</td>
+                        <td className="lp-num">{row.unitNo}</td>
+                        <td className="lp-text">{row.unitName}</td>
+                        <td className="lp-text">{row.subUnit}</td>
+                        <td className="lp-num">{row.hours}</td>
+                        <td className="lp-text">{row.remarks}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {plan.items.map((item, itemIndex) => {
-                        const subUnits = normalizeSubUnitTitles(
-                          item.subUnitTitles,
-                          item.subUnitTitle,
-                        );
-                        return (
-                          <tr key={item._id || `${plan._id}-${itemIndex}`}>
-                            <td className="lp-num">{itemIndex + 1}</td>
-                            <td className="lp-num">
-                              {item.unit?.unitNo ?? "—"}
-                            </td>
-                            <td className="lp-text">
-                              {item.unit?.chapterName ||
-                                item.subjectLabel ||
-                                "—"}
-                            </td>
-                            <td className="lp-text">
-                              {subUnits.length > 0
-                                ? subUnits.join(", ")
-                                : item.plannedTopic || "—"}
-                            </td>
-                            <td className="lp-num">
-                              {Number.isFinite(item.estimatedClasses)
-                                ? item.estimatedClasses
-                                : "—"}
-                            </td>
-                            <td className="lp-text">
-                              {item.remarks?.trim() || ""}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-          ))
+            );
+          })
         )}
         <AcademicPrintFooter />
       </div>
