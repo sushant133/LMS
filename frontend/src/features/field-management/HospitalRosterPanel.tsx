@@ -42,6 +42,7 @@ import { NumberInput } from "components/ui/number-input";
 import { Select } from "components/ui/select";
 import { Table, TableBody, TableHead, Td, Th } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
+import { useAuth } from "features/auth/AuthProvider";
 import { api, unwrap } from "lib/api";
 import {
   buildPrintInstitutionHeaderHtml,
@@ -201,10 +202,96 @@ const escapePrintHtml = (value: string): string =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
+type RosterPrintHeader = {
+  name: string;
+  address?: string;
+  preparedBy?: string;
+  approvedBy?: string;
+  /** Short-form glossary printed under the table, above signatures. */
+  note?: string;
+  /** When false, omit the Note block. Default true. */
+  includeNote?: boolean;
+  /** When false, omit the signature block. Default true. */
+  includeSignatures?: boolean;
+};
+
+const sortByOrder = <T extends { sortOrder?: number }>(rows: T[]): T[] =>
+  [...rows].sort((a, b) => (a.sortOrder ?? 100) - (b.sortOrder ?? 100));
+
+/** Glossary of roster short codes → full names (M = Morning, ER = Emergency). */
+const buildRosterShortFormNote = (
+  entries: Array<{ short?: string; full?: string; sortOrder?: number }>,
+): string => {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const row of sortByOrder(entries)) {
+    const code = (row.short ?? "").trim();
+    const name = (row.full ?? "").trim();
+    if (!code || !name) continue;
+    const key = code.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parts.push(`${code} = ${name}`);
+  }
+  return parts.join(", ");
+};
+
+const rosterMasterShortForms = (
+  shifts: DutyShiftRecord[],
+  departments: HospitalDepartmentRecord[],
+  codes: RosterDutyCodeRecord[],
+): Array<{ short?: string; full?: string; sortOrder?: number }> => [
+  ...shifts.map((row) => ({
+    short: row.shortCode,
+    full: row.name,
+    sortOrder: row.sortOrder,
+  })),
+  ...departments.map((row) => ({
+    short: row.shortCode,
+    full: row.name,
+    sortOrder: 1000 + (row.sortOrder ?? 100),
+  })),
+  ...codes.map((row) => ({
+    short: row.code,
+    full: row.label,
+    sortOrder: 2000 + (row.sortOrder ?? 100),
+  })),
+];
+
+const rosterShortFormNoteHtml = (noteText?: string): string => {
+  const text =
+    (noteText ?? "").trim() ||
+    "M = Morning, ER = Emergency (edit this note)";
+  return `<div class="note">
+      <strong>Note:</strong>
+      <span class="note-body">${escapePrintHtml(text)}</span>
+    </div>`;
+};
+
+const rosterSignatureBlockHtml = (header?: RosterPrintHeader): string => {
+  if (header?.includeSignatures === false) return "";
+  const prepared = (header?.preparedBy ?? "").trim();
+  const approved = (header?.approvedBy ?? "").trim();
+  return `<div class="sig-block">
+      <div class="sig">
+        <div class="sig-space"></div>
+        <div class="sig-line"></div>
+        <div class="sig-role">Prepared By</div>
+        <div class="sig-name editable" contenteditable="true" data-placeholder="Type name">${escapePrintHtml(prepared)}</div>
+      </div>
+      <div class="sig">
+        <div class="sig-space"></div>
+        <div class="sig-line"></div>
+        <div class="sig-role">Approved By</div>
+        <div class="sig-name editable" contenteditable="true" data-placeholder="Type name">${escapePrintHtml(approved)}</div>
+      </div>
+    </div>`;
+};
+
 const openRosterPrintWindow = (
   title: string,
   bodyHtml: string,
-  header?: { name: string; address?: string },
+  header?: RosterPrintHeader,
 ) => {
   const win = window.open("", "_blank");
   if (!win) {
@@ -236,13 +323,169 @@ const openRosterPrintWindow = (
       thead { display: table-header-group; }
       tr { page-break-inside: avoid; }
       .legend { margin-top: 8px; font-size: 10px; color: #334155; }
-      @page { size: A4 landscape; margin: 8mm; }
+      .print-footer {
+        margin-top: 10px;
+        padding-top: 6px;
+        border-top: 1px solid #94a3b8;
+        background: #fff;
+      }
+      .note {
+        margin: 0 0 6px;
+        font-size: 10px;
+        color: #334155;
+        line-height: 1.5;
+      }
+      .note strong { color: #0f172a; margin-right: 4px; }
+      .note-body { font-size: 10px; }
+      .print-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        margin: -8mm -8mm 10px;
+        padding: 8px 12px;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-size: 13px;
+      }
+      .print-toolbar .hint { flex: 1; min-width: 180px; font-size: 12px; color: #cbd5e1; }
+      .print-toolbar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+      .print-toolbar button {
+        background: #ffffff;
+        color: #0f172a;
+        border: 0;
+        border-radius: 6px;
+        padding: 6px 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .editable.is-editing {
+        outline: 1px dashed #94a3b8;
+        outline-offset: 2px;
+        min-width: 2em;
+        cursor: text;
+        border-radius: 2px;
+      }
+      .editable.is-editing:empty::before {
+        content: attr(data-placeholder);
+        color: #94a3b8;
+        font-weight: 400;
+      }
+      .sig-block {
+        margin-top: 8px;
+        display: flex;
+        justify-content: space-around;
+        gap: 32px;
+        page-break-inside: avoid;
+      }
+      .sig {
+        min-width: 58mm;
+        max-width: 90mm;
+        text-align: center;
+        font-size: 11px;
+        color: #334155;
+      }
+      .sig-space { height: 18px; }
+      .sig-line {
+        border-top: 1px solid #0f172a;
+        margin: 0 6px 4px;
+      }
+      .sig-role { font-weight: 600; font-size: 11px; color: #0f172a; }
+      .sig-name {
+        margin-top: 2px;
+        min-height: 14px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #0f172a;
+      }
+      @page { size: A4 landscape; margin: 8mm 8mm 38mm 8mm; }
+      @media screen {
+        .print-footer {
+          position: sticky;
+          bottom: 0;
+          z-index: 20;
+          margin-top: 12px;
+          padding: 8px 4px 6px;
+          box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.08);
+        }
+      }
+      @media print {
+        body { padding: 0 0 36mm; }
+        .print-toolbar, .no-print { display: none !important; }
+        .editable.is-editing { outline: none !important; }
+        .editable.is-editing:empty::before { content: none !important; }
+        .print-footer {
+          position: fixed;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          margin: 0;
+          padding: 4px 0 0;
+          border-top: 1px solid #64748b;
+          box-shadow: none;
+        }
+        .sig-space { height: 12px; }
+      }
       ${PRINT_INSTITUTION_HEADER_CSS}
     </style>
     </head><body>
+    <div class="print-toolbar no-print">
+      <label>
+        <input type="checkbox" id="roster-edit-toggle" checked />
+        Edit texts
+      </label>
+      <span class="hint">Click the hospital name, heading, or other highlighted text to change it. Names print under the signature lines. Then Print / Save as PDF.</span>
+      <button type="button" id="roster-print-btn">Print / Save as PDF</button>
+    </div>
     ${institutionHeader}
     ${bodyHtml}
-    <script>window.onload=function(){window.print()}</script>
+    <div class="print-footer">
+      ${header?.includeNote === false ? "" : rosterShortFormNoteHtml(header?.note)}
+      ${rosterSignatureBlockHtml(header)}
+    </div>
+    <script>
+      (function () {
+        var selectors = [
+          ".print-inst-name",
+          ".print-inst-name-np",
+          ".print-inst-address",
+          "h1",
+          ".meta",
+          ".legend",
+          ".note",
+          ".note-body",
+          ".sig-name",
+          "td.student",
+        ];
+        document.querySelectorAll(selectors.join(",")).forEach(function (el) {
+          el.classList.add("editable");
+          if (!el.getAttribute("data-placeholder")) {
+            el.setAttribute("data-placeholder", "Click to edit");
+          }
+        });
+        function setEditing(on) {
+          document.querySelectorAll(".editable").forEach(function (el) {
+            el.setAttribute("contenteditable", on ? "true" : "false");
+            if (on) el.classList.add("is-editing");
+            else el.classList.remove("is-editing");
+          });
+        }
+        var toggle = document.getElementById("roster-edit-toggle");
+        var btn = document.getElementById("roster-print-btn");
+        if (toggle) {
+          toggle.addEventListener("change", function () { setEditing(toggle.checked); });
+          setEditing(toggle.checked);
+        }
+        if (btn) {
+          btn.addEventListener("click", function () {
+            try { window.focus(); window.print(); } catch (e) {}
+          });
+        }
+      })();
+    </script>
     </body></html>`);
   win.document.close();
 };
@@ -2023,6 +2266,15 @@ const RosterBuilder = ({
   const [addOpen, setAddOpen] = useState(false);
   const [addSearch, setAddSearch] = useState("");
   const [pickedIds, setPickedIds] = useState<string[]>([]);
+  const [printPromptOpen, setPrintPromptOpen] = useState(false);
+  const [printFields, setPrintFields] = useState({
+    hospitalName: "",
+    institutionName: "",
+    preparedBy: "",
+    approvedBy: "",
+    includeNote: true,
+  });
+  const { user } = useAuth();
   /**
    * In-app cell clipboard for Ctrl+C / Ctrl+V on individual student cells
    * (shift, department, code, remarks) — not whole day columns.
@@ -2380,7 +2632,29 @@ const RosterBuilder = ({
     ? cellMap.get(cellKey(selected.studentId, selected.day))
     : undefined;
 
-  const printRoster = () => {
+  const openPrintPrompt = () => {
+    const branding = getPrintInstitutionBranding();
+    setPrintFields({
+      hospitalName: roster.hospitalName?.trim() || "Hospital",
+      institutionName: branding.name?.trim() || "Institution",
+      preparedBy:
+        roster.preparedByName?.trim() ||
+        roster.coordinatorName?.trim() ||
+        user?.fullName?.trim() ||
+        "",
+      approvedBy: roster.approvedByName?.trim() || "",
+      includeNote: true,
+    });
+    setPrintPromptOpen(true);
+  };
+
+  const printRoster = (fields: {
+    hospitalName: string;
+    institutionName: string;
+    preparedBy: string;
+    approvedBy: string;
+    includeNote: boolean;
+  }) => {
     const headDays = days
       .map((d) => {
         const date = roster.startDateBs ? dayDateLabel(d).slice(5) : "";
@@ -2417,15 +2691,12 @@ const RosterBuilder = ({
             .join("")
         : `<tr><td colspan="${days.length + 2}">No students in this roster.</td></tr>`;
 
-    const legendParts = [
-      ...shifts
-        .filter((s) => s.isActive)
-        .map((s) => `${s.shortCode}=${s.name} (${s.dutyHours}h)`),
-      ...activeCodes.map((c) => `${c.code}=${c.label}`),
-    ];
+    const noteText = buildRosterShortFormNote(
+      rosterMasterShortForms(shifts, departments, dutyCodes),
+    );
 
-    const collegeName =
-      getPrintInstitutionBranding().name?.trim() || "Institution";
+    const collegeName = fields.institutionName.trim() || "Institution";
+    const hospitalName = fields.hospitalName.trim() || "Hospital";
     openRosterPrintWindow(
       `${roster.name} — Hospital Duty Roster`,
       `<h1>Hospital Duty Roster</h1>
@@ -2446,14 +2717,38 @@ const RosterBuilder = ({
           </tr>
         </thead>
         <tbody>${bodyRows}</tbody>
-      </table>
-      ${
-        legendParts.length
-          ? `<p class="legend">Note: ${escapePrintHtml(legendParts.join(" · "))}</p>`
-          : ""
-      }`,
-      { name: roster.hospitalName || "Hospital" },
+      </table>`,
+      {
+        name: hospitalName,
+        note: noteText,
+        includeNote: fields.includeNote !== false,
+        preparedBy: fields.preparedBy.trim(),
+        approvedBy: fields.approvedBy.trim(),
+      },
     );
+  };
+
+  const confirmPrintRoster = () => {
+    const preparedBy = printFields.preparedBy.trim();
+    const approvedBy = printFields.approvedBy.trim();
+    setPrintPromptOpen(false);
+    if (
+      isAdmin &&
+      (preparedBy !== (roster.preparedByName ?? "").trim() ||
+        approvedBy !== (roster.approvedByName ?? "").trim())
+    ) {
+      void unwrap(
+        api.put(`/field-duty/hospital-rosters/${roster._id}`, {
+          preparedByName: preparedBy,
+          approvedByName: approvedBy,
+        }),
+      )
+        .then(() => onChanged())
+        .catch(() => {
+          /* print still proceeds even if names fail to persist */
+        });
+    }
+    printRoster(printFields);
   };
 
   const printBranding = getPrintInstitutionBranding();
@@ -2470,6 +2765,106 @@ const RosterBuilder = ({
         </p>
         <p className="mt-1 text-sm text-slate-600">{institutionName}</p>
       </div>
+      {printPromptOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4 print:hidden"
+          onClick={() => setPrintPromptOpen(false)}
+          role="presentation"
+        >
+          <form
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              confirmPrintRoster();
+            }}
+            aria-label="Print roster"
+          >
+            <h3 className="text-lg font-semibold text-slate-900">Print roster</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              These names print under the signature lines at the bottom of the
+              page. You can still edit the hospital name and other text in the
+              preview before saving as PDF.
+            </p>
+            <div className="mt-4 space-y-3">
+              <FormField label="Hospital name">
+                <Input
+                  autoFocus
+                  value={printFields.hospitalName}
+                  onChange={(e) =>
+                    setPrintFields((p) => ({ ...p, hospitalName: e.target.value }))
+                  }
+                  placeholder="Hospital name on the print heading"
+                />
+              </FormField>
+              <FormField label="Institution name">
+                <Input
+                  value={printFields.institutionName}
+                  onChange={(e) =>
+                    setPrintFields((p) => ({
+                      ...p,
+                      institutionName: e.target.value,
+                    }))
+                  }
+                  placeholder="College / institution name"
+                />
+              </FormField>
+              <FormField label="Prepared by">
+                <Input
+                  value={printFields.preparedBy}
+                  onChange={(e) =>
+                    setPrintFields((p) => ({ ...p, preparedBy: e.target.value }))
+                  }
+                  placeholder="Full name"
+                />
+              </FormField>
+              <FormField label="Approved by">
+                <Input
+                  value={printFields.approvedBy}
+                  onChange={(e) =>
+                    setPrintFields((p) => ({ ...p, approvedBy: e.target.value }))
+                  }
+                  placeholder="Full name"
+                />
+              </FormField>
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={printFields.includeNote}
+                  onChange={(e) =>
+                    setPrintFields((p) => ({
+                      ...p,
+                      includeNote: e.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  Include note of short forms
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    Printed under the table, above signatures — e.g. M = Morning,
+                    ER = Emergency.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div className="mt-5 flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setPrintPromptOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" className="flex-1">
+                <Printer className="mr-1.5 h-4 w-4" />
+                Preview & print
+              </Button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       <Card className="print:shadow-none">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -2533,7 +2928,7 @@ const RosterBuilder = ({
                 Unlock
               </Button>
             ) : null}
-            <Button type="button" size="sm" variant="outline" onClick={printRoster}>
+            <Button type="button" size="sm" variant="outline" onClick={openPrintPrompt}>
               <Printer className="mr-1 h-3.5 w-3.5" />
               Print
             </Button>
@@ -2876,22 +3271,11 @@ const RosterBuilder = ({
             </Card>
           ) : null}
 
-          {/* Note */}
-          <div className="flex flex-wrap gap-3 text-xs text-slate-600">
-            <span className="font-semibold text-slate-800">Note:</span>
-            {shifts
-              .filter((s) => s.isActive)
-              .map((s) => (
-                <span key={s._id}>
-                  <span className="font-mono font-semibold">{s.shortCode}</span>={s.name} (
-                  {s.dutyHours}h)
-                </span>
-              ))}
-            {activeCodes.map((c) => (
-              <span key={c._id}>
-                <span className="font-mono font-semibold">{c.code}</span>={c.label}
-              </span>
-            ))}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+            <span className="font-semibold text-slate-900">Note: </span>
+            {buildRosterShortFormNote(
+              rosterMasterShortForms(shifts, departments, dutyCodes),
+            ) || "M = Morning, ER = Emergency"}
           </div>
         </CardContent>
       </Card>
@@ -2934,6 +3318,23 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
   const printSection = (title: string, tableHtml: string) => {
     const collegeName =
       getPrintInstitutionBranding().name?.trim() || "Institution";
+    const noteText = buildRosterShortFormNote([
+      ...summary.shiftLegend.map((s, i) => ({
+        short: s.shortCode,
+        full: s.name,
+        sortOrder: i,
+      })),
+      ...summary.departmentLegend.map((d, i) => ({
+        short: d.shortCode,
+        full: d.name,
+        sortOrder: 1000 + i,
+      })),
+      ...(summary.codeLegend ?? []).map((c, i) => ({
+        short: c.code,
+        full: c.label,
+        sortOrder: 2000 + i,
+      })),
+    ]);
     openRosterPrintWindow(
       `${roster.name} — ${title}`,
       `<style>
@@ -2949,7 +3350,12 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
         ${roster.batchName || roster.yearName ? ` · ${escapePrintHtml(`${roster.batchName ?? "Batch"} / ${roster.yearName ?? "Year"}`)}` : ""}
       </div>
       ${tableHtml}`,
-      { name: roster.hospitalName || "Hospital" },
+      {
+        name: roster.hospitalName || "Hospital",
+        note: noteText,
+        preparedBy: roster.preparedByName,
+        approvedBy: roster.approvedByName,
+      },
     );
   };
 
