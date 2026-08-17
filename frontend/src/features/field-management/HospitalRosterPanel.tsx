@@ -326,15 +326,36 @@ const openRosterPrintWindow = (
       tr { page-break-inside: avoid; break-inside: avoid; }
       td, th { page-break-inside: avoid; break-inside: avoid; }
       .legend { margin-top: 8px; font-size: 10px; color: #334155; }
+      .sheets { }
+      .sheet {
+        display: flex;
+        flex-direction: column;
+        min-height: 190mm;
+        box-sizing: border-box;
+        page-break-after: always;
+        break-after: page;
+      }
+      .sheet:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+      .sheet-cont {
+        font-size: 11px;
+        font-weight: 600;
+        color: #334155;
+        margin: 0 0 6px;
+      }
       .print-footer {
-        margin-top: 10px;
-        padding-top: 6px;
+        margin-top: auto;
+        padding-top: 14px;
         border-top: 1px solid #94a3b8;
         background: #fff;
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
       .note {
-        margin: 0 0 16px;
-        padding-bottom: 10px;
+        margin: 0 0 20px;
+        padding: 0 0 12px;
         border-bottom: 1px solid #e2e8f0;
         font-size: 9.5px;
         color: #334155;
@@ -380,7 +401,7 @@ const openRosterPrintWindow = (
         font-weight: 400;
       }
       .sig-block {
-        margin-top: 18px;
+        margin-top: 22px;
         display: flex;
         justify-content: space-around;
         gap: 32px;
@@ -408,7 +429,7 @@ const openRosterPrintWindow = (
       }
       @page {
         size: A4 landscape;
-        margin: 8mm 8mm 58mm 8mm;
+        margin: 8mm;
       }
       @page {
         @top-left { content: none; }
@@ -418,16 +439,6 @@ const openRosterPrintWindow = (
         @bottom-center { content: none; }
         @bottom-right { content: none; }
       }
-      @media screen {
-        .print-footer {
-          position: sticky;
-          bottom: 0;
-          z-index: 20;
-          margin-top: 16px;
-          padding: 10px 4px 8px;
-          box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.08);
-        }
-      }
       @media print {
         html, body { height: auto; }
         body { padding: 0; }
@@ -435,17 +446,9 @@ const openRosterPrintWindow = (
         .editable.is-editing { outline: none !important; }
         .editable.is-editing:empty::before { content: none !important; }
         .print-footer {
-          position: fixed;
-          left: 8mm;
-          right: 8mm;
-          bottom: 6mm;
-          margin: 0;
-          padding: 4px 0 0;
-          border-top: 1px solid #64748b;
+          position: static;
           box-shadow: none;
         }
-        .sig-block { margin-top: 16px; }
-        .sig-space { height: 20px; }
       }
       ${PRINT_INSTITUTION_HEADER_CSS}
     </style>
@@ -466,7 +469,7 @@ const openRosterPrintWindow = (
     </div>
     <script>
       (function () {
-        var selectors = [
+        var EDIT_SEL = [
           ".print-inst-name",
           ".print-inst-name-np",
           ".print-inst-address",
@@ -477,13 +480,19 @@ const openRosterPrintWindow = (
           ".note-body",
           ".sig-name",
           "td.student",
-        ];
-        document.querySelectorAll(selectors.join(",")).forEach(function (el) {
-          el.classList.add("editable");
-          if (!el.getAttribute("data-placeholder")) {
-            el.setAttribute("data-placeholder", "Click to edit");
-          }
-        });
+        ].join(",");
+
+        function bindEdit() {
+          document.querySelectorAll(EDIT_SEL).forEach(function (el) {
+            el.classList.add("editable");
+            if (!el.getAttribute("data-placeholder")) {
+              el.setAttribute("data-placeholder", "Click to edit");
+            }
+          });
+          var toggle = document.getElementById("roster-edit-toggle");
+          setEditing(toggle ? toggle.checked : true);
+        }
+
         function setEditing(on) {
           document.querySelectorAll(".editable").forEach(function (el) {
             el.setAttribute("contenteditable", on ? "true" : "false");
@@ -491,17 +500,89 @@ const openRosterPrintWindow = (
             else el.classList.remove("is-editing");
           });
         }
+
+        function paginateSheets() {
+          var table = document.querySelector("table");
+          var footer = document.querySelector(".print-footer");
+          if (!table || !footer) return;
+          var rows = Array.prototype.slice.call(table.querySelectorAll("tbody tr"));
+          if (!rows.length) return;
+
+          var inst = document.querySelector(".print-inst-header");
+          var h1 = document.querySelector("h1");
+          var meta = document.querySelector(".meta");
+          var thead = table.querySelector("thead");
+          var mm = 96 / 25.4;
+          var pageH = 190 * mm;
+          var measure = function (el) {
+            return el ? el.getBoundingClientRect().height : 0;
+          };
+          var headerH = measure(inst) + measure(h1) + measure(meta);
+          var theadH = measure(thead);
+          var footerH = measure(footer) + 18;
+          var rowH = Math.max(measure(rows[0]), 18);
+          var firstFit = Math.max(
+            1,
+            Math.floor((pageH - headerH - theadH - footerH) / rowH) - 1,
+          );
+          var laterFit = Math.max(
+            1,
+            Math.floor((pageH - 20 - theadH - footerH) / rowH) - 1,
+          );
+
+          var chunks = [];
+          var i = 0;
+          var take = firstFit;
+          while (i < rows.length) {
+            chunks.push(rows.slice(i, i + take));
+            i += take;
+            take = laterFit;
+          }
+
+          var wrap = document.createElement("div");
+          wrap.className = "sheets";
+          chunks.forEach(function (chunk, idx) {
+            var sheet = document.createElement("div");
+            sheet.className = "sheet";
+            if (idx === 0) {
+              if (inst) sheet.appendChild(inst);
+              if (h1) sheet.appendChild(h1);
+              if (meta) sheet.appendChild(meta);
+            } else {
+              var cont = document.createElement("div");
+              cont.className = "sheet-cont";
+              cont.textContent = (document.title || "Hospital Duty Roster") + " (continued)";
+              sheet.appendChild(cont);
+            }
+            var nextTable = document.createElement("table");
+            if (thead) nextTable.appendChild(thead.cloneNode(true));
+            var tbody = document.createElement("tbody");
+            chunk.forEach(function (row) { tbody.appendChild(row); });
+            nextTable.appendChild(tbody);
+            sheet.appendChild(nextTable);
+            sheet.appendChild(footer.cloneNode(true));
+            wrap.appendChild(sheet);
+          });
+          table.parentNode.insertBefore(wrap, table);
+          table.remove();
+          footer.remove();
+          bindEdit();
+        }
+
+        bindEdit();
         var toggle = document.getElementById("roster-edit-toggle");
         var btn = document.getElementById("roster-print-btn");
         if (toggle) {
           toggle.addEventListener("change", function () { setEditing(toggle.checked); });
-          setEditing(toggle.checked);
         }
         if (btn) {
           btn.addEventListener("click", function () {
             try { window.focus(); window.print(); } catch (e) {}
           });
         }
+        function run() { setTimeout(paginateSheets, 40); }
+        if (document.readyState === "complete") run();
+        else window.addEventListener("load", run);
       })();
     </script>
     </body></html>`);
