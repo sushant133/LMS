@@ -321,7 +321,9 @@ const openRosterPrintWindow = (
       td.student { text-align: left; white-space: nowrap; font-weight: 600; }
       td.cell { text-align: center; font-family: ui-monospace, monospace; font-weight: 600; }
       thead { display: table-header-group; }
-      tr { page-break-inside: avoid; }
+      tfoot { display: table-footer-group; }
+      tr { page-break-inside: avoid; break-inside: avoid; }
+      td, th { page-break-inside: avoid; break-inside: avoid; }
       .legend { margin-top: 8px; font-size: 10px; color: #334155; }
       .print-footer {
         margin-top: 10px;
@@ -330,13 +332,15 @@ const openRosterPrintWindow = (
         background: #fff;
       }
       .note {
-        margin: 0 0 6px;
-        font-size: 10px;
+        margin: 0 0 16px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 9.5px;
         color: #334155;
-        line-height: 1.5;
+        line-height: 1.45;
       }
       .note strong { color: #0f172a; margin-right: 4px; }
-      .note-body { font-size: 10px; }
+      .note-body { font-size: 9.5px; }
       .print-toolbar {
         position: sticky;
         top: 0;
@@ -375,7 +379,7 @@ const openRosterPrintWindow = (
         font-weight: 400;
       }
       .sig-block {
-        margin-top: 8px;
+        margin-top: 18px;
         display: flex;
         justify-content: space-around;
         gap: 32px;
@@ -388,7 +392,7 @@ const openRosterPrintWindow = (
         font-size: 11px;
         color: #334155;
       }
-      .sig-space { height: 18px; }
+      .sig-space { height: 22px; }
       .sig-line {
         border-top: 1px solid #0f172a;
         margin: 0 6px 4px;
@@ -401,33 +405,46 @@ const openRosterPrintWindow = (
         font-weight: 600;
         color: #0f172a;
       }
-      @page { size: A4 landscape; margin: 8mm 8mm 38mm 8mm; }
+      @page {
+        size: A4 landscape;
+        margin: 8mm 8mm 58mm 8mm;
+      }
+      @page {
+        @top-left { content: none; }
+        @top-center { content: none; }
+        @top-right { content: none; }
+        @bottom-left { content: none; }
+        @bottom-center { content: none; }
+        @bottom-right { content: none; }
+      }
       @media screen {
         .print-footer {
           position: sticky;
           bottom: 0;
           z-index: 20;
-          margin-top: 12px;
-          padding: 8px 4px 6px;
+          margin-top: 16px;
+          padding: 10px 4px 8px;
           box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.08);
         }
       }
       @media print {
-        body { padding: 0 0 36mm; }
+        html, body { height: auto; }
+        body { padding: 0; }
         .print-toolbar, .no-print { display: none !important; }
         .editable.is-editing { outline: none !important; }
         .editable.is-editing:empty::before { content: none !important; }
         .print-footer {
           position: fixed;
-          left: 0;
-          right: 0;
-          bottom: 0;
+          left: 8mm;
+          right: 8mm;
+          bottom: 6mm;
           margin: 0;
           padding: 4px 0 0;
           border-top: 1px solid #64748b;
           box-shadow: none;
         }
-        .sig-space { height: 12px; }
+        .sig-block { margin-top: 16px; }
+        .sig-space { height: 20px; }
       }
       ${PRINT_INSTITUTION_HEADER_CSS}
     </style>
@@ -437,7 +454,7 @@ const openRosterPrintWindow = (
         <input type="checkbox" id="roster-edit-toggle" checked />
         Edit texts
       </label>
-      <span class="hint">Click the hospital name, heading, or other highlighted text to change it. Names print under the signature lines. Then Print / Save as PDF.</span>
+      <span class="hint">Click highlighted text to edit. In the print dialog, turn off <strong>Headers and footers</strong> so the page address is not saved on the PDF.</span>
       <button type="button" id="roster-print-btn">Print / Save as PDF</button>
     </div>
     ${institutionHeader}
@@ -488,6 +505,15 @@ const openRosterPrintWindow = (
     </script>
     </body></html>`);
   win.document.close();
+  win.document.title = title;
+  // window.open("") is about:blank — Chrome prints that URL in the PDF footer
+  // unless Headers and footers is off. Point the tab at this app instead.
+  try {
+    const path = `${window.location.pathname}${window.location.search}` || "/";
+    win.history.replaceState({}, title, path);
+  } catch {
+    /* ignore if the print tab cannot change its URL */
+  }
 };
 
 export const HospitalRosterPanel = ({ isAdmin }: Props) => {
