@@ -52,9 +52,14 @@ export default defineConfig(({ mode }) => {
                 },
                 workbox: {
                     navigateFallback: '/index.html',
-                    navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
+                    navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/android-app-version\.json/],
                     globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg}'],
+                    globIgnores: ['**/android-app-version.json'],
                     runtimeCaching: [
+                        {
+                            urlPattern: /\/android-app-version\.json/i,
+                            handler: 'NetworkOnly',
+                        },
                         {
                             urlPattern: /^https?:\/\/.*\.(?:png|jpg|jpeg|svg|gif|ico)$/i,
                             handler: 'CacheFirst',

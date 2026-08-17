@@ -36,6 +36,12 @@ location = /manifest.webmanifest {
     add_header Cache-Control "no-cache, must-revalidate" always;
 }
 
+# In-app Android update check — always fetch the live versionCode
+location = /android-app-version.json {
+    add_header Cache-Control "no-cache, must-revalidate" always;
+    default_type application/json;
+}
+
 # API and protected uploads go to the Node process — never the SPA fallback
 location /api/ {
     proxy_pass http://127.0.0.1:5000;

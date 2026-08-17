@@ -64,9 +64,14 @@ export default defineConfig(({ mode }) => {
           // service worker returns index.html for links like
           // /api/exams/results/:examId/:studentId/marksheet/pdf and the tab renders the
           // SPA "Page not found" screen instead of the file.
-          navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/android-app-version\.json/],
           globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+          globIgnores: ["**/android-app-version.json"],
           runtimeCaching: [
+            {
+              urlPattern: /\/android-app-version\.json/i,
+              handler: "NetworkOnly",
+            },
             {
               urlPattern: /^https?:\/\/.*\.(?:png|jpg|jpeg|svg|gif|ico)$/i,
               handler: "CacheFirst",
@@ -92,7 +97,7 @@ export default defineConfig(({ mode }) => {
     },
     // Pre-bundle Capacitor packages so HMR does not fail if the dep graph is cold
     optimizeDeps: {
-      include: ["@capacitor/core", "@capacitor/push-notifications"],
+      include: ["@capacitor/core", "@capacitor/push-notifications", "@capacitor/app"],
     },
     build: {
       // External .map files — never inline eval-style sourcemaps in production
