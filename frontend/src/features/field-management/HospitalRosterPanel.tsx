@@ -319,6 +319,7 @@ const openRosterPrintWindow = (
       th, td { border: 1px solid #94a3b8; padding: 2px 3px; }
       th { background: #f1f5f9; font-weight: 600; }
       td.student { text-align: left; white-space: nowrap; font-weight: 600; }
+      th.sn, td.sn { text-align: center; width: 18px; white-space: nowrap; font-weight: 600; }
       td.cell { text-align: center; font-family: ui-monospace, monospace; font-weight: 600; }
       thead { display: table-header-group; }
       tfoot { display: table-footer-group; }
@@ -2690,7 +2691,7 @@ const RosterBuilder = ({
     const bodyRows =
       students.length > 0
         ? students
-            .map((st) => {
+            .map((st, i) => {
               const dayCells = days
                 .map((d) => {
                   const label = cellLabel(cellMap.get(cellKey(st.studentId, d)));
@@ -2705,6 +2706,7 @@ const RosterBuilder = ({
               const roll =
                 st.rollNumber != null ? `R${st.rollNumber}` : st.admissionNumber ?? "";
               return `<tr>
+                <td class="sn">${i + 1}</td>
                 <td class="student">${escapePrintHtml(st.fullName)}${
                   roll
                     ? `<div style="font-weight:400;color:#64748b">${escapePrintHtml(String(roll))}</div>`
@@ -2715,7 +2717,7 @@ const RosterBuilder = ({
               </tr>`;
             })
             .join("")
-        : `<tr><td colspan="${days.length + 2}">No students in this roster.</td></tr>`;
+        : `<tr><td colspan="${days.length + 3}">No students in this roster.</td></tr>`;
 
     const noteText = buildRosterShortFormNote(
       rosterMasterShortForms(shifts, departments, dutyCodes),
@@ -2737,6 +2739,7 @@ const RosterBuilder = ({
       <table>
         <thead>
           <tr>
+            <th class="sn">S.N.</th>
             <th>Student</th>
             ${headDays}
             <th>Remarks</th>
@@ -3076,7 +3079,10 @@ const RosterBuilder = ({
             <table className="w-full min-w-[1100px] border-collapse text-xs">
               <thead className="sticky top-0 z-10 bg-slate-50">
                 <tr>
-                  <th className="sticky left-0 z-20 border border-slate-200 bg-slate-50 px-2 py-2 text-left font-semibold text-slate-700">
+                  <th className="sticky left-0 z-20 w-9 border border-slate-200 bg-slate-50 px-1 py-2 text-center font-semibold text-slate-700">
+                    S.N.
+                  </th>
+                  <th className="sticky left-9 z-20 border border-slate-200 bg-slate-50 px-2 py-2 text-left font-semibold text-slate-700">
                     Student
                   </th>
                   {days.map((d) => (
@@ -3102,7 +3108,7 @@ const RosterBuilder = ({
                 {students.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={days.length + 2}
+                      colSpan={days.length + 3}
                       className="border border-slate-200 px-3 py-8 text-center text-slate-500"
                     >
                       No students in this roster. Use Add students to put them back
@@ -3110,9 +3116,12 @@ const RosterBuilder = ({
                     </td>
                   </tr>
                 ) : (
-                  students.map((st) => (
+                  students.map((st, i) => (
                     <tr key={st.studentId}>
-                      <td className="sticky left-0 z-10 max-w-[180px] border border-slate-200 bg-white px-2 py-1 font-medium text-slate-900">
+                      <td className="sticky left-0 z-10 w-9 border border-slate-200 bg-white px-1 py-1 text-center tabular-nums font-semibold text-slate-700">
+                        {i + 1}
+                      </td>
+                      <td className="sticky left-9 z-10 max-w-[180px] border border-slate-200 bg-white px-2 py-1 font-medium text-slate-900">
                         <div className="truncate" title={st.fullName}>
                           {st.fullName}
                         </div>
