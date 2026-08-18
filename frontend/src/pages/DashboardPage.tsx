@@ -66,28 +66,37 @@ const panelClass =
   "border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_28px_-12px_rgba(15,23,42,0.12)]";
 
 const INSTITUTION_MIX_COLORS = ["#0f172a", "#475569", "#94a3b8"];
+
+/**
+ * Shared categorical order for the demographics donuts, validated for
+ * colorblind separation and contrast on white. Hues are assigned in this fixed
+ * order and never cycled/re-ranked, so a category keeps its color when filters
+ * change the slice count.
+ */
+const DEMOGRAPHIC_CHART_COLORS = [
+  "#2563eb",
+  "#ea580c",
+  "#059669",
+  "#7c3aed",
+  "#ca8a04",
+  "#e11d48",
+];
+/** Reserved neutrals — reads as "not a hue with meaning", never a real category. */
+const UNSET_CHART_COLOR = "#94a3b8";
+const OTHER_CHART_COLOR = "#334155";
+
 /** Male / Female / Other pie colors */
 const GENDER_CHART_COLORS: Record<string, string> = {
   Male: "#2563eb",
   Female: "#db2777",
-  "Other / Unset": "#94a3b8",
-  Other: "#94a3b8",
+  "Other / Unset": UNSET_CHART_COLOR,
+  Other: UNSET_CHART_COLOR,
   male: "#2563eb",
   female: "#db2777",
 };
 
 /** Religion palette (stable by index for unknown labels) */
-const RELIGION_CHART_COLORS = [
-  "#0c2d6b",
-  "#2563eb",
-  "#7c3aed",
-  "#db2777",
-  "#ea580c",
-  "#059669",
-  "#ca8a04",
-  "#64748b",
-  "#0891b2",
-];
+const RELIGION_CHART_COLORS = DEMOGRAPHIC_CHART_COLORS;
 
 const religionColor = (name: string, index: number): string => {
   const fixed: Record<string, string> = {
@@ -99,35 +108,27 @@ const religionColor = (name: string, index: number): string => {
     Prakriti: "#0891b2",
     Bon: "#0c2d6b",
     Sikhism: "#db2777",
-    Jainism: "#64748b",
-    Other: "#94a3b8",
-    "Prefer not to say": "#94a3b8",
-    Unset: "#cbd5e1",
+    Jainism: "#e11d48",
+    Other: OTHER_CHART_COLOR,
+    "Prefer not to say": UNSET_CHART_COLOR,
+    Unset: UNSET_CHART_COLOR,
   };
   return fixed[name] ?? RELIGION_CHART_COLORS[index % RELIGION_CHART_COLORS.length]!;
 };
 
 /** Ethnicity category palette (stable by index for unknown labels) */
-const ETHNICITY_CHART_COLORS = [
-  "#0c2d6b",
-  "#2563eb",
-  "#7c3aed",
-  "#db2777",
-  "#ea580c",
-  "#059669",
-  "#64748b",
-];
+const ETHNICITY_CHART_COLORS = DEMOGRAPHIC_CHART_COLORS;
 
 const ethnicityColor = (name: string, index: number): string => {
   const fixed: Record<string, string> = {
-    "Brahmin / Chhetri": "#0c2d6b",
+    "Brahmin / Chhetri": "#2563eb",
     Dalit: "#db2777",
     "Janajati / Indigenous": "#059669",
     Madhesi: "#ea580c",
-    Muslim: "#2563eb",
-    Other: "#94a3b8",
-    "Prefer not to say": "#64748b",
-    Unset: "#cbd5e1",
+    Muslim: "#7c3aed",
+    Other: OTHER_CHART_COLOR,
+    "Prefer not to say": UNSET_CHART_COLOR,
+    Unset: UNSET_CHART_COLOR,
   };
   return fixed[name] ?? ETHNICITY_CHART_COLORS[index % ETHNICITY_CHART_COLORS.length]!;
 };
@@ -229,7 +230,10 @@ const buildDonutSvg = (
   slices: BreakdownSlice[],
   colorFor: (name: string, index: number) => string,
 ): string => {
-  const visible = slices.filter((s) => s.value > 0);
+  // Keep the original index so colors stay stable per category
+  const visible = slices
+    .map((s, index) => ({ ...s, color: colorFor(s.name, index) }))
+    .filter((s) => s.value > 0);
   const total = visible.reduce((sum, s) => sum + s.value, 0);
   if (!total) {
     return `<svg viewBox="0 0 200 200" width="168" height="168"><circle cx="100" cy="100" r="58" fill="none" stroke="#e2e8f0" stroke-width="22"/></svg>`;
@@ -241,13 +245,13 @@ const buildDonutSvg = (
   let cursor = -90;
   const paths: string[] = [];
   const labels: string[] = [];
-  visible.forEach((slice, index) => {
+  visible.forEach((slice) => {
     const sweep = (slice.value / total) * 360;
     const start = cursor;
     const end = cursor + sweep;
     const mid = start + sweep / 2;
     paths.push(
-      `<path d="${donutSlicePath(cx, cy, outer, inner, start, end)}" fill="${colorFor(slice.name, index)}" stroke="#fff" stroke-width="1.5"/>`,
+      `<path d="${donutSlicePath(cx, cy, outer, inner, start, end)}" fill="${slice.color}" stroke="#fff" stroke-width="1.5"/>`,
     );
     if (slice.value / total >= 0.06) {
       const tip = polarPoint(cx, cy, 78, mid);
@@ -269,13 +273,16 @@ const buildChartPrintColumn = (
   slices: BreakdownSlice[],
   colorFor: (name: string, index: number) => string,
 ): string => {
-  const visible = slices.filter((s) => s.value > 0);
+  // Keep the original index so colors stay stable per category
+  const visible = slices
+    .map((s, index) => ({ ...s, color: colorFor(s.name, index) }))
+    .filter((s) => s.value > 0);
   const total = visible.reduce((sum, s) => sum + s.value, 0);
   const rows = visible
-    .map((s, i) => {
+    .map((s) => {
       const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
       return `<tr>
-        <td><span class="swatch" style="background:${colorFor(s.name, i)}"></span>${escapeDemoPrintHtml(s.name)}</td>
+        <td><span class="swatch" style="background:${s.color}"></span>${escapeDemoPrintHtml(s.name)}</td>
         <td class="num">${s.value}</td>
         <td class="num">${pct}%</td>
       </tr>`;
@@ -574,7 +581,11 @@ const StudentDemographicsCharts = ({
   );
 };
 
-/** Clean donut + legend with full category names (Male, Female, Madhesi, …). */
+/**
+ * Part-to-whole card: one clean donut (no floating slice labels — those collide
+ * and clip) + a ranked legend where each row doubles as a proportion bar, so
+ * small categories stay readable and comparable.
+ */
 const BreakdownDonutCard = ({
   title,
   scope,
@@ -593,47 +604,16 @@ const BreakdownDonutCard = ({
   emptyMessage: string;
   legendLinkBase?: string;
 }) => {
-  const slices = data.filter((s) => s.value > 0);
   const total = data.reduce((sum, s) => sum + s.value, 0);
+  /** Keep the original index so a category never changes color when others drop out. */
+  const slices = data
+    .map((s, index) => ({ ...s, color: colorFor(s.name, index) }))
+    .filter((s) => s.value > 0)
+    .sort((a, b) => b.value - a.value);
   const hasData = slices.length > 0 && total > 0;
 
-  /** Full word labels on slices large enough to read (e.g. "Male", "Female"). */
-  const renderSliceLabel = (props: {
-    cx?: number;
-    cy?: number;
-    midAngle?: number;
-    outerRadius?: number;
-    percent?: number;
-    name?: string;
-    value?: number;
-    payload?: { name?: string; value?: number };
-  }) => {
-    const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, percent = 0 } = props;
-    const name = (props.payload?.name || props.name || "").trim();
-    const value = props.payload?.value ?? props.value ?? 0;
-    // Hide only tiny slivers so short labels stay readable
-    if (percent < 0.04 || !name) return null;
-    const RADIAN = Math.PI / 180;
-    const radius = outerRadius + 22;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#334155"
-        textAnchor={x > cx ? "start" : "end"}
-        dominantBaseline="central"
-        fontSize={11}
-        fontWeight={600}
-      >
-        {`${name} (${value})`}
-      </text>
-    );
-  };
-
   return (
-    <Card className={cn(panelClass)}>
+    <Card className={cn(panelClass, "flex flex-col")}>
       <CardHeader className="space-y-1 border-slate-100/80 pb-2">
         <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight sm:text-lg">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
@@ -645,78 +625,80 @@ const BreakdownDonutCard = ({
           <p className="text-xs font-normal text-slate-500 sm:text-sm">{scope}</p>
         ) : null}
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-1 flex-col">
         {!hasData ? (
           <div className="flex h-[220px] items-center justify-center text-sm text-slate-500">
             {emptyMessage}
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {/* Extra height so full-word labels outside the ring are not clipped */}
-            <div className="relative mx-auto w-full max-w-[360px] overflow-visible sm:max-w-[400px]">
-              <ChartBox height={300} className="overflow-visible sm:min-h-[300px] [&_.recharts-wrapper]:overflow-visible [&_svg]:overflow-visible">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <PieChart margin={{ top: 28, right: 48, bottom: 28, left: 48 }}>
-                  <Pie
-                    data={slices}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius="48%"
-                    innerRadius="30%"
-                    paddingAngle={slices.length > 1 ? 3 : 0}
-                    stroke="#ffffff"
-                    strokeWidth={2}
-                    isAnimationActive={false}
-                    label={renderSliceLabel}
-                    labelLine={{
-                      stroke: "#94a3b8",
-                      strokeWidth: 1,
-                    }}
-                  >
-                    {slices.map((entry, index) => (
-                      <Cell
-                        key={entry.name}
-                        fill={colorFor(entry.name, index)}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: 12,
-                      border: "1px solid #e2e8f0",
-                      fontSize: 13,
-                    }}
-                    formatter={(value, name) => {
-                      const n = typeof value === "number" ? value : Number(value);
-                      const pct =
-                        total > 0 ? ((n / total) * 100).toFixed(0) : "0";
-                      // Keep full category name in tooltip (Male, Female, Madhesi, …)
-                      return [
-                        `${n} student${n === 1 ? "" : "s"} (${pct}%)`,
-                        String(name),
-                      ];
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+          <div className="flex flex-col gap-5">
+            <div className="relative mx-auto w-full max-w-[300px]">
+              <ChartBox height={216}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                    <Pie
+                      data={slices}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius="98%"
+                      innerRadius="68%"
+                      startAngle={90}
+                      endAngle={-270}
+                      /** 2px surface gap between segments, not a border */
+                      paddingAngle={slices.length > 1 ? 1.5 : 0}
+                      cornerRadius={slices.length > 1 ? 4 : 0}
+                      /** Keeps 1% categories visible instead of a hairline */
+                      minAngle={slices.length > 1 ? 4 : 0}
+                      stroke="#ffffff"
+                      strokeWidth={slices.length > 1 ? 2 : 0}
+                      isAnimationActive={false}
+                    >
+                      {slices.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      cursor={false}
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid #e2e8f0",
+                        boxShadow: "0 8px 24px -12px rgba(15,23,42,0.25)",
+                        fontSize: 13,
+                        padding: "8px 12px",
+                      }}
+                      itemStyle={{ color: "#0f172a" }}
+                      formatter={(value, name) => {
+                        const n = typeof value === "number" ? value : Number(value);
+                        const pct = total > 0 ? ((n / total) * 100).toFixed(0) : "0";
+                        return [
+                          `${n} student${n === 1 ? "" : "s"} (${pct}%)`,
+                          String(name),
+                        ];
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
               </ChartBox>
+              {/* Hero figure in the hole — the number the card leads with */}
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                   Total
                 </span>
-                <span className="text-2xl font-bold tabular-nums text-slate-900">
+                <span className="text-[32px] font-bold leading-none tabular-nums text-slate-900">
                   {total}
+                </span>
+                <span className="mt-1 text-[11px] font-medium text-slate-500">
+                  student{total === 1 ? "" : "s"}
                 </span>
               </div>
             </div>
 
-            {/* Full-word legend — clickable when legendLinkBase is set */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {slices.map((entry, index) => {
-                const pct =
-                  total > 0 ? Math.round((entry.value / total) * 100) : 0;
+            {/* Ranked legend — each row is also a proportion bar */}
+            <div className="flex flex-col gap-2.5">
+              {slices.map((entry) => {
+                const pct = total > 0 ? (entry.value / total) * 100 : 0;
                 const genderParam =
                   entry.name === "Other / Unset" || entry.name === "Other"
                     ? "Other"
@@ -724,28 +706,36 @@ const BreakdownDonutCard = ({
                 const href = legendLinkBase
                   ? `${legendLinkBase}?gender=${encodeURIComponent(genderParam)}`
                   : undefined;
-                const rowClass =
-                  "flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 transition";
+                const rowClass = "group block rounded-lg px-1 py-0.5 transition";
                 const inner = (
                   <>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white"
-                        style={{
-                          backgroundColor: colorFor(entry.name, index),
-                        }}
-                      />
-                      <span className="text-sm font-semibold text-slate-800 whitespace-normal">
-                        {entry.name}
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: entry.color }}
+                        />
+                        <span className="truncate text-[13px] font-medium text-slate-700">
+                          {entry.name}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-baseline gap-1.5">
+                        <span className="text-[13px] font-semibold tabular-nums text-slate-900">
+                          {entry.value}
+                        </span>
+                        <span className="text-[11px] tabular-nums text-slate-400">
+                          {Math.round(pct)}%
+                        </span>
                       </span>
                     </div>
-                    <div className="flex shrink-0 items-baseline gap-1.5">
-                      <span className="text-sm font-bold tabular-nums text-slate-900">
-                        {entry.value}
-                      </span>
-                      <span className="text-xs tabular-nums text-slate-400">
-                        {pct}%
-                      </span>
+                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.max(pct, 1.5)}%`,
+                          backgroundColor: entry.color,
+                        }}
+                      />
                     </div>
                   </>
                 );
@@ -753,10 +743,7 @@ const BreakdownDonutCard = ({
                   <Link
                     key={entry.name}
                     to={href}
-                    className={cn(
-                      rowClass,
-                      "hover:border-slate-300 hover:bg-white",
-                    )}
+                    className={cn(rowClass, "hover:bg-slate-50")}
                   >
                     {inner}
                   </Link>
