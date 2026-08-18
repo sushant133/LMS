@@ -14,6 +14,8 @@ interface StickyTableScrollProps {
   body: ReactNode;
   /** Max height of the body scroll area. */
   maxHeightClassName?: string;
+  /** Show a horizontal scrollbar on the header so sideways scroll is reachable without going to the bottom. */
+  showHeaderScrollbar?: boolean;
   className?: string;
 }
 
@@ -32,6 +34,7 @@ export const StickyTableScroll = ({
   header,
   body,
   maxHeightClassName = "max-h-[min(70vh,720px)]",
+  showHeaderScrollbar = false,
   className,
 }: StickyTableScrollProps) => {
   const headerRef = useRef<HTMLDivElement>(null);
@@ -83,7 +86,12 @@ export const StickyTableScroll = ({
       {/* Always-visible header strip (does not scroll vertically) */}
       <div
         ref={headerRef}
-        className="shrink-0 overflow-x-auto overflow-y-hidden border-b border-slate-200 bg-slate-50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={cn(
+          "shrink-0 overflow-x-auto overflow-y-hidden border-b border-slate-200 bg-slate-50 [-webkit-overflow-scrolling:touch] [touch-action:pan-x]",
+          showHeaderScrollbar
+            ? "[scrollbar-width:thin] [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-slate-100"
+            : "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        )}
         onScroll={onHeaderScroll}
       >
         {header}
@@ -93,7 +101,7 @@ export const StickyTableScroll = ({
       <div
         ref={bodyRef}
         className={cn(
-          "min-h-0 min-w-0 overflow-auto overscroll-contain",
+          "min-h-0 min-w-0 overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]",
           /* Clear left-right slider (thumb) like other fixed tables */
           "[scrollbar-width:auto] [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar]:w-2.5",
           "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300",

@@ -17,12 +17,13 @@ import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Select } from "components/ui/select";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { ResultMarksheetView } from "features/exams/ResultMarksheetView";
 import { api, unwrap } from "lib/api";
 import { getPdfErrorMessage, printBulkResultsElement } from "lib/printUtils";
 import { filterYearsByBatch } from "lib/teacherScopeUtils";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 
 /** Match CTEVT sample: always two decimal places (e.g. 20.00). */
 const formatMark = (value: number | string | null | undefined): string => {
@@ -366,7 +367,7 @@ export const PrintResultsPanel = ({
         />
       ) : publishedExams.length > 0 && grid && grid.rows.length > 0 ? (
         <>
-          <Card className="print:hidden">
+          <Card className="print:hidden min-w-0">
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -379,6 +380,10 @@ export const PrintResultsPanel = ({
                     {" · "}
                     {grid.rows.length} student
                     {grid.rows.length === 1 ? "" : "s"}
+                    <span className="sm:hidden">
+                      {" · "}
+                      Swipe sideways for more columns
+                    </span>
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -403,81 +408,175 @@ export const PrintResultsPanel = ({
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                <Table>
-                  <TableHead>
-                    <tr>
-                      <Th>S.N.</Th>
-                      <Th>Student</Th>
-                      <Th>Roll</Th>
-                      <Th>Reg. No.</Th>
-                      {grid.subjects.map((subject) => (
-                        <Th key={subject.subjectId}>{subject.subjectName}</Th>
-                      ))}
-                      <Th>Total</Th>
-                      <Th>%</Th>
-                      <Th>Grade</Th>
-                      <Th>GPA</Th>
-                      <Th>Status</Th>
-                      <Th />
-                    </tr>
-                  </TableHead>
-                  <TableBody>
-                    {grid.rows.map((row) => (
-                      <tr key={row.resultId}>
-                        <Td>{row.sn}</Td>
-                        <Td>{row.studentName}</Td>
-                        <Td>{row.rollNumber}</Td>
-                        <Td>{row.registrationNumber}</Td>
-                        {grid.subjects.map((subject) => (
-                          <Td key={subject.subjectId}>
-                            {row.subjectMarks[subject.subjectId] ?? "—"}
-                          </Td>
-                        ))}
-                        <Td>
-                          {row.totalMarks}/{row.totalFullMarks}
-                        </Td>
-                        <Td>{row.percentage}%</Td>
-                        <Td>
-                          <Badge>{row.grade}</Badge>
-                        </Td>
-                        <Td>{row.gpa.toFixed(2)}</Td>
-                        <Td>
-                          <Badge
-                            className={
-                              row.passFailStatus === "PASS"
-                                ? "bg-brand-100 text-brand-700"
-                                : "bg-red-100 text-red-700"
-                            }
-                          >
-                            {row.passFailStatus}
-                          </Badge>
-                        </Td>
-                        <Td>
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setStudentId(row.studentId)}
-                            >
-                              Marksheet
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Open marksheet to download PDF"
-                              onClick={() => setStudentId(row.studentId)}
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </Td>
-                      </tr>
+            <CardContent className="p-0">
+              {(() => {
+                const tableMinWidthPx = 900 + markColumnCount * 88;
+                const tableClassName = "w-full table-fixed";
+                const thClass = "bg-slate-50 whitespace-nowrap";
+                const stickySn =
+                  "sticky left-0 z-20 border-r border-slate-100 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)]";
+                const stickyName =
+                  "sticky left-[56px] z-20 border-r border-slate-100 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.08)]";
+                const colGroup = (
+                  <colgroup>
+                    <col style={{ width: 56 }} />
+                    <col style={{ width: 176 }} />
+                    <col style={{ width: 72 }} />
+                    <col style={{ width: 104 }} />
+                    {grid.subjects.map((subject) => (
+                      <col key={subject.subjectId} style={{ width: 88 }} />
                     ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    <col style={{ width: 88 }} />
+                    <col style={{ width: 56 }} />
+                    <col style={{ width: 64 }} />
+                    <col style={{ width: 56 }} />
+                    <col style={{ width: 80 }} />
+                    <col style={{ width: 148 }} />
+                  </colgroup>
+                );
+                return (
+                  <div className="min-w-0 overflow-hidden border-t border-slate-200">
+                    <StickyTableScroll
+                      maxHeightClassName="max-h-[min(52dvh,560px)]"
+                      showHeaderScrollbar
+                      header={
+                        <Table
+                          className={tableClassName}
+                          style={{ minWidth: tableMinWidthPx }}
+                        >
+                          {colGroup}
+                          <TableHead>
+                            <tr>
+                              <Th
+                                className={cn(
+                                  thClass,
+                                  stickySn,
+                                  "text-center",
+                                )}
+                              >
+                                S.N.
+                              </Th>
+                              <Th className={cn(thClass, stickyName)}>
+                                Student
+                              </Th>
+                              <Th className={thClass}>Roll</Th>
+                              <Th className={thClass}>Reg. No.</Th>
+                              {grid.subjects.map((subject) => (
+                                <Th
+                                  key={subject.subjectId}
+                                  className={cn(
+                                    thClass,
+                                    "whitespace-normal px-2 text-xs leading-tight",
+                                  )}
+                                  title={subject.subjectName}
+                                >
+                                  {subject.subjectName}
+                                </Th>
+                              ))}
+                              <Th className={thClass}>Total</Th>
+                              <Th className={thClass}>%</Th>
+                              <Th className={thClass}>Grade</Th>
+                              <Th className={thClass}>GPA</Th>
+                              <Th className={thClass}>Status</Th>
+                              <Th className={thClass} />
+                            </tr>
+                          </TableHead>
+                        </Table>
+                      }
+                      body={
+                        <Table
+                          className={tableClassName}
+                          style={{ minWidth: tableMinWidthPx }}
+                        >
+                          {colGroup}
+                          <TableBody>
+                            {grid.rows.map((row) => (
+                              <tr key={row.resultId}>
+                                <Td
+                                  className={cn(
+                                    stickySn,
+                                    "bg-white text-center tabular-nums",
+                                  )}
+                                >
+                                  {row.sn}
+                                </Td>
+                                <Td
+                                  className={cn(stickyName, "bg-white")}
+                                  title={row.studentName}
+                                >
+                                  <span className="line-clamp-2">
+                                    {row.studentName}
+                                  </span>
+                                </Td>
+                                <Td className="whitespace-nowrap">
+                                  {row.rollNumber}
+                                </Td>
+                                <Td className="whitespace-nowrap">
+                                  {row.registrationNumber}
+                                </Td>
+                                {grid.subjects.map((subject) => (
+                                  <Td
+                                    key={subject.subjectId}
+                                    className="px-2 text-center tabular-nums whitespace-nowrap"
+                                  >
+                                    {row.subjectMarks[subject.subjectId] ?? "—"}
+                                  </Td>
+                                ))}
+                                <Td className="whitespace-nowrap tabular-nums">
+                                  {row.totalMarks}/{row.totalFullMarks}
+                                </Td>
+                                <Td className="whitespace-nowrap tabular-nums">
+                                  {row.percentage}%
+                                </Td>
+                                <Td>
+                                  <Badge>{row.grade}</Badge>
+                                </Td>
+                                <Td className="tabular-nums">
+                                  {row.gpa.toFixed(2)}
+                                </Td>
+                                <Td>
+                                  <Badge
+                                    className={
+                                      row.passFailStatus === "PASS"
+                                        ? "bg-brand-100 text-brand-700"
+                                        : "bg-red-100 text-red-700"
+                                    }
+                                  >
+                                    {row.passFailStatus}
+                                  </Badge>
+                                </Td>
+                                <Td>
+                                  <div className="flex justify-end gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        setStudentId(row.studentId)
+                                      }
+                                    >
+                                      Marksheet
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      title="Open marksheet to download PDF"
+                                      onClick={() =>
+                                        setStudentId(row.studentId)
+                                      }
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </Td>
+                              </tr>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      }
+                    />
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
 

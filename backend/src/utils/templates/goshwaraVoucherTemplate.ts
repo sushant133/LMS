@@ -197,7 +197,7 @@ export const buildExactGoshwaraVoucherHtml = (
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Noto Sans Devanagari', 'Nirmala UI', Mangal, 'Kokila', sans-serif;
+      font-family: 'Kanchan', 'Preeti Unicode', 'Noto Sans Devanagari', 'Nirmala UI', Mangal, 'Kokila', sans-serif;
       color: #000;
       font-size: 13px;
       line-height: 1.35;

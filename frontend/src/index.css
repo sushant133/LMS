@@ -193,7 +193,10 @@
 }
 
 /* Nepali / Devanagari content — ONLY applied via .font-nepali on Nepali subject fields.
-   Do not use Preeti/Kantipur as a web font. Store Unicode only.
+   Do not use legacy ASCII Preeti/Kantipur as a web font. Store Unicode only.
+   "Kanchan" and "Preeti Unicode" are Unicode Devanagari fonts (not the legacy
+   ASCII mapping) and are preferred first when installed on the machine;
+   "Noto Sans Devanagari" is the loaded web font and always resolves as fallback.
 
    IMPORTANT for manual typing (Windows Nepali, Google Input Tools, Mac Nepali):
    - Do NOT set restrictive font-feature-settings (breaks matras/conjuncts like र् + क → र्क).
@@ -201,6 +204,8 @@
    - Extra line-height so ि ी ु ू े ै ो ौ ँ ं are not clipped. */
 .font-nepali {
   font-family:
+    "Kanchan",
+    "Preeti Unicode",
     "Noto Sans Devanagari",
     "Noto Serif Devanagari",
     "Nirmala UI",
@@ -247,6 +252,8 @@ textarea.font-nepali {
   .font-nepali,
   [lang="ne"] {
     font-family:
+      "Kanchan",
+      "Preeti Unicode",
       "Noto Sans Devanagari",
       "Nirmala UI",
       "Mangal",

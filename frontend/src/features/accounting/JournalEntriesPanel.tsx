@@ -30,6 +30,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
+import { ensureUnicodeNepali } from "lib/preetiToUnicode";
 import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { Textarea } from "components/ui/textarea";
@@ -292,9 +293,12 @@ const VOUCHER_TYPE_NP: Record<VoucherType, string> = {
   PURCHASE: "खरिद",
 };
 
-/** Inputs accept Nepali typing (Devanagari keyboard / OS IME) */
+/** Inputs accept Nepali typing (Devanagari keyboard / OS IME).
+ *  Kanchan / Preeti Unicode display if installed; legacy Preeti ASCII converts on blur/save. */
 const npInputClass =
-  "font-nepali lang-ne [font-family:'Noto_Sans_Devanagari','Nirmala_UI',Mangal,sans-serif]";
+  "font-nepali lang-ne [font-family:'Kanchan','Preeti_Unicode','Noto_Sans_Devanagari','Nirmala_UI',Mangal,sans-serif]";
+
+const npText = (value: string): string => ensureUnicodeNepali(value).trim();
 
 type CreateVoucherResponse = {
   voucher: GoshwaraVoucherRecord;
@@ -616,7 +620,7 @@ export const JournalEntriesPanel = ({
     }
 
     const words =
-      amountInWords.trim() ||
+      npText(amountInWords) ||
       (totals.debit > 0 ? amountToWordsNepali(totals.debit) : undefined);
 
     const resolvedPrintLines = (
@@ -627,7 +631,7 @@ export const JournalEntriesPanel = ({
         ? printLines
         : lines.map((l, i) => ({
             sn: String(i + 1),
-            particulars: (l.description ?? "").trim(),
+            particulars: npText(l.description ?? ""),
             account: l.accountName || "",
             ledgerNo: l.accountCode || "",
             debit: Number(l.debitNpr) || 0,
@@ -639,10 +643,10 @@ export const JournalEntriesPanel = ({
           l.particulars || l.account || l.ledgerNo || l.debit > 0 || l.credit > 0,
       )
       .map((l) => ({
-        sn: l.sn || undefined,
-        particulars: l.particulars || undefined,
-        account: l.account || undefined,
-        ledgerNo: l.ledgerNo || undefined,
+        sn: npText(l.sn) || undefined,
+        particulars: npText(l.particulars) || undefined,
+        account: npText(l.account) || undefined,
+        ledgerNo: npText(l.ledgerNo) || undefined,
         debit: l.debit > 0 ? l.debit : undefined,
         credit: l.credit > 0 ? l.credit : undefined,
       }));
@@ -659,20 +663,20 @@ export const JournalEntriesPanel = ({
     const payload: GoshwaraVoucherInput = {
       voucherType,
       dateBs,
-      voucherNo: voucherNo.trim() || undefined,
+      voucherNo: npText(voucherNo) || undefined,
       // Government header comes from Institution Settings (server re-resolves it too)
       govOfficeName: collegeNameNp || undefined,
       addressLine: collegeAddressNp || undefined,
-      particulars: particulars.trim(),
-      receiptNo: receiptNo.trim() || undefined,
-      receivedAmount: receivedAmount.trim() || undefined,
-      presenterName: presenterName.trim() || undefined,
-      presenterRank: presenterRank.trim() || undefined,
-      chequeNo: chequeNo.trim() || undefined,
-      chequeAmount: chequeAmount.trim() || undefined,
-      chequePresenter: chequePresenter.trim() || undefined,
-      chequeDate: chequeDate.trim() || undefined,
-      chequeRank: chequeRank.trim() || undefined,
+      particulars: npText(particulars),
+      receiptNo: npText(receiptNo) || undefined,
+      receivedAmount: npText(receivedAmount) || undefined,
+      presenterName: npText(presenterName) || undefined,
+      presenterRank: npText(presenterRank) || undefined,
+      chequeNo: npText(chequeNo) || undefined,
+      chequeAmount: npText(chequeAmount) || undefined,
+      chequePresenter: npText(chequePresenter) || undefined,
+      chequeDate: npText(chequeDate) || undefined,
+      chequeRank: npText(chequeRank) || undefined,
       amountInWords: words,
       printLines: resolvedPrintLines,
       lines: lines.map((l) => ({
@@ -680,7 +684,7 @@ export const JournalEntriesPanel = ({
         accountName: l.accountName,
         debitNpr: Number(l.debitNpr) || 0,
         creditNpr: Number(l.creditNpr) || 0,
-        description: (l.description ?? "").trim(),
+        description: npText(l.description ?? ""),
       })),
     };
     createVoucher.mutate(payload);
@@ -957,6 +961,7 @@ export const JournalEntriesPanel = ({
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <FormField label="Voucher no. (गो. भी. नं.)">
                   <Input
+                    nepali
                     lang="ne"
                     className={npInputClass}
                     value={voucherNo}
@@ -984,6 +989,7 @@ export const JournalEntriesPanel = ({
                 <FormField label="Amount in words (अक्षरेपी)">
                   <div className="flex gap-1">
                     <Input
+                      nepali
                       lang="ne"
                       className={cn(npInputClass, "min-w-0")}
                       value={amountInWords}
@@ -1005,6 +1011,7 @@ export const JournalEntriesPanel = ({
 
               <FormField label="Narration / particulars *">
                 <Textarea
+                  nepali
                   lang="ne"
                   className={npInputClass}
                   value={particulars}
@@ -1083,6 +1090,7 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td className="min-w-[200px]">
                             <Input
+                              nepali
                               lang="ne"
                               className={npInputClass}
                               value={line.description ?? ""}
@@ -1205,6 +1213,7 @@ export const JournalEntriesPanel = ({
                         <tr key={index}>
                           <Td>
                             <Input
+                              nepali
                               lang="ne"
                               className={npInputClass}
                               value={row.sn}
@@ -1216,6 +1225,7 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td className="min-w-[160px]">
                             <Input
+                              nepali
                               lang="ne"
                               className={npInputClass}
                               value={row.particulars}
@@ -1229,6 +1239,7 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td className="min-w-[120px]">
                             <Input
+                              nepali
                               lang="ne"
                               className={npInputClass}
                               value={row.account}
@@ -1242,6 +1253,7 @@ export const JournalEntriesPanel = ({
                           </Td>
                           <Td>
                             <Input
+                              nepali
                               lang="ne"
                               className={npInputClass}
                               value={row.ledgerNo}
@@ -1306,6 +1318,7 @@ export const JournalEntriesPanel = ({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField label="Receipt no.">
                       <Input
+                        nepali
                         lang="ne"
                         className={npInputClass}
                         value={receiptNo}
@@ -1314,6 +1327,7 @@ export const JournalEntriesPanel = ({
                     </FormField>
                     <FormField label="Amount received">
                       <Input
+                        nepali
                         lang="ne"
                         className={npInputClass}
                         value={receivedAmount}
@@ -1322,6 +1336,7 @@ export const JournalEntriesPanel = ({
                     </FormField>
                     <FormField label="Presented by">
                       <Input
+                        nepali
                         lang="ne"
                         className={npInputClass}
                         value={presenterName}
@@ -1330,6 +1345,7 @@ export const JournalEntriesPanel = ({
                     </FormField>
                     <FormField label="Rank">
                       <Input
+                        nepali
                         lang="ne"
                         className={npInputClass}
                         value={presenterRank}
@@ -1343,6 +1359,7 @@ export const JournalEntriesPanel = ({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FormField label="Cheque no.">
                       <Input
+                        nepali
                         lang="ne"
                         className={npInputClass}
                         value={chequeNo}
@@ -1351,6 +1368,7 @@ export const JournalEntriesPanel = ({
                     </FormField>
                     <FormField label="Cheque amount">
                       <Input
+                        nepali
                         lang="ne"
                         className={npInputClass}
                         value={chequeAmount}
@@ -1359,6 +1377,7 @@ export const JournalEntriesPanel = ({
                     </FormField>
                     <FormField label="Presented by">
                       <Input
+                        nepali
                         lang="ne"
                         className={npInputClass}
                         value={chequePresenter}
@@ -1368,6 +1387,7 @@ export const JournalEntriesPanel = ({
                     <FormField label="Date / rank">
                       <div className="flex gap-2">
                         <Input
+                          nepali
                           lang="ne"
                           className={cn(npInputClass, "min-w-0")}
                           value={chequeDate}
@@ -1375,6 +1395,7 @@ export const JournalEntriesPanel = ({
                           placeholder="Date"
                         />
                         <Input
+                          nepali
                           lang="ne"
                           className={cn(npInputClass, "min-w-0")}
                           value={chequeRank}

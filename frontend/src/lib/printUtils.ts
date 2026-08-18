@@ -915,7 +915,7 @@ const buildPrintableHtml = (element: HTMLElement, pageFormat: PageFormat): strin
       }
       .font-nepali,
       [lang="ne"] {
-        font-family: "Noto Sans Devanagari", "Nirmala UI", "Mangal", "Arial Unicode MS", sans-serif !important;
+        font-family: "Kanchan", "Preeti Unicode", "Noto Sans Devanagari", "Nirmala UI", "Mangal", "Arial Unicode MS", sans-serif !important;
       }
       .print-results-bulk-table {
         display: block !important;

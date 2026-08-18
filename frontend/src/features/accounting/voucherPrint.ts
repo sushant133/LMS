@@ -102,7 +102,7 @@ export const printSimpleDocument = (opts: {
   <style>
     * { box-sizing: border-box; }
     body {
-      font-family: "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+      font-family: "Kanchan", "Preeti Unicode", "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif;
       margin: 0;
       padding: 16mm 14mm;
       color: #0f172a;
