@@ -322,39 +322,21 @@ const openRosterPrintWindow = (
       th.sn, td.sn { text-align: center; width: 18px; white-space: nowrap; font-weight: 600; }
       td.cell { text-align: center; font-family: ui-monospace, monospace; font-weight: 600; }
       thead { display: table-header-group; }
-      tfoot { display: table-footer-group; }
+      tfoot { display: table-row-group; }
       tr { page-break-inside: avoid; break-inside: avoid; }
       td, th { page-break-inside: avoid; break-inside: avoid; }
       .legend { margin-top: 8px; font-size: 10px; color: #334155; }
-      .sheets { }
-      .sheet {
-        display: flex;
-        flex-direction: column;
-        min-height: 190mm;
-        box-sizing: border-box;
-        page-break-after: always;
-        break-after: page;
-      }
-      .sheet:last-child {
-        page-break-after: auto;
-        break-after: auto;
-      }
-      .sheet-cont {
-        font-size: 11px;
-        font-weight: 600;
-        color: #334155;
-        margin: 0 0 6px;
-      }
       .print-footer {
-        margin-top: auto;
-        padding-top: 14px;
+        margin-top: 16px;
+        padding-top: 12px;
         border-top: 1px solid #94a3b8;
         background: #fff;
         page-break-inside: avoid;
         break-inside: avoid;
+        page-break-before: auto;
       }
       .note {
-        margin: 0 0 20px;
+        margin: 0 0 22px;
         padding: 0 0 12px;
         border-bottom: 1px solid #e2e8f0;
         font-size: 9.5px;
@@ -482,107 +464,31 @@ const openRosterPrintWindow = (
           "td.student",
         ].join(",");
 
-        function bindEdit() {
+        function setEditing(on) {
           document.querySelectorAll(EDIT_SEL).forEach(function (el) {
             el.classList.add("editable");
             if (!el.getAttribute("data-placeholder")) {
               el.setAttribute("data-placeholder", "Click to edit");
             }
-          });
-          var toggle = document.getElementById("roster-edit-toggle");
-          setEditing(toggle ? toggle.checked : true);
-        }
-
-        function setEditing(on) {
-          document.querySelectorAll(".editable").forEach(function (el) {
             el.setAttribute("contenteditable", on ? "true" : "false");
             if (on) el.classList.add("is-editing");
             else el.classList.remove("is-editing");
           });
         }
 
-        function paginateSheets() {
-          var table = document.querySelector("table");
-          var footer = document.querySelector(".print-footer");
-          if (!table || !footer) return;
-          var rows = Array.prototype.slice.call(table.querySelectorAll("tbody tr"));
-          if (!rows.length) return;
-
-          var inst = document.querySelector(".print-inst-header");
-          var h1 = document.querySelector("h1");
-          var meta = document.querySelector(".meta");
-          var thead = table.querySelector("thead");
-          var mm = 96 / 25.4;
-          var pageH = 190 * mm;
-          var measure = function (el) {
-            return el ? el.getBoundingClientRect().height : 0;
-          };
-          var headerH = measure(inst) + measure(h1) + measure(meta);
-          var theadH = measure(thead);
-          var footerH = measure(footer) + 18;
-          var rowH = Math.max(measure(rows[0]), 18);
-          var firstFit = Math.max(
-            1,
-            Math.floor((pageH - headerH - theadH - footerH) / rowH) - 1,
-          );
-          var laterFit = Math.max(
-            1,
-            Math.floor((pageH - 20 - theadH - footerH) / rowH) - 1,
-          );
-
-          var chunks = [];
-          var i = 0;
-          var take = firstFit;
-          while (i < rows.length) {
-            chunks.push(rows.slice(i, i + take));
-            i += take;
-            take = laterFit;
-          }
-
-          var wrap = document.createElement("div");
-          wrap.className = "sheets";
-          chunks.forEach(function (chunk, idx) {
-            var sheet = document.createElement("div");
-            sheet.className = "sheet";
-            if (idx === 0) {
-              if (inst) sheet.appendChild(inst);
-              if (h1) sheet.appendChild(h1);
-              if (meta) sheet.appendChild(meta);
-            } else {
-              var cont = document.createElement("div");
-              cont.className = "sheet-cont";
-              cont.textContent = (document.title || "Hospital Duty Roster") + " (continued)";
-              sheet.appendChild(cont);
-            }
-            var nextTable = document.createElement("table");
-            if (thead) nextTable.appendChild(thead.cloneNode(true));
-            var tbody = document.createElement("tbody");
-            chunk.forEach(function (row) { tbody.appendChild(row); });
-            nextTable.appendChild(tbody);
-            sheet.appendChild(nextTable);
-            sheet.appendChild(footer.cloneNode(true));
-            wrap.appendChild(sheet);
-          });
-          table.parentNode.insertBefore(wrap, table);
-          table.remove();
-          footer.remove();
-          bindEdit();
-        }
-
-        bindEdit();
         var toggle = document.getElementById("roster-edit-toggle");
         var btn = document.getElementById("roster-print-btn");
         if (toggle) {
           toggle.addEventListener("change", function () { setEditing(toggle.checked); });
+          setEditing(toggle.checked);
+        } else {
+          setEditing(true);
         }
         if (btn) {
           btn.addEventListener("click", function () {
             try { window.focus(); window.print(); } catch (e) {}
           });
         }
-        function run() { setTimeout(paginateSheets, 40); }
-        if (document.readyState === "complete") run();
-        else window.addEventListener("load", run);
       })();
     </script>
     </body></html>`);
