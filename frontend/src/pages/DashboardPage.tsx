@@ -10,11 +10,13 @@ import {
   ClipboardList,
   GraduationCap,
   Megaphone,
+  Printer,
   Receipt,
   Sparkles,
   Users,
   Wallet
 } from "lucide-react";
+import { toast } from "sonner";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartBox } from "components/ui/chart-box";
 import { useTranslation } from "react-i18next";
@@ -52,6 +54,11 @@ import { DashboardSchedulePanels } from "features/dashboard/DashboardSchedulePan
 import { DashboardBannerPopup } from "features/notices/DashboardBannerPopup";
 import { useNotificationBadge } from "hooks/useNotificationBadge";
 import { applyNotificationReadLocally, invalidateNotificationQueries } from "lib/notificationQueries";
+import {
+  buildPrintInstitutionHeaderHtml,
+  getPrintInstitutionBranding,
+  PRINT_INSTITUTION_HEADER_CSS,
+} from "lib/printBranding";
 import { cn, formatCurrencyNpr } from "lib/utils";
 
 /** Soft premium surfaces — restrained color, fine borders, light elevation */
@@ -65,6 +72,8 @@ const GENDER_CHART_COLORS: Record<string, string> = {
   Female: "#db2777",
   "Other / Unset": "#94a3b8",
   Other: "#94a3b8",
+  male: "#2563eb",
+  female: "#db2777",
 };
 
 /** Religion palette (stable by index for unknown labels) */
@@ -166,6 +175,186 @@ const tallyEthnicitySlices = (rows: DemoRow[]): BreakdownSlice[] => {
     .map(([name, value]) => ({ name, value }));
 };
 
+/** Collapse male/MALE/Male into one Male slice so the donut never shows both. */
+const normalizeGenderSlices = (slices: BreakdownSlice[]): BreakdownSlice[] => {
+  let male = 0;
+  let female = 0;
+  let other = 0;
+  for (const s of slices) {
+    const key = (s.name ?? "").trim().toLowerCase();
+    if (key === "male") male += s.value;
+    else if (key === "female") female += s.value;
+    else other += s.value;
+  }
+  return [
+    { name: "Male", value: male },
+    { name: "Female", value: female },
+    ...(other > 0 ? [{ name: "Other / Unset", value: other }] : []),
+  ];
+};
+
+const escapeDemoPrintHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const polarPoint = (cx: number, cy: number, r: number, deg: number) => {
+  const rad = (deg * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+};
+
+const donutSlicePath = (
+  cx: number,
+  cy: number,
+  outer: number,
+  inner: number,
+  startDeg: number,
+  endDeg: number,
+): string => {
+  const sweep = endDeg - startDeg;
+  if (sweep >= 359.9) {
+    return `M ${cx + outer} ${cy} A ${outer} ${outer} 0 1 1 ${cx - outer} ${cy} A ${outer} ${outer} 0 1 1 ${cx + outer} ${cy} M ${cx + inner} ${cy} A ${inner} ${inner} 0 1 0 ${cx - inner} ${cy} A ${inner} ${inner} 0 1 0 ${cx + inner} ${cy}`;
+  }
+  const o1 = polarPoint(cx, cy, outer, startDeg);
+  const o2 = polarPoint(cx, cy, outer, endDeg);
+  const i2 = polarPoint(cx, cy, inner, endDeg);
+  const i1 = polarPoint(cx, cy, inner, startDeg);
+  const large = sweep > 180 ? 1 : 0;
+  return `M ${o1.x.toFixed(2)} ${o1.y.toFixed(2)} A ${outer} ${outer} 0 ${large} 1 ${o2.x.toFixed(2)} ${o2.y.toFixed(2)} L ${i2.x.toFixed(2)} ${i2.y.toFixed(2)} A ${inner} ${inner} 0 ${large} 0 ${i1.x.toFixed(2)} ${i1.y.toFixed(2)} Z`;
+};
+
+const buildDonutSvg = (
+  slices: BreakdownSlice[],
+  colorFor: (name: string, index: number) => string,
+): string => {
+  const visible = slices.filter((s) => s.value > 0);
+  const total = visible.reduce((sum, s) => sum + s.value, 0);
+  if (!total) {
+    return `<svg viewBox="0 0 200 200" width="168" height="168"><circle cx="100" cy="100" r="58" fill="none" stroke="#e2e8f0" stroke-width="22"/></svg>`;
+  }
+  const cx = 100;
+  const cy = 100;
+  const outer = 58;
+  const inner = 34;
+  let cursor = -90;
+  const paths: string[] = [];
+  const labels: string[] = [];
+  visible.forEach((slice, index) => {
+    const sweep = (slice.value / total) * 360;
+    const start = cursor;
+    const end = cursor + sweep;
+    const mid = start + sweep / 2;
+    paths.push(
+      `<path d="${donutSlicePath(cx, cy, outer, inner, start, end)}" fill="${colorFor(slice.name, index)}" stroke="#fff" stroke-width="1.5"/>`,
+    );
+    if (slice.value / total >= 0.06) {
+      const tip = polarPoint(cx, cy, 78, mid);
+      const anchor = tip.x >= cx ? "start" : "end";
+      labels.push(
+        `<text x="${tip.x.toFixed(1)}" y="${tip.y.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle" font-size="8" font-weight="600" fill="#334155">${escapeDemoPrintHtml(slice.name)} (${slice.value})</text>`,
+      );
+    }
+    cursor = end;
+  });
+  return `<svg viewBox="0 0 200 200" width="168" height="168" overflow="visible">${paths.join("")}${labels.join("")}
+    <text x="100" y="96" text-anchor="middle" font-size="8" fill="#94a3b8" font-weight="600">TOTAL</text>
+    <text x="100" y="112" text-anchor="middle" font-size="16" fill="#0f172a" font-weight="700">${total}</text>
+  </svg>`;
+};
+
+const buildChartPrintColumn = (
+  title: string,
+  slices: BreakdownSlice[],
+  colorFor: (name: string, index: number) => string,
+): string => {
+  const visible = slices.filter((s) => s.value > 0);
+  const total = visible.reduce((sum, s) => sum + s.value, 0);
+  const rows = visible
+    .map((s, i) => {
+      const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
+      return `<tr>
+        <td><span class="swatch" style="background:${colorFor(s.name, i)}"></span>${escapeDemoPrintHtml(s.name)}</td>
+        <td class="num">${s.value}</td>
+        <td class="num">${pct}%</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="col">
+    <h2>${escapeDemoPrintHtml(title)}</h2>
+    <div class="donut">${buildDonutSvg(slices, colorFor)}</div>
+    <table>
+      <thead><tr><th>Category</th><th>Students</th><th>%</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="3">No data</td></tr>`}</tbody>
+      <tfoot><tr><th>Total</th><th class="num">${total}</th><th></th></tr></tfoot>
+    </table>
+  </section>`;
+};
+
+const printDemographicsCharts = (opts: {
+  scope: string;
+  gender: BreakdownSlice[];
+  ethnicity: BreakdownSlice[];
+  religion: BreakdownSlice[];
+}) => {
+  const win = window.open("", "_blank");
+  if (!win) {
+    toast.error("Pop-up blocked — allow pop-ups to print the charts");
+    return;
+  }
+  const branding = getPrintInstitutionBranding();
+  const header = buildPrintInstitutionHeaderHtml({ branding });
+  const title = "Student demographics";
+  win.document.write(`<!DOCTYPE html><html><head>
+    <meta charset="utf-8"/>
+    <title>${escapeDemoPrintHtml(title)}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: system-ui, sans-serif; color: #0f172a; padding: 8mm; }
+      h1 { font-size: 15px; margin: 8px 0 2px; text-align: center; }
+      .scope { text-align: center; font-size: 11px; color: #475569; margin: 0 0 10px; }
+      .grid { display: flex; gap: 10px; align-items: flex-start; }
+      .col { flex: 1; min-width: 0; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; }
+      .col h2 { font-size: 12px; margin: 0 0 6px; text-align: center; }
+      .donut { display: flex; justify-content: center; margin: 0 0 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 9px; }
+      th, td { border: 1px solid #e2e8f0; padding: 3px 4px; text-align: left; }
+      th { background: #f8fafc; }
+      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+      .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+      .hint { margin-top: 8px; font-size: 10px; color: #64748b; }
+      ${PRINT_INSTITUTION_HEADER_CSS}
+      @page { size: A4 landscape; margin: 8mm; }
+      @media print {
+        body { padding: 0; }
+        .no-print { display: none !important; }
+      }
+    </style>
+  </head><body>
+    <div class="no-print" style="margin-bottom:10px;display:flex;justify-content:flex-end;gap:8px">
+      <button type="button" onclick="window.print()" style="padding:6px 12px;font-weight:600;cursor:pointer">Print / Save as PDF</button>
+    </div>
+    ${header}
+    <h1>${escapeDemoPrintHtml(title)}</h1>
+    <p class="scope">${escapeDemoPrintHtml(opts.scope)}</p>
+    <div class="grid">
+      ${buildChartPrintColumn("Students by Gender", opts.gender, (name) => GENDER_CHART_COLORS[name] ?? "#94a3b8")}
+      ${buildChartPrintColumn("Students by Ethnicity", opts.ethnicity, ethnicityColor)}
+      ${buildChartPrintColumn("Students by Religion", opts.religion, religionColor)}
+    </div>
+    <p class="hint">Printed ${new Date().toLocaleString()}</p>
+  </body></html>`);
+  win.document.close();
+  win.document.title = title;
+  try {
+    const path = `${window.location.pathname}${window.location.search}` || "/";
+    win.history.replaceState({}, title, path);
+  } catch {
+    /* ignore */
+  }
+};
+
 /** Gender + ethnicity + religion donuts with batch / year (or class / section) filters. */
 const StudentDemographicsCharts = ({
   data,
@@ -231,10 +420,11 @@ const StudentDemographicsCharts = ({
    * With batch/year filter → recompute from full active-student demographics.
    */
   const hasChartFilter = Boolean(batchId || yearId);
-  const genderSlices =
+  const genderSlices = normalizeGenderSlices(
     hasChartFilter && rows.length > 0
       ? genderData
-      : (data.genderChart ?? genderData);
+      : (data.genderChart ?? genderData),
+  );
   const religionSlices =
     hasChartFilter && rows.length > 0
       ? religionData
@@ -317,6 +507,24 @@ const StudentDemographicsCharts = ({
         </Card>
       ) : null}
 
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            printDemographicsCharts({
+              scope: chartScope,
+              gender: genderSlices,
+              ethnicity: ethnicitySlices,
+              religion: religionSlices,
+            })
+          }
+        >
+          <Printer className="mr-1.5 h-3.5 w-3.5" />
+          Print all charts
+        </Button>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
         <BreakdownDonutCard
           title="Students by Gender"
@@ -389,7 +597,7 @@ const BreakdownDonutCard = ({
   const total = data.reduce((sum, s) => sum + s.value, 0);
   const hasData = slices.length > 0 && total > 0;
 
-  /** Full word labels on slices large enough to read (e.g. "Male", "Madhesi"). */
+  /** Full word labels on slices large enough to read (e.g. "Male", "Female"). */
   const renderSliceLabel = (props: {
     cx?: number;
     cy?: number;
@@ -398,13 +606,15 @@ const BreakdownDonutCard = ({
     percent?: number;
     name?: string;
     value?: number;
+    payload?: { name?: string; value?: number };
   }) => {
-    const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, percent = 0, name = "", value = 0 } =
-      props;
+    const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, percent = 0 } = props;
+    const name = (props.payload?.name || props.name || "").trim();
+    const value = props.payload?.value ?? props.value ?? 0;
     // Hide only tiny slivers so short labels stay readable
     if (percent < 0.04 || !name) return null;
     const RADIAN = Math.PI / 180;
-    const radius = outerRadius + 18;
+    const radius = outerRadius + 22;
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
     return (
@@ -414,7 +624,8 @@ const BreakdownDonutCard = ({
         fill="#334155"
         textAnchor={x > cx ? "start" : "end"}
         dominantBaseline="central"
-        className="text-[11px] font-semibold"
+        fontSize={11}
+        fontWeight={600}
       >
         {`${name} (${value})`}
       </text>
@@ -442,18 +653,18 @@ const BreakdownDonutCard = ({
         ) : (
           <div className="flex flex-col gap-4">
             {/* Extra height so full-word labels outside the ring are not clipped */}
-            <div className="relative mx-auto w-full max-w-[320px] sm:max-w-[360px]">
-              <ChartBox height={260} className="sm:min-h-[260px]">
+            <div className="relative mx-auto w-full max-w-[360px] overflow-visible sm:max-w-[400px]">
+              <ChartBox height={300} className="overflow-visible sm:min-h-[300px] [&_.recharts-wrapper]:overflow-visible [&_svg]:overflow-visible">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <PieChart margin={{ top: 20, right: 28, bottom: 20, left: 28 }}>
+                <PieChart margin={{ top: 28, right: 48, bottom: 28, left: 48 }}>
                   <Pie
                     data={slices}
                     dataKey="value"
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    outerRadius="62%"
-                    innerRadius="40%"
+                    outerRadius="48%"
+                    innerRadius="30%"
                     paddingAngle={slices.length > 1 ? 3 : 0}
                     stroke="#ffffff"
                     strokeWidth={2}
