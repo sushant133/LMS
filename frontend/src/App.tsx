@@ -1,4 +1,4 @@
-import { Suspense, type ReactNode, useState } from "react";
+import { Suspense, type ReactNode, useLayoutEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppLayout } from "components/layout/AppLayout";
 import { AuthLayout } from "components/layout/AuthLayout";
@@ -95,6 +95,17 @@ const LazyRoute = ({ children }: { children: ReactNode }) => {
   );
 };
 
+/** Mobile/PWA restores last scroll; always land at the top of a new route. */
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [pathname]);
+  return null;
+};
+
 export default function App() {
   /**
    * Web: show the React splash for 1.5s.
@@ -109,6 +120,7 @@ export default function App() {
   return (
     <OfflineLoginOnly>
     <AppUpdatePrompt />
+    <ScrollToTop />
     <Routes>
       <Route path="/" element={<RootRedirect />} />
 

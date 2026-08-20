@@ -468,7 +468,6 @@ export const EmployeeAttendancePanel = ({
       <style>body{font-family:system-ui,sans-serif;padding:24px;color:#0f172a} .hdr{text-align:center;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:14px} .hdr h1{margin:0;font-size:18px;text-transform:uppercase} table{border-collapse:collapse;width:100%;font-size:12px} th,td{border:1px solid #ccc;padding:4px} th{background:#f1f5f9}</style>
       </head><body>
       <div class="hdr"><h1>${instName}</h1>${instAddr}<p style="margin:8px 0 0;font-size:15px;font-weight:600">${label} Attendance Register</p></div>
-      <p style="font-size:12px;color:#475569">Generated ${new Date().toLocaleString()}</p>
       <table><thead><tr><th>Date</th><th>ID</th><th>Name</th><th>Dept</th><th>Designation</th><th>Status</th><th>In</th><th>Out</th>${periodHeader}<th>Remarks</th></tr></thead>
       <tbody>${body || `<tr><td colspan='${colSpan}'>No records</td></tr>`}</tbody></table>
       <script>window.onload=()=>window.print()</script></body></html>`);

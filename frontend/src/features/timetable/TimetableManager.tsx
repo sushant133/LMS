@@ -1417,7 +1417,6 @@ export const TimetableManager = () => {
                           )
                         : undefined,
                       academicYearBs: form.academicYearBs,
-                      generatedAt: new Date().toLocaleDateString(),
                       viewTitle,
                     }}
                   />
@@ -1586,7 +1585,6 @@ const StudentMatrix = ({
             batchName,
             yearName,
             academicYearBs,
-            generatedAt: new Date().toLocaleDateString(),
             viewTitle: "Student weekly timetable",
           }}
         />

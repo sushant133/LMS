@@ -360,7 +360,7 @@ export const buildMarksheetHtml = (data: MarksheetTemplateData): string => {
 
   <div class="om-meta">
     <div class="om-meta-lines">${metaParts.map((part) => `<p>${part}</p>`).join("")}</div>
-    <p class="om-meta-note">This is a computer-generated official marksheet. Verify authenticity with the institution using the verification number when provided.</p>
+    <p class="om-meta-note">Verify authenticity with the institution using the verification number when provided.</p>
   </div>
 </article>
 </body>

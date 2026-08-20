@@ -1610,7 +1610,6 @@ export const LogBookPanel = ({
               : "Filtered Log Book entries"
           }
           academicYearBs={filters.academicYearBs}
-          generatedAt={new Date().toLocaleString()}
         />
         {groupByTeacher(printEntries).map((group) => (
           <div key={group.teacherId} className="mb-8">

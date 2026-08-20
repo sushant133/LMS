@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -229,6 +229,7 @@ const donutSlicePath = (
 const buildDonutSvg = (
   slices: BreakdownSlice[],
   colorFor: (name: string, index: number) => string,
+  size = 168,
 ): string => {
   // Keep the original index so colors stay stable per category
   const visible = slices
@@ -236,7 +237,7 @@ const buildDonutSvg = (
     .filter((s) => s.value > 0);
   const total = visible.reduce((sum, s) => sum + s.value, 0);
   if (!total) {
-    return `<svg viewBox="0 0 200 200" width="168" height="168"><circle cx="100" cy="100" r="58" fill="none" stroke="#e2e8f0" stroke-width="22"/></svg>`;
+    return `<svg viewBox="0 0 200 200" width="${size}" height="${size}"><circle cx="100" cy="100" r="58" fill="none" stroke="#e2e8f0" stroke-width="22"/></svg>`;
   }
   const cx = 100;
   const cy = 100;
@@ -262,16 +263,26 @@ const buildDonutSvg = (
     }
     cursor = end;
   });
-  return `<svg viewBox="0 0 200 200" width="168" height="168" overflow="visible">${paths.join("")}${labels.join("")}
+  return `<svg viewBox="0 0 200 200" width="${size}" height="${size}" overflow="visible">${paths.join("")}${labels.join("")}
     <text x="100" y="96" text-anchor="middle" font-size="8" fill="#94a3b8" font-weight="600">TOTAL</text>
     <text x="100" y="112" text-anchor="middle" font-size="16" fill="#0f172a" font-weight="700">${total}</text>
   </svg>`;
 };
 
+type PrintableDemoChart = {
+  title: string;
+  slices: BreakdownSlice[];
+  colorFor: (name: string, index: number) => string;
+};
+
+const genderChartColor = (name: string, _index?: number): string =>
+  GENDER_CHART_COLORS[name] ?? "#94a3b8";
+
 const buildChartPrintColumn = (
   title: string,
   slices: BreakdownSlice[],
   colorFor: (name: string, index: number) => string,
+  opts?: { large?: boolean; hideTitle?: boolean },
 ): string => {
   // Keep the original index so colors stay stable per category
   const visible = slices
@@ -288,9 +299,12 @@ const buildChartPrintColumn = (
       </tr>`;
     })
     .join("");
+  const heading = opts?.hideTitle
+    ? ""
+    : `<h2>${escapeDemoPrintHtml(title)}</h2>`;
   return `<section class="col">
-    <h2>${escapeDemoPrintHtml(title)}</h2>
-    <div class="donut">${buildDonutSvg(slices, colorFor)}</div>
+    ${heading}
+    <div class="donut">${buildDonutSvg(slices, colorFor, opts?.large ? 260 : 168)}</div>
     <table>
       <thead><tr><th>Category</th><th>Students</th><th>%</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="3">No data</td></tr>`}</tbody>
@@ -301,9 +315,8 @@ const buildChartPrintColumn = (
 
 const printDemographicsCharts = (opts: {
   scope: string;
-  gender: BreakdownSlice[];
-  ethnicity: BreakdownSlice[];
-  religion: BreakdownSlice[];
+  charts: PrintableDemoChart[];
+  documentTitle?: string;
 }) => {
   const win = window.open("", "_blank");
   if (!win) {
@@ -312,7 +325,18 @@ const printDemographicsCharts = (opts: {
   }
   const branding = getPrintInstitutionBranding();
   const header = buildPrintInstitutionHeaderHtml({ branding });
-  const title = "Student demographics";
+  const single = opts.charts.length === 1;
+  const title =
+    opts.documentTitle ??
+    (single ? opts.charts[0]!.title : "Student demographics");
+  const columns = opts.charts
+    .map((chart) =>
+      buildChartPrintColumn(chart.title, chart.slices, chart.colorFor, {
+        large: single,
+        hideTitle: single,
+      }),
+    )
+    .join("");
   win.document.write(`<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
     <title>${escapeDemoPrintHtml(title)}</title>
@@ -322,17 +346,23 @@ const printDemographicsCharts = (opts: {
       h1 { font-size: 15px; margin: 8px 0 2px; text-align: center; }
       .scope { text-align: center; font-size: 11px; color: #475569; margin: 0 0 10px; }
       .grid { display: flex; gap: 10px; align-items: flex-start; }
+      .grid.single { display: block; max-width: 460px; margin: 0 auto; }
       .col { flex: 1; min-width: 0; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; }
+      .grid.single .col { padding: 16px; }
       .col h2 { font-size: 12px; margin: 0 0 6px; text-align: center; }
+      .grid.single .col h2 { font-size: 14px; }
       .donut { display: flex; justify-content: center; margin: 0 0 8px; }
       table { width: 100%; border-collapse: collapse; font-size: 9px; }
+      .grid.single table { font-size: 12px; }
       th, td { border: 1px solid #e2e8f0; padding: 3px 4px; text-align: left; }
+      .grid.single th, .grid.single td { padding: 6px 8px; }
       th { background: #f8fafc; }
       td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
       .hint { margin-top: 8px; font-size: 10px; color: #64748b; }
+      .donut, .swatch, th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       ${PRINT_INSTITUTION_HEADER_CSS}
-      @page { size: A4 landscape; margin: 8mm; }
+      @page { size: ${single ? "A4 portrait" : "A4 landscape"}; margin: 8mm; }
       @media print {
         body { padding: 0; }
         .no-print { display: none !important; }
@@ -345,10 +375,8 @@ const printDemographicsCharts = (opts: {
     ${header}
     <h1>${escapeDemoPrintHtml(title)}</h1>
     <p class="scope">${escapeDemoPrintHtml(opts.scope)}</p>
-    <div class="grid">
-      ${buildChartPrintColumn("Students by Gender", opts.gender, (name) => GENDER_CHART_COLORS[name] ?? "#94a3b8")}
-      ${buildChartPrintColumn("Students by Ethnicity", opts.ethnicity, ethnicityColor)}
-      ${buildChartPrintColumn("Students by Religion", opts.religion, religionColor)}
+    <div class="grid${single ? " single" : ""}">
+      ${columns}
     </div>
     <p class="hint">Printed ${new Date().toLocaleString()}</p>
   </body></html>`);
@@ -450,6 +478,31 @@ const StudentDemographicsCharts = ({
 
   const legendBase = "/students/list";
 
+  const printableCharts: PrintableDemoChart[] = [
+    {
+      title: "Students by Gender",
+      slices: genderSlices,
+      colorFor: genderChartColor,
+    },
+    {
+      title: "Students by Ethnicity",
+      slices: ethnicitySlices,
+      colorFor: ethnicityColor,
+    },
+    {
+      title: "Students by Religion",
+      slices: religionSlices,
+      colorFor: religionColor,
+    },
+  ];
+
+  const printCharts = (charts: PrintableDemoChart[], documentTitle?: string) =>
+    printDemographicsCharts({
+      scope: chartScope,
+      charts,
+      documentTitle,
+    });
+
   // Hide filter bar only when we have no batch/year options (non-admin / empty school)
   const showFilters = batches.length > 0 || years.length > 0;
 
@@ -518,14 +571,7 @@ const StudentDemographicsCharts = ({
         <Button
           size="sm"
           variant="outline"
-          onClick={() =>
-            printDemographicsCharts({
-              scope: chartScope,
-              gender: genderSlices,
-              ethnicity: ethnicitySlices,
-              religion: religionSlices,
-            })
-          }
+          onClick={() => printCharts(printableCharts, "Student demographics")}
         >
           <Printer className="mr-1.5 h-3.5 w-3.5" />
           Print all charts
@@ -538,15 +584,14 @@ const StudentDemographicsCharts = ({
           scope={chartScope}
           icon={<Users className="h-4 w-4 text-slate-600" strokeWidth={1.75} />}
           data={genderSlices}
-          colorFor={(name) =>
-            GENDER_CHART_COLORS[name] ?? INSTITUTION_MIX_COLORS[0]!
-          }
+          colorFor={genderChartColor}
           emptyMessage={
             hasChartFilter
               ? "No active students match this batch/year filter."
               : "No active students with gender recorded yet."
           }
           legendLinkBase={legendBase}
+          onPrint={() => printCharts([printableCharts[0]!])}
         />
         <BreakdownDonutCard
           title="Students by Ethnicity"
@@ -561,6 +606,7 @@ const StudentDemographicsCharts = ({
               ? "No active students match this batch/year filter."
               : "No active students with ethnicity recorded yet."
           }
+          onPrint={() => printCharts([printableCharts[1]!])}
         />
         <BreakdownDonutCard
           title="Students by Religion"
@@ -575,6 +621,7 @@ const StudentDemographicsCharts = ({
               ? "No active students match this batch/year filter."
               : "No active students with religion recorded yet."
           }
+          onPrint={() => printCharts([printableCharts[2]!])}
         />
       </div>
     </div>
@@ -595,6 +642,7 @@ const BreakdownDonutCard = ({
   emptyMessage,
   /** When set, legend rows link to this path with ?gender=Name (for gender chart). */
   legendLinkBase,
+  onPrint,
 }: {
   title: string;
   scope?: string;
@@ -603,6 +651,7 @@ const BreakdownDonutCard = ({
   colorFor: (name: string, index: number) => string;
   emptyMessage: string;
   legendLinkBase?: string;
+  onPrint?: () => void;
 }) => {
   const total = data.reduce((sum, s) => sum + s.value, 0);
   /** Keep the original index so a category never changes color when others drop out. */
@@ -615,12 +664,28 @@ const BreakdownDonutCard = ({
   return (
     <Card className={cn(panelClass, "flex flex-col")}>
       <CardHeader className="space-y-1 border-slate-100/80 pb-2">
-        <CardTitle className="flex items-center gap-2.5 text-base font-semibold tracking-tight sm:text-lg">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
-            {icon}
-          </span>
-          {title}
-        </CardTitle>
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex min-w-0 items-center gap-2.5 text-base font-semibold tracking-tight sm:text-lg">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+              {icon}
+            </span>
+            <span className="min-w-0">{title}</span>
+          </CardTitle>
+          {onPrint ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={onPrint}
+              aria-label={`Print ${title}`}
+              title={`Print ${title}`}
+            >
+              <Printer className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Print</span>
+            </Button>
+          ) : null}
+        </div>
         {scope ? (
           <p className="text-xs font-normal text-slate-500 sm:text-sm">{scope}</p>
         ) : null}
@@ -1613,6 +1678,32 @@ export const DashboardPage = () => {
     placeholderData: keepPreviousData,
     staleTime: 60_000
   });
+
+  // Mobile WebView / PWA often restores mid-page scroll or auto-focuses the
+  // first <select> (batch filters, demographics). Keep the dashboard at top.
+  useLayoutEffect(() => {
+    const scrollTop = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    scrollTop();
+    const frame = window.requestAnimationFrame(scrollTop);
+    const timer = window.setTimeout(() => {
+      scrollTop();
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        (active.tagName === "SELECT" || active.tagName === "INPUT")
+      ) {
+        active.blur();
+      }
+    }, 80);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const isInitialDashboardLoad = dashboardQuery.isPending && !dashboardQuery.data;
 

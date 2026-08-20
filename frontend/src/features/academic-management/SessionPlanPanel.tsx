@@ -1889,7 +1889,6 @@ export const SessionPlanPanel = ({
               : "Filtered Session Plans"
           }
           academicYearBs={filters.academicYearBs}
-          generatedAt={new Date().toLocaleString()}
         />
         {printPlans.length === 0 ? (
           <p className="text-sm text-slate-600">No session plans to export.</p>

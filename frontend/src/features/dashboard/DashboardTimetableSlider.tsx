@@ -105,19 +105,27 @@ export const DashboardTimetableSlider = ({
   const [active, setActive] = useState(startIndex);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
+  const scrollSlideIntoView = (index: number, behavior: ScrollBehavior = "auto") => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const width = scroller.clientWidth;
+    if (width <= 0) return;
+    // Scroll the row only — never scrollIntoView, which jumps the whole page
+    // down to this widget when the dashboard opens on mobile.
+    scroller.scrollTo({ left: index * width, behavior });
+  };
+
   const goTo = (index: number) => {
     const next = Math.max(0, Math.min(days.length - 1, index));
     setActive(next);
-    const scroller = scrollerRef.current;
-    const slide = scroller?.children[next] as HTMLElement | undefined;
-    slide?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+    scrollSlideIntoView(next, "smooth");
   };
 
   useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-    const slide = scroller.children[startIndex] as HTMLElement | undefined;
-    slide?.scrollIntoView({ inline: "start", block: "nearest" });
+    const id = window.requestAnimationFrame(() =>
+      scrollSlideIntoView(startIndex, "auto"),
+    );
+    return () => window.cancelAnimationFrame(id);
   }, [startIndex]);
 
   const onScroll = () => {

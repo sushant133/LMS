@@ -415,6 +415,12 @@ const systemAdminItems: Array<{ labelKey: string; path: string; roles: UserRole[
   },
 ];
 
+const scrollPageToTop = () => {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+};
+
 const renderNavLink = (
   item: { labelKey: string; path: string; section?: string },
   label: string,
@@ -426,7 +432,14 @@ const renderNavLink = (
     key={`${item.section ?? "nav"}-${item.path}-${item.labelKey}`}
     to={item.path}
     end={useEnd}
-    onClick={onNavigate}
+    onClick={() => {
+      onNavigate();
+      // Same-route tap (e.g. Dashboard while already there) does not remount,
+      // so scroll back to the top of the page on mobile.
+      if (window.location.pathname === item.path) {
+        scrollPageToTop();
+      }
+    }}
     className={({ isActive }) =>
       cn(
         "flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition",
@@ -1040,7 +1053,12 @@ export const AppLayout = () => {
           <div className="app-sidebar-brand flex shrink-0 items-start gap-2">
             <NavLink
               to={brandHomePath}
-              onClick={closeMobile}
+              onClick={() => {
+                closeMobile();
+                if (location.pathname.startsWith("/dashboard")) {
+                  scrollPageToTop();
+                }
+              }}
               title={`${appConfig.appName} — Dashboard`}
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-white/40"
             >
@@ -1149,7 +1167,12 @@ export const AppLayout = () => {
               {/* Brand block: PHIT COLLEGE primary on mobile (never the long legal name) */}
               <NavLink
                 to={brandHomePath}
-                onClick={closeMobile}
+                onClick={() => {
+                  closeMobile();
+                  if (location.pathname.startsWith("/dashboard")) {
+                    scrollPageToTop();
+                  }
+                }}
                 className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
                 title={`${appConfig.appName} — Dashboard`}
               >

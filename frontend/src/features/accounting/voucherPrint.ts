@@ -144,7 +144,7 @@ export const printSimpleDocument = (opts: {
     ${opts.subtitle ? `<p class="subtitle">${escapeHtml(opts.subtitle)}</p>` : ""}
   </div>
   ${opts.bodyHtml}
-  <div class="footer">Generated from ${escapeHtml(college)} Accounting · ${escapeHtml(new Date().toLocaleString())}</div>
+  <div class="footer">${escapeHtml(college)} Accounting</div>
 </body>
 </html>`;
 

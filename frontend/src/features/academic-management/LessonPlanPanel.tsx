@@ -2645,7 +2645,6 @@ export const LessonPlanPanel = ({
               : "Filtered Lesson Plans"
           }
           academicYearBs={filters.academicYearBs}
-          generatedAt={new Date().toLocaleString()}
         />
         {printPlans.length === 0 ? (
           <p className="text-sm text-slate-600">No lesson plans to export.</p>

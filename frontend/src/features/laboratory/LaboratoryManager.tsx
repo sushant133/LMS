@@ -3265,7 +3265,6 @@ export const LaboratoryManager = () => {
                     );
                   })()}
                   <p className="mb-3 text-sm text-slate-500">
-                    Generated {new Date(reportData.generatedAt).toLocaleString()} ·{" "}
                     {reportData.summary?.rowCount ?? reportData.rows.length} rows
                     {reportData.summary?.totalValuation != null
                       ? ` · Valuation: ${reportData.summary.totalValuation}`

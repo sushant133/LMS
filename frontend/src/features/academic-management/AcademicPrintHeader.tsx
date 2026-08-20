@@ -8,7 +8,6 @@ interface AcademicPrintHeaderProps {
   title: string;
   subtitle?: string;
   academicYearBs?: string;
-  generatedAt?: string;
 }
 
 /** Shown in on-screen print area and PDF export (institution branding). */
@@ -18,7 +17,6 @@ export const AcademicPrintHeader = ({
   title,
   subtitle,
   academicYearBs,
-  generatedAt,
 }: AcademicPrintHeaderProps) => {
   const branding = getPrintInstitutionBranding();
   const address =
@@ -37,11 +35,11 @@ export const AcademicPrintHeader = ({
           {subtitle ? (
             <p className="text-sm text-slate-600">{subtitle}</p>
           ) : null}
-          <p className="mt-1 text-xs text-slate-500">
-            {academicYearBs ? `Academic Year: ${academicYearBs}` : null}
-            {academicYearBs && generatedAt ? " · " : null}
-            {generatedAt ? `Generated: ${generatedAt}` : null}
-          </p>
+          {academicYearBs ? (
+            <p className="mt-1 text-xs text-slate-500">
+              Academic Year: {academicYearBs}
+            </p>
+          ) : null}
         </div>
       </div>
     </div>
@@ -51,8 +49,8 @@ export const AcademicPrintHeader = ({
 export const AcademicPrintFooter = () => (
   <div className="mt-8 border-t border-slate-300 pt-3 text-xs text-slate-500 print:mt-6">
     <p>
-      Generated from Academic Management · Confidential academic record · Page
-      numbers appear when printing/exporting to PDF
+      Confidential academic record · Page numbers appear when
+      printing/exporting to PDF
     </p>
   </div>
 );

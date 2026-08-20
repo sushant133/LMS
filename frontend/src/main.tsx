@@ -13,6 +13,10 @@ import { installStaleChunkRecovery } from "lib/staleChunkRecovery";
 
 installStaleChunkRecovery();
 
+if (typeof window !== "undefined" && "scrollRestoration" in window.history) {
+  window.history.scrollRestoration = "manual";
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     {/* Last line of defence: without it, any uncaught render error empties #root entirely */}

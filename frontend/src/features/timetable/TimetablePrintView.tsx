@@ -14,7 +14,6 @@ export type TimetablePrintMeta = {
   className?: string;
   sectionName?: string;
   academicYearBs?: string;
-  generatedAt: string;
   principalName?: string;
   viewTitle: string;
   /** Printed heading under the college name. Defaults to weekly class timetable. */
@@ -181,7 +180,6 @@ export const TimetablePrintView = ({
           {meta.academicYearBs ? (
             <span>Academic Year (BS): {meta.academicYearBs}</span>
           ) : null}
-          <span>Generated: {meta.generatedAt}</span>
         </div>
       </header>
 

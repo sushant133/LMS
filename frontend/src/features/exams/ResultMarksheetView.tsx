@@ -314,8 +314,8 @@ export const ResultMarksheetView = ({
           ) : null}
         </div>
         <p className="om-meta-note">
-          This is a computer-generated official marksheet. Verify authenticity
-          with the institution using the verification number when provided.
+          Verify authenticity with the institution using the verification
+          number when provided.
         </p>
       </div>
     </article>

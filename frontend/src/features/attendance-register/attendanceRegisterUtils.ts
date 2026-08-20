@@ -184,12 +184,6 @@ export const buildAttendanceRegisterPrintHtml = (
   );
   const monthLabel = escapeHtml(data.monthLabel || data.monthBs || "");
   const scopeLabel = data.scopeLabel ? escapeHtml(data.scopeLabel) : "";
-  const generated = escapeHtml(
-    data.generatedAt
-      ? new Date(data.generatedAt).toLocaleString()
-      : new Date().toLocaleString(),
-  );
-
   const branding = getPrintInstitutionBranding();
   const instName = (options.institutionName || branding.name || "").trim();
   const instAddress = (
@@ -363,7 +357,7 @@ export const buildAttendanceRegisterPrintHtml = (
   <div class="meta">
     <strong>Month:</strong> ${monthLabel}${scopeLabel ? ` · <strong>Scope:</strong> ${scopeLabel}` : ""}
     <br />
-    <strong>Generated:</strong> ${generated} · <strong>By:</strong> ${preparedBy}
+    <strong>By:</strong> ${preparedBy}
     · <strong>People:</strong> ${data.rows.length} · <strong>Days:</strong> ${data.days.length}
   </div>
   <div class="stats">

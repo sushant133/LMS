@@ -268,7 +268,7 @@ export function exportFinanceReportExcel(report: FinanceReportResponse) {
 
   const sheet = buildAlignedSheet(
     report.title || "Finance report",
-    `Generated: ${new Date(report.generatedAt).toLocaleString()} · ${report.totals.count} row(s)`,
+    `${report.totals.count} row(s)`,
     headers,
     body,
     footer,
@@ -337,7 +337,7 @@ export function exportTransactionsExcel(rows: FinanceTransactionRecord[]) {
 
   const sheet = buildAlignedSheet(
     "Finance Management — All Transactions",
-    `Generated: ${new Date().toLocaleString()} · ${rows.length} entr${rows.length === 1 ? "y" : "ies"}`,
+    `${rows.length} entr${rows.length === 1 ? "y" : "ies"}`,
     headers,
     body,
     footer,
@@ -512,7 +512,7 @@ export function exportTransactionsLedgerExcel(
 
   const sheet = buildAlignedSheet(
     meta?.title || "Finance Management — Transaction Ledger",
-    `${meta?.institutionName ? `${meta.institutionName} · ` : ""}Period: ${ledgerPeriodLabel(meta)} · Generated: ${meta?.generatedAt || new Date().toLocaleString()} · ${lines.length} entr${lines.length === 1 ? "y" : "ies"}`,
+    `${meta?.institutionName ? `${meta.institutionName} · ` : ""}Period: ${ledgerPeriodLabel(meta)} · ${lines.length} entr${lines.length === 1 ? "y" : "ies"}`,
     headers,
     body,
     footer,
@@ -584,7 +584,6 @@ const buildLedgerHtml = (
   <h1>${escapeHtml(meta?.title || "Finance Management — Transaction Ledger")}</h1>
   <p class="meta">
     Period: ${escapeHtml(ledgerPeriodLabel(meta))} ·
-    Generated: ${escapeHtml(meta?.generatedAt || new Date().toLocaleString())} ·
     ${lines.length} entr${lines.length === 1 ? "y" : "ies"}
   </p>
   <table>
@@ -762,7 +761,6 @@ export async function exportTransactionsLedgerPdf(
     doc.setTextColor(71, 85, 105);
     const sub = [
       `Period: ${ledgerPeriodLabel(meta)}`,
-      `Generated: ${meta?.generatedAt || new Date().toLocaleString()}`,
       `${lines.length} entr${lines.length === 1 ? "y" : "ies"}`,
     ]
       .filter(Boolean)
@@ -968,7 +966,7 @@ export function printFinanceReport(report: FinanceReportResponse) {
     </style></head><body>
     ${institutionHeader}
     <h1>${escapeHtml(report.title)}</h1>
-    <p>Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())} · ${report.totals.count} row(s)</p>
+    <p>${report.totals.count} row(s)</p>
     <table><thead><tr>
       <th>Date</th><th>Type</th><th>Category</th><th>Title</th><th>Amount</th><th>Payment</th><th>Ref</th>
     </tr></thead><tbody>${rowsHtml || `<tr><td colspan="7">No rows</td></tr>`}</tbody></table>

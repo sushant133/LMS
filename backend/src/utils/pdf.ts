@@ -275,7 +275,7 @@ export async function generateFeeReceiptPDF(data: ReceiptData, res: Response): P
     .font(fonts.regular)
     .fontSize(9)
     .fillColor("#64748b")
-    .text("This is a computer-generated receipt. Thank you for your payment.", 50, y, {
+    .text("Thank you for your payment.", 50, y, {
       align: "center",
       width: contentWidth
     });

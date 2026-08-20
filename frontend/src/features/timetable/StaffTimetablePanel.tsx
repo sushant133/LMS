@@ -970,7 +970,6 @@ export const StaffTimetablePanel = ({
                         getPrintInstitutionBranding().address,
                       principalName: settingsQuery.data?.principalName,
                       academicYearBs,
-                      generatedAt: new Date().toLocaleDateString(),
                       viewTitle,
                       documentTitle: "Weekly Staff Timetable",
                       staffName: table.staffId ? table.title : undefined,
