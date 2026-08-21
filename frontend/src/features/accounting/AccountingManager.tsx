@@ -330,6 +330,7 @@ const defaultSalary: SalaryPaymentInput = {
   otherDeductionsNpr: 0,
   presentDays: 0,
   absentDays: 0,
+  leaveDays: 0,
   extraDuty: 0,
   absentDeductionNpr: 0,
   extraAmountNpr: 0,
@@ -2465,6 +2466,7 @@ export const AccountingManager = () => {
                                 // saving the edit resets them to 0 / drops attachments
                                 presentDays: row.presentDays ?? 0,
                                 absentDays: row.absentDays ?? 0,
+                                leaveDays: row.leaveDays ?? 0,
                                 extraDuty: row.extraDuty ?? 0,
                                 absentDeductionNpr: row.absentDeductionNpr ?? 0,
                                 extraAmountNpr: row.extraAmountNpr ?? 0,

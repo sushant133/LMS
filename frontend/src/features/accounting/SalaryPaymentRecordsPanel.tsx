@@ -86,6 +86,7 @@ const calcLine = (
     | "monthlySalaryNpr"
     | "presentDays"
     | "absentDays"
+    | "leaveDays"
     | "extraDuty"
     | "workingDaysInMonth"
     | "extraAmountNpr"
@@ -101,10 +102,14 @@ const calcLine = (
 > => {
   const days = Math.max(1, row.workingDaysInMonth || 30);
   const monthly = Math.max(0, Number(row.monthlySalaryNpr) || 0);
-  const absent = Math.max(0, Number(row.absentDays) || 0);
+  const leave = Math.max(0, Number(row.leaveDays) || 0);
+  const deducted = Math.min(
+    Math.max(0, Number(row.absentDays) || 0) + leave,
+    days,
+  );
   const extraDuty = Math.max(0, Number(row.extraDuty) || 0);
   const perDay = monthly / days;
-  const absentDeductionNpr = round2(perDay * absent);
+  const absentDeductionNpr = round2(perDay * deducted);
   const extraAmountNpr =
     preferExtraDuty || extraDuty > 0
       ? round2(perDay * extraDuty)
@@ -188,6 +193,7 @@ const emptyEntryForm = () => ({
   monthlySalaryNpr: "0",
   presentDays: "0",
   absentDays: "0",
+  leaveDays: "0",
   extraDuty: "0",
   remarks: "",
   attendanceManualOverride: false,
@@ -329,6 +335,7 @@ export const SalaryPaymentRecordsPanel = ({
       .map((r, i) => ({
         ...r,
         sn: i + 1,
+        leaveDays: r.leaveDays ?? 0,
         salaryPaymentId: r.salaryPaymentId
           ? String(r.salaryPaymentId)
           : undefined,
@@ -365,6 +372,7 @@ export const SalaryPaymentRecordsPanel = ({
         monthlySalaryNpr: number;
         presentDays: number;
         absentDays: number;
+        leaveDays?: number;
         extraDuty: number;
         extraAmountNpr?: number;
         absentDeductionNpr?: number;
@@ -502,6 +510,22 @@ export const SalaryPaymentRecordsPanel = ({
     rows[0]?.workingDaysInMonth ??
     30;
 
+  const calendarDaysInMonth =
+    sheetQuery.data?.calendarDaysInMonth ?? workingDaysInMonth;
+  const saturdayDaysInMonth = sheetQuery.data?.saturdayDaysInMonth ?? 0;
+  const otherHolidayDaysInMonth =
+    sheetQuery.data?.otherHolidayDaysInMonth ?? 0;
+  const holidayDaysInMonth =
+    sheetQuery.data?.holidayDaysInMonth ??
+    (saturdayDaysInMonth + otherHolidayDaysInMonth ||
+      Math.max(0, calendarDaysInMonth - workingDaysInMonth));
+
+  /** Employees missing from one or more day sheets this month. */
+  const incompleteAttendanceCount = useMemo(
+    () => catalog.filter((c) => c.attendanceIncomplete).length,
+    [catalog],
+  );
+
   /** Employees not yet on the sheet (available to add) */
   const availableCatalog = useMemo(() => {
     const onSheet = new Set(rows.map((r) => employeeKeyOf(r)));
@@ -529,11 +553,13 @@ export const SalaryPaymentRecordsPanel = ({
     const monthly = Number(entry.monthlySalaryNpr) || 0;
     const presentDays = Number(entry.presentDays) || 0;
     const absentDays = Number(entry.absentDays) || 0;
+    const leaveDays = Number(entry.leaveDays) || 0;
     const extraDuty = Number(entry.extraDuty) || 0;
     return calcLine({
       monthlySalaryNpr: monthly,
       presentDays,
       absentDays,
+      leaveDays,
       extraDuty,
       workingDaysInMonth,
       extraAmountNpr: 0,
@@ -554,6 +580,7 @@ export const SalaryPaymentRecordsPanel = ({
       monthlySalaryNpr: String(src.monthlySalaryNpr ?? 0),
       presentDays: String(src.presentDays ?? 0),
       absentDays: String(src.absentDays ?? 0),
+      leaveDays: String(src.leaveDays ?? 0),
       extraDuty: String(src.extraDuty ?? 0),
       remarks: src.remarks ?? "",
       attendanceManualOverride: Boolean(src.attendanceManualOverride),
@@ -586,11 +613,13 @@ export const SalaryPaymentRecordsPanel = ({
     }
     const presentDays = Number(entry.presentDays) || 0;
     const absentDays = Number(entry.absentDays) || 0;
+    const leaveDays = Number(entry.leaveDays) || 0;
     const extraDuty = Number(entry.extraDuty) || 0;
     const calc = calcLine({
       monthlySalaryNpr: monthly,
       presentDays,
       absentDays,
+      leaveDays,
       extraDuty,
       workingDaysInMonth,
       extraAmountNpr: 0,
@@ -600,6 +629,7 @@ export const SalaryPaymentRecordsPanel = ({
       monthlySalaryNpr: monthly,
       presentDays,
       absentDays,
+      leaveDays,
       extraDuty,
       ...calc,
       remarks: entry.remarks,
@@ -647,6 +677,7 @@ export const SalaryPaymentRecordsPanel = ({
       monthlySalaryNpr: String(row.monthlySalaryNpr ?? 0),
       presentDays: String(row.presentDays ?? 0),
       absentDays: String(row.absentDays ?? 0),
+      leaveDays: String(row.leaveDays ?? 0),
       extraDuty: String(row.extraDuty ?? 0),
       remarks: row.remarks ?? "",
       attendanceManualOverride: Boolean(row.attendanceManualOverride),
@@ -676,13 +707,14 @@ export const SalaryPaymentRecordsPanel = ({
 
   /**
    * Super Admin / College Admin: edit a cell on the generated sheet.
-   * - Days / monthly salary → re-calc money unless valuesManualOverride
+   * - Present / absent / leave → freeze attendance and re-calc money
+   * - Monthly salary / extra duty → re-calc money without freezing attendance
    * - Money columns → mark valuesManualOverride (keep typed amounts)
    */
   const patchRow = (
     rowKey: string,
     patch: Partial<EditableRow>,
-    mode: "days" | "money" | "meta" = "meta",
+    mode: "days" | "rate" | "money" | "meta" = "meta",
   ) => {
     if (!canEditSheet) return;
     setRows((prev) =>
@@ -697,6 +729,19 @@ export const SalaryPaymentRecordsPanel = ({
           if (mode === "days") {
             next.attendanceManualOverride = true;
             next.attendanceIncomplete = false;
+            const wd = next.workingDaysInMonth || workingDaysInMonth;
+            if (patch.absentDays !== undefined || patch.leaveDays !== undefined) {
+              next.presentDays = round2(
+                Math.max(
+                  0,
+                  wd -
+                    Math.max(0, Number(next.absentDays) || 0) -
+                    Math.max(0, Number(next.leaveDays) || 0),
+                ),
+              );
+            }
+          }
+          if (mode === "days" || mode === "rate") {
             if (!next.valuesManualOverride) {
               Object.assign(
                 next,
@@ -704,6 +749,7 @@ export const SalaryPaymentRecordsPanel = ({
                   monthlySalaryNpr: next.monthlySalaryNpr,
                   presentDays: next.presentDays,
                   absentDays: next.absentDays,
+                  leaveDays: next.leaveDays,
                   extraDuty: next.extraDuty,
                   workingDaysInMonth:
                     next.workingDaysInMonth || workingDaysInMonth,
@@ -713,7 +759,6 @@ export const SalaryPaymentRecordsPanel = ({
             }
           } else if (mode === "money") {
             next.valuesManualOverride = true;
-            next.attendanceManualOverride = true;
             next.attendanceIncomplete = false;
           }
           return next;
@@ -734,6 +779,7 @@ export const SalaryPaymentRecordsPanel = ({
             monthlySalaryNpr: r.monthlySalaryNpr,
             presentDays: r.presentDays,
             absentDays: r.absentDays,
+            leaveDays: r.leaveDays,
             extraDuty: r.extraDuty,
             workingDaysInMonth: r.workingDaysInMonth || workingDaysInMonth,
             extraAmountNpr: 0,
@@ -870,6 +916,7 @@ export const SalaryPaymentRecordsPanel = ({
         <td class="n">${formatCurrencyNpr(r.monthlySalaryNpr)}</td>
         <td class="c">${r.presentDays}</td>
         <td class="c">${r.absentDays}</td>
+        <td class="c">${r.leaveDays ?? 0}</td>
         <td class="c">${r.extraDuty}</td>
         <td class="n">${formatCurrencyNpr(r.absentDeductionNpr)}</td>
         <td class="n">${formatCurrencyNpr(r.extraAmountNpr)}</td>
@@ -1044,12 +1091,18 @@ export const SalaryPaymentRecordsPanel = ({
         : ""
     }
     <p class="sheet-title">Salary Sheet of ${escapeHtml(monthLabel)}</p>
+    <p class="college-address">
+      Month days ${calendarDaysInMonth} − Saturdays ${saturdayDaysInMonth} − other holidays ${otherHolidayDaysInMonth} = ${workingDaysInMonth} working days
+      · per-day salary = monthly ÷ ${workingDaysInMonth}
+      · leave and absence deduct · unrecorded working days paid as present
+    </p>
   </div>
   <table class="data">
     <colgroup>
       <col style="width:4%" />
-      <col style="width:14%" />
+      <col style="width:11%" />
       <col style="width:9%" />
+      <col style="width:7%" />
       <col style="width:6%" />
       <col style="width:6%" />
       <col style="width:6%" />
@@ -1068,6 +1121,7 @@ export const SalaryPaymentRecordsPanel = ({
         <th>Monthly Salary</th>
         <th>Present Days</th>
         <th>Absent Days</th>
+        <th>Leave Days</th>
         <th>Extra Duty</th>
         <th>Absent Deduction</th>
         <th>Extra Amount</th>
@@ -1083,7 +1137,7 @@ export const SalaryPaymentRecordsPanel = ({
       <tr>
         <td colspan="2" class="c">TOTAL</td>
         <td class="n">${formatCurrencyNpr(totals.totalMonthlySalaryNpr)}</td>
-        <td colspan="3"></td>
+        <td colspan="4"></td>
         <td class="n">${formatCurrencyNpr(totals.totalAbsentDeductionNpr)}</td>
         <td class="n">${formatCurrencyNpr(totals.totalExtraAmountNpr)}</td>
         <td class="n">${formatCurrencyNpr(totals.totalSalaryAmountNpr)}</td>
@@ -1250,8 +1304,13 @@ export const SalaryPaymentRecordsPanel = ({
         "S.N.": r.sn,
         "Employee Name": r.employeeName,
         "Monthly Salary": r.monthlySalaryNpr,
+        "Working Days": r.workingDaysInMonth || workingDaysInMonth,
+        "Saturdays": saturdayDaysInMonth,
+        "Other Holidays": otherHolidayDaysInMonth,
+        "Register sheets": `${Number(r.attendanceDaysRecorded) || 0} / ${Number(r.attendanceExpectedDays) || 0}`,
         "Present Days": r.presentDays,
         "Absent Days": r.absentDays,
+        "Leave Days": r.leaveDays ?? 0,
         "Extra Duty": r.extraDuty,
         "Absent Deduction": r.absentDeductionNpr,
         "Extra Amount": r.extraAmountNpr,
@@ -1265,8 +1324,13 @@ export const SalaryPaymentRecordsPanel = ({
         "S.N.": "",
         "Employee Name": "TOTAL",
         "Monthly Salary": totals.totalMonthlySalaryNpr,
+        "Working Days": "",
+        "Saturdays": "",
+        "Other Holidays": "",
+        "Register sheets": "",
         "Present Days": "",
         "Absent Days": "",
+        "Leave Days": "",
         "Extra Duty": "",
         "Absent Deduction": totals.totalAbsentDeductionNpr,
         "Extra Amount": totals.totalExtraAmountNpr,
@@ -1280,8 +1344,13 @@ export const SalaryPaymentRecordsPanel = ({
         "S.N.": "",
         "Employee Name": "Total Net in words",
         "Monthly Salary": totals.totalNetSalaryInWords,
+        "Working Days": "",
+        "Saturdays": "",
+        "Other Holidays": "",
+        "Register sheets": "",
         "Present Days": "",
         "Absent Days": "",
+        "Leave Days": "",
         "Extra Duty": "",
         "Absent Deduction": "",
         "Extra Amount": "",
@@ -1295,8 +1364,13 @@ export const SalaryPaymentRecordsPanel = ({
         "S.N.": "",
         "Employee Name": s.position,
         "Monthly Salary": s.name,
+        "Working Days": "",
+        "Saturdays": "",
+        "Other Holidays": "",
+        "Register sheets": "",
         "Present Days": "",
         "Absent Days": "",
+        "Leave Days": "",
         "Extra Duty": "",
         "Absent Deduction": "",
         "Extra Amount": "",
@@ -1340,6 +1414,7 @@ export const SalaryPaymentRecordsPanel = ({
         monthlySalaryNpr: r.monthlySalaryNpr,
         presentDays: r.presentDays,
         absentDays: r.absentDays,
+        leaveDays: r.leaveDays ?? 0,
         extraDuty: r.extraDuty,
         extraAmountNpr: r.extraAmountNpr,
         absentDeductionNpr: r.absentDeductionNpr,
@@ -1690,6 +1765,7 @@ export const SalaryPaymentRecordsPanel = ({
                     monthlySalaryNpr: r.monthlySalaryNpr,
                     presentDays: r.presentDays,
                     absentDays: r.absentDays,
+                    leaveDays: r.leaveDays ?? 0,
                     extraDuty: r.extraDuty,
                     extraAmountNpr: r.extraAmountNpr,
                     absentDeductionNpr: r.absentDeductionNpr,
@@ -1850,29 +1926,91 @@ export const SalaryPaymentRecordsPanel = ({
             ) : null}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
-            <span>
+            <span title="Calendar days in this Bikram Sambat month">
+              Month days:{" "}
+              <strong className="text-slate-900">
+                {calendarDaysInMonth}
+              </strong>
+            </span>
+            <span title="Saturday weekly offs. A WORKING_DAY override on the academic calendar keeps that Saturday as a working day.">
+              Saturdays:{" "}
+              <strong className="text-slate-900">
+                −{saturdayDaysInMonth}
+              </strong>
+            </span>
+            <span title="Public holidays, vacations and other calendar holidays that are not Saturdays. These never count as absence.">
+              Other holidays:{" "}
+              <strong className="text-slate-900">
+                −{otherHolidayDaysInMonth}
+              </strong>
+            </span>
+            <span title="Working days = month days − Saturdays − other holidays. Per-day salary = monthly salary ÷ working days. Leave and absence deduct against this.">
               Working days:{" "}
               <strong className="text-slate-900">{workingDaysInMonth}</strong>
+              <span className="text-slate-500">
+                {" "}
+                ({calendarDaysInMonth} − {saturdayDaysInMonth} − {otherHolidayDaysInMonth}
+                {holidayDaysInMonth !== saturdayDaysInMonth + otherHolidayDaysInMonth
+                  ? `, total off ${holidayDaysInMonth}`
+                  : ""}
+                )
+              </span>
             </span>
             {sheetQuery.data ? (
-              <span>
-                Attendance days:{" "}
-                <strong className="text-slate-900">
-                  {sheetQuery.data.attendanceCoverageDays}
+              <span
+                title="Working days that have a teacher / staff attendance register. Registers taken on a holiday are ignored."
+                className={cn(
+                  sheetQuery.data.attendanceCoverageDays < workingDaysInMonth &&
+                    "text-amber-700",
+                )}
+              >
+                Attendance taken:{" "}
+                <strong
+                  className={cn(
+                    sheetQuery.data.attendanceCoverageDays < workingDaysInMonth
+                      ? "text-amber-900"
+                      : "text-slate-900",
+                  )}
+                >
+                  {sheetQuery.data.attendanceCoverageDays} / {workingDaysInMonth}
+                </strong>
+                {sheetQuery.data.attendanceCoverageDaysTeacher !== undefined &&
+                sheetQuery.data.attendanceCoverageDaysStaff !== undefined ? (
+                  <span className="text-slate-500">
+                    {" "}
+                    (teachers {sheetQuery.data.attendanceCoverageDaysTeacher} ·
+                    staff {sheetQuery.data.attendanceCoverageDaysStaff})
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
+            {incompleteAttendanceCount > 0 ? (
+              <span
+                className="text-amber-700"
+                title="These employees are missing from some day sheets — the unrecorded days are paid as present"
+              >
+                Incomplete attendance:{" "}
+                <strong className="text-amber-900">
+                  {incompleteAttendanceCount}
                 </strong>
               </span>
             ) : null}
-            <span>
+            <span title="Employees with a saved payroll row for this month">
               On sheet:{" "}
               <strong className="text-slate-900">{rows.length}</strong>
             </span>
-            <span>
+            <span title="Employees in the roster who are not on this month's sheet yet">
               Not yet added:{" "}
               <strong className="text-slate-900">{availableCatalog.length}</strong>
             </span>
             <span>
               Month:{" "}
               <strong className="text-slate-900">{monthLabel}</strong>
+            </span>
+            <span className="basis-full text-[11px] text-slate-500">
+              Present + Absent + Leave = Working days. Leave and absence deduct
+              (monthly ÷ working days × days). Saturdays and calendar holidays are
+              not working days. Unrecorded working days are paid as present.
             </span>
           </div>
         </CardContent>
@@ -1937,6 +2075,7 @@ export const SalaryPaymentRecordsPanel = ({
                     monthlySalaryNpr: "0",
                     presentDays: "0",
                     absentDays: "0",
+                    leaveDays: "0",
                     extraDuty: "0",
                     remarks: "",
                     attendanceManualOverride: false,
@@ -2006,6 +2145,21 @@ export const SalaryPaymentRecordsPanel = ({
                 }
               />
             </FormField>
+            <FormField label="Leave days">
+              <NumberInput
+                min={0}
+                step={0.5}
+                value={entry.leaveDays}
+                disabled={!canManualAttendance && !entry.attendanceManualOverride}
+                onChange={(e) =>
+                  setEntry((f) => ({
+                    ...f,
+                    leaveDays: e.target.value,
+                    attendanceManualOverride: true,
+                  }))
+                }
+              />
+            </FormField>
             <FormField label="Extra duty (days)">
               <NumberInput
                 min={0}
@@ -2062,7 +2216,11 @@ export const SalaryPaymentRecordsPanel = ({
               {selectedCatalogRow.attendanceIncomplete ? (
                 <div className="sm:col-span-2 lg:col-span-5">
                   <Badge className="bg-amber-100 text-amber-900">
-                    Attendance incomplete for this employee — verify days before adding
+                    Attendance incomplete for this employee
+                    {selectedCatalogRow.attendanceExpectedDays
+                      ? ` — recorded on ${selectedCatalogRow.attendanceDaysRecorded} of ${selectedCatalogRow.attendanceExpectedDays} day sheet(s)`
+                      : ""}
+                    {" "}— verify days before adding
                   </Badge>
                 </div>
               ) : null}
@@ -2243,8 +2401,10 @@ export const SalaryPaymentRecordsPanel = ({
                     <Th className="w-12 text-center">S.N.</Th>
                     <Th>Employee Name</Th>
                     <Th className="text-right">Monthly Salary</Th>
+                    <Th className="text-center">Register</Th>
                     <Th className="text-center">Present Days</Th>
                     <Th className="text-center">Absent Days</Th>
+                    <Th className="text-center">Leave Days</Th>
                     <Th className="text-center">Extra Duty</Th>
                     <Th className="text-right">Absent Deduction</Th>
                     <Th className="text-right">Extra Amount</Th>
@@ -2261,6 +2421,18 @@ export const SalaryPaymentRecordsPanel = ({
                     const rowKey = employeeKeyOf(row);
                     const cellInput =
                       "h-8 min-w-[4.5rem] border-slate-200 bg-white px-1.5 text-right text-xs tabular-nums";
+                    const rowRecordedDays = Number(row.attendanceDaysRecorded) || 0;
+                    const rowExpectedSheets = Number(row.attendanceExpectedDays) || 0;
+                    const rowMonthDays = row.workingDaysInMonth || workingDaysInMonth;
+                    const rowUnrecordedDays =
+                      row.unrecordedDays ??
+                      Math.max(0, rowMonthDays - rowRecordedDays);
+                    const rowLeaveDays = Number(row.leaveDays) || 0;
+                    const daysSum =
+                      Number(row.presentDays || 0) +
+                      Number(row.absentDays || 0) +
+                      rowLeaveDays;
+                    const daysReconcile = Math.abs(daysSum - rowMonthDays) < 0.01;
                     return (
                     <tr
                       key={`${row.employeeType}-${row.teacherId || row.staffId}`}
@@ -2287,8 +2459,14 @@ export const SalaryPaymentRecordsPanel = ({
                           {row.department ? ` · ${row.department}` : ""}
                         </div>
                         {row.attendanceIncomplete ? (
-                          <Badge className="mt-1 bg-amber-100 text-amber-900">
+                          <Badge
+                            className="mt-1 bg-amber-100 text-amber-900"
+                            title={`Attendance recorded on ${row.attendanceDaysRecorded} of ${row.attendanceExpectedDays ?? 0} day sheet(s) this month. Unrecorded working days are paid as present. Saturdays and calendar holidays are excluded from working days.`}
+                          >
                             Attendance incomplete
+                            {row.attendanceExpectedDays
+                              ? ` (${row.attendanceDaysRecorded}/${row.attendanceExpectedDays} days)`
+                              : ""}
                           </Badge>
                         ) : null}
                         {row.attendanceManualOverride ? (
@@ -2312,7 +2490,7 @@ export const SalaryPaymentRecordsPanel = ({
                               patchRow(
                                 rowKey,
                                 { monthlySalaryNpr: v ?? 0 },
-                                "days",
+                                "rate",
                               )
                             }
                           />
@@ -2321,6 +2499,45 @@ export const SalaryPaymentRecordsPanel = ({
                             {formatCurrencyNpr(row.monthlySalaryNpr)}
                           </span>
                         )}
+                      </Td>
+                      <Td className="text-center">
+                        <span
+                          className={cn(
+                            "tabular-nums font-medium",
+                            rowUnrecordedDays > 0
+                              ? "text-amber-700"
+                              : "text-slate-700",
+                          )}
+                          title={
+                            row.attendanceManualOverride
+                              ? "Days were entered manually."
+                              : rowExpectedSheets > 0
+                                ? `On ${rowRecordedDays} of ${rowExpectedSheets} ${row.employeeType === "TEACHER" ? "teacher" : "staff"} register(s). ${rowUnrecordedDays} working day(s) had no mark and are paid as present.`
+                                : "No attendance register this month — working days are paid as present."
+                          }
+                        >
+                          {row.attendanceManualOverride
+                            ? "Manual"
+                            : rowExpectedSheets > 0
+                              ? `${rowRecordedDays} / ${rowExpectedSheets}`
+                              : "—"}
+                        </span>
+                        <div
+                          className={cn(
+                            "text-[10px] leading-tight",
+                            daysReconcile ? "text-slate-500" : "text-amber-600",
+                          )}
+                          title={`Present ${row.presentDays} + Absent ${row.absentDays} + Leave ${rowLeaveDays} should equal ${rowMonthDays} working days`}
+                        >
+                          {daysReconcile
+                            ? `= ${rowMonthDays} working`
+                            : `${daysSum} ≠ ${rowMonthDays} working`}
+                        </div>
+                        {rowUnrecordedDays > 0 && !row.attendanceManualOverride ? (
+                          <div className="text-[10px] leading-tight text-amber-600">
+                            {rowUnrecordedDays} unrecorded (paid)
+                          </div>
+                        ) : null}
                       </Td>
                       <Td className="text-center">
                         {canEditSheet ? (
@@ -2366,12 +2583,31 @@ export const SalaryPaymentRecordsPanel = ({
                             min={0}
                             step={0.5}
                             className={cn(cellInput, "text-center")}
+                            value={row.leaveDays ?? 0}
+                            onValueChange={(v) =>
+                              patchRow(
+                                rowKey,
+                                { leaveDays: v ?? 0 },
+                                "days",
+                              )
+                            }
+                          />
+                        ) : (
+                          <span className="tabular-nums">{row.leaveDays ?? 0}</span>
+                        )}
+                      </Td>
+                      <Td className="text-center">
+                        {canEditSheet ? (
+                          <NumberInput
+                            min={0}
+                            step={0.5}
+                            className={cn(cellInput, "text-center")}
                             value={row.extraDuty}
                             onValueChange={(v) =>
                               patchRow(
                                 rowKey,
                                 { extraDuty: v ?? 0 },
-                                "days",
+                                "rate",
                               )
                             }
                           />
@@ -2540,7 +2776,8 @@ export const SalaryPaymentRecordsPanel = ({
                     <Td className="text-right">
                       {formatCurrencyNpr(totals.totalMonthlySalaryNpr)}
                     </Td>
-                    <Td colSpan={3} />
+                    {/* Register / Present / Absent / Leave / Extra duty */}
+                    <Td colSpan={5} />
                     <Td className="text-right text-rose-800">
                       {formatCurrencyNpr(totals.totalAbsentDeductionNpr)}
                     </Td>

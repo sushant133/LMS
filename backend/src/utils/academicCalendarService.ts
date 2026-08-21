@@ -664,3 +664,111 @@ export const prepareEventDateFields = (startDateBs: string, endDateBs: string) =
 };
 
 export { WEEKDAY_NAMES };
+
+/**
+ * Resolve every holiday date in one BS month with a fixed number of queries.
+ *
+ * Same precedence as resolveCalendarHolidayForDate (WORKING_DAY override wins,
+ * then stored holiday/vacation events, then automatic Saturdays, then legacy
+ * Setting.holidays) — but evaluated for the whole month at once so callers such
+ * as payroll can derive working days without 30+ round trips.
+ */
+export const resolveMonthHolidayDates = async (
+  schoolId: Types.ObjectId | string,
+  monthBs: string
+): Promise<{
+  /** Calendar days in the BS month. */
+  calendarDays: number;
+  /** Dates that are holidays (Saturdays, calendar events, legacy settings). */
+  holidayDates: Set<string>;
+  /** Automatic Saturday weekly offs (WORKING_DAY override excluded). */
+  saturdayDates: Set<string>;
+  /** Calendar / vacation / legacy holidays that are not Saturdays. */
+  otherHolidayDates: Set<string>;
+  /** Working days = calendarDays - holidayDates.size (never below 1). */
+  workingDays: number;
+}> => {
+  const { Types: MongooseTypes } = await import("mongoose");
+  const oid =
+    typeof schoolId === "string" ? new MongooseTypes.ObjectId(schoolId) : schoolId;
+
+  const [yearStr, monthStr] = monthBs.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const calendarDays = year && month ? getDaysInBsMonth(year, month) : 30;
+
+  const firstDateBs = `${monthBs}-01`;
+  const lastDateBs = `${monthBs}-${String(calendarDays).padStart(2, "0")}`;
+  const allDates = expandBsDateRange(firstDateBs, lastDateBs);
+
+  const [events, settings] = await Promise.all([
+    AcademicCalendarEvent.find({
+      schoolId: oid,
+      status: { $ne: "INACTIVE" },
+      $and: [
+        {
+          $or: [
+            { startDateBs: { $lte: lastDateBs } },
+            { startDateBs: { $exists: false }, dateBs: { $lte: lastDateBs } }
+          ]
+        },
+        {
+          $or: [
+            { endDateBs: { $gte: firstDateBs } },
+            { endDateBs: { $exists: false }, dateBs: { $gte: firstDateBs } }
+          ]
+        }
+      ]
+    }).lean<EventLean[]>(),
+    Setting.findOne({ schoolId: oid }).select("holidays").lean()
+  ]);
+
+  const workingDayOverrides = new Set<string>();
+  const eventHolidays = new Set<string>();
+
+  for (const event of events) {
+    const { startDateBs, endDateBs } = normalizeEventDates(event);
+    const isOverride =
+      event.eventType === "WORKING_DAY" || Boolean(event.isWorkingDayOverride);
+    const isHoliday =
+      !isOverride && (Boolean(event.isHoliday) || resolveIsHoliday(event.eventType));
+    if (!isOverride && !isHoliday) continue;
+    for (const dateBs of expandBsDateRange(startDateBs, endDateBs)) {
+      if (!dateBs.startsWith(monthBs)) continue;
+      if (isOverride) workingDayOverrides.add(dateBs);
+      else eventHolidays.add(dateBs);
+    }
+  }
+
+  const legacyHolidays = new Set(
+    (settings?.holidays ?? [])
+      .map((item) => String(item.dateBs || ""))
+      .filter((dateBs) => dateBs.startsWith(monthBs))
+  );
+
+  const saturdayDates = new Set<string>();
+  const otherHolidayDates = new Set<string>();
+  const holidayDates = new Set<string>();
+  for (const dateBs of allDates) {
+    // An explicit WORKING_DAY override beats every holiday source.
+    if (workingDayOverrides.has(dateBs)) continue;
+    const isSaturday = getDayOfWeekFromBs(dateBs) === 6;
+    const isOtherHoliday =
+      eventHolidays.has(dateBs) || legacyHolidays.has(dateBs);
+    if (isSaturday) {
+      saturdayDates.add(dateBs);
+      holidayDates.add(dateBs);
+    } else if (isOtherHoliday) {
+      otherHolidayDates.add(dateBs);
+      holidayDates.add(dateBs);
+    }
+  }
+
+  return {
+    calendarDays,
+    holidayDates,
+    saturdayDates,
+    otherHolidayDates,
+    workingDays: Math.max(1, calendarDays - holidayDates.size)
+  };
+};

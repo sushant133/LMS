@@ -20,6 +20,8 @@ const salaryPaymentSchema = new Schema(
     /** Attendance / payroll sheet fields */
     presentDays: { type: Number, default: 0 },
     absentDays: { type: Number, default: 0 },
+    /** LEAVE register marks. Deducted like absence. */
+    leaveDays: { type: Number, default: 0 },
     /** Extra duty units (days) approved for the month */
     extraDuty: { type: Number, default: 0 },
     absentDeductionNpr: { type: Number, default: 0 },

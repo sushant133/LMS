@@ -251,6 +251,7 @@ export interface SalaryPaymentRecord {
   otherDeductionsNpr: number;
   presentDays?: number;
   absentDays?: number;
+  leaveDays?: number;
   extraDuty?: number;
   absentDeductionNpr?: number;
   extraAmountNpr?: number;
@@ -292,6 +293,8 @@ export interface SalarySheetRow {
   monthlySalaryNpr: number;
   presentDays: number;
   absentDays: number;
+  /** LEAVE register marks. Deducted like absence. */
+  leaveDays: number;
   extraDuty: number;
   absentDeductionNpr: number;
   extraAmountNpr: number;
@@ -304,6 +307,17 @@ export interface SalarySheetRow {
   /** Super Admin / College Admin fully overrode money columns. */
   valuesManualOverride?: boolean;
   attendanceDaysRecorded: number;
+  /**
+   * Day sheets that exist this month for this employee's category.
+   * attendanceDaysRecorded < attendanceExpectedDays means the employee is
+   * missing from some day sheets — those days are paid as present.
+   */
+  attendanceExpectedDays?: number;
+  /**
+   * Working days with no register mark for this employee.
+   * Paid as present so Present + Absent + Leave = working days.
+   */
+  unrecordedDays?: number;
   workingDaysInMonth: number;
   salaryPaymentId?: string;
   status?: SalaryPaymentStatus;
@@ -330,8 +344,22 @@ export interface SalarySheetApproval {
 
 export interface SalarySheetResponse {
   monthBs: string;
+  /** Working days = calendar days - Saturdays - other holidays. The payroll per-day divisor. */
   workingDaysInMonth: number;
+  /** Every day of the BS month, holidays included. */
+  calendarDaysInMonth?: number;
+  /** Saturday weekly offs (WORKING_DAY override excluded). */
+  saturdayDaysInMonth?: number;
+  /** Calendar / vacation / legacy holidays that are not Saturdays. */
+  otherHolidayDaysInMonth?: number;
+  /** Saturdays + other holidays. */
+  holidayDaysInMonth?: number;
+  /** Distinct day sheets in the month across both categories. */
   attendanceCoverageDays: number;
+  /** Distinct TEACHER day sheets in the month. */
+  attendanceCoverageDaysTeacher?: number;
+  /** Distinct STAFF day sheets in the month. */
+  attendanceCoverageDaysStaff?: number;
   attendanceIncomplete: boolean;
   attendanceWarning?: string;
   rows: SalarySheetRow[];

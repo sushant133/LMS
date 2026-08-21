@@ -2991,6 +2991,7 @@ const resolvePayrollAmounts = (payload: {
   basicSalaryNpr: number;
   presentDays?: number;
   absentDays?: number;
+  leaveDays?: number;
   extraDuty?: number;
   extraAmountNpr?: number;
   absentDeductionNpr?: number;
@@ -3015,6 +3016,7 @@ const resolvePayrollAmounts = (payload: {
       monthlySalaryNpr: payload.basicSalaryNpr,
       presentDays: payload.presentDays ?? 0,
       absentDays: payload.absentDays ?? 0,
+      leaveDays: payload.leaveDays ?? 0,
       extraDuty: payload.extraDuty ?? 0,
       workingDaysInMonth: payload.workingDaysInMonth ?? 30,
       extraAmountOverrideNpr:
@@ -3177,11 +3179,15 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       : "DRAFT"
     : payload.status;
 
-  // Derive working days from BS calendar for consistent per-day rates
-  const [y, m] = payload.monthBs.split("-").map(Number);
-  const { getDaysInBsMonth } = await import("../utils/nepaliDate.js");
-  const workingDaysInMonth =
-    y && m ? getDaysInBsMonth(y, m) : 30;
+  // Derive working days from the academic calendar (month length minus
+  // Saturdays / holidays) so saved amounts match what the sheet displayed.
+  const { resolveMonthHolidayDates } = await import(
+    "../utils/academicCalendarService.js"
+  );
+  const { workingDays: workingDaysInMonth } = await resolveMonthHolidayDates(
+    schoolId,
+    payload.monthBs
+  );
 
   if (saveStatus === "PAID" && payload.paidDateBs) {
     const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
@@ -3195,6 +3201,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       monthlySalaryNpr: row.monthlySalaryNpr,
       presentDays: row.presentDays,
       absentDays: row.absentDays,
+      leaveDays: row.leaveDays,
       extraDuty: row.extraDuty,
       workingDaysInMonth,
       extraAmountOverrideNpr:
@@ -3243,6 +3250,7 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       otherDeductionsNpr: 0,
       presentDays: row.presentDays,
       absentDays: row.absentDays,
+      leaveDays: row.leaveDays ?? 0,
       extraDuty: row.extraDuty,
       absentDeductionNpr: money.absentDeductionNpr,
       extraAmountNpr: money.extraAmountNpr,

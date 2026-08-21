@@ -4,12 +4,13 @@ import { CollegeStaff } from "../models/CollegeStaff.js";
 import { EmployeeAttendance } from "../models/EmployeeAttendance.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
 import { Teacher } from "../models/Teacher.js";
-import { getDaysInBsMonth } from "./nepaliDate.js";
+
 
 export type SalarySheetCalcInput = {
   monthlySalaryNpr: number;
   presentDays: number;
   absentDays: number;
+  leaveDays?: number;
   extraDuty: number;
   workingDaysInMonth: number;
   /** When set, use instead of extraDuty * perDay */
@@ -27,15 +28,30 @@ export type SalarySheetCalcResult = {
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
+/** Present + absent + leave should equal working days (unrecorded working days are paid as present). */
+export const paidPresentDays = (
+  workingDaysInMonth: number,
+  absentDays: number,
+  leaveDays: number
+): number => {
+  const days = Math.max(1, Number(workingDaysInMonth) || 30);
+  const deducted = Math.max(0, Number(absentDays) || 0) + Math.max(0, Number(leaveDays) || 0);
+  return round2(Math.max(0, days - Math.min(deducted, days)));
+};
+
+export const deductedAttendanceDays = (absentDays: number, leaveDays: number): number =>
+  Math.max(0, Number(absentDays) || 0) + Math.max(0, Number(leaveDays) || 0);
+
 export const calculateSalarySheetLine = (
   input: SalarySheetCalcInput
 ): SalarySheetCalcResult => {
   const days = Math.max(1, Number(input.workingDaysInMonth) || 30);
   const monthly = Math.max(0, Number(input.monthlySalaryNpr) || 0);
-  const absent = Math.max(0, Number(input.absentDays) || 0);
+  const leave = Math.max(0, Number(input.leaveDays) || 0);
+  const deducted = Math.min(deductedAttendanceDays(input.absentDays, leave), days);
   const extraDuty = Math.max(0, Number(input.extraDuty) || 0);
   const perDay = monthly / days;
-  const absentDeductionNpr = round2(perDay * absent);
+  const absentDeductionNpr = round2(perDay * deducted);
   const extraAmountNpr =
     input.extraAmountOverrideNpr !== undefined && input.extraAmountOverrideNpr !== null
       ? round2(Math.max(0, Number(input.extraAmountOverrideNpr) || 0))
@@ -58,22 +74,28 @@ export const calculateSalarySheetLine = (
 type AttendanceBucket = {
   presentDays: number;
   absentDays: number;
+  leaveDays: number;
   daysRecorded: number;
 };
 
 const emptyBucket = (): AttendanceBucket => ({
   presentDays: 0,
   absentDays: 0,
+  leaveDays: 0,
   daysRecorded: 0
 });
 
-/** PRESENT-like statuses count as present; ABSENT/LEAVE as absent. */
+/**
+ * Map one register mark. Holiday-dated sheets are skipped by the caller, so a
+ * HOLIDAY status on a remaining (working) day is paid as present.
+ */
 const applyStatus = (bucket: AttendanceBucket, status: string): void => {
   bucket.daysRecorded += 1;
   switch (status) {
     case "PRESENT":
     case "LATE":
     case "OFFICIAL_DUTY":
+    case "HOLIDAY":
       bucket.presentDays += 1;
       break;
     case "HALF_DAY":
@@ -81,11 +103,10 @@ const applyStatus = (bucket: AttendanceBucket, status: string): void => {
       bucket.absentDays += 0.5;
       break;
     case "ABSENT":
-    case "LEAVE":
       bucket.absentDays += 1;
       break;
-    case "HOLIDAY":
-      // neither present nor absent for payroll deduction
+    case "LEAVE":
+      bucket.leaveDays += 1;
       break;
     default:
       break;
@@ -99,13 +120,22 @@ export const aggregateEmployeeAttendanceForMonth = async (
   byTeacherId: Map<string, AttendanceBucket>;
   byStaffId: Map<string, AttendanceBucket>;
   coverageDays: number;
+  /** Distinct TEACHER sheet dates that actually carry entries. */
+  teacherCoverageDays: number;
+  /** Distinct STAFF sheet dates that actually carry entries. */
+  staffCoverageDays: number;
+  /** Every day of the BS month, holidays included. */
+  calendarDaysInMonth: number;
+  saturdayDaysInMonth: number;
+  otherHolidayDaysInMonth: number;
+  /** Saturdays + calendar holidays + legacy settings holidays. */
+  holidayDaysInMonth: number;
+  /** calendarDays - holidays. The payroll per-day divisor. */
   workingDaysInMonth: number;
 }> => {
-  const [yearStr, monthStr] = monthBs.split("-");
-  const year = Number(yearStr);
-  const month = Number(monthStr);
-  const workingDaysInMonth =
-    year && month ? getDaysInBsMonth(year, month) : 30;
+  const { resolveMonthHolidayDates } = await import("./academicCalendarService.js");
+  const { calendarDays, holidayDates, saturdayDates, otherHolidayDates, workingDays } =
+    await resolveMonthHolidayDates(schoolId, monthBs);
 
   const sheets = await EmployeeAttendance.find({
     schoolId,
@@ -116,11 +146,23 @@ export const aggregateEmployeeAttendanceForMonth = async (
     .lean();
 
   const dateSet = new Set<string>();
+  const teacherDateSet = new Set<string>();
+  const staffDateSet = new Set<string>();
   const byTeacherId = new Map<string, AttendanceBucket>();
   const byStaffId = new Map<string, AttendanceBucket>();
 
   for (const sheet of sheets) {
+    // An empty day sheet is not attendance coverage — counting it would inflate
+    // the expected-days baseline and hide genuinely missing employees.
+    if ((sheet.entries?.length ?? 0) === 0) continue;
+    // A holiday is nobody's working day. Registers do get opened on Saturdays,
+    // sometimes marking people ABSENT or LEAVE — deducting pay for a public
+    // holiday. Skip those sheets entirely so they can neither deduct salary nor
+    // count towards attendance coverage.
+    if (holidayDates.has(sheet.dateBs)) continue;
     dateSet.add(sheet.dateBs);
+    if (sheet.category === "TEACHER") teacherDateSet.add(sheet.dateBs);
+    if (sheet.category === "STAFF") staffDateSet.add(sheet.dateBs);
     for (const entry of sheet.entries ?? []) {
       const status = String(entry.status || "");
       if (entry.teacherId) {
@@ -142,7 +184,13 @@ export const aggregateEmployeeAttendanceForMonth = async (
     byTeacherId,
     byStaffId,
     coverageDays: dateSet.size,
-    workingDaysInMonth
+    teacherCoverageDays: teacherDateSet.size,
+    staffCoverageDays: staffDateSet.size,
+    calendarDaysInMonth: calendarDays,
+    saturdayDaysInMonth: saturdayDates.size,
+    otherHolidayDaysInMonth: otherHolidayDates.size,
+    holidayDaysInMonth: holidayDates.size,
+    workingDaysInMonth: workingDays
   };
 };
 
@@ -219,12 +267,16 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     monthlySalaryNpr: number;
     presentDays: number;
     absentDays: number;
+    leaveDays: number;
     extraDuty: number;
     remarks: string;
     attendanceIncomplete: boolean;
     attendanceManualOverride: boolean;
     valuesManualOverride: boolean;
     attendanceDaysRecorded: number;
+    unrecordedDays: number;
+    /** Day sheets that exist this month for this employee's category. */
+    attendanceExpectedDays: number;
     salaryPaymentId?: string;
     status?: string;
     extraAmountOverrideNpr?: number;
@@ -234,6 +286,61 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     savedSalaryAmountNpr?: number;
     savedTax1PercentNpr?: number;
     savedNetSalaryNpr?: number;
+  };
+
+  const workingDaysInMonth = attendance.workingDaysInMonth;
+
+  const settleDays = (
+    att: AttendanceBucket | undefined,
+    saved:
+      | {
+          presentDays?: number;
+          absentDays?: number;
+          leaveDays?: number;
+          attendanceManualOverride?: boolean;
+        }
+      | undefined
+  ) => {
+    const daysRecorded = att?.daysRecorded ?? 0;
+    const noAttendance = daysRecorded === 0;
+    const manual = Boolean(saved?.attendanceManualOverride);
+    const savedPresent = Number(saved?.presentDays ?? 0);
+    const savedAbsent = Number(saved?.absentDays ?? 0);
+    const savedLeave = Number(saved?.leaveDays ?? 0);
+    const hasSavedDays = savedPresent > 0 || savedAbsent > 0 || savedLeave > 0;
+    if (manual || (noAttendance && hasSavedDays)) {
+      return {
+        presentDays: savedPresent,
+        absentDays: savedAbsent,
+        leaveDays: savedLeave,
+        unrecordedDays: Math.max(0, workingDaysInMonth - daysRecorded),
+        daysRecorded,
+        noAttendance,
+        manual
+      };
+    }
+    if (noAttendance) {
+      return {
+        presentDays: paidPresentDays(workingDaysInMonth, 0, 0),
+        absentDays: 0,
+        leaveDays: 0,
+        unrecordedDays: workingDaysInMonth,
+        daysRecorded: 0,
+        noAttendance: true,
+        manual: false
+      };
+    }
+    const absentDays = Number(att?.absentDays ?? 0);
+    const leaveDays = Number(att?.leaveDays ?? 0);
+    return {
+      presentDays: paidPresentDays(workingDaysInMonth, absentDays, leaveDays),
+      absentDays,
+      leaveDays,
+      unrecordedDays: Math.max(0, workingDaysInMonth - daysRecorded),
+      daysRecorded,
+      noAttendance: false,
+      manual: false
+    };
   };
 
   const drafts: DraftRow[] = [];
@@ -272,8 +379,14 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         continue;
       }
       const att = attendance.byTeacherId.get(id);
-      const incomplete = !att || att.daysRecorded === 0;
-      const manual = Boolean(saved?.attendanceManualOverride);
+      const settled = settleDays(att, saved);
+      const expectedDays = attendance.teacherCoverageDays;
+      /**
+       * Partial coverage still uses the real attendance figures, but must be
+       * flagged: unrecorded days are silently paid as present.
+       */
+      const incomplete =
+        settled.noAttendance || settled.daysRecorded < expectedDays;
       const valuesManual = Boolean(
         (saved as { valuesManualOverride?: boolean } | undefined)
           ?.valuesManualOverride
@@ -285,22 +398,17 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         department: "Teaching",
         designation,
         monthlySalaryNpr: Number(saved?.basicSalaryNpr ?? t.basicSalaryNpr ?? 0),
-        presentDays: manual
-          ? Number(saved?.presentDays ?? 0)
-          : incomplete
-            ? Number(saved?.presentDays ?? 0)
-            : Number(att?.presentDays ?? 0),
-        absentDays: manual
-          ? Number(saved?.absentDays ?? 0)
-          : incomplete
-            ? Number(saved?.absentDays ?? 0)
-            : Number(att?.absentDays ?? 0),
+        presentDays: settled.presentDays,
+        absentDays: settled.absentDays,
+        leaveDays: settled.leaveDays,
         extraDuty: Number(saved?.extraDuty ?? 0),
         remarks: String(saved?.notes ?? ""),
-        attendanceIncomplete: incomplete && !manual,
-        attendanceManualOverride: manual,
+        attendanceIncomplete: incomplete && !settled.manual,
+        attendanceManualOverride: settled.manual,
         valuesManualOverride: valuesManual,
-        attendanceDaysRecorded: att?.daysRecorded ?? 0,
+        attendanceDaysRecorded: settled.daysRecorded,
+        unrecordedDays: settled.unrecordedDays,
+        attendanceExpectedDays: expectedDays,
         salaryPaymentId: saved ? String(saved._id) : undefined,
         status: saved?.status,
         extraAmountOverrideNpr:
@@ -353,8 +461,14 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         continue;
       }
       const att = attendance.byStaffId.get(id);
-      const incomplete = !att || att.daysRecorded === 0;
-      const manual = Boolean(saved?.attendanceManualOverride);
+      const settled = settleDays(att, saved);
+      const expectedDays = attendance.staffCoverageDays;
+      /**
+       * Partial coverage still uses the real attendance figures, but must be
+       * flagged: unrecorded days are silently paid as present.
+       */
+      const incomplete =
+        settled.noAttendance || settled.daysRecorded < expectedDays;
       const valuesManual = Boolean(
         (saved as { valuesManualOverride?: boolean } | undefined)
           ?.valuesManualOverride
@@ -366,22 +480,17 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         department,
         designation,
         monthlySalaryNpr: Number(saved?.basicSalaryNpr ?? s.basicSalaryNpr ?? 0),
-        presentDays: manual
-          ? Number(saved?.presentDays ?? 0)
-          : incomplete
-            ? Number(saved?.presentDays ?? 0)
-            : Number(att?.presentDays ?? 0),
-        absentDays: manual
-          ? Number(saved?.absentDays ?? 0)
-          : incomplete
-            ? Number(saved?.absentDays ?? 0)
-            : Number(att?.absentDays ?? 0),
+        presentDays: settled.presentDays,
+        absentDays: settled.absentDays,
+        leaveDays: settled.leaveDays,
         extraDuty: Number(saved?.extraDuty ?? 0),
         remarks: String(saved?.notes ?? ""),
-        attendanceIncomplete: incomplete && !manual,
-        attendanceManualOverride: manual,
+        attendanceIncomplete: incomplete && !settled.manual,
+        attendanceManualOverride: settled.manual,
         valuesManualOverride: valuesManual,
-        attendanceDaysRecorded: att?.daysRecorded ?? 0,
+        attendanceDaysRecorded: settled.daysRecorded,
+        unrecordedDays: settled.unrecordedDays,
+        attendanceExpectedDays: expectedDays,
         salaryPaymentId: saved ? String(saved._id) : undefined,
         status: saved?.status,
         extraAmountOverrideNpr:
@@ -442,12 +551,15 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
         presentDays: Number(s.presentDays ?? 0),
         absentDays: Number(s.absentDays ?? 0),
+        leaveDays: Number((s as { leaveDays?: number }).leaveDays ?? 0),
         extraDuty: Number(s.extraDuty ?? 0),
         remarks: String(s.notes ?? ""),
         attendanceIncomplete: false,
         attendanceManualOverride: manual,
         valuesManualOverride: valuesManual,
         attendanceDaysRecorded: 0,
+        unrecordedDays: 0,
+        attendanceExpectedDays: 0,
         salaryPaymentId: String(s._id),
         status: s.status,
         extraAmountOverrideNpr: undefined,
@@ -484,12 +596,15 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
         presentDays: Number(s.presentDays ?? 0),
         absentDays: Number(s.absentDays ?? 0),
+        leaveDays: Number((s as { leaveDays?: number }).leaveDays ?? 0),
         extraDuty: Number(s.extraDuty ?? 0),
         remarks: String(s.notes ?? ""),
         attendanceIncomplete: false,
         attendanceManualOverride: manual,
         valuesManualOverride: true,
         attendanceDaysRecorded: 0,
+        unrecordedDays: 0,
+        attendanceExpectedDays: 0,
         salaryPaymentId: String(s._id),
         status: s.status,
         extraAmountOverrideNpr: undefined,
@@ -505,12 +620,12 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
 
   drafts.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 
-  const workingDaysInMonth = attendance.workingDaysInMonth;
   const rows = drafts.map((d, index) => {
     const calc = calculateSalarySheetLine({
       monthlySalaryNpr: d.monthlySalaryNpr,
       presentDays: d.presentDays,
       absentDays: d.absentDays,
+      leaveDays: d.leaveDays,
       extraDuty: d.extraDuty,
       workingDaysInMonth,
       extraAmountOverrideNpr: d.extraAmountOverrideNpr
@@ -527,6 +642,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       monthlySalaryNpr: d.monthlySalaryNpr,
       presentDays: d.presentDays,
       absentDays: d.absentDays,
+      leaveDays: d.leaveDays,
       extraDuty: d.extraDuty,
       absentDeductionNpr: useManualMoney
         ? Number(d.savedAbsentDeductionNpr ?? 0)
@@ -548,6 +664,8 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       attendanceManualOverride: d.attendanceManualOverride,
       valuesManualOverride: useManualMoney,
       attendanceDaysRecorded: d.attendanceDaysRecorded,
+      attendanceExpectedDays: d.attendanceExpectedDays,
+      unrecordedDays: d.unrecordedDays,
       workingDaysInMonth,
       salaryPaymentId: d.salaryPaymentId,
       status: d.status as
@@ -574,17 +692,35 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
 
   const anyIncomplete = rows.some((r) => r.attendanceIncomplete);
   const coverageDays = attendance.coverageDays;
+  const teacherCoverageDays = attendance.teacherCoverageDays;
+  const staffCoverageDays = attendance.staffCoverageDays;
+  const calendarDaysInMonth = attendance.calendarDaysInMonth;
+  const saturdayDaysInMonth = attendance.saturdayDaysInMonth;
+  const otherHolidayDaysInMonth = attendance.otherHolidayDaysInMonth;
+  const holidayDaysInMonth = attendance.holidayDaysInMonth;
+  const incompleteCount = rows.filter((r) => r.attendanceIncomplete).length;
+
   const attendanceWarning =
     coverageDays === 0
-      ? `No staff/teacher attendance records found for ${monthBs}. Present/absent days are empty — authorized users may enter them manually.`
+      ? `No staff/teacher attendance records found for ${monthBs}. Every working day is paid as present — authorized users may enter absences and leaves manually.`
       : anyIncomplete
-        ? `Attendance is incomplete for some employees in ${monthBs} (${coverageDays} day(s) recorded). Missing rows show a warning; authorized users can correct present/absent days.`
+        ? `Attendance is incomplete for ${incompleteCount} of ${rows.length} employee(s) in ${monthBs}. ` +
+          `${monthBs} has ${calendarDaysInMonth} calendar days − ${saturdayDaysInMonth} Saturday(s) − ${otherHolidayDaysInMonth} other holiday(s) = ${workingDaysInMonth} working days; ` +
+          `registers were taken on ${teacherCoverageDays} teacher day(s) and ${staffCoverageDays} staff day(s). ` +
+          `Leave and absence deduct per working day. Saturdays and calendar holidays are excluded from working days. ` +
+          `Working days with no attendance record are paid as present — review the flagged rows before submitting.`
         : undefined;
 
   return {
     monthBs,
     workingDaysInMonth,
+    calendarDaysInMonth,
+    saturdayDaysInMonth,
+    otherHolidayDaysInMonth,
+    holidayDaysInMonth,
     attendanceCoverageDays: coverageDays,
+    attendanceCoverageDaysTeacher: teacherCoverageDays,
+    attendanceCoverageDaysStaff: staffCoverageDays,
     attendanceIncomplete: anyIncomplete || coverageDays === 0,
     attendanceWarning,
     rows,
