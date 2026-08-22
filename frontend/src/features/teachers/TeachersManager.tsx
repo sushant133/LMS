@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Button } from "components/ui/button";
 import { Badge } from "components/ui/badge";
+import { StickyTableScroll } from "components/ui/StickyTableScroll";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { CollegeLogo } from "components/shared/CollegeLogo";
 import { EmptyState } from "components/shared/EmptyState";
@@ -34,7 +35,7 @@ import {
 } from "lib/printBranding";
 import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
-import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
+import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
@@ -283,6 +284,40 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     }
   };
 
+  const tableMinWidthClass = canManage ? "min-w-[1760px]" : "min-w-[1280px]";
+  const tableClassName = cn("w-full table-fixed", tableMinWidthClass);
+  const thClass = "bg-slate-50 whitespace-nowrap";
+  const colGroup = canManage ? (
+    <colgroup>
+      <col className="w-[3.5%]" />
+      <col className="w-[13%]" />
+      <col className="w-[9%]" />
+      <col className="w-[8%]" />
+      <col className="w-[9%]" />
+      <col className="w-[6%]" />
+      <col className="w-[6%]" />
+      <col className="w-[10%]" />
+      <col className="w-[6%]" />
+      <col className="w-[8%]" />
+      <col className="w-[7%]" />
+      <col className="w-[14.5%]" />
+    </colgroup>
+  ) : (
+    <colgroup>
+      <col className="w-[4%]" />
+      <col className="w-[16%]" />
+      <col className="w-[11%]" />
+      <col className="w-[10%]" />
+      <col className="w-[11%]" />
+      <col className="w-[8%]" />
+      <col className="w-[8%]" />
+      <col className="w-[12%]" />
+      <col className="w-[8%]" />
+      <col className="w-[7%]" />
+      <col className="w-[5%]" />
+    </colgroup>
+  );
+
   const content = (
     <>
       {!embedded ? (
@@ -376,7 +411,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
         </div>
       ) : null}
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
             <CardTitle>Teachers</CardTitle>
@@ -394,32 +429,44 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
             {printing ? "Preparing…" : "Print list"}
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-w-0">
           {teachers.length === 0 ? (
             <EmptyState
               title="No teachers yet"
               description="Create teacher profiles (HR only), then assign subjects under Academics → Subject Assignment."
             />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHead>
-                  <tr>
-                    <Th className="w-14 text-center">S.N.</Th>
-                    <Th>Name</Th>
-                    <Th>Phone</Th>
-                    <Th>Designation</Th>
-                    <Th>Qualification</Th>
-                    <Th>Code</Th>
-                    <Th>Status</Th>
-                    <Th>Teaching load</Th>
-                    <Th>Migration</Th>
-                    <Th>Pay type</Th>
-                    <Th>Salary / Rate</Th>
-                    <Th />
-                  </tr>
-                </TableHead>
-                <TableBody>
+            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200">
+              <StickyTableScroll
+                maxHeightClassName="max-h-[min(70vh,720px)]"
+                showHeaderScrollbar
+                header={
+                  <Table className={tableClassName}>
+                    {colGroup}
+                    <TableHead>
+                      <tr>
+                        <Th className={cn(thClass, "text-center")}>S.N.</Th>
+                        <Th className={thClass}>Name</Th>
+                        <Th className={thClass}>Phone</Th>
+                        <Th className={thClass}>Designation</Th>
+                        <Th className={thClass}>Qualification</Th>
+                        <Th className={thClass}>Code</Th>
+                        <Th className={thClass}>Status</Th>
+                        <Th className={thClass}>Teaching load</Th>
+                        <Th className={thClass}>Migration</Th>
+                        <Th className={thClass}>Pay type</Th>
+                        <Th className={thClass}>Salary / Rate</Th>
+                        {canManage ? (
+                          <Th className={cn(thClass, "text-right")}>Actions</Th>
+                        ) : null}
+                      </tr>
+                    </TableHead>
+                  </Table>
+                }
+                body={
+                  <Table className={tableClassName}>
+                    {colGroup}
+                    <TableBody>
                   {teachers.map((teacher, index) => {
                     const migrationStatus =
                       teacher.assignmentMigrationStatus ?? "PENDING";
@@ -430,7 +477,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                       teacher.status !== "INACTIVE" &&
                       teacher.user?.isActive !== false;
                     return (
-                    <tr key={teacher._id}>
+                    <tr key={teacher._id} className="align-top">
                       <Td className="text-center tabular-nums text-slate-500">
                         {index + 1}
                       </Td>
@@ -490,7 +537,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                       </Td>
                       <Td>{teacherPaySummary(teacher)}</Td>
                       {canManage ? (
-                        <Td className="text-right">
+                        <Td className="text-right align-top">
                           <div className="flex flex-wrap justify-end gap-2">
                             <Button size="sm" variant="outline" asChild>
                               <Link to={`/teachers/${teacher._id}/profile`}>
@@ -588,8 +635,10 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     </tr>
                     );
                   })}
-                </TableBody>
-              </Table>
+                    </TableBody>
+                  </Table>
+                }
+              />
             </div>
           )}
         </CardContent>
