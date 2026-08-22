@@ -8,8 +8,15 @@ import type {
   SalarySheetMonthSummary,
   SalarySheetResponse,
   SalarySheetRow,
+  TeacherPaymentType,
 } from "@phit-erp/shared";
-import { formatNrsAmountInWords, HOLIDAY_EVENT_TYPES } from "@phit-erp/shared";
+import {
+  calculateSalarySheetLine,
+  formatNrsAmountInWords,
+  HOLIDAY_EVENT_TYPES,
+  normalizeTeacherPaymentType,
+  sumTeacherTenderAmountNpr,
+} from "@phit-erp/shared";
 import { getDaysInBsMonth } from "@munatech/nepali-datepicker";
 import { isSaturdayBs } from "features/academic-calendar/academicCalendarUtils";
 import { api, unwrap } from "lib/api";
@@ -136,28 +143,25 @@ const calcLine = (
   leaveDays: number,
   extraDuty: number,
   workingDays: number,
-) => {
-  const days = Math.max(1, workingDays);
-  const deducted = Math.min(
-    Math.max(0, absentDays) + Math.max(0, leaveDays),
-    days,
-  );
-  const perDay = Math.max(0, monthly) / days;
-  const absentDeductionNpr = round2(perDay * deducted);
-  const extraAmountNpr = round2(perDay * Math.max(0, extraDuty));
-  const salaryAmountNpr = round2(
-    Math.max(0, monthly - absentDeductionNpr + extraAmountNpr),
-  );
-  const tax1PercentNpr = round2(salaryAmountNpr * 0.01);
-  const netSalaryNpr = round2(Math.max(0, salaryAmountNpr - tax1PercentNpr));
-  return {
-    absentDeductionNpr,
-    extraAmountNpr,
-    salaryAmountNpr,
-    tax1PercentNpr,
-    netSalaryNpr,
-  };
-};
+  extras?: {
+    paymentType?: TeacherPaymentType | string;
+    periodRateNpr?: number;
+    periodsAttended?: number;
+    tenderThisMonthNpr?: number;
+  },
+) =>
+  calculateSalarySheetLine({
+    paymentType: extras?.paymentType,
+    monthlySalaryNpr: monthly,
+    presentDays: 0,
+    absentDays,
+    leaveDays,
+    extraDuty,
+    workingDaysInMonth: workingDays,
+    periodRateNpr: extras?.periodRateNpr,
+    periodsAttended: extras?.periodsAttended,
+    tenderThisMonthNpr: extras?.tenderThisMonthNpr,
+  });
 
 type AttendanceBucket = {
   present: number;
@@ -201,6 +205,9 @@ type SalaryEmployeesResponse = {
   teachers: Array<{
     _id: string;
     basicSalaryNpr?: number;
+    paymentType?: TeacherPaymentType | string;
+    periodRateNpr?: number;
+    tenders?: Array<{ tenderAmountNpr?: number }>;
     teacherCode?: string;
     designation?: string;
     user?: { fullName?: string; designation?: string };
@@ -389,16 +396,40 @@ export const fetchSalarySheetClientFallback = async (
     const expectedDays = teacherDateSet.size;
     const incomplete =
       settled.noAttendance || settled.daysRecorded < expectedDays;
+    const paymentType = normalizeTeacherPaymentType(
+      saved?.paymentType ?? t.paymentType,
+    );
+    const periodRateNpr = Number(
+      saved?.periodRateNpr ?? t.periodRateNpr ?? 0,
+    );
+    const tenderAmountNpr = Number(
+      saved?.tenderAmountNpr ?? sumTeacherTenderAmountNpr(t.tenders),
+    );
     const monthly = Number(
-      saved?.basicSalaryNpr ?? t.basicSalaryNpr ?? 0,
+      saved?.basicSalaryNpr ??
+        (paymentType === "PERIOD"
+          ? periodRateNpr
+          : paymentType === "TENDER"
+            ? tenderAmountNpr
+            : t.basicSalaryNpr ?? 0),
     );
     const extraDuty = Number(saved?.extraDuty ?? 0);
+    const periodsAttended = Number(saved?.periodsAttended ?? 0);
+    const syllabusCompletedPercent = Number(
+      saved?.syllabusCompletedPercent ?? 0,
+    );
     const calc = calcLine(
       monthly,
       settled.absentDays,
       settled.leaveDays,
       extraDuty,
       workingDaysInMonth,
+      {
+        paymentType,
+        periodRateNpr,
+        periodsAttended,
+        tenderThisMonthNpr: Number(saved?.tenderThisMonthNpr ?? 0),
+      },
     );
     drafts.push({
       employeeType: "TEACHER",
@@ -407,6 +438,13 @@ export const fetchSalarySheetClientFallback = async (
       department: "Teaching",
       designation: t.user?.designation || t.designation || "",
       monthlySalaryNpr: monthly,
+      paymentType,
+      periodRateNpr,
+      periodsAttended,
+      tenderAmountNpr,
+      syllabusCompletedPercent,
+      tenderAlreadyPaidNpr: Number(saved?.tenderAlreadyPaidNpr ?? 0),
+      tenderThisMonthNpr: Number(saved?.tenderThisMonthNpr ?? 0),
       presentDays: settled.presentDays,
       absentDays: settled.absentDays,
       leaveDays: settled.leaveDays,
@@ -809,6 +847,14 @@ type SaveRow = {
   leaveDays?: number;
   extraDuty: number;
   extraAmountNpr?: number;
+  paymentType?: TeacherPaymentType;
+  periodRateNpr?: number;
+  periodsAttended?: number;
+  tenderAmountNpr?: number;
+  syllabusCompletedPercent?: number;
+  tenderAlreadyPaidNpr?: number;
+  tenderThisMonthNpr?: number;
+  payBreakdown?: string;
   absentDeductionNpr?: number;
   salaryAmountNpr?: number;
   tax1PercentNpr?: number;
@@ -872,6 +918,14 @@ export const saveSalarySheetClient = async (payload: {
       leaveDays: row.leaveDays ?? 0,
       extraDuty: row.extraDuty,
       extraAmountNpr: row.extraAmountNpr ?? 0,
+      paymentType: row.paymentType,
+      periodRateNpr: row.periodRateNpr,
+      periodsAttended: row.periodsAttended,
+      tenderAmountNpr: row.tenderAmountNpr,
+      syllabusCompletedPercent: row.syllabusCompletedPercent,
+      tenderAlreadyPaidNpr: row.tenderAlreadyPaidNpr,
+      tenderThisMonthNpr: row.tenderThisMonthNpr,
+      payBreakdown: row.payBreakdown,
       absentDeductionNpr: row.absentDeductionNpr ?? 0,
       salaryAmountNpr: row.salaryAmountNpr ?? 0,
       taxNpr: 0, // may recompute below

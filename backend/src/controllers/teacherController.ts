@@ -172,6 +172,9 @@ const buildTeacherAssignmentFields = (
     joinedDateBs: string;
     address: (typeof teacherSchema)["_output"]["address"];
     basicSalaryNpr: number;
+    paymentType?: (typeof teacherSchema)["_output"]["paymentType"];
+    periodRateNpr?: number;
+    tenders?: (typeof teacherSchema)["_output"]["tenders"];
   }
 ) => ({
   teacherCode: payload.teacherCode,
@@ -180,6 +183,9 @@ const buildTeacherAssignmentFields = (
   address: payload.address,
   subjects: payload.subjects,
   basicSalaryNpr: payload.basicSalaryNpr,
+  paymentType: payload.paymentType ?? "MONTHLY",
+  periodRateNpr: payload.periodRateNpr ?? 0,
+  tenders: payload.tenders ?? [],
   ...(isCollege(institutionType)
     ? {
         assignedBatchIds: payload.assignedBatchIds,
@@ -392,6 +398,17 @@ export const updateTeacher = asyncHandler(async (req: Request, res: Response) =>
   teacher.joinedDateBs = payload.joinedDateBs;
   teacher.address = payload.address;
   teacher.basicSalaryNpr = payload.basicSalaryNpr;
+  teacher.paymentType = payload.paymentType ?? "MONTHLY";
+  teacher.periodRateNpr = payload.periodRateNpr ?? 0;
+  teacher.set(
+    "tenders",
+    (payload.tenders ?? []).map((tender) => ({
+      subjectId: tender.subjectId,
+      academicYearBs: tender.academicYearBs,
+      tenderAmountNpr: tender.tenderAmountNpr,
+      notes: tender.notes ?? ""
+    }))
+  );
 
   if (payload.photoUrl !== undefined) {
     const previousPhoto = teacher.photoUrl;

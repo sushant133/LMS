@@ -42,7 +42,10 @@ export interface TeacherMasterRow {
   qualification: string;
   joinedDateBs: string;
   subjects: string;
+  paymentType?: string;
   basicSalaryNpr: number;
+  periodRateNpr?: number;
+  tenderAmountNpr?: number;
 }
 
 export interface InfrastructureRow {
@@ -127,7 +130,16 @@ export async function generateTeacherMasterExport(req: Request): Promise<Teacher
     qualification: t.qualification,
     joinedDateBs: t.joinedDateBs,
     subjects: (t.subjects || []).map((s: any) => s.name).join("; ") || "",
-    basicSalaryNpr: t.basicSalaryNpr || 0
+    paymentType: t.paymentType || "MONTHLY",
+    basicSalaryNpr: t.basicSalaryNpr || 0,
+    periodRateNpr: t.periodRateNpr || 0,
+    tenderAmountNpr: Array.isArray(t.tenders)
+      ? t.tenders.reduce(
+          (sum: number, row: { tenderAmountNpr?: number }) =>
+            sum + (Number(row.tenderAmountNpr) || 0),
+          0
+        )
+      : 0
   }));
 }
 

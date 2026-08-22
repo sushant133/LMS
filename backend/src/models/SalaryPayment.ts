@@ -8,8 +8,21 @@ const salaryPaymentSchema = new Schema(
     staffId: { type: Schema.Types.ObjectId, ref: "CollegeStaff" },
     staffName: { type: String },
     monthBs: { type: String, required: true },
-    /** Monthly gross salary (sheet: Monthly Salary) */
+    /** Monthly gross salary (sheet: Monthly Salary). For PERIOD this stores the period rate; for TENDER the contract total. */
     basicSalaryNpr: { type: Number, required: true },
+    paymentType: {
+      type: String,
+      enum: ["MONTHLY", "TENDER", "PERIOD"],
+      default: "MONTHLY"
+    },
+    periodRateNpr: { type: Number, default: 0 },
+    periodsAttended: { type: Number, default: 0 },
+    tenderAmountNpr: { type: Number, default: 0 },
+    syllabusCompletedPercent: { type: Number, default: 0 },
+    tenderAlreadyPaidNpr: { type: Number, default: 0 },
+    tenderThisMonthNpr: { type: Number, default: 0 },
+    payBreakdown: { type: String, default: "" },
+    academicYearBs: { type: String, default: "" },
     allowancesNpr: { type: Number, default: 0 },
     bonusNpr: { type: Number, default: 0 },
     advanceSalaryNpr: { type: Number, default: 0 },

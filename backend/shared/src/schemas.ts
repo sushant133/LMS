@@ -6,6 +6,7 @@ import {
   COLLEGE_STAFF_CATEGORIES,
   DISABILITY_CATEGORIES,
   EMPLOYMENT_TYPES,
+  TEACHER_PAYMENT_TYPES,
   ETHNICITY_CATEGORIES,
   EXAM_ATTENDANCE_STATUSES,
   EXAM_STATUSES,
@@ -337,6 +338,25 @@ export const teacherSchema = z.object({
   assignedBatchIds: z.array(objectIdSchema).default([]),
   assignedYearIds: z.array(objectIdSchema).default([]),
   basicSalaryNpr: moneySchema,
+  /**
+   * How this teacher is paid on the salary sheet.
+   * MONTHLY (default), TENDER (subject contract vs syllabus %), PERIOD (NPR × periods taught).
+   */
+  paymentType: z.enum(TEACHER_PAYMENT_TYPES).default("MONTHLY"),
+  /** NPR per period when paymentType is PERIOD. */
+  periodRateNpr: moneySchema.default(0),
+  /** Subject contracts when paymentType is TENDER. */
+  tenders: z
+    .array(
+      z.object({
+        _id: z.string().optional(),
+        subjectId: objectIdSchema,
+        academicYearBs: academicYearSchema,
+        tenderAmountNpr: moneySchema,
+        notes: z.string().trim().max(500).optional().or(z.literal(""))
+      })
+    )
+    .default([]),
   photoUrl: z.string().optional().or(z.literal("")),
   documents: z.array(hrDocumentSchema).optional()
 });

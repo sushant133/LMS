@@ -2227,11 +2227,21 @@ export const AccountingManager = () => {
                       const teacher = (
                         salaryEmployeesQuery.data?.teachers ?? []
                       ).find((item) => item._id === e.target.value);
+                      const payType = teacher?.paymentType || "MONTHLY";
+                      const contract =
+                        payType === "PERIOD"
+                          ? Number(teacher?.periodRateNpr ?? 0)
+                          : payType === "TENDER"
+                            ? (teacher?.tenders ?? []).reduce(
+                                (sum, row) =>
+                                  sum + (Number(row.tenderAmountNpr) || 0),
+                                0,
+                              )
+                            : Number(teacher?.basicSalaryNpr ?? 0);
                       setSalaryForm((current) => ({
                         ...current,
                         teacherId: e.target.value,
-                        basicSalaryNpr:
-                          teacher?.basicSalaryNpr ?? current.basicSalaryNpr,
+                        basicSalaryNpr: contract || current.basicSalaryNpr,
                       }));
                     }}
                   >
@@ -2240,6 +2250,10 @@ export const AccountingManager = () => {
                       (teacher) => (
                         <option key={teacher._id} value={teacher._id}>
                           {teacher.user.fullName}
+                          {teacher.paymentType &&
+                          teacher.paymentType !== "MONTHLY"
+                            ? ` (${teacher.paymentType === "PERIOD" ? "per period" : "tender"})`
+                            : ""}
                         </option>
                       ),
                     )}

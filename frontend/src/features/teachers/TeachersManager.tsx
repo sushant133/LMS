@@ -2,8 +2,11 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_TEACHER_DESIGNATION,
+  TEACHER_PAYMENT_TYPE_LABELS,
+  sumTeacherTenderAmountNpr,
   type HrDocument,
   type TeacherInput,
+  type TeacherPaymentType,
   type TeacherRecord,
 } from "@phit-erp/shared";
 import { Printer } from "lucide-react";
@@ -109,8 +112,28 @@ const mapTeacherToInput = (teacher: TeacherRecord): TeacherInput => ({
   assignedBatchIds: [],
   assignedYearIds: [],
   basicSalaryNpr: teacher.basicSalaryNpr,
+  paymentType: teacher.paymentType ?? "MONTHLY",
+  periodRateNpr: teacher.periodRateNpr ?? 0,
+  tenders: (teacher.tenders ?? []).map((tender) => ({
+    _id: tender._id,
+    subjectId: String(tender.subjectId || ""),
+    academicYearBs: tender.academicYearBs,
+    tenderAmountNpr: tender.tenderAmountNpr,
+    notes: tender.notes ?? "",
+  })),
   photoUrl: teacher.photoUrl ?? "",
 });
+
+const teacherPaySummary = (teacher: TeacherRecord): string => {
+  const type = (teacher.paymentType ?? "MONTHLY") as TeacherPaymentType;
+  if (type === "PERIOD") {
+    return `${formatCurrencyNpr(teacher.periodRateNpr ?? 0)} / period`;
+  }
+  if (type === "TENDER") {
+    return formatCurrencyNpr(sumTeacherTenderAmountNpr(teacher.tenders));
+  }
+  return formatCurrencyNpr(teacher.basicSalaryNpr);
+};
 
 interface TeachersManagerProps {
   embedded?: boolean;
@@ -367,7 +390,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                     <Th>Status</Th>
                     <Th>Teaching load</Th>
                     <Th>Migration</Th>
-                    <Th>Salary</Th>
+                    <Th>Pay type</Th>
+                    <Th>Salary / Rate</Th>
                     <Th />
                   </tr>
                 </TableHead>
@@ -430,7 +454,17 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                           {migrationStatus}
                         </Badge>
                       </Td>
-                      <Td>{formatCurrencyNpr(teacher.basicSalaryNpr)}</Td>
+                      <Td>
+                        <Badge className="bg-slate-100 text-slate-800">
+                          {
+                            TEACHER_PAYMENT_TYPE_LABELS[
+                              (teacher.paymentType ??
+                                "MONTHLY") as TeacherPaymentType
+                            ]
+                          }
+                        </Badge>
+                      </Td>
+                      <Td>{teacherPaySummary(teacher)}</Td>
                       {canManage ? (
                         <Td className="text-right">
                           <div className="flex flex-wrap justify-end gap-2">
@@ -636,7 +670,12 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                 <th style={printTh}>Status</th>
                 <th style={printTh}>Teaching load</th>
                 {canManage ? (
-                  <th style={{ ...printTh, textAlign: "right" }}>Salary</th>
+                  <>
+                    <th style={printTh}>Pay type</th>
+                    <th style={{ ...printTh, textAlign: "right" }}>
+                      Salary / Rate
+                    </th>
+                  </>
                 ) : null}
               </tr>
             </thead>
@@ -679,9 +718,19 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                       {legacyLoadSummary(teacher, isCollege)}
                     </td>
                     {canManage ? (
-                      <td style={{ ...printTd, textAlign: "right" }}>
-                        {formatCurrencyNpr(teacher.basicSalaryNpr)}
-                      </td>
+                      <>
+                        <td style={printTd}>
+                          {
+                            TEACHER_PAYMENT_TYPE_LABELS[
+                              (teacher.paymentType ??
+                                "MONTHLY") as TeacherPaymentType
+                            ]
+                          }
+                        </td>
+                        <td style={{ ...printTd, textAlign: "right" }}>
+                          {teacherPaySummary(teacher)}
+                        </td>
+                      </>
                     ) : null}
                   </tr>
                 );

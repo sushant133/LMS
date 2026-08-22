@@ -2,10 +2,16 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   HrDocument,
+  SubjectRecord,
   TeacherProfileData,
   TeacherRecord,
 } from "@phit-erp/shared";
-import { DEFAULT_TEACHER_DESIGNATION } from "@phit-erp/shared";
+import {
+  DEFAULT_TEACHER_DESIGNATION,
+  TEACHER_PAYMENT_TYPE_LABELS,
+  sumTeacherTenderAmountNpr,
+  type TeacherPaymentType,
+} from "@phit-erp/shared";
 import {
   FileText,
   GraduationCap,
@@ -74,6 +80,11 @@ export const TeacherProfileView = () => {
   const { teacherId = "" } = useParams();
   const [tab, setTab] = useState<ProfileTab>("overview");
   const [documents, setDocuments] = useState<HrDocument[]>([]);
+
+  const subjectsQuery = useQuery({
+    queryKey: ["academics-subjects"],
+    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects")),
+  });
 
   const profileQuery = useQuery({
     queryKey: ["teacher-profile", teacherId],
@@ -195,9 +206,37 @@ export const TeacherProfileView = () => {
                     { label: "Qualification", value: teacher.qualification },
                     { label: "Joined date (BS)", value: teacher.joinedDateBs },
                     {
-                      label: "Basic salary",
-                      value: formatCurrencyNpr(teacher.basicSalaryNpr),
+                      label: "Pay type",
+                      value:
+                        TEACHER_PAYMENT_TYPE_LABELS[
+                          (teacher.paymentType ??
+                            "MONTHLY") as TeacherPaymentType
+                        ],
                     },
+                    ...(teacher.paymentType === "PERIOD"
+                      ? [
+                          {
+                            label: "Rate per period",
+                            value: formatCurrencyNpr(
+                              teacher.periodRateNpr ?? 0,
+                            ),
+                          },
+                        ]
+                      : teacher.paymentType === "TENDER"
+                        ? [
+                            {
+                              label: "Tender total",
+                              value: formatCurrencyNpr(
+                                sumTeacherTenderAmountNpr(teacher.tenders),
+                              ),
+                            },
+                          ]
+                        : [
+                            {
+                              label: "Monthly salary",
+                              value: formatCurrencyNpr(teacher.basicSalaryNpr),
+                            },
+                          ]),
                     {
                       label: "Account status",
                       value:
@@ -210,6 +249,59 @@ export const TeacherProfileView = () => {
                   ]}
                 />
               </section>
+
+              {teacher.paymentType === "TENDER" ? (
+                <section>
+                  <h3 className="mb-3 text-lg font-semibold">Subject tenders</h3>
+                  {(teacher.tenders ?? []).length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No subject tenders configured. Edit the teacher to add
+                      contracts.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-100">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2">Subject</th>
+                            <th className="px-3 py-2">Academic year</th>
+                            <th className="px-3 py-2 text-right">Amount</th>
+                            <th className="px-3 py-2">Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(teacher.tenders ?? []).map((tender, index) => {
+                            const subject = (subjectsQuery.data ?? []).find(
+                              (row) => row._id === String(tender.subjectId),
+                            );
+                            return (
+                              <tr
+                                key={tender._id || `tender-${index}`}
+                                className="border-t border-slate-100"
+                              >
+                                <td className="px-3 py-2 font-medium">
+                                  {subject
+                                    ? `${subject.name}${subject.code ? ` (${subject.code})` : ""}`
+                                    : String(tender.subjectId)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {tender.academicYearBs}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                  {formatCurrencyNpr(tender.tenderAmountNpr)}
+                                </td>
+                                <td className="px-3 py-2 text-slate-600">
+                                  {tender.notes?.trim() || "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              ) : null}
 
               {permissions?.canViewDocuments ? (
                 <section>

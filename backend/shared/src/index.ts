@@ -6,6 +6,7 @@ export * from "./accounting-schemas.js";
 export * from "./accounting-types.js";
 export * from "./accounting-reports.js";
 export * from "./accounting-constants.js";
+export * from "./salary-sheet.js";
 export * from "./accounting-permissions.js";
 export * from "./accounting-ledger.js";
 export * from "./finance-types.js";

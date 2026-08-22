@@ -4,10 +4,15 @@ import type {
   SalaryPaymentStatus,
   SalarySheetRow,
   SchoolSettingsRecord,
+  TeacherPaymentType,
 } from "@phit-erp/shared";
 import {
+  calculateSalarySheetLine,
+  calculateTenderThisMonthNpr,
   formatNrsAmountInWords,
+  normalizeTeacherPaymentType,
   PAYMENT_METHODS,
+  TEACHER_PAYMENT_TYPE_LABELS,
 } from "@phit-erp/shared";
 import { getTodayBs } from "@munatech/nepali-datepicker";
 import {
@@ -90,6 +95,13 @@ const calcLine = (
     | "extraDuty"
     | "workingDaysInMonth"
     | "extraAmountNpr"
+    | "paymentType"
+    | "periodRateNpr"
+    | "periodsAttended"
+    | "tenderAmountNpr"
+    | "syllabusCompletedPercent"
+    | "tenderAlreadyPaidNpr"
+    | "tenderThisMonthNpr"
   >,
   preferExtraDuty = true,
 ): Pick<
@@ -99,33 +111,36 @@ const calcLine = (
   | "salaryAmountNpr"
   | "tax1PercentNpr"
   | "netSalaryNpr"
+  | "tenderThisMonthNpr"
 > => {
-  const days = Math.max(1, row.workingDaysInMonth || 30);
-  const monthly = Math.max(0, Number(row.monthlySalaryNpr) || 0);
-  const leave = Math.max(0, Number(row.leaveDays) || 0);
-  const deducted = Math.min(
-    Math.max(0, Number(row.absentDays) || 0) + leave,
-    days,
-  );
+  const paymentType = normalizeTeacherPaymentType(row.paymentType);
   const extraDuty = Math.max(0, Number(row.extraDuty) || 0);
-  const perDay = monthly / days;
-  const absentDeductionNpr = round2(perDay * deducted);
-  const extraAmountNpr =
-    preferExtraDuty || extraDuty > 0
-      ? round2(perDay * extraDuty)
-      : round2(Math.max(0, Number(row.extraAmountNpr) || 0));
-  const salaryAmountNpr = round2(
-    Math.max(0, monthly - absentDeductionNpr + extraAmountNpr),
-  );
-  const tax1PercentNpr = round2(salaryAmountNpr * 0.01);
-  const netSalaryNpr = round2(Math.max(0, salaryAmountNpr - tax1PercentNpr));
-  return {
-    absentDeductionNpr,
-    extraAmountNpr,
-    salaryAmountNpr,
-    tax1PercentNpr,
-    netSalaryNpr,
-  };
+  const extraOverride =
+    !preferExtraDuty && extraDuty === 0
+      ? Number(row.extraAmountNpr) || 0
+      : undefined;
+  const tenderThisMonthNpr =
+    paymentType === "TENDER"
+      ? calculateTenderThisMonthNpr(
+          Number(row.tenderAmountNpr ?? row.monthlySalaryNpr ?? 0),
+          Number(row.syllabusCompletedPercent ?? 0),
+          Number(row.tenderAlreadyPaidNpr ?? 0),
+        )
+      : Number(row.tenderThisMonthNpr ?? 0);
+  const calc = calculateSalarySheetLine({
+    paymentType,
+    monthlySalaryNpr: Number(row.monthlySalaryNpr) || 0,
+    presentDays: Number(row.presentDays) || 0,
+    absentDays: Number(row.absentDays) || 0,
+    leaveDays: Number(row.leaveDays) || 0,
+    extraDuty,
+    workingDaysInMonth: row.workingDaysInMonth || 30,
+    extraAmountOverrideNpr: extraOverride,
+    periodRateNpr: Number(row.periodRateNpr ?? row.monthlySalaryNpr) || 0,
+    periodsAttended: Number(row.periodsAttended) || 0,
+    tenderThisMonthNpr,
+  });
+  return { ...calc, tenderThisMonthNpr };
 };
 
 const currentBsMonth = (): string => {
@@ -191,6 +206,8 @@ const emptyEntryForm = () => ({
   employeeType: "TEACHER" as "TEACHER" | "STAFF",
   employeeKey: "",
   monthlySalaryNpr: "0",
+  periodsAttended: "0",
+  syllabusCompletedPercent: "0",
   presentDays: "0",
   absentDays: "0",
   leaveDays: "0",
@@ -198,6 +215,15 @@ const emptyEntryForm = () => ({
   remarks: "",
   attendanceManualOverride: false,
 });
+
+const payTypeOf = (row?: { paymentType?: string } | null): TeacherPaymentType =>
+  normalizeTeacherPaymentType(row?.paymentType);
+
+const rateColumnLabel = (type: TeacherPaymentType): string => {
+  if (type === "PERIOD") return "Rate / period (NPR)";
+  if (type === "TENDER") return "Tender amount (NPR)";
+  return "Monthly salary (NPR)";
+};
 
 const employeeKeyOf = (r: {
   employeeType: string;
@@ -550,6 +576,7 @@ export const SalaryPaymentRecordsPanel = ({
   }, [catalog, rows, entry.employeeKey]);
 
   const entryPreview = useMemo(() => {
+    const src = selectedCatalogRow;
     const monthly = Number(entry.monthlySalaryNpr) || 0;
     const presentDays = Number(entry.presentDays) || 0;
     const absentDays = Number(entry.absentDays) || 0;
@@ -563,8 +590,18 @@ export const SalaryPaymentRecordsPanel = ({
       extraDuty,
       workingDaysInMonth,
       extraAmountNpr: 0,
+      paymentType: src?.paymentType,
+      periodRateNpr: src?.periodRateNpr ?? monthly,
+      periodsAttended: Number(entry.periodsAttended) || src?.periodsAttended || 0,
+      tenderAmountNpr: src?.tenderAmountNpr ?? monthly,
+      syllabusCompletedPercent:
+        Number(entry.syllabusCompletedPercent) ||
+        src?.syllabusCompletedPercent ||
+        0,
+      tenderAlreadyPaidNpr: src?.tenderAlreadyPaidNpr ?? 0,
+      tenderThisMonthNpr: src?.tenderThisMonthNpr ?? 0,
     });
-  }, [entry, workingDaysInMonth]);
+  }, [entry, workingDaysInMonth, selectedCatalogRow]);
 
   const fillEntryFromCatalog = (key: string) => {
     const src =
@@ -578,6 +615,8 @@ export const SalaryPaymentRecordsPanel = ({
       employeeType: src.employeeType,
       employeeKey: key,
       monthlySalaryNpr: String(src.monthlySalaryNpr ?? 0),
+      periodsAttended: String(src.periodsAttended ?? 0),
+      syllabusCompletedPercent: String(src.syllabusCompletedPercent ?? 0),
       presentDays: String(src.presentDays ?? 0),
       absentDays: String(src.absentDays ?? 0),
       leaveDays: String(src.leaveDays ?? 0),
@@ -607,14 +646,25 @@ export const SalaryPaymentRecordsPanel = ({
       return;
     }
     const monthly = Number(entry.monthlySalaryNpr) || 0;
-    if (monthly <= 0) {
-      toast.error("Enter monthly salary");
+    const payType = payTypeOf(src);
+    if (payType !== "TENDER" && monthly <= 0) {
+      toast.error(
+        payType === "PERIOD"
+          ? "Enter the rate per period"
+          : "Enter monthly salary",
+      );
       return;
     }
     const presentDays = Number(entry.presentDays) || 0;
     const absentDays = Number(entry.absentDays) || 0;
     const leaveDays = Number(entry.leaveDays) || 0;
     const extraDuty = Number(entry.extraDuty) || 0;
+    const periodsAttended =
+      Number(entry.periodsAttended) || src.periodsAttended || 0;
+    const syllabusCompletedPercent =
+      Number(entry.syllabusCompletedPercent) ||
+      src.syllabusCompletedPercent ||
+      0;
     const calc = calcLine({
       monthlySalaryNpr: monthly,
       presentDays,
@@ -623,10 +673,21 @@ export const SalaryPaymentRecordsPanel = ({
       extraDuty,
       workingDaysInMonth,
       extraAmountNpr: 0,
+      paymentType: src.paymentType,
+      periodRateNpr: payType === "PERIOD" ? monthly : src.periodRateNpr,
+      periodsAttended,
+      tenderAmountNpr: payType === "TENDER" ? monthly : src.tenderAmountNpr,
+      syllabusCompletedPercent,
+      tenderAlreadyPaidNpr: src.tenderAlreadyPaidNpr,
+      tenderThisMonthNpr: src.tenderThisMonthNpr,
     });
     const nextRow: EditableRow = {
       ...src,
       monthlySalaryNpr: monthly,
+      periodRateNpr: payType === "PERIOD" ? monthly : src.periodRateNpr,
+      periodsAttended,
+      tenderAmountNpr: payType === "TENDER" ? monthly : src.tenderAmountNpr,
+      syllabusCompletedPercent,
       presentDays,
       absentDays,
       leaveDays,
@@ -675,6 +736,8 @@ export const SalaryPaymentRecordsPanel = ({
       employeeType: row.employeeType,
       employeeKey: key,
       monthlySalaryNpr: String(row.monthlySalaryNpr ?? 0),
+      periodsAttended: String(row.periodsAttended ?? 0),
+      syllabusCompletedPercent: String(row.syllabusCompletedPercent ?? 0),
       presentDays: String(row.presentDays ?? 0),
       absentDays: String(row.absentDays ?? 0),
       leaveDays: String(row.leaveDays ?? 0),
@@ -714,7 +777,7 @@ export const SalaryPaymentRecordsPanel = ({
   const patchRow = (
     rowKey: string,
     patch: Partial<EditableRow>,
-    mode: "days" | "rate" | "money" | "meta" = "meta",
+    mode: "days" | "rate" | "money" | "meta" | "units" = "meta",
   ) => {
     if (!canEditSheet) return;
     setRows((prev) =>
@@ -741,7 +804,17 @@ export const SalaryPaymentRecordsPanel = ({
               );
             }
           }
-          if (mode === "days" || mode === "rate") {
+          if (mode === "rate" && next.paymentType === "PERIOD") {
+            next.periodRateNpr = Number(next.monthlySalaryNpr) || 0;
+          }
+          if (mode === "rate" && next.paymentType === "TENDER") {
+            next.tenderAmountNpr = Number(next.monthlySalaryNpr) || 0;
+          }
+          if (mode === "units") {
+            next.attendanceManualOverride = true;
+            next.attendanceIncomplete = false;
+          }
+          if (mode === "days" || mode === "rate" || mode === "units") {
             if (!next.valuesManualOverride) {
               Object.assign(
                 next,
@@ -754,8 +827,22 @@ export const SalaryPaymentRecordsPanel = ({
                   workingDaysInMonth:
                     next.workingDaysInMonth || workingDaysInMonth,
                   extraAmountNpr: next.extraAmountNpr,
+                  paymentType: next.paymentType,
+                  periodRateNpr: next.periodRateNpr,
+                  periodsAttended: next.periodsAttended,
+                  tenderAmountNpr: next.tenderAmountNpr,
+                  syllabusCompletedPercent: next.syllabusCompletedPercent,
+                  tenderAlreadyPaidNpr: next.tenderAlreadyPaidNpr,
+                  tenderThisMonthNpr: next.tenderThisMonthNpr,
                 }),
               );
+              const type = payTypeOf(next);
+              if (type === "PERIOD") {
+                const rate = Number(next.periodRateNpr ?? next.monthlySalaryNpr) || 0;
+                next.payBreakdown = `${Number(next.periodsAttended) || 0} period(s) × Rs ${rate.toLocaleString("en-NP")}`;
+              } else if (type === "TENDER") {
+                next.payBreakdown = `syllabus ${Number(next.syllabusCompletedPercent) || 0}% · already paid Rs ${Number(next.tenderAlreadyPaidNpr || 0).toLocaleString("en-NP")} · this month Rs ${Number(next.tenderThisMonthNpr || 0).toLocaleString("en-NP")}`;
+              }
             }
           } else if (mode === "money") {
             next.valuesManualOverride = true;
@@ -783,6 +870,13 @@ export const SalaryPaymentRecordsPanel = ({
             extraDuty: r.extraDuty,
             workingDaysInMonth: r.workingDaysInMonth || workingDaysInMonth,
             extraAmountNpr: 0,
+            paymentType: r.paymentType,
+            periodRateNpr: r.periodRateNpr,
+            periodsAttended: r.periodsAttended,
+            tenderAmountNpr: r.tenderAmountNpr,
+            syllabusCompletedPercent: r.syllabusCompletedPercent,
+            tenderAlreadyPaidNpr: r.tenderAlreadyPaidNpr,
+            tenderThisMonthNpr: r.tenderThisMonthNpr,
           });
           return {
             ...r,
@@ -912,7 +1006,13 @@ export const SalaryPaymentRecordsPanel = ({
         (r) => `
       <tr>
         <td class="c">${r.sn}</td>
-        <td class="name-cell">${escapeHtml(r.employeeName)}</td>
+        <td class="name-cell">${escapeHtml(r.employeeName)}${
+          r.employeeType === "TEACHER"
+            ? `<div class="pay-meta">${escapeHtml(
+                TEACHER_PAYMENT_TYPE_LABELS[payTypeOf(r)],
+              )}${r.payBreakdown ? ` · ${escapeHtml(r.payBreakdown)}` : ""}</div>`
+            : ""
+        }</td>
         <td class="n">${formatCurrencyNpr(r.monthlySalaryNpr)}</td>
         <td class="c">${r.presentDays}</td>
         <td class="c">${r.absentDays}</td>
@@ -1023,6 +1123,12 @@ export const SalaryPaymentRecordsPanel = ({
       white-space: normal;
       line-height: 1.25;
     }
+    .salary-sheet-pdf .pay-meta {
+      font-weight: 400;
+      font-size: 9px;
+      color: #334155;
+      margin-top: 2px;
+    }
     .salary-sheet-pdf tfoot td {
       font-weight: 700;
       background: #f3f3f3;
@@ -1093,8 +1199,8 @@ export const SalaryPaymentRecordsPanel = ({
     <p class="sheet-title">Salary Sheet of ${escapeHtml(monthLabel)}</p>
     <p class="college-address">
       Month days ${calendarDaysInMonth} − Saturdays ${saturdayDaysInMonth} − other holidays ${otherHolidayDaysInMonth} = ${workingDaysInMonth} working days
-      · per-day salary = monthly ÷ ${workingDaysInMonth}
-      · leave and absence deduct · unrecorded working days paid as present
+      · monthly: per-day = monthly ÷ ${workingDaysInMonth}, leave/absence deduct
+      · tender: paid from syllabus completed · period: rate × periods taught
     </p>
   </div>
   <table class="data">
@@ -1118,7 +1224,7 @@ export const SalaryPaymentRecordsPanel = ({
       <tr>
         <th>S.N.</th>
         <th>Employee Name</th>
-        <th>Monthly Salary</th>
+        <th>Salary / Rate / Contract</th>
         <th>Present Days</th>
         <th>Absent Days</th>
         <th>Leave Days</th>
@@ -1303,6 +1409,17 @@ export const SalaryPaymentRecordsPanel = ({
       ...rows.map((r) => ({
         "S.N.": r.sn,
         "Employee Name": r.employeeName,
+        "Pay type":
+          r.employeeType === "TEACHER"
+            ? TEACHER_PAYMENT_TYPE_LABELS[payTypeOf(r)]
+            : "Monthly salary",
+        "Pay units":
+          payTypeOf(r) === "PERIOD"
+            ? `${r.periodsAttended ?? 0} periods`
+            : payTypeOf(r) === "TENDER"
+              ? `${r.syllabusCompletedPercent ?? 0}% syllabus`
+              : "",
+        "Breakdown": r.payBreakdown || "",
         "Monthly Salary": r.monthlySalaryNpr,
         "Working Days": r.workingDaysInMonth || workingDaysInMonth,
         "Saturdays": saturdayDaysInMonth,
@@ -1323,6 +1440,9 @@ export const SalaryPaymentRecordsPanel = ({
       {
         "S.N.": "",
         "Employee Name": "TOTAL",
+        "Pay type": "",
+        "Pay units": "",
+        "Breakdown": "",
         "Monthly Salary": totals.totalMonthlySalaryNpr,
         "Working Days": "",
         "Saturdays": "",
@@ -1343,6 +1463,9 @@ export const SalaryPaymentRecordsPanel = ({
       {
         "S.N.": "",
         "Employee Name": "Total Net in words",
+        "Pay type": "",
+        "Pay units": "",
+        "Breakdown": "",
         "Monthly Salary": totals.totalNetSalaryInWords,
         "Working Days": "",
         "Saturdays": "",
@@ -1363,6 +1486,9 @@ export const SalaryPaymentRecordsPanel = ({
       ...sign.map((s) => ({
         "S.N.": "",
         "Employee Name": s.position,
+        "Pay type": "",
+        "Pay units": "",
+        "Breakdown": "",
         "Monthly Salary": s.name,
         "Working Days": "",
         "Saturdays": "",
@@ -1412,6 +1538,14 @@ export const SalaryPaymentRecordsPanel = ({
         staffId: r.staffId,
         employeeName: r.employeeName,
         monthlySalaryNpr: r.monthlySalaryNpr,
+        paymentType: r.paymentType,
+        periodRateNpr: r.periodRateNpr,
+        periodsAttended: r.periodsAttended,
+        tenderAmountNpr: r.tenderAmountNpr,
+        syllabusCompletedPercent: r.syllabusCompletedPercent,
+        tenderAlreadyPaidNpr: r.tenderAlreadyPaidNpr,
+        tenderThisMonthNpr: r.tenderThisMonthNpr,
+        payBreakdown: r.payBreakdown,
         presentDays: r.presentDays,
         absentDays: r.absentDays,
         leaveDays: r.leaveDays ?? 0,
@@ -2008,9 +2142,11 @@ export const SalaryPaymentRecordsPanel = ({
               <strong className="text-slate-900">{monthLabel}</strong>
             </span>
             <span className="basis-full text-[11px] text-slate-500">
-              Present + Absent + Leave = Working days. Leave and absence deduct
-              (monthly ÷ working days × days). Saturdays and calendar holidays are
-              not working days. Unrecorded working days are paid as present.
+              Monthly teachers: Present + Absent + Leave = working days; leave
+              and absence deduct (monthly ÷ working days × days). Tender
+              teachers: paid from syllabus completed this year minus already
+              paid. Period teachers: rate × periods taught (log book). Saturdays
+              and holidays are not working days.
             </span>
           </div>
         </CardContent>
@@ -2073,6 +2209,8 @@ export const SalaryPaymentRecordsPanel = ({
                     employeeType: e.target.value as "TEACHER" | "STAFF",
                     employeeKey: "",
                     monthlySalaryNpr: "0",
+                    periodsAttended: "0",
+                    syllabusCompletedPercent: "0",
                     presentDays: "0",
                     absentDays: "0",
                     leaveDays: "0",
@@ -2106,7 +2244,9 @@ export const SalaryPaymentRecordsPanel = ({
                 ))}
               </Select>
             </FormField>
-            <FormField label="Monthly salary (NPR) *">
+            <FormField
+              label={`${rateColumnLabel(payTypeOf(selectedCatalogRow))} *`}
+            >
               <NumberInput
                 min={0}
                 value={entry.monthlySalaryNpr}
@@ -2115,6 +2255,38 @@ export const SalaryPaymentRecordsPanel = ({
                 }
               />
             </FormField>
+            {payTypeOf(selectedCatalogRow) === "PERIOD" ? (
+              <FormField label="Periods taught">
+                <NumberInput
+                  min={0}
+                  step={1}
+                  value={entry.periodsAttended}
+                  onChange={(e) =>
+                    setEntry((f) => ({
+                      ...f,
+                      periodsAttended: e.target.value,
+                      attendanceManualOverride: true,
+                    }))
+                  }
+                />
+              </FormField>
+            ) : null}
+            {payTypeOf(selectedCatalogRow) === "TENDER" ? (
+              <FormField label="Syllabus completed (%)">
+                <NumberInput
+                  min={0}
+                  max={100}
+                  value={entry.syllabusCompletedPercent}
+                  onChange={(e) =>
+                    setEntry((f) => ({
+                      ...f,
+                      syllabusCompletedPercent: e.target.value,
+                      attendanceManualOverride: true,
+                    }))
+                  }
+                />
+              </FormField>
+            ) : null}
             <FormField label="Present days">
               <NumberInput
                 min={0}
@@ -2160,7 +2332,13 @@ export const SalaryPaymentRecordsPanel = ({
                 }
               />
             </FormField>
-            <FormField label="Extra duty (days)">
+            <FormField
+              label={
+                payTypeOf(selectedCatalogRow) === "PERIOD"
+                  ? "Extra periods"
+                  : "Extra duty (days)"
+              }
+            >
               <NumberInput
                 min={0}
                 step={0.5}
@@ -2400,7 +2578,8 @@ export const SalaryPaymentRecordsPanel = ({
                   <tr className="bg-slate-50 text-xs">
                     <Th className="w-12 text-center">S.N.</Th>
                     <Th>Employee Name</Th>
-                    <Th className="text-right">Monthly Salary</Th>
+                    <Th className="text-right">Salary / Rate / Contract</Th>
+                    <Th className="text-center">Pay units</Th>
                     <Th className="text-center">Register</Th>
                     <Th className="text-center">Present Days</Th>
                     <Th className="text-center">Absent Days</Th>
@@ -2458,13 +2637,28 @@ export const SalaryPaymentRecordsPanel = ({
                           {row.designation || row.employeeType}
                           {row.department ? ` · ${row.department}` : ""}
                         </div>
+                        {row.employeeType === "TEACHER" ? (
+                          <Badge className="mt-1 bg-slate-100 text-slate-800">
+                            {TEACHER_PAYMENT_TYPE_LABELS[payTypeOf(row)]}
+                          </Badge>
+                        ) : null}
+                        {row.payBreakdown ? (
+                          <div className="mt-1 max-w-[16rem] text-[11px] leading-snug text-slate-600">
+                            {row.payBreakdown}
+                          </div>
+                        ) : null}
                         {row.attendanceIncomplete ? (
                           <Badge
                             className="mt-1 bg-amber-100 text-amber-900"
                             title={`Attendance recorded on ${row.attendanceDaysRecorded} of ${row.attendanceExpectedDays ?? 0} day sheet(s) this month. Unrecorded working days are paid as present. Saturdays and calendar holidays are excluded from working days.`}
                           >
-                            Attendance incomplete
-                            {row.attendanceExpectedDays
+                            {payTypeOf(row) === "PERIOD"
+                              ? "No periods recorded"
+                              : payTypeOf(row) === "TENDER"
+                                ? "No subject tender"
+                                : "Attendance incomplete"}
+                            {payTypeOf(row) === "MONTHLY" &&
+                            row.attendanceExpectedDays
                               ? ` (${row.attendanceDaysRecorded}/${row.attendanceExpectedDays} days)`
                               : ""}
                           </Badge>
@@ -2499,6 +2693,59 @@ export const SalaryPaymentRecordsPanel = ({
                             {formatCurrencyNpr(row.monthlySalaryNpr)}
                           </span>
                         )}
+                      </Td>
+                      <Td className="text-center">
+                        {payTypeOf(row) === "PERIOD" ? (
+                          canEditSheet ? (
+                            <NumberInput
+                              min={0}
+                              className={cn(cellInput, "text-center")}
+                              value={row.periodsAttended ?? 0}
+                              onValueChange={(v) =>
+                                patchRow(
+                                  rowKey,
+                                  { periodsAttended: v ?? 0 },
+                                  "units",
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="tabular-nums">
+                              {row.periodsAttended ?? 0}
+                            </span>
+                          )
+                        ) : payTypeOf(row) === "TENDER" ? (
+                          canEditSheet ? (
+                            <NumberInput
+                              min={0}
+                              max={100}
+                              className={cn(cellInput, "text-center")}
+                              value={row.syllabusCompletedPercent ?? 0}
+                              onValueChange={(v) =>
+                                patchRow(
+                                  rowKey,
+                                  { syllabusCompletedPercent: v ?? 0 },
+                                  "units",
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="tabular-nums">
+                              {row.syllabusCompletedPercent ?? 0}%
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                        {payTypeOf(row) === "PERIOD" ? (
+                          <div className="text-[10px] text-slate-500">
+                            periods
+                          </div>
+                        ) : payTypeOf(row) === "TENDER" ? (
+                          <div className="text-[10px] text-slate-500">
+                            syllabus %
+                          </div>
+                        ) : null}
                       </Td>
                       <Td className="text-center">
                         <span
@@ -2776,8 +3023,8 @@ export const SalaryPaymentRecordsPanel = ({
                     <Td className="text-right">
                       {formatCurrencyNpr(totals.totalMonthlySalaryNpr)}
                     </Td>
-                    {/* Register / Present / Absent / Leave / Extra duty */}
-                    <Td colSpan={5} />
+                    {/* Pay units / Register / Present / Absent / Leave / Extra duty */}
+                    <Td colSpan={6} />
                     <Td className="text-right text-rose-800">
                       {formatCurrencyNpr(totals.totalAbsentDeductionNpr)}
                     </Td>

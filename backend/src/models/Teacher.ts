@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import mongoose, { Schema, type InferSchemaType } from "mongoose";
-import { HR_DOCUMENT_STATUSES } from "@phit-erp/shared";
+import { HR_DOCUMENT_STATUSES, TEACHER_PAYMENT_TYPES } from "@phit-erp/shared";
 
 const addressSchema = new Schema(
   {
@@ -57,6 +57,32 @@ const teacherSchema = new Schema(
       index: true
     },
     basicSalaryNpr: { type: Number, default: 0 },
+    /**
+     * MONTHLY: basicSalaryNpr is the monthly salary.
+     * TENDER: tenders[] hold per-subject contract amounts, paid vs syllabus %.
+     * PERIOD: periodRateNpr × periods taught (log book).
+     */
+    paymentType: {
+      type: String,
+      enum: TEACHER_PAYMENT_TYPES,
+      default: "MONTHLY",
+      index: true
+    },
+    periodRateNpr: { type: Number, default: 0 },
+    tenders: {
+      type: [
+        new Schema(
+          {
+            subjectId: { type: Schema.Types.ObjectId, ref: "Subject", required: true },
+            academicYearBs: { type: String, required: true, trim: true },
+            tenderAmountNpr: { type: Number, required: true, min: 0 },
+            notes: { type: String, default: "" }
+          },
+          { _id: true }
+        )
+      ],
+      default: []
+    },
     photoUrl: { type: String },
     documents: { type: [hrDocumentSchema], default: [] },
     /**

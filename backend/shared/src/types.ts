@@ -27,6 +27,16 @@ export type CollegeStaffCategory =
 
 export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN";
 
+export type TeacherPaymentType = "MONTHLY" | "TENDER" | "PERIOD";
+
+export interface TeacherTender {
+  _id?: string;
+  subjectId: string;
+  academicYearBs: string;
+  tenderAmountNpr: number;
+  notes?: string;
+}
+
 export type BannerTargetRole =
   | "STUDENT"
   | "TEACHER"
@@ -493,6 +503,12 @@ export interface TeacherRecord {
   /** Portal employment status — INACTIVE blocks login */
   status?: "ACTIVE" | "INACTIVE";
   basicSalaryNpr: number;
+  /** How the teacher is paid. Missing on legacy records = MONTHLY. */
+  paymentType?: TeacherPaymentType;
+  /** NPR per period when paymentType is PERIOD. */
+  periodRateNpr?: number;
+  /** Subject contracts when paymentType is TENDER. */
+  tenders?: TeacherTender[];
   photoUrl?: string;
   documents?: HrDocument[];
   createdAt?: string;

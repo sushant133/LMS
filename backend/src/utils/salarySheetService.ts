@@ -1,73 +1,156 @@
 import type { Types } from "mongoose";
-import { formatNrsAmountInWords } from "@phit-erp/shared";
+import {
+  calculateSalarySheetLine,
+  calculateTenderThisMonthNpr,
+  formatNrsAmountInWords,
+  normalizeTeacherPaymentType,
+  paidPresentDays,
+  sumTeacherTenderAmountNpr,
+  type TeacherPaymentType
+} from "@phit-erp/shared";
+import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
+import { AcademicProgress } from "../models/AcademicProgress.js";
 import { CollegeStaff } from "../models/CollegeStaff.js";
 import { EmployeeAttendance } from "../models/EmployeeAttendance.js";
 import { SalaryPayment } from "../models/SalaryPayment.js";
+import { School } from "../models/School.js";
+import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
 
-
-export type SalarySheetCalcInput = {
-  monthlySalaryNpr: number;
-  presentDays: number;
-  absentDays: number;
-  leaveDays?: number;
-  extraDuty: number;
-  workingDaysInMonth: number;
-  /** When set, use instead of extraDuty * perDay */
-  extraAmountOverrideNpr?: number;
-};
-
-export type SalarySheetCalcResult = {
-  perDaySalaryNpr: number;
-  absentDeductionNpr: number;
-  extraAmountNpr: number;
-  salaryAmountNpr: number;
-  tax1PercentNpr: number;
-  netSalaryNpr: number;
-};
+export {
+  calculateSalarySheetLine,
+  calculateTenderThisMonthNpr,
+  deductedAttendanceDays,
+  paidPresentDays
+} from "@phit-erp/shared";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-/** Present + absent + leave should equal working days (unrecorded working days are paid as present). */
-export const paidPresentDays = (
-  workingDaysInMonth: number,
-  absentDays: number,
-  leaveDays: number
-): number => {
-  const days = Math.max(1, Number(workingDaysInMonth) || 30);
-  const deducted = Math.max(0, Number(absentDays) || 0) + Math.max(0, Number(leaveDays) || 0);
-  return round2(Math.max(0, days - Math.min(deducted, days)));
+/** Nepal academic year YYYY/YYYY is typically Shrawan (04) through Ashadh (03). */
+const monthInAcademicYear = (monthBs: string, academicYearBs: string): boolean => {
+  const parts = academicYearBs.split("/");
+  if (parts.length !== 2) return true;
+  const startY = Number(parts[0]);
+  const endY = Number(parts[1]);
+  const [yStr, mStr] = monthBs.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  if (!y || !m || !startY || !endY) return true;
+  if (m >= 4) return y === startY;
+  return y === endY;
 };
 
-export const deductedAttendanceDays = (absentDays: number, leaveDays: number): number =>
-  Math.max(0, Number(absentDays) || 0) + Math.max(0, Number(leaveDays) || 0);
+type TeacherPayFacts = {
+  periodsByTeacher: Map<string, number>;
+  progressByTeacherSubject: Map<string, number>;
+  tenderPaidByTeacher: Map<string, number>;
+  subjectNameById: Map<string, string>;
+  academicYearBs: string;
+};
 
-export const calculateSalarySheetLine = (
-  input: SalarySheetCalcInput
-): SalarySheetCalcResult => {
-  const days = Math.max(1, Number(input.workingDaysInMonth) || 30);
-  const monthly = Math.max(0, Number(input.monthlySalaryNpr) || 0);
-  const leave = Math.max(0, Number(input.leaveDays) || 0);
-  const deducted = Math.min(deductedAttendanceDays(input.absentDays, leave), days);
-  const extraDuty = Math.max(0, Number(input.extraDuty) || 0);
-  const perDay = monthly / days;
-  const absentDeductionNpr = round2(perDay * deducted);
-  const extraAmountNpr =
-    input.extraAmountOverrideNpr !== undefined && input.extraAmountOverrideNpr !== null
-      ? round2(Math.max(0, Number(input.extraAmountOverrideNpr) || 0))
-      : round2(perDay * extraDuty);
-  const salaryAmountNpr = round2(
-    Math.max(0, monthly - absentDeductionNpr + extraAmountNpr)
-  );
-  const tax1PercentNpr = round2(salaryAmountNpr * 0.01);
-  const netSalaryNpr = round2(Math.max(0, salaryAmountNpr - tax1PercentNpr));
+const loadTeacherPayFacts = async (
+  schoolId: Types.ObjectId,
+  monthBs: string,
+  teacherIds: Types.ObjectId[]
+): Promise<TeacherPayFacts> => {
+  const empty: TeacherPayFacts = {
+    periodsByTeacher: new Map(),
+    progressByTeacherSubject: new Map(),
+    tenderPaidByTeacher: new Map(),
+    subjectNameById: new Map(),
+    academicYearBs: ""
+  };
+  if (teacherIds.length === 0) return empty;
+
+  const school = await School.findById(schoolId).select("academicYearBs").lean();
+  const academicYearBs = String(school?.academicYearBs || "").trim();
+
+  const [logCounts, progressRows, paidRows, subjects] = await Promise.all([
+    AcademicLogBookEntry.aggregate<{ _id: Types.ObjectId; periods: number }>([
+      {
+        $match: {
+          schoolId,
+          teacherId: { $in: teacherIds },
+          isDeleted: false,
+          dateBs: { $regex: `^${monthBs}` }
+        }
+      },
+      { $group: { _id: "$teacherId", periods: { $sum: 1 } } }
+    ]),
+    AcademicProgress.find({ schoolId, teacherId: { $in: teacherIds } })
+      .select("teacherId subjectId completedPercent academicYearBs")
+      .lean(),
+    SalaryPayment.find({
+      schoolId,
+      isDeleted: false,
+      teacherId: { $in: teacherIds },
+      monthBs: { $ne: monthBs }
+    })
+      .select("teacherId monthBs paymentType tenderThisMonthNpr academicYearBs")
+      .lean(),
+    Subject.find({ schoolId }).select("name code").lean()
+  ]);
+
+  const periodsByTeacher = new Map<string, number>();
+  for (const row of logCounts) {
+    periodsByTeacher.set(String(row._id), Number(row.periods) || 0);
+  }
+
+  const pushProgress = (rows: typeof progressRows, requireAy: boolean) => {
+    const buckets = new Map<string, number[]>();
+    for (const row of rows) {
+      const rowAy = String(row.academicYearBs || "").trim();
+      if (requireAy && academicYearBs && rowAy && rowAy !== academicYearBs) continue;
+      const key = `${String(row.teacherId)}:${String(row.subjectId)}`;
+      const list = buckets.get(key) ?? [];
+      list.push(Number(row.completedPercent) || 0);
+      buckets.set(key, list);
+    }
+    return buckets;
+  };
+  let progressBuckets = pushProgress(progressRows, true);
+  if (progressBuckets.size === 0) progressBuckets = pushProgress(progressRows, false);
+
+  const progressByTeacherSubject = new Map<string, number>();
+  for (const [key, values] of progressBuckets) {
+    const avg = values.reduce((sum, n) => sum + n, 0) / Math.max(1, values.length);
+    progressByTeacherSubject.set(key, round2(avg));
+  }
+
+  const tenderPaidByTeacher = new Map<string, number>();
+  for (const row of paidRows) {
+    const isTender =
+      normalizeTeacherPaymentType(row.paymentType) === "TENDER" ||
+      Number(row.tenderThisMonthNpr) > 0;
+    if (!isTender) continue;
+    const ay = String(row.academicYearBs || "").trim();
+    if (academicYearBs) {
+      if (ay) {
+        if (ay !== academicYearBs) continue;
+      } else if (!monthInAcademicYear(String(row.monthBs || ""), academicYearBs)) {
+        continue;
+      }
+    }
+    const key = String(row.teacherId);
+    tenderPaidByTeacher.set(
+      key,
+      round2((tenderPaidByTeacher.get(key) ?? 0) + (Number(row.tenderThisMonthNpr) || 0))
+    );
+  }
+
+  const subjectNameById = new Map<string, string>();
+  for (const subject of subjects) {
+    const name = String(subject.name || "").trim() || "Subject";
+    const code = String(subject.code || "").trim();
+    subjectNameById.set(String(subject._id), code ? `${name} (${code})` : name);
+  }
+
   return {
-    perDaySalaryNpr: round2(perDay),
-    absentDeductionNpr,
-    extraAmountNpr,
-    salaryAmountNpr,
-    tax1PercentNpr,
-    netSalaryNpr
+    periodsByTeacher,
+    progressByTeacherSubject,
+    tenderPaidByTeacher,
+    subjectNameById,
+    academicYearBs
   };
 };
 
@@ -226,7 +309,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   const [attendance, teachers, staff, existingSalariesRaw] = await Promise.all([
     aggregateEmployeeAttendanceForMonth(schoolId, monthBs),
     Teacher.find({ schoolId })
-      .select("teacherCode basicSalaryNpr user status")
+      .select("teacherCode basicSalaryNpr user status paymentType periodRateNpr tenders")
       .populate({ path: "user", select: "fullName designation isActive" })
       .lean(),
     CollegeStaff.find({ schoolId })
@@ -257,6 +340,12 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       .map((s) => [idKey(s.staffId), s] as const)
   );
 
+  const payFacts = await loadTeacherPayFacts(
+    schoolId,
+    monthBs,
+    teachers.map((t) => t._id as Types.ObjectId)
+  );
+
   type DraftRow = {
     employeeType: "TEACHER" | "STAFF";
     teacherId?: string;
@@ -265,6 +354,14 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     department: string;
     designation: string;
     monthlySalaryNpr: number;
+    paymentType: TeacherPaymentType;
+    periodRateNpr: number;
+    periodsAttended: number;
+    tenderAmountNpr: number;
+    syllabusCompletedPercent: number;
+    tenderAlreadyPaidNpr: number;
+    tenderThisMonthNpr: number;
+    payBreakdown: string;
     presentDays: number;
     absentDays: number;
     leaveDays: number;
@@ -343,6 +440,168 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     };
   };
 
+  const resolveTeacherPay = (
+    teacherId: string,
+    teacher: {
+      basicSalaryNpr?: number;
+      paymentType?: string;
+      periodRateNpr?: number;
+      tenders?: Array<{
+        subjectId?: unknown;
+        academicYearBs?: string;
+        tenderAmountNpr?: number;
+      }>;
+    },
+    saved:
+      | {
+          paymentType?: string;
+          basicSalaryNpr?: number;
+          periodRateNpr?: number;
+          periodsAttended?: number;
+          tenderAmountNpr?: number;
+          syllabusCompletedPercent?: number;
+          tenderAlreadyPaidNpr?: number;
+          tenderThisMonthNpr?: number;
+          payBreakdown?: string;
+          attendanceManualOverride?: boolean;
+        }
+      | undefined
+  ) => {
+    const paymentType: TeacherPaymentType = saved?.paymentType
+      ? normalizeTeacherPaymentType(saved.paymentType)
+      : saved
+        ? "MONTHLY"
+        : normalizeTeacherPaymentType(teacher.paymentType);
+    const periodRateNpr = Math.max(
+      0,
+      Number(
+        saved?.periodRateNpr ??
+          teacher.periodRateNpr ??
+          (paymentType === "PERIOD" ? teacher.basicSalaryNpr : 0)
+      ) || 0
+    );
+    const tenders = Array.isArray(teacher.tenders) ? teacher.tenders : [];
+    const ayTenders = payFacts.academicYearBs
+      ? tenders.filter(
+          (row) =>
+            !row.academicYearBs || row.academicYearBs === payFacts.academicYearBs
+        )
+      : tenders;
+    const activeTenders = ayTenders.length > 0 ? ayTenders : tenders;
+    const liveTenderAmount = sumTeacherTenderAmountNpr(activeTenders);
+
+    const livePeriods = payFacts.periodsByTeacher.get(teacherId) ?? 0;
+    const alreadyPaid = payFacts.tenderPaidByTeacher.get(teacherId) ?? 0;
+    const manualUnits = Boolean(saved?.attendanceManualOverride);
+
+    let periodsAttended = livePeriods;
+    let tenderAmountNpr = liveTenderAmount;
+    let syllabusCompletedPercent = 0;
+    let tenderAlreadyPaidNpr = alreadyPaid;
+    let liveTenderEarnedNpr = 0;
+    const parts: string[] = [];
+
+    if (paymentType === "TENDER") {
+      let weighted = 0;
+      let weight = 0;
+      for (const tender of activeTenders) {
+        const subjectId = idKey(tender.subjectId);
+        const percent =
+          payFacts.progressByTeacherSubject.get(`${teacherId}:${subjectId}`) ?? 0;
+        const amount = Math.max(0, Number(tender.tenderAmountNpr) || 0);
+        liveTenderEarnedNpr += (percent / 100) * amount;
+        weighted += percent * amount;
+        weight += amount;
+        const subjectName = payFacts.subjectNameById.get(subjectId) || "Subject";
+        parts.push(`${subjectName} ${round2(percent)}% of Rs ${amount.toLocaleString("en-NP")}`);
+      }
+      syllabusCompletedPercent = weight > 0 ? round2(weighted / weight) : 0;
+    }
+
+    if (manualUnits && saved) {
+      if (saved.periodsAttended !== undefined) {
+        periodsAttended = Math.max(0, Number(saved.periodsAttended) || 0);
+      }
+      if (saved.tenderAmountNpr !== undefined) {
+        tenderAmountNpr = Math.max(0, Number(saved.tenderAmountNpr) || 0);
+      }
+      if (saved.syllabusCompletedPercent !== undefined) {
+        syllabusCompletedPercent = Math.max(
+          0,
+          Number(saved.syllabusCompletedPercent) || 0
+        );
+      }
+      if (saved.tenderAlreadyPaidNpr !== undefined) {
+        tenderAlreadyPaidNpr = Math.max(0, Number(saved.tenderAlreadyPaidNpr) || 0);
+      }
+    }
+
+    const tenderThisMonthNpr =
+      paymentType === "TENDER"
+        ? manualUnits && saved?.syllabusCompletedPercent !== undefined
+          ? calculateTenderThisMonthNpr(
+              tenderAmountNpr,
+              syllabusCompletedPercent,
+              tenderAlreadyPaidNpr
+            )
+          : round2(Math.max(0, liveTenderEarnedNpr - tenderAlreadyPaidNpr))
+        : 0;
+
+    if (paymentType === "TENDER") {
+      parts.push(
+        `already paid Rs ${tenderAlreadyPaidNpr.toLocaleString("en-NP")} this year`
+      );
+      parts.push(`this month Rs ${tenderThisMonthNpr.toLocaleString("en-NP")}`);
+    } else if (paymentType === "PERIOD") {
+      parts.push(
+        `${periodsAttended} period(s) × Rs ${periodRateNpr.toLocaleString("en-NP")}`
+      );
+    }
+
+    const monthlySalaryNpr =
+      paymentType === "PERIOD"
+        ? Number(saved?.basicSalaryNpr ?? periodRateNpr)
+        : paymentType === "TENDER"
+          ? Number(saved?.basicSalaryNpr ?? tenderAmountNpr)
+          : Number(saved?.basicSalaryNpr ?? teacher.basicSalaryNpr ?? 0);
+
+    return {
+      paymentType,
+      periodRateNpr:
+        paymentType === "PERIOD" ? Number(saved?.basicSalaryNpr ?? periodRateNpr) : periodRateNpr,
+      periodsAttended,
+      tenderAmountNpr,
+      syllabusCompletedPercent,
+      tenderAlreadyPaidNpr,
+      tenderThisMonthNpr,
+      payBreakdown:
+        (manualUnits && saved?.payBreakdown ? String(saved.payBreakdown) : parts.join(" · ")) ||
+        "",
+      monthlySalaryNpr
+    };
+  };
+
+  const emptyPay = (): Pick<
+    DraftRow,
+    | "paymentType"
+    | "periodRateNpr"
+    | "periodsAttended"
+    | "tenderAmountNpr"
+    | "syllabusCompletedPercent"
+    | "tenderAlreadyPaidNpr"
+    | "tenderThisMonthNpr"
+    | "payBreakdown"
+  > => ({
+    paymentType: "MONTHLY",
+    periodRateNpr: 0,
+    periodsAttended: 0,
+    tenderAmountNpr: 0,
+    syllabusCompletedPercent: 0,
+    tenderAlreadyPaidNpr: 0,
+    tenderThisMonthNpr: 0,
+    payBreakdown: ""
+  });
+
   const drafts: DraftRow[] = [];
 
   if (!employeeType || employeeType === "TEACHER") {
@@ -385,8 +644,15 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
        * Partial coverage still uses the real attendance figures, but must be
        * flagged: unrecorded days are silently paid as present.
        */
-      const incomplete =
+      const pay = resolveTeacherPay(id, t, saved);
+      const attendanceIncomplete =
         settled.noAttendance || settled.daysRecorded < expectedDays;
+      const incomplete =
+        pay.paymentType === "PERIOD"
+          ? pay.periodsAttended <= 0 && !settled.manual
+          : pay.paymentType === "TENDER"
+            ? pay.tenderAmountNpr <= 0 && !settled.manual
+            : attendanceIncomplete;
       const valuesManual = Boolean(
         (saved as { valuesManualOverride?: boolean } | undefined)
           ?.valuesManualOverride
@@ -397,7 +663,15 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         employeeName: name,
         department: "Teaching",
         designation,
-        monthlySalaryNpr: Number(saved?.basicSalaryNpr ?? t.basicSalaryNpr ?? 0),
+        monthlySalaryNpr: pay.monthlySalaryNpr,
+        paymentType: pay.paymentType,
+        periodRateNpr: pay.periodRateNpr,
+        periodsAttended: pay.periodsAttended,
+        tenderAmountNpr: pay.tenderAmountNpr,
+        syllabusCompletedPercent: pay.syllabusCompletedPercent,
+        tenderAlreadyPaidNpr: pay.tenderAlreadyPaidNpr,
+        tenderThisMonthNpr: pay.tenderThisMonthNpr,
+        payBreakdown: pay.payBreakdown,
         presentDays: settled.presentDays,
         absentDays: settled.absentDays,
         leaveDays: settled.leaveDays,
@@ -480,6 +754,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         department,
         designation,
         monthlySalaryNpr: Number(saved?.basicSalaryNpr ?? s.basicSalaryNpr ?? 0),
+        ...emptyPay(),
         presentDays: settled.presentDays,
         absentDays: settled.absentDays,
         leaveDays: settled.leaveDays,
@@ -549,6 +824,22 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         department: "Teaching",
         designation: "",
         monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
+        paymentType: normalizeTeacherPaymentType(
+          (s as { paymentType?: string }).paymentType
+        ),
+        periodRateNpr: Number((s as { periodRateNpr?: number }).periodRateNpr ?? 0),
+        periodsAttended: Number((s as { periodsAttended?: number }).periodsAttended ?? 0),
+        tenderAmountNpr: Number((s as { tenderAmountNpr?: number }).tenderAmountNpr ?? 0),
+        syllabusCompletedPercent: Number(
+          (s as { syllabusCompletedPercent?: number }).syllabusCompletedPercent ?? 0
+        ),
+        tenderAlreadyPaidNpr: Number(
+          (s as { tenderAlreadyPaidNpr?: number }).tenderAlreadyPaidNpr ?? 0
+        ),
+        tenderThisMonthNpr: Number(
+          (s as { tenderThisMonthNpr?: number }).tenderThisMonthNpr ?? 0
+        ),
+        payBreakdown: String((s as { payBreakdown?: string }).payBreakdown ?? ""),
         presentDays: Number(s.presentDays ?? 0),
         absentDays: Number(s.absentDays ?? 0),
         leaveDays: Number((s as { leaveDays?: number }).leaveDays ?? 0),
@@ -594,6 +885,7 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         department: "",
         designation: "",
         monthlySalaryNpr: Number(s.basicSalaryNpr ?? 0),
+        ...emptyPay(),
         presentDays: Number(s.presentDays ?? 0),
         absentDays: Number(s.absentDays ?? 0),
         leaveDays: Number((s as { leaveDays?: number }).leaveDays ?? 0),
@@ -622,13 +914,17 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
 
   const rows = drafts.map((d, index) => {
     const calc = calculateSalarySheetLine({
+      paymentType: d.paymentType,
       monthlySalaryNpr: d.monthlySalaryNpr,
       presentDays: d.presentDays,
       absentDays: d.absentDays,
       leaveDays: d.leaveDays,
       extraDuty: d.extraDuty,
       workingDaysInMonth,
-      extraAmountOverrideNpr: d.extraAmountOverrideNpr
+      extraAmountOverrideNpr: d.extraAmountOverrideNpr,
+      periodRateNpr: d.periodRateNpr,
+      periodsAttended: d.periodsAttended,
+      tenderThisMonthNpr: d.tenderThisMonthNpr
     });
     const useManualMoney = Boolean(d.valuesManualOverride);
     return {
@@ -640,6 +936,14 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       department: d.department,
       designation: d.designation,
       monthlySalaryNpr: d.monthlySalaryNpr,
+      paymentType: d.paymentType,
+      periodRateNpr: d.periodRateNpr,
+      periodsAttended: d.periodsAttended,
+      tenderAmountNpr: d.tenderAmountNpr,
+      syllabusCompletedPercent: d.syllabusCompletedPercent,
+      tenderAlreadyPaidNpr: d.tenderAlreadyPaidNpr,
+      tenderThisMonthNpr: d.tenderThisMonthNpr,
+      payBreakdown: d.payBreakdown,
       presentDays: d.presentDays,
       absentDays: d.absentDays,
       leaveDays: d.leaveDays,

@@ -1,4 +1,12 @@
-import type { AddressSelection, CollegeStaffRecord, FeeType, StudentRecord, TeacherRecord, UserProfile } from "./types.js";
+import type {
+  AddressSelection,
+  CollegeStaffRecord,
+  FeeType,
+  StudentRecord,
+  TeacherPaymentType,
+  TeacherRecord,
+  UserProfile
+} from "./types.js";
 
 export type PaymentMethod =
   | "CASH"
@@ -243,6 +251,15 @@ export interface SalaryPaymentRecord {
   staffName?: string;
   monthBs: string;
   basicSalaryNpr: number;
+  paymentType?: TeacherPaymentType;
+  periodRateNpr?: number;
+  periodsAttended?: number;
+  tenderAmountNpr?: number;
+  syllabusCompletedPercent?: number;
+  tenderAlreadyPaidNpr?: number;
+  tenderThisMonthNpr?: number;
+  payBreakdown?: string;
+  academicYearBs?: string;
   allowancesNpr: number;
   bonusNpr: number;
   advanceSalaryNpr: number;
@@ -291,6 +308,15 @@ export interface SalarySheetRow {
   department: string;
   designation: string;
   monthlySalaryNpr: number;
+  /** Teacher pay basis. Staff and legacy rows are MONTHLY. */
+  paymentType?: TeacherPaymentType;
+  periodRateNpr?: number;
+  periodsAttended?: number;
+  tenderAmountNpr?: number;
+  syllabusCompletedPercent?: number;
+  tenderAlreadyPaidNpr?: number;
+  tenderThisMonthNpr?: number;
+  payBreakdown?: string;
   presentDays: number;
   absentDays: number;
   /** LEAVE register marks. Deducted like absence. */

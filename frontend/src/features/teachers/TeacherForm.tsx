@@ -1,11 +1,18 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_TEACHER_DESIGNATION,
+  TEACHER_PAYMENT_TYPE_HELP,
+  TEACHER_PAYMENT_TYPE_LABELS,
+  TEACHER_PAYMENT_TYPES,
   teacherSchema,
+  type SchoolSettingsRecord,
+  type SubjectRecord,
   type TeacherInput,
+  type TeacherPaymentType,
 } from "@phit-erp/shared";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Upload } from "lucide-react";
+import { Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { AddressFields } from "components/shared/AddressFields";
 import { FormField } from "components/shared/FormField";
@@ -17,6 +24,7 @@ import {
 import { Button } from "components/ui/button";
 import { Input } from "components/ui/input";
 import { NumberInput } from "components/ui/number-input";
+import { Select } from "components/ui/select";
 import { HrDocumentsSection } from "features/hr-documents/HrDocumentsSection";
 import type { HrDocument } from "@phit-erp/shared";
 import { api, resolveApiUrl, resolveMediaUrl, unwrap } from "lib/api";
@@ -42,6 +50,9 @@ const createDefaultTeacherValue = (): TeacherInput => ({
   assignedBatchIds: [],
   assignedYearIds: [],
   basicSalaryNpr: 0,
+  paymentType: "MONTHLY",
+  periodRateNpr: 0,
+  tenders: [],
   photoUrl: "",
 });
 
@@ -74,6 +85,21 @@ export const TeacherForm = ({
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const paymentType = (form.paymentType ?? "MONTHLY") as TeacherPaymentType;
+
+  const subjectsQuery = useQuery({
+    queryKey: ["academics-subjects"],
+    queryFn: () => unwrap<SubjectRecord[]>(api.get("/academics/subjects")),
+  });
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => unwrap<SchoolSettingsRecord>(api.get("/settings")),
+  });
+  const subjects = (subjectsQuery.data ?? []).filter(
+    (subject) => subject.isActive !== false,
+  );
+  const currentAcademicYear =
+    settingsQuery.data?.academicYearBs?.trim() || "";
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -134,6 +160,18 @@ export const TeacherForm = ({
       return;
     }
 
+    if (paymentType === "TENDER") {
+      const rows = form.tenders ?? [];
+      if (rows.some((tender) => !tender.subjectId)) {
+        toast.error("Select a subject for every tender row");
+        return;
+      }
+      if (rows.some((tender) => !tender.academicYearBs?.trim())) {
+        toast.error("Enter the academic year for every subject tender");
+        return;
+      }
+    }
+
     // HR-only: always send empty assignment arrays (backend may reject non-empty for ACCEPTED/NA)
     const parsed = teacherSchema.safeParse({
       ...form,
@@ -145,6 +183,13 @@ export const TeacherForm = ({
       assignedSectionIds: [],
       assignedBatchIds: [],
       assignedYearIds: [],
+      paymentType,
+      periodRateNpr: paymentType === "PERIOD" ? form.periodRateNpr ?? 0 : 0,
+      basicSalaryNpr: paymentType === "MONTHLY" ? form.basicSalaryNpr : form.basicSalaryNpr ?? 0,
+      tenders:
+        paymentType === "TENDER"
+          ? (form.tenders ?? []).filter((tender) => tender.subjectId)
+          : [],
     });
 
     if (!parsed.success) {
@@ -241,17 +286,57 @@ export const TeacherForm = ({
             }
           />
         </FormField>
-        <FormField label="Basic Salary (NPR)">
-          <NumberInput
-            value={form.basicSalaryNpr}
+        <FormField label="Pay type">
+          <Select
+            value={paymentType}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
-                basicSalaryNpr: event.target.valueAsNumber,
+                paymentType: event.target.value as TeacherPaymentType,
               }))
             }
-          />
+          >
+            {TEACHER_PAYMENT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {TEACHER_PAYMENT_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </Select>
+          <p className="mt-1 text-xs text-slate-500">
+            {TEACHER_PAYMENT_TYPE_HELP[paymentType]}
+          </p>
         </FormField>
+        {paymentType === "MONTHLY" ? (
+          <FormField label="Monthly salary (NPR)">
+            <NumberInput
+              min={0}
+              value={form.basicSalaryNpr}
+              onValueChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  basicSalaryNpr: value ?? 0,
+                }))
+              }
+            />
+          </FormField>
+        ) : null}
+        {paymentType === "PERIOD" ? (
+          <FormField label="Rate per period (NPR)">
+            <NumberInput
+              min={0}
+              value={form.periodRateNpr ?? 0}
+              onValueChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  periodRateNpr: value ?? 0,
+                }))
+              }
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Salary sheet pays this rate × periods taught (from the log book).
+            </p>
+          </FormField>
+        ) : null}
         <FormField label="Profile photo">
           <div className="space-y-2">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm">
@@ -275,6 +360,160 @@ export const TeacherForm = ({
           </div>
         </FormField>
       </div>
+
+      {paymentType === "TENDER" ? (
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="font-medium text-slate-900">Subject tenders</p>
+              <p className="text-xs text-slate-500">
+                Award one or more subjects at a fixed contract amount. The salary
+                sheet pays the share of syllabus completed, minus amounts already
+                paid this academic year.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!currentAcademicYear) {
+                  toast.error(
+                    "Set the academic year in Settings before adding a subject tender",
+                  );
+                  return;
+                }
+                setForm((current) => ({
+                  ...current,
+                  tenders: [
+                    ...(current.tenders ?? []),
+                    {
+                      subjectId: "",
+                      academicYearBs: currentAcademicYear,
+                      tenderAmountNpr: 0,
+                      notes: "",
+                    },
+                  ],
+                }));
+              }}
+            >
+              <Plus className="mr-1 h-4 w-4" />
+              Add subject
+            </Button>
+          </div>
+          {(form.tenders ?? []).length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No subject tenders yet. Add the subject and contract amount.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {(form.tenders ?? []).map((tender, index) => (
+                <div
+                  key={tender._id || `tender-${index}`}
+                  className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-12"
+                >
+                  <div className="md:col-span-4">
+                    <FormField label="Subject">
+                      <Select
+                        value={tender.subjectId}
+                        onChange={(event) =>
+                          setForm((current) => {
+                            const next = [...(current.tenders ?? [])];
+                            next[index] = {
+                              ...next[index]!,
+                              subjectId: event.target.value,
+                            };
+                            return { ...current, tenders: next };
+                          })
+                        }
+                      >
+                        <option value="">Select subject</option>
+                        {subjects.map((subject) => (
+                          <option key={subject._id} value={subject._id}>
+                            {subject.name}
+                            {subject.code ? ` (${subject.code})` : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  </div>
+                  <div className="md:col-span-3">
+                    <FormField label="Academic year (BS)">
+                      <Input
+                        placeholder="2082/2083"
+                        value={tender.academicYearBs}
+                        onChange={(event) =>
+                          setForm((current) => {
+                            const next = [...(current.tenders ?? [])];
+                            next[index] = {
+                              ...next[index]!,
+                              academicYearBs: event.target.value,
+                            };
+                            return { ...current, tenders: next };
+                          })
+                        }
+                      />
+                    </FormField>
+                  </div>
+                  <div className="md:col-span-3">
+                    <FormField label="Tender amount (NPR)">
+                      <NumberInput
+                        min={0}
+                        value={tender.tenderAmountNpr}
+                        onValueChange={(value) =>
+                          setForm((current) => {
+                            const next = [...(current.tenders ?? [])];
+                            next[index] = {
+                              ...next[index]!,
+                              tenderAmountNpr: value ?? 0,
+                            };
+                            return { ...current, tenders: next };
+                          })
+                        }
+                      />
+                    </FormField>
+                  </div>
+                  <div className="flex items-end md:col-span-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full text-rose-700"
+                      onClick={() =>
+                        setForm((current) => ({
+                          ...current,
+                          tenders: (current.tenders ?? []).filter(
+                            (_, rowIndex) => rowIndex !== index,
+                          ),
+                        }))
+                      }
+                    >
+                      <Trash2 className="mr-1 h-4 w-4" />
+                      Remove
+                    </Button>
+                  </div>
+                  <div className="md:col-span-12">
+                    <FormField label="Notes (optional)">
+                      <Input
+                        value={tender.notes ?? ""}
+                        onChange={(event) =>
+                          setForm((current) => {
+                            const next = [...(current.tenders ?? [])];
+                            next[index] = {
+                              ...next[index]!,
+                              notes: event.target.value,
+                            };
+                            return { ...current, tenders: next };
+                          })
+                        }
+                      />
+                    </FormField>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <AddressFields
         value={form.address}

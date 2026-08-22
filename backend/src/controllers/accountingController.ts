@@ -96,11 +96,13 @@ import {
   formatNrsAmountInWords,
   hasAccountingPermission,
   isInstitutionAdmin,
+  normalizeTeacherPaymentType,
   normalizeUserRole
 } from "@phit-erp/shared";
 import {
   buildSalarySheet,
-  calculateSalarySheetLine
+  calculateSalarySheetLine,
+  calculateTenderThisMonthNpr
 } from "../utils/salarySheetService.js";
 import { needsApprovalForAmount } from "./accountingApprovalController.js";
 import { FinancialApproval } from "../models/FinancialApproval.js";
@@ -3003,16 +3005,36 @@ const resolvePayrollAmounts = (payload: {
   loanDeductionNpr?: number;
   otherDeductionsNpr?: number;
   workingDaysInMonth?: number;
+  paymentType?: string;
+  periodRateNpr?: number;
+  periodsAttended?: number;
+  tenderAmountNpr?: number;
+  syllabusCompletedPercent?: number;
+  tenderAlreadyPaidNpr?: number;
+  tenderThisMonthNpr?: number;
 }) => {
   const useSheet =
     payload.presentDays !== undefined ||
     payload.absentDays !== undefined ||
     payload.extraDuty !== undefined ||
     payload.extraAmountNpr !== undefined ||
-    payload.salaryAmountNpr !== undefined;
+    payload.salaryAmountNpr !== undefined ||
+    payload.periodsAttended !== undefined ||
+    payload.paymentType === "PERIOD" ||
+    payload.paymentType === "TENDER";
 
   if (useSheet) {
+    const paymentType = normalizeTeacherPaymentType(payload.paymentType);
+    const tenderThisMonthNpr =
+      paymentType === "TENDER"
+        ? calculateTenderThisMonthNpr(
+            Number(payload.tenderAmountNpr ?? payload.basicSalaryNpr ?? 0),
+            Number(payload.syllabusCompletedPercent ?? 0),
+            Number(payload.tenderAlreadyPaidNpr ?? 0)
+          )
+        : Number(payload.tenderThisMonthNpr ?? 0);
     const calc = calculateSalarySheetLine({
+      paymentType,
       monthlySalaryNpr: payload.basicSalaryNpr,
       presentDays: payload.presentDays ?? 0,
       absentDays: payload.absentDays ?? 0,
@@ -3023,7 +3045,10 @@ const resolvePayrollAmounts = (payload: {
         payload.extraAmountNpr !== undefined &&
         (payload.extraDuty === undefined || payload.extraDuty === 0)
           ? payload.extraAmountNpr
-          : undefined
+          : undefined,
+      periodRateNpr: payload.periodRateNpr ?? payload.basicSalaryNpr,
+      periodsAttended: payload.periodsAttended,
+      tenderThisMonthNpr
     });
     return {
       absentDeductionNpr: calc.absentDeductionNpr,
@@ -3188,6 +3213,8 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
     schoolId,
     payload.monthBs
   );
+  const schoolRow = await School.findById(schoolId).select("academicYearBs").lean();
+  const schoolAcademicYearBs = String(schoolRow?.academicYearBs || "").trim();
 
   if (saveStatus === "PAID" && payload.paidDateBs) {
     const { assertFiscalPeriodOpen } = await import("../utils/fiscalYear.js");
@@ -3197,7 +3224,17 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   const savedIds: string[] = [];
 
   for (const row of payload.rows) {
+    const paymentType = normalizeTeacherPaymentType(row.paymentType);
+    const tenderThisMonthNpr =
+      paymentType === "TENDER"
+        ? calculateTenderThisMonthNpr(
+            Number(row.tenderAmountNpr ?? row.monthlySalaryNpr ?? 0),
+            Number(row.syllabusCompletedPercent ?? 0),
+            Number(row.tenderAlreadyPaidNpr ?? 0)
+          )
+        : Number(row.tenderThisMonthNpr ?? 0);
     const calc = calculateSalarySheetLine({
+      paymentType,
       monthlySalaryNpr: row.monthlySalaryNpr,
       presentDays: row.presentDays,
       absentDays: row.absentDays,
@@ -3207,7 +3244,10 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       extraAmountOverrideNpr:
         row.extraAmountNpr !== undefined && row.extraDuty === 0
           ? row.extraAmountNpr
-          : undefined
+          : undefined,
+      periodRateNpr: row.periodRateNpr ?? row.monthlySalaryNpr,
+      periodsAttended: row.periodsAttended,
+      tenderThisMonthNpr
     });
 
     // Only Super Admin / College Admin may persist manual money overrides
@@ -3252,6 +3292,18 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       absentDays: row.absentDays,
       leaveDays: row.leaveDays ?? 0,
       extraDuty: row.extraDuty,
+      paymentType,
+      periodRateNpr:
+        paymentType === "PERIOD"
+          ? Number(row.periodRateNpr ?? row.monthlySalaryNpr ?? 0)
+          : Number(row.periodRateNpr ?? 0),
+      periodsAttended: Number(row.periodsAttended ?? 0),
+      tenderAmountNpr: Number(row.tenderAmountNpr ?? (paymentType === "TENDER" ? row.monthlySalaryNpr : 0)),
+      syllabusCompletedPercent: Number(row.syllabusCompletedPercent ?? 0),
+      tenderAlreadyPaidNpr: Number(row.tenderAlreadyPaidNpr ?? 0),
+      tenderThisMonthNpr,
+      payBreakdown: row.payBreakdown ?? "",
+      academicYearBs: schoolAcademicYearBs,
       absentDeductionNpr: money.absentDeductionNpr,
       extraAmountNpr: money.extraAmountNpr,
       salaryAmountNpr: money.salaryAmountNpr,
@@ -4565,6 +4617,9 @@ export const listSalaryEmployees = asyncHandler(async (req: Request, res: Respon
       _id: t._id.toString(),
       teacherCode: t.teacherCode,
       basicSalaryNpr: t.basicSalaryNpr ?? 0,
+      paymentType: (t as { paymentType?: string }).paymentType || "MONTHLY",
+      periodRateNpr: (t as { periodRateNpr?: number }).periodRateNpr ?? 0,
+      tenders: (t as { tenders?: unknown[] }).tenders ?? [],
       user: t.user,
       designation: (t.user as { designation?: string } | null)?.designation
     }));

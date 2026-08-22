@@ -1,4 +1,4 @@
-import type { GradeSymbol, UserRole } from "./types.js";
+import type { GradeSymbol, TeacherPaymentType, UserRole } from "./types.js";
 
 /** Official PHIT LMS branding */
 export const APP_BRAND_NAME = "PHIT LMS";
@@ -184,6 +184,40 @@ export const COLLEGE_STAFF_REPORT_TYPES = [
 ] as const;
 
 export const EMPLOYMENT_TYPES = ["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN"] as const;
+
+/**
+ * How a teacher is paid. Staff remain monthly.
+ * - MONTHLY: fixed monthly salary, leave/absence deduct per working day
+ * - TENDER: subject contract for a fixed amount, paid as syllabus is completed
+ * - PERIOD: NPR per period taught (log book / class taken)
+ */
+export const TEACHER_PAYMENT_TYPES = ["MONTHLY", "TENDER", "PERIOD"] as const;
+
+export const TEACHER_PAYMENT_TYPE_LABELS: Record<TeacherPaymentType, string> = {
+  MONTHLY: "Monthly salary",
+  TENDER: "Subject tender (syllabus)",
+  PERIOD: "Per period"
+};
+
+export const TEACHER_PAYMENT_TYPE_HELP: Record<TeacherPaymentType, string> = {
+  MONTHLY:
+    "Fixed monthly salary. Leave and absence deduct per working day (monthly ÷ working days).",
+  TENDER:
+    "Teacher is awarded a subject for a fixed contract amount. Each month they are paid for syllabus completed, minus amounts already paid this academic year.",
+  PERIOD:
+    "Paid for each period taught (from the teaching log book). Extra duty counts as extra periods."
+};
+
+export const normalizeTeacherPaymentType = (value: unknown): TeacherPaymentType => {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "TENDER" || raw === "PERIOD") return raw;
+  return "MONTHLY";
+};
+
+export const sumTeacherTenderAmountNpr = (
+  tenders: Array<{ tenderAmountNpr?: number }> | undefined | null
+): number =>
+  (tenders ?? []).reduce((sum, row) => sum + Math.max(0, Number(row.tenderAmountNpr) || 0), 0);
 
 export const PUBLIC_REGISTER_ROLES: UserRole[] = ["PARENT"];
 
