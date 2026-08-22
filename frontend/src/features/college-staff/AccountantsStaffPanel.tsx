@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   accountantSchema,
@@ -49,6 +49,15 @@ export const AccountantsStaffPanel = () => {
   const [form, setForm] = useState<AccountantInput>(defaultAccountant);
   const [password, setPassword] = useState("");
   const [editing, setEditing] = useState<AccountantRecord | null>(null);
+  const formRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    const frame = window.requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editing]);
 
   const accountantsQuery = useQuery({
     queryKey: ["accounting-accountants"],
@@ -114,7 +123,8 @@ export const AccountantsStaffPanel = () => {
   return (
     <div className="space-y-6">
       {canManage ? (
-        <Card>
+        <div ref={formRef} className="scroll-mt-24">
+        <Card className={editing ? "ring-2 ring-brand-200" : undefined}>
           <CardHeader>
             <CardTitle>
               {editing ? "Edit Accountant" : "Create Accountant"}
@@ -251,6 +261,7 @@ export const AccountantsStaffPanel = () => {
             </div>
           </CardContent>
         </Card>
+        </div>
       ) : null}
 
       <Card>

@@ -130,6 +130,7 @@ export const CollegeStaffManager = ({
   /** Separate from edit form — open Module Access from list without full edit. */
   const [accessStaff, setAccessStaff] = useState<CollegeStaffRecord | null>(null);
   const moduleAccessRef = useRef<HTMLDivElement | null>(null);
+  const formRef = useRef<HTMLDivElement | null>(null);
 
   /**
    * Bring the panel itself into view once it has rendered.
@@ -143,6 +144,14 @@ export const CollegeStaffManager = ({
     if (!accessStaff?.user?._id) return;
     moduleAccessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [accessStaff]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const frame = window.requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editing]);
   const [isUploading, setIsUploading] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -654,7 +663,8 @@ export const CollegeStaffManager = ({
       ) : null}
 
       {showForm ? (
-        <Card>
+        <div ref={formRef} className="scroll-mt-24">
+        <Card className={editing ? "ring-2 ring-brand-200" : undefined}>
           <CardHeader>
             <CardTitle>
               {editing ? "Edit non-teaching staff" : "Create non-teaching staff"}
@@ -1012,6 +1022,7 @@ export const CollegeStaffManager = ({
             </div>
           </CardContent>
         </Card>
+        </div>
       ) : null}
 
       {canManage && (accessStaff?.user?._id || editing?.user?._id) ? (
@@ -1285,10 +1296,6 @@ export const CollegeStaffManager = ({
                                       variant="outline"
                                       onClick={() => {
                                         loadStaff(staff);
-                                        window.scrollTo({
-                                          top: 0,
-                                          behavior: "smooth",
-                                        });
                                       }}
                                     >
                                       Edit

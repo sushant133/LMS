@@ -155,6 +155,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const [editDocuments, setEditDocuments] = useState<HrDocument[]>([]);
   const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
   const moduleAccessRef = useRef<HTMLDivElement | null>(null);
+  const formRef = useRef<HTMLDivElement | null>(null);
+  const assignmentsRef = useRef<HTMLDivElement | null>(null);
 
   /**
    * Bring the panel itself into view once it has rendered.
@@ -168,8 +170,25 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     if (!accessTeacher?.user?._id) return;
     moduleAccessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [accessTeacher]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const frame = window.requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editing]);
+
   const [assignmentsTeacher, setAssignmentsTeacher] =
     useState<TeacherRecord | null>(null);
+
+  useEffect(() => {
+    if (!assignmentsTeacher) return;
+    const frame = window.requestAnimationFrame(() => {
+      assignmentsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [assignmentsTeacher]);
   const teachersQuery = useQuery({
     // includeInactive so admins can see deactivated teachers and re-activate them
     queryKey: ["teachers", "manage"],
@@ -274,7 +293,10 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       ) : null}
 
       {assignmentsTeacher ? (
-        <div className="mb-6 space-y-3 rounded-xl border border-brand-200 bg-white p-4 shadow-sm">
+        <div
+          ref={assignmentsRef}
+          className="mb-6 scroll-mt-24 space-y-3 rounded-xl border border-brand-200 bg-white p-4 shadow-sm"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-slate-900">
               Assignments — {assignmentsTeacher.user.fullName}
@@ -296,7 +318,8 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
       ) : null}
 
       {canManage ? (
-        <Card>
+        <div ref={formRef} className="scroll-mt-24">
+        <Card className={editing ? "ring-2 ring-brand-200" : undefined}>
           <CardHeader>
             <CardTitle>{editing ? "Edit Teacher" : "Create Teacher"}</CardTitle>
           </CardHeader>
@@ -332,6 +355,7 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
             ) : null}
           </CardContent>
         </Card>
+        </div>
       ) : null}
 
       {canManage && accessTeacher?.user?._id && !editing ? (
@@ -479,7 +503,6 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
                                 setEditing(null);
                                 setAccessTeacher(null);
                                 setAssignmentsTeacher(teacher);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
                               }}
                             >
                               Assignments
