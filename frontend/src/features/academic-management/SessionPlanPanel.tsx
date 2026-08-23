@@ -639,6 +639,13 @@ export const SessionPlanPanel = ({
     [allPlans, filters.keyword],
   );
 
+  // Tree badges must match the right-hand list: one plan per curriculum subject
+  // per teacher, not one per batch-provisioned subject instance.
+  const uniquePlans = useMemo(
+    () => dedupePlansByCurriculum(keywordFilteredPlans, subjects, true),
+    [keywordFilteredPlans, subjects],
+  );
+
   const faculties = useMemo(
     () =>
       buildAcademicHierarchy({
@@ -654,13 +661,14 @@ export const SessionPlanPanel = ({
         filterTeacherId: filters.teacherId || teacherId,
         filterFaculty: filters.faculty,
         keyword: filters.keyword,
-        records: keywordFilteredPlans.map((plan) => ({
+        records: uniquePlans.map((plan) => ({
           subjectId: plan.subjectId,
           yearId: plan.yearId,
           classId: plan.classId,
           teacherId: plan.teacherId,
           faculty: plan.faculty,
           subjectName: plan.subject?.name,
+          subjectCode: plan.subject?.code,
           teacherName: plan.teacher?.user?.fullName,
         })),
       }),
@@ -678,7 +686,7 @@ export const SessionPlanPanel = ({
       filters.faculty,
       filters.keyword,
       teacherId,
-      keywordFilteredPlans,
+      uniquePlans,
     ],
   );
 
