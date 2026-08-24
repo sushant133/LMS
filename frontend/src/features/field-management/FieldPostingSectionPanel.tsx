@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
+import { MobileDayChipGrid } from "components/shared/MobileDayChipGrid";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -36,7 +37,7 @@ import {
   buildPrintInstitutionHeaderHtml,
   PRINT_INSTITUTION_HEADER_CSS,
 } from "lib/printBranding";
-import { parseErrorMessage } from "lib/utils";
+import { cn, parseErrorMessage } from "lib/utils";
 import {
   defaultPostingTypeForSection,
   fieldCodeClass,
@@ -2302,7 +2303,114 @@ export const FieldPostingSectionPanel = ({
                     }
                   />
                 ) : (
-                  <div className="overflow-x-auto rounded-xl border border-slate-300">
+                  <>
+                  <div className="space-y-2 md:hidden">
+                    {filteredMarkRows.map((row, sn) => {
+                      const idx = markRows.findIndex(
+                        (r) => r.studentId === row.studentId,
+                      );
+                      return (
+                        <div
+                          key={row.studentId}
+                          className={cn(
+                            "rounded-xl border bg-white p-3",
+                            row.onRoster ? "border-slate-200" : "border-slate-200 opacity-70",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium text-slate-900">
+                                {sn + 1}. {row.fullName}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                Roll {row.rollNumber ?? "—"}
+                                {row.admissionNumber ? ` · ${row.admissionNumber}` : ""}
+                              </p>
+                              {fromHospitalRoster || section === "HOSPITAL" ? (
+                                <p className="mt-0.5 text-xs text-slate-600">
+                                  {[row.departmentLabel, row.shiftLabel, row.rosterCode]
+                                    .filter(Boolean)
+                                    .join(" · ") || "—"}
+                                </p>
+                              ) : null}
+                            </div>
+                            {!fromHospitalRoster ? (
+                              <label className="flex items-center gap-1 text-xs text-slate-600">
+                                <input
+                                  type="checkbox"
+                                  disabled={isReadOnly}
+                                  checked={row.onRoster}
+                                  onChange={() =>
+                                    setMarkRows((rows) =>
+                                      rows.map((r, i) =>
+                                        i === idx
+                                          ? { ...r, onRoster: !r.onRoster }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                />
+                                Duty
+                              </label>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 grid grid-cols-4 gap-1">
+                            {(["PRESENT", "ABSENT", "LATE", "LEAVE"] as const).map(
+                              (st) => (
+                                <label
+                                  key={st}
+                                  className={cn(
+                                    "flex items-center justify-center gap-1 rounded-lg border px-1 py-1.5 text-[11px]",
+                                    row.onRoster && row.status === st
+                                      ? "border-brand-400 bg-brand-50 font-semibold"
+                                      : "border-slate-200",
+                                  )}
+                                >
+                                  <input
+                                    type="radio"
+                                    className="h-3.5 w-3.5"
+                                    name={`m-status-${row.studentId}`}
+                                    disabled={isReadOnly || !row.onRoster}
+                                    checked={row.onRoster && row.status === st}
+                                    onChange={() =>
+                                      setMarkRows((rows) =>
+                                        rows.map((r, i) =>
+                                          i === idx
+                                            ? { ...r, onRoster: true, status: st }
+                                            : r,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                  {st === "PRESENT"
+                                    ? "P"
+                                    : st === "ABSENT"
+                                      ? "A"
+                                      : st === "LATE"
+                                        ? "Late"
+                                        : "Lv"}
+                                </label>
+                              ),
+                            )}
+                          </div>
+                          <Input
+                            className="mt-2"
+                            placeholder="Remarks"
+                            disabled={isReadOnly || !row.onRoster}
+                            value={row.remarks}
+                            onChange={(e) =>
+                              setMarkRows((rows) =>
+                                rows.map((r, i) =>
+                                  i === idx ? { ...r, remarks: e.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="hidden overflow-x-auto rounded-xl border border-slate-300 md:block">
                     <table className="w-full min-w-[720px] border-collapse text-sm">
                       <thead>
                         <tr className="bg-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
@@ -2450,6 +2558,7 @@ export const FieldPostingSectionPanel = ({
                       </tbody>
                     </table>
                   </div>
+                  </>
                 )}
 
                 {!isReadOnly && markRows.length > 0 ? (
@@ -2709,7 +2818,33 @@ export const FieldPostingSectionPanel = ({
                   </p>
                 </div>
                 <CardContent className="p-0">
-                  <div className="max-h-[min(75vh,820px)] overflow-auto">
+                  <div className="space-y-2 p-3 md:hidden">
+                    {monthlyRegister.students.map((st, idx) => (
+                      <div
+                        key={st.studentId}
+                        className="rounded-xl border border-slate-200 bg-white p-3"
+                      >
+                        <p className="font-medium text-slate-900">
+                          {idx + 1}. {st.fullName}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Roll {st.rollNumber ?? "—"}
+                          {st.admissionNumber ? ` · ${st.admissionNumber}` : ""}
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-600">
+                          P {st.present} · A {st.absent} · L {st.late} · Lv {st.leave} ·
+                          E {st.emergency}
+                        </p>
+                        <div className="mt-2">
+                          <MobileDayChipGrid
+                            days={monthlyRegister.days}
+                            getLabel={(d) => st.cells[d]?.code || ""}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hidden max-h-[min(75vh,820px)] overflow-auto md:block">
                     <table className="w-full min-w-[900px] border-collapse text-xs">
                       <thead className="sticky top-0 z-10 bg-slate-100">
                         <tr>

@@ -23,6 +23,7 @@ import {
   endSubjectAssignment,
   getAcademicYearBs,
   listSubjectAssignments,
+  getAssignmentLeftover,
   reassignSubjectAssignment,
   recomputeSubjectTeacherIds,
   updateSubjectAssignment
@@ -94,7 +95,18 @@ export const deleteAssignment = asyncHandler(async (req: Request, res: Response)
 export const reassignAssignment = asyncHandler(async (req: Request, res: Response) => {
   const payload = subjectAssignmentReassignSchema.parse(req.body);
   const result = await reassignSubjectAssignment(req, paramId(req), payload);
-  return sendSuccess(res, "Subject assignment reassigned", { rows: [result.row], warnings: result.warnings });
+  return sendSuccess(
+    res,
+    payload.continueLeftover
+      ? "Incoming teacher continues leftover syllabus"
+      : "Subject assignment reassigned",
+    { rows: [result.row], warnings: result.warnings }
+  );
+});
+
+export const leftoverAssignment = asyncHandler(async (req: Request, res: Response) => {
+  const leftover = await getAssignmentLeftover(tenantObjectId(req), paramId(req));
+  return sendSuccess(res, "Syllabus leftover fetched", leftover);
 });
 
 export const copyYear = asyncHandler(async (req: Request, res: Response) => {

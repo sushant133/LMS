@@ -145,9 +145,15 @@ export const subjectAssignmentReassignSchema = z
     effectiveFromBs: bsDateSchema,
     effectiveToBs: bsDateSchema.optional().nullable(),
     remarks: z.string().trim().max(2000).optional().or(z.literal("")),
-    endReason: z.string().trim().max(1000).optional().or(z.literal(""))
+    endReason: z.string().trim().max(1000).optional().or(z.literal("")),
+    /**
+     * Incoming teacher continues leftover syllabus/session plan for this
+     * batch/year instead of starting a blank copy.
+     */
+    continueLeftover: z.boolean().optional().default(false)
   })
   .superRefine((value, ctx) => {
+    if (value.continueLeftover) return;
     if (!value.assignmentType) return;
     refineAssignmentTypeFields(
       {

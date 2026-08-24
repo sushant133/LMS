@@ -45,15 +45,75 @@ export const paidPresentDays = (
 export const deductedAttendanceDays = (absentDays: number, leaveDays: number): number =>
   Math.max(0, Number(absentDays) || 0) + Math.max(0, Number(leaveDays) || 0);
 
+export const clampSyllabusPercent = (n: number): number =>
+  Math.min(100, Math.max(0, Number(n) || 0));
+
+export type TenderProgressCalc = {
+  syllabusCompletedPercent: number;
+  syllabusAlreadyPaidPercent: number;
+  syllabusThisMonthPercent: number;
+  syllabusRemainingPercent: number;
+  tenderAlreadyPaidNpr: number;
+  tenderThisMonthNpr: number;
+};
+
+/**
+ * Fair tender instalment: pay only the new syllabus % since the last payment.
+ * Example: paid at 14% complete, now 33% complete → this month 19% (33 − 14).
+ */
+export const calculateTenderProgress = (input: {
+  tenderAmountNpr: number;
+  syllabusCompletedPercent: number;
+  syllabusAlreadyPaidPercent: number;
+}): TenderProgressCalc => {
+  const contract = Math.max(0, Number(input.tenderAmountNpr) || 0);
+  const completed = roundSalaryNpr(clampSyllabusPercent(input.syllabusCompletedPercent));
+  const alreadyPaidPercent = roundSalaryNpr(
+    Math.min(completed, clampSyllabusPercent(input.syllabusAlreadyPaidPercent))
+  );
+  const thisMonthPercent = roundSalaryNpr(Math.max(0, completed - alreadyPaidPercent));
+  const remainingPercent = roundSalaryNpr(Math.max(0, 100 - completed));
+  return {
+    syllabusCompletedPercent: completed,
+    syllabusAlreadyPaidPercent: alreadyPaidPercent,
+    syllabusThisMonthPercent: thisMonthPercent,
+    syllabusRemainingPercent: remainingPercent,
+    tenderAlreadyPaidNpr: roundSalaryNpr((alreadyPaidPercent / 100) * contract),
+    tenderThisMonthNpr: roundSalaryNpr((thisMonthPercent / 100) * contract)
+  };
+};
+
+export const formatTenderPayBreakdown = (
+  progress: TenderProgressCalc,
+  subjectNotes?: string
+): string => {
+  const core = [
+    `completed ${progress.syllabusCompletedPercent}%`,
+    `already paid ${progress.syllabusAlreadyPaidPercent}%`,
+    `this month ${progress.syllabusThisMonthPercent}% of Rs ${progress.tenderThisMonthNpr.toLocaleString("en-NP")}`,
+    `remaining ${progress.syllabusRemainingPercent}%`
+  ].join(" · ");
+  return subjectNotes ? `${subjectNotes} · ${core}` : core;
+};
+
+/** NPR for this month from completed % minus already-paid % (or legacy already-paid NPR). */
 export const calculateTenderThisMonthNpr = (
   tenderAmountNpr: number,
   syllabusCompletedPercent: number,
-  alreadyPaidNpr: number
+  alreadyPaidNprOrPercent: number,
+  alreadyPaidIsPercent = false
 ): number => {
   const contract = Math.max(0, Number(tenderAmountNpr) || 0);
-  const percent = Math.min(100, Math.max(0, Number(syllabusCompletedPercent) || 0));
-  const earned = roundSalaryNpr((percent / 100) * contract);
-  return roundSalaryNpr(Math.max(0, earned - Math.max(0, Number(alreadyPaidNpr) || 0)));
+  const alreadyPaidPercent = alreadyPaidIsPercent
+    ? Number(alreadyPaidNprOrPercent) || 0
+    : contract > 0
+      ? ((Math.max(0, Number(alreadyPaidNprOrPercent) || 0) / contract) * 100)
+      : 0;
+  return calculateTenderProgress({
+    tenderAmountNpr: contract,
+    syllabusCompletedPercent,
+    syllabusAlreadyPaidPercent: alreadyPaidPercent
+  }).tenderThisMonthNpr;
 };
 
 const applyTax = (

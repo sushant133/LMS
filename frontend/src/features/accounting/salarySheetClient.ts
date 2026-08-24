@@ -852,6 +852,9 @@ type SaveRow = {
   periodsAttended?: number;
   tenderAmountNpr?: number;
   syllabusCompletedPercent?: number;
+  syllabusAlreadyPaidPercent?: number;
+  syllabusThisMonthPercent?: number;
+  syllabusRemainingPercent?: number;
   tenderAlreadyPaidNpr?: number;
   tenderThisMonthNpr?: number;
   payBreakdown?: string;
@@ -923,6 +926,9 @@ export const saveSalarySheetClient = async (payload: {
       periodsAttended: row.periodsAttended,
       tenderAmountNpr: row.tenderAmountNpr,
       syllabusCompletedPercent: row.syllabusCompletedPercent,
+      syllabusAlreadyPaidPercent: row.syllabusAlreadyPaidPercent,
+      syllabusThisMonthPercent: row.syllabusThisMonthPercent,
+      syllabusRemainingPercent: row.syllabusRemainingPercent,
       tenderAlreadyPaidNpr: row.tenderAlreadyPaidNpr,
       tenderThisMonthNpr: row.tenderThisMonthNpr,
       payBreakdown: row.payBreakdown,

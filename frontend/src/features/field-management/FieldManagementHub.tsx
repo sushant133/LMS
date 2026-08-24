@@ -156,7 +156,7 @@ export const FieldManagementHub = () => {
           : "Manage Community/PHC and Hospital postings — assignment, coordinator attendance, and monitoring. Independent from classroom and laboratory attendance.";
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <PageHeader title="Field Management" description={description} />
 
       <div className="flex flex-wrap gap-2">

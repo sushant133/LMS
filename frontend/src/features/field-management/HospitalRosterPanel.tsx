@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { adToBs, bsToAd, getTodayBs } from "@munatech/nepali-datepicker";
 import {
@@ -33,6 +40,7 @@ import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
 import { LoadingState } from "components/shared/LoadingState";
+import { MobileDayChipGrid } from "components/shared/MobileDayChipGrid";
 import { NepaliDateField } from "components/shared/NepaliDateField";
 import { Badge } from "components/ui/badge";
 import { Button } from "components/ui/button";
@@ -591,7 +599,7 @@ export const HospitalRosterPanel = ({ isAdmin }: Props) => {
     ];
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <Card className="border-brand-100 bg-[linear-gradient(135deg,_white_0%,_#eef3fb_100%)]">
         <CardContent className="py-4 text-sm text-slate-600">
           Hospital Roster is an additive clinical duty planner. Existing Community/PHC
@@ -2280,6 +2288,10 @@ const RosterBuilder = ({
   const [addOpen, setAddOpen] = useState(false);
   const [addSearch, setAddSearch] = useState("");
   const [pickedIds, setPickedIds] = useState<string[]>([]);
+  const [mobileMode, setMobileMode] = useState<"student" | "day">("student");
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
+  const [mobileDay, setMobileDay] = useState(1);
+  const [mobileSearch, setMobileSearch] = useState("");
   const [printPromptOpen, setPrintPromptOpen] = useState(false);
   const [printFields, setPrintFields] = useState({
     hospitalName: "",
@@ -2327,6 +2339,15 @@ const RosterBuilder = ({
     }
     return m;
   }, [localCells]);
+
+  const mobileStudents = useMemo(() => {
+    const q = mobileSearch.trim().toLowerCase();
+    if (!q) return students;
+    return students.filter((st) => {
+      const hay = `${st.fullName} ${st.rollNumber ?? ""} ${st.admissionNumber ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [students, mobileSearch]);
 
   const shiftById = useMemo(
     () => new Map(shifts.map((s) => [s._id, s])),
@@ -3061,8 +3082,201 @@ const RosterBuilder = ({
             </Card>
           ) : null}
 
-          {/* Grid */}
-          <div className="max-h-[min(70vh,720px)] overflow-auto overscroll-contain rounded-xl border border-slate-200 [scrollbar-width:thin]">
+          {/* Mobile: student/day cards instead of the clipped wide grid */}
+          <div className="space-y-3 md:hidden">
+            <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-0.5">
+              <button
+                type="button"
+                className={cn(
+                  "flex-1 rounded-lg px-3 py-2 text-sm font-medium",
+                  mobileMode === "student"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600",
+                )}
+                onClick={() => setMobileMode("student")}
+              >
+                By student
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "flex-1 rounded-lg px-3 py-2 text-sm font-medium",
+                  mobileMode === "day" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600",
+                )}
+                onClick={() => setMobileMode("day")}
+              >
+                By day
+              </button>
+            </div>
+
+            {students.length === 0 ? (
+              <p className="rounded-xl border border-slate-200 px-3 py-8 text-center text-sm text-slate-500">
+                No students in this roster. Use Add students to put them back from this
+                batch and year.
+              </p>
+            ) : mobileMode === "student" ? (
+              <>
+                <Input
+                  placeholder="Search student, roll, admission…"
+                  value={mobileSearch}
+                  onChange={(e) => setMobileSearch(e.target.value)}
+                />
+                <div className="space-y-2">
+                  {mobileStudents.map((st, i) => {
+                    const assigned = days.filter((d) =>
+                      Boolean(cellLabel(cellMap.get(cellKey(st.studentId, d)))),
+                    ).length;
+                    const open =
+                      expandedStudentId === st.studentId ||
+                      selected?.studentId === st.studentId;
+                    return (
+                      <div
+                        key={st.studentId}
+                        className="rounded-xl border border-slate-200 bg-white p-3"
+                      >
+                        <button
+                          type="button"
+                          className="flex w-full items-start justify-between gap-2 text-left"
+                          onClick={() =>
+                            setExpandedStudentId(open ? null : st.studentId)
+                          }
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-900">
+                              {i + 1}. {st.fullName}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {st.rollNumber != null ? `R${st.rollNumber}` : ""}{" "}
+                              {st.admissionNumber ?? ""}
+                              {" · "}
+                              {assigned}/{days.length} days
+                            </p>
+                          </div>
+                          <span className="text-xs text-slate-400">
+                            {open ? "Hide" : "Days"}
+                          </span>
+                        </button>
+                        {open ? (
+                          <div className="mt-3 space-y-2">
+                            {isAdmin && !locked ? (
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="text-xs text-brand-700 underline"
+                                  onClick={() => {
+                                    const sh = shifts[0]?._id ?? "";
+                                    const dep = departments[0]?._id ?? "";
+                                    fillRow(st.studentId, sh, dep);
+                                  }}
+                                >
+                                  Fill
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-xs text-amber-700 underline"
+                                  onClick={() => clearRow(st.studentId)}
+                                >
+                                  Clear days
+                                </button>
+                              </div>
+                            ) : null}
+                            <MobileDayChipGrid
+                              days={days}
+                              getLabel={(d) =>
+                                cellLabel(cellMap.get(cellKey(st.studentId, d)))
+                              }
+                              getSubLabel={(d) =>
+                                roster.startDateBs ? dayDateLabel(d).slice(5) : ""
+                              }
+                              getColor={(d) =>
+                                cellColor(cellMap.get(cellKey(st.studentId, d)))
+                              }
+                              selectedDay={
+                                selected?.studentId === st.studentId
+                                  ? selected.day
+                                  : null
+                              }
+                              onSelectDay={
+                                isAdmin && !locked
+                                  ? (d) => setSelected({ studentId: st.studentId, day: d })
+                                  : undefined
+                              }
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [-webkit-overflow-scrolling:touch]">
+                  {days.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={cn(
+                        "shrink-0 rounded-xl border px-3 py-2 text-center",
+                        mobileDay === d
+                          ? "border-brand-500 bg-brand-50 text-brand-900"
+                          : "border-slate-200 bg-white text-slate-700",
+                      )}
+                      onClick={() => setMobileDay(d)}
+                    >
+                      <div className="text-sm font-semibold">{d}</div>
+                      {roster.startDateBs ? (
+                        <div className="text-[10px] text-slate-500">
+                          {dayDateLabel(d).slice(5)}
+                        </div>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  {mobileStudents.map((st, i) => {
+                    const c = cellMap.get(cellKey(st.studentId, mobileDay));
+                    const active =
+                      selected?.studentId === st.studentId &&
+                      selected.day === mobileDay;
+                    return (
+                      <button
+                        key={st.studentId}
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center justify-between gap-3 rounded-xl border bg-white px-3 py-3 text-left",
+                          active
+                            ? "border-brand-500 ring-2 ring-brand-200"
+                            : "border-slate-200",
+                        )}
+                        style={{ background: cellColor(c) || "#fff" }}
+                        onClick={() => {
+                          if (!isAdmin || locked) return;
+                          setSelected({ studentId: st.studentId, day: mobileDay });
+                        }}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-900">
+                            {i + 1}. {st.fullName}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {st.rollNumber != null ? `R${st.rollNumber}` : ""}{" "}
+                            {st.admissionNumber ?? ""}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-mono text-sm font-semibold text-slate-800">
+                          {cellLabel(c) || "·"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Desktop / tablet grid */}
+          <div className="hidden max-h-[min(70vh,720px)] overflow-auto overscroll-contain rounded-xl border border-slate-200 [scrollbar-width:thin] md:block">
             <table className="w-full min-w-[1100px] border-collapse text-xs">
               <thead className="sticky top-0 z-10 bg-slate-50">
                 <tr>
@@ -3197,7 +3411,7 @@ const RosterBuilder = ({
 
           {/* Cell editor */}
           {isAdmin && !locked && selected ? (
-            <Card className="border-brand-200 bg-brand-50/40 print:hidden">
+            <Card className="sticky bottom-2 z-30 border-brand-200 bg-white shadow-lg print:hidden md:static md:bg-brand-50/40 md:shadow-none">
               <CardContent className="grid gap-3 py-4 sm:grid-cols-2 lg:grid-cols-4">
                 <p className="sm:col-span-2 lg:col-span-4 text-sm font-medium text-slate-800">
                   Editing day {selected.day} —{" "}
@@ -3306,6 +3520,121 @@ const RosterBuilder = ({
 };
 
 // ─── Duty summary / clinical record ─────────────────────────────────────────
+
+const dutySummaryTh =
+  "whitespace-nowrap px-2 py-1.5 text-[11px] font-semibold leading-tight text-slate-600";
+const dutySummaryTd = "whitespace-nowrap px-2 py-1.5 text-xs leading-tight";
+const dutySummaryMetric = "w-16 px-1.5 text-center tabular-nums";
+const dutySummaryCode = "w-9 min-w-9 px-1 text-center tabular-nums";
+
+/** Bounded horizontal swipe area so wide matrices scroll inside the card, not the page. */
+const DutySummaryScroll = ({ children }: { children: ReactNode }) => (
+  <div className="isolate hidden w-fit max-w-full min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-slate-200 [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y] [scrollbar-width:thin] md:block [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-slate-100">
+    {children}
+  </div>
+);
+
+const DutyMobileStudentCard = ({
+  index,
+  rollNumber,
+  fullName,
+  children,
+}: {
+  index: number;
+  rollNumber?: number;
+  fullName: string;
+  children: ReactNode;
+}) => (
+  <div className="rounded-xl border border-slate-200 bg-white p-3">
+    <p className="font-medium text-slate-900">
+      {index + 1}. {fullName}
+    </p>
+    <p className="text-xs text-slate-500">Roll {rollLabel(rollNumber)}</p>
+    <div className="mt-2">{children}</div>
+  </div>
+);
+
+const dutyStatGrid = "grid grid-cols-2 gap-x-3 gap-y-1 text-xs";
+const dutyStatRow = (label: string, value: string | number) => (
+  <div className="flex justify-between gap-2">
+    <span className="text-slate-500">{label}</span>
+    <span className="tabular-nums font-medium text-slate-900">{value}</span>
+  </div>
+);
+
+const DutySummaryTable = ({ children }: { children: ReactNode }) => (
+  <Table className="w-max min-w-0 border-separate border-spacing-0 text-xs">
+    {children}
+  </Table>
+);
+
+const DutySummaryIdHead = () => (
+  <>
+    <Th
+      className={cn(
+        dutySummaryTh,
+        "sticky left-0 z-20 w-10 bg-slate-50 text-center",
+      )}
+    >
+      S.N.
+    </Th>
+    <Th
+      className={cn(
+        dutySummaryTh,
+        "sticky left-10 z-20 w-12 bg-slate-50 text-center",
+      )}
+    >
+      Roll
+    </Th>
+    <Th
+      className={cn(
+        dutySummaryTh,
+        "sticky left-[5.5rem] z-20 min-w-[8.5rem] max-w-[11rem] bg-slate-50 shadow-[4px_0_8px_-2px_rgba(15,23,42,0.12)]",
+      )}
+    >
+      Student
+    </Th>
+  </>
+);
+
+const DutySummaryIdCells = ({
+  index,
+  rollNumber,
+  fullName,
+}: {
+  index: number;
+  rollNumber?: number;
+  fullName: string;
+}) => (
+  <>
+    <Td
+      className={cn(
+        dutySummaryTd,
+        "sticky left-0 z-10 w-10 bg-white text-center tabular-nums",
+      )}
+    >
+      {index + 1}
+    </Td>
+    <Td
+      className={cn(
+        dutySummaryTd,
+        "sticky left-10 z-10 w-12 bg-white text-center tabular-nums",
+      )}
+    >
+      {rollLabel(rollNumber)}
+    </Td>
+    <Td
+      className={cn(
+        dutySummaryTd,
+        "sticky left-[5.5rem] z-10 min-w-[8.5rem] max-w-[11rem] bg-white font-medium text-slate-900 shadow-[4px_0_8px_-2px_rgba(15,23,42,0.12)]",
+      )}
+    >
+      <span className="block max-w-[11rem] truncate" title={fullName}>
+        {fullName}
+      </span>
+    </Td>
+  </>
+);
 
 const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
   const deptCodes = useMemo(() => {
@@ -3511,10 +3840,10 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
   };
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-          <div>
+    <div className="min-w-0 space-y-4">
+      <Card className="min-w-0">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0">
             <CardTitle>Student duty summary</CardTitle>
             <p className="text-sm text-slate-500">
               {roster.name} · {periodLabel(roster)}
@@ -3526,43 +3855,71 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
             Print
           </Button>
         </CardHeader>
-        <CardContent className="min-w-0">
-          <div className="overflow-x-auto">
-            <Table className="min-w-[960px]">
+        <CardContent className="min-w-0 px-3 py-3 sm:px-4">
+          <DutySummaryScroll>
+            <DutySummaryTable>
               <TableHead>
                 <tr>
-                  <Th className="w-12 text-center">S.N.</Th>
-                  <Th className="w-16 text-center">Roll</Th>
-                  <Th>Student</Th>
-                  <Th>Total duties</Th>
-                  <Th>Duty hours</Th>
-                  <Th>Working days</Th>
-                  <Th>Leave</Th>
-                  <Th>Off</Th>
+                  <DutySummaryIdHead />
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Total duties</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Duty hours</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Working days</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Leave</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Off</Th>
                 </tr>
               </TableHead>
               <TableBody>
                 {dutyRows.map((row, i) => (
                   <tr key={row.studentId}>
-                    <Td className="text-center tabular-nums">{i + 1}</Td>
-                    <Td className="text-center tabular-nums">{rollLabel(row.rollNumber)}</Td>
-                    <Td className="font-medium">{row.fullName}</Td>
-                    <Td className="tabular-nums">{row.totalDuties}</Td>
-                    <Td className="tabular-nums">{row.totalDutyHours}</Td>
-                    <Td className="tabular-nums">{row.workingDays}</Td>
-                    <Td className="tabular-nums">{row.leaveDays}</Td>
-                    <Td className="tabular-nums">{row.offDays}</Td>
+                    <DutySummaryIdCells
+                      index={i}
+                      rollNumber={row.rollNumber}
+                      fullName={row.fullName}
+                    />
+                    <Td className={cn(dutySummaryTd, dutySummaryMetric)}>
+                      {row.totalDuties}
+                    </Td>
+                    <Td className={cn(dutySummaryTd, dutySummaryMetric)}>
+                      {row.totalDutyHours}
+                    </Td>
+                    <Td className={cn(dutySummaryTd, dutySummaryMetric)}>
+                      {row.workingDays}
+                    </Td>
+                    <Td className={cn(dutySummaryTd, dutySummaryMetric)}>
+                      {row.leaveDays}
+                    </Td>
+                    <Td className={cn(dutySummaryTd, dutySummaryMetric)}>
+                      {row.offDays}
+                    </Td>
                   </tr>
                 ))}
               </TableBody>
-            </Table>
+            </DutySummaryTable>
+          </DutySummaryScroll>
+          <div className="space-y-2 md:hidden">
+            {dutyRows.map((row, i) => (
+              <DutyMobileStudentCard
+                key={row.studentId}
+                index={i}
+                rollNumber={row.rollNumber}
+                fullName={row.fullName}
+              >
+                <div className={dutyStatGrid}>
+                  {dutyStatRow("Duties", row.totalDuties)}
+                  {dutyStatRow("Hours", row.totalDutyHours)}
+                  {dutyStatRow("Working", row.workingDays)}
+                  {dutyStatRow("Leave", row.leaveDays)}
+                  {dutyStatRow("Off", row.offDays)}
+                </div>
+              </DutyMobileStudentCard>
+            ))}
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-          <div>
+      <Card className="min-w-0">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0">
             <CardTitle>Department days by student</CardTitle>
             <p className="text-sm text-slate-500">
               How many days each student worked in each department (column = department code).
@@ -3573,25 +3930,27 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
             Print
           </Button>
         </CardHeader>
-        <CardContent className="min-w-0">
-          <div className="overflow-x-auto">
-            <Table className="min-w-[960px]">
+        <CardContent className="min-w-0 px-3 py-3 sm:px-4">
+          <DutySummaryScroll>
+            <DutySummaryTable>
               <TableHead>
                 <tr>
-                  <Th className="w-12 text-center">S.N.</Th>
-                  <Th className="w-16 text-center">Roll</Th>
-                  <Th>Student</Th>
+                  <DutySummaryIdHead />
                   {deptCodes.map((c) => {
                     const name =
                       summary.departmentLegend.find((d) => d.shortCode === c)?.name ??
                       c;
                     return (
-                      <Th key={c} className="text-center" title={name}>
+                      <Th
+                        key={c}
+                        className={cn(dutySummaryTh, dutySummaryCode)}
+                        title={name}
+                      >
                         {c}
                       </Th>
                     );
                   })}
-                  <Th className="text-right">Dept days</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Dept days</Th>
                 </tr>
               </TableHead>
               <TableBody>
@@ -3602,24 +3961,60 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                   );
                   return (
                     <tr key={row.studentId}>
-                      <Td className="text-center tabular-nums">{i + 1}</Td>
-                      <Td className="text-center tabular-nums">
-                        {rollLabel(row.rollNumber)}
-                      </Td>
-                      <Td className="font-medium">{row.fullName}</Td>
+                      <DutySummaryIdCells
+                        index={i}
+                        rollNumber={row.rollNumber}
+                        fullName={row.fullName}
+                      />
                       {deptCodes.map((c) => (
-                        <Td key={c} className="text-center tabular-nums">
+                        <Td key={c} className={cn(dutySummaryTd, dutySummaryCode)}>
                           {row.byDepartment[c] ?? 0}
                         </Td>
                       ))}
-                      <Td className="text-right font-semibold tabular-nums">
+                      <Td
+                        className={cn(
+                          dutySummaryTd,
+                          dutySummaryMetric,
+                          "font-semibold",
+                        )}
+                      >
                         {deptTotal}
                       </Td>
                     </tr>
                   );
                 })}
               </TableBody>
-            </Table>
+            </DutySummaryTable>
+          </DutySummaryScroll>
+          <div className="space-y-2 md:hidden">
+            {dutyRows.map((row, i) => {
+              const deptTotal = Object.values(row.byDepartment).reduce(
+                (a, b) => a + b,
+                0,
+              );
+              return (
+                <DutyMobileStudentCard
+                  key={row.studentId}
+                  index={i}
+                  rollNumber={row.rollNumber}
+                  fullName={row.fullName}
+                >
+                  <div className="flex flex-wrap gap-1">
+                    {deptCodes.map((c) => (
+                      <span
+                        key={c}
+                        className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] tabular-nums"
+                      >
+                        {c} {row.byDepartment[c] ?? 0}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-xs font-semibold text-slate-800">
+                    Dept days {deptTotal}
+                  </p>
+                </DutyMobileStudentCard>
+              );
+            })}
           </div>
           {deptCodes.length === 0 ? (
             <p className="py-4 text-center text-sm text-slate-500">
@@ -3629,9 +4024,9 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-          <div>
+      <Card className="min-w-0">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0">
             <CardTitle>Shift days by student</CardTitle>
             <p className="text-sm text-slate-500">
               How many days each student worked each shift (column = shift code). Separate from
@@ -3643,28 +4038,26 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
             Print
           </Button>
         </CardHeader>
-        <CardContent className="min-w-0">
-          <div className="overflow-x-auto">
-            <Table className="min-w-[960px]">
+        <CardContent className="min-w-0 px-3 py-3 sm:px-4">
+          <DutySummaryScroll>
+            <DutySummaryTable>
               <TableHead>
                 <tr>
-                  <Th className="w-12 text-center">S.N.</Th>
-                  <Th className="w-16 text-center">Roll</Th>
-                  <Th>Student</Th>
+                  <DutySummaryIdHead />
                   {shiftCodes.map((c) => {
                     const sh = summary.shiftLegend.find((s) => s.shortCode === c);
                     return (
                       <Th
                         key={c}
-                        className="text-center"
+                        className={cn(dutySummaryTh, dutySummaryCode)}
                         title={sh ? `${sh.name} (${sh.dutyHours}h)` : c}
                       >
                         {c}
                       </Th>
                     );
                   })}
-                  <Th className="text-right">Shift days</Th>
-                  <Th className="text-right">Hours</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Shift days</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Hours</Th>
                 </tr>
               </TableHead>
               <TableBody>
@@ -3675,27 +4068,60 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
                   );
                   return (
                     <tr key={row.studentId}>
-                      <Td className="text-center tabular-nums">{i + 1}</Td>
-                      <Td className="text-center tabular-nums">
-                        {rollLabel(row.rollNumber)}
-                      </Td>
-                      <Td className="font-medium">{row.fullName}</Td>
+                      <DutySummaryIdCells
+                        index={i}
+                        rollNumber={row.rollNumber}
+                        fullName={row.fullName}
+                      />
                       {shiftCodes.map((c) => (
-                        <Td key={c} className="text-center tabular-nums">
+                        <Td key={c} className={cn(dutySummaryTd, dutySummaryCode)}>
                           {row.byShift[c] ?? 0}
                         </Td>
                       ))}
-                      <Td className="text-right font-semibold tabular-nums">
+                      <Td
+                        className={cn(
+                          dutySummaryTd,
+                          dutySummaryMetric,
+                          "font-semibold",
+                        )}
+                      >
                         {shiftTotal}
                       </Td>
-                      <Td className="text-right tabular-nums">
+                      <Td className={cn(dutySummaryTd, dutySummaryMetric)}>
                         {row.totalDutyHours}
                       </Td>
                     </tr>
                   );
                 })}
               </TableBody>
-            </Table>
+            </DutySummaryTable>
+          </DutySummaryScroll>
+          <div className="space-y-2 md:hidden">
+            {dutyRows.map((row, i) => {
+              const shiftTotal = Object.values(row.byShift).reduce((a, b) => a + b, 0);
+              return (
+                <DutyMobileStudentCard
+                  key={row.studentId}
+                  index={i}
+                  rollNumber={row.rollNumber}
+                  fullName={row.fullName}
+                >
+                  <div className="flex flex-wrap gap-1">
+                    {shiftCodes.map((c) => (
+                      <span
+                        key={c}
+                        className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] tabular-nums"
+                      >
+                        {c} {row.byShift[c] ?? 0}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-xs font-semibold text-slate-800">
+                    Shift days {shiftTotal} · Hours {row.totalDutyHours}
+                  </p>
+                </DutyMobileStudentCard>
+              );
+            })}
           </div>
           {shiftCodes.length === 0 ? (
             <p className="py-4 text-center text-sm text-slate-500">
@@ -3705,9 +4131,9 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-          <div>
+      <Card className="min-w-0">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0">
             <CardTitle>Clinical duty record (departments)</CardTitle>
             <p className="text-sm text-slate-500">
               Same department matrix as above — compact clinical record view.
@@ -3718,40 +4144,70 @@ const DutySummaryView = ({ summary }: { summary: HospitalRosterSummary }) => {
             Print
           </Button>
         </CardHeader>
-        <CardContent className="min-w-0">
-          <div className="overflow-x-auto">
-            <Table className="min-w-[960px]">
+        <CardContent className="min-w-0 px-3 py-3 sm:px-4">
+          <DutySummaryScroll>
+            <DutySummaryTable>
               <TableHead>
                 <tr>
-                  <Th className="w-12 text-center">S.N.</Th>
-                  <Th className="w-16 text-center">Roll</Th>
-                  <Th>Student</Th>
+                  <DutySummaryIdHead />
                   {deptCodes.map((c) => (
-                    <Th key={c} className="text-center">
+                    <Th key={c} className={cn(dutySummaryTh, dutySummaryCode)}>
                       {c}
                     </Th>
                   ))}
-                  <Th className="text-right">Total duties</Th>
+                  <Th className={cn(dutySummaryTh, dutySummaryMetric)}>Total duties</Th>
                 </tr>
               </TableHead>
               <TableBody>
                 {clinicalRows.map((row, i) => (
                   <tr key={row.studentId}>
-                    <Td className="text-center tabular-nums">{i + 1}</Td>
-                    <Td className="text-center tabular-nums">
-                      {rollLabel(row.rollNumber)}
-                    </Td>
-                    <Td className="font-medium">{row.fullName}</Td>
+                    <DutySummaryIdCells
+                      index={i}
+                      rollNumber={row.rollNumber}
+                      fullName={row.fullName}
+                    />
                     {deptCodes.map((c) => (
-                      <Td key={c} className="text-center tabular-nums">
+                      <Td key={c} className={cn(dutySummaryTd, dutySummaryCode)}>
                         {row.byDepartment[c] ?? 0}
                       </Td>
                     ))}
-                    <Td className="text-right font-semibold">{row.totalDuties}</Td>
+                    <Td
+                      className={cn(
+                        dutySummaryTd,
+                        dutySummaryMetric,
+                        "font-semibold",
+                      )}
+                    >
+                      {row.totalDuties}
+                    </Td>
                   </tr>
                 ))}
               </TableBody>
-            </Table>
+            </DutySummaryTable>
+          </DutySummaryScroll>
+          <div className="space-y-2 md:hidden">
+            {clinicalRows.map((row, i) => (
+              <DutyMobileStudentCard
+                key={row.studentId}
+                index={i}
+                rollNumber={row.rollNumber}
+                fullName={row.fullName}
+              >
+                <div className="flex flex-wrap gap-1">
+                  {deptCodes.map((c) => (
+                    <span
+                      key={c}
+                      className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] tabular-nums"
+                    >
+                      {c} {row.byDepartment[c] ?? 0}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs font-semibold text-slate-800">
+                  Total duties {row.totalDuties}
+                </p>
+              </DutyMobileStudentCard>
+            ))}
           </div>
         </CardContent>
       </Card>

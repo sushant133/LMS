@@ -256,6 +256,9 @@ export interface SalaryPaymentRecord {
   periodsAttended?: number;
   tenderAmountNpr?: number;
   syllabusCompletedPercent?: number;
+  syllabusAlreadyPaidPercent?: number;
+  syllabusThisMonthPercent?: number;
+  syllabusRemainingPercent?: number;
   tenderAlreadyPaidNpr?: number;
   tenderThisMonthNpr?: number;
   payBreakdown?: string;
@@ -313,7 +316,14 @@ export interface SalarySheetRow {
   periodRateNpr?: number;
   periodsAttended?: number;
   tenderAmountNpr?: number;
+  /** Cumulative syllabus completed (auto from allotted syllabus). */
   syllabusCompletedPercent?: number;
+  /** Syllabus % already paid in earlier PAID months this academic year. */
+  syllabusAlreadyPaidPercent?: number;
+  /** Payable this month = completed − already paid (e.g. 33 − 14 = 19). */
+  syllabusThisMonthPercent?: number;
+  /** 100 − completed. */
+  syllabusRemainingPercent?: number;
   tenderAlreadyPaidNpr?: number;
   tenderThisMonthNpr?: number;
   payBreakdown?: string;

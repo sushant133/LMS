@@ -13,7 +13,7 @@ import {
   type TeacherRecord,
   type YearRecord,
 } from "@phit-erp/shared";
-import { Pencil, Power, Trash2 } from "lucide-react";
+import { Pencil, Power, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "components/shared/EmptyState";
 import { FormField } from "components/shared/FormField";
@@ -74,6 +74,19 @@ interface MigrationTeacherRow {
   assignedSectionIds: string[];
   assignedBatchIds: string[];
   assignedYearIds: string[];
+}
+
+interface SyllabusLeftover {
+  hasHierarchy: boolean;
+  totalUnits: number;
+  completedUnits: number;
+  leftoverUnits: number;
+  completedPercent: number;
+  leftoverPercent: number;
+  leftoverFrom: number | null;
+  leftoverTo: number | null;
+  completedFrom: number | null;
+  completedTo: number | null;
 }
 
 interface WorkloadRow {
@@ -175,6 +188,12 @@ export const SubjectAssignmentManager = () => {
   );
   const [deactivateToBs, setDeactivateToBs] = useState("");
   const [deactivateReason, setDeactivateReason] = useState("");
+  const [continuingRow, setContinuingRow] = useState<SubjectAssignmentRecord | null>(
+    null,
+  );
+  const [continueTeacherId, setContinueTeacherId] = useState("");
+  const [continueFromBs, setContinueFromBs] = useState("");
+  const [continueReason, setContinueReason] = useState("");
   const actionPanelRef = useRef<HTMLDivElement>(null);
 
   const settingsQuery = useQuery({
@@ -390,6 +409,7 @@ export const SubjectAssignmentManager = () => {
 
   const openEdit = (row: SubjectAssignmentRecord) => {
     setDeactivatingRow(null);
+    setContinuingRow(null);
     setEditingRow(row);
     setEditDraft({
       assignmentType: row.assignmentType,
@@ -409,6 +429,7 @@ export const SubjectAssignmentManager = () => {
   const openDeactivate = (row: SubjectAssignmentRecord) => {
     setEditingRow(null);
     setEditDraft(null);
+    setContinuingRow(null);
     setDeactivatingRow(row);
     setDeactivateToBs(todayBsString());
     setDeactivateReason("Deactivated by admin");
@@ -420,10 +441,27 @@ export const SubjectAssignmentManager = () => {
     setDeactivateReason("");
   };
 
+  const openContinue = (row: SubjectAssignmentRecord) => {
+    setEditingRow(null);
+    setEditDraft(null);
+    setDeactivatingRow(null);
+    setContinuingRow(row);
+    setContinueTeacherId("");
+    setContinueFromBs(todayBsString());
+    setContinueReason("");
+  };
+
+  const closeContinue = () => {
+    setContinuingRow(null);
+    setContinueTeacherId("");
+    setContinueFromBs("");
+    setContinueReason("");
+  };
+
   // Cards mount after state updates — scroll once they exist so Edit/Deactivate
   // is not left off-screen below the assignment table.
   useEffect(() => {
-    if (!editingRow && !deactivatingRow) return;
+    if (!editingRow && !deactivatingRow && !continuingRow) return;
     const frame = window.requestAnimationFrame(() => {
       actionPanelRef.current?.scrollIntoView({
         behavior: "smooth",
@@ -502,6 +540,45 @@ export const SubjectAssignmentManager = () => {
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  const leftoverQuery = useQuery({
+    queryKey: ["subject-assignment-leftover", continuingRow?._id],
+    queryFn: () =>
+      unwrap<SyllabusLeftover>(
+        api.get(`/academics/subject-assignments/${continuingRow!._id}/leftover`),
+      ),
+    enabled: Boolean(continuingRow?._id),
+  });
+
+  const continueMutation = useMutation({
+    mutationFn: async () => {
+      if (!continuingRow) throw new Error("No assignment selected");
+      if (!continueTeacherId) throw new Error("Select the incoming teacher");
+      if (continueTeacherId === idOf(continuingRow.teacherId)) {
+        throw new Error("Incoming teacher must be different from the teacher who is leaving");
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(continueFromBs)) {
+        throw new Error("Valid start date (BS YYYY-MM-DD) is required");
+      }
+      return unwrap<{ rows: SubjectAssignmentRecord[]; warnings: string[] }>(
+        api.post(`/academics/subject-assignments/${continuingRow._id}/reassign`, {
+          teacherId: continueTeacherId,
+          effectiveFromBs: continueFromBs,
+          continueLeftover: true,
+          endReason:
+            continueReason.trim() ||
+            "Left after teaching part of the syllabus; leftover continued by incoming teacher",
+        }),
+      );
+    },
+    onSuccess: async (data) => {
+      toast.success("Incoming teacher will continue leftover syllabus");
+      data.warnings?.forEach((w) => toast.warning(w));
+      closeContinue();
+      await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (row: SubjectAssignmentRecord) => {
       return unwrap<{ rows: SubjectAssignmentRecord[]; warnings: string[] }>(
@@ -513,6 +590,7 @@ export const SubjectAssignmentManager = () => {
       data.warnings?.forEach((w) => toast.warning(w));
       if (editingRow && data.rows?.[0]?._id === editingRow._id) closeEdit();
       if (deactivatingRow && data.rows?.[0]?._id === deactivatingRow._id) closeDeactivate();
+      if (continuingRow && data.rows?.[0]?._id === continuingRow._id) closeContinue();
       await queryClient.invalidateQueries({ queryKey: ["subject-assignments"] });
     },
     onError: (error) => toast.error(parseErrorMessage(error)),
@@ -595,7 +673,7 @@ export const SubjectAssignmentManager = () => {
     <div className="space-y-6">
       <PageHeader
         title="Subject Assignment"
-        description="Assign teachers to subjects for class/section or batch/year with FULL, UNIT, or PERCENTAGE coverage. Teacher accounts remain HR-only."
+        description="Assign teachers to subjects for class/section or batch/year with FULL, UNIT, or PERCENTAGE coverage. If a teacher leaves mid-syllabus, use Continue leftover so the incoming teacher picks up remaining units on the same batch/year plan."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -804,6 +882,116 @@ export const SubjectAssignmentManager = () => {
                     onClick={() => deactivateMutation.mutate()}
                   >
                     {deactivateMutation.isPending ? "Deactivating..." : "Deactivate"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            </div>
+          ) : null}
+
+          {canManage && continuingRow ? (
+            <div ref={actionPanelRef} className="scroll-mt-28">
+            <Card className="border-sky-200 shadow-sm">
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Continue leftover syllabus</CardTitle>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {labelOfTeacher(continuingRow.teacherId)} left{" "}
+                    {labelOfSubject(continuingRow.subjectId)} ({groupLabel(continuingRow)}
+                    ). The incoming teacher continues remaining units on the same
+                    batch/year syllabus and session plan. Prior completed work stays
+                    with the previous teacher for tender pay.
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={closeContinue}>
+                  Cancel
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {leftoverQuery.isLoading ? (
+                  <p className="text-sm text-slate-500">Checking leftover units…</p>
+                ) : leftoverQuery.data ? (
+                  <div className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-sm text-slate-700">
+                    {leftoverQuery.data.hasHierarchy ? (
+                      leftoverQuery.data.leftoverUnits > 0 ? (
+                        <>
+                          <p>
+                            Taught:{" "}
+                            <strong>
+                              {leftoverQuery.data.completedUnits} / {leftoverQuery.data.totalUnits} units
+                              ({leftoverQuery.data.completedPercent}%)
+                            </strong>
+                            {leftoverQuery.data.completedFrom != null
+                              ? ` · units ${leftoverQuery.data.completedFrom}–${leftoverQuery.data.completedTo}`
+                              : ""}
+                          </p>
+                          <p className="mt-1">
+                            Incoming teacher continues{" "}
+                            <strong>
+                              units {leftoverQuery.data.leftoverFrom}–{leftoverQuery.data.leftoverTo}
+                            </strong>{" "}
+                            ({leftoverQuery.data.leftoverPercent}% remaining).
+                          </p>
+                        </>
+                      ) : (
+                        <p>This syllabus portion is already complete. Nothing left to continue.</p>
+                      )
+                    ) : (
+                      <p>
+                        No unit breakdown yet. The incoming teacher will continue the same
+                        subject syllabus ({leftoverQuery.data.completedPercent}% already
+                        recorded). Set their tender for leftover work only.
+                      </p>
+                    )}
+                  </div>
+                ) : leftoverQuery.isError ? (
+                  <p className="text-sm text-rose-700">
+                    {parseErrorMessage(leftoverQuery.error)}
+                  </p>
+                ) : null}
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FormField label="Incoming teacher">
+                    <Select
+                      value={continueTeacherId}
+                      onChange={(e) => setContinueTeacherId(e.target.value)}
+                    >
+                      <option value="">Select teacher</option>
+                      {teachers
+                        .filter((t) => t._id !== idOf(continuingRow.teacherId))
+                        .map((t) => (
+                          <option key={t._id} value={t._id}>
+                            {teacherOptionLabel(t)}
+                          </option>
+                        ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Continue from (BS)">
+                    <NepaliDateField value={continueFromBs} onChange={setContinueFromBs} />
+                  </FormField>
+                  <FormField label="Reason (optional)">
+                    <Input
+                      value={continueReason}
+                      onChange={(e) => setContinueReason(e.target.value)}
+                      placeholder="Previous teacher left mid-syllabus"
+                    />
+                  </FormField>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={closeContinue}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={
+                      continueMutation.isPending ||
+                      !continueTeacherId ||
+                      (leftoverQuery.data?.hasHierarchy === true &&
+                        leftoverQuery.data.leftoverUnits === 0)
+                    }
+                    onClick={() => continueMutation.mutate()}
+                  >
+                    {continueMutation.isPending
+                      ? "Saving…"
+                      : "Continue leftover with this teacher"}
                   </Button>
                 </div>
               </CardContent>
@@ -1296,7 +1484,9 @@ export const SubjectAssignmentManager = () => {
                         <tr
                           key={row._id}
                           className={
-                            editingRow?._id === row._id || deactivatingRow?._id === row._id
+                            editingRow?._id === row._id ||
+                            deactivatingRow?._id === row._id ||
+                            continuingRow?._id === row._id
                               ? "bg-slate-50"
                               : undefined
                           }
@@ -1336,10 +1526,27 @@ export const SubjectAssignmentManager = () => {
                                     <Button
                                       size="sm"
                                       variant="outline"
+                                      className="border-sky-200 text-sky-800 hover:bg-sky-50"
+                                      disabled={
+                                        updateMutation.isPending ||
+                                        deactivateMutation.isPending ||
+                                        continueMutation.isPending ||
+                                        deleteMutation.isPending
+                                      }
+                                      onClick={() => openContinue(row)}
+                                      title="Incoming teacher continues leftover units on the same syllabus"
+                                    >
+                                      <UserPlus className="mr-1 h-3.5 w-3.5" />
+                                      Continue leftover
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
                                       className="border-amber-200 text-amber-800 hover:bg-amber-50"
                                       disabled={
                                         updateMutation.isPending ||
                                         deactivateMutation.isPending ||
+                                        continueMutation.isPending ||
                                         deleteMutation.isPending
                                       }
                                       onClick={() => openDeactivate(row)}

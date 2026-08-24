@@ -58,6 +58,8 @@ export interface SubjectAssignmentRecord {
   effectiveToBs?: string | null;
   status: SubjectAssignmentStatus;
   remarks?: string;
+  /** Syllabus % already done when this teacher continued leftover work. */
+  handoverBaselinePercent?: number | null;
   supersedesAssignmentId?: string | null;
   supersededByAssignmentId?: string | null;
   createdBy: string;

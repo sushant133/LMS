@@ -42,6 +42,13 @@ const subjectAssignmentSchema = new Schema(
     },
     remarks: { type: String, default: "" },
 
+    /**
+     * When this row continues leftover work after another teacher left:
+     * syllabus % already completed at handover (0–100). Tender pay for the
+     * incoming teacher starts from this baseline so prior work is not paid twice.
+     */
+    handoverBaselinePercent: { type: Number, default: null, min: 0, max: 100 },
+
     supersedesAssignmentId: { type: Schema.Types.ObjectId, ref: "SubjectAssignment", default: null },
     supersededByAssignmentId: { type: Schema.Types.ObjectId, ref: "SubjectAssignment", default: null },
 

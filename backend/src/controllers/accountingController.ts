@@ -97,12 +97,13 @@ import {
   hasAccountingPermission,
   isInstitutionAdmin,
   normalizeTeacherPaymentType,
-  normalizeUserRole
+  normalizeUserRole,
+  sumTeacherTenderAmountNpr
 } from "@phit-erp/shared";
 import {
   buildSalarySheet,
   calculateSalarySheetLine,
-  calculateTenderThisMonthNpr
+  calculateTenderProgress
 } from "../utils/salarySheetService.js";
 import { needsApprovalForAmount } from "./accountingApprovalController.js";
 import { FinancialApproval } from "../models/FinancialApproval.js";
@@ -154,6 +155,55 @@ const isSalarySheetSuperAdmin = (roles: string[]): boolean =>
 
 const isSalarySheetCollegeAdmin = (roles: string[]): boolean =>
   roles.includes("COLLEGE_ADMIN");
+
+/** HR / teacher record rates — accountants cannot change these on the sheet. */
+const officialPayrollRate = async (
+  schoolId: ReturnType<typeof tenantObjectId>,
+  row: {
+    employeeType: "TEACHER" | "STAFF";
+    teacherId?: string;
+    staffId?: string;
+    monthlySalaryNpr?: number;
+    paymentType?: string;
+    periodRateNpr?: number;
+    tenderAmountNpr?: number;
+  }
+) => {
+  if (row.employeeType === "TEACHER" && row.teacherId) {
+    const teacher = await Teacher.findOne({ _id: row.teacherId, schoolId })
+      .select("basicSalaryNpr paymentType periodRateNpr tenders")
+      .lean();
+    const paymentType = normalizeTeacherPaymentType(teacher?.paymentType ?? row.paymentType);
+    const tenderAmountNpr = sumTeacherTenderAmountNpr(
+      (teacher as { tenders?: Array<{ tenderAmountNpr?: number }> } | null)?.tenders
+    );
+    const periodRateNpr = Math.max(0, Number(teacher?.periodRateNpr ?? row.periodRateNpr) || 0);
+    const monthlySalaryNpr =
+      paymentType === "PERIOD"
+        ? periodRateNpr
+        : paymentType === "TENDER"
+          ? tenderAmountNpr
+          : Math.max(0, Number(teacher?.basicSalaryNpr) || 0);
+    return { paymentType, monthlySalaryNpr, periodRateNpr, tenderAmountNpr };
+  }
+  if (row.employeeType === "STAFF" && row.staffId) {
+    const staff = await CollegeStaff.findOne({ _id: row.staffId, schoolId })
+      .select("basicSalaryNpr")
+      .lean();
+    return {
+      paymentType: "MONTHLY" as const,
+      monthlySalaryNpr: Math.max(0, Number(staff?.basicSalaryNpr) || 0),
+      periodRateNpr: 0,
+      tenderAmountNpr: 0
+    };
+  }
+  return {
+    paymentType: normalizeTeacherPaymentType(row.paymentType),
+    monthlySalaryNpr: Math.max(0, Number(row.monthlySalaryNpr) || 0),
+    periodRateNpr: Math.max(0, Number(row.periodRateNpr) || 0),
+    tenderAmountNpr: Math.max(0, Number(row.tenderAmountNpr) || 0)
+  };
+};
 import { formatAddressLine } from "../utils/formatAddress.js";
 import { generateFeeReceiptPDF } from "../utils/pdf.js";
 import { getInstitutionType, isCollege } from "../utils/institution.js";
@@ -3010,6 +3060,7 @@ const resolvePayrollAmounts = (payload: {
   periodsAttended?: number;
   tenderAmountNpr?: number;
   syllabusCompletedPercent?: number;
+  syllabusAlreadyPaidPercent?: number;
   tenderAlreadyPaidNpr?: number;
   tenderThisMonthNpr?: number;
 }) => {
@@ -3027,11 +3078,20 @@ const resolvePayrollAmounts = (payload: {
     const paymentType = normalizeTeacherPaymentType(payload.paymentType);
     const tenderThisMonthNpr =
       paymentType === "TENDER"
-        ? calculateTenderThisMonthNpr(
-            Number(payload.tenderAmountNpr ?? payload.basicSalaryNpr ?? 0),
-            Number(payload.syllabusCompletedPercent ?? 0),
-            Number(payload.tenderAlreadyPaidNpr ?? 0)
-          )
+        ? calculateTenderProgress({
+            tenderAmountNpr: Number(
+              payload.tenderAmountNpr ?? payload.basicSalaryNpr ?? 0
+            ),
+            syllabusCompletedPercent: Number(payload.syllabusCompletedPercent ?? 0),
+            syllabusAlreadyPaidPercent: Number(
+              payload.syllabusAlreadyPaidPercent ??
+                (Number(payload.tenderAmountNpr ?? payload.basicSalaryNpr ?? 0) > 0
+                  ? (Number(payload.tenderAlreadyPaidNpr ?? 0) /
+                      Number(payload.tenderAmountNpr ?? payload.basicSalaryNpr ?? 1)) *
+                    100
+                  : 0)
+            )
+          }).tenderThisMonthNpr
         : Number(payload.tenderThisMonthNpr ?? 0);
     const calc = calculateSalarySheetLine({
       paymentType,
@@ -3224,100 +3284,6 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
   const savedIds: string[] = [];
 
   for (const row of payload.rows) {
-    const paymentType = normalizeTeacherPaymentType(row.paymentType);
-    const tenderThisMonthNpr =
-      paymentType === "TENDER"
-        ? calculateTenderThisMonthNpr(
-            Number(row.tenderAmountNpr ?? row.monthlySalaryNpr ?? 0),
-            Number(row.syllabusCompletedPercent ?? 0),
-            Number(row.tenderAlreadyPaidNpr ?? 0)
-          )
-        : Number(row.tenderThisMonthNpr ?? 0);
-    const calc = calculateSalarySheetLine({
-      paymentType,
-      monthlySalaryNpr: row.monthlySalaryNpr,
-      presentDays: row.presentDays,
-      absentDays: row.absentDays,
-      leaveDays: row.leaveDays,
-      extraDuty: row.extraDuty,
-      workingDaysInMonth,
-      extraAmountOverrideNpr:
-        row.extraAmountNpr !== undefined && row.extraDuty === 0
-          ? row.extraAmountNpr
-          : undefined,
-      periodRateNpr: row.periodRateNpr ?? row.monthlySalaryNpr,
-      periodsAttended: row.periodsAttended,
-      tenderThisMonthNpr
-    });
-
-    // Only Super Admin / College Admin may persist manual money overrides
-    const useManualValues =
-      canManualValues && Boolean(row.valuesManualOverride);
-    if (Boolean(row.valuesManualOverride) && !canManualValues) {
-      throw new ApiError(
-        403,
-        "Only Super Admin or College Admin can save manually edited salary amounts"
-      );
-    }
-
-    const money = useManualValues
-      ? {
-          absentDeductionNpr: Math.max(0, Number(row.absentDeductionNpr ?? 0)),
-          extraAmountNpr: Math.max(0, Number(row.extraAmountNpr ?? 0)),
-          salaryAmountNpr: Math.max(0, Number(row.salaryAmountNpr ?? 0)),
-          taxNpr: Math.max(0, Number(row.tax1PercentNpr ?? 0)),
-          netSalaryNpr: Math.max(0, Number(row.netSalaryNpr ?? calc.netSalaryNpr))
-        }
-      : {
-          absentDeductionNpr: calc.absentDeductionNpr,
-          extraAmountNpr: calc.extraAmountNpr,
-          salaryAmountNpr: calc.salaryAmountNpr,
-          taxNpr: calc.tax1PercentNpr,
-          netSalaryNpr: calc.netSalaryNpr
-        };
-
-    const docFields = {
-      employeeType: row.employeeType,
-      teacherId: row.employeeType === "TEACHER" ? row.teacherId : undefined,
-      staffId: row.employeeType === "STAFF" ? row.staffId : undefined,
-      staffName: row.employeeName ?? "",
-      monthBs: payload.monthBs,
-      basicSalaryNpr: row.monthlySalaryNpr,
-      allowancesNpr: 0,
-      bonusNpr: 0,
-      advanceSalaryNpr: 0,
-      loanDeductionNpr: 0,
-      otherDeductionsNpr: 0,
-      presentDays: row.presentDays,
-      absentDays: row.absentDays,
-      leaveDays: row.leaveDays ?? 0,
-      extraDuty: row.extraDuty,
-      paymentType,
-      periodRateNpr:
-        paymentType === "PERIOD"
-          ? Number(row.periodRateNpr ?? row.monthlySalaryNpr ?? 0)
-          : Number(row.periodRateNpr ?? 0),
-      periodsAttended: Number(row.periodsAttended ?? 0),
-      tenderAmountNpr: Number(row.tenderAmountNpr ?? (paymentType === "TENDER" ? row.monthlySalaryNpr : 0)),
-      syllabusCompletedPercent: Number(row.syllabusCompletedPercent ?? 0),
-      tenderAlreadyPaidNpr: Number(row.tenderAlreadyPaidNpr ?? 0),
-      tenderThisMonthNpr,
-      payBreakdown: row.payBreakdown ?? "",
-      academicYearBs: schoolAcademicYearBs,
-      absentDeductionNpr: money.absentDeductionNpr,
-      extraAmountNpr: money.extraAmountNpr,
-      salaryAmountNpr: money.salaryAmountNpr,
-      taxNpr: money.taxNpr,
-      netSalaryNpr: money.netSalaryNpr,
-      attendanceManualOverride: Boolean(row.attendanceManualOverride),
-      valuesManualOverride: useManualValues,
-      attendanceIncomplete: false,
-      notes: row.remarks ?? "",
-      status: saveStatus,
-      paidDateBs: payload.paidDateBs || undefined,
-      paymentMethod: payload.paymentMethod
-    };
-
     let existing = null as InstanceType<typeof SalaryPayment> | null;
     if (row.salaryPaymentId) {
       existing = await SalaryPayment.findOne({
@@ -3336,6 +3302,158 @@ export const saveSalarySheet = asyncHandler(async (req: Request, res: Response) 
       if (row.employeeType === "STAFF" && row.staffId) filter.staffId = row.staffId;
       existing = await SalaryPayment.findOne(filter);
     }
+
+    let paymentType = normalizeTeacherPaymentType(row.paymentType);
+    let monthlySalaryNpr = Number(row.monthlySalaryNpr) || 0;
+    let periodRateNpr = Number(row.periodRateNpr ?? 0);
+    let tenderAmountNpr = Number(
+      row.tenderAmountNpr ?? (paymentType === "TENDER" ? row.monthlySalaryNpr : 0)
+    );
+    let preserveAdminAmounts = false;
+
+    if (!admin) {
+      if (existing?.valuesManualOverride) {
+        paymentType = normalizeTeacherPaymentType(existing.paymentType);
+        monthlySalaryNpr = Number(existing.basicSalaryNpr) || 0;
+        periodRateNpr = Number(existing.periodRateNpr) || 0;
+        tenderAmountNpr = Number(existing.tenderAmountNpr) || 0;
+        preserveAdminAmounts = true;
+      } else {
+        const official = await officialPayrollRate(schoolId, row);
+        paymentType = official.paymentType;
+        monthlySalaryNpr = official.monthlySalaryNpr;
+        periodRateNpr = official.periodRateNpr;
+        tenderAmountNpr = official.tenderAmountNpr;
+      }
+    }
+
+    const tenderContract = tenderAmountNpr || monthlySalaryNpr;
+    const tenderProgress =
+      paymentType === "TENDER"
+        ? calculateTenderProgress({
+            tenderAmountNpr: tenderContract,
+            syllabusCompletedPercent: Number(row.syllabusCompletedPercent ?? 0),
+            syllabusAlreadyPaidPercent: Number(
+              row.syllabusAlreadyPaidPercent ??
+                (tenderContract > 0
+                  ? (Number(row.tenderAlreadyPaidNpr ?? 0) / tenderContract) * 100
+                  : 0)
+            )
+          })
+        : null;
+    const tenderThisMonthNpr =
+      paymentType === "TENDER"
+        ? tenderProgress!.tenderThisMonthNpr
+        : Number(row.tenderThisMonthNpr ?? 0);
+    const calc = calculateSalarySheetLine({
+      paymentType,
+      monthlySalaryNpr,
+      presentDays: row.presentDays,
+      absentDays: row.absentDays,
+      leaveDays: row.leaveDays,
+      extraDuty: row.extraDuty,
+      workingDaysInMonth,
+      extraAmountOverrideNpr:
+        admin && row.extraAmountNpr !== undefined && row.extraDuty === 0
+          ? row.extraAmountNpr
+          : undefined,
+      periodRateNpr: periodRateNpr || monthlySalaryNpr,
+      periodsAttended: row.periodsAttended,
+      tenderThisMonthNpr
+    });
+
+    // Only Super Admin / College Admin may persist (or keep) manual money overrides
+    const useManualValues = admin
+      ? Boolean(row.valuesManualOverride)
+      : preserveAdminAmounts;
+
+    const money = useManualValues
+      ? {
+          absentDeductionNpr: Math.max(
+            0,
+            Number(
+              (admin ? row.absentDeductionNpr : existing?.absentDeductionNpr) ?? 0
+            )
+          ),
+          extraAmountNpr: Math.max(
+            0,
+            Number((admin ? row.extraAmountNpr : existing?.extraAmountNpr) ?? 0)
+          ),
+          salaryAmountNpr: Math.max(
+            0,
+            Number((admin ? row.salaryAmountNpr : existing?.salaryAmountNpr) ?? 0)
+          ),
+          taxNpr: Math.max(
+            0,
+            Number((admin ? row.tax1PercentNpr : existing?.taxNpr) ?? calc.tax1PercentNpr)
+          ),
+          netSalaryNpr: Math.max(
+            0,
+            Number(
+              (admin ? row.netSalaryNpr : existing?.netSalaryNpr) ?? calc.netSalaryNpr
+            )
+          )
+        }
+      : {
+          absentDeductionNpr: calc.absentDeductionNpr,
+          extraAmountNpr: calc.extraAmountNpr,
+          salaryAmountNpr: calc.salaryAmountNpr,
+          taxNpr: calc.tax1PercentNpr,
+          netSalaryNpr: calc.netSalaryNpr
+        };
+
+    const docFields = {
+      employeeType: row.employeeType,
+      teacherId: row.employeeType === "TEACHER" ? row.teacherId : undefined,
+      staffId: row.employeeType === "STAFF" ? row.staffId : undefined,
+      staffName: row.employeeName ?? "",
+      monthBs: payload.monthBs,
+      basicSalaryNpr: monthlySalaryNpr,
+      allowancesNpr: 0,
+      bonusNpr: 0,
+      advanceSalaryNpr: 0,
+      loanDeductionNpr: 0,
+      otherDeductionsNpr: 0,
+      presentDays: row.presentDays,
+      absentDays: row.absentDays,
+      leaveDays: row.leaveDays ?? 0,
+      extraDuty: row.extraDuty,
+      paymentType,
+      periodRateNpr:
+        paymentType === "PERIOD" ? periodRateNpr || monthlySalaryNpr : periodRateNpr,
+      periodsAttended: Number(row.periodsAttended ?? 0),
+      tenderAmountNpr: paymentType === "TENDER" ? tenderAmountNpr || monthlySalaryNpr : tenderAmountNpr,
+      syllabusCompletedPercent: Number(
+        tenderProgress?.syllabusCompletedPercent ?? row.syllabusCompletedPercent ?? 0
+      ),
+      syllabusAlreadyPaidPercent: Number(
+        tenderProgress?.syllabusAlreadyPaidPercent ?? row.syllabusAlreadyPaidPercent ?? 0
+      ),
+      syllabusThisMonthPercent: Number(
+        tenderProgress?.syllabusThisMonthPercent ?? row.syllabusThisMonthPercent ?? 0
+      ),
+      syllabusRemainingPercent: Number(
+        tenderProgress?.syllabusRemainingPercent ?? row.syllabusRemainingPercent ?? 100
+      ),
+      tenderAlreadyPaidNpr: Number(
+        tenderProgress?.tenderAlreadyPaidNpr ?? row.tenderAlreadyPaidNpr ?? 0
+      ),
+      tenderThisMonthNpr,
+      payBreakdown: row.payBreakdown ?? "",
+      academicYearBs: schoolAcademicYearBs,
+      absentDeductionNpr: money.absentDeductionNpr,
+      extraAmountNpr: money.extraAmountNpr,
+      salaryAmountNpr: money.salaryAmountNpr,
+      taxNpr: money.taxNpr,
+      netSalaryNpr: money.netSalaryNpr,
+      attendanceManualOverride: Boolean(row.attendanceManualOverride),
+      valuesManualOverride: useManualValues,
+      attendanceIncomplete: false,
+      notes: row.remarks ?? "",
+      status: saveStatus,
+      paidDateBs: payload.paidDateBs || undefined,
+      paymentMethod: payload.paymentMethod
+    };
 
     if (existing) {
       if (existing.status === "PAID" && saveStatus !== "PAID") {
@@ -3566,7 +3684,7 @@ export const rejectSalarySheet = asyncHandler(async (req: Request, res: Response
 
   const sheet = await buildSalarySheet({ schoolId, monthBs });
   const approval = await loadSalarySheetApproval(schoolId, monthBs);
-  return sendSuccess(res, "Salary sheet rejected", { ...sheet, approval });
+  return sendSuccess(res, "Salary sheet returned for correction", { ...sheet, approval });
 });
 
 export const createSalary = asyncHandler(async (req: Request, res: Response) => {

@@ -11,14 +11,19 @@ import type {
   SubjectAssignmentCopyYearInput
 } from "@phit-erp/shared";
 import { env } from "../config/env.js";
+import { AcademicLessonPlan } from "../models/AcademicLessonPlan.js";
+import { AcademicProgress } from "../models/AcademicProgress.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
+import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
 import { Section } from "../models/Section.js";
 import { Setting } from "../models/Setting.js";
 import { Subject } from "../models/Subject.js";
 import { SubjectAssignment } from "../models/SubjectAssignment.js";
 import { Teacher } from "../models/Teacher.js";
+import { TimetableSlot } from "../models/TimetableSlot.js";
 import { Year } from "../models/Year.js";
+import { computeSyllabusLeftover, type SyllabusLeftover } from "./syllabusLeftover.js";
 import { ApiError } from "./apiError.js";
 import { getInstitutionType, isCollege } from "./institution.js";
 import { ensureValidBsDate, getTodayBs } from "./nepaliDate.js";
@@ -800,6 +805,165 @@ export const deleteSubjectAssignment = async (
   });
 };
 
+const academicWorkFilter = (
+  schoolId: ObjectId,
+  academicYearBs: string,
+  subjectId: ObjectId | string,
+  teacherId: ObjectId | string,
+  group: GroupKeys
+): Record<string, unknown> => {
+  const filter: Record<string, unknown> = {
+    schoolId,
+    academicYearBs,
+    subjectId,
+    teacherId,
+    isDeleted: false
+  };
+  if (group.batchId) filter.batchId = group.batchId;
+  if (group.yearId) filter.yearId = group.yearId;
+  if (group.classId) filter.classId = group.classId;
+  if (group.sectionId) filter.sectionId = group.sectionId;
+  return filter;
+};
+
+/** Move session plan, leftover lesson plans, and timetable to the incoming teacher. */
+const transferAcademicHandover = async (
+  schoolId: ObjectId,
+  academicYearBs: string,
+  subjectId: ObjectId,
+  fromTeacherId: ObjectId,
+  toTeacherId: ObjectId,
+  group: GroupKeys,
+  session: ClientSession | null
+): Promise<string[]> => {
+  const notes: string[] = [];
+  const opt = getSessionOption(session);
+  const fromFilter = academicWorkFilter(schoolId, academicYearBs, subjectId, fromTeacherId, group);
+
+  const plans = await AcademicSessionPlan.find(fromFilter).session(session);
+  for (const plan of plans) {
+    const clashFilter = academicWorkFilter(schoolId, academicYearBs, subjectId, toTeacherId, group);
+    const clash = await AcademicSessionPlan.findOne({
+      ...clashFilter,
+      _id: { $ne: plan._id }
+    }).session(session);
+
+    if (!clash) {
+      plan.teacherId = toTeacherId;
+      await plan.save(opt);
+      await AcademicLessonPlan.updateMany(
+        { schoolId, sessionPlanId: plan._id, isDeleted: false },
+        { $set: { teacherId: toTeacherId } },
+        opt
+      );
+      await AcademicProgress.updateMany(
+        { schoolId, sessionPlanId: plan._id },
+        { $set: { teacherId: toTeacherId } },
+        opt
+      );
+      notes.push("Session plan continued for the incoming teacher (same units and progress).");
+      continue;
+    }
+
+    const oldUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id }).session(session);
+    const clashUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: clash._id }).session(session);
+    const clashNos = new Set(clashUnits.map((u) => u.unitNo));
+    const toInsert = oldUnits
+      .filter((u) => !clashNos.has(u.unitNo))
+      .map((u) => {
+        const raw = u.toObject() as Record<string, unknown>;
+        delete raw._id;
+        return {
+          ...raw,
+          sessionPlanId: clash._id,
+          schoolId
+        };
+      });
+    if (toInsert.length > 0) {
+      await AcademicSessionPlanUnit.insertMany(toInsert, opt);
+      notes.push(
+        `Merged ${toInsert.length} leftover session-plan unit(s) into the incoming teacher's existing plan.`
+      );
+    }
+  }
+
+  await AcademicLessonPlan.updateMany(
+    {
+      schoolId,
+      academicYearBs,
+      subjectId,
+      teacherId: fromTeacherId,
+      isDeleted: false,
+      ...(group.batchId ? { batchId: group.batchId } : {}),
+      ...(group.yearId ? { yearId: group.yearId } : {}),
+      ...(group.classId ? { classId: group.classId } : {}),
+      ...(group.sectionId ? { sectionId: group.sectionId } : {})
+    },
+    { $set: { teacherId: toTeacherId } },
+    opt
+  );
+
+  const slotFilter: Record<string, unknown> = {
+    schoolId,
+    academicYearBs,
+    subjectId,
+    teacherId: fromTeacherId
+  };
+  if (group.batchId) slotFilter.batchId = group.batchId;
+  if (group.yearId) slotFilter.yearId = group.yearId;
+  if (group.classId) slotFilter.classId = group.classId;
+  if (group.sectionId) slotFilter.sectionId = group.sectionId;
+  const slotResult = await TimetableSlot.updateMany(
+    slotFilter,
+    { $set: { teacherId: toTeacherId } },
+    opt
+  );
+  if ((slotResult.modifiedCount ?? 0) > 0) {
+    notes.push(`Moved ${slotResult.modifiedCount} timetable slot(s) to the incoming teacher.`);
+  }
+
+  await AcademicSyllabus.updateMany(
+    {
+      schoolId,
+      academicYearBs,
+      subjectId,
+      teacherId: fromTeacherId,
+      isDeleted: false
+    },
+    { $set: { teacherId: toTeacherId } },
+    opt
+  );
+
+  return notes;
+};
+
+export const getAssignmentLeftover = async (
+  schoolId: ObjectId | string,
+  assignmentId: string
+): Promise<SyllabusLeftover & { assignmentId: string; subjectId: string; teacherId: string }> => {
+  const sid = typeof schoolId === "string" ? new mongoose.Types.ObjectId(schoolId) : schoolId;
+  const existing = await SubjectAssignment.findOne({ _id: assignmentId, schoolId: sid });
+  if (!existing) {
+    throw new ApiError(404, "Subject assignment not found");
+  }
+  const leftover = await computeSyllabusLeftover({
+    schoolId: sid,
+    academicYearBs: existing.academicYearBs,
+    subjectId: existing.subjectId.toString(),
+    yearId: existing.yearId?.toString() ?? null,
+    classId: existing.classId?.toString() ?? null,
+    batchId: existing.batchId?.toString() ?? null,
+    assignedUnitFrom: existing.unitFrom ?? null,
+    assignedUnitTo: existing.unitTo ?? null
+  });
+  return {
+    ...leftover,
+    assignmentId: existing._id.toString(),
+    subjectId: existing.subjectId.toString(),
+    teacherId: existing.teacherId.toString()
+  };
+};
+
 export const reassignSubjectAssignment = async (
   req: Request,
   id: string,
@@ -825,15 +989,63 @@ export const reassignSubjectAssignment = async (
       yearId: existing.yearId?.toString() ?? null
     };
 
-    const nextType = payload.assignmentType ?? existing.assignmentType;
+    const continueLeftover = Boolean(payload.continueLeftover);
+    let leftover: SyllabusLeftover | null = null;
+    if (continueLeftover) {
+      leftover = await computeSyllabusLeftover({
+        schoolId,
+        academicYearBs: existing.academicYearBs,
+        subjectId: existing.subjectId.toString(),
+        yearId: group.yearId,
+        classId: group.classId,
+        batchId: group.batchId,
+        assignedUnitFrom: existing.unitFrom ?? null,
+        assignedUnitTo: existing.unitTo ?? null
+      });
+      if (leftover.hasHierarchy && leftover.leftoverUnits === 0) {
+        throw new ApiError(
+          400,
+          "No leftover units on this syllabus. The assigned portion is already complete."
+        );
+      }
+    }
+
+    let nextType = payload.assignmentType ?? existing.assignmentType;
+    let nextFrom = payload.unitFrom !== undefined ? payload.unitFrom : existing.unitFrom;
+    let nextTo = payload.unitTo !== undefined ? payload.unitTo : existing.unitTo;
+    let nextPct =
+      payload.assignedPercentage !== undefined
+        ? payload.assignedPercentage
+        : existing.assignedPercentage;
+    let handoverBaselinePercent: number | null = null;
+
+    if (continueLeftover && leftover) {
+      handoverBaselinePercent = leftover.completedPercent;
+      if (
+        leftover.hasHierarchy &&
+        leftover.leftoverFrom != null &&
+        leftover.leftoverTo != null
+      ) {
+        nextType = "UNIT";
+        nextFrom = leftover.leftoverFrom;
+        nextTo = leftover.leftoverTo;
+        nextPct = null;
+        if (leftover.completedFrom != null && leftover.completedTo != null) {
+          existing.assignmentType = "UNIT";
+          existing.unitFrom = leftover.completedFrom;
+          existing.unitTo = leftover.completedTo;
+          existing.assignedPercentage = null;
+        }
+      }
+    }
+
     const draft: DraftAssignmentRow = {
       teacherId: payload.teacherId,
       subjectId: existing.subjectId.toString(),
       assignmentType: nextType,
-      unitFrom: payload.unitFrom !== undefined ? payload.unitFrom : existing.unitFrom,
-      unitTo: payload.unitTo !== undefined ? payload.unitTo : existing.unitTo,
-      assignedPercentage:
-        payload.assignedPercentage !== undefined ? payload.assignedPercentage : existing.assignedPercentage,
+      unitFrom: nextFrom,
+      unitTo: nextTo,
+      assignedPercentage: nextPct,
       ...group
     };
     if (nextType !== "UNIT") {
@@ -865,16 +1077,29 @@ export const reassignSubjectAssignment = async (
     );
     const warnings = validateMergedActiveSet(merged, {
       maxUnit,
-      allowExceedMaxUnit: Boolean(payload.remarks?.trim() || existing.remarks?.trim())
+      allowExceedMaxUnit: Boolean(
+        payload.remarks?.trim() || existing.remarks?.trim() || continueLeftover
+      )
     });
 
     const endDate = payload.effectiveFromBs;
     existing.status = "SUPERSEDED";
     existing.effectiveToBs = endDate;
     existing.endedBy = userId;
-    existing.endReason = payload.endReason || "Reassigned to another teacher";
+    existing.endReason =
+      payload.endReason ||
+      (continueLeftover
+        ? "Left after teaching part of the syllabus; leftover continued by incoming teacher"
+        : "Reassigned to another teacher");
     existing.updatedBy = userId;
     await existing.save({ ...getSessionOption(session) });
+
+    const leftoverNote =
+      continueLeftover && leftover?.leftoverFrom != null
+        ? `Continues leftover units ${leftover.leftoverFrom}–${leftover.leftoverTo} (${leftover.completedPercent}% already taught).`
+        : continueLeftover
+          ? `Continues leftover syllabus (${leftover?.completedPercent ?? 0}% already taught).`
+          : "";
 
     const [created] = await SubjectAssignment.create(
       [
@@ -896,7 +1121,11 @@ export const reassignSubjectAssignment = async (
           effectiveFromBs: payload.effectiveFromBs,
           effectiveToBs: payload.effectiveToBs ?? null,
           status: "ACTIVE",
-          remarks: payload.remarks ?? `Reassigned from ${existing.teacherId.toString()}`,
+          remarks:
+            payload.remarks ||
+            leftoverNote ||
+            `Reassigned from ${existing.teacherId.toString()}`,
+          handoverBaselinePercent,
           supersedesAssignmentId: existing._id,
           createdBy: userId
         }
@@ -914,6 +1143,20 @@ export const reassignSubjectAssignment = async (
       batchId: existing.batchId?.toString() ?? null,
       yearId: existing.yearId?.toString() ?? null
     });
+
+    if (continueLeftover) {
+      const handoverNotes = await transferAcademicHandover(
+        schoolId,
+        existing.academicYearBs,
+        existing.subjectId,
+        existing.teacherId,
+        new mongoose.Types.ObjectId(payload.teacherId),
+        group,
+        session
+      );
+      warnings.push(...handoverNotes);
+      if (leftoverNote) warnings.unshift(leftoverNote);
+    }
 
     const populated = await SubjectAssignment.findById(created!._id)
       .populate("subjectId", "name code")

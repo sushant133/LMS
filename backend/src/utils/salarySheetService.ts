@@ -1,8 +1,9 @@
 import type { Types } from "mongoose";
 import {
   calculateSalarySheetLine,
-  calculateTenderThisMonthNpr,
+  calculateTenderProgress,
   formatNrsAmountInWords,
+  formatTenderPayBreakdown,
   normalizeTeacherPaymentType,
   paidPresentDays,
   sumTeacherTenderAmountNpr,
@@ -16,15 +17,29 @@ import { SalaryPayment } from "../models/SalaryPayment.js";
 import { School } from "../models/School.js";
 import { Subject } from "../models/Subject.js";
 import { Teacher } from "../models/Teacher.js";
+import { loadTenderSyllabusProgress } from "./tenderSyllabusProgress.js";
 
 export {
   calculateSalarySheetLine,
+  calculateTenderProgress,
   calculateTenderThisMonthNpr,
   deductedAttendanceDays,
   paidPresentDays
 } from "@phit-erp/shared";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** Normalize ObjectId / populated ref / string for map keys. */
+const idKey = (value: unknown): string => {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object" && value !== null) {
+    if ("_id" in value && (value as { _id?: unknown })._id != null) {
+      return String((value as { _id: unknown })._id);
+    }
+  }
+  return String(value);
+};
 
 /** Nepal academic year YYYY/YYYY is typically Shrawan (04) through Ashadh (03). */
 const monthInAcademicYear = (monthBs: string, academicYearBs: string): boolean => {
@@ -43,7 +58,10 @@ const monthInAcademicYear = (monthBs: string, academicYearBs: string): boolean =
 type TeacherPayFacts = {
   periodsByTeacher: Map<string, number>;
   progressByTeacherSubject: Map<string, number>;
+  progressDetailByTeacherSubject: Map<string, string>;
+  assignedSubjectsByTeacher: Map<string, string[]>;
   tenderPaidByTeacher: Map<string, number>;
+  tenderPaidPercentByTeacher: Map<string, number>;
   subjectNameById: Map<string, string>;
   academicYearBs: string;
 };
@@ -51,12 +69,16 @@ type TeacherPayFacts = {
 const loadTeacherPayFacts = async (
   schoolId: Types.ObjectId,
   monthBs: string,
-  teacherIds: Types.ObjectId[]
+  teacherIds: Types.ObjectId[],
+  tenderSubjectIdsByTeacher: Map<string, string[]>
 ): Promise<TeacherPayFacts> => {
   const empty: TeacherPayFacts = {
     periodsByTeacher: new Map(),
     progressByTeacherSubject: new Map(),
+    progressDetailByTeacherSubject: new Map(),
+    assignedSubjectsByTeacher: new Map(),
     tenderPaidByTeacher: new Map(),
+    tenderPaidPercentByTeacher: new Map(),
     subjectNameById: new Map(),
     academicYearBs: ""
   };
@@ -65,7 +87,7 @@ const loadTeacherPayFacts = async (
   const school = await School.findById(schoolId).select("academicYearBs").lean();
   const academicYearBs = String(school?.academicYearBs || "").trim();
 
-  const [logCounts, progressRows, paidRows, subjects] = await Promise.all([
+  const [logCounts, progressRows, paidRows, subjects, syllabusProgress] = await Promise.all([
     AcademicLogBookEntry.aggregate<{ _id: Types.ObjectId; periods: number }>([
       {
         $match: {
@@ -83,12 +105,21 @@ const loadTeacherPayFacts = async (
     SalaryPayment.find({
       schoolId,
       isDeleted: false,
+      status: "PAID",
       teacherId: { $in: teacherIds },
       monthBs: { $ne: monthBs }
     })
-      .select("teacherId monthBs paymentType tenderThisMonthNpr academicYearBs")
+      .select(
+        "teacherId monthBs paymentType tenderThisMonthNpr tenderAmountNpr basicSalaryNpr syllabusCompletedPercent syllabusAlreadyPaidPercent syllabusThisMonthPercent academicYearBs"
+      )
       .lean(),
-    Subject.find({ schoolId }).select("name code").lean()
+    Subject.find({ schoolId }).select("name code").lean(),
+    loadTenderSyllabusProgress({
+      schoolId,
+      teacherIds,
+      academicYearBs,
+      tenderSubjectIdsByTeacher
+    })
   ]);
 
   const periodsByTeacher = new Map<string, number>();
@@ -116,8 +147,15 @@ const loadTeacherPayFacts = async (
     const avg = values.reduce((sum, n) => sum + n, 0) / Math.max(1, values.length);
     progressByTeacherSubject.set(key, round2(avg));
   }
+  // Official syllabus (allotted portion) wins over session-plan AcademicProgress.
+  for (const [key, percent] of syllabusProgress.percentByTeacherSubject) {
+    progressByTeacherSubject.set(key, percent);
+  }
 
   const tenderPaidByTeacher = new Map<string, number>();
+  const tenderPaidPercentByTeacher = new Map<string, number>();
+  const paidPercentSumByTeacher = new Map<string, number>();
+  const paidContractByTeacher = new Map<string, number>();
   for (const row of paidRows) {
     const isTender =
       normalizeTeacherPaymentType(row.paymentType) === "TENDER" ||
@@ -132,10 +170,44 @@ const loadTeacherPayFacts = async (
       }
     }
     const key = String(row.teacherId);
-    tenderPaidByTeacher.set(
-      key,
-      round2((tenderPaidByTeacher.get(key) ?? 0) + (Number(row.tenderThisMonthNpr) || 0))
+    const paidNpr = Number(row.tenderThisMonthNpr) || 0;
+    tenderPaidByTeacher.set(key, round2((tenderPaidByTeacher.get(key) ?? 0) + paidNpr));
+    const contract = Math.max(
+      0,
+      Number(row.tenderAmountNpr ?? row.basicSalaryNpr) || 0
     );
+    if (contract > 0) paidContractByTeacher.set(key, contract);
+
+    const completedAtPay = Number(row.syllabusCompletedPercent) || 0;
+    const alreadyThen = Number(row.syllabusAlreadyPaidPercent) || 0;
+    const thisThen = Number(row.syllabusThisMonthPercent) || 0;
+    const milestone = Math.max(completedAtPay, alreadyThen + thisThen);
+    tenderPaidPercentByTeacher.set(
+      key,
+      round2(Math.max(tenderPaidPercentByTeacher.get(key) ?? 0, milestone))
+    );
+    if (thisThen > 0) {
+      paidPercentSumByTeacher.set(
+        key,
+        round2((paidPercentSumByTeacher.get(key) ?? 0) + thisThen)
+      );
+    }
+  }
+  for (const [key, sumPct] of paidPercentSumByTeacher) {
+    tenderPaidPercentByTeacher.set(
+      key,
+      round2(Math.max(tenderPaidPercentByTeacher.get(key) ?? 0, sumPct))
+    );
+  }
+  for (const [key, paidNpr] of tenderPaidByTeacher) {
+    if ((tenderPaidPercentByTeacher.get(key) ?? 0) > 0) continue;
+    const contract = paidContractByTeacher.get(key) ?? 0;
+    if (contract > 0 && paidNpr > 0) {
+      tenderPaidPercentByTeacher.set(
+        key,
+        round2(Math.min(100, (paidNpr / contract) * 100))
+      );
+    }
   }
 
   const subjectNameById = new Map<string, string>();
@@ -148,7 +220,10 @@ const loadTeacherPayFacts = async (
   return {
     periodsByTeacher,
     progressByTeacherSubject,
+    progressDetailByTeacherSubject: syllabusProgress.detailByTeacherSubject,
+    assignedSubjectsByTeacher: syllabusProgress.assignedSubjectsByTeacher,
     tenderPaidByTeacher,
+    tenderPaidPercentByTeacher,
     subjectNameById,
     academicYearBs
   };
@@ -286,18 +361,6 @@ export type BuildSalarySheetOptions = {
   search?: string;
 };
 
-/** Normalize ObjectId / populated ref / string for map keys. */
-const idKey = (value: unknown): string => {
-  if (value == null) return "";
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "object" && value !== null) {
-    if ("_id" in value && (value as { _id?: unknown })._id != null) {
-      return String((value as { _id: unknown })._id);
-    }
-  }
-  return String(value);
-};
-
 export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
   const { schoolId, monthBs } = options;
   const dept = options.department?.trim().toLowerCase() || "";
@@ -340,10 +403,19 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       .map((s) => [idKey(s.staffId), s] as const)
   );
 
+  const tenderSubjectIdsByTeacher = new Map<string, string[]>();
+  for (const t of teachers) {
+    const ids = (Array.isArray(t.tenders) ? t.tenders : [])
+      .map((row) => idKey((row as { subjectId?: unknown }).subjectId))
+      .filter(Boolean);
+    if (ids.length > 0) tenderSubjectIdsByTeacher.set(idKey(t._id), ids);
+  }
+
   const payFacts = await loadTeacherPayFacts(
     schoolId,
     monthBs,
-    teachers.map((t) => t._id as Types.ObjectId)
+    teachers.map((t) => t._id as Types.ObjectId),
+    tenderSubjectIdsByTeacher
   );
 
   type DraftRow = {
@@ -359,6 +431,9 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     periodsAttended: number;
     tenderAmountNpr: number;
     syllabusCompletedPercent: number;
+    syllabusAlreadyPaidPercent: number;
+    syllabusThisMonthPercent: number;
+    syllabusRemainingPercent: number;
     tenderAlreadyPaidNpr: number;
     tenderThisMonthNpr: number;
     payBreakdown: string;
@@ -460,10 +535,14 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
           periodsAttended?: number;
           tenderAmountNpr?: number;
           syllabusCompletedPercent?: number;
+          syllabusAlreadyPaidPercent?: number;
+          syllabusThisMonthPercent?: number;
+          syllabusRemainingPercent?: number;
           tenderAlreadyPaidNpr?: number;
           tenderThisMonthNpr?: number;
           payBreakdown?: string;
           attendanceManualOverride?: boolean;
+          status?: string;
         }
       | undefined
   ) => {
@@ -491,29 +570,64 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     const liveTenderAmount = sumTeacherTenderAmountNpr(activeTenders);
 
     const livePeriods = payFacts.periodsByTeacher.get(teacherId) ?? 0;
-    const alreadyPaid = payFacts.tenderPaidByTeacher.get(teacherId) ?? 0;
+    const alreadyPaidPercentLive =
+      payFacts.tenderPaidPercentByTeacher.get(teacherId) ?? 0;
     const manualUnits = Boolean(saved?.attendanceManualOverride);
+    const savedPaid = String(saved?.status || "").toUpperCase() === "PAID";
 
     let periodsAttended = livePeriods;
     let tenderAmountNpr = liveTenderAmount;
     let syllabusCompletedPercent = 0;
-    let tenderAlreadyPaidNpr = alreadyPaid;
-    let liveTenderEarnedNpr = 0;
+    let syllabusAlreadyPaidPercent = alreadyPaidPercentLive;
+    let syllabusThisMonthPercent = 0;
+    let syllabusRemainingPercent = 100;
+    let tenderAlreadyPaidNpr = 0;
+    let tenderThisMonthNpr = 0;
     const parts: string[] = [];
 
     if (paymentType === "TENDER") {
+      const subjectRows: Array<{ subjectId: string; amount: number }> = [];
+      if (activeTenders.length > 0) {
+        for (const tender of activeTenders) {
+          const subjectId = idKey(tender.subjectId);
+          if (!subjectId) continue;
+          subjectRows.push({
+            subjectId,
+            amount: Math.max(0, Number(tender.tenderAmountNpr) || 0)
+          });
+        }
+      } else {
+        for (const subjectId of payFacts.assignedSubjectsByTeacher.get(teacherId) ?? []) {
+          subjectRows.push({ subjectId, amount: 0 });
+        }
+        if (subjectRows.length > 0) {
+          tenderAmountNpr = Math.max(
+            0,
+            Number(teacher.basicSalaryNpr) || liveTenderAmount || 0
+          );
+        }
+      }
+
       let weighted = 0;
       let weight = 0;
-      for (const tender of activeTenders) {
-        const subjectId = idKey(tender.subjectId);
+      for (const row of subjectRows) {
         const percent =
-          payFacts.progressByTeacherSubject.get(`${teacherId}:${subjectId}`) ?? 0;
-        const amount = Math.max(0, Number(tender.tenderAmountNpr) || 0);
-        liveTenderEarnedNpr += (percent / 100) * amount;
-        weighted += percent * amount;
-        weight += amount;
-        const subjectName = payFacts.subjectNameById.get(subjectId) || "Subject";
-        parts.push(`${subjectName} ${round2(percent)}% of Rs ${amount.toLocaleString("en-NP")}`);
+          payFacts.progressByTeacherSubject.get(`${teacherId}:${row.subjectId}`) ?? 0;
+        const detail =
+          payFacts.progressDetailByTeacherSubject.get(`${teacherId}:${row.subjectId}`) ?? "";
+        const amount = row.amount;
+        const rowWeight = amount > 0 ? amount : 1;
+        weighted += percent * rowWeight;
+        weight += rowWeight;
+        const subjectName = payFacts.subjectNameById.get(row.subjectId) || "Subject";
+        const portion = detail ? ` · ${detail}` : "";
+        if (amount > 0) {
+          parts.push(
+            `${subjectName}${portion} ${round2(percent)}% of Rs ${amount.toLocaleString("en-NP")}`
+          );
+        } else {
+          parts.push(`${subjectName}${portion} ${round2(percent)}%`);
+        }
       }
       syllabusCompletedPercent = weight > 0 ? round2(weighted / weight) : 0;
     }
@@ -531,27 +645,54 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
           Number(saved.syllabusCompletedPercent) || 0
         );
       }
-      if (saved.tenderAlreadyPaidNpr !== undefined) {
-        tenderAlreadyPaidNpr = Math.max(0, Number(saved.tenderAlreadyPaidNpr) || 0);
-      }
     }
 
-    const tenderThisMonthNpr =
-      paymentType === "TENDER"
-        ? manualUnits && saved?.syllabusCompletedPercent !== undefined
-          ? calculateTenderThisMonthNpr(
-              tenderAmountNpr,
-              syllabusCompletedPercent,
-              tenderAlreadyPaidNpr
-            )
-          : round2(Math.max(0, liveTenderEarnedNpr - tenderAlreadyPaidNpr))
-        : 0;
-
     if (paymentType === "TENDER") {
-      parts.push(
-        `already paid Rs ${tenderAlreadyPaidNpr.toLocaleString("en-NP")} this year`
-      );
-      parts.push(`this month Rs ${tenderThisMonthNpr.toLocaleString("en-NP")}`);
+      if (savedPaid && saved) {
+        syllabusCompletedPercent = Math.max(
+          0,
+          Number(saved.syllabusCompletedPercent ?? syllabusCompletedPercent) || 0
+        );
+        syllabusAlreadyPaidPercent = Math.max(
+          0,
+          Number(saved.syllabusAlreadyPaidPercent ?? alreadyPaidPercentLive) || 0
+        );
+        const locked = calculateTenderProgress({
+          tenderAmountNpr,
+          syllabusCompletedPercent,
+          syllabusAlreadyPaidPercent
+        });
+        syllabusThisMonthPercent =
+          Number(saved.syllabusThisMonthPercent) || locked.syllabusThisMonthPercent;
+        syllabusRemainingPercent =
+          Number(saved.syllabusRemainingPercent) || locked.syllabusRemainingPercent;
+        tenderAlreadyPaidNpr =
+          Number(saved.tenderAlreadyPaidNpr) || locked.tenderAlreadyPaidNpr;
+        tenderThisMonthNpr =
+          Number(saved.tenderThisMonthNpr) || locked.tenderThisMonthNpr;
+      } else {
+        const progress = calculateTenderProgress({
+          tenderAmountNpr,
+          syllabusCompletedPercent,
+          syllabusAlreadyPaidPercent: alreadyPaidPercentLive
+        });
+        syllabusCompletedPercent = progress.syllabusCompletedPercent;
+        syllabusAlreadyPaidPercent = progress.syllabusAlreadyPaidPercent;
+        syllabusThisMonthPercent = progress.syllabusThisMonthPercent;
+        syllabusRemainingPercent = progress.syllabusRemainingPercent;
+        tenderAlreadyPaidNpr = progress.tenderAlreadyPaidNpr;
+        tenderThisMonthNpr = progress.tenderThisMonthNpr;
+        parts.push(
+          formatTenderPayBreakdown({
+            syllabusCompletedPercent,
+            syllabusAlreadyPaidPercent,
+            syllabusThisMonthPercent,
+            syllabusRemainingPercent,
+            tenderAlreadyPaidNpr,
+            tenderThisMonthNpr
+          })
+        );
+      }
     } else if (paymentType === "PERIOD") {
       parts.push(
         `${periodsAttended} period(s) × Rs ${periodRateNpr.toLocaleString("en-NP")}`
@@ -572,11 +713,15 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       periodsAttended,
       tenderAmountNpr,
       syllabusCompletedPercent,
+      syllabusAlreadyPaidPercent,
+      syllabusThisMonthPercent,
+      syllabusRemainingPercent,
       tenderAlreadyPaidNpr,
       tenderThisMonthNpr,
       payBreakdown:
-        (manualUnits && saved?.payBreakdown ? String(saved.payBreakdown) : parts.join(" · ")) ||
-        "",
+        (savedPaid && saved?.payBreakdown
+          ? String(saved.payBreakdown)
+          : parts.join(" · ")) || "",
       monthlySalaryNpr
     };
   };
@@ -588,6 +733,9 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     | "periodsAttended"
     | "tenderAmountNpr"
     | "syllabusCompletedPercent"
+    | "syllabusAlreadyPaidPercent"
+    | "syllabusThisMonthPercent"
+    | "syllabusRemainingPercent"
     | "tenderAlreadyPaidNpr"
     | "tenderThisMonthNpr"
     | "payBreakdown"
@@ -597,6 +745,9 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
     periodsAttended: 0,
     tenderAmountNpr: 0,
     syllabusCompletedPercent: 0,
+    syllabusAlreadyPaidPercent: 0,
+    syllabusThisMonthPercent: 0,
+    syllabusRemainingPercent: 100,
     tenderAlreadyPaidNpr: 0,
     tenderThisMonthNpr: 0,
     payBreakdown: ""
@@ -669,6 +820,9 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         periodsAttended: pay.periodsAttended,
         tenderAmountNpr: pay.tenderAmountNpr,
         syllabusCompletedPercent: pay.syllabusCompletedPercent,
+        syllabusAlreadyPaidPercent: pay.syllabusAlreadyPaidPercent,
+        syllabusThisMonthPercent: pay.syllabusThisMonthPercent,
+        syllabusRemainingPercent: pay.syllabusRemainingPercent,
         tenderAlreadyPaidNpr: pay.tenderAlreadyPaidNpr,
         tenderThisMonthNpr: pay.tenderThisMonthNpr,
         payBreakdown: pay.payBreakdown,
@@ -833,6 +987,15 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
         syllabusCompletedPercent: Number(
           (s as { syllabusCompletedPercent?: number }).syllabusCompletedPercent ?? 0
         ),
+        syllabusAlreadyPaidPercent: Number(
+          (s as { syllabusAlreadyPaidPercent?: number }).syllabusAlreadyPaidPercent ?? 0
+        ),
+        syllabusThisMonthPercent: Number(
+          (s as { syllabusThisMonthPercent?: number }).syllabusThisMonthPercent ?? 0
+        ),
+        syllabusRemainingPercent: Number(
+          (s as { syllabusRemainingPercent?: number }).syllabusRemainingPercent ?? 100
+        ),
         tenderAlreadyPaidNpr: Number(
           (s as { tenderAlreadyPaidNpr?: number }).tenderAlreadyPaidNpr ?? 0
         ),
@@ -941,6 +1104,9 @@ export const buildSalarySheet = async (options: BuildSalarySheetOptions) => {
       periodsAttended: d.periodsAttended,
       tenderAmountNpr: d.tenderAmountNpr,
       syllabusCompletedPercent: d.syllabusCompletedPercent,
+      syllabusAlreadyPaidPercent: d.syllabusAlreadyPaidPercent,
+      syllabusThisMonthPercent: d.syllabusThisMonthPercent,
+      syllabusRemainingPercent: d.syllabusRemainingPercent,
       tenderAlreadyPaidNpr: d.tenderAlreadyPaidNpr,
       tenderThisMonthNpr: d.tenderThisMonthNpr,
       payBreakdown: d.payBreakdown,

@@ -7,6 +7,7 @@ import {
   deleteAssignment,
   endAssignment,
   getAssignmentById,
+  leftoverAssignment,
   listAssignments,
   migrationReview,
   reassignAssignment,
@@ -34,6 +35,7 @@ router.get("/", authorizeInstitutionAdmin, listAssignments);
 router.post("/", authorizeInstitutionAdmin, createAssignment);
 
 router.get("/:id", authorizeInstitutionAdmin, getAssignmentById);
+router.get("/:id/leftover", authorizeInstitutionAdmin, leftoverAssignment);
 router.put("/:id", authorizeInstitutionAdmin, updateAssignment);
 router.delete("/:id", authorizeInstitutionAdmin, deleteAssignment);
 router.post("/:id/end", authorizeInstitutionAdmin, endAssignment);

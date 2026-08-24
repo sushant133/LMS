@@ -8,8 +8,9 @@ import type {
 } from "@phit-erp/shared";
 import {
   calculateSalarySheetLine,
-  calculateTenderThisMonthNpr,
+  calculateTenderProgress,
   formatNrsAmountInWords,
+  formatTenderPayBreakdown,
   normalizeTeacherPaymentType,
   PAYMENT_METHODS,
   TEACHER_PAYMENT_TYPE_LABELS,
@@ -100,6 +101,7 @@ const calcLine = (
     | "periodsAttended"
     | "tenderAmountNpr"
     | "syllabusCompletedPercent"
+    | "syllabusAlreadyPaidPercent"
     | "tenderAlreadyPaidNpr"
     | "tenderThisMonthNpr"
   >,
@@ -112,6 +114,10 @@ const calcLine = (
   | "tax1PercentNpr"
   | "netSalaryNpr"
   | "tenderThisMonthNpr"
+  | "syllabusAlreadyPaidPercent"
+  | "syllabusThisMonthPercent"
+  | "syllabusRemainingPercent"
+  | "tenderAlreadyPaidNpr"
 > => {
   const paymentType = normalizeTeacherPaymentType(row.paymentType);
   const extraDuty = Math.max(0, Number(row.extraDuty) || 0);
@@ -119,13 +125,18 @@ const calcLine = (
     !preferExtraDuty && extraDuty === 0
       ? Number(row.extraAmountNpr) || 0
       : undefined;
+  const contract = Number(row.tenderAmountNpr ?? row.monthlySalaryNpr ?? 0);
+  const tenderProgress =
+    paymentType === "TENDER"
+      ? calculateTenderProgress({
+          tenderAmountNpr: contract,
+          syllabusCompletedPercent: Number(row.syllabusCompletedPercent ?? 0),
+          syllabusAlreadyPaidPercent: Number(row.syllabusAlreadyPaidPercent ?? 0),
+        })
+      : null;
   const tenderThisMonthNpr =
     paymentType === "TENDER"
-      ? calculateTenderThisMonthNpr(
-          Number(row.tenderAmountNpr ?? row.monthlySalaryNpr ?? 0),
-          Number(row.syllabusCompletedPercent ?? 0),
-          Number(row.tenderAlreadyPaidNpr ?? 0),
-        )
+      ? tenderProgress!.tenderThisMonthNpr
       : Number(row.tenderThisMonthNpr ?? 0);
   const calc = calculateSalarySheetLine({
     paymentType,
@@ -140,7 +151,18 @@ const calcLine = (
     periodsAttended: Number(row.periodsAttended) || 0,
     tenderThisMonthNpr,
   });
-  return { ...calc, tenderThisMonthNpr };
+  return {
+    ...calc,
+    tenderThisMonthNpr,
+    syllabusAlreadyPaidPercent:
+      tenderProgress?.syllabusAlreadyPaidPercent ??
+      Number(row.syllabusAlreadyPaidPercent ?? 0),
+    syllabusThisMonthPercent: tenderProgress?.syllabusThisMonthPercent ?? 0,
+    syllabusRemainingPercent: tenderProgress?.syllabusRemainingPercent ?? 100,
+    tenderAlreadyPaidNpr:
+      tenderProgress?.tenderAlreadyPaidNpr ??
+      Number(row.tenderAlreadyPaidNpr ?? 0),
+  };
 };
 
 const currentBsMonth = (): string => {
@@ -424,6 +446,10 @@ export const SalaryPaymentRecordsPanel = ({
     canPrepareSheet && (status === "DRAFT" || status === "PROCESSED");
   const canWritePayroll = canEditSheet;
   const canManualAttendance = canEditSheet;
+  /** Salary / net columns: admin may type or clear-and-write. Accountant uses HR rates. */
+  const canEditAmounts = isAdmin && canEditSheet;
+  /** Row Edit / Remove: admin only. Accountant prepares by adding, then submits. */
+  const canManageRows = isAdmin && canEditSheet;
   const canSaveSheet =
     canEditSheet || (isAdmin && (status === "APPROVED" || status === "PAID"));
   const canSubmitSheet =
@@ -435,7 +461,7 @@ export const SalaryPaymentRecordsPanel = ({
     status === "PENDING_APPROVAL" &&
     ((isCollegeAdmin && !approval?.collegeAdminApproved) ||
       (isSuperAdmin && !approval?.superAdminApproved));
-  const canRejectSheet =
+  const canReturnForCorrection =
     isAdmin && (status === "PENDING_APPROVAL" || status === "APPROVED");
 
   const refreshSheet = async () => {
@@ -464,7 +490,7 @@ export const SalaryPaymentRecordsPanel = ({
   const rejectMutation = useMutation({
     mutationFn: () => rejectSalarySheetClient(monthBs),
     onSuccess: async () => {
-      toast.success("Rejected");
+      toast.success("Returned for correction — accountant can update the sheet");
       await refreshSheet();
     },
     onError: (e) => toast.error(parseErrorMessage(e)),
@@ -598,6 +624,7 @@ export const SalaryPaymentRecordsPanel = ({
         Number(entry.syllabusCompletedPercent) ||
         src?.syllabusCompletedPercent ||
         0,
+      syllabusAlreadyPaidPercent: src?.syllabusAlreadyPaidPercent ?? 0,
       tenderAlreadyPaidNpr: src?.tenderAlreadyPaidNpr ?? 0,
       tenderThisMonthNpr: src?.tenderThisMonthNpr ?? 0,
     });
@@ -645,13 +672,15 @@ export const SalaryPaymentRecordsPanel = ({
       toast.error("Employee not found");
       return;
     }
-    const monthly = Number(entry.monthlySalaryNpr) || 0;
+    const monthly = canEditAmounts
+      ? Number(entry.monthlySalaryNpr) || 0
+      : Number(src.monthlySalaryNpr) || 0;
     const payType = payTypeOf(src);
     if (payType !== "TENDER" && monthly <= 0) {
       toast.error(
         payType === "PERIOD"
-          ? "Enter the rate per period"
-          : "Enter monthly salary",
+          ? "Rate per period is not set on this employee record"
+          : "Monthly salary is not set on this employee record (admin)",
       );
       return;
     }
@@ -678,6 +707,7 @@ export const SalaryPaymentRecordsPanel = ({
       periodsAttended,
       tenderAmountNpr: payType === "TENDER" ? monthly : src.tenderAmountNpr,
       syllabusCompletedPercent,
+      syllabusAlreadyPaidPercent: src.syllabusAlreadyPaidPercent,
       tenderAlreadyPaidNpr: src.tenderAlreadyPaidNpr,
       tenderThisMonthNpr: src.tenderThisMonthNpr,
     });
@@ -692,7 +722,16 @@ export const SalaryPaymentRecordsPanel = ({
       absentDays,
       leaveDays,
       extraDuty,
-      ...calc,
+      ...(src.valuesManualOverride && !canEditAmounts
+        ? {
+            absentDeductionNpr: src.absentDeductionNpr,
+            extraAmountNpr: src.extraAmountNpr,
+            salaryAmountNpr: src.salaryAmountNpr,
+            tax1PercentNpr: src.tax1PercentNpr,
+            netSalaryNpr: src.netSalaryNpr,
+            valuesManualOverride: true,
+          }
+        : calc),
       remarks: entry.remarks,
       attendanceManualOverride:
         entry.attendanceManualOverride || Boolean(src.attendanceManualOverride),
@@ -725,8 +764,8 @@ export const SalaryPaymentRecordsPanel = ({
   };
 
   const startEditRow = (row: EditableRow) => {
-    if (!canWritePayroll) {
-      toast.error("Cannot edit");
+    if (!canManageRows) {
+      toast.error("Only Super Admin or College Admin can edit a salary sheet row");
       return;
     }
     const key = employeeKeyOf(row);
@@ -749,8 +788,8 @@ export const SalaryPaymentRecordsPanel = ({
   };
 
   const removeRow = (row: EditableRow) => {
-    if (!canWritePayroll) {
-      toast.error("Cannot remove");
+    if (!canManageRows) {
+      toast.error("Only Super Admin or College Admin can remove a salary sheet row");
       return;
     }
     const key = employeeKeyOf(row);
@@ -780,6 +819,16 @@ export const SalaryPaymentRecordsPanel = ({
     mode: "days" | "rate" | "money" | "meta" | "units" = "meta",
   ) => {
     if (!canEditSheet) return;
+    if (mode === "money" && !canEditAmounts) return;
+    if (
+      mode === "rate" &&
+      !canEditAmounts &&
+      (patch.monthlySalaryNpr !== undefined ||
+        patch.periodRateNpr !== undefined ||
+        patch.tenderAmountNpr !== undefined)
+    ) {
+      return;
+    }
     setRows((prev) =>
       renumber(
         prev.map((r) => {
@@ -841,7 +890,14 @@ export const SalaryPaymentRecordsPanel = ({
                 const rate = Number(next.periodRateNpr ?? next.monthlySalaryNpr) || 0;
                 next.payBreakdown = `${Number(next.periodsAttended) || 0} period(s) × Rs ${rate.toLocaleString("en-NP")}`;
               } else if (type === "TENDER") {
-                next.payBreakdown = `syllabus ${Number(next.syllabusCompletedPercent) || 0}% · already paid Rs ${Number(next.tenderAlreadyPaidNpr || 0).toLocaleString("en-NP")} · this month Rs ${Number(next.tenderThisMonthNpr || 0).toLocaleString("en-NP")}`;
+                next.payBreakdown = formatTenderPayBreakdown({
+                  syllabusCompletedPercent: Number(next.syllabusCompletedPercent) || 0,
+                  syllabusAlreadyPaidPercent: Number(next.syllabusAlreadyPaidPercent) || 0,
+                  syllabusThisMonthPercent: Number(next.syllabusThisMonthPercent) || 0,
+                  syllabusRemainingPercent: Number(next.syllabusRemainingPercent) || 0,
+                  tenderAlreadyPaidNpr: Number(next.tenderAlreadyPaidNpr) || 0,
+                  tenderThisMonthNpr: Number(next.tenderThisMonthNpr) || 0,
+                });
               }
             }
           } else if (mode === "money") {
@@ -856,7 +912,7 @@ export const SalaryPaymentRecordsPanel = ({
 
   /** Admin: clear money override and recompute from days + monthly salary */
   const recalculateRowFromDays = (row: EditableRow) => {
-    if (!canEditSheet) return;
+    if (!canEditAmounts) return;
     const key = employeeKeyOf(row);
     setRows((prev) =>
       renumber(
@@ -1417,7 +1473,7 @@ export const SalaryPaymentRecordsPanel = ({
           payTypeOf(r) === "PERIOD"
             ? `${r.periodsAttended ?? 0} periods`
             : payTypeOf(r) === "TENDER"
-              ? `${r.syllabusCompletedPercent ?? 0}% syllabus`
+              ? `${r.syllabusThisMonthPercent ?? 0}% this month (${r.syllabusCompletedPercent ?? 0}% complete − ${r.syllabusAlreadyPaidPercent ?? 0}% paid, ${r.syllabusRemainingPercent ?? 0}% left)`
               : "",
         "Breakdown": r.payBreakdown || "",
         "Monthly Salary": r.monthlySalaryNpr,
@@ -1543,6 +1599,9 @@ export const SalaryPaymentRecordsPanel = ({
         periodsAttended: r.periodsAttended,
         tenderAmountNpr: r.tenderAmountNpr,
         syllabusCompletedPercent: r.syllabusCompletedPercent,
+        syllabusAlreadyPaidPercent: r.syllabusAlreadyPaidPercent,
+        syllabusThisMonthPercent: r.syllabusThisMonthPercent,
+        syllabusRemainingPercent: r.syllabusRemainingPercent,
         tenderAlreadyPaidNpr: r.tenderAlreadyPaidNpr,
         tenderThisMonthNpr: r.tenderThisMonthNpr,
         payBreakdown: r.payBreakdown,
@@ -1931,16 +1990,25 @@ export const SalaryPaymentRecordsPanel = ({
           {approveMutation.isPending ? "Approving…" : "Approve"}
         </Button>
       ) : null}
-      {canRejectSheet ? (
+      {canReturnForCorrection ? (
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="text-rose-700"
+          className="text-amber-800"
           disabled={rejectMutation.isPending}
-          onClick={() => rejectMutation.mutate()}
+          onClick={() => {
+            if (
+              !window.confirm(
+                "Return this salary sheet to the accountant for correction? They can update it and submit again.",
+              )
+            ) {
+              return;
+            }
+            rejectMutation.mutate();
+          }}
         >
-          Reject
+          {rejectMutation.isPending ? "Returning…" : "Return for correction"}
         </Button>
       ) : null}
     </div>
@@ -2152,6 +2220,26 @@ export const SalaryPaymentRecordsPanel = ({
         </CardContent>
       </Card>
 
+      {isAccountant && !isAdmin ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          {status === "PENDING_APPROVAL" ? (
+            <p>
+              This sheet is submitted and waiting for admin approval. You cannot
+              edit it until an admin uses <strong>Return for correction</strong>.
+            </p>
+          ) : status === "APPROVED" || status === "PAID" ? (
+            <p>This salary sheet is locked. Amounts are set by admin.</p>
+          ) : (
+            <p>
+              Prepare the sheet (add employees and attendance), then{" "}
+              <strong>Submit</strong> for admin approval. Salary / net amounts
+              are fixed from employee records — only admin can change them or
+              remove rows.
+            </p>
+          )}
+        </div>
+      ) : null}
+
       {sheetQuery.data?.attendanceWarning ? (
         <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -2161,7 +2249,7 @@ export const SalaryPaymentRecordsPanel = ({
         </div>
       ) : null}
 
-      {/* ─── 2. Add / edit employee (admin only) ─── */}
+      {/* ─── 2. Add employee (accountant prepares; admin may also edit amounts) ─── */}
       {canWritePayroll ? (
       <Card className="overflow-hidden border-slate-200 shadow-sm">
         <button
@@ -2250,10 +2338,22 @@ export const SalaryPaymentRecordsPanel = ({
               <NumberInput
                 min={0}
                 value={entry.monthlySalaryNpr}
+                disabled={!canEditAmounts}
+                title={
+                  canEditAmounts
+                    ? undefined
+                    : "Salary / tender / period rate is set by admin and cannot be changed here"
+                }
                 onChange={(e) =>
                   setEntry((f) => ({ ...f, monthlySalaryNpr: e.target.value }))
                 }
               />
+              {!canEditAmounts ? (
+                <p className="text-[11px] leading-snug text-slate-500">
+                  Amount is fixed from the employee record (admin). Accountant
+                  prepares the sheet, then submits for approval.
+                </p>
+              ) : null}
             </FormField>
             {payTypeOf(selectedCatalogRow) === "PERIOD" ? (
               <FormField label="Periods taught">
@@ -2277,6 +2377,10 @@ export const SalaryPaymentRecordsPanel = ({
                   min={0}
                   max={100}
                   value={entry.syllabusCompletedPercent}
+                  title={
+                    selectedCatalogRow?.payBreakdown ||
+                    "Auto-filled from the allotted subject syllabus. Change only to override."
+                  }
                   onChange={(e) =>
                     setEntry((f) => ({
                       ...f,
@@ -2285,6 +2389,10 @@ export const SalaryPaymentRecordsPanel = ({
                     }))
                   }
                 />
+                <p className="text-[11px] leading-snug text-slate-500">
+                  {selectedCatalogRow?.payBreakdown ||
+                    "Auto-filled from the allotted subject syllabus."}
+                </p>
               </FormField>
             ) : null}
             <FormField label="Present days">
@@ -2592,7 +2700,7 @@ export const SalaryPaymentRecordsPanel = ({
                     <Th className="text-right">Net Salary</Th>
                     <Th className="text-center">Signature</Th>
                     <Th>Remarks</Th>
-                    {canWritePayroll ? <Th>Actions</Th> : null}
+                    {canManageRows ? <Th>Actions</Th> : null}
                   </tr>
                 </TableHead>
                 <TableBody>
@@ -2675,7 +2783,7 @@ export const SalaryPaymentRecordsPanel = ({
                         ) : null}
                       </Td>
                       <Td className="text-right">
-                        {canEditSheet ? (
+                        {canEditAmounts ? (
                           <NumberInput
                             min={0}
                             className={cellInput}
@@ -2721,6 +2829,10 @@ export const SalaryPaymentRecordsPanel = ({
                               max={100}
                               className={cn(cellInput, "text-center")}
                               value={row.syllabusCompletedPercent ?? 0}
+                              title={
+                                row.payBreakdown ||
+                                "Current syllabus complete %. This month pays only the increase since last paid month."
+                              }
                               onValueChange={(v) =>
                                 patchRow(
                                   rowKey,
@@ -2730,7 +2842,10 @@ export const SalaryPaymentRecordsPanel = ({
                               }
                             />
                           ) : (
-                            <span className="tabular-nums">
+                            <span
+                              className="tabular-nums"
+                              title={row.payBreakdown || undefined}
+                            >
                               {row.syllabusCompletedPercent ?? 0}%
                             </span>
                           )
@@ -2742,8 +2857,17 @@ export const SalaryPaymentRecordsPanel = ({
                             periods
                           </div>
                         ) : payTypeOf(row) === "TENDER" ? (
-                          <div className="text-[10px] text-slate-500">
-                            syllabus %
+                          <div className="text-[10px] leading-snug text-slate-500">
+                            <div>
+                              this month{" "}
+                              <span className="font-semibold text-slate-700">
+                                {row.syllabusThisMonthPercent ?? 0}%
+                              </span>
+                            </div>
+                            <div>
+                              paid {row.syllabusAlreadyPaidPercent ?? 0}% · left{" "}
+                              {row.syllabusRemainingPercent ?? 0}%
+                            </div>
                           </div>
                         ) : null}
                       </Td>
@@ -2863,7 +2987,7 @@ export const SalaryPaymentRecordsPanel = ({
                         )}
                       </Td>
                       <Td className="text-right text-rose-700">
-                        {canEditSheet ? (
+                        {canEditAmounts ? (
                           <NumberInput
                             min={0}
                             className={cn(cellInput, "text-rose-800")}
@@ -2883,7 +3007,7 @@ export const SalaryPaymentRecordsPanel = ({
                         )}
                       </Td>
                       <Td className="text-right text-emerald-700">
-                        {canEditSheet ? (
+                        {canEditAmounts ? (
                           <NumberInput
                             min={0}
                             className={cn(cellInput, "text-emerald-800")}
@@ -2903,7 +3027,7 @@ export const SalaryPaymentRecordsPanel = ({
                         )}
                       </Td>
                       <Td className="text-right font-medium">
-                        {canEditSheet ? (
+                        {canEditAmounts ? (
                           <NumberInput
                             min={0}
                             className={cellInput}
@@ -2923,7 +3047,7 @@ export const SalaryPaymentRecordsPanel = ({
                         )}
                       </Td>
                       <Td className="text-right">
-                        {canEditSheet ? (
+                        {canEditAmounts ? (
                           <NumberInput
                             min={0}
                             className={cellInput}
@@ -2943,7 +3067,7 @@ export const SalaryPaymentRecordsPanel = ({
                         )}
                       </Td>
                       <Td className="text-right font-semibold text-slate-900">
-                        {canEditSheet ? (
+                        {canEditAmounts ? (
                           <NumberInput
                             min={0}
                             className={cn(cellInput, "font-semibold")}
@@ -2981,7 +3105,7 @@ export const SalaryPaymentRecordsPanel = ({
                           <span className="truncate">{row.remarks || "—"}</span>
                         )}
                       </Td>
-                      {canWritePayroll ? (
+                      {canManageRows ? (
                         <Td>
                           <div className="flex flex-wrap gap-1">
                             {row.valuesManualOverride ? (
@@ -3041,7 +3165,7 @@ export const SalaryPaymentRecordsPanel = ({
                       {formatCurrencyNpr(totals.totalNetSalaryNpr)}
                     </Td>
                     {/* Signature + Remarks (+ Actions when admin) */}
-                    <Td colSpan={canWritePayroll ? 3 : 2} />
+                    <Td colSpan={canManageRows ? 3 : 2} />
                   </tr>
                 </TableBody>
               </Table>
