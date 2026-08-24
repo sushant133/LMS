@@ -3527,15 +3527,15 @@ const dutySummaryTd = "whitespace-nowrap px-2 py-1.5 text-xs leading-tight";
 const dutySummaryMetric = "w-16 px-1.5 text-center tabular-nums";
 const dutySummaryCode = "w-9 min-w-9 px-1 text-center tabular-nums";
 
-/** Horizontal scroll when columns overflow; table always has a visible width. */
+/** Always-visible tables (desktop + phone). Swipe sideways when columns overflow. */
 const DutySummaryScroll = ({ children }: { children: ReactNode }) => (
-  <div className="w-full max-w-full overflow-x-auto rounded-xl border border-slate-200 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
+  <div className="w-full overflow-auto overscroll-contain rounded-xl border border-slate-200 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
     {children}
   </div>
 );
 
 const DutySummaryTable = ({ children }: { children: ReactNode }) => (
-  <Table className="w-full min-w-max border-separate border-spacing-0 text-xs">
+  <Table className="w-full min-w-[720px] border-collapse text-xs">
     {children}
   </Table>
 );
