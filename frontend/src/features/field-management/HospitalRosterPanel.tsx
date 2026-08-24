@@ -3275,8 +3275,8 @@ const RosterBuilder = ({
             )}
           </div>
 
-          {/* Desktop / tablet grid */}
-          <div className="hidden max-h-[min(70vh,720px)] overflow-auto overscroll-contain rounded-xl border border-slate-200 [scrollbar-width:thin] md:block">
+          {/* Full roster grid — always visible; swipe sideways on a phone */}
+          <div className="max-h-[min(70vh,720px)] w-full overflow-auto overscroll-contain rounded-xl border border-slate-200 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
             <table className="w-full min-w-[1100px] border-collapse text-xs">
               <thead className="sticky top-0 z-10 bg-slate-50">
                 <tr>

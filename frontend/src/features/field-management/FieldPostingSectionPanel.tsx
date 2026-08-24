@@ -2410,7 +2410,7 @@ export const FieldPostingSectionPanel = ({
                       );
                     })}
                   </div>
-                  <div className="hidden overflow-x-auto rounded-xl border border-slate-300 md:block">
+                  <div className="overflow-x-auto rounded-xl border border-slate-300 [-webkit-overflow-scrolling:touch]">
                     <table className="w-full min-w-[720px] border-collapse text-sm">
                       <thead>
                         <tr className="bg-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
@@ -2844,7 +2844,7 @@ export const FieldPostingSectionPanel = ({
                       </div>
                     ))}
                   </div>
-                  <div className="hidden max-h-[min(75vh,820px)] overflow-auto md:block">
+                  <div className="max-h-[min(75vh,820px)] overflow-auto [-webkit-overflow-scrolling:touch]">
                     <table className="w-full min-w-[900px] border-collapse text-xs">
                       <thead className="sticky top-0 z-10 bg-slate-100">
                         <tr>
