@@ -21,7 +21,7 @@ import { Button } from "components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "components/ui/card";
 import { Input } from "components/ui/input";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
@@ -33,7 +33,7 @@ const statusBadgeClass = (status: string): string => {
 };
 
 export const AcademicPromotionManager = () => {
-  const canManage = useIsTenantAdmin();
+  const canManage = useCanManageGrantedModule("academic-structure");
   const [academicSessionBs, setAcademicSessionBs] = useState(
     DEFAULT_ACADEMIC_YEAR_BS,
   );

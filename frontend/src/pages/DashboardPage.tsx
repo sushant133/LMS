@@ -22,6 +22,11 @@ import { ChartBox } from "components/ui/chart-box";
 import { useTranslation } from "react-i18next";
 import {
   COLLEGE_STAFF_CATEGORY_LABELS,
+  canAccessAcademicStructure,
+  canAccessAttendanceAdminHub,
+  canAccessExaminationManagement,
+  canAccessModule,
+  hasExtraAdminModuleGrants,
   hasInstitutionAccess,
   type CollegeStaffCategory,
   type CollegeStaffRecord,
@@ -29,6 +34,7 @@ import {
   type DashboardMetric,
   type DashboardNotificationItem,
   type DashboardResponse,
+  type ModuleAccessMap,
   type NoticeRecord,
   type UserProfile
 } from "@phit-erp/shared";
@@ -864,8 +870,8 @@ const resolveDashboardStatHref = (label: string): string | undefined => {
     "Unread Alerts": "/notifications",
     "Enrolled Subjects": "/my-subjects",
     "Attendance Days": "/attendance",
-    "Assigned Batches": "/students/list",
-    "Assigned Classes": "/students/list",
+    "Assigned Batches": "/my-students/list",
+    "Assigned Classes": "/my-students/list",
     "Assigned Subjects": "/academics/subject-assignments",
     "Linked Children": "/parent-portal",
     "Children with Fees Due": "/parent-portal",
@@ -900,6 +906,53 @@ const dashboardStatHint = (label: string, href?: string): string | null => {
   if (label.includes("Attendance")) return "Open attendance →";
   if (label.includes("Children") || label.includes("Parent")) return "Open portal →";
   return "Open →";
+};
+
+/** Extra Administration shortcuts when a teacher was granted those modules. */
+const teacherAdminQuickActions = (
+  user: UserProfile,
+): Array<{ label: string; href: string }> => {
+  if (!user.moduleAccessConfigured) return [];
+  const map = (user.moduleAccess ?? {}) as ModuleAccessMap;
+  const actions: Array<{ label: string; href: string }> = [];
+  if (canAccessModule(map, "teachers") || canAccessModule(map, "staff")) {
+    actions.push({
+      label: "Staff Management",
+      href: canAccessModule(map, "staff")
+        ? "/college-staff"
+        : "/college-staff?tab=teachers",
+    });
+  }
+  if (canAccessAcademicStructure(map)) {
+    actions.push({ label: "Academic Structure", href: "/academics" });
+  }
+  if (canAccessAttendanceAdminHub(map)) {
+    actions.push({ label: "Attendance Management", href: "/attendance-view" });
+  }
+  if (canAccessExaminationManagement(map)) {
+    actions.push({ label: "Examination Management", href: "/exams-view" });
+  }
+  if (canAccessModule(map, "accounts")) {
+    actions.push({ label: "Accounting", href: "/accounting" });
+  }
+  if (canAccessModule(map, "hr")) {
+    actions.push({ label: "HR & Payroll", href: "/hr" });
+  }
+  if (canAccessModule(map, "settings")) {
+    actions.push({ label: "Settings", href: "/settings" });
+  }
+  if (canAccessModule(map, "reports")) {
+    actions.push({ label: "Reports", href: "/reports" });
+  }
+  if (hasExtraAdminModuleGrants(map)) {
+    actions.push({
+      label: "Academic Management",
+      href: "/academic-management-view",
+    });
+    actions.push({ label: "Student Management", href: "/students" });
+    actions.push({ label: "Timetable Management", href: "/timetable-view" });
+  }
+  return actions;
 };
 
 const highlightToneClass: Record<NonNullable<DashboardHighlight["tone"]>, string> = {
@@ -1967,7 +2020,7 @@ export const DashboardPage = () => {
             { label: "Accounting", href: "/accounting" },
             { label: "Finance Management", href: "/finance" },
             { label: "Exams & Results", href: "/exams-view" },
-            { label: "Timetable", href: "/timetable" },
+            { label: "Timetable", href: "/timetable-view" },
             { label: "IEMIS Reports", href: "/reports" },
             { label: "Parent Links", href: "/parent-links" }
           ]}
@@ -1977,13 +2030,14 @@ export const DashboardPage = () => {
       {isTeacher ? (
         <QuickActions
           actions={[
-            { label: "My Students", href: "/students" },
+            { label: "My Students", href: "/my-students" },
             { label: "My Timetable", href: "/timetable" },
             { label: "My Assignments", href: "/homework" },
             { label: "My Attendance", href: "/attendance" },
             { label: "My Examinations", href: "/exams" },
             { label: "Academic Plans", href: "/academic-management" },
-            { label: "My Library", href: "/my-library" }
+            { label: "My Library", href: "/my-library" },
+            ...teacherAdminQuickActions(user),
           ]}
         />
       ) : null}

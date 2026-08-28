@@ -90,9 +90,9 @@ import { useAuth } from "features/auth/AuthProvider";
 import { useIsCollege } from "hooks/useInstitutionType";
 import {
   useHasInstitutionAccess,
-  useIsTenantAdmin,
   useNormalizedRole,
 } from "hooks/useNormalizedRole";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { useTeacherScope } from "hooks/useTeacherScope";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { api, unwrap } from "lib/api";
@@ -414,7 +414,7 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   const { user } = useAuth();
   const role = useNormalizedRole();
   const isTeacher = userIsTeacher(user) || role === "TEACHER";
-  const canManage = useIsTenantAdmin();
+  const canManage = useCanManageGrantedModule("examinations-college");
   const hasInstitutionRead = useHasInstitutionAccess();
   /** Write admins + college viewers (read-only admin surfaces). */
   const isAdmin = canManage || hasInstitutionRead;

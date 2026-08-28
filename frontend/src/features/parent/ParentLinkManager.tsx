@@ -29,7 +29,7 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 
 type ParentLinkRecord = {
   _id: string;
@@ -69,7 +69,7 @@ const relationshipLabels: Record<ParentFromStudentRelationship, string> = {
 };
 
 export const ParentLinkManager = () => {
-  const canManage = useIsTenantAdmin();
+  const canManage = useCanManageGrantedModule("parents");
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [customLoginByRelationship, setCustomLoginByRelationship] = useState<
     Record<ParentFromStudentRelationship, string>

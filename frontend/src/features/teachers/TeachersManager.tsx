@@ -37,7 +37,7 @@ import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
 import { useIsCollege } from "hooks/useInstitutionType";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import { TeacherAssignmentsPanel } from "./TeacherAssignmentsPanel";
 import { TeacherForm } from "./TeacherForm";
@@ -141,7 +141,7 @@ interface TeachersManagerProps {
 }
 
 export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
-  const canManage = useIsTenantAdmin();
+  const canManage = useCanManageGrantedModule("teachers");
   const isCollege = useIsCollege();
   const { user, availableSchools } = useAuth();
   const institutionName = getCollegeDisplayName(availableSchools, user);
@@ -155,18 +155,20 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
   const [editing, setEditing] = useState<TeacherRecord | null>(null);
   const [editDocuments, setEditDocuments] = useState<HrDocument[]>([]);
   const [accessTeacher, setAccessTeacher] = useState<TeacherRecord | null>(null);
+  const [assignmentsTeacher, setAssignmentsTeacher] =
+    useState<TeacherRecord | null>(null);
   const moduleAccessRef = useRef<HTMLDivElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
   const assignmentsRef = useRef<HTMLDivElement | null>(null);
 
-  /**
-   * Bring the panel itself into view once it has rendered.
-   *
-   * The button used to jump to the top of the page instead, which landed above
-   * the panel — with the add-teacher card in between it read as "the page just
-   * scrolled up" rather than as the module access opening. The panel does not
-   * exist until this state is set, so the scroll has to happen in an effect.
-   */
+  const teachersQuery = useQuery({
+    queryKey: ["teachers", "manage"],
+    queryFn: () =>
+      unwrap<TeacherRecord[]>(
+        api.get("/teachers", { params: { includeInactive: true } }),
+      ),
+  });
+
   useEffect(() => {
     if (!accessTeacher?.user?._id) return;
     moduleAccessRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -180,9 +182,6 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     return () => window.cancelAnimationFrame(frame);
   }, [editing]);
 
-  const [assignmentsTeacher, setAssignmentsTeacher] =
-    useState<TeacherRecord | null>(null);
-
   useEffect(() => {
     if (!assignmentsTeacher) return;
     const frame = window.requestAnimationFrame(() => {
@@ -190,14 +189,26 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [assignmentsTeacher]);
-  const teachersQuery = useQuery({
-    // includeInactive so admins can see deactivated teachers and re-activate them
-    queryKey: ["teachers", "manage"],
-    queryFn: () =>
-      unwrap<TeacherRecord[]>(
-        api.get("/teachers", { params: { includeInactive: true } }),
-      ),
-  });
+
+  useEffect(() => {
+    const rows = teachersQuery.data;
+    if (!rows?.length) return;
+    if (editing) {
+      const latest = rows.find((row) => row._id === editing._id);
+      if (latest && latest.user?.designation !== editing.user?.designation) {
+        setEditing(latest);
+      }
+    }
+    if (accessTeacher) {
+      const latest = rows.find((row) => row._id === accessTeacher._id);
+      if (
+        latest &&
+        latest.user?.designation !== accessTeacher.user?.designation
+      ) {
+        setAccessTeacher(latest);
+      }
+    }
+  }, [teachersQuery.data, editing, accessTeacher]);
 
   const teacherMutation = useMutation({
     mutationFn: async (payload: TeacherInput) =>
@@ -360,7 +371,11 @@ export const TeachersManager = ({ embedded = false }: TeachersManagerProps) => {
           </CardHeader>
           <CardContent>
             <TeacherForm
-              key={editing?._id ?? "new-teacher"}
+              key={
+                editing
+                  ? `${editing._id}-${editing.user?.designation ?? ""}`
+                  : "new-teacher"
+              }
               isEditing={Boolean(editing)}
               teacherId={editing?._id}
               initialValue={editing ? mapTeacherToInput(editing) : undefined}

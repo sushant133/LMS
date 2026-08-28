@@ -42,9 +42,14 @@ import { compareBsDates, getDayOfWeekFromBs, getOffsetFromBsDate, getTodayBs } f
 import { sendNotification, getSchoolIdFromRequest } from "./notificationService.js";
 import { getTeacherScope, requireTeacherScope } from "./teacherScope.js";
 import { tenantObjectId } from "./tenant.js";
+import { actorHasExtraAdminGrants, actorMayUseAdminWorkspaceScope } from "./workspaceScope.js";
 
-/** BS date pattern YYYY-MM-DD (used for lesson plan item deadlines). */
-const BS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Institution Administrator, or a dual-role teacher with extra admin grants. */
+export const actorIsAcademicAdmin = async (req: Request): Promise<boolean> => {
+  if (!req.user) return false;
+  if (canManageInstitution(req.user.role)) return true;
+  return actorHasExtraAdminGrants(req);
+};
 
 /** Nepali month names aligned with BS month index 1–12 (Baisakh=1 … Chaitra=12). */
 export const NEPALI_MONTH_NAMES = [
@@ -236,6 +241,7 @@ export const applyCurriculumSubjectFilter = async (
 };
 
 export const applyTeacherScopeToFilter = async (req: Request, filter: Record<string, unknown>): Promise<void> => {
+  if (await actorMayUseAdminWorkspaceScope(req)) return;
   const scope = await getTeacherScope(req);
   if (scope) {
     filter.teacherId = scope.teacherId;
@@ -252,6 +258,7 @@ export const applyTeacherSubjectScopeToFilter = async (
   req: Request,
   filter: Record<string, unknown>
 ): Promise<void> => {
+  if (await actorMayUseAdminWorkspaceScope(req)) return;
   const scope = await getTeacherScope(req);
   if (!scope) return;
 
@@ -301,7 +308,7 @@ export const applyTeacherSubjectScopeToFilter = async (
 
 export const assertTeacherOwnership = async (req: Request, teacherId: string): Promise<void> => {
   if (!req.user) throw new ApiError(401, "Authentication required");
-  if (isAcademicAdmin(req.user.role)) return;
+  if (await actorIsAcademicAdmin(req)) return;
 
   const scope = await requireTeacherScope(req);
   if (scope.teacherId !== teacherId) {
@@ -315,7 +322,7 @@ export const assertSyllabusAccess = async (
   params: { teacherId?: string | null; subjectId: string }
 ): Promise<void> => {
   if (!req.user) throw new ApiError(401, "Authentication required");
-  if (isAcademicAdmin(req.user.role)) return;
+  if (await actorIsAcademicAdmin(req)) return;
 
   const scope = await requireTeacherScope(req);
   if (params.teacherId && params.teacherId === scope.teacherId) return;
@@ -353,14 +360,14 @@ export const assertApprovableStatus = (status: AcademicPlanStatus): void => {
 };
 
 /** Strip ownership fields teachers must not reassign on update. */
-export const sanitizeTeacherOwnedUpdate = <T extends Record<string, unknown>>(
+export const sanitizeTeacherOwnedUpdate = async <T extends Record<string, unknown>>(
   req: Request,
   payload: T
-): T => {
+): Promise<T> => {
   // Always clone so callers can delete structure fields (chapters/units) without
   // mutating the original Zod payload used for hierarchy rewrite.
   const next = { ...payload };
-  if (isAcademicAdmin(req.user?.role ?? "")) return next;
+  if (await actorIsAcademicAdmin(req)) return next;
   delete next.teacherId;
   return next;
 };

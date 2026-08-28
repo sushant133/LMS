@@ -130,7 +130,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Student Management",
     description: "Student records, admission, documents",
     apiPrefixes: ["/students"],
-    routePrefixes: ["/students"],
+    routePrefixes: ["/students", "/my-students"],
     availableActions: ["view", "create", "edit", "delete", "export", "print", "manage"]
   },
   {
@@ -138,7 +138,11 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Teacher Management",
     description: "Teacher profiles and teaching staff",
     apiPrefixes: ["/teachers"],
-    routePrefixes: ["/teachers", "/college-staff"],
+    // /college-staff is the Staff module. Teachers live at /teachers
+    // (which redirects to the Teachers tab). Unlocking either module is
+    // handled by canAccessStaffDirectory so a Teacher Management grant
+    // still opens the shared College Staff page.
+    routePrefixes: ["/teachers"],
     availableActions: ["view", "create", "edit", "delete", "export", "manage"]
   },
   {
@@ -246,7 +250,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Session / Lesson / Log Book",
     description: "Session Plan, Lesson Plan, Log Book approvals",
     apiPrefixes: ["/academic-management"],
-    routePrefixes: ["/academic-management"],
+    routePrefixes: ["/academic-management", "/academic-management-view"],
     availableActions: ["view", "create", "edit", "delete", "approve", "export", "print"]
   },
   {
@@ -262,7 +266,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Timetable",
     description: "Class, teacher, and college staff duty timetables",
     apiPrefixes: ["/timetable", "/staff-timetable"],
-    routePrefixes: ["/timetable"],
+    routePrefixes: ["/timetable", "/timetable-view"],
     availableActions: ["view", "create", "edit", "delete", "publish", "export"]
   },
   {
@@ -360,7 +364,7 @@ export const ERP_MODULES: ErpModuleDefinition[] = [
     label: "Laboratory",
     description: "Lab equipment and inventory",
     apiPrefixes: ["/laboratory"],
-    routePrefixes: ["/laboratory"],
+    routePrefixes: ["/laboratory", "/laboratory-view"],
     availableActions: ["view", "create", "edit", "delete", "manage", "export"]
   },
   {
@@ -564,6 +568,32 @@ export const LEADERSHIP_DESIGNATIONS = [
 export type LeadershipDesignation = (typeof LEADERSHIP_DESIGNATIONS)[number];
 
 /**
+ * True for Principal / Vice Principal / Coordinator (and the other leadership
+ * titles). "Other" is a custom-title picker, not leadership by itself.
+ */
+export const isLeadershipDesignation = (value?: string | null): boolean => {
+  const raw = value?.trim() ?? "";
+  if (!raw) return false;
+  const lower = raw.toLowerCase();
+  if (lower === "other" || lower === "teacher") return false;
+  if (
+    (LEADERSHIP_DESIGNATIONS as readonly string[]).some(
+      (label) => label.toLowerCase() === lower
+    )
+  ) {
+    return true;
+  }
+  return (
+    lower.includes("principal") ||
+    lower.includes("coordinator") ||
+    lower.includes("co-ordinator") ||
+    lower.includes("director") ||
+    lower.includes("dean") ||
+    lower.includes("controller")
+  );
+};
+
+/**
  * Default when no permissions have been configured yet (legacy accounts).
  * Once an admin saves any moduleAccess map, missing modules resolve as NONE
  * so only explicitly granted departments appear for staff.
@@ -629,6 +659,24 @@ export const buildTeacherBaselineModuleAccess = (): Record<
     result[key] = baseline.has(key) ? "WRITE" : "NONE";
   }
   return result;
+};
+
+/**
+ * Admin-only departments (not teaching baseline). Granting any of these to a
+ * teacher unlocks the Administration sidebar separately from My Work.
+ */
+export const EXTRA_ADMIN_MODULE_KEYS: readonly ErpModuleKey[] = ERP_MODULE_KEYS.filter(
+  (key) =>
+    key !== "dashboard" &&
+    key !== "profile" &&
+    !(TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(key)
+);
+
+export const hasExtraAdminModuleGrants = (
+  map: ModuleAccessMap | null | undefined
+): boolean => {
+  if (!hasConfiguredModuleAccess(map)) return false;
+  return EXTRA_ADMIN_MODULE_KEYS.some((key) => canAccessModule(map, key));
 };
 
 /**
@@ -761,7 +809,7 @@ export const MODULE_ACCESS_UI_GROUPS: Array<{
     id: "campus",
     title: "Campus services",
     description: "Library, lab, transport, notices",
-    keys: ["library", "laboratory", "inventory", "transport", "notices", "banners", "hostel"]
+    keys: ["library", "laboratory", "inventory", "transport", "notices", "banners"]
   },
   {
     id: "finance",
@@ -830,6 +878,57 @@ export const canAccessAttendanceManagement = (
   map: ModuleAccessMap | null | undefined
 ): boolean =>
   ATTENDANCE_MANAGEMENT_MODULE_KEYS.some((key) => canAccessModule(map, key));
+
+/**
+ * HR Teacher / Staff Attendance — the Administration "Attendance Management"
+ * hub. Teaching `attendance` / `daily-attendance` (My Attendance) must not
+ * unlock this menu for teachers; those stay under My Work.
+ */
+export const ATTENDANCE_ADMIN_HUB_MODULE_KEYS: readonly ErpModuleKey[] = [
+  "teacher-attendance",
+  "staff-attendance"
+] as const;
+
+export const canAccessAttendanceAdminHub = (
+  map: ModuleAccessMap | null | undefined
+): boolean =>
+  ATTENDANCE_ADMIN_HUB_MODULE_KEYS.some((key) => canAccessModule(map, key));
+
+/** True for the Attendance Management hub path, not teacher My Attendance. */
+export const isAttendanceAdminHubPath = (routePath: string): boolean => {
+  const path = (routePath.split("?")[0] ?? routePath) || "/";
+  return (
+    path === "/attendance-view" ||
+    path.startsWith("/attendance-view/") ||
+    path === "/attendance-register" ||
+    path.startsWith("/attendance-register/")
+  );
+};
+
+/**
+ * College Staff directory (Teachers tab + non-teaching staff).
+ * `/teachers` redirects to `/college-staff?tab=teachers`, so a grant on
+ * either module must open the shared page.
+ */
+export const STAFF_DIRECTORY_MODULE_KEYS: readonly ErpModuleKey[] = [
+  "teachers",
+  "staff"
+] as const;
+
+export const isStaffDirectoryPath = (routePath: string): boolean => {
+  const path = (routePath.split("?")[0] ?? routePath) || "/";
+  return (
+    path === "/college-staff" ||
+    path.startsWith("/college-staff/") ||
+    path === "/teachers" ||
+    path.startsWith("/teachers/")
+  );
+};
+
+export const canAccessStaffDirectory = (
+  map: ModuleAccessMap | null | undefined
+): boolean =>
+  STAFF_DIRECTORY_MODULE_KEYS.some((key) => canAccessModule(map, key));
 
 /**
  * Examination Management hub (/exams-view) — College and/or CTEVT.

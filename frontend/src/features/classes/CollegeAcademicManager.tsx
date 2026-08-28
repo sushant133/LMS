@@ -26,7 +26,7 @@ import { queryClient } from "lib/queryClient";
 import { parseErrorMessage } from "lib/utils";
 import { AcademicPromotionManager } from "./AcademicPromotionManager";
 import { MasterSubjectManager } from "./MasterSubjectManager";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 
 const defaultBatchValue: BatchInput = {
   name: "",
@@ -35,7 +35,7 @@ const defaultBatchValue: BatchInput = {
 };
 
 export const CollegeAcademicManager = () => {
-  const canManage = useIsTenantAdmin();
+  const canManage = useCanManageGrantedModule("academic-structure");
   const [searchParams] = useSearchParams();
   const sectionParam = (searchParams.get("section") ?? "").toLowerCase();
   const [batchForm, setBatchForm] = useState<BatchInput>(defaultBatchValue);

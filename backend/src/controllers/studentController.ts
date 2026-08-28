@@ -12,6 +12,7 @@ import { ApiError } from "../utils/apiError.js";
 import { ensureValidBsDate } from "../utils/nepaliDate.js";
 import { getStudentScopeFilter } from "../utils/parentScope.js";
 import { getTeacherStudentFilter, getTeacherScope } from "../utils/teacherScope.js";
+import { actorMayUseAdminWorkspaceScope } from "../utils/workspaceScope.js";
 import { throwIfDuplicateKey } from "../utils/mongoErrors.js";
 import { recordAudit } from "../utils/audit.js";
 import {
@@ -36,6 +37,9 @@ import { hardDeleteStudentAccount } from "../utils/deletePersonCascade.js";
 
 const getReadableStudentFilter = async (req: Request): Promise<Record<string, unknown>> => {
   if (req.user?.role === "TEACHER") {
+    if (await actorMayUseAdminWorkspaceScope(req)) {
+      return getStudentScopeFilter(req);
+    }
     return getTeacherStudentFilter(req);
   }
   return getStudentScopeFilter(req);
@@ -114,8 +118,9 @@ const usesLimitedStudentView = (role: string | undefined): boolean =>
 
 export const listStudents = asyncHandler(async (req: Request, res: Response) => {
   const filter = await getReadableStudentFilter(req);
-  const limitedView = usesLimitedStudentView(req.user?.role);
-  const isTeacher = req.user?.role === "TEACHER";
+  const adminStudentScope = await actorMayUseAdminWorkspaceScope(req);
+  const limitedView = usesLimitedStudentView(req.user?.role) && !adminStudentScope;
+  const isTeacher = req.user?.role === "TEACHER" && !adminStudentScope;
 
   // Teachers: only active students in their assigned batch/year (or class/section)
   if (isTeacher) {

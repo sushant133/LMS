@@ -106,8 +106,8 @@ router.post("/lesson-plans", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"
 router.put("/lesson-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), updateLessonPlan);
 router.delete("/lesson-plans/:id", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), deleteLessonPlan);
 router.post("/lesson-plans/:id/submit", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), submitLessonPlan);
-router.post("/lesson-plans/:id/approve", authorizeInstitutionAdmin, approveLessonPlan);
-router.post("/lesson-plans/:id/reject", authorizeInstitutionAdmin, rejectLessonPlan);
+router.post("/lesson-plans/:id/approve", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), approveLessonPlan);
+router.post("/lesson-plans/:id/reject", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), rejectLessonPlan);
 
 router.get("/log-book-entries", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listLogBookEntries);
 router.post("/log-book-entries", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), createLogBookEntry);
@@ -121,7 +121,7 @@ router.get("/attendance/summary", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COL
 router.get("/comments", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), listComments);
 router.post("/comments", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), addComment);
 
-router.post("/lesson-plans/:id/unlock", authorizeInstitutionAdmin, unlockLessonPlan);
+router.post("/lesson-plans/:id/unlock", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "TEACHER"), unlockLessonPlan);
 
 router.get("/reports/:type", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), getAcademicReport);
 router.get("/reports/:type/export", authorize("SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"), exportAcademicReport);

@@ -28,6 +28,8 @@ import { Select } from "components/ui/select";
 import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useAuth } from "features/auth/AuthProvider";
+import { isDualRoleTeacher } from "lib/workspace";
 import {
   filterSubjectsByClass,
   filterSubjectsByYear,
@@ -151,7 +153,8 @@ const labelById = (
 };
 
 export const SubjectAssignmentManager = () => {
-  const canManage = useIsTenantAdmin();
+  const { user } = useAuth();
+  const canManage = useIsTenantAdmin() || isDualRoleTeacher(user);
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const [searchParams] = useSearchParams();

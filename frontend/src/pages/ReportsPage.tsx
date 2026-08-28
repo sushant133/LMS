@@ -88,7 +88,7 @@ export const ReportsPage = () => {
               Session plans, lesson plans, log books, syllabus completion, teacher performance, pending approvals, and late submission reports are available inside the Academic Management module.
             </p>
             <Button asChild>
-              <Link to="/academic-management">Open Academic Management Reports</Link>
+              <Link to="/academic-management-view">Open Academic Management Reports</Link>
             </Button>
           </CardContent>
         </Card>

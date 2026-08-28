@@ -5,6 +5,7 @@ import { useAuth } from "features/auth/AuthProvider";
 import { useTeacherLabAccess } from "hooks/useTeacherLabAccess";
 import { getRoleRedirectPath } from "lib/auth";
 import { normalizeUserRole } from "@phit-erp/shared";
+import { isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
 
 /**
  * Admins / lab staff always enter the module.
@@ -12,9 +13,24 @@ import { normalizeUserRole } from "@phit-erp/shared";
  */
 export const LaboratoryPage = () => {
   const { user } = useAuth();
+  const workspace = useWorkspaceMode();
   const role = user ? normalizeUserRole(user.role) : null;
-  const isTeacher = role === "TEACHER";
+  const isTeacher = role === "TEACHER" && workspace !== "admin";
   const labAccessQuery = useTeacherLabAccess(isTeacher);
+
+  if (
+    workspace === "admin" &&
+    role === "TEACHER" &&
+    !isDualRoleTeacher(user) &&
+    role !== "LABORATORY_STAFF"
+  ) {
+    return (
+      <Navigate
+        to="/laboratory"
+        replace
+      />
+    );
+  }
 
   if (isTeacher) {
     if (labAccessQuery.isLoading) {

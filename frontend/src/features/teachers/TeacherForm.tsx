@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   DEFAULT_TEACHER_DESIGNATION,
+  LEADERSHIP_DESIGNATIONS,
   TEACHER_PAYMENT_TYPE_HELP,
   TEACHER_PAYMENT_TYPE_LABELS,
   TEACHER_PAYMENT_TYPES,
@@ -253,19 +254,60 @@ export const TeacherForm = ({
           />
         </FormField>
         <FormField label="Designation">
-          <Input
-            placeholder={DEFAULT_TEACHER_DESIGNATION}
-            value={form.designation ?? ""}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                designation: event.target.value,
-              }))
-            }
-          />
-          <p className="mt-1 text-xs text-slate-500">
-            Leave blank to use &quot;{DEFAULT_TEACHER_DESIGNATION}&quot;.
-          </p>
+          {(() => {
+            const current = form.designation?.trim() || DEFAULT_TEACHER_DESIGNATION;
+            const known = new Set<string>([
+              DEFAULT_TEACHER_DESIGNATION,
+              ...LEADERSHIP_DESIGNATIONS,
+            ]);
+            const isCustom = Boolean(current) && !known.has(current);
+            const selectValue = isCustom ? "Other" : current;
+            return (
+              <>
+                <Select
+                  value={selectValue}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setForm((prev) => ({
+                      ...prev,
+                      designation:
+                        next === "Other"
+                          ? prev.designation && !known.has(prev.designation)
+                            ? prev.designation
+                            : ""
+                          : next,
+                    }));
+                  }}
+                >
+                  <option value={DEFAULT_TEACHER_DESIGNATION}>
+                    {DEFAULT_TEACHER_DESIGNATION}
+                  </option>
+                  {LEADERSHIP_DESIGNATIONS.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+                {selectValue === "Other" ? (
+                  <Input
+                    className="mt-2"
+                    placeholder="Custom designation"
+                    value={form.designation ?? ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        designation: event.target.value,
+                      }))
+                    }
+                  />
+                ) : null}
+                <p className="mt-1 text-xs text-slate-500">
+                  Leadership titles (Vice Principal, Principal, …) are shown on
+                  their login. Extra admin menus come from Module Access below.
+                </p>
+              </>
+            );
+          })()}
         </FormField>
         <FormField label="Qualification">
           <Input

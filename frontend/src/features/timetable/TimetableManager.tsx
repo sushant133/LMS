@@ -50,6 +50,7 @@ import {
   type ScopeOption,
 } from "lib/teacherScopeUtils";
 import { cn, parseErrorMessage } from "lib/utils";
+import { useWorkspaceMode } from "lib/workspace";
 import { SESSION_COLORS, SESSION_LABELS } from "./timetableColors";
 import { TimetablePrintView } from "./TimetablePrintView";
 import {
@@ -115,11 +116,14 @@ const isProgramYear = (year: ScopeOption & { level?: number; name?: string }) =>
 
 export const TimetableManager = () => {
   const { user } = useAuth();
+  const workspace = useWorkspaceMode();
+  const adminWorkspace = workspace === "admin";
   const isTeacher =
-    user?.role === "TEACHER" ||
-    (user?.secondaryRoles ?? []).includes("TEACHER");
+    (user?.role === "TEACHER" ||
+      (user?.secondaryRoles ?? []).includes("TEACHER")) &&
+    !adminWorkspace;
   const isStudent = user?.role === "STUDENT";
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "") || adminWorkspace;
   const canWrite = isAdmin || isTeacher;
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");

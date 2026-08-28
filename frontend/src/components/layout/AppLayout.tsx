@@ -5,14 +5,18 @@ import { useQuery } from "@tanstack/react-query";
 import {
   INSTITUTION_NAME,
   canAccessAcademicStructure,
+  canAccessAttendanceAdminHub,
   canAccessAttendanceManagement,
   canAccessExaminationManagement,
   canAccessModule,
+  canAccessStaffDirectory,
   canManageInstitution,
   hasInstitutionAccess,
   isAcademicStructurePath,
+  isAttendanceAdminHubPath,
   isAttendanceManagementPath,
   isExaminationManagementPath,
+  isStaffDirectoryPath,
   isSystemAdministrator,
   normalizeUserRole,
   resolveModuleFromRoutePath,
@@ -41,6 +45,7 @@ import {
   getUserRoleSubtitle,
   roleLabelMap,
 } from "lib/auth";
+import { isDualRoleTeacher } from "lib/workspace";
 import {
   formatPrintAddress,
   setPrintInstitutionBranding,
@@ -195,7 +200,7 @@ const navItems: NavItem[] = [
   },
   {
     labelKey: "myStudents",
-    path: "/students",
+    path: "/my-students",
     roles: ["TEACHER"],
     section: "myWork",
   },
@@ -299,13 +304,13 @@ const navItems: NavItem[] = [
   },
   {
     labelKey: "academicManagementAdmin",
-    path: "/academic-management",
+    path: "/academic-management-view",
     roles: [...institutionRoles],
     section: "administration",
   },
   {
     labelKey: "timetableManagement",
-    path: "/timetable",
+    path: "/timetable-view",
     roles: [...institutionRoles, "PRINCIPAL"],
     section: "administration",
   },
@@ -335,7 +340,7 @@ const navItems: NavItem[] = [
   },
   {
     labelKey: "laboratoryManagement",
-    path: "/laboratory",
+    path: "/laboratory-view",
     roles: [...institutionRoles, "LABORATORY_STAFF"],
     section: "administration",
   },
@@ -673,7 +678,18 @@ export const AppLayout = () => {
     if (isAcademicStructurePath(path)) {
       return canAccessAcademicStructure(moduleAccessMap);
     }
-    // Teacher / Staff Attendance module grants unlock Attendance Management hub
+    // Teachers tab + non-teaching staff share the College Staff page
+    if (isStaffDirectoryPath(path)) {
+      return canAccessStaffDirectory(moduleAccessMap);
+    }
+    // Attendance Management hub (not teacher My Attendance at /attendance)
+    if (isAttendanceAdminHubPath(path)) {
+      return (
+        canAccessAttendanceAdminHub(moduleAccessMap) ||
+        (!hasTeachingCapability &&
+          canAccessAttendanceManagement(moduleAccessMap))
+      );
+    }
     if (
       isAttendanceManagementPath(path) &&
       canAccessAttendanceManagement(moduleAccessMap)
@@ -694,11 +710,54 @@ export const AppLayout = () => {
 
   /**
    * Unlock an Administration menu item via Module Access.
-   * Pure teachers: only non-teaching departments (Settings, Reports, Accounting…).
-   * Teaching modules stay under My Work only.
+   * Pure teachers: extra admin departments the Administrator granted
+   * (Staff, Academic Structure, Exams, Settings, HR attendance, …).
+   * Teaching tools stay under My Work only.
    */
   const hasExplicitAdminNavGrant = (path: string): boolean => {
     if (!hasExplicitModuleGrant(path)) return false;
+
+    // Distinct admin hubs — never treat as My Work duplicates
+    if (isAcademicStructurePath(path)) return true;
+    if (path === "/teachers" || path.startsWith("/teachers/")) {
+      return canAccessModule(moduleAccessMap, "teachers");
+    }
+    if (path === "/college-staff" || path.startsWith("/college-staff/")) {
+      return (
+        canAccessModule(moduleAccessMap, "staff") ||
+        canAccessModule(moduleAccessMap, "teachers")
+      );
+    }
+    if (isAttendanceAdminHubPath(path)) return true;
+    if (isExaminationManagementPath(path)) return true;
+    const dualRole = isDualRoleTeacher(user);
+    if (
+      path === "/academic-management-view" ||
+      path.startsWith("/academic-management-view/")
+    ) {
+      return dualRole || isAdmin || institutionAccess;
+    }
+    if (path === "/timetable-view" || path.startsWith("/timetable-view/")) {
+      return dualRole || isAdmin || institutionAccess;
+    }
+    if (path === "/laboratory-view" || path.startsWith("/laboratory-view/")) {
+      return dualRole || isAdmin || institutionAccess;
+    }
+    if (
+      path === "/students" ||
+      path === "/students/list" ||
+      path === "/students/create" ||
+      path.startsWith("/students/list")
+    ) {
+      return dualRole || isAdmin || institutionAccess;
+    }
+    if (
+      path === "/academics/subject-assignments" ||
+      path.startsWith("/academics/subject-assignments/")
+    ) {
+      return dualRole || isAdmin || institutionAccess;
+    }
+
     const moduleKey = resolveModuleFromRoutePath(path);
     if (!moduleKey) return false;
     if (
@@ -746,10 +805,17 @@ export const AppLayout = () => {
       if (!moduleAccessConfigured) return isAdmin || institutionAccess;
       return canAccessAcademicStructure(moduleAccessMap);
     }
+    if (isStaffDirectoryPath(path)) {
+      if (!moduleAccessConfigured) return isAdmin || institutionAccess;
+      return canAccessStaffDirectory(moduleAccessMap);
+    }
     if (isAttendanceManagementPath(path)) {
       // Teachers always keep My Attendance; HR teacher/staff attendance is via grants
       if (hasTeachingCapability && path === "/attendance") return true;
       if (!moduleAccessConfigured) return hasAdminCapability || hasTeachingCapability;
+      if (isAttendanceAdminHubPath(path) && hasTeachingCapability) {
+        return canAccessAttendanceAdminHub(moduleAccessMap);
+      }
       return canAccessAttendanceManagement(moduleAccessMap);
     }
     if (isExaminationManagementPath(path)) {
@@ -772,6 +838,8 @@ export const AppLayout = () => {
         path === "/timetable" ||
         path === "/exams" ||
         path === "/students" ||
+        path === "/my-students" ||
+        path.startsWith("/my-students/") ||
         path === "/my-library" ||
         path === "/laboratory" ||
         path === "/notices" ||

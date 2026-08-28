@@ -51,7 +51,6 @@ import {
   statusBadgeClass,
 } from "./academicManagementUtils";
 import type { AcademicManagementFilters } from "@phit-erp/shared";
-import { AcademicCommentsPanel } from "./AcademicCommentsPanel";
 import {
   AcademicPrintFooter,
   AcademicPrintHeader,
@@ -83,6 +82,8 @@ interface LessonPlanPanelProps {
   isCollege?: boolean;
   institutionName?: string;
   writeAccess?: boolean;
+  /** Academic Management admin hub (not teacher My Work). */
+  isAdminView?: boolean;
 }
 
 const normText = (value?: string | null) =>
@@ -299,6 +300,9 @@ const flattenLessonPlanTableRows = (
     });
 };
 
+const isLessonPlanPending = (status?: string) =>
+  status === "PENDING_APPROVAL" || status === "SUBMITTED";
+
 const lessonPlanStatusRank = (status?: string) => {
   switch (status) {
     case "APPROVED":
@@ -480,10 +484,11 @@ export const LessonPlanPanel = ({
   isCollege = false,
   institutionName = "Institution",
   writeAccess = true,
+  isAdminView = false,
 }: LessonPlanPanelProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const isAdmin = canManageInstitution(user?.role ?? "");
+  const isAdmin = canManageInstitution(user?.role ?? "") || isAdminView;
   const canMutate = writeAccess;
   const [showForm, setShowForm] = useState(false);
   const [savingTable, setSavingTable] = useState(false);
@@ -2279,8 +2284,9 @@ export const LessonPlanPanel = ({
               </Button>
               <p className="w-full text-xs text-slate-500">
                 Saved plans stay in <strong>Draft</strong> until you press{" "}
-                <strong>Submit</strong> on the plan card. Use{" "}
-                <strong>Continue</strong> next to Submit to keep editing.
+                <strong>Submit</strong>. An administrator must then{" "}
+                <strong>Approve</strong> them, the same as Session Plan and Log
+                Book. Use <strong>Continue</strong> to keep editing a draft.
               </p>
             </div>
           </CardContent>
@@ -2345,6 +2351,14 @@ export const LessonPlanPanel = ({
 
               {teacherGroups.map((group) => {
                 const tableRows = flattenLessonPlanTableRows(group.items);
+                const planById = new Map(
+                  group.items.map((plan) => [plan._id, plan]),
+                );
+                const firstRowOfPlan = new Set<string>();
+                const showActions = canMutate || isAdmin;
+                const pendingPlans = group.items.filter((plan) =>
+                  isLessonPlanPending(plan.status),
+                );
                 return (
                 <div key={group.teacherId} className="space-y-3">
                   {teacherGroups.length > 1 ? (
@@ -2367,6 +2381,74 @@ export const LessonPlanPanel = ({
                       </p>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                      {isAdmin && pendingPlans.length > 0 ? (
+                        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 no-print">
+                          <p className="text-sm font-semibold text-amber-950">
+                            {pendingPlans.length} lesson plan
+                            {pendingPlans.length === 1 ? "" : "s"} waiting for
+                            approval
+                          </p>
+                          {pendingPlans
+                            .slice()
+                            .sort((a, b) =>
+                              (a.teachingDateBs || a.startDateBs || "").localeCompare(
+                                b.teachingDateBs || b.startDateBs || "",
+                              ),
+                            )
+                            .map((plan) => (
+                              <div
+                                key={plan._id}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-100 bg-white px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-slate-900">
+                                    {plan.teachingDateBs ||
+                                      plan.startDateBs ||
+                                      "—"}
+                                    {plan.month ? ` · ${plan.month}` : ""}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {plan.teacher?.user?.fullName ||
+                                      group.teacherName}{" "}
+                                    · submitted, needs admin approval
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge className={statusBadgeClass(plan.status)}>
+                                    {plan.status === "SUBMITTED"
+                                      ? "PENDING APPROVAL"
+                                      : plan.status}
+                                  </Badge>
+                                  <Button
+                                    size="sm"
+                                    onClick={() =>
+                                      approveMutation.mutate(plan._id)
+                                    }
+                                    disabled={approveMutation.isPending}
+                                  >
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      const remarks =
+                                        window.prompt("Rejection remarks");
+                                      if (remarks)
+                                        rejectMutation.mutate({
+                                          id: plan._id,
+                                          remarks,
+                                        });
+                                    }}
+                                    disabled={rejectMutation.isPending}
+                                  >
+                                    Reject
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      ) : null}
                       <div className="overflow-x-auto">
                         <Table className="min-w-[880px]">
                           <TableHead>
@@ -2378,17 +2460,30 @@ export const LessonPlanPanel = ({
                               <Th>Sub-Unit</Th>
                               <Th className="w-16 text-center">C/Hr</Th>
                               <Th className="w-28">Remarks</Th>
+                              <Th className="w-28">Status</Th>
+                              {showActions ? (
+                                <Th className="w-44 no-print">Actions</Th>
+                              ) : null}
                             </tr>
                           </TableHead>
                           <TableBody>
                             {tableRows.length === 0 ? (
                               <tr>
-                                <Td colSpan={7} className="py-6 text-center text-slate-500">
+                                <Td
+                                  colSpan={showActions ? 9 : 8}
+                                  className="py-6 text-center text-slate-500"
+                                >
                                   No lesson plan rows yet.
                                 </Td>
                               </tr>
                             ) : (
-                              tableRows.map((row, i) => (
+                              tableRows.map((row, i) => {
+                                const plan = planById.get(row.planId);
+                                const isFirst =
+                                  Boolean(row.planId) &&
+                                  !firstRowOfPlan.has(row.planId);
+                                if (isFirst) firstRowOfPlan.add(row.planId);
+                                return (
                                 <tr key={`${row.planId}-${i}`}>
                                   <Td className="text-center tabular-nums">{i + 1}</Td>
                                   <Td className="whitespace-nowrap tabular-nums">
@@ -2412,147 +2507,131 @@ export const LessonPlanPanel = ({
                                   </Td>
                                   <Td className="text-center tabular-nums">{row.hours}</Td>
                                   <Td>{row.remarks || ""}</Td>
+                                  <Td>
+                                    {isFirst && plan ? (
+                                      <Badge
+                                        className={statusBadgeClass(plan.status)}
+                                      >
+                                        {plan.status === "SUBMITTED"
+                                          ? "PENDING APPROVAL"
+                                          : plan.status}
+                                      </Badge>
+                                    ) : null}
+                                  </Td>
+                                  {showActions ? (
+                                    <Td className="no-print">
+                                      {isFirst && plan ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          {canMutate &&
+                                          (plan.status === "DRAFT" ||
+                                            plan.status === "REJECTED") ? (
+                                            <>
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() =>
+                                                  openContinueDraft(plan)
+                                                }
+                                              >
+                                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                                Continue
+                                              </Button>
+                                              <Button
+                                                size="sm"
+                                                onClick={() =>
+                                                  submitMutation.mutate(plan._id)
+                                                }
+                                                disabled={submitMutation.isPending}
+                                              >
+                                                <Send className="mr-1 h-3.5 w-3.5" />
+                                                Submit
+                                              </Button>
+                                            </>
+                                          ) : null}
+                                          {canMutate &&
+                                          (isAdmin ||
+                                            plan.status === "DRAFT" ||
+                                            plan.status === "REJECTED") ? (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                              disabled={deleteMutation.isPending}
+                                              onClick={() => {
+                                                const dateLabel =
+                                                  plan.teachingDateBs ||
+                                                  plan.startDateBs ||
+                                                  row.dateBs ||
+                                                  "this day";
+                                                if (
+                                                  !window.confirm(
+                                                    `Delete the lesson plan for ${dateLabel}?`,
+                                                  )
+                                                ) {
+                                                  return;
+                                                }
+                                                deleteMutation.mutate(plan._id);
+                                              }}
+                                            >
+                                              <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                              Delete
+                                            </Button>
+                                          ) : null}
+                                          {isAdmin &&
+                                          isLessonPlanPending(plan.status) ? (
+                                            <>
+                                              <Button
+                                                size="sm"
+                                                onClick={() =>
+                                                  approveMutation.mutate(plan._id)
+                                                }
+                                              >
+                                                Approve
+                                              </Button>
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => {
+                                                  const remarks =
+                                                    window.prompt(
+                                                      "Rejection remarks",
+                                                    );
+                                                  if (remarks)
+                                                    rejectMutation.mutate({
+                                                      id: plan._id,
+                                                      remarks,
+                                                    });
+                                                }}
+                                              >
+                                                Reject
+                                              </Button>
+                                            </>
+                                          ) : null}
+                                          {isAdmin &&
+                                          plan.status === "APPROVED" ? (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() =>
+                                                unlockMutation.mutate(plan._id)
+                                              }
+                                            >
+                                              Unlock
+                                            </Button>
+                                          ) : null}
+                                        </div>
+                                      ) : null}
+                                    </Td>
+                                  ) : null}
                                 </tr>
-                              ))
+                                );
+                              })
                             )}
                           </TableBody>
                         </Table>
                       </div>
                     </CardContent>
                   </Card>
-                  {group.items
-                    .slice()
-                    .sort((a, b) => {
-                      const ad = a.teachingDateBs || a.startDateBs || "";
-                      const bd = b.teachingDateBs || b.startDateBs || "";
-                      return ad.localeCompare(bd);
-                    })
-                    .map((plan) => (
-                    <Card key={plan._id}>
-                      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <CardTitle>
-                            {(plan.teachingDateBs ||
-                              plan.startDateBs ||
-                              plan.month) ?? "—"}{" "}
-                            · {plan.academicYearBs}
-                          </CardTitle>
-                          <p className="text-sm text-slate-600">
-                            {plan.teacher?.user?.fullName}
-                            {plan.month ? ` · ${plan.month}` : ""}
-                          </p>
-                          {plan.monthlyDescription ? (
-                            <p className="mt-1 text-sm text-slate-600">
-                              {plan.monthlyDescription}
-                            </p>
-                          ) : null}
-                        </div>
-                        <Badge className={statusBadgeClass(plan.status)}>
-                          {plan.status}
-                        </Badge>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        {canMutate ? (
-                          <div className="flex flex-wrap gap-2 no-print">
-                            {plan.status === "DRAFT" ||
-                            plan.status === "REJECTED" ? (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openContinueDraft(plan)}
-                                >
-                                  <Pencil className="mr-2 h-4 w-4" />
-                                  Continue
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => submitMutation.mutate(plan._id)}
-                                  disabled={submitMutation.isPending}
-                                >
-                                  <Send className="mr-2 h-4 w-4" />
-                                  Submit
-                                </Button>
-                              </>
-                            ) : null}
-                            {isAdmin ||
-                            plan.status === "DRAFT" ||
-                            plan.status === "REJECTED" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                                disabled={deleteMutation.isPending}
-                                onClick={() => {
-                                  const dateLabel =
-                                    plan.teachingDateBs ||
-                                    plan.startDateBs ||
-                                    plan.month ||
-                                    "this day";
-                                  if (
-                                    !window.confirm(
-                                      `Delete the lesson plan for ${dateLabel}?\n\nIts topics stop counting towards Session Plan coverage. This cannot be undone from here.`,
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  deleteMutation.mutate(plan._id);
-                                }}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Delete
-                              </Button>
-                            ) : null}
-                            {isAdmin && plan.status === "PENDING_APPROVAL" ? (
-                              <>
-                                <Button
-                                  size="sm"
-                                  onClick={() =>
-                                    approveMutation.mutate(plan._id)
-                                  }
-                                >
-                                  Approve
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    const remarks =
-                                      window.prompt("Rejection remarks");
-                                    if (remarks)
-                                      rejectMutation.mutate({
-                                        id: plan._id,
-                                        remarks,
-                                      });
-                                  }}
-                                >
-                                  Reject
-                                </Button>
-                              </>
-                            ) : null}
-                            {isAdmin && plan.status === "APPROVED" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => unlockMutation.mutate(plan._id)}
-                              >
-                                Unlock
-                              </Button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        <div className="no-print">
-                          <AcademicCommentsPanel
-                            entityType="LESSON_PLAN"
-                            entityId={plan._id}
-                            canComment={
-                              isAdmin || plan.status !== "APPROVED"
-                            }
-                          />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
                 </div>
                 );
               })}

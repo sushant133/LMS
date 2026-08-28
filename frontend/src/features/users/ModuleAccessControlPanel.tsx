@@ -228,7 +228,9 @@ export const ModuleAccessControlPanel = ({
 
   const enabledModules = useMemo(() => {
     return ERP_MODULES.filter((m) => {
-      if (m.key === "dashboard" || m.key === "profile") return false;
+      if (m.key === "dashboard" || m.key === "profile" || m.key === "hostel") {
+        return false;
+      }
       const mode = draftAccess[m.key] ?? "NONE";
       return mode === "WRITE" || mode === "READ_ONLY";
     });
@@ -353,6 +355,61 @@ export const ModuleAccessControlPanel = ({
       </CardHeader>
 
       <CardContent className="space-y-6">
+        <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Job title
+            </label>
+            <Select
+              value={designation}
+              disabled={readOnly}
+              onChange={(event) => {
+                setDirty(true);
+                setDesignation(event.target.value);
+              }}
+            >
+              <option value="">— Not set —</option>
+              {(
+                accessQuery.data?.leadershipDesignations ??
+                LEADERSHIP_DESIGNATIONS
+              ).map((label) => (
+                <option key={label} value={label}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+            {designation === "Other" ? (
+              <Input
+                className="mt-2"
+                placeholder="Custom title"
+                value={customDesignation}
+                disabled={readOnly}
+                onChange={(event) => {
+                  setDirty(true);
+                  setCustomDesignation(event.target.value);
+                }}
+              />
+            ) : null}
+            <p className="mt-1 text-xs text-slate-500">
+              Shown on their profile and login (e.g. Vice Principal). Does not
+              grant permissions by itself — turn on sections below.
+            </p>
+          </div>
+          <div className="flex flex-col justify-center text-sm text-slate-600">
+            <p>
+              Current title:{" "}
+              <strong className="text-slate-900">
+                {designation === "Other"
+                  ? customDesignation.trim() || "Custom"
+                  : designation.trim() || "Not set"}
+              </strong>
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Save access after changing the title or any section.
+            </p>
+          </div>
+        </div>
+
         {/* Quick start */}
         {!readOnly ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -541,50 +598,12 @@ export const ModuleAccessControlPanel = ({
           >
             Advanced options
             <span className="text-xs font-normal text-slate-500">
-              {showAdvanced ? "Hide" : "Job title, extra roles, audit note"}
+              {showAdvanced ? "Hide" : "Extra roles, audit note"}
             </span>
           </button>
           {showAdvanced ? (
             <div className="space-y-4 border-t border-slate-100 px-4 py-4">
               <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">
-                    Job title (display only)
-                  </label>
-                  <Select
-                    value={designation}
-                    disabled={readOnly}
-                    onChange={(event) => {
-                      setDirty(true);
-                      setDesignation(event.target.value);
-                    }}
-                  >
-                    <option value="">— Not set —</option>
-                    {(
-                      accessQuery.data?.leadershipDesignations ??
-                      LEADERSHIP_DESIGNATIONS
-                    ).map((label) => (
-                      <option key={label} value={label}>
-                        {label}
-                      </option>
-                    ))}
-                  </Select>
-                  {designation === "Other" ? (
-                    <Input
-                      className="mt-2"
-                      placeholder="Custom title"
-                      value={customDesignation}
-                      disabled={readOnly}
-                      onChange={(event) => {
-                        setDirty(true);
-                        setCustomDesignation(event.target.value);
-                      }}
-                    />
-                  ) : null}
-                  <p className="mt-1 text-xs text-slate-500">
-                    Title does not grant permissions by itself.
-                  </p>
-                </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">
                     Note for audit log
@@ -613,9 +632,9 @@ export const ModuleAccessControlPanel = ({
                 {isPrimaryTeacher ? (
                   <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
                     This account is already a <strong>Teacher</strong>. Set job
-                    title to Principal above if needed — teaching modules stay
-                    on after you save. Check extra roles only if they also need
-                    another portal (lab, library, etc.).
+                    title (Vice Principal, Principal, …) at the top if needed —
+                    teaching modules stay on after you save. Check extra roles
+                    only if they also need another portal (lab, library, etc.).
                   </p>
                 ) : null}
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -703,6 +722,19 @@ export const ModuleAccessControlPanel = ({
                     setSecondaryRoles([
                       ...(accessQuery.data.secondaryRoles ?? []),
                     ]);
+                    const des = accessQuery.data.designation ?? "";
+                    if (
+                      des &&
+                      !(LEADERSHIP_DESIGNATIONS as readonly string[]).includes(
+                        des,
+                      )
+                    ) {
+                      setDesignation("Other");
+                      setCustomDesignation(des);
+                    } else {
+                      setDesignation(des);
+                      setCustomDesignation("");
+                    }
                     setDirty(false);
                   }
                 }}

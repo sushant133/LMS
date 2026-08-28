@@ -42,7 +42,7 @@ export const filtersToParams = (
  */
 export const academicListApiParams = (
   filters: AcademicManagementFilters,
-  options?: { isCollege?: boolean },
+  options?: { isCollege?: boolean; adminScope?: boolean },
 ): Record<string, string> => {
   const params = filtersToParams(filters);
   delete params.batchId;
@@ -52,6 +52,9 @@ export const academicListApiParams = (
   if (options?.isCollege !== false) {
     // College: year level filtering is client-side via hierarchy tree
     delete params.yearId;
+  }
+  if (options?.adminScope) {
+    params.adminScope = "1";
   }
   return params;
 };

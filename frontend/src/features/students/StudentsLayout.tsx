@@ -3,6 +3,9 @@ import { UserPlus, Users } from "lucide-react";
 import { PageHeader } from "components/shared/PageHeader";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useAuth } from "features/auth/AuthProvider";
+import { isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
+import { userIsTeacher } from "lib/teacherRole";
 import { getAcademicLabels } from "lib/academicStructureUtils";
 import { cn } from "lib/utils";
 
@@ -15,15 +18,37 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
   );
 
 export const StudentsLayout = () => {
+  const { user } = useAuth();
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
-  const canManage = useIsTenantAdmin();
+  const workspace = useWorkspaceMode();
+  const isTenantAdmin = useIsTenantAdmin();
+  const canManage =
+    isTenantAdmin || (workspace === "admin" && isDualRoleTeacher(user));
   const location = useLocation();
+
+  if (
+    !isTenantAdmin &&
+    userIsTeacher(user) &&
+    !isDualRoleTeacher(user) &&
+    (location.pathname === "/students" ||
+      location.pathname.startsWith("/students/"))
+  ) {
+    const suffix = location.pathname.slice("/students".length);
+    return (
+      <Navigate
+        to={`/my-students${suffix || ""}${location.search}`}
+        replace
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={canManage ? "Student Management" : "My Students"}
+        title={
+          workspace === "admin" || canManage ? "Student Management" : "My Students"
+        }
         description={
           canManage
             ? "Admissions, BS dates, Nepal address data, guardian details, total fee and scholarship."

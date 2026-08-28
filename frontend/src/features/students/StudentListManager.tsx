@@ -34,6 +34,7 @@ import { useTeacherScope } from "hooks/useTeacherScope";
 import { useAuth } from "features/auth/AuthProvider";
 import { getCollegeDisplayName } from "lib/auth";
 import { userIsTeacher } from "lib/teacherRole";
+import { adminScopeParams, isDualRoleTeacher, useWorkspaceMode } from "lib/workspace";
 import {
   filterSectionsByClass,
   filterYearsByBatch,
@@ -112,9 +113,13 @@ export const StudentListManager = () => {
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const isAdmin = useIsTenantAdmin();
-  const hasInstitutionRead = useHasInstitutionAccess();
-  const isTeacher = userIsTeacher(user) || role === "TEACHER";
-  const canManage = isAdmin;
+  const workspace = useWorkspaceMode();
+  const adminWorkspace =
+    workspace === "admin" && (isAdmin || isDualRoleTeacher(user));
+  const hasInstitutionRead = useHasInstitutionAccess() || adminWorkspace;
+  const isTeacher =
+    (userIsTeacher(user) || role === "TEACHER") && !adminWorkspace;
+  const canManage = isAdmin || adminWorkspace;
   const teacherScopeQuery = useTeacherScope(isTeacher);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -144,8 +149,13 @@ export const StudentListManager = () => {
   }, [searchParams]);
 
   const studentsQuery = useQuery({
-    queryKey: ["students"],
-    queryFn: () => unwrap<StudentRecord[]>(api.get("/students")),
+    queryKey: ["students", adminWorkspace ? "admin" : "default"],
+    queryFn: () =>
+      unwrap<StudentRecord[]>(
+        api.get("/students", {
+          params: adminWorkspace ? adminScopeParams : undefined,
+        }),
+      ),
     enabled: hasInstitutionRead,
   });
   const classesQuery = useQuery({

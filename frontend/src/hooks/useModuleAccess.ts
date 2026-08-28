@@ -3,6 +3,7 @@ import {
   applyTeacherRoleBaseline,
   canAccessModule,
   hasModuleAction,
+  isInstitutionAdmin,
   isSystemAdministrator,
   resolveModuleAccessMode,
   resolveModuleFromRoutePath,
@@ -126,4 +127,21 @@ export const useCanWriteModule = (moduleKey: ErpModuleKey): boolean => {
 export const useCanAccessModule = (moduleKey: ErpModuleKey): boolean => {
   const { canAccess } = useModuleAccess(moduleKey);
   return canAccess;
+};
+
+/**
+ * True when this user may use admin controls for a department:
+ * institution Administrator, or an explicit Module Access Manage grant
+ * on a non-teaching module (e.g. Teacher Management for a Vice Principal).
+ * Teaching baseline WRITE (My Students, My Attendance, …) does not count.
+ */
+export const useCanManageGrantedModule = (moduleKey: ErpModuleKey): boolean => {
+  const { user } = useAuth();
+  const { canWrite, isUnrestricted } = useModuleAccess(moduleKey);
+  if (isUnrestricted) return true;
+  if (!canWrite) return false;
+  if (isInstitutionAdmin(user?.role ?? "")) return true;
+  return !(TEACHER_BASELINE_MODULE_KEYS as readonly string[]).includes(
+    moduleKey,
+  );
 };

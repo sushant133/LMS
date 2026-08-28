@@ -265,6 +265,31 @@ export default function App() {
                   }
                 />
               </Route>
+              <Route
+                path="/my-students"
+                element={
+                  <LazyRoute>
+                    <StudentsLayout />
+                  </LazyRoute>
+                }
+              >
+                <Route
+                  index
+                  element={
+                    <LazyRoute>
+                      <StudentsIndexRedirect />
+                    </LazyRoute>
+                  }
+                />
+                <Route
+                  path="list"
+                  element={
+                    <LazyRoute>
+                      <StudentListPage />
+                    </LazyRoute>
+                  }
+                />
+              </Route>
             </Route>
 
             <Route
@@ -365,6 +390,7 @@ export default function App() {
               }
             >
               <Route path="/laboratory" element={<LaboratoryPage />} />
+              <Route path="/laboratory-view" element={<LaboratoryPage />} />
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "ACCOUNTANT", "CASHIER", "AUDITOR", "PRINCIPAL"]} />}>
@@ -488,10 +514,12 @@ export default function App() {
               }
             >
               <Route path="/timetable" element={<TimetablePage />} />
+              <Route path="/timetable-view" element={<TimetablePage />} />
             </Route>
 
             <Route element={<ProtectedRoute roles={["SUPER_ADMIN", "COLLEGE_ADMIN", "COLLEGE_VIEWER", "TEACHER"]} />}>
               <Route path="/academic-management" element={<LazyRoute><AcademicManagementPage /></LazyRoute>} />
+              <Route path="/academic-management-view" element={<LazyRoute><AcademicManagementPage /></LazyRoute>} />
             </Route>
 
             <Route element={<ProtectedRoute roles={["TEACHER"]} />}>

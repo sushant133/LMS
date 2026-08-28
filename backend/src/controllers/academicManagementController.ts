@@ -68,7 +68,7 @@ import {
   NEPALI_MONTH_NAMES,
   getSessionPlanSyllabusCoverage,
   getTodayTimetable,
-  isAcademicAdmin,
+  actorIsAcademicAdmin,
   notifyAdmins,
   notifyTeacher,
   recordApproval,
@@ -412,7 +412,7 @@ const sanitizeSessionPlanUnit = <
 export const createSessionPlan = asyncHandler(async (req: Request, res: Response) => {
   const payload = academicSessionPlanSchema.parse(req.body);
 
-  if (req.user?.role === "TEACHER") {
+  if (req.user?.role === "TEACHER" && !(await actorIsAcademicAdmin(req))) {
     const scope = await requireTeacherScope(req);
     if (payload.teacherId !== scope.teacherId) {
       throw new ApiError(403, "Teachers can only create session plans for themselves");
@@ -484,9 +484,9 @@ export const updateSessionPlan = asyncHandler(async (req: Request, res: Response
 
   if (!existing) throw new ApiError(404, "Session plan not found");
   await assertTeacherOwnership(req, existing.teacherId.toString());
-  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+  if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
-  const safePayload = sanitizeTeacherOwnedUpdate(
+  const safePayload = await sanitizeTeacherOwnedUpdate(
     req,
     sanitizeSessionPlanScope(payload as Record<string, unknown> & {
       classId?: string;
@@ -587,7 +587,7 @@ export const deleteSessionPlan = asyncHandler(async (req: Request, res: Response
 
   if (!existing) throw new ApiError(404, "Session plan not found");
   await assertTeacherOwnership(req, existing.teacherId.toString());
-  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+  if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   existing.isDeleted = true;
   existing.audit = { ...existing.audit, deletedBy: actorObjectId(req), deletedAt: new Date() };
@@ -616,7 +616,7 @@ export const submitSessionPlan = asyncHandler(async (req: Request, res: Response
 });
 
 export const approveSessionPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can approve plans");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can approve plans");
   const { remarks } = academicApprovalActionSchema.parse(req.body);
 
   const existing = await AcademicSessionPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
@@ -642,7 +642,7 @@ export const approveSessionPlan = asyncHandler(async (req: Request, res: Respons
 });
 
 export const rejectSessionPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can reject plans");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can reject plans");
   const { remarks } = academicRejectActionSchema.parse(req.body);
 
   const existing = await AcademicSessionPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
@@ -667,7 +667,7 @@ export const rejectSessionPlan = asyncHandler(async (req: Request, res: Response
 });
 
 export const unlockSessionPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can unlock plans");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can unlock plans");
   const existing = await AcademicSessionPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Session plan not found");
 
@@ -911,7 +911,7 @@ export const getSyllabus = asyncHandler(async (req: Request, res: Response) => {
 
 export const createSyllabus = asyncHandler(async (req: Request, res: Response) => {
   // Official syllabus is admin-owned; teachers only view and plan from it
-  if (req.user?.role === "TEACHER") {
+  if (req.user?.role === "TEACHER" && !(await actorIsAcademicAdmin(req))) {
     throw new ApiError(
       403,
       "Teachers cannot create syllabi. View the syllabus for your assigned subjects and create Session Plan, Lesson Plan, and Log Book instead."
@@ -1143,13 +1143,13 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
     teacherId: existing.teacherId?.toString(),
     subjectId: existing.subjectId.toString()
   });
-  if (req.user?.role === "TEACHER") {
+  if (req.user?.role === "TEACHER" && !(await actorIsAcademicAdmin(req))) {
     throw new ApiError(
       403,
       "Teachers cannot edit the syllabus. Use Session Plan, Lesson Plan, and Log Book for teaching work. Sub-unit progress can be updated from the syllabus view if needed."
     );
   }
-  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+  if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   // Rewrite hierarchy when client sends structure (including blank unit titles).
   const hasChaptersField = payload.chapters !== undefined;
@@ -1172,7 +1172,7 @@ export const updateSyllabus = asyncHandler(async (req: Request, res: Response) =
 
   // ALWAYS shallow-clone header fields so delete of chapters/units cannot touch payload.
   const safePayload = {
-    ...sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>)
+    ...(await sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>))
   } as Record<string, unknown>;
   // Never assign empty strings to ObjectId fields (mongoose CastError → 400)
   for (const key of ["classId", "sectionId", "batchId", "yearId", "teacherId"] as const) {
@@ -1387,7 +1387,7 @@ export const reorderSyllabusHierarchy = asyncHandler(async (req: Request, res: R
     teacherId: existing.teacherId?.toString(),
     subjectId: existing.subjectId.toString()
   });
-  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+  if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   await withTransaction(async (session) => {
     const sessionOpt = getSessionOption(session);
@@ -1537,7 +1537,7 @@ export const submitSyllabus = asyncHandler(async (req: Request, res: Response) =
 
 export const approveSyllabus = asyncHandler(async (req: Request, res: Response) => {
   academicApprovalActionSchema.parse(req.body ?? {});
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can approve");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can approve");
   const existing = await AcademicSyllabus.findOne({
     _id: req.params.id,
     schoolId: tenantObjectId(req),
@@ -1571,7 +1571,7 @@ export const approveSyllabus = asyncHandler(async (req: Request, res: Response) 
 
 export const rejectSyllabus = asyncHandler(async (req: Request, res: Response) => {
   const payload = academicRejectActionSchema.parse(req.body);
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can reject");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can reject");
   const existing = await AcademicSyllabus.findOne({
     _id: req.params.id,
     schoolId: tenantObjectId(req),
@@ -1604,7 +1604,7 @@ export const rejectSyllabus = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const unlockSyllabus = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can unlock");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can unlock");
   const existing = await AcademicSyllabus.findOne({
     _id: req.params.id,
     schoolId: tenantObjectId(req),
@@ -1672,7 +1672,7 @@ export const createLessonPlan = asyncHandler(async (req: Request, res: Response)
     items: parsed.items.map((item) => normalizeSubUnitSelection(item))
   };
 
-  if (req.user?.role === "TEACHER") {
+  if (req.user?.role === "TEACHER" && !(await actorIsAcademicAdmin(req))) {
     const scope = await requireTeacherScope(req);
     if (payload.teacherId !== scope.teacherId) throw new ApiError(403, "Teachers can only create lesson plans for themselves");
   }
@@ -1783,7 +1783,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
   if (!existing) throw new ApiError(404, "Lesson plan not found");
 
   await assertTeacherOwnership(req, existing.teacherId.toString());
-  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+  if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   const sessionPlanId = payload.sessionPlanId ?? existing.sessionPlanId?.toString();
   if (!sessionPlanId) {
@@ -1848,7 +1848,7 @@ export const updateLessonPlan = asyncHandler(async (req: Request, res: Response)
     }
   }
 
-  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+  const safePayload = await sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   // Never assign nested `items` or empty ObjectId strings onto the plan document
   const {
     items: _itemsIgnored,
@@ -1982,7 +1982,7 @@ export const deleteLessonPlan = asyncHandler(async (req: Request, res: Response)
   if (!existing) throw new ApiError(404, "Lesson plan not found");
 
   await assertTeacherOwnership(req, existing.teacherId.toString());
-  if (!isAcademicAdmin(req.user?.role ?? "")) assertEditableStatus(existing.status);
+  if (!(await actorIsAcademicAdmin(req))) assertEditableStatus(existing.status);
 
   const items = await AcademicLessonPlanItem.find({ lessonPlanId: existing._id })
     .select("sessionPlanUnitId")
@@ -2030,7 +2030,7 @@ export const submitLessonPlan = asyncHandler(async (req: Request, res: Response)
 });
 
 export const approveLessonPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can approve plans");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can approve plans");
   const { remarks } = academicApprovalActionSchema.parse(req.body);
 
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
@@ -2053,7 +2053,7 @@ export const approveLessonPlan = asyncHandler(async (req: Request, res: Response
 });
 
 export const rejectLessonPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can reject plans");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can reject plans");
   const { remarks } = academicRejectActionSchema.parse(req.body);
 
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
@@ -2127,7 +2127,7 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
   const dateBs = ensureValidBsDate(parsed.dateBs);
   const payload = { ...parsed, dateBs };
 
-  if (req.user?.role === "TEACHER") {
+  if (req.user?.role === "TEACHER" && !(await actorIsAcademicAdmin(req))) {
     const scope = await requireTeacherScope(req);
     if (payload.teacherId !== scope.teacherId) throw new ApiError(403, "Teachers can only create their own log book entries");
   }
@@ -2390,7 +2390,7 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (!existing) throw new ApiError(404, "Log book entry not found");
 
   await assertTeacherOwnership(req, existing.teacherId.toString());
-  if (!isAcademicAdmin(req.user?.role ?? "") && existing.reviewStatus === "APPROVED") {
+  if (!(await actorIsAcademicAdmin(req)) && existing.reviewStatus === "APPROVED") {
     throw new ApiError(403, "Approved log book entries cannot be modified");
   }
 
@@ -2413,7 +2413,7 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     }
   }
 
-  const safePayload = sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
+  const safePayload = await sanitizeTeacherOwnedUpdate(req, payload as Record<string, unknown>);
   const previousItemId = existing.lessonPlanItemId?.toString();
 
   // Apply only safe scalar fields; never write "" into ObjectId paths
@@ -2586,7 +2586,7 @@ export const deleteLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (!existing) throw new ApiError(404, "Log book entry not found");
 
   await assertTeacherOwnership(req, existing.teacherId.toString());
-  if (!isAcademicAdmin(req.user?.role ?? "") && existing.reviewStatus === "APPROVED") {
+  if (!(await actorIsAcademicAdmin(req)) && existing.reviewStatus === "APPROVED") {
     throw new ApiError(403, "Approved log book entries cannot be deleted");
   }
 
@@ -2599,7 +2599,7 @@ export const deleteLogBookEntry = asyncHandler(async (req: Request, res: Respons
 });
 
 export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can review log book entries");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can review log book entries");
   const payload = academicLogBookReviewSchema.parse(req.body);
 
   const existing = await AcademicLogBookEntry.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
@@ -2715,7 +2715,7 @@ export const addComment = asyncHandler(async (req: Request, res: Response) => {
   if (
     "teacherId" in entity &&
     entity.teacherId &&
-    isAcademicAdmin(req.user?.role ?? "")
+    (await actorIsAcademicAdmin(req))
   ) {
     await notifyTeacher(
       req,
@@ -2730,7 +2730,7 @@ export const addComment = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const unlockLessonPlan = asyncHandler(async (req: Request, res: Response) => {
-  if (!isAcademicAdmin(req.user?.role ?? "")) throw new ApiError(403, "Only administrators can unlock plans");
+  if (!(await actorIsAcademicAdmin(req))) throw new ApiError(403, "Only administrators can unlock plans");
   const existing = await AcademicLessonPlan.findOne({ _id: req.params.id, schoolId: tenantObjectId(req), isDeleted: false });
   if (!existing) throw new ApiError(404, "Lesson plan not found");
 
@@ -2790,7 +2790,7 @@ export const listComments = asyncHandler(async (req: Request, res: Response) => 
     } else if ("teacherId" in entity && entity.teacherId) {
       await assertTeacherOwnership(req, entity.teacherId.toString());
     }
-  } else if (!isAcademicAdmin(req.user?.role ?? "")) {
+  } else if (!(await actorIsAcademicAdmin(req))) {
     // Non-admins cannot list comments for unknown entities
     throw new ApiError(404, "Entity not found");
   }

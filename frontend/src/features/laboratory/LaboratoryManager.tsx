@@ -48,6 +48,7 @@ import { NepaliDateField } from "components/shared/NepaliDateField";
 import { PageHeader } from "components/shared/PageHeader";
 import { useAuth } from "features/auth/AuthProvider";
 import { useModuleAccess } from "hooks/useModuleAccess";
+import { useWorkspaceMode } from "lib/workspace";
 import { LaboratoryAllotPanel } from "features/laboratory/LaboratoryAllotPanel";
 import { LaboratoryPrintInventoryPanel } from "features/laboratory/LaboratoryPrintInventoryPanel";
 import { StockStatusBadge } from "features/library/StockStatusBadge";
@@ -109,8 +110,10 @@ type TeacherOption = { _id: string; user: { fullName: string } };
 
 export const LaboratoryManager = () => {
   const { user } = useAuth();
-  const isAdmin = canManageInstitution(user?.role ?? "");
-  const isTeacher = user?.role === "TEACHER";
+  const workspace = useWorkspaceMode();
+  const isAdmin =
+    canManageInstitution(user?.role ?? "") || workspace === "admin";
+  const isTeacher = user?.role === "TEACHER" && workspace !== "admin";
   const { canWrite: labModuleWrite, isReadOnly: labReadOnly } =
     useModuleAccess("laboratory");
   /** Full lab inventory/meta management: Admin or Lab Staff with write access. */

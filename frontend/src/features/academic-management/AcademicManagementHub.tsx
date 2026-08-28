@@ -32,6 +32,7 @@ import { useTeacherScope } from "hooks/useTeacherScope";
 import { useIsCollege } from "hooks/useInstitutionType";
 import { useModuleAccess } from "hooks/useModuleAccess";
 import { getCollegeDisplayName } from "lib/auth";
+import { useWorkspaceMode } from "lib/workspace";
 import { api, unwrap } from "lib/api";
 import { downloadPdfFromElementById, printElementById } from "lib/printUtils";
 import { cn } from "lib/utils";
@@ -87,9 +88,13 @@ const printAreaIdForTab = (tab: Tab): string | null => {
 export const AcademicManagementHub = () => {
   const { user, availableSchools } = useAuth();
   const isCollege = useIsCollege();
-  const isTeacher = user?.role === "TEACHER";
-  const isAdmin = canManageInstitution(user?.role ?? "");
-  const hasInstitutionRead = hasInstitutionAccess(user?.role ?? "");
+  const workspace = useWorkspaceMode();
+  /** Administration hub: all teachers' plans / approvals. My Work: own subjects only. */
+  const isAdminWorkspace = workspace === "admin";
+  const isTeacher = user?.role === "TEACHER" && !isAdminWorkspace;
+  const isAdmin = canManageInstitution(user?.role ?? "") || isAdminWorkspace;
+  const hasInstitutionRead =
+    hasInstitutionAccess(user?.role ?? "") || isAdminWorkspace;
   const teacherScopeQuery = useTeacherScope(isTeacher);
   const institutionName = getCollegeDisplayName(availableSchools, user);
   const { canWrite: canWriteAcademic, isReadOnly: academicReadOnly } =
@@ -185,9 +190,27 @@ export const AcademicManagementHub = () => {
    * plans from every batch of the same year level are returned and merged.
    */
   const academicListParams = useMemo(
-    () => academicListApiParams(appliedFilters, { isCollege }),
-    [appliedFilters, isCollege],
+    () =>
+      academicListApiParams(appliedFilters, {
+        isCollege,
+        adminScope: isAdminWorkspace,
+      }),
+    [appliedFilters, isCollege, isAdminWorkspace],
   );
+
+  useEffect(() => {
+    if (!isAdminWorkspace) return;
+    const interceptor = api.interceptors.request.use((config) => {
+      const url = String(config.url ?? "");
+      if (url.includes("/academic-management")) {
+        config.params = { ...(config.params ?? {}), adminScope: "1" };
+      }
+      return config;
+    });
+    return () => {
+      api.interceptors.request.eject(interceptor);
+    };
+  }, [isAdminWorkspace]);
 
   const dashboardQuery = useQuery({
     queryKey: ["academic-management", "dashboard", academicListParams],
@@ -456,8 +479,16 @@ export const AcademicManagementHub = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Academic Management"
-        description="Syllabus, session planning, lesson planning, and daily log books with tracking and approvals."
+        title={
+          isTeacher
+            ? "My Session / Lesson / Log Book"
+            : "Academic Management"
+        }
+        description={
+          isTeacher
+            ? "Your assigned subjects: syllabus, session plans, lesson plans, and daily log book."
+            : "Institution syllabus, session/lesson plans, log books, and approvals for every teacher."
+        }
       />
 
       <ModuleReadOnlyBanner show={academicReadOnly} />
@@ -559,6 +590,7 @@ export const AcademicManagementHub = () => {
           teacherId={teacherId}
           teachers={teachersQuery.data ?? []}
           writeAccess={canWriteAcademic}
+          isAdminView={isAdmin}
           {...hierarchyProps}
         />
       </div>

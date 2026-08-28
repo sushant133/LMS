@@ -51,7 +51,7 @@ import {
 import { printElementById } from "lib/printUtils";
 import { queryClient } from "lib/queryClient";
 import { cn, formatCurrencyNpr, parseErrorMessage } from "lib/utils";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 import { ModuleAccessControlPanel } from "features/users/ModuleAccessControlPanel";
 import {
   categoryDisplayLabel,
@@ -109,7 +109,7 @@ export const CollegeStaffManager = ({
   showReports = false,
   showCreateForm = true,
 }: CollegeStaffManagerProps) => {
-  const canManage = useIsTenantAdmin();
+  const canManage = useCanManageGrantedModule("staff");
   const { user, availableSchools } = useAuth();
   const institutionName = getCollegeDisplayName(availableSchools, user);
   const printBranding = getPrintInstitutionBranding();

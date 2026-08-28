@@ -2,15 +2,19 @@ import {
   INSTITUTION_ACCESS_ROLES,
   INSTITUTION_ADMIN_ROLES,
   canAccessAcademicStructure,
+  canAccessAttendanceAdminHub,
   canAccessAttendanceManagement,
   canAccessExaminationManagement,
   canAccessModule,
+  canAccessStaffDirectory,
   canManageInstitution,
   hasInstitutionAccess,
   isAcademicStructurePath,
+  isAttendanceAdminHubPath,
   isAttendanceManagementPath,
   isExaminationManagementPath,
   isInstitutionAdmin,
+  isStaffDirectoryPath,
   isSystemAdministrator,
   normalizeUserRole,
   resolveModuleFromRoutePath,
@@ -80,7 +84,23 @@ export const hasProtectedRouteAccess = (
     options.pathname &&
     options.moduleAccess
   ) {
-    // Teacher Attendance / Staff Attendance grants share the Attendance Management hub
+    // Teacher + Staff directory share /college-staff (Teachers tab redirects here)
+    if (
+      isStaffDirectoryPath(options.pathname) &&
+      canAccessStaffDirectory(options.moduleAccess)
+    ) {
+      return true;
+    }
+    // Attendance Management hub: HR teacher/staff attendance, or any attendance
+    // grant for non-teaching staff. Teaching My Attendance is /attendance.
+    if (isAttendanceAdminHubPath(options.pathname)) {
+      if (canAccessAttendanceAdminHub(options.moduleAccess)) {
+        return true;
+      }
+      if (canAccessAttendanceManagement(options.moduleAccess)) {
+        return true;
+      }
+    }
     if (
       isAttendanceManagementPath(options.pathname) &&
       canAccessAttendanceManagement(options.moduleAccess)

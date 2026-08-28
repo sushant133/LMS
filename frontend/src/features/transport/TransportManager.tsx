@@ -19,10 +19,10 @@ import { Table, TableBody, Td, Th, TableHead } from "components/ui/table";
 import { api, unwrap } from "lib/api";
 import { queryClient } from "lib/queryClient";
 import { formatCurrencyNpr, parseErrorMessage } from "lib/utils";
-import { useIsTenantAdmin } from "hooks/useNormalizedRole";
+import { useCanManageGrantedModule } from "hooks/useModuleAccess";
 
 export const TransportManager = () => {
-  const canManage = useIsTenantAdmin();
+  const canManage = useCanManageGrantedModule("transport");
   const [routeForm, setRouteForm] = useState<TransportRouteInput>({
     name: "",
     vehicleNumber: "",
