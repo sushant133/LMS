@@ -49,6 +49,11 @@ export const AcademicReportsPanel = ({
     [filters, isCollege],
   );
 
+  /** These two are teacher-scoped server-side and 400 without a teacher. */
+  const needsTeacher =
+    reportType === "teacher-lesson-plan" || reportType === "teacher-log-book";
+  const missingTeacher = needsTeacher && !filters.teacherId;
+
   const reportQuery = useQuery({
     queryKey: ["academic-management", "reports", reportType, reportParams],
     queryFn: () =>
@@ -57,9 +62,14 @@ export const AcademicReportsPanel = ({
           params: reportParams,
         }),
       ),
+    enabled: !missingTeacher,
   });
 
   const downloadCsv = async () => {
+    if (missingTeacher) {
+      toast.error("Select a teacher in the filters for this report");
+      return;
+    }
     try {
       const response = await api.get(
         `/academic-management/reports/${reportType}/export`,
@@ -110,12 +120,17 @@ export const AcademicReportsPanel = ({
               </option>
             ))}
           </Select>
-          <Button variant="outline" onClick={() => void downloadCsv()}>
+          <Button
+            variant="outline"
+            disabled={missingTeacher}
+            onClick={() => void downloadCsv()}
+          >
             <Download className="mr-2 h-4 w-4" />
             Export CSV
           </Button>
           <Button
             variant="outline"
+            disabled={missingTeacher}
             onClick={() =>
               window.open(
                 resolveApiUrl(
@@ -136,8 +151,17 @@ export const AcademicReportsPanel = ({
           <CardTitle>{reportQuery.data?.title ?? "Report Preview"}</CardTitle>
         </CardHeader>
         <CardContent>
-          {reportQuery.isLoading ? (
+          {missingTeacher ? (
+            <p className="text-sm text-slate-500">
+              Select a teacher in the filters above to run this report.
+            </p>
+          ) : reportQuery.isLoading ? (
             <LoadingState />
+          ) : reportQuery.isError ? (
+            <p className="text-sm text-rose-600">
+              This report could not be generated. Check the active filters and
+              try again.
+            </p>
           ) : rows.length === 0 ? (
             <p className="text-sm text-slate-500">
               No records found for the selected report and filters.

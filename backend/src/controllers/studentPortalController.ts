@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import type { StudentSubjectDetail } from "@phit-erp/shared";
 import { Assignment, AssignmentSubmission } from "../models/Assignment.js";
 import { Attendance } from "../models/Attendance.js";
 import { FeeCollection } from "../models/FeeCollection.js";
@@ -252,31 +253,49 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
    * Official (APPROVED) syllabus only for students. Match curriculum siblings
    * so a syllabus on another batch-year subject instance still appears.
    * Prefer exact subjectId match, then approved siblings.
+   *
+   * `syllabusAvailability` tells the portal WHY nothing is rendered, so
+   * "still in draft" never looks identical to "never created" or to a
+   * server-side failure.
    */
   let syllabus: Awaited<ReturnType<typeof serializeSyllabus>> = null;
+  let syllabusAvailability: StudentSubjectDetail["syllabusAvailability"] = "NONE";
   try {
     const subjectIds = await expandCurriculumSubjectIds(
       schoolId,
       subject._id.toString()
     );
+    // Fetch every live syllabus for the curriculum, then pick the approved one.
+    // The unapproved rows are never serialized — they only explain the empty state.
     const syllabusRows = await AcademicSyllabus.find({
       schoolId,
       subjectId: { $in: subjectIds },
-      isDeleted: false,
-      status: "APPROVED"
+      isDeleted: false
     })
       .sort({ updatedAt: -1 })
       .lean();
 
+    const approvedRows = syllabusRows.filter((row) => row.status === "APPROVED");
     const preferred =
-      syllabusRows.find((row) => row.subjectId.toString() === subject._id.toString()) ??
-      syllabusRows[0];
+      approvedRows.find((row) => row.subjectId.toString() === subject._id.toString()) ??
+      approvedRows[0];
 
     if (preferred) {
       syllabus = await serializeSyllabus(preferred._id.toString());
+      syllabusAvailability = syllabus ? "APPROVED" : "UNAVAILABLE";
+    } else if (syllabusRows.length > 0) {
+      syllabusAvailability = "AWAITING_APPROVAL";
     }
-  } catch {
+  } catch (error) {
+    // Never let a syllabus failure take down the whole subject page, but do not
+    // swallow it either — a silent null is indistinguishable from "not approved".
+    console.error(
+      "[student/subject-detail] syllabus load failed",
+      subject._id.toString(),
+      error
+    );
     syllabus = null;
+    syllabusAvailability = "UNAVAILABLE";
   }
 
   type SubLike = {
@@ -349,7 +368,8 @@ export const getStudentSubjectDetail = asyncHandler(async (req: Request, res: Re
     notes: notes.map(mapAssignment),
     submissions,
     notices,
-    syllabus: studentSyllabus
+    syllabus: studentSyllabus,
+    syllabusAvailability
   });
 });
 

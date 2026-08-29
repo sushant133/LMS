@@ -565,4 +565,12 @@ export interface StudentSubjectDetail {
   notices: Array<{ _id: string; title: string; content: string; publishDateBs: string }>;
   /** Official syllabus for this subject when available (not rejected). */
   syllabus?: StudentSubjectSyllabus | null;
+  /**
+   * Why `syllabus` is empty, so the portal can say something useful:
+   * - APPROVED         → a syllabus is attached
+   * - AWAITING_APPROVAL→ one exists for this curriculum but is not approved yet
+   * - NONE             → no syllabus has been created for this subject
+   * - UNAVAILABLE      → it could not be loaded (server-side failure, logged)
+   */
+  syllabusAvailability?: "APPROVED" | "AWAITING_APPROVAL" | "NONE" | "UNAVAILABLE";
 }

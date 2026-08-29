@@ -187,6 +187,14 @@ export const StudentSubjects = () => {
         } as unknown as AcademicSyllabusRecord)
       : null;
 
+    /** Say why the syllabus is missing — draft, absent, or failed to load. */
+    const syllabusEmptyMessage =
+      detail.syllabusAvailability === "AWAITING_APPROVAL"
+        ? "The syllabus for this subject is prepared but not approved yet. It appears here once your administrator approves it."
+        : detail.syllabusAvailability === "UNAVAILABLE"
+          ? "The syllabus could not be loaded right now. Please try again later or inform your administrator."
+          : "No syllabus has been created for this subject yet. Ask your administrator to add and approve it.";
+
     const printStudentSyllabus = async () => {
       if (!syllabusForView) return;
       setPrintingSyllabus(true);
@@ -245,10 +253,7 @@ export const StudentSubjects = () => {
           </CardHeader>
           <CardContent>
             {!syllabusForView ? (
-              <p className="text-sm text-slate-500">
-                No approved syllabus has been published for this subject yet.
-                Ask your administrator to approve the syllabus when it is ready.
-              </p>
+              <p className="text-sm text-slate-500">{syllabusEmptyMessage}</p>
             ) : (
               <SyllabusDocumentView plan={syllabusForView} mode="view" />
             )}

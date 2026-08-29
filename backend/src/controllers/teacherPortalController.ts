@@ -39,7 +39,7 @@ export const getTeacherAssignments = asyncHandler(async (req: Request, res: Resp
       expandedSubjectIds.add(sib);
     }
   }
-  const subjectIdList = expandedSubjectIds.size > 0 ? [...expandedSubjectIds] : ["__none__"];
+  const subjectIdList = [...expandedSubjectIds];
 
   if (college) {
     const subjectFilter: Record<string, unknown> = {

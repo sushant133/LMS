@@ -20,8 +20,20 @@ import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
  * has caused empty trees on some VPS/Atlas timing cases. Always allocate new ids.
  * clientKey is still accepted on the payload for client-side React keys only.
  */
-const forcedObjectId = (_clientKey?: string): Types.ObjectId | undefined => {
-  return undefined;
+/**
+ * The editor sends the persisted `_id` as `clientKey` for rows that already
+ * exist (and a synthetic "ch-3"/"unit-7" key for new ones), so reusing it keeps
+ * chapter/unit/sub-unit ids stable across saves. Without this, every save wipes
+ * and re-mints the tree, orphaning every session-plan unit, lesson-plan item and
+ * log-book entry that references it — teaching progress then silently stops
+ * tracking. `createWithOptionalId` retries without the id on an _id collision.
+ */
+const forcedObjectId = (clientKey?: string): Types.ObjectId | undefined => {
+  const raw = String(clientKey ?? "").trim();
+  // isValid() also accepts any 12-char string; round-trip to require a real hex id.
+  if (!raw || !mongoose.Types.ObjectId.isValid(raw)) return undefined;
+  if (new mongoose.Types.ObjectId(raw).toString() !== raw.toLowerCase()) return undefined;
+  return new mongoose.Types.ObjectId(raw);
 };
 
 type LegacyUnitLike = {

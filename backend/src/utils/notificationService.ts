@@ -190,7 +190,7 @@ export const buildPersonalNotificationFilter = (
   extra: Record<string, unknown> = {}
 ): Record<string, unknown> => {
   if (!req.user?.userId) {
-    return { ...extra, recipientUserId: "__none__" };
+    return { ...extra, recipientUserId: { $in: [] } };
   }
   const schoolId = req.tenantSchoolId ? req.tenantSchoolId : tenantObjectId(req);
   return {

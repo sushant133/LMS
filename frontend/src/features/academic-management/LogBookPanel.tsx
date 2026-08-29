@@ -602,6 +602,22 @@ export const LogBookPanel = ({
     onError: (error) => toast.error(parseErrorMessage(error)),
   });
 
+  /**
+   * Soft-deletes on the server, then rolls the syllabus sub-units and the
+   * Session Plan back so the removed class stops counting as taught.
+   * Administrators may delete an APPROVED entry (mistaken approval);
+   * teachers can only remove their own entries before approval.
+   */
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      unwrap(api.delete(`/academic-management/log-book-entries/${id}`)),
+    onSuccess: () => {
+      toast.success("Log book entry deleted");
+      void queryClient.invalidateQueries({ queryKey: ["academic-management"] });
+    },
+    onError: (error) => toast.error(parseErrorMessage(error)),
+  });
+
   const updateRow = (index: number, patch: Partial<DraftLogRow>) => {
     setRows((current) =>
       current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
@@ -1576,6 +1592,39 @@ export const LogBookPanel = ({
                                           Needs improvement
                                         </Button>
                                       </>
+                                    ) : null}
+                                    {canEditDelete &&
+                                    (isAdmin ||
+                                      entry.reviewStatus !== "APPROVED") ? (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                        disabled={deleteMutation.isPending}
+                                        title={
+                                          entry.reviewStatus === "APPROVED"
+                                            ? "Delete this approved entry (approved by mistake)"
+                                            : "Delete this log book row"
+                                        }
+                                        onClick={() => {
+                                          const label = entry.dateBs || "this row";
+                                          const warning =
+                                            entry.reviewStatus === "APPROVED"
+                                              ? " It is already approved, and the sub-units it covered will go back to not started."
+                                              : "";
+                                          if (
+                                            !window.confirm(
+                                              `Delete the log book entry for ${label}?${warning}`,
+                                            )
+                                          ) {
+                                            return;
+                                          }
+                                          deleteMutation.mutate(entry._id);
+                                        }}
+                                      >
+                                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                        Delete
+                                      </Button>
                                     ) : null}
                                   </div>
                                 </Td>

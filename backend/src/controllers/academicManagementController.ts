@@ -742,19 +742,30 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const rows = await AcademicSyllabus.find(filter).sort({ updatedAt: -1 }).lean();
-  const serialized = (await Promise.all(rows.map((row) => serializeSyllabus(row._id.toString())))).filter(Boolean);
+  const serialized = (
+    await Promise.all(
+      rows.map(async (row) => {
+        try {
+          return await serializeSyllabus(row._id.toString());
+        } catch (error) {
+          console.error("[listSyllabi] serialize failed", String(row._id), error);
+          return null;
+        }
+      })
+    )
+  ).filter(Boolean);
   const filtered = serialized.filter((plan) => {
     const chapterTitles = (plan?.chapters ?? []).map((c) => c.title);
     const chapterDescriptions = (plan?.chapters ?? []).map((c) => c.description);
-    const unitTitles = (plan?.chapters ?? []).flatMap((c) => c.units.map((u) => u.title));
+    const unitTitles = (plan?.chapters ?? []).flatMap((c) => (c.units ?? []).map((u) => u.title));
     const unitDescriptions = (plan?.chapters ?? []).flatMap((c) =>
-      c.units.map((u) => u.description)
+      (c.units ?? []).map((u) => u.description)
     );
     const unitOutcomes = (plan?.chapters ?? []).flatMap((c) =>
-      c.units.map((u) => u.learningObjective)
+      (c.units ?? []).map((u) => u.learningObjective)
     );
     const unitRefs = (plan?.chapters ?? []).flatMap((c) =>
-      c.units.map((u) => u.references)
+      (c.units ?? []).map((u) => u.references)
     );
     const flattenSubs = <T extends { children?: T[] }>(subs: T[]): T[] => {
       const out: T[] = [];
@@ -768,7 +779,7 @@ export const listSyllabi = asyncHandler(async (req: Request, res: Response) => {
       return out;
     };
     const allSubs = (plan?.chapters ?? []).flatMap((c) =>
-      c.units.flatMap((u) => flattenSubs(u.subUnits ?? []))
+      (c.units ?? []).flatMap((u) => flattenSubs(u.subUnits ?? []))
     );
     const subHeadings = allSubs.map((s) => s.heading);
     const subDescriptions = allSubs.map((s) => s.description);
@@ -2675,6 +2686,22 @@ export const deleteLogBookEntry = asyncHandler(async (req: Request, res: Respons
   await existing.save();
 
   if (existing.lessonPlanItemId) await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
+  // A deleted entry no longer counts as taught: roll the syllabus leaves and the
+  // session plan back, exactly as create/update propagate them forward.
+  if (existing.syllabusId) {
+    await syncSyllabusCompletionFromLogBook(
+      tenantObjectId(req),
+      existing.syllabusId.toString(),
+      existing.subjectId.toString()
+    );
+  }
+  await resyncSessionPlansTouchedByLog({
+    schoolId: tenantObjectId(req).toString(),
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    sessionPlanUnitId: existing.sessionPlanUnitId?.toString(),
+    syllabusUnitId: existing.syllabusUnitId?.toString()
+  });
   return sendSuccess(res, "Log book entry deleted");
 });
 
@@ -2692,6 +2719,22 @@ export const reviewLogBookEntry = asyncHandler(async (req: Request, res: Respons
   await existing.save();
 
   if (existing.lessonPlanItemId) await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
+  // NEEDS_IMPROVEMENT excludes the entry from taught leaves, and approving it
+  // includes it again — both directions must reach the syllabus and session plan.
+  if (existing.syllabusId) {
+    await syncSyllabusCompletionFromLogBook(
+      tenantObjectId(req),
+      existing.syllabusId.toString(),
+      existing.subjectId.toString()
+    );
+  }
+  await resyncSessionPlansTouchedByLog({
+    schoolId: tenantObjectId(req).toString(),
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    sessionPlanUnitId: existing.sessionPlanUnitId?.toString(),
+    syllabusUnitId: existing.syllabusUnitId?.toString()
+  });
   await notifyTeacherOfAcademicDecision(req, {
     kind: "LOG_BOOK",
     teacherId: existing.teacherId.toString(),

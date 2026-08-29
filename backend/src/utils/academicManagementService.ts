@@ -276,7 +276,7 @@ export const applyTeacherSubjectScopeToFilter = async (
 
   const existing = filter.subjectId;
   if (existing == null) {
-    filter.subjectId = { $in: allowedList.length > 0 ? allowedList : ["__none__"] };
+    filter.subjectId = { $in: allowedList };
     return;
   }
   const existingIds: string[] =
@@ -300,7 +300,7 @@ export const applyTeacherSubjectScopeToFilter = async (
   }
   filter.subjectId =
     intersected.length === 0
-      ? { $in: ["__none__"] }
+      ? { $in: [] }
       : intersected.length === 1
         ? intersected[0]
         : { $in: intersected };
@@ -1175,10 +1175,17 @@ export const resolveTaughtSyllabusSubUnitIds = async (
 
   let leaves = await loadSyllabusLeaves(syllabusIds);
   const unitId = asId(params.syllabusUnitId);
+  let scopedByUnit = false;
   if (unitId) {
     const scoped = leaves.filter((leaf) => leaf.unitId === unitId);
-    if (scoped.length > 0) leaves = scoped;
-  } else {
+    if (scoped.length > 0) {
+      leaves = scoped;
+      scopedByUnit = true;
+    }
+  }
+  // A dangling unit id must not widen the search to the whole syllabus: fall
+  // back to the unit label so a title is never matched against another unit.
+  if (!scopedByUnit) {
     const unitNo = parseUnitNo(params.unitLabel);
     if (unitNo > 0) {
       const scoped = leaves.filter((leaf) => leaf.unitNo === unitNo);
@@ -1217,9 +1224,14 @@ export const uniqueTaughtSyllabusLeafIdsFromLogBook = async (
     byUnit.set(leaf.unitId, list);
   }
 
-  const subjectIds = subjectId
-    ? await expandCurriculumSubjectIds(schoolId, subjectId)
-    : [];
+  let subjectIds: string[] = [];
+  if (subjectId && mongoose.Types.ObjectId.isValid(subjectId)) {
+    try {
+      subjectIds = await expandCurriculumSubjectIds(schoolId, subjectId);
+    } catch {
+      subjectIds = [subjectId];
+    }
+  }
   const entries = await AcademicLogBookEntry.find({
     schoolId,
     isDeleted: { $ne: true },
@@ -1292,20 +1304,25 @@ export const syncSyllabusCompletionFromLogBook = async (
     subjectId
   );
   const taughtList = [...taught];
+  if (taughtList.length === 0) {
+    await AcademicSyllabusSubUnit.updateMany(
+      { syllabusId, status: "COMPLETED" },
+      { $set: { status: "NOT_STARTED" } }
+    );
+    return taught;
+  }
   await AcademicSyllabusSubUnit.updateMany(
     {
       syllabusId,
       status: "COMPLETED",
-      _id: { $nin: taughtList.length > 0 ? taughtList : ["__none__"] }
+      _id: { $nin: taughtList }
     },
     { $set: { status: "NOT_STARTED" } }
   );
-  if (taughtList.length > 0) {
-    await AcademicSyllabusSubUnit.updateMany(
-      { syllabusId, _id: { $in: taughtList } },
-      { $set: { status: "COMPLETED" } }
-    );
-  }
+  await AcademicSyllabusSubUnit.updateMany(
+    { syllabusId, _id: { $in: taughtList } },
+    { $set: { status: "COMPLETED" } }
+  );
   return taught;
 };
 
@@ -1493,7 +1510,17 @@ const leafProgressForSyllabusUnit = async (
 const ensureSessionUnitSyllabusLink = async (
   unit: InstanceType<typeof AcademicSessionPlanUnit>
 ): Promise<void> => {
-  if (unit.syllabusUnitId) return;
+  // A stored link is only trustworthy while the topic it points at still exists.
+  // Re-saving a syllabus can replace the hierarchy, leaving this id dangling —
+  // leaf progress then silently reads zero and the unit never leaves PENDING.
+  if (unit.syllabusUnitId) {
+    const linked = await AcademicSyllabusTopic.findById(unit.syllabusUnitId)
+      .select("_id")
+      .lean();
+    if (linked) return;
+    unit.set("syllabusUnitId", undefined);
+    unit.set("syllabusChapterId", undefined);
+  }
   let syllabusIds: string[] = unit.syllabusId ? [unit.syllabusId.toString()] : [];
   if (syllabusIds.length === 0) {
     const plan = await AcademicSessionPlan.findById(unit.sessionPlanId)
@@ -2003,11 +2030,17 @@ export const serializeSyllabus = async (syllabusId: string) => {
   const schoolId = plan.schoolId.toString();
   // Auto-migrate legacy flat units → Chapter → Unit → SubUnit (idempotent)
   await ensureSyllabusHierarchy(syllabusId, schoolId);
-  await syncSyllabusCompletionFromLogBook(
-    plan.schoolId,
-    syllabusId,
-    plan.subjectId?._id?.toString() ?? plan.subjectId?.toString()
-  );
+  try {
+    const subjectId =
+      plan.subjectId && typeof plan.subjectId === "object" && "_id" in plan.subjectId
+        ? String((plan.subjectId as { _id: unknown })._id)
+        : plan.subjectId
+          ? String(plan.subjectId)
+          : undefined;
+    await syncSyllabusCompletionFromLogBook(plan.schoolId, syllabusId, subjectId);
+  } catch (error) {
+    console.error("[serializeSyllabus] log-book completion sync failed", syllabusId, error);
+  }
 
   const chapters = await loadSyllabusHierarchy(syllabusId);
   const stats = computeHierarchyStats(chapters);
@@ -2482,11 +2515,19 @@ const loadSyllabusCompletionRows = async (
   if (syllabi.length === 0) return [];
 
   for (const syllabus of syllabi) {
-    await syncSyllabusCompletionFromLogBook(
-      schoolId,
-      String(syllabus._id),
-      String(syllabus.subjectId)
-    );
+    try {
+      await syncSyllabusCompletionFromLogBook(
+        schoolId,
+        String(syllabus._id),
+        syllabus.subjectId ? String(syllabus.subjectId) : undefined
+      );
+    } catch (error) {
+      console.error(
+        "[dashboard] syllabus completion sync failed",
+        String(syllabus._id),
+        error
+      );
+    }
   }
 
   const syllabusIds = syllabi.map((row) => row._id);

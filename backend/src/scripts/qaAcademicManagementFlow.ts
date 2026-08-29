@@ -10,7 +10,9 @@
  *  6) Lesson plan update draft (empty ObjectId fields must not 400)
  *  7) Lesson plan same unit on second day (daily spread)
  *  8) Log book create from lesson plan item
- *  9) Soft cleanup of QA-created lesson plans
+ *  9) Same sub-unit logged on two dates counts as completed ONCE
+ * 10) Deleting a log entry rolls the syllabus back
+ * 11) Soft cleanup of QA-created lesson plans
  *
  * Run: npx tsx src/scripts/qaAcademicManagementFlow.ts
  */
@@ -22,6 +24,7 @@ import { AcademicLessonPlanItem } from "../models/AcademicLessonPlanItem.js";
 import { AcademicLogBookEntry } from "../models/AcademicLogBookEntry.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
+import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import { School } from "../models/School.js";
 
 type Check = { name: string; ok: boolean; detail?: string };
@@ -332,6 +335,154 @@ async function main() {
       );
     } else {
       fail("POST log-book entry", "missing lesson item id");
+    }
+
+    // 4b) Sub-unit dedupe: the same sub-unit taught on two dates counts once
+    console.log("\n═══ 4b) Log book sub-unit dedupe ═══");
+    const syllabusUnitId = String(unit.syllabusUnitId || "");
+    const syllabusId = String(unit.syllabusId || "");
+    if (!syllabusUnitId || !syllabusId) {
+      pass("dedupe check skipped", "session plan unit has no syllabus link");
+    } else {
+      const allLeaves = await AcademicSyllabusSubUnit.find({ syllabusId })
+        .select("_id heading unitId parentSubUnitId status")
+        .lean();
+      const parentIds = new Set(
+        allLeaves
+          .map((row) => (row.parentSubUnitId ? String(row.parentSubUnitId) : ""))
+          .filter(Boolean)
+      );
+      const leaves = allLeaves.filter((row) => !parentIds.has(String(row._id)));
+      const doneCount = () =>
+        AcademicSyllabusSubUnit.find({ syllabusId })
+          .select("_id heading parentSubUnitId status")
+          .lean()
+          .then((rows) => {
+            const parents = new Set(
+              rows
+                .map((r) => (r.parentSubUnitId ? String(r.parentSubUnitId) : ""))
+                .filter(Boolean)
+            );
+            return rows.filter(
+              (r) =>
+                !parents.has(String(r._id)) &&
+                (r.status === "COMPLETED" || r.status === "SKIPPED")
+            ).length;
+          });
+
+      // Two untaught leaves in this unit with distinct, non-empty headings
+      const seen = new Set<string>();
+      const spare = leaves.filter((row) => {
+        if (String(row.unitId) !== syllabusUnitId) return false;
+        if (row.status === "COMPLETED" || row.status === "SKIPPED") return false;
+        const h = String(row.heading || "").trim().toLowerCase();
+        if (!h || seen.has(h)) return false;
+        seen.add(h);
+        return true;
+      });
+
+      if (spare.length < 2) {
+        pass("dedupe check skipped", `untaught leaves=${spare.length} (need 2)`);
+      } else {
+        const first = String(spare[0]!.heading).trim();
+        const second = String(spare[1]!.heading).trim();
+        const before = await doneCount();
+
+        const logBody = (dateBs: string, titles: string[], periodNumber: number) => ({
+          sessionPlanUnitId: unitId,
+          academicYearBs,
+          session: academicYearBs,
+          subjectId,
+          teacherId,
+          dateBs,
+          unit: `Unit ${unit.unitNo}`,
+          syllabusId,
+          syllabusUnitId,
+          topicCovered: "QA dedupe",
+          objectives: "",
+          teachingMethod: "",
+          theoryPractical: "THEORY",
+          periodNumber,
+          subUnitTitle: titles.join("; "),
+          subUnitTitles: titles,
+          syllabusSubUnitIds: [] as string[],
+          homeworkGiven: "",
+          assignment: "",
+          feedback: "",
+          difficultiesFaced: "",
+          nextClassPlan: ""
+        });
+
+        // Day 1 teaches BOTH sub-units
+        const dayA = await api(
+          "POST",
+          "/academic-management/log-book-entries",
+          logBody(day1, [first, second], 7)
+        );
+        const dayAId = (dayA.json.data as { _id?: string } | undefined)?._id;
+        if (dayAId) createdLogEntryIds.push(dayAId);
+        assert(
+          "log entry day 1 (two sub-units)",
+          dayA.status === 201 || dayA.status === 200,
+          `status=${dayA.status} msg=${dayA.message}`
+        );
+        const afterA = await doneCount();
+        assert(
+          "two sub-units taught → +2 completed",
+          afterA === before + 2,
+          `before=${before} after=${afterA}`
+        );
+
+        // Day 2 re-teaches ONLY the second sub-unit — must not count again
+        const dayB = await api(
+          "POST",
+          "/academic-management/log-book-entries",
+          logBody(day2, [second], 8)
+        );
+        const dayBId = (dayB.json.data as { _id?: string } | undefined)?._id;
+        if (dayBId) createdLogEntryIds.push(dayBId);
+        assert(
+          "log entry day 2 (repeat sub-unit)",
+          dayB.status === 201 || dayB.status === 200,
+          `status=${dayB.status} msg=${dayB.message}`
+        );
+        const afterB = await doneCount();
+        assert(
+          "repeat of same sub-unit counts ONCE",
+          afterB === before + 2,
+          `expected=${before + 2} got=${afterB} distinctTaught=2`
+        );
+
+        // Removing the repeat must not un-complete a sub-unit day 1 also covered
+        if (dayBId) {
+          const delB = await api(
+            "DELETE",
+            `/academic-management/log-book-entries/${dayBId}`
+          );
+          assert("delete repeat entry", delB.status === 200, `status=${delB.status}`);
+          const afterDelB = await doneCount();
+          assert(
+            "sub-unit stays completed while day 1 still covers it",
+            afterDelB === before + 2,
+            `expected=${before + 2} got=${afterDelB}`
+          );
+        }
+
+        // Removing the last entry that covered them rolls both back
+        if (dayAId) {
+          const delA = await api(
+            "DELETE",
+            `/academic-management/log-book-entries/${dayAId}`
+          );
+          assert("delete day 1 entry", delA.status === 200, `status=${delA.status}`);
+          const afterDelA = await doneCount();
+          assert(
+            "deleting the log rolls the syllabus back",
+            afterDelA === before,
+            `expected=${before} got=${afterDelA}`
+          );
+        }
+      }
     }
 
     // 5) DB consistency

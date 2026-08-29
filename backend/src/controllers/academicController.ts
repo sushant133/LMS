@@ -177,9 +177,7 @@ export const listSubjects = asyncHandler(async (req: Request, res: Response) => 
         expanded.add(sib);
       }
     }
-    filter._id = {
-      $in: expanded.size > 0 ? [...expanded] : ["__none__"]
-    };
+    filter._id = { $in: [...expanded] };
   }
 
   const studentProfile = await getStudentProfile(req);
@@ -313,7 +311,7 @@ export const listBatches = asyncHandler(async (req: Request, res: Response) => {
       ];
     }
     Object.assign(filter, {
-      _id: { $in: batchIds.length > 0 ? batchIds : ["__none__"] }
+      _id: { $in: batchIds }
     });
   }
 
@@ -451,7 +449,7 @@ export const listYears = asyncHandler(async (req: Request, res: Response) => {
         query._id = { $in: yearIds };
       }
     } else {
-      query._id = { $in: ["__none__"] };
+      query._id = { $in: [] };
     }
   }
 
