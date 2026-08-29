@@ -76,6 +76,17 @@ export const canManageInstitution = (role: string): boolean => isInstitutionAdmi
 export const isSystemAdministrator = (role: string): boolean => normalizeUserRole(role) === "SUPER_ADMIN";
 
 /**
+ * Portal-only roles. They consume their own data through the Student / Parent
+ * portals and must never see administrative surfaces (create exam, print
+ * results, approve, manage…), regardless of the Module Access matrix — an
+ * unconfigured (empty) matrix otherwise resolves to legacy full WRITE.
+ */
+export const PORTAL_ROLES: UserRole[] = ["STUDENT", "PARENT"];
+
+export const isPortalRole = (role: string): boolean =>
+  PORTAL_ROLES.includes(normalizeUserRole(role));
+
+/**
  * Changing or removing an existing record is reserved for Administrator and
  * System Administrator. Granted Vice Principal / Principal / staff may still
  * create, view, approve, and operate the module.

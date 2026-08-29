@@ -5,6 +5,7 @@ import {
   canEditOrDeleteRecords,
   hasModuleAction,
   isInstitutionAdmin,
+  isPortalRole,
   isSystemAdministrator,
   resolveModuleAccessMode,
   resolveModuleFromRoutePath,
@@ -142,6 +143,9 @@ export const useCanAccessModule = (moduleKey: ErpModuleKey): boolean => {
 export const useCanManageGrantedModule = (moduleKey: ErpModuleKey): boolean => {
   const { user } = useAuth();
   const { canWrite, isUnrestricted } = useModuleAccess(moduleKey);
+  // Students / parents never get administrative surfaces, even when their
+  // Module Access matrix is unconfigured (which resolves to legacy WRITE).
+  if (isPortalRole(user?.role ?? "")) return false;
   if (isUnrestricted) return true;
   if (!canWrite) return false;
   if (isInstitutionAdmin(user?.role ?? "")) return true;
@@ -163,6 +167,7 @@ export const useIsGrantedAdmin = (moduleKey: ErpModuleKey): boolean => {
   const { user } = useAuth();
   const workspace = useWorkspaceMode();
   const canManage = useCanManageGrantedModule(moduleKey);
+  if (isPortalRole(user?.role ?? "")) return false;
   if (!canManage) return false;
   if (isInstitutionAdmin(user?.role ?? "") || isSystemAdministrator(user?.role ?? "")) {
     return true;

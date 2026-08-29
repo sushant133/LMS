@@ -19,6 +19,7 @@ import { AcademicProgress } from "../models/AcademicProgress.js";
 import { AcademicSessionPlan } from "../models/AcademicSessionPlan.js";
 import { AcademicSessionPlanUnit } from "../models/AcademicSessionPlanUnit.js";
 import { AcademicSyllabus } from "../models/AcademicSyllabus.js";
+import { AcademicSyllabusTopic } from "../models/AcademicSyllabusTopic.js";
 import { AcademicSyllabusUnit } from "../models/AcademicSyllabusUnit.js";
 import { AcademicSyllabusSubUnit } from "../models/AcademicSyllabusSubUnit.js";
 import {
@@ -1000,9 +1001,139 @@ export const resolveLogBookLessonPlanLink = async (
   };
 };
 
+const expandTaughtTitles = (titles: string[]): string[] => {
+  const out: string[] = [];
+  for (const title of titles) {
+    for (const part of String(title || "")
+      .split(/[;\n|]+/)
+      .map((row) => row.trim())
+      .filter(Boolean)) {
+      if (!out.some((x) => x.toLowerCase() === part.toLowerCase())) out.push(part);
+    }
+  }
+  return out;
+};
+
+const parseUnitNo = (label?: string): number => {
+  const match = String(label || "").match(/(?:^|\b)(?:unit|chapter)\s*(\d+)/i);
+  return match ? Number(match[1]) : 0;
+};
+
+const titleDisplayNo = (title: string): string => {
+  const match = String(title || "")
+    .trim()
+    .match(/^(\d+(?:\.\d+)*)\b/);
+  return match?.[1] ?? "";
+};
+
+type SyllabusLeaf = {
+  id: string;
+  heading: string;
+  headingKey: string;
+  unitId: string;
+  unitNo: number;
+  displayNo: string;
+};
+
+const loadSyllabusLeaves = async (syllabusIds: string[]): Promise<SyllabusLeaf[]> => {
+  if (syllabusIds.length === 0) return [];
+  const [rows, topics] = await Promise.all([
+    AcademicSyllabusSubUnit.find({ syllabusId: { $in: syllabusIds } })
+      .select("_id heading unitId parentSubUnitId subUnitNo")
+      .lean(),
+    AcademicSyllabusTopic.find({ syllabusId: { $in: syllabusIds } })
+      .select("_id unitNo")
+      .lean()
+  ]);
+  const unitNoById = new Map(topics.map((topic) => [String(topic._id), Number(topic.unitNo) || 0]));
+  const byId = new Map(rows.map((row) => [String(row._id), row]));
+  const parentIds = new Set(
+    rows
+      .map((row) => (row.parentSubUnitId ? String(row.parentSubUnitId) : ""))
+      .filter(Boolean)
+  );
+
+  const displayNoOf = (id: string, seen = new Set<string>()): string => {
+    if (seen.has(id)) return "";
+    seen.add(id);
+    const node = byId.get(id);
+    if (!node) return "";
+    const no = String(node.subUnitNo || 0);
+    if (node.parentSubUnitId) {
+      const parent = displayNoOf(String(node.parentSubUnitId), seen);
+      return parent ? `${parent}.${no}` : no;
+    }
+    const unitNo = unitNoById.get(String(node.unitId)) || 0;
+    return unitNo ? `${unitNo}.${no}` : no;
+  };
+
+  return rows
+    .filter((row) => !parentIds.has(String(row._id)))
+    .map((row) => {
+      const id = String(row._id);
+      return {
+        id,
+        heading: String(row.heading || ""),
+        headingKey: headingKey(row.heading),
+        unitId: String(row.unitId || ""),
+        unitNo: unitNoById.get(String(row.unitId)) || 0,
+        displayNo: displayNoOf(id)
+      };
+    });
+};
+
+/** Match one taught title to at most the correct leaf(s) in the given scope. */
+const matchLeavesByTitles = (leaves: SyllabusLeaf[], titles: string[]): string[] => {
+  const found = new Set<string>();
+  const unitsInScope = new Set(leaves.map((leaf) => leaf.unitId));
+  const scopedToOneUnit = unitsInScope.size <= 1;
+
+  for (const title of expandTaughtTitles(titles)) {
+    const key = headingKey(title);
+    const raw = title.trim().toLowerCase();
+    const num = titleDisplayNo(title);
+    const candidates = leaves.filter((leaf) => {
+      if (num && leaf.displayNo === num) return true;
+      if (key && leaf.headingKey === key) return true;
+      if (raw && leaf.heading.trim().toLowerCase() === raw) return true;
+      return false;
+    });
+    if (candidates.length === 0) continue;
+    const byDisplay = num ? candidates.filter((leaf) => leaf.displayNo === num) : [];
+    if (byDisplay.length === 1) {
+      found.add(byDisplay[0]!.id);
+      continue;
+    }
+    const exactRaw = candidates.filter(
+      (leaf) => leaf.heading.trim().toLowerCase() === raw
+    );
+    if (exactRaw.length === 1) {
+      found.add(exactRaw[0]!.id);
+      continue;
+    }
+    const unitIds = new Set(candidates.map((leaf) => leaf.unitId));
+    if (unitIds.size === 1 || scopedToOneUnit) {
+      if (byDisplay.length > 0) {
+        for (const leaf of byDisplay) found.add(leaf.id);
+      } else if (exactRaw.length > 0) {
+        for (const leaf of exactRaw) found.add(leaf.id);
+      } else if (candidates.length === 1) {
+        found.add(candidates[0]!.id);
+      } else {
+        // Same generic heading twice in one unit: count once, not every lookalike
+        found.add(candidates[0]!.id);
+      }
+      continue;
+    }
+    // Ambiguous across units with no unit scope — do not over-count
+  }
+  return [...found];
+};
+
 /**
- * Map taught sub-unit titles (and any known ids) onto syllabus sub-unit documents
- * so Log Book save can mark them COMPLETED and raise syllabus %.
+ * Map taught sub-unit titles onto syllabus leaf documents.
+ * Known ids are only used when they correspond to a taught title (never dump
+ * a whole lesson-plan unit list). Repeats of the same leaf collapse to one id.
  */
 export const resolveTaughtSyllabusSubUnitIds = async (
   req: Request,
@@ -1013,50 +1144,169 @@ export const resolveTaughtSyllabusSubUnitIds = async (
     syllabusUnitId?: string;
     syllabusChapterId?: string;
     subjectId?: string;
+    unitLabel?: string;
   }
 ): Promise<string[]> => {
   const schoolId = tenantObjectId(req);
-  const found = new Set(
-    (params.knownIds ?? [])
-      .map((id) => asId(id))
-      .filter((id): id is string => Boolean(id))
-  );
-  const titles = (params.taughtTitles ?? []).map((t) => t.trim()).filter(Boolean);
-  if (titles.length === 0) return [...found];
+  const knownIds = [
+    ...new Set(
+      (params.knownIds ?? [])
+        .map((id) => asId(id))
+        .filter((id): id is string => Boolean(id))
+    )
+  ];
+  const titles = expandTaughtTitles(params.taughtTitles ?? []);
+  if (titles.length === 0) return knownIds;
 
-  const filter: Record<string, unknown> = { schoolId };
+  const syllabusIds: string[] = [];
   const syllabusId = asId(params.syllabusId);
-  const unitId = asId(params.syllabusUnitId);
-  const chapterId = asId(params.syllabusChapterId);
-  if (syllabusId) filter.syllabusId = syllabusId;
-  if (unitId) filter.unitId = unitId;
-  if (chapterId) filter.chapterId = chapterId;
-
-  if (!filter.syllabusId && params.subjectId) {
+  if (syllabusId) syllabusIds.push(syllabusId);
+  if (syllabusIds.length === 0 && params.subjectId) {
     const siblingIds = await expandCurriculumSubjectIds(schoolId, params.subjectId);
     const syllabi = await AcademicSyllabus.find({
       schoolId,
       subjectId: siblingIds.length > 0 ? { $in: siblingIds } : params.subjectId,
-      isDeleted: false
+      isDeleted: { $ne: true }
     })
       .select("_id")
       .lean();
-    if (syllabi.length > 0) {
-      filter.syllabusId = { $in: syllabi.map((row) => row._id) };
+    syllabusIds.push(...syllabi.map((row) => row._id.toString()));
+  }
+
+  let leaves = await loadSyllabusLeaves(syllabusIds);
+  const unitId = asId(params.syllabusUnitId);
+  if (unitId) {
+    const scoped = leaves.filter((leaf) => leaf.unitId === unitId);
+    if (scoped.length > 0) leaves = scoped;
+  } else {
+    const unitNo = parseUnitNo(params.unitLabel);
+    if (unitNo > 0) {
+      const scoped = leaves.filter((leaf) => leaf.unitNo === unitNo);
+      if (scoped.length > 0) leaves = scoped;
     }
   }
 
-  const rows = await AcademicSyllabusSubUnit.find(filter).select("_id heading").lean();
-  const wanted = new Set(titles.map(headingKey).filter(Boolean));
-  const wantedRaw = new Set(titles.map((t) => t.trim().toLowerCase()));
-  for (const row of rows) {
-    const raw = String(row.heading || "").trim().toLowerCase();
-    const key = headingKey(row.heading);
-    if ((key && wanted.has(key)) || (raw && wantedRaw.has(raw))) {
-      found.add(row._id.toString());
+  const matched = matchLeavesByTitles(leaves, titles);
+  const knownSet = new Set(knownIds);
+  const matchedKnown = matched.filter((id) => knownSet.size === 0 || knownSet.has(id));
+  // Prefer title matches; fall back to known ids that are actual leaves for those titles
+  const found = new Set(matchedKnown.length > 0 ? matchedKnown : matched);
+  if (found.size === 0 && knownIds.length > 0) {
+    const leafIds = new Set(leaves.map((leaf) => leaf.id));
+    for (const id of knownIds) {
+      if (leafIds.has(id)) found.add(id);
     }
   }
   return [...found];
+};
+
+/**
+ * Unique syllabus leaves actually taught in the log book (same leaf on two dates = 1).
+ */
+export const uniqueTaughtSyllabusLeafIdsFromLogBook = async (
+  schoolId: mongoose.Types.ObjectId,
+  syllabusId: string,
+  subjectId?: string
+): Promise<Set<string>> => {
+  const leaves = await loadSyllabusLeaves([syllabusId]);
+  const leafById = new Map(leaves.map((leaf) => [leaf.id, leaf]));
+  const byUnit = new Map<string, SyllabusLeaf[]>();
+  for (const leaf of leaves) {
+    const list = byUnit.get(leaf.unitId) ?? [];
+    list.push(leaf);
+    byUnit.set(leaf.unitId, list);
+  }
+
+  const subjectIds = subjectId
+    ? await expandCurriculumSubjectIds(schoolId, subjectId)
+    : [];
+  const entries = await AcademicLogBookEntry.find({
+    schoolId,
+    isDeleted: { $ne: true },
+    reviewStatus: { $ne: "NEEDS_IMPROVEMENT" },
+    $or: [
+      { syllabusId },
+      ...(subjectIds.length > 0 ? [{ subjectId: { $in: subjectIds } }] : [])
+    ]
+  })
+    .select(
+      "subUnitTitles subUnitTitle syllabusSubUnitIds syllabusSubUnitId syllabusUnitId syllabusId unit"
+    )
+    .lean();
+
+  const taught = new Set<string>();
+  for (const entry of entries) {
+    const entrySyllabus = entry.syllabusId ? String(entry.syllabusId) : "";
+    if (entrySyllabus && entrySyllabus !== syllabusId) continue;
+    const titles = expandTaughtTitles([
+      ...((entry.subUnitTitles as string[] | undefined) ?? []),
+      String(entry.subUnitTitle || "")
+    ]);
+    const unitId = entry.syllabusUnitId ? String(entry.syllabusUnitId) : "";
+    const unitNo = parseUnitNo(String((entry as { unit?: string }).unit || ""));
+    let scope = leaves;
+    if (unitId && byUnit.has(unitId)) scope = byUnit.get(unitId) ?? leaves;
+    else if (unitNo > 0) {
+      const byNo = leaves.filter((leaf) => leaf.unitNo === unitNo);
+      if (byNo.length > 0) scope = byNo;
+    }
+
+    const ids = [
+      ...((entry.syllabusSubUnitIds ?? []) as Array<string | { toString(): string }>),
+      entry.syllabusSubUnitId
+    ]
+      .map((id) => (id ? String(id) : ""))
+      .filter(Boolean);
+    if (titles.length > 0) {
+      const matched = matchLeavesByTitles(scope, titles);
+      if (matched.length > 0) {
+        for (const id of matched) taught.add(id);
+        continue;
+      }
+    }
+    const blob = titles.join(" ").toLowerCase();
+    for (const id of ids) {
+      const leaf = leafById.get(id);
+      if (!leaf || !scope.some((row) => row.id === id)) continue;
+      if (
+        titles.length === 0 ||
+        (leaf.headingKey && blob.includes(leaf.headingKey)) ||
+        (leaf.heading && blob.includes(leaf.heading.trim().toLowerCase()))
+      ) {
+        taught.add(id);
+      }
+    }
+  }
+  return taught;
+};
+
+/** Align COMPLETED flags with unique log-book-taught leaves (deduped). */
+export const syncSyllabusCompletionFromLogBook = async (
+  schoolId: mongoose.Types.ObjectId,
+  syllabusId: string,
+  subjectId?: string
+): Promise<Set<string>> => {
+  const taught = await uniqueTaughtSyllabusLeafIdsFromLogBook(
+    schoolId,
+    syllabusId,
+    subjectId
+  );
+  const taughtList = [...taught];
+  await AcademicSyllabusSubUnit.updateMany(
+    {
+      syllabusId,
+      status: "COMPLETED",
+      _id: { $nin: taughtList.length > 0 ? taughtList : ["__none__"] }
+    },
+    { $set: { status: "NOT_STARTED" } }
+  );
+  if (taughtList.length > 0) {
+    await AcademicSyllabusSubUnit.updateMany(
+      { syllabusId, _id: { $in: taughtList } },
+      { $set: { status: "COMPLETED" } }
+    );
+  }
+  return taught;
 };
 
 export const assertNoDuplicateLogBookForItemDate = async (
@@ -1217,12 +1467,85 @@ export const syncLessonPlanItemProgress = async (lessonPlanItemId: string): Prom
   }
 };
 
-/** Recompute Session Plan unit status from live (non-deleted) Lesson Plan items only. */
+const syllabusLeafDone = (status: string): boolean =>
+  status === "COMPLETED" || status === "SKIPPED";
+
+const leafProgressForSyllabusUnit = async (
+  syllabusUnitId?: string | null
+): Promise<{ total: number; completed: number } | null> => {
+  if (!syllabusUnitId) return null;
+  const subs = await AcademicSyllabusSubUnit.find({ unitId: syllabusUnitId })
+    .select("_id parentSubUnitId status")
+    .lean();
+  if (subs.length === 0) return { total: 0, completed: 0 };
+  const parentIds = new Set(
+    subs
+      .map((row) => (row.parentSubUnitId ? String(row.parentSubUnitId) : ""))
+      .filter(Boolean)
+  );
+  const leaves = subs.filter((row) => !parentIds.has(String(row._id)));
+  return {
+    total: leaves.length,
+    completed: leaves.filter((row) => syllabusLeafDone(String(row.status || ""))).length
+  };
+};
+
+const ensureSessionUnitSyllabusLink = async (
+  unit: InstanceType<typeof AcademicSessionPlanUnit>
+): Promise<void> => {
+  if (unit.syllabusUnitId) return;
+  let syllabusIds: string[] = unit.syllabusId ? [unit.syllabusId.toString()] : [];
+  if (syllabusIds.length === 0) {
+    const plan = await AcademicSessionPlan.findById(unit.sessionPlanId)
+      .select("schoolId subjectId academicYearBs")
+      .lean();
+    if (plan?.subjectId) {
+      const subjectIds = await expandCurriculumSubjectIds(
+        plan.schoolId,
+        plan.subjectId.toString()
+      );
+      const syllabi = await AcademicSyllabus.find({
+        schoolId: plan.schoolId,
+        subjectId: { $in: subjectIds },
+        isDeleted: { $ne: true },
+        ...(plan.academicYearBs ? { academicYearBs: plan.academicYearBs } : {})
+      })
+        .select("_id")
+        .lean();
+      syllabusIds = syllabi.map((row) => row._id.toString());
+    }
+  }
+  if (syllabusIds.length === 0) return;
+  const title = String(unit.chapterName || "").trim();
+  const topic =
+    (await AcademicSyllabusTopic.findOne({
+      syllabusId: { $in: syllabusIds },
+      unitNo: unit.unitNo
+    })
+      .select("_id syllabusId")
+      .lean()) ||
+    (title
+      ? await AcademicSyllabusTopic.findOne({
+          syllabusId: { $in: syllabusIds },
+          title: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+        })
+          .select("_id syllabusId")
+          .lean()
+      : null);
+  if (!topic) return;
+  unit.set("syllabusUnitId", topic._id);
+  if (!unit.syllabusId && topic.syllabusId) {
+    unit.set("syllabusId", topic.syllabusId);
+  }
+};
+
+/** Recompute Session Plan unit status from syllabus sub-units (log book) and lesson items. */
 export const resyncSessionPlanUnitProgress = async (unitId: string): Promise<void> => {
   const unit = await AcademicSessionPlanUnit.findById(unitId);
   if (!unit) return;
 
-  // Only items on live (non-deleted) lesson plans count toward unit progress
+  await ensureSessionUnitSyllabusLink(unit);
+
   const rawItems = await AcademicLessonPlanItem.find({ sessionPlanUnitId: unitId }).lean();
   const planIds = [
     ...new Set(rawItems.map((item) => item.lessonPlanId?.toString()).filter(Boolean))
@@ -1238,17 +1561,20 @@ export const resyncSessionPlanUnitProgress = async (unitId: string): Promise<voi
   const livePlanIds = new Set(livePlans.map((p) => p._id.toString()));
   const items = rawItems.filter((item) => livePlanIds.has(item.lessonPlanId?.toString() ?? ""));
 
-  if (items.length === 0) {
-    unit.status = "PENDING";
-    await unit.save();
-    return;
-  }
-
-  const allCompleted = items.every((item) => item.completionStatus === "COMPLETED");
-  const anyStarted = items.some((item) => (item.completedClasses ?? 0) > 0);
+  const leaves = await leafProgressForSyllabusUnit(unit.syllabusUnitId?.toString());
+  const allItemsDone =
+    items.length > 0 && items.every((item) => item.completionStatus === "COMPLETED");
+  const anyItemsStarted = items.some((item) => (item.completedClasses ?? 0) > 0);
   const anyDelayed = items.some((item) => item.completionStatus === "DELAYED");
+  const allLeavesDone = Boolean(leaves && leaves.total > 0 && leaves.completed >= leaves.total);
+  const anyLeavesDone = Boolean(leaves && leaves.completed > 0);
 
-  unit.status = allCompleted ? "COMPLETED" : anyDelayed ? "DELAYED" : anyStarted ? "IN_PROGRESS" : "PENDING";
+  if (allLeavesDone || allItemsDone) unit.status = "COMPLETED";
+  else if (anyDelayed) unit.status = "DELAYED";
+  else if (anyLeavesDone || anyItemsStarted) unit.status = "IN_PROGRESS";
+  else if (items.length === 0 && (!leaves || leaves.total === 0)) unit.status = "PENDING";
+  else unit.status = "PENDING";
+
   await unit.save();
 };
 
@@ -1256,15 +1582,166 @@ const syncSessionPlanUnitFromLessonItem = async (unitId: string): Promise<void> 
   await resyncSessionPlanUnitProgress(unitId);
 };
 
-export const syncSessionPlanProgress = async (sessionPlanId: string): Promise<void> => {
-  const units = await AcademicSessionPlanUnit.find({ sessionPlanId });
+const computeSessionPlanProgressStats = async (sessionPlanId: string) => {
+  const units = await AcademicSessionPlanUnit.find({ sessionPlanId }).lean();
   const total = units.length;
-  const completed = units.filter((unit) => unit.status === "COMPLETED").length;
-  const delayed = units.filter((unit) => unit.status === "DELAYED").length;
-  const completedPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const completedUnits = units.filter((unit) => unit.status === "COMPLETED").length;
+  const delayedUnits = units.filter((unit) => unit.status === "DELAYED").length;
 
+  const syllabusUnitIds = units
+    .map((unit) => unit.syllabusUnitId?.toString())
+    .filter((id): id is string => Boolean(id));
+  let totalLeaves = 0;
+  let doneLeaves = 0;
+  if (syllabusUnitIds.length > 0) {
+    const subs = await AcademicSyllabusSubUnit.find({ unitId: { $in: syllabusUnitIds } })
+      .select("_id parentSubUnitId status")
+      .lean();
+    const parentIds = new Set(
+      subs
+        .map((row) => (row.parentSubUnitId ? String(row.parentSubUnitId) : ""))
+        .filter(Boolean)
+    );
+    const leaves = subs.filter((row) => !parentIds.has(String(row._id)));
+    totalLeaves = leaves.length;
+    doneLeaves = leaves.filter((row) => syllabusLeafDone(String(row.status || ""))).length;
+  }
+
+  // Same subject syllabus (covers units not yet linked by syllabusUnitId).
+  // Use ONE matching syllabus — never sum sibling copies (that double-counts).
+  if (totalLeaves === 0) {
+    const plan = await AcademicSessionPlan.findById(sessionPlanId)
+      .select("schoolId subjectId academicYearBs yearId classId")
+      .lean();
+    if (plan?.subjectId) {
+      const subjectIds = await expandCurriculumSubjectIds(
+        plan.schoolId,
+        plan.subjectId.toString()
+      );
+      const syllabi = await AcademicSyllabus.find({
+        schoolId: plan.schoolId,
+        subjectId: { $in: subjectIds },
+        isDeleted: { $ne: true },
+        ...(plan.academicYearBs ? { academicYearBs: plan.academicYearBs } : {})
+      })
+        .select("_id yearId classId")
+        .lean();
+      const planYear = plan.yearId ? String(plan.yearId) : "";
+      const planClass = plan.classId ? String(plan.classId) : "";
+      const ranked = syllabi
+        .map((syllabus) => {
+          let score = 0;
+          if (planYear && syllabus.yearId && String(syllabus.yearId) === planYear) score += 4;
+          if (planClass && syllabus.classId && String(syllabus.classId) === planClass) {
+            score += 4;
+          }
+          return { syllabus, score };
+        })
+        .sort((a, b) => b.score - a.score);
+      const chosen =
+        ranked.find((row) => row.score > 0)?.syllabus ?? ranked[0]?.syllabus ?? null;
+      if (chosen) {
+        const chapters = await loadSyllabusHierarchy(chosen._id.toString());
+        const stats = computeHierarchyStats(chapters);
+        if (stats.totalSubUnits > 0) {
+          totalLeaves = stats.totalSubUnits;
+          doneLeaves = stats.completedSubUnits;
+        }
+      }
+    }
+  }
+
+  const completedPercent =
+    totalLeaves > 0
+      ? Math.round((doneLeaves / totalLeaves) * 100)
+      : total > 0
+        ? Math.round((completedUnits / total) * 100)
+        : 0;
+
+  return {
+    totalUnits: total,
+    completedUnits,
+    remainingUnits: Math.max(0, total - completedUnits),
+    delayedUnits,
+    completedPercent,
+    remainingPercent: Math.max(0, 100 - completedPercent)
+  };
+};
+
+export const resyncSessionPlansTouchedByLog = async (params: {
+  schoolId?: string;
+  teacherId?: string;
+  subjectId?: string;
+  sessionPlanUnitId?: string;
+  syllabusUnitId?: string;
+}): Promise<void> => {
+  const unitIds = new Set<string>();
+  const planIds = new Set<string>();
+  if (params.sessionPlanUnitId) unitIds.add(params.sessionPlanUnitId);
+  if (params.syllabusUnitId) {
+    const linked = await AcademicSessionPlanUnit.find({
+      syllabusUnitId: params.syllabusUnitId
+    })
+      .select("_id sessionPlanId")
+      .lean();
+    for (const unit of linked) {
+      unitIds.add(unit._id.toString());
+      planIds.add(unit.sessionPlanId.toString());
+    }
+  }
+  for (const id of unitIds) {
+    await resyncSessionPlanUnitProgress(id);
+    const unit = await AcademicSessionPlanUnit.findById(id).select("sessionPlanId").lean();
+    if (unit) planIds.add(unit.sessionPlanId.toString());
+  }
+  if (planIds.size === 0 && params.teacherId && params.subjectId) {
+    const filter: Record<string, unknown> = {
+      teacherId: params.teacherId,
+      subjectId: params.subjectId,
+      isDeleted: { $ne: true }
+    };
+    if (params.schoolId) filter.schoolId = params.schoolId;
+    const plans = await AcademicSessionPlan.find(filter).select("_id").lean();
+    for (const plan of plans) {
+      planIds.add(plan._id.toString());
+      const units = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id })
+        .select("_id")
+        .lean();
+      for (const unit of units) await resyncSessionPlanUnitProgress(unit._id.toString());
+    }
+  }
+  for (const planId of planIds) await syncSessionPlanProgress(planId);
+};
+
+export const syncSessionPlanProgress = async (sessionPlanId: string): Promise<void> => {
   const plan = await AcademicSessionPlan.findById(sessionPlanId);
   if (!plan) return;
+  if (plan.subjectId) {
+    const subjectIds = await expandCurriculumSubjectIds(
+      plan.schoolId,
+      plan.subjectId.toString()
+    );
+    const syllabi = await AcademicSyllabus.find({
+      schoolId: plan.schoolId,
+      subjectId: { $in: subjectIds },
+      isDeleted: { $ne: true },
+      ...(plan.academicYearBs ? { academicYearBs: plan.academicYearBs } : {})
+    })
+      .select("_id")
+      .lean();
+    for (const syllabus of syllabi) {
+      await syncSyllabusCompletionFromLogBook(
+        plan.schoolId,
+        syllabus._id.toString(),
+        plan.subjectId.toString()
+      );
+    }
+  }
+  const units = await AcademicSessionPlanUnit.find({ sessionPlanId });
+  for (const unit of units) {
+    await resyncSessionPlanUnitProgress(unit._id.toString());
+  }
+  const stats = await computeSessionPlanProgressStats(sessionPlanId);
 
   await AcademicProgress.findOneAndUpdate(
     { sessionPlanId },
@@ -1274,11 +1751,11 @@ export const syncSessionPlanProgress = async (sessionPlanId: string): Promise<vo
       subjectId: plan.subjectId,
       teacherId: plan.teacherId,
       academicYearBs: plan.academicYearBs,
-      completedPercent,
-      remainingPercent: 100 - completedPercent,
-      completedUnits: completed,
-      remainingUnits: total - completed,
-      delayedUnits: delayed
+      completedPercent: stats.completedPercent,
+      remainingPercent: stats.remainingPercent,
+      completedUnits: stats.completedUnits,
+      remainingUnits: stats.remainingUnits,
+      delayedUnits: stats.delayedUnits
     },
     { upsert: true, new: true }
   );
@@ -1459,9 +1936,12 @@ export const serializeSessionPlan = async (planId: string) => {
   if (!plan) return null;
 
   const units = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id }).sort({ unitNo: 1 }).lean();
-  const progress = await AcademicProgress.findOne({ sessionPlanId: plan._id }).lean();
-  const total = units.length;
-  const completed = units.filter((unit) => unit.status === "COMPLETED").length;
+  await syncSessionPlanProgress(plan._id.toString());
+  const refreshedUnits = await AcademicSessionPlanUnit.find({ sessionPlanId: plan._id })
+    .sort({ unitNo: 1 })
+    .lean();
+  const stats = await computeSessionPlanProgressStats(plan._id.toString());
+  const displayUnits = refreshedUnits.length > 0 ? refreshedUnits : units;
 
   return {
     _id: plan._id.toString(),
@@ -1479,7 +1959,7 @@ export const serializeSessionPlan = async (planId: string) => {
     status: plan.status,
     adminRemarks: plan.adminRemarks,
     attachmentUrl: plan.attachmentUrl,
-    units: units.map((unit) => ({
+    units: displayUnits.map((unit) => ({
       _id: unit._id.toString(),
       sessionPlanId: unit.sessionPlanId.toString(),
       unitNo: unit.unitNo,
@@ -1501,10 +1981,10 @@ export const serializeSessionPlan = async (planId: string) => {
       syllabusUnitId:
         (unit as { syllabusUnitId?: { toString(): string } }).syllabusUnitId?.toString?.() ?? ""
     })),
-    completedPercent: progress?.completedPercent ?? (total > 0 ? Math.round((completed / total) * 100) : 0),
-    remainingPercent: progress?.remainingPercent ?? (total > 0 ? Math.round(((total - completed) / total) * 100) : 100),
-    completedUnits: progress?.completedUnits ?? completed,
-    remainingUnits: progress?.remainingUnits ?? total - completed,
+    completedPercent: stats.completedPercent,
+    remainingPercent: stats.remainingPercent,
+    completedUnits: stats.completedUnits,
+    remainingUnits: stats.remainingUnits,
     audit: formatAudit(plan),
     subject: plan.subjectId as unknown as { _id: string; name: string; code: string } | undefined,
     teacher: plan.teacherId as unknown as { _id: string; teacherCode: string; user?: { fullName: string } } | undefined
@@ -1523,6 +2003,11 @@ export const serializeSyllabus = async (syllabusId: string) => {
   const schoolId = plan.schoolId.toString();
   // Auto-migrate legacy flat units → Chapter → Unit → SubUnit (idempotent)
   await ensureSyllabusHierarchy(syllabusId, schoolId);
+  await syncSyllabusCompletionFromLogBook(
+    plan.schoolId,
+    syllabusId,
+    plan.subjectId?._id?.toString() ?? plan.subjectId?.toString()
+  );
 
   const chapters = await loadSyllabusHierarchy(syllabusId);
   const stats = computeHierarchyStats(chapters);
@@ -1610,8 +2095,27 @@ export const serializeSyllabus = async (syllabusId: string) => {
     totalTopics: stats.totalTopics,
     theoryHoursCovered: stats.theoryHoursCovered,
     practicalHoursCovered: stats.practicalHoursCovered,
-    teachingHoursCovered: stats.teachingHoursCovered,
-    remainingTeachingHours: stats.remainingTeachingHours,
+    teachingHoursCovered:
+      stats.teachingHoursTotal > 0
+        ? stats.teachingHoursCovered
+        : Math.round(
+            (completedPercent / 100) *
+              ((Number((plan as { totalTheoryHours?: number }).totalTheoryHours) || 0) +
+                (Number((plan as { totalPracticalHours?: number }).totalPracticalHours) || 0))
+          ),
+    remainingTeachingHours:
+      stats.teachingHoursTotal > 0
+        ? stats.remainingTeachingHours
+        : Math.max(
+            0,
+            (Number((plan as { totalTheoryHours?: number }).totalTheoryHours) || 0) +
+              (Number((plan as { totalPracticalHours?: number }).totalPracticalHours) || 0) -
+              Math.round(
+                (completedPercent / 100) *
+                  ((Number((plan as { totalTheoryHours?: number }).totalTheoryHours) || 0) +
+                    (Number((plan as { totalPracticalHours?: number }).totalPracticalHours) || 0))
+              )
+          ),
     audit: formatAudit(plan),
     subject: subject
       ? {
@@ -1976,6 +2480,14 @@ const loadSyllabusCompletionRows = async (
 
   const syllabi = await AcademicSyllabus.find(match).select("_id subjectId").lean();
   if (syllabi.length === 0) return [];
+
+  for (const syllabus of syllabi) {
+    await syncSyllabusCompletionFromLogBook(
+      schoolId,
+      String(syllabus._id),
+      String(syllabus.subjectId)
+    );
+  }
 
   const syllabusIds = syllabi.map((row) => row._id);
   const [subUnits, legacyUnits, subjectDocs] = await Promise.all([

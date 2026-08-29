@@ -762,9 +762,7 @@ export const LogBookPanel = ({
         syllabusChapterId: oid(first?.syllabusChapterId),
         syllabusUnitId: oid(first?.syllabusUnitId),
         syllabusSubUnitId: oid(
-          taught
-            .map((title) => first?.titleToId[titleKey(title)])
-            .find(Boolean) || first?.syllabusSubUnitIds[0],
+          taught.map((title) => first?.titleToId[titleKey(title)]).find(Boolean),
         ),
         syllabusSubUnitIds: taught
           .map((title) => first?.titleToId[titleKey(title)] || "")

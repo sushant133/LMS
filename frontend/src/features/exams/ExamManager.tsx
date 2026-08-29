@@ -414,11 +414,13 @@ export const ExamManager = ({ embedded = false }: ExamManagerProps) => {
   const { user } = useAuth();
   const role = useNormalizedRole();
   const isTeacher = userIsTeacher(user) || role === "TEACHER";
-  const canManage = useCanManageGrantedModule("examinations-college");
+  const grantedManage = useCanManageGrantedModule("examinations-college");
   const hasInstitutionRead = useHasInstitutionAccess();
-  /** Write admins + college viewers (read-only admin surfaces). */
-  const isAdmin = canManage || hasInstitutionRead;
   const isStudentOrParent = role === "STUDENT" || role === "PARENT";
+  /** Portal roles only ever see StudentExamPortal — never admin surfaces. */
+  const canManage = grantedManage && !isStudentOrParent;
+  /** Write admins + college viewers (read-only admin surfaces). */
+  const isAdmin = !isStudentOrParent && (canManage || hasInstitutionRead);
   const isCollege = useIsCollege();
   const labels = getAcademicLabels(isCollege ? "COLLEGE" : "SCHOOL");
   const teacherScopeQuery = useTeacherScope(isTeacher);

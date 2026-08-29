@@ -80,6 +80,8 @@ import {
   syncLessonPlanItemProgress,
   syncSessionPlanProgress,
   resyncSessionPlanUnitProgress,
+  resyncSessionPlansTouchedByLog,
+  syncSyllabusCompletionFromLogBook,
   matchesKeyword
 } from "../utils/academicManagementService.js";
 import { exportAcademicReportCsv, generateAcademicReport, type AcademicReportType } from "../utils/academicManagementReports.js";
@@ -2332,7 +2334,8 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
     syllabusChapterId:
       payload.syllabusChapterId ||
       (unitDoc as { syllabusChapterId?: { toString(): string } } | null)?.syllabusChapterId?.toString?.(),
-    subjectId: payload.subjectId
+    subjectId: payload.subjectId,
+    unitLabel
   });
 
   const entry = await AcademicLogBookEntry.create({
@@ -2408,6 +2411,21 @@ export const createLogBookEntry = asyncHandler(async (req: Request, res: Respons
       // Non-blocking — log book entry is still valid without syllabus progress
     }
   }
+
+  if (payload.syllabusId) {
+    await syncSyllabusCompletionFromLogBook(
+      tenantObjectId(req),
+      payload.syllabusId,
+      payload.subjectId
+    );
+  }
+  await resyncSessionPlansTouchedByLog({
+    schoolId: tenantObjectId(req).toString(),
+    teacherId: payload.teacherId,
+    subjectId: payload.subjectId,
+    sessionPlanUnitId: unitDoc?._id?.toString(),
+    syllabusUnitId: payload.syllabusUnitId
+  });
 
   await recordAudit(req, { action: "academic.log_book.create", entity: "LOG_BOOK_ENTRY", entityId: entry._id.toString(), after: entry });
   const serialized = await serializeLogBookEntry(entry._id.toString());
@@ -2601,7 +2619,8 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
     syllabusId: existing.syllabusId?.toString(),
     syllabusUnitId: existing.syllabusUnitId?.toString(),
     syllabusChapterId: existing.syllabusChapterId?.toString(),
-    subjectId: existing.subjectId.toString()
+    subjectId: existing.subjectId.toString(),
+    unitLabel: String(existing.unit || "")
   });
   if (updatedSubIds.length > 0) {
     existing.set("syllabusSubUnitIds", updatedSubIds);
@@ -2622,6 +2641,20 @@ export const updateLogBookEntry = asyncHandler(async (req: Request, res: Respons
   if (existing.lessonPlanItemId) {
     await syncLessonPlanItemProgress(existing.lessonPlanItemId.toString());
   }
+  if (existing.syllabusId) {
+    await syncSyllabusCompletionFromLogBook(
+      tenantObjectId(req),
+      existing.syllabusId.toString(),
+      existing.subjectId.toString()
+    );
+  }
+  await resyncSessionPlansTouchedByLog({
+    schoolId: tenantObjectId(req).toString(),
+    teacherId: existing.teacherId.toString(),
+    subjectId: existing.subjectId.toString(),
+    sessionPlanUnitId: existing.sessionPlanUnitId?.toString(),
+    syllabusUnitId: existing.syllabusUnitId?.toString()
+  });
   await recordAudit(req, { action: "academic.log_book.update", entity: "LOG_BOOK_ENTRY", entityId: existing._id.toString(), after: existing });
 
   const serialized = await serializeLogBookEntry(existing._id.toString());
